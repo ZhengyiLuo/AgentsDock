@@ -283,6 +283,7 @@ struct MobileCodeBlock: View {
 struct MobileArtifactView: View {
     let file: ZFile
     let url: URL
+    @State private var fullscreenVideo = false
 
     var body: some View {
         MobileSystemCard(icon: icon, title: file.title ?? file.filename, tint: .green) {
@@ -299,9 +300,17 @@ struct MobileArtifactView: View {
                     VideoPlayer(player: AVPlayer(url: url))
                         .frame(height: 240)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
-                    Label(file.size.map(mobileByteString) ?? "Video", systemImage: "film")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Label(file.size.map(mobileByteString) ?? "Video", systemImage: "film")
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Button {
+                            fullscreenVideo = true
+                        } label: {
+                            Label("Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right")
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
                 }
                 if let text = file.text {
                     MobileMarkdownView(markdown: text)
@@ -312,12 +321,67 @@ struct MobileArtifactView: View {
                 .font(.caption.weight(.semibold))
             }
         }
+        .mobileVideoFullscreen(isPresented: $fullscreenVideo, url: url, title: file.title ?? file.filename)
     }
 
     private var icon: String {
         if file.content_type?.hasPrefix("video/") == true { return "film" }
         if file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func mobileVideoFullscreen(isPresented: Binding<Bool>, url: URL, title: String) -> some View {
+        #if os(iOS)
+        self.fullScreenCover(isPresented: isPresented) {
+            MobileFullscreenVideoView(url: url, title: title)
+        }
+        #else
+        self.sheet(isPresented: isPresented) {
+            MobileFullscreenVideoView(url: url, title: title)
+                .frame(minWidth: 900, minHeight: 560)
+        }
+        #endif
+    }
+}
+
+private struct MobileFullscreenVideoView: View {
+    let url: URL
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer
+
+    init(url: URL, title: String) {
+        self.url = url
+        self.title = title
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+            Button {
+                player.pause()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.white)
+                    .padding(18)
+            }
+            .accessibilityLabel("Close fullscreen video")
+        }
+        .onAppear {
+            player.play()
+        }
+        .onDisappear {
+            player.pause()
+        }
     }
 }
 
