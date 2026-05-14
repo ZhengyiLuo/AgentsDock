@@ -43,8 +43,12 @@ final class AppStore: ObservableObject {
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
     private var pendingScrollRequest: Task<Void, Never>?
+    private var selectionGeneration = 0
+    private var memoryChatCache: [String: CachedChat] = [:]
+    private var memoryChatCacheOrder: [String] = []
     private var lastScrollRequestAt = Date.distantPast
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
+    private let maxMemoryCachedChats = 8
 
     private struct CachedChat: Codable, Sendable {
         var session: ZSession
@@ -328,6 +332,8 @@ final class AppStore: ObservableObject {
             syncSelectedRunningState()
             return
         }
+        selectionGeneration += 1
+        let generation = selectionGeneration
         loadingSessionID = sessionID
         defer {
             if loadingSessionID == sessionID {
@@ -341,11 +347,11 @@ final class AppStore: ObservableObject {
         status = serverReachable ? "Loading chat" : "Server offline"
         AppLogger.info("select session=\(sessionID)")
         var loadedFromCache = false
-        if let cached = loadCachedChat(sessionID) {
+        if let cached = memoryCachedChat(sessionID) {
             applyCachedChat(cached)
             loadedFromCache = true
-            status = "Loaded cached chat"
-            AppLogger.info("loaded cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
+            status = "Loaded memory chat"
+            AppLogger.info("loaded memory cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
             requestScrollToBottom(immediate: true)
         } else {
             events = []
@@ -354,6 +360,23 @@ final class AppStore: ObservableObject {
             omittedHistoryEventCount = 0
             loadedSessionID = nil
             latestSeenSeq = 0
+            let cacheURL = chatCacheURL(sessionID)
+            if let cached = await Self.loadCachedChat(from: cacheURL) {
+                guard selectedSessionID == sessionID, selectionGeneration == generation else {
+                    AppLogger.info("drop stale cache response session=\(sessionID)")
+                    return
+                }
+                rememberChatCache(cached)
+                applyCachedChat(cached)
+                loadedFromCache = true
+                status = "Loaded cached chat"
+                AppLogger.info("loaded disk cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
+                requestScrollToBottom(immediate: true)
+            }
+        }
+        guard selectedSessionID == sessionID, selectionGeneration == generation else {
+            AppLogger.info("drop stale selection before network session=\(sessionID)")
+            return
         }
         do {
             struct Response: Codable {
@@ -376,7 +399,7 @@ final class AppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
-            guard selectedSessionID == sessionID else {
+            guard selectedSessionID == sessionID, selectionGeneration == generation else {
                 AppLogger.info("drop stale selection response session=\(sessionID)")
                 return
             }
@@ -827,10 +850,31 @@ final class AppStore: ObservableObject {
         chatCacheDirectory.appendingPathComponent("\(sessionID).json")
     }
 
-    private func loadCachedChat(_ sessionID: String) -> CachedChat? {
-        let url = chatCacheURL(sessionID)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(CachedChat.self, from: data)
+    private func memoryCachedChat(_ sessionID: String) -> CachedChat? {
+        guard let cached = memoryChatCache[sessionID] else { return nil }
+        touchMemoryChatCache(sessionID)
+        return cached
+    }
+
+    private func rememberChatCache(_ cached: CachedChat) {
+        memoryChatCache[cached.session.id] = cached
+        touchMemoryChatCache(cached.session.id)
+        while memoryChatCacheOrder.count > maxMemoryCachedChats, let staleID = memoryChatCacheOrder.first {
+            memoryChatCacheOrder.removeFirst()
+            memoryChatCache.removeValue(forKey: staleID)
+        }
+    }
+
+    private func touchMemoryChatCache(_ sessionID: String) {
+        memoryChatCacheOrder.removeAll { $0 == sessionID }
+        memoryChatCacheOrder.append(sessionID)
+    }
+
+    nonisolated private static func loadCachedChat(from url: URL) async -> CachedChat? {
+        await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(CachedChat.self, from: data)
+        }.value
     }
 
     private func saveSelectedChatCache() {
@@ -847,6 +891,7 @@ final class AppStore: ObservableObject {
             omittedHistoryEventCount: omittedHistoryEventCount,
             cachedAt: ISO8601DateFormatter().string(from: Date())
         )
+        rememberChatCache(cached)
         pendingCacheWrite?.cancel()
         pendingCacheWrite = Task.detached(priority: .utility) {
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -863,6 +908,8 @@ final class AppStore: ObservableObject {
 
     private func deleteCachedChat(_ sessionID: String) {
         pendingCacheWrite?.cancel()
+        memoryChatCache.removeValue(forKey: sessionID)
+        memoryChatCacheOrder.removeAll { $0 == sessionID }
         try? FileManager.default.removeItem(at: chatCacheURL(sessionID))
     }
 
