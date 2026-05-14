@@ -7,7 +7,7 @@ struct ComposerView: View {
     @Binding var importerOpen: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if !store.uploads.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
@@ -28,13 +28,13 @@ struct ComposerView: View {
                 PromptTextView(text: $store.prompt, isEditable: store.selectedSession != nil) {
                     Task { await store.sendPrompt() }
                 }
-                .frame(minHeight: 38, maxHeight: 104)
+                .frame(height: promptHeight)
                 .overlay(alignment: .topLeading) {
                     if store.prompt.isEmpty {
                         Text("Message")
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 5)
                             .allowsHitTesting(false)
                     }
                 }
@@ -52,9 +52,16 @@ struct ComposerView: View {
                 .help(store.isRunning ? "Queue message" : "Send message")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
         .background(Theme.panel)
+    }
+
+    private var promptHeight: CGFloat {
+        let hardLines = store.prompt.split(separator: "\n", omittingEmptySubsequences: false).count
+        let softLines = max(1, Int(ceil(Double(store.prompt.count) / 110.0)))
+        let visibleLines = min(max(hardLines, softLines), 5)
+        return CGFloat(visibleLines * 18 + 12)
     }
 }
 
@@ -80,7 +87,7 @@ struct PromptTextView: NSViewRepresentable {
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.textColor = .labelColor
         textView.insertionPointColor = .controlAccentColor
-        textView.textContainerInset = NSSize(width: 7, height: 5)
+        textView.textContainerInset = NSSize(width: 7, height: 4)
         textView.isRichText = false
         textView.allowsUndo = true
         textView.importsGraphics = false
