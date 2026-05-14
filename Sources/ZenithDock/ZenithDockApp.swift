@@ -32,8 +32,11 @@ private struct ShowZenithDockWindowCommand: View {
     var body: some View {
         Button("Show ZenithDock") {
             AppLogger.info("show window command")
-            openWindow(id: "main")
-            NSApp.activate(ignoringOtherApps: true)
+            if !ZenithDockWindowController.activateExistingMainWindow() {
+                openWindow(id: "main")
+            }
+            NSApp.activate()
+            ZenithDockWindowController.cullDuplicateMainWindowsSoon()
         }
         .keyboardShortcut("0", modifiers: .command)
     }
@@ -48,15 +51,18 @@ final class ZenithDockAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        ZenithDockWindowController.cullDuplicateMainWindowsSoon()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         AppLogger.info("app reopen visible_windows=\(flag)")
-        guard !flag else { return true }
-        if let window = sender.windows.first {
-            window.makeKeyAndOrderFront(nil)
-        } else {
+        ZenithDockWindowController.cullDuplicateMainWindows()
+        if !ZenithDockWindowController.activateExistingMainWindow() && !flag {
             sender.sendAction(Selector(("showNewWindow:")), to: nil, from: nil)
         }
-        sender.activate(ignoringOtherApps: true)
+        sender.activate()
+        ZenithDockWindowController.cullDuplicateMainWindowsSoon()
         return true
     }
 
@@ -66,6 +72,7 @@ final class ZenithDockAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         AppLogger.info("app did become active windows=\(NSApp.windows.count)")
+        ZenithDockWindowController.cullDuplicateMainWindowsSoon()
     }
 }
 
@@ -73,6 +80,18 @@ private final class ZenithDockSingleInstanceGuard {
     private var lockFileDescriptor: CInt = -1
 
     func shouldTerminateDuplicateLaunch() -> Bool {
+        if let existing = existingRunningApplication() {
+            if shouldReplace(existing) {
+                AppLogger.warning("replacing stale existing app pid=\(existing.processIdentifier) path=\(existing.bundleURL?.path ?? "-")")
+                existing.terminate()
+                waitForTermination(existing)
+            } else {
+                activate(existing)
+                AppLogger.info("duplicate launch detected existing_pid=\(existing.processIdentifier)")
+                return true
+            }
+        }
+
         if let existing = existingRunningApplication() {
             activate(existing)
             AppLogger.info("duplicate launch detected existing_pid=\(existing.processIdentifier)")
@@ -88,6 +107,24 @@ private final class ZenithDockSingleInstanceGuard {
         }
         AppLogger.info("duplicate launch detected by lock")
         return true
+    }
+
+    private func shouldReplace(_ existing: NSRunningApplication) -> Bool {
+        guard let existingPath = existing.bundleURL?.standardizedFileURL.path else { return false }
+        let currentPath = Bundle.main.bundleURL.standardizedFileURL.path
+        guard existingPath != currentPath else { return false }
+        return existingPath.contains("/DerivedData/") || currentPath.contains("/DerivedData/")
+    }
+
+    private func waitForTermination(_ app: NSRunningApplication) {
+        let deadline = Date().addingTimeInterval(1.2)
+        while !app.isTerminated && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if !app.isTerminated {
+            AppLogger.warning("force terminating stale app pid=\(app.processIdentifier)")
+            app.forceTerminate()
+        }
     }
 
     func releaseLock() {
@@ -156,5 +193,52 @@ private final class ZenithDockSingleInstanceGuard {
 
     private func activate(_ app: NSRunningApplication) {
         app.activate(options: [.activateAllWindows])
+    }
+}
+
+@MainActor
+private enum ZenithDockWindowController {
+    private static let mainWindowTitle = "Zenith Dock"
+
+    static func activateExistingMainWindow() -> Bool {
+        cullDuplicateMainWindows()
+        guard let window = mainWindows().first else { return false }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+
+    static func cullDuplicateMainWindowsSoon() {
+        DispatchQueue.main.async {
+            cullDuplicateMainWindows()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            cullDuplicateMainWindows()
+        }
+    }
+
+    static func cullDuplicateMainWindows() {
+        let windows = mainWindows()
+        guard windows.count > 1 else { return }
+        let keeper = windows.first(where: \.isKeyWindow)
+            ?? windows.first(where: \.isMainWindow)
+            ?? windows.first(where: \.isVisible)
+            ?? windows[0]
+        for window in windows where window !== keeper {
+            window.close()
+        }
+        AppLogger.warning("closed duplicate main windows kept=\(ObjectIdentifier(keeper).hashValue) closed=\(windows.count - 1)")
+    }
+
+    private static func mainWindows() -> [NSWindow] {
+        NSApp.windows
+            .filter { $0.title == mainWindowTitle && !$0.isReleasedWhenClosed }
+            .sorted { lhs, rhs in
+                if lhs.isKeyWindow != rhs.isKeyWindow { return lhs.isKeyWindow }
+                if lhs.isMainWindow != rhs.isMainWindow { return lhs.isMainWindow }
+                return lhs.windowNumber < rhs.windowNumber
+            }
     }
 }
