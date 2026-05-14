@@ -198,6 +198,7 @@ final class MobileAppStore: ObservableObject {
             status = socketLive ? "Live" : "Server connected"
             connectionDetail = "Connected to \(resolvedServerURLString)"
         } catch {
+            guard !isCancelledNetworkError(error) else { return }
             serverReachable = false
             socketLive = false
             activeSessionIDs = []
@@ -222,6 +223,7 @@ final class MobileAppStore: ObservableObject {
                 }
             }
         } catch {
+            guard !isCancelledNetworkError(error) else { return }
             if showErrors { report(error) }
         }
     }
@@ -234,6 +236,7 @@ final class MobileAppStore: ObservableObject {
                 jobs = res.jobs
             }
         } catch {
+            guard !isCancelledNetworkError(error) else { return }
             if showErrors { report(error) }
         }
     }
@@ -695,6 +698,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func report(_ error: Error) {
+        guard !isCancelledNetworkError(error) else { return }
         let ns = error as NSError
         if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
             errorText = "Agent server rejected the access token for \(resolvedServerURLString). Check the token on Zen-nv and in this app."
@@ -703,6 +707,11 @@ final class MobileAppStore: ObservableObject {
         } else {
             errorText = error.localizedDescription
         }
+    }
+
+    private func isCancelledNetworkError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
     }
 
     private func connectionFailureSummary(_ error: Error) -> String {
