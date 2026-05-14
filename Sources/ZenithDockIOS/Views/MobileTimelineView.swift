@@ -4,12 +4,20 @@ import ZenithCore
 struct MobileTimelineView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
+    @Binding var resumeOpen: Bool
     @State private var isAtBottom = true
+    @State private var optionsOpen = false
     private let bottomID = "mobile-timeline-bottom"
 
     var body: some View {
+        let rows = MobileTimelineRows.build(from: store.displayEvents)
+
         VStack(spacing: 0) {
-            MobileChatHeader(importerOpen: $importerOpen)
+            MobileChatHeader(
+                importerOpen: $importerOpen,
+                resumeOpen: $resumeOpen,
+                optionsOpen: $optionsOpen
+            )
             Divider()
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
@@ -20,7 +28,10 @@ struct MobileTimelineView: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 40)
                             }
-                            ForEach(MobileTimelineRows.build(from: store.displayEvents)) { row in
+                            if store.hiddenDisplayEventCount > 0 {
+                                MobileTimelineHistoryLoader()
+                            }
+                            ForEach(rows) { row in
                                 switch row {
                                 case .event(let event):
                                     MobileEventCard(event: event)
@@ -65,6 +76,10 @@ struct MobileTimelineView: View {
         .safeAreaInset(edge: .bottom) {
             MobileComposerView(importerOpen: $importerOpen)
         }
+        .sheet(isPresented: $optionsOpen) {
+            MobileChatOptionsView(isPresented: $optionsOpen, resumeOpen: $resumeOpen)
+                .environmentObject(store)
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -78,6 +93,8 @@ struct MobileTimelineView: View {
 private struct MobileChatHeader: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
+    @Binding var resumeOpen: Bool
+    @Binding var optionsOpen: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -114,6 +131,39 @@ private struct MobileChatHeader: View {
             } label: {
                 Image(systemName: "paperclip")
             }
+            Menu {
+                Button {
+                    resumeOpen = true
+                } label: {
+                    Label("Resume Chat", systemImage: "arrow.uturn.forward.circle")
+                }
+                Button {
+                    optionsOpen = true
+                } label: {
+                    Label("Chat Options", systemImage: "slider.horizontal.3")
+                }
+                Picker("Backend", selection: Binding(
+                    get: { store.selectedSession?.backend ?? "claude" },
+                    set: { newValue in Task { await store.updateSelected(backend: newValue) } }
+                )) {
+                    Text("Claude").tag("claude")
+                    Text("Codex").tag("codex")
+                }
+                if let session = store.selectedSession {
+                    Button {
+                        Task { await store.togglePin(session) }
+                    } label: {
+                        Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                    }
+                    Button {
+                        Task { await store.forkSelected() }
+                    } label: {
+                        Label("Fork Chat", systemImage: "arrow.triangle.branch")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -126,6 +176,49 @@ private struct MobileChatHeader: View {
             return "\(session.backend) session \(provider)"
         }
         return "\(session.backend) · \(session.folder ?? "General")"
+    }
+}
+
+private struct MobileTimelineHistoryLoader: View {
+    @EnvironmentObject private var store: MobileAppStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock.arrow.circlepath")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Older history")
+                    .font(.caption.weight(.semibold))
+                Text("\(store.hiddenDisplayEventCount) older events not loaded")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if store.loadedHistoryLimitReached {
+                Text("Window limit")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if store.isLoadingOlderHistory {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Button {
+                    Task { await store.loadOlderHistory() }
+                } label: {
+                    Label("Load", systemImage: "arrow.up.circle")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!store.canLoadOlderHistory)
+            }
+        }
+        .padding(10)
+        .background(MobileTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
+        .onAppear {
+            guard store.canLoadOlderHistory else { return }
+            Task { await store.loadOlderHistory() }
+        }
     }
 }
 

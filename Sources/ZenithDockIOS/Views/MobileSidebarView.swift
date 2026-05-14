@@ -4,6 +4,7 @@ import ZenithCore
 struct MobileSidebarView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var resumeOpen: Bool
+    @State private var deleteCandidate: ZSession?
 
     var body: some View {
         List(selection: $store.selectedSessionID) {
@@ -11,10 +12,19 @@ struct MobileSidebarView: View {
                 MobileServerStatusView()
             }
 
-            Section("Chats") {
-                ForEach(store.sessions) { session in
-                    MobileSessionRow(session: session)
-                        .tag(session.id)
+            if !store.pinnedSessions.isEmpty {
+                Section("Pinned") {
+                    ForEach(store.pinnedSessions) { session in
+                        sessionRow(session)
+                    }
+                }
+            }
+
+            ForEach(store.folders.keys.sorted(), id: \.self) { folder in
+                Section(folder) {
+                    ForEach(store.folders[folder] ?? []) { session in
+                        sessionRow(session)
+                    }
                 }
             }
         }
@@ -38,6 +48,60 @@ struct MobileSidebarView: View {
                 }
             }
         }
+        .confirmationDialog("Delete chat?", isPresented: Binding(
+            get: { deleteCandidate != nil },
+            set: { if !$0 { deleteCandidate = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                guard let deleteCandidate else { return }
+                Task { await store.deleteSession(deleteCandidate) }
+                self.deleteCandidate = nil
+            }
+            Button("Cancel", role: .cancel) {
+                deleteCandidate = nil
+            }
+        } message: {
+            Text(deleteCandidate?.title ?? "This chat will be removed from ZenithDock.")
+        }
+    }
+
+    private func sessionRow(_ session: ZSession) -> some View {
+        MobileSessionRow(session: session)
+            .tag(session.id)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button {
+                    Task { await store.togglePin(session) }
+                } label: {
+                    Label(session.pinned == true ? "Unpin" : "Pin", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                }
+                .tint(.blue)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    deleteCandidate = session
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+            .contextMenu {
+                Button {
+                    Task { await store.togglePin(session) }
+                } label: {
+                    Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                }
+                Menu("Move to Folder") {
+                    ForEach(store.folderNames, id: \.self) { folder in
+                        Button(folder) {
+                            Task { await store.moveSession(session, to: folder) }
+                        }
+                    }
+                }
+                Button(role: .destructive) {
+                    deleteCandidate = session
+                } label: {
+                    Label("Delete Chat", systemImage: "trash")
+                }
+            }
     }
 }
 

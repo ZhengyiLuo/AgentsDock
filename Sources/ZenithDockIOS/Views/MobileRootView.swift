@@ -13,7 +13,7 @@ struct MobileRootView: View {
             if store.selectedSession == nil {
                 ContentUnavailableView("No Chat Selected", systemImage: "bubble.left.and.bubble.right", description: Text("Create or select a chat to start."))
             } else {
-                MobileTimelineView(importerOpen: $importerOpen)
+                MobileTimelineView(importerOpen: $importerOpen, resumeOpen: $resumeOpen)
             }
         }
         .task { await store.startLiveTracking() }

@@ -15,22 +15,28 @@ final class MobileAppStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
+    @Published var jobs: [ZJob] = []
     @Published var prompt = ""
     @Published var isRunning = false
     @Published var isLoading = false
+    @Published var isLoadingOlderHistory = false
     @Published var serverReachable = false
     @Published var socketLive = false
     @Published var status = "Disconnected"
     @Published var connectionDetail = "No connection test yet"
     @Published var activeSessionIDs: Set<String> = []
     @Published var errorText: String?
+    @Published var omittedHistoryEventCount = 0
     @Published var scrollRevision = 0
 
-    private let eventLimit = 80
+    private let initialEventLimit = 80
+    private let olderHistoryPageLimit = 100
+    private let maxLoadedTimelineEvents = 360
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
-    private var lastSeq: Int { events.map(\.seq).max() ?? 0 }
+    private var latestSeenSeq = 0
+    private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
     init() {
         let savedURL = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
@@ -66,6 +72,30 @@ final class MobileAppStore: ObservableObject {
 
     var selectedSession: ZSession? {
         sessions.first { $0.id == selectedSessionID }
+    }
+
+    var pinnedSessions: [ZSession] {
+        sessions.filter { $0.pinned == true }
+    }
+
+    var folders: [String: [ZSession]] {
+        Dictionary(grouping: sessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
+    }
+
+    var folderNames: [String] {
+        Array(Set(sessions.map { $0.folder ?? "General" })).sorted()
+    }
+
+    var hiddenDisplayEventCount: Int {
+        omittedHistoryEventCount
+    }
+
+    var canLoadOlderHistory: Bool {
+        omittedHistoryEventCount > 0 && !isLoadingOlderHistory && events.count < maxLoadedTimelineEvents
+    }
+
+    var loadedHistoryLimitReached: Bool {
+        omittedHistoryEventCount > 0 && events.count >= maxLoadedTimelineEvents
     }
 
     var displayEvents: [ZEvent] {
@@ -114,6 +144,7 @@ final class MobileAppStore: ObservableObject {
             await refreshHealth(showErrors: false)
             if tick % 6 == 0 {
                 await refreshSessions(showErrors: false)
+                await refreshJobs(showErrors: false)
             }
             if let sid = selectedSessionID, serverReachable, !socketLive {
                 connectEvents(sessionID: sid, after: lastSeq)
@@ -143,6 +174,9 @@ final class MobileAppStore: ObservableObject {
         events = []
         uploads = []
         sessions = []
+        jobs = []
+        omittedHistoryEventCount = 0
+        latestSeenSeq = 0
         await refresh(showErrors: true)
     }
 
@@ -151,6 +185,7 @@ final class MobileAppStore: ObservableObject {
         rememberServerURL()
         await refreshHealth(showErrors: showErrors)
         await refreshSessions(showErrors: showErrors)
+        await refreshJobs(showErrors: showErrors)
     }
 
     func refreshHealth(showErrors: Bool = true) async {
@@ -190,6 +225,18 @@ final class MobileAppStore: ObservableObject {
                 if let selectedSessionID {
                     await select(sessionID: selectedSessionID)
                 }
+            }
+        } catch {
+            if showErrors { report(error) }
+        }
+    }
+
+    func refreshJobs(showErrors: Bool = true) async {
+        do {
+            struct Response: Codable { let jobs: [ZJob] }
+            let res: Response = try await api.get("/api/jobs")
+            if jobs != res.jobs {
+                jobs = res.jobs
             }
         } catch {
             if showErrors { report(error) }
@@ -239,6 +286,89 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
+    func updateSelected(backend: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
+        guard let sid = selectedSessionID else { return }
+        await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, pinned: pinned)
+    }
+
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, pinned: Bool? = nil) async {
+        struct Body: Codable {
+            var title: String?
+            var folder: String?
+            var cwd: String?
+            var backend: String?
+            var pinned: Bool?
+        }
+        do {
+            struct Response: Codable { let session: ZSession }
+            let res: Response = try await api.patch("/api/sessions/\(sessionID)", body: Body(
+                title: title,
+                folder: folder,
+                cwd: cwd,
+                backend: backend,
+                pinned: pinned
+            ))
+            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = res.session
+            }
+        } catch {
+            report(error)
+        }
+    }
+
+    func togglePin(_ session: ZSession) async {
+        await updateSession(session.id, pinned: !(session.pinned ?? false))
+    }
+
+    func moveSession(_ session: ZSession, to folder: String) async {
+        let cleanFolder = folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        await updateSession(session.id, folder: cleanFolder.isEmpty ? "General" : cleanFolder)
+    }
+
+    func deleteSession(_ session: ZSession) async {
+        struct Response: Codable {
+            let ok: Bool
+            let deleted: Bool
+            let deleted_jobs: Int?
+        }
+        do {
+            let _: Response = try await api.delete("/api/sessions/\(session.id)")
+            sessions.removeAll { $0.id == session.id }
+            jobs.removeAll { $0.session_id == session.id }
+            activeSessionIDs.remove(session.id)
+            if selectedSessionID == session.id {
+                webSocket?.cancel(with: .goingAway, reason: nil)
+                webSocket = nil
+                selectedSessionID = nil
+                events = []
+                uploads = []
+                omittedHistoryEventCount = 0
+                latestSeenSeq = 0
+                socketLive = false
+                syncSelectedRunningState()
+                if let next = sessions.first {
+                    await select(sessionID: next.id)
+                }
+            }
+        } catch {
+            report(error)
+        }
+    }
+
+    func forkSelected() async {
+        guard let sid = selectedSessionID else { return }
+        struct Body: Codable { var title: String? }
+        do {
+            struct Response: Codable { let session: ZSession }
+            let title = "Fork of \(selectedSession?.title ?? "Chat")"
+            let res: Response = try await api.post("/api/sessions/\(sid)/fork", body: Body(title: title))
+            sessions.insert(res.session, at: 0)
+            await select(sessionID: res.session.id)
+        } catch {
+            report(error)
+        }
+    }
+
     func select(sessionID: String) async {
         if loadingSessionID == sessionID {
             selectedSessionID = sessionID
@@ -259,17 +389,20 @@ final class MobileAppStore: ObservableObject {
         isLoading = true
         events = []
         uploads = []
+        omittedHistoryEventCount = 0
+        latestSeenSeq = 0
         status = serverReachable ? "Loading chat" : "Server offline"
 
         do {
             struct Response: Codable {
                 let session: ZSession
                 let events: [ZEvent]
+                let events_omitted_before: Int?
             }
             let res: Response = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: [
-                    URLQueryItem(name: "limit", value: "\(eventLimit)"),
+                    URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
                     URLQueryItem(name: "tail", value: "true")
                 ]
             )
@@ -277,13 +410,56 @@ final class MobileAppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
-            events = res.events
+            events = timelineEvents(from: res.events)
+            latestSeenSeq = events.map(\.seq).max() ?? 0
+            omittedHistoryEventCount = res.events_omitted_before ?? 0
             uploads = events.compactMap(\.file)
             isLoading = false
             connectEvents(sessionID: sessionID, after: lastSeq)
             scrollRevision += 1
         } catch {
             isLoading = false
+            report(error)
+        }
+    }
+
+    func loadOlderHistory() async {
+        guard let sid = selectedSessionID,
+              omittedHistoryEventCount > 0,
+              !isLoadingOlderHistory,
+              let before = events.map(\.seq).min(),
+              events.count < maxLoadedTimelineEvents else {
+            return
+        }
+
+        isLoadingOlderHistory = true
+        defer { isLoadingOlderHistory = false }
+
+        do {
+            struct Response: Codable {
+                let session: ZSession
+                let events: [ZEvent]
+                let events_omitted_before: Int?
+            }
+            let capacity = max(1, min(olderHistoryPageLimit, maxLoadedTimelineEvents - events.count))
+            let res: Response = try await api.get(
+                "/api/sessions/\(sid)",
+                queryItems: [
+                    URLQueryItem(name: "before", value: "\(before)"),
+                    URLQueryItem(name: "limit", value: "\(capacity)"),
+                    URLQueryItem(name: "tail", value: "true")
+                ]
+            )
+            if let idx = sessions.firstIndex(where: { $0.id == sid }) {
+                sessions[idx] = res.session
+            }
+            let existingIDs = Set(events.map(\.id))
+            let older = timelineEvents(from: res.events).filter { !existingIDs.contains($0.id) }
+            events = (older + events).sorted { $0.seq < $1.seq }
+            omittedHistoryEventCount = res.events_omitted_before ?? 0
+            latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
+            uploads = events.compactMap(\.file)
+        } catch {
             report(error)
         }
     }
@@ -341,6 +517,65 @@ final class MobileAppStore: ObservableObject {
         }
         do {
             let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
+        } catch {
+            report(error)
+        }
+    }
+
+    func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool) async {
+        guard let sid = selectedSessionID else { return }
+        let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPrompt.isEmpty else { return }
+        struct Body: Codable {
+            let session_id: String
+            let title: String
+            let prompt: String
+            let interval_seconds: Int
+            let loop: Bool
+            let enabled: Bool
+            let backend: String?
+        }
+        do {
+            struct Response: Codable { let job: ZJob }
+            let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let res: Response = try await api.post("/api/jobs", body: Body(
+                session_id: sid,
+                title: cleanTitle.isEmpty ? "Loop: \(selectedSession?.title ?? "Chat")" : cleanTitle,
+                prompt: cleanPrompt,
+                interval_seconds: max(10, intervalSeconds),
+                loop: loop,
+                enabled: true,
+                backend: selectedSession?.backend
+            ))
+            jobs.insert(res.job, at: 0)
+        } catch {
+            report(error)
+        }
+    }
+
+    func updateJob(_ job: ZJob, enabled: Bool? = nil) async {
+        struct Body: Codable {
+            var enabled: Bool?
+        }
+        do {
+            struct Response: Codable { let job: ZJob }
+            let res: Response = try await api.patch("/api/jobs/\(job.id)", body: Body(enabled: enabled))
+            if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
+                jobs[idx] = res.job
+            }
+        } catch {
+            report(error)
+        }
+    }
+
+    func deleteJob(_ job: ZJob) async {
+        struct Response: Codable {
+            let ok: Bool
+            let deleted: Bool
+        }
+        do {
+            let _: Response = try await api.delete("/api/jobs/\(job.id)")
+            jobs.removeAll { $0.id == job.id }
         } catch {
             report(error)
         }
@@ -416,12 +651,21 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func ingest(_ event: ZEvent) {
+        latestSeenSeq = max(latestSeenSeq, event.seq)
+        if event.type == "raw_event" {
+            return
+        }
         guard event.session_id == selectedSessionID else {
             updateRunningState(from: event)
             return
         }
         guard !events.contains(where: { $0.id == event.id }) else { return }
         events.append(event)
+        if events.count > maxLoadedTimelineEvents {
+            let overflow = events.count - maxLoadedTimelineEvents
+            events.removeFirst(overflow)
+            omittedHistoryEventCount += overflow
+        }
         updateRunningState(from: event)
         if let file = event.file {
             uploads.append(file)
@@ -437,6 +681,10 @@ final class MobileAppStore: ObservableObject {
             activeSessionIDs.remove(event.session_id)
         }
         syncSelectedRunningState()
+    }
+
+    private func timelineEvents(from source: [ZEvent]) -> [ZEvent] {
+        source.filter { $0.type != "raw_event" }
     }
 
     private func syncSelectedRunningState() {
