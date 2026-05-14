@@ -13,10 +13,15 @@ struct MobileTimelineView: View {
     @State private var optionsOpen = false
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
+    @State private var visibleRowLimit = 90
     private let bottomID = "mobile-timeline-bottom"
+    private let rowPageSize = 70
 
     var body: some View {
-        let rows = MobileTimelineRows.build(from: store.displayEvents)
+        let displayEvents = store.displayEvents
+        let allRows = MobileTimelineRows.build(from: displayEvents)
+        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
+        let rows = Array(allRows.suffix(visibleRowLimit))
 
         VStack(spacing: 0) {
             MobileChatHeader(
@@ -33,8 +38,10 @@ struct MobileTimelineView: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 40)
                             }
-                            if store.hiddenDisplayEventCount > 0 {
-                                MobileTimelineHistoryLoader {
+                            if store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0 {
+                                MobileTimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
+                                    revealOlderRows()
+                                } onLoadOlder: {
                                     loadOlderHistoryFromIntent()
                                 }
                                     .background(MobileHistoryTopReader())
@@ -80,7 +87,7 @@ struct MobileTimelineView: View {
                         TapGesture()
                             .onEnded { dismissMobileKeyboard() }
                     )
-                    if !isAtBottom && !store.displayEvents.isEmpty {
+                    if !isAtBottom && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy)
                         } label: {
@@ -101,7 +108,15 @@ struct MobileTimelineView: View {
                     isAtBottom = true
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
+                    visibleRowLimit = 90
                     scrollToBottom(proxy)
+                }
+                .onChange(of: displayEvents.count) {
+                    if displayEvents.isEmpty {
+                        visibleRowLimit = 90
+                    } else if isAtBottom {
+                        visibleRowLimit = min(max(visibleRowLimit, 90), max(MobileTimelineRows.build(from: displayEvents).count, 90))
+                    }
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
@@ -144,16 +159,26 @@ struct MobileTimelineView: View {
         guard topIsVisible,
               !isAtBottom,
               olderHistoryLoadArmed,
-              !suppressScrollHistoryLoadUntilTopLeaves,
-              store.canLoadOlderHistory else {
+              !suppressScrollHistoryLoadUntilTopLeaves else {
             return
         }
+        if revealOlderRows() {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = true
+            return
+        }
+        guard store.canLoadOlderHistory else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
         Task { await store.loadOlderHistory() }
     }
 
     private func loadOlderHistoryFromIntent() {
+        if revealOlderRows() {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = true
+            return
+        }
         guard store.canLoadOlderHistory else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
@@ -161,6 +186,11 @@ struct MobileTimelineView: View {
     }
 
     private func loadOlderHistoryFromPull() async {
+        if revealOlderRows() {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = true
+            return
+        }
         if store.canLoadOlderHistory {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
@@ -168,6 +198,14 @@ struct MobileTimelineView: View {
             return
         }
         await store.refreshTimelineFromPull()
+    }
+
+    @discardableResult
+    private func revealOlderRows() -> Bool {
+        let rowCount = MobileTimelineRows.build(from: store.displayEvents).count
+        guard visibleRowLimit < rowCount else { return false }
+        visibleRowLimit = min(rowCount, visibleRowLimit + rowPageSize)
+        return true
     }
 }
 
@@ -264,19 +302,29 @@ private struct MobileChatHeader: View {
 
 private struct MobileTimelineHistoryLoader: View {
     @EnvironmentObject private var store: MobileAppStore
+    let hiddenRenderedRowCount: Int
+    let onShowOlderRows: () -> Void
     let onLoadOlder: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
                 .foregroundStyle(.secondary)
-            Text("\(store.hiddenDisplayEventCount) older")
+            Text("\(totalOlderCount) older")
                 .font(.caption.weight(.semibold))
             Text("messages")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            if store.isLoadingOlderHistory {
+            if hiddenRenderedRowCount > 0 {
+                Button {
+                    onShowOlderRows()
+                } label: {
+                    Label("Show", systemImage: "arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            } else if store.isLoadingOlderHistory {
                 ProgressView()
                     .controlSize(.small)
             } else {
@@ -296,6 +344,10 @@ private struct MobileTimelineHistoryLoader: View {
         .background(.thinMaterial)
         .clipShape(Capsule())
         .overlay(Capsule().stroke(MobileTheme.softLine))
+    }
+
+    private var totalOlderCount: Int {
+        store.hiddenDisplayEventCount + hiddenRenderedRowCount
     }
 }
 

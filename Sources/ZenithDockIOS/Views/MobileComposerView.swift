@@ -8,6 +8,7 @@ import UIKit
 struct MobileComposerView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
+    @State private var draftPrompt = ""
     @State private var promptFocused = false
     @State private var promptHeight: CGFloat = MobilePromptTextView.minimumHeight
 
@@ -44,14 +45,14 @@ struct MobileComposerView: View {
 
                 ZStack(alignment: .topLeading) {
                     MobilePromptTextView(
-                        text: $store.prompt,
+                        text: $draftPrompt,
                         isFocused: $promptFocused,
                         measuredHeight: $promptHeight,
                         isEditable: store.selectedSessionID != nil,
                         onSubmit: submitPrompt
                     )
                     .frame(height: promptHeight)
-                    if store.prompt.isEmpty {
+                    if draftPrompt.isEmpty {
                         Text(store.selectedSessionID == nil ? "Select a chat" : "Message")
                             .font(.body)
                             .foregroundStyle(.tertiary)
@@ -84,15 +85,31 @@ struct MobileComposerView: View {
         .padding(.top, 8)
         .padding(.bottom, 7)
         .background(.bar)
+        .onChange(of: store.selectedSessionID) {
+            draftPrompt = ""
+            promptHeight = MobilePromptTextView.minimumHeight
+        }
     }
 
     private var canSend: Bool {
-        store.selectedSessionID != nil && !store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        store.selectedSessionID != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func submitPrompt() {
         guard canSend else { return }
-        Task { await store.sendPrompt() }
+        let submitted = draftPrompt
+        draftPrompt = ""
+        promptHeight = MobilePromptTextView.minimumHeight
+        Task {
+            let accepted = await store.sendPrompt(submitted)
+            if !accepted {
+                await MainActor.run {
+                    if draftPrompt.isEmpty {
+                        draftPrompt = submitted
+                    }
+                }
+            }
+        }
     }
 }
 

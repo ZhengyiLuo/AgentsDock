@@ -31,11 +31,22 @@ final class MobileAppStore: ObservableObject {
 
     private let initialEventLimit = 80
     private let olderHistoryPageLimit = 120
+    private let maxMemoryCachedChats = 8
+    private let maxMemoryCachedEvents = 180
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
     private var latestSeenSeq = 0
+    private var selectionGeneration = 0
+    private var memoryChatCache: [String: CachedChat] = [:]
+    private var memoryChatCacheOrder: [String] = []
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
+
+    private struct CachedChat {
+        var session: ZSession
+        var events: [ZEvent]
+        var omittedHistoryEventCount: Int
+    }
 
     init() {
         let savedURL = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
@@ -172,6 +183,8 @@ final class MobileAppStore: ObservableObject {
         jobs = []
         omittedHistoryEventCount = 0
         latestSeenSeq = 0
+        memoryChatCache = [:]
+        memoryChatCacheOrder = []
         await refresh(showErrors: true)
     }
 
@@ -334,6 +347,7 @@ final class MobileAppStore: ObservableObject {
             sessions.removeAll { $0.id == session.id }
             jobs.removeAll { $0.session_id == session.id }
             activeSessionIDs.remove(session.id)
+            forgetMemoryChatCache(session.id)
             if selectedSessionID == session.id {
                 webSocket?.cancel(with: .goingAway, reason: nil)
                 webSocket = nil
@@ -373,6 +387,8 @@ final class MobileAppStore: ObservableObject {
             syncSelectedRunningState()
             return
         }
+        selectionGeneration += 1
+        let generation = selectionGeneration
         loadingSessionID = sessionID
         defer {
             if loadingSessionID == sessionID {
@@ -385,11 +401,22 @@ final class MobileAppStore: ObservableObject {
         webSocket?.cancel(with: .goingAway, reason: nil)
         socketLive = false
         isLoading = true
-        events = []
-        uploads = []
-        omittedHistoryEventCount = 0
-        latestSeenSeq = 0
         status = serverReachable ? "Loading chat" : "Server offline"
+        var loadedFromCache = false
+
+        if let cached = memoryCachedChat(sessionID) {
+            applyCachedChat(cached)
+            loadedFromCache = true
+            isLoading = false
+            scrollRevision += 1
+        } else {
+            events = []
+            uploads = []
+            omittedHistoryEventCount = 0
+            latestSeenSeq = 0
+        }
+
+        guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
 
         do {
             struct Response: Codable {
@@ -397,25 +424,36 @@ final class MobileAppStore: ObservableObject {
                 let events: [ZEvent]
                 let events_omitted_before: Int?
             }
+            let requestAfter = loadedFromCache ? lastSeq : 0
             let res: Response = try await api.get(
                 "/api/sessions/\(sessionID)",
-                queryItems: [
+                queryItems: loadedFromCache && requestAfter > 0 ? [
+                    URLQueryItem(name: "after", value: "\(requestAfter)"),
+                    URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
+                    URLQueryItem(name: "tail", value: "false")
+                ] : [
                     URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
                     URLQueryItem(name: "tail", value: "true")
                 ]
             )
-            guard selectedSessionID == sessionID else { return }
+            guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
-            events = timelineEvents(from: res.events)
-            latestSeenSeq = events.map(\.seq).max() ?? 0
-            omittedHistoryEventCount = res.events_omitted_before ?? 0
+            if loadedFromCache {
+                mergeEvents(res.events)
+            } else {
+                events = timelineEvents(from: res.events)
+                latestSeenSeq = events.map(\.seq).max() ?? 0
+                omittedHistoryEventCount = res.events_omitted_before ?? 0
+            }
             uploads = events.compactMap(\.file)
             isLoading = false
+            rememberSelectedChat()
             connectEvents(sessionID: sessionID, after: lastSeq)
             scrollRevision += 1
         } catch {
+            guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
             isLoading = false
             report(error)
         }
@@ -455,6 +493,7 @@ final class MobileAppStore: ObservableObject {
             omittedHistoryEventCount = res.events_omitted_before ?? 0
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             uploads = events.compactMap(\.file)
+            rememberSelectedChat()
         } catch {
             report(error)
         }
@@ -471,15 +510,19 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func sendPrompt() async {
-        guard let sid = selectedSessionID else { return }
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+    @discardableResult
+    func sendPrompt(_ submittedPrompt: String? = nil) async -> Bool {
+        guard let sid = selectedSessionID else { return false }
+        let sourcePrompt = submittedPrompt ?? prompt
+        let trimmed = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
         }
-        prompt = ""
+        if submittedPrompt == nil {
+            prompt = ""
+        }
         activeSessionIDs.insert(sid)
         syncSelectedRunningState()
         do {
@@ -494,11 +537,15 @@ final class MobileAppStore: ObservableObject {
                 sessions[idx] = res.session
             }
             uploads = []
+            return true
         } catch {
-            prompt = trimmed
+            if submittedPrompt == nil {
+                prompt = trimmed
+            }
             activeSessionIDs.remove(sid)
             syncSelectedRunningState()
             report(error)
+            return false
         }
     }
 
@@ -672,6 +719,9 @@ final class MobileAppStore: ObservableObject {
         if let file = event.file {
             uploads.append(file)
         }
+        if event.type != "raw_event" {
+            rememberSelectedChat()
+        }
         scrollRevision += 1
     }
 
@@ -687,6 +737,62 @@ final class MobileAppStore: ObservableObject {
 
     private func timelineEvents(from source: [ZEvent]) -> [ZEvent] {
         source.filter { $0.type != "raw_event" }
+    }
+
+    private func mergeEvents(_ incoming: [ZEvent]) {
+        guard !incoming.isEmpty else { return }
+        let existingIDs = Set(events.map(\.id))
+        let incomingEvents = timelineEvents(from: incoming)
+        events.append(contentsOf: incomingEvents.filter { !existingIDs.contains($0.id) })
+        events.sort { $0.seq < $1.seq }
+        latestSeenSeq = max(latestSeenSeq, incomingEvents.map(\.seq).max() ?? 0)
+    }
+
+    private func applyCachedChat(_ cached: CachedChat) {
+        if let idx = sessions.firstIndex(where: { $0.id == cached.session.id }) {
+            sessions[idx] = cached.session
+        }
+        events = timelineEvents(from: cached.events)
+        omittedHistoryEventCount = cached.omittedHistoryEventCount
+        uploads = events.compactMap(\.file)
+        latestSeenSeq = events.map(\.seq).max() ?? 0
+    }
+
+    private func rememberSelectedChat() {
+        guard let session = selectedSession else { return }
+        let overflow = max(events.count - maxMemoryCachedEvents, 0)
+        let cachedEvents = Array(events.suffix(maxMemoryCachedEvents))
+        let cached = CachedChat(
+            session: session,
+            events: cachedEvents,
+            omittedHistoryEventCount: omittedHistoryEventCount + overflow
+        )
+        rememberChatCache(cached)
+    }
+
+    private func memoryCachedChat(_ sessionID: String) -> CachedChat? {
+        guard let cached = memoryChatCache[sessionID] else { return nil }
+        touchMemoryChatCache(sessionID)
+        return cached
+    }
+
+    private func rememberChatCache(_ cached: CachedChat) {
+        memoryChatCache[cached.session.id] = cached
+        touchMemoryChatCache(cached.session.id)
+        while memoryChatCacheOrder.count > maxMemoryCachedChats, let staleID = memoryChatCacheOrder.first {
+            memoryChatCacheOrder.removeFirst()
+            memoryChatCache.removeValue(forKey: staleID)
+        }
+    }
+
+    private func touchMemoryChatCache(_ sessionID: String) {
+        memoryChatCacheOrder.removeAll { $0 == sessionID }
+        memoryChatCacheOrder.append(sessionID)
+    }
+
+    private func forgetMemoryChatCache(_ sessionID: String) {
+        memoryChatCache.removeValue(forKey: sessionID)
+        memoryChatCacheOrder.removeAll { $0 == sessionID }
     }
 
     private func syncSelectedRunningState() {
