@@ -1,0 +1,539 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B00000000000000000000001 /* ZenithCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000001 /* ZenithCore.swift */; };
+		B00000000000000000000002 /* ZenithDockIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000002 /* ZenithDockIOSApp.swift */; };
+		B00000000000000000000003 /* MobileTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* MobileTheme.swift */; };
+		B00000000000000000000004 /* MobileAppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000004 /* MobileAppStore.swift */; };
+		B00000000000000000000005 /* MobileFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000005 /* MobileFormatting.swift */; };
+		B00000000000000000000006 /* MobileComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000006 /* MobileComposerView.swift */; };
+		B00000000000000000000007 /* MobileEventViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000007 /* MobileEventViews.swift */; };
+		B00000000000000000000008 /* MobileResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000008 /* MobileResumeView.swift */; };
+		B00000000000000000000009 /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000009 /* MobileRootView.swift */; };
+		B0000000000000000000000A /* MobileSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000A /* MobileSidebarView.swift */; };
+		B0000000000000000000000B /* MobileTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000B /* MobileTimelineView.swift */; };
+		B0000000000000000000000C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000C /* Assets.xcassets */; };
+		B0000000000000000000000D /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
+		B0000000000000000000000E /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C00000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T00000000000000000000002;
+			remoteInfo = ZenithCore;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		CP0000000000000000000001 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				B0000000000000000000000E /* ZenithCore.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		F00000000000000000000001 /* ZenithCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenithCore.swift; sourceTree = "<group>"; };
+		F00000000000000000000002 /* ZenithDockIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenithDockIOSApp.swift; sourceTree = "<group>"; };
+		F00000000000000000000003 /* MobileTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTheme.swift; sourceTree = "<group>"; };
+		F00000000000000000000004 /* MobileAppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAppStore.swift; sourceTree = "<group>"; };
+		F00000000000000000000005 /* MobileFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileFormatting.swift; sourceTree = "<group>"; };
+		F00000000000000000000006 /* MobileComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileComposerView.swift; sourceTree = "<group>"; };
+		F00000000000000000000007 /* MobileEventViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileEventViews.swift; sourceTree = "<group>"; };
+		F00000000000000000000008 /* MobileResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileResumeView.swift; sourceTree = "<group>"; };
+		F00000000000000000000009 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
+		F0000000000000000000000A /* MobileSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSidebarView.swift; sourceTree = "<group>"; };
+		F0000000000000000000000B /* MobileTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTimelineView.swift; sourceTree = "<group>"; };
+		F0000000000000000000000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F0000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F0000000000000000000000E /* ZenithDockIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZenithDockIOS.entitlements; sourceTree = "<group>"; };
+		P00000000000000000000001 /* ZenithDock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZenithDock.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		P00000000000000000000002 /* ZenithCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = ZenithCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		FR0000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000000D /* ZenithCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FR0000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		G00000000000000000000000 = {
+			isa = PBXGroup;
+			children = (
+				G00000000000000000000001 /* Apps */,
+				G00000000000000000000002 /* Sources */,
+				G00000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		G00000000000000000000001 /* Apps */ = {
+			isa = PBXGroup;
+			children = (
+				G00000000000000000000004 /* ZenithDockIOS */,
+			);
+			path = Apps;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000002 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				G00000000000000000000005 /* ZenithCore */,
+				G00000000000000000000006 /* ZenithDockIOS */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				P00000000000000000000001 /* ZenithDock.app */,
+				P00000000000000000000002 /* ZenithCore.framework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000004 /* ZenithDockIOS */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000000D /* Info.plist */,
+				F0000000000000000000000E /* ZenithDockIOS.entitlements */,
+			);
+			path = ZenithDockIOS;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000005 /* ZenithCore */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000001 /* ZenithCore.swift */,
+			);
+			path = ZenithCore;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000006 /* ZenithDockIOS */ = {
+			isa = PBXGroup;
+			children = (
+				G00000000000000000000007 /* App */,
+				G00000000000000000000008 /* Design */,
+				G00000000000000000000009 /* State */,
+				G0000000000000000000000A /* Support */,
+				G0000000000000000000000B /* Views */,
+				G0000000000000000000000C /* Resources */,
+			);
+			path = ZenithDockIOS;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000007 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000002 /* ZenithDockIOSApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000008 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000003 /* MobileTheme.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000009 /* State */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000004 /* MobileAppStore.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		G0000000000000000000000A /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000005 /* MobileFormatting.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		G0000000000000000000000B /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000006 /* MobileComposerView.swift */,
+				F00000000000000000000007 /* MobileEventViews.swift */,
+				F00000000000000000000008 /* MobileResumeView.swift */,
+				F00000000000000000000009 /* MobileRootView.swift */,
+				F0000000000000000000000A /* MobileSidebarView.swift */,
+				F0000000000000000000000B /* MobileTimelineView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		G0000000000000000000000C /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000000C /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		T00000000000000000000001 /* ZenithDockIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XC0000000000000000000003 /* Build configuration list for PBXNativeTarget "ZenithDockIOS" */;
+			buildPhases = (
+				SR0000000000000000000001 /* Sources */,
+				FR0000000000000000000001 /* Frameworks */,
+				RS0000000000000000000001 /* Resources */,
+				CP0000000000000000000001 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = ZenithDockIOS;
+			productName = ZenithDock;
+			productReference = P00000000000000000000001 /* ZenithDock.app */;
+			productType = "com.apple.product-type.application";
+		};
+		T00000000000000000000002 /* ZenithCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XC0000000000000000000004 /* Build configuration list for PBXNativeTarget "ZenithCore" */;
+			buildPhases = (
+				SR0000000000000000000002 /* Sources */,
+				FR0000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZenithCore;
+			productName = ZenithCore;
+			productReference = P00000000000000000000002 /* ZenithCore.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					T00000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					T00000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = XC0000000000000000000001 /* Build configuration list for PBXProject "ZenithDock" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = G00000000000000000000000;
+			productRefGroup = G00000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				T00000000000000000000001 /* ZenithDockIOS */,
+				T00000000000000000000002 /* ZenithCore */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		RS0000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000000C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		SR0000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000002 /* ZenithDockIOSApp.swift in Sources */,
+				B00000000000000000000003 /* MobileTheme.swift in Sources */,
+				B00000000000000000000004 /* MobileAppStore.swift in Sources */,
+				B00000000000000000000005 /* MobileFormatting.swift in Sources */,
+				B00000000000000000000006 /* MobileComposerView.swift in Sources */,
+				B00000000000000000000007 /* MobileEventViews.swift in Sources */,
+				B00000000000000000000008 /* MobileResumeView.swift in Sources */,
+				B00000000000000000000009 /* MobileRootView.swift in Sources */,
+				B0000000000000000000000A /* MobileSidebarView.swift in Sources */,
+				B0000000000000000000000B /* MobileTimelineView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		SR0000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* ZenithCore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D00000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T00000000000000000000002 /* ZenithCore */;
+			targetProxy = C00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		XC0000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		XC0000000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		XC0000000000000000000021 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Apps/ZenithDockIOS/ZenithDockIOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = KRR35MWWHD;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/ZenithDockIOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithDock;
+				PRODUCT_NAME = ZenithDock;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		XC0000000000000000000022 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Apps/ZenithDockIOS/ZenithDockIOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = KRR35MWWHD;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/ZenithDockIOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithDock;
+				PRODUCT_NAME = ZenithDock;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		XC0000000000000000000031 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithCore;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		XC0000000000000000000032 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEFINES_MODULE = YES;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithCore;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		XC0000000000000000000001 /* Build configuration list for PBXProject "ZenithDock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC0000000000000000000011 /* Debug */,
+				XC0000000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XC0000000000000000000003 /* Build configuration list for PBXNativeTarget "ZenithDockIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC0000000000000000000021 /* Debug */,
+				XC0000000000000000000022 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XC0000000000000000000004 /* Build configuration list for PBXNativeTarget "ZenithCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC0000000000000000000031 /* Debug */,
+				XC0000000000000000000032 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}
