@@ -607,6 +607,48 @@ async def enqueue_turn(session_id: str, req: TurnRequest, sess: dict[str, Any]) 
     }
 
 
+async def unqueue_turn(session_id: str, queued_id: str) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    removed: dict[str, Any] | None = None
+    async with QUEUE_LOCK:
+        queue = QUEUED_TURNS.get(session_id)
+        if queue:
+            kept: deque[dict[str, Any]] = deque()
+            for item in queue:
+                if removed is None and item.get("queued_id") == queued_id:
+                    removed = item
+                    continue
+                kept.append(item)
+            if kept:
+                QUEUED_TURNS[session_id] = kept
+                remaining = len(kept)
+            else:
+                QUEUED_TURNS.pop(session_id, None)
+                remaining = 0
+        else:
+            remaining = 0
+
+    if removed is None:
+        raise HTTPException(status_code=404, detail="queued turn not found")
+
+    await append_event(session_id, "turn_unqueued", {
+        "queued_id": queued_id,
+        "backend": removed.get("backend") or STORE.sessions[session_id].get("backend") or DEFAULT_BACKEND,
+        "prompt": removed.get("prompt") or "",
+        "file_ids": list(removed.get("file_ids") or []),
+        "message": "Removed queued message.",
+        "remaining": remaining,
+    })
+    return {
+        "ok": True,
+        "unqueued": True,
+        "queued_id": queued_id,
+        "remaining": remaining,
+    }
+
+
 async def start_next_queued_turn(session_id: str) -> None:
     async with QUEUE_LOCK:
         queue = QUEUED_TURNS.get(session_id)
@@ -1818,6 +1860,11 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
 @app.post("/api/sessions/{session_id}/turns")
 async def post_turn(session_id: str, req: TurnRequest) -> dict[str, Any]:
     return await start_turn(session_id, req)
+
+
+@app.delete("/api/sessions/{session_id}/queue/{queued_id}")
+async def delete_queued_turn(session_id: str, queued_id: str) -> dict[str, Any]:
+    return await unqueue_turn(session_id, queued_id)
 
 
 @app.post("/api/sessions/{session_id}/stop")

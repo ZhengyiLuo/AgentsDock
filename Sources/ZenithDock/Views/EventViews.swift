@@ -21,7 +21,16 @@ struct EventCard: View {
         } else if event.type == "turn_queued" {
             HStack {
                 Spacer(minLength: 80)
-                MessageBubble(label: queuedLabel, text: event.prompt ?? "", isUser: true, isQueued: !store.hasStartedQueuedEvent(event))
+                let isPending = store.isQueuedEventPending(event)
+                MessageBubble(
+                    label: queuedLabel,
+                    text: event.prompt ?? "",
+                    isUser: true,
+                    isQueued: isPending,
+                    actionTitle: isPending ? "Unqueue" : nil,
+                    actionSystemImage: isPending ? "xmark.circle" : nil,
+                    action: isPending ? { Task { await store.unqueue(event) } } : nil
+                )
             }
         } else if event.type == "assistant_text" {
             HStack {
@@ -118,6 +127,7 @@ struct EventCard: View {
         switch event.type {
         case "turn_started": "Prompt"
         case "turn_queued": "Queued"
+        case "turn_unqueued": "Removed from Queue"
         case "assistant_text": "Assistant"
         case "reasoning_summary": "Reasoning Summary"
         case "tool_started": "Tool Started"
@@ -143,6 +153,7 @@ struct EventCard: View {
         case "error": "exclamationmark.triangle"
         case "turn_started": "arrow.up.message"
         case "turn_queued": "text.badge.clock"
+        case "turn_unqueued": "xmark.circle"
         case "turn_finished": "checkmark.circle"
         default: "circle"
         }
@@ -153,7 +164,7 @@ struct EventCard: View {
         case "error": .red
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
-        case "turn_queued": .secondary
+        case "turn_queued", "turn_unqueued": .secondary
         case "artifact_created": .green
         default: .accentColor
         }
@@ -164,6 +175,9 @@ struct EventCard: View {
     }
 
     private var queuedLabel: String {
+        if store.hasCancelledQueuedEvent(event) {
+            return "Removed from queue"
+        }
         if store.hasStartedQueuedEvent(event) {
             return "Sent from queue"
         }
@@ -179,6 +193,9 @@ struct MessageBubble: View {
     let text: String
     let isUser: Bool
     var isQueued = false
+    var actionTitle: String?
+    var actionSystemImage: String?
+    var action: (() -> Void)?
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
@@ -187,6 +204,15 @@ struct MessageBubble: View {
                 Text(label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if let action {
+                    Button(action: action) {
+                        Label(actionTitle ?? "Action", systemImage: actionSystemImage ?? "circle")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(actionTitle ?? "Action")
+                }
                 Button {
                     copyToPasteboard(text)
                 } label: {

@@ -108,6 +108,15 @@ final class AppStore: ObservableObject {
         return events.contains { $0.type == "turn_started" && $0.queued_id == queuedID }
     }
 
+    func hasCancelledQueuedEvent(_ event: ZEvent) -> Bool {
+        guard event.type == "turn_queued", let queuedID = event.queued_id else { return false }
+        return events.contains { $0.type == "turn_unqueued" && $0.queued_id == queuedID }
+    }
+
+    func isQueuedEventPending(_ event: ZEvent) -> Bool {
+        event.type == "turn_queued" && !hasStartedQueuedEvent(event) && !hasCancelledQueuedEvent(event)
+    }
+
     private func makeDisplayEvents(from source: [ZEvent]) -> [ZEvent] {
         if showDebugEvents {
             return source
@@ -124,7 +133,7 @@ final class AppStore: ObservableObject {
         })
         return source.filter { event in
             switch event.type {
-            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback":
+            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_unqueued":
                 return false
             case "turn_started":
                 if let queuedID = event.queued_id, queuedTurnIDs.contains(queuedID) {
@@ -622,6 +631,23 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func unqueue(_ event: ZEvent) async {
+        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        struct Response: Codable {
+            let ok: Bool
+            let unqueued: Bool?
+            let queued_id: String?
+            let remaining: Int?
+        }
+        do {
+            let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
+            AppLogger.info("unqueued session=\(event.session_id) queued=\(queuedID)")
+        } catch {
+            AppLogger.error("unqueue failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+        }
+    }
+
     func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool) async {
         guard let sid = selectedSessionID else { return }
         struct Body: Codable {
@@ -716,7 +742,7 @@ final class AppStore: ObservableObject {
             omittedHistoryEventCount += overflow
         }
         rebuildDisplayEvents()
-        if ["turn_started", "turn_queued", "assistant_text", "turn_finished", "error"].contains(event.type) {
+        if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
             AppLogger.info("event session=\(event.session_id) seq=\(event.seq) type=\(event.type)")
         }
         if event.type == "turn_started" {

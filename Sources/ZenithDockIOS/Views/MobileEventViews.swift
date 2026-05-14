@@ -17,7 +17,15 @@ struct MobileEventCard: View {
         case "turn_started":
             userBubble(label: "You", text: event.prompt ?? "")
         case "turn_queued":
-            userBubble(label: queuedLabel, text: event.prompt ?? "", queued: !store.hasStartedQueuedEvent(event))
+            let isPending = store.isQueuedEventPending(event)
+            userBubble(
+                label: queuedLabel,
+                text: event.prompt ?? "",
+                queued: isPending,
+                actionTitle: isPending ? "Unqueue" : nil,
+                actionSystemImage: isPending ? "xmark.circle" : nil,
+                action: isPending ? { Task { await store.unqueue(event) } } : nil
+            )
         case "assistant_text":
             assistantBubble(text: event.text ?? "")
         case "turn_finished":
@@ -47,6 +55,9 @@ struct MobileEventCard: View {
     }
 
     private var queuedLabel: String {
+        if store.hasCancelledQueuedEvent(event) {
+            return "Removed from queue"
+        }
         if store.hasStartedQueuedEvent(event) {
             return "Sent from queue"
         }
@@ -56,10 +67,25 @@ struct MobileEventCard: View {
         return "Queued"
     }
 
-    private func userBubble(label: String, text: String, queued: Bool = false) -> some View {
+    private func userBubble(
+        label: String,
+        text: String,
+        queued: Bool = false,
+        actionTitle: String? = nil,
+        actionSystemImage: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
         HStack {
             Spacer(minLength: 44)
-            MobileMessageBubble(label: label, text: text, isUser: true, queued: queued)
+            MobileMessageBubble(
+                label: label,
+                text: text,
+                isUser: true,
+                queued: queued,
+                actionTitle: actionTitle,
+                actionSystemImage: actionSystemImage,
+                action: action
+            )
         }
     }
 
@@ -76,6 +102,9 @@ struct MobileMessageBubble: View {
     let text: String
     let isUser: Bool
     var queued = false
+    var actionTitle: String?
+    var actionSystemImage: String?
+    var action: (() -> Void)?
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 7) {
@@ -84,6 +113,13 @@ struct MobileMessageBubble: View {
                 Text(label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if let action {
+                    Button(action: action) {
+                        Label(actionTitle ?? "Action", systemImage: actionSystemImage ?? "circle")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                }
                 Button {
                     copyToPasteboard(text)
                 } label: {

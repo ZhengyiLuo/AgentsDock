@@ -20,6 +20,16 @@ echo "Checking health"
 if [[ -n "${ZENITHDOCK_AGENT_TOKEN:-}" ]]; then
   ssh "$REMOTE_HOST" "curl -fsS -H 'Authorization: Bearer ${ZENITHDOCK_AGENT_TOKEN}' http://127.0.0.1:7850/api/health"
 else
-  ssh "$REMOTE_HOST" "curl -fsS http://127.0.0.1:7850/api/health"
+  REMOTE_HEALTH_BODY="/tmp/zenithdock-agent-health.json"
+  STATUS="$(ssh "$REMOTE_HOST" "curl -sS -o '$REMOTE_HEALTH_BODY' -w '%{http_code}' http://127.0.0.1:7850/api/health || true")"
+  if [[ "$STATUS" == "200" ]]; then
+    ssh "$REMOTE_HOST" "cat '$REMOTE_HEALTH_BODY'"
+  elif [[ "$STATUS" == "401" ]]; then
+    echo "Health endpoint requires a token; service is responding. Set ZENITHDOCK_AGENT_TOKEN to verify authenticated health."
+  else
+    ssh "$REMOTE_HOST" "cat '$REMOTE_HEALTH_BODY'" || true
+    echo "Health check failed with HTTP $STATUS" >&2
+    exit 1
+  fi
 fi
 echo

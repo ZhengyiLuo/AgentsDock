@@ -51,7 +51,7 @@ final class MobileAppStore: ObservableObject {
         })
         return events.filter { event in
             switch event.type {
-            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback":
+            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_unqueued":
                 return false
             case "turn_started":
                 if let queuedID = event.queued_id, queuedTurnIDs.contains(queuedID) {
@@ -295,6 +295,21 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
+    func unqueue(_ event: ZEvent) async {
+        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        struct Response: Codable {
+            let ok: Bool
+            let unqueued: Bool?
+            let queued_id: String?
+            let remaining: Int?
+        }
+        do {
+            let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
+        } catch {
+            report(error)
+        }
+    }
+
     func upload(urls: [URL]) async {
         guard let sid = selectedSessionID else { return }
         for url in urls {
@@ -330,6 +345,15 @@ final class MobileAppStore: ObservableObject {
     func hasStartedQueuedEvent(_ event: ZEvent) -> Bool {
         guard event.type == "turn_queued", let queuedID = event.queued_id else { return false }
         return events.contains { $0.type == "turn_started" && $0.queued_id == queuedID }
+    }
+
+    func hasCancelledQueuedEvent(_ event: ZEvent) -> Bool {
+        guard event.type == "turn_queued", let queuedID = event.queued_id else { return false }
+        return events.contains { $0.type == "turn_unqueued" && $0.queued_id == queuedID }
+    }
+
+    func isQueuedEventPending(_ event: ZEvent) -> Bool {
+        event.type == "turn_queued" && !hasStartedQueuedEvent(event) && !hasCancelledQueuedEvent(event)
     }
 
     private func connectEvents(sessionID: String, after: Int) {
