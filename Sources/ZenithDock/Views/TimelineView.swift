@@ -39,20 +39,20 @@ struct TimelineView: View {
                                     Color.clear
                                         .frame(height: 1)
                                         .id(bottomID)
-                                        .background(
-                                            GeometryReader { marker in
-                                                Color.clear.preference(
-                                                    key: TimelineBottomOffsetKey.self,
-                                                    value: marker.frame(in: .named("timeline-scroll")).maxY
-                                                )
-                                            }
-                                        )
                                 }
                             }
                             .padding(20)
                             .padding(.bottom, 56)
                             .frame(maxWidth: 980, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .center)
+                            .background(
+                                GeometryReader { content in
+                                    Color.clear.preference(
+                                        key: TimelineBottomOffsetKey.self,
+                                        value: content.frame(in: .named("timeline-scroll")).maxY
+                                    )
+                                }
+                            )
                         }
                         .coordinateSpace(name: "timeline-scroll")
                         if !isAtBottom && !displayEvents.isEmpty {
