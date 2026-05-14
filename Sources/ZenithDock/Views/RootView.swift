@@ -26,6 +26,14 @@ struct RootView: View {
                         store.rememberServerURL()
                     }
                     .onSubmit { Task { await store.refresh() } }
+                SecureField("Token", text: $store.accessToken)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 150)
+                    .onChange(of: store.accessToken) {
+                        store.rememberAccessToken()
+                    }
+                    .onSubmit { Task { await store.refresh() } }
+                    .help("Shared token for ZENITHDOCK_AGENT_TOKEN")
                 Button {
                     Task { await store.refresh() }
                 } label: {

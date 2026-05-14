@@ -13,6 +13,27 @@ struct InspectorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+            GroupBox("Security") {
+                VStack(alignment: .leading, spacing: 10) {
+                    LabeledContent("Server", value: store.serverReachable ? "Online" : "Offline")
+                    SecureField("Agent access token", text: $store.accessToken)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: store.accessToken) {
+                            store.rememberAccessToken()
+                        }
+                        .onSubmit {
+                            Task { await store.refresh() }
+                        }
+                    Button {
+                        Task { await store.refresh() }
+                    } label: {
+                        Label("Check Server", systemImage: "bolt.horizontal.circle")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, 4)
+            }
+
             if let session = store.selectedSession {
                 GroupBox("Session") {
                     VStack(alignment: .leading, spacing: 10) {

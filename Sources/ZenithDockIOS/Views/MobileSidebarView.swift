@@ -66,6 +66,13 @@ private struct MobileServerStatusView: View {
                     store.rememberServerURL()
                 }
                 .onSubmit { Task { await store.reconnect() } }
+            SecureField("Access token", text: $store.accessToken)
+                .font(.caption.monospaced())
+                .mobileTokenInputStyle()
+                .onChange(of: store.accessToken) {
+                    store.rememberAccessToken()
+                }
+                .onSubmit { Task { await store.reconnect() } }
             Button {
                 Task { await store.reconnect() }
             } label: {
@@ -86,6 +93,17 @@ private extension View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .keyboardType(.URL)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func mobileTokenInputStyle() -> some View {
+        #if os(iOS)
+        self
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
         #else
         self
         #endif

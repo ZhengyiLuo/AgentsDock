@@ -6,6 +6,7 @@ private let defaultAgentServerURLString = "http://10.112.215.37:7850"
 @MainActor
 final class MobileAppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
+    @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = []
     @Published var selectedSessionID: String?
     @Published var events: [ZEvent] = []
@@ -27,7 +28,10 @@ final class MobileAppStore: ObservableObject {
     private var lastSeq: Int { events.map(\.seq).max() ?? 0 }
 
     var api: APIClient {
-        APIClient(baseURL: URL(string: serverURLString) ?? URL(string: defaultAgentServerURLString)!)
+        APIClient(
+            baseURL: URL(string: serverURLString) ?? URL(string: defaultAgentServerURLString)!,
+            accessToken: accessToken
+        )
     }
 
     var selectedSession: ZSession? {
@@ -90,6 +94,10 @@ final class MobileAppStore: ObservableObject {
     func rememberServerURL() {
         cleanServerURL()
         UserDefaults.standard.set(serverURLString, forKey: "serverURL")
+    }
+
+    func rememberAccessToken() {
+        ZenithTokenStore.save(accessToken)
     }
 
     func reconnect() async {
@@ -302,7 +310,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     func fileURL(_ file: ZFile) -> URL {
-        api.url("/api/files/\(file.id)")
+        api.authenticatedURL("/api/files/\(file.id)")
     }
 
     private func cleanServerURL() {
@@ -325,7 +333,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func connectEvents(sessionID: String, after: Int) {
-        let task = URLSession.shared.webSocketTask(with: api.wsURL(sessionID: sessionID, after: after))
+        let task = URLSession.shared.webSocketTask(with: api.wsRequest(sessionID: sessionID, after: after))
         webSocket = task
         task.resume()
         socketLive = true
@@ -391,7 +399,9 @@ final class MobileAppStore: ObservableObject {
 
     private func report(_ error: Error) {
         let ns = error as NSError
-        if ns.domain == NSURLErrorDomain {
+        if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
+            errorText = "Agent server rejected the access token. Check the token on Zen-nv and in this app."
+        } else if ns.domain == NSURLErrorDomain {
             errorText = "Cannot reach \(serverURLString). If Safari opens /api/health, tap Reconnect once; otherwise check Tailscale and port 7850. Code \(ns.code)."
         } else {
             errorText = error.localizedDescription

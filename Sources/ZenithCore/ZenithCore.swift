@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import UniformTypeIdentifiers
 
 public struct ZSession: Codable, Identifiable, Hashable, Sendable {
@@ -135,25 +136,49 @@ public enum JSONValue: Codable, Hashable, Sendable {
 
 public struct APIClient: Sendable {
     public var baseURL: URL
+    public var accessToken: String?
 
-    public init(baseURL: URL) {
+    public init(baseURL: URL, accessToken: String? = nil) {
         self.baseURL = baseURL
+        let trimmedToken = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accessToken = trimmedToken?.isEmpty == false ? trimmedToken : nil
     }
 
     public func url(_ path: String) -> URL {
         baseURL.appending(path: path)
     }
 
+    public func authenticatedURL(_ path: String) -> URL {
+        guard let accessToken else { return url(path) }
+        var comps = URLComponents(url: url(path), resolvingAgainstBaseURL: false)!
+        var items = comps.queryItems ?? []
+        items.append(URLQueryItem(name: "token", value: accessToken))
+        comps.queryItems = items
+        return comps.url ?? url(path)
+    }
+
     public func wsURL(sessionID: String, after: Int) -> URL {
         var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         comps.scheme = comps.scheme == "https" ? "wss" : "ws"
         comps.path = "/api/sessions/\(sessionID)/events"
-        comps.queryItems = [URLQueryItem(name: "after", value: "\(after)")]
+        var items = [URLQueryItem(name: "after", value: "\(after)")]
+        if let accessToken {
+            items.append(URLQueryItem(name: "token", value: accessToken))
+        }
+        comps.queryItems = items
         return comps.url!
     }
 
+    public func wsRequest(sessionID: String, after: Int) -> URLRequest {
+        var req = URLRequest(url: wsURL(sessionID: sessionID, after: after))
+        applyAuth(to: &req)
+        return req
+    }
+
     public func get<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(from: url(path))
+        var req = URLRequest(url: url(path))
+        applyAuth(to: &req)
+        let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response, data)
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -162,7 +187,9 @@ public struct APIClient: Sendable {
         var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         comps.path = path
         comps.queryItems = queryItems.isEmpty ? nil : queryItems
-        let (data, response) = try await URLSession.shared.data(from: comps.url!)
+        var req = URLRequest(url: comps.url!)
+        applyAuth(to: &req)
+        let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response, data)
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -171,6 +198,7 @@ public struct APIClient: Sendable {
         var req = URLRequest(url: url(path))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &req)
         req.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response, data)
@@ -181,6 +209,7 @@ public struct APIClient: Sendable {
         var req = URLRequest(url: url(path))
         req.httpMethod = "PATCH"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &req)
         req.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response, data)
@@ -190,6 +219,7 @@ public struct APIClient: Sendable {
     public func delete<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> T {
         var req = URLRequest(url: url(path))
         req.httpMethod = "DELETE"
+        applyAuth(to: &req)
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response, data)
         return try JSONDecoder().decode(T.self, from: data)
@@ -200,6 +230,7 @@ public struct APIClient: Sendable {
         var req = URLRequest(url: url("/api/sessions/\(sessionID)/files"))
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &req)
 
         var body = Data()
         let name = fileURL.lastPathComponent
@@ -217,6 +248,12 @@ public struct APIClient: Sendable {
         return try JSONDecoder().decode(UploadResponse.self, from: data).file
     }
 
+    private func applyAuth(to request: inout URLRequest) {
+        guard let accessToken else { return }
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(accessToken, forHTTPHeaderField: "X-ZenithDock-Token")
+    }
+
     private func validate(_ response: URLResponse, _ data: Data) throws {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? "Request failed"
@@ -224,6 +261,66 @@ public struct APIClient: Sendable {
                 NSLocalizedDescriptionKey: text
             ])
         }
+    }
+}
+
+public enum ZenithTokenStore {
+    private static let service = "com.zhengyiluo.ZenithDock"
+    private static let account = "agent-access-token"
+    private static let fallbackKey = "agentAccessToken"
+
+    public static func load() -> String {
+        var query = baseQuery()
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess,
+           let data = result as? Data,
+           let token = String(data: data, encoding: .utf8) {
+            return token
+        }
+        return UserDefaults.standard.string(forKey: fallbackKey) ?? ""
+    }
+
+    public static func save(_ token: String) {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            clear()
+            return
+        }
+
+        let data = Data(trimmed.utf8)
+        let update: [String: Any] = [kSecValueData as String: data]
+        let status = SecItemUpdate(baseQuery() as CFDictionary, update as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = baseQuery()
+            item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            if SecItemAdd(item as CFDictionary, nil) != errSecSuccess {
+                UserDefaults.standard.set(trimmed, forKey: fallbackKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: fallbackKey)
+            }
+        } else if status != errSecSuccess {
+            UserDefaults.standard.set(trimmed, forKey: fallbackKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: fallbackKey)
+        }
+    }
+
+    public static func clear() {
+        SecItemDelete(baseQuery() as CFDictionary)
+        UserDefaults.standard.removeObject(forKey: fallbackKey)
+    }
+
+    private static func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 }
 

@@ -21,10 +21,35 @@
 		B0000000000000000000000C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000C /* Assets.xcassets */; };
 		B0000000000000000000000D /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
 		B0000000000000000000000E /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B00000000000000000000010 /* ZenithDockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000010 /* ZenithDockApp.swift */; };
+		B00000000000000000000011 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000011 /* Theme.swift */; };
+		B00000000000000000000012 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000012 /* AppStore.swift */; };
+		B00000000000000000000013 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000013 /* AppLogger.swift */; };
+		B00000000000000000000014 /* Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000014 /* Formatting.swift */; };
+		B00000000000000000000015 /* InlineVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000015 /* InlineVideoView.swift */; };
+		B00000000000000000000016 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000016 /* MarkdownView.swift */; };
+		B00000000000000000000017 /* RunningAgentBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000017 /* RunningAgentBanner.swift */; };
+		B00000000000000000000018 /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* ComposerView.swift */; };
+		B00000000000000000000019 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* EmptyStateView.swift */; };
+		B0000000000000000000001A /* EventViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* EventViews.swift */; };
+		B0000000000000000000001B /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* InspectorView.swift */; };
+		B0000000000000000000001C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* RootView.swift */; };
+		B0000000000000000000001D /* SessionManagementSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* SessionManagementSheets.swift */; };
+		B0000000000000000000001E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* SidebarView.swift */; };
+		B0000000000000000000001F /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* TimelineView.swift */; };
+		B00000000000000000000020 /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
+		B00000000000000000000021 /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		C00000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T00000000000000000000002;
+			remoteInfo = ZenithCore;
+		};
+		C00000000000000000000002 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A00000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -41,6 +66,17 @@
 			dstSubfolderSpec = 10;
 			files = (
 				B0000000000000000000000E /* ZenithCore.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CP0000000000000000000002 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				B00000000000000000000021 /* ZenithCore.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -62,8 +98,26 @@
 		F0000000000000000000000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F0000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F0000000000000000000000E /* ZenithDockIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZenithDockIOS.entitlements; sourceTree = "<group>"; };
+		F00000000000000000000010 /* ZenithDockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenithDockApp.swift; sourceTree = "<group>"; };
+		F00000000000000000000011 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		F00000000000000000000012 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
+		F00000000000000000000013 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		F00000000000000000000014 /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
+		F00000000000000000000015 /* InlineVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineVideoView.swift; sourceTree = "<group>"; };
+		F00000000000000000000016 /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
+		F00000000000000000000017 /* RunningAgentBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningAgentBanner.swift; sourceTree = "<group>"; };
+		F00000000000000000000018 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
+		F00000000000000000000019 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		F0000000000000000000001A /* EventViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventViews.swift; sourceTree = "<group>"; };
+		F0000000000000000000001B /* InspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
+		F0000000000000000000001C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		F0000000000000000000001D /* SessionManagementSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagementSheets.swift; sourceTree = "<group>"; };
+		F0000000000000000000001E /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		F0000000000000000000001F /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
+		F00000000000000000000020 /* ZenithDockMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZenithDockMac.entitlements; sourceTree = "<group>"; };
 		P00000000000000000000001 /* ZenithDock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZenithDock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		P00000000000000000000002 /* ZenithCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = ZenithCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		P00000000000000000000003 /* ZenithDock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZenithDock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +133,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FR0000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000020 /* ZenithCore.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -98,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				G00000000000000000000004 /* ZenithDockIOS */,
+				G0000000000000000000000D /* ZenithDockMac */,
 			);
 			path = Apps;
 			sourceTree = "<group>";
@@ -106,6 +169,7 @@
 			isa = PBXGroup;
 			children = (
 				G00000000000000000000005 /* ZenithCore */,
+				G0000000000000000000000E /* ZenithDock */,
 				G00000000000000000000006 /* ZenithDockIOS */,
 			);
 			path = Sources;
@@ -116,6 +180,7 @@
 			children = (
 				P00000000000000000000001 /* ZenithDock.app */,
 				P00000000000000000000002 /* ZenithCore.framework */,
+				P00000000000000000000003 /* ZenithDock.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -127,6 +192,14 @@
 				F0000000000000000000000E /* ZenithDockIOS.entitlements */,
 			);
 			path = ZenithDockIOS;
+			sourceTree = "<group>";
+		};
+		G0000000000000000000000D /* ZenithDockMac */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000020 /* ZenithDockMac.entitlements */,
+			);
+			path = ZenithDockMac;
 			sourceTree = "<group>";
 		};
 		G00000000000000000000005 /* ZenithCore */ = {
@@ -203,6 +276,69 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		G0000000000000000000000E /* ZenithDock */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000010 /* ZenithDockApp.swift */,
+				G0000000000000000000000F /* Design */,
+				G00000000000000000000010 /* State */,
+				G00000000000000000000011 /* Support */,
+				G00000000000000000000012 /* Views */,
+			);
+			path = ZenithDock;
+			sourceTree = "<group>";
+		};
+		G0000000000000000000000F /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000011 /* Theme.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000010 /* State */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000012 /* AppStore.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000011 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000013 /* AppLogger.swift */,
+				F00000000000000000000014 /* Formatting.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000012 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				G00000000000000000000013 /* Components */,
+				F00000000000000000000018 /* ComposerView.swift */,
+				F00000000000000000000019 /* EmptyStateView.swift */,
+				F0000000000000000000001A /* EventViews.swift */,
+				F0000000000000000000001B /* InspectorView.swift */,
+				F0000000000000000000001C /* RootView.swift */,
+				F0000000000000000000001D /* SessionManagementSheets.swift */,
+				F0000000000000000000001E /* SidebarView.swift */,
+				F0000000000000000000001F /* TimelineView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		G00000000000000000000013 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000015 /* InlineVideoView.swift */,
+				F00000000000000000000016 /* MarkdownView.swift */,
+				F00000000000000000000017 /* RunningAgentBanner.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -241,6 +377,24 @@
 			productReference = P00000000000000000000002 /* ZenithCore.framework */;
 			productType = "com.apple.product-type.framework";
 		};
+		T00000000000000000000003 /* ZenithDockMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XC0000000000000000000005 /* Build configuration list for PBXNativeTarget "ZenithDockMac" */;
+			buildPhases = (
+				SR0000000000000000000003 /* Sources */,
+				FR0000000000000000000003 /* Frameworks */,
+				CP0000000000000000000002 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = ZenithDockMac;
+			productName = ZenithDock;
+			productReference = P00000000000000000000003 /* ZenithDock.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -255,6 +409,9 @@
 						CreatedOnToolsVersion = 16.0;
 					};
 					T00000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					T00000000000000000000003 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -274,6 +431,7 @@
 			targets = (
 				T00000000000000000000001 /* ZenithDockIOS */,
 				T00000000000000000000002 /* ZenithCore */,
+				T00000000000000000000003 /* ZenithDockMac */,
 			);
 		};
 /* End PBXProject section */
@@ -315,6 +473,29 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		SR0000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000010 /* ZenithDockApp.swift in Sources */,
+				B00000000000000000000011 /* Theme.swift in Sources */,
+				B00000000000000000000012 /* AppStore.swift in Sources */,
+				B00000000000000000000013 /* AppLogger.swift in Sources */,
+				B00000000000000000000014 /* Formatting.swift in Sources */,
+				B00000000000000000000015 /* InlineVideoView.swift in Sources */,
+				B00000000000000000000016 /* MarkdownView.swift in Sources */,
+				B00000000000000000000017 /* RunningAgentBanner.swift in Sources */,
+				B00000000000000000000018 /* ComposerView.swift in Sources */,
+				B00000000000000000000019 /* EmptyStateView.swift in Sources */,
+				B0000000000000000000001A /* EventViews.swift in Sources */,
+				B0000000000000000000001B /* InspectorView.swift in Sources */,
+				B0000000000000000000001C /* RootView.swift in Sources */,
+				B0000000000000000000001D /* SessionManagementSheets.swift in Sources */,
+				B0000000000000000000001E /* SidebarView.swift in Sources */,
+				B0000000000000000000001F /* TimelineView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -322,6 +503,11 @@
 			isa = PBXTargetDependency;
 			target = T00000000000000000000002 /* ZenithCore */;
 			targetProxy = C00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		D00000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T00000000000000000000002 /* ZenithCore */;
+			targetProxy = C00000000000000000000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -372,7 +558,6 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -417,7 +602,6 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				VALIDATE_PRODUCT = YES;
@@ -486,10 +670,11 @@
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithCore;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -502,12 +687,66 @@
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithCore;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		XC0000000000000000000041 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Apps/ZenithDockMac/ZenithDockMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KRR35MWWHD;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ZenithDock;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ZenithDock connects to your Zen-nv agent server on the local network or Tailscale.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithDock;
+				PRODUCT_NAME = ZenithDock;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		XC0000000000000000000042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Apps/ZenithDockMac/ZenithDockMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KRR35MWWHD;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ZenithDock;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ZenithDock connects to your Zen-nv agent server on the local network or Tailscale.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zhengyiluo.ZenithDock;
+				PRODUCT_NAME = ZenithDock;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
@@ -537,6 +776,15 @@
 			buildConfigurations = (
 				XC0000000000000000000031 /* Debug */,
 				XC0000000000000000000032 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XC0000000000000000000005 /* Build configuration list for PBXNativeTarget "ZenithDockMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC0000000000000000000041 /* Debug */,
+				XC0000000000000000000042 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -7,6 +7,7 @@ private let defaultAgentServerURLString = "http://10.112.215.37:7850"
 @MainActor
 final class AppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
+    @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = []
     @Published var selectedSessionID: String?
     @Published var events: [ZEvent] = []
@@ -51,7 +52,10 @@ final class AppStore: ObservableObject {
     }
 
     var api: APIClient {
-        APIClient(baseURL: URL(string: serverURLString) ?? URL(string: defaultAgentServerURLString)!)
+        APIClient(
+            baseURL: URL(string: serverURLString) ?? URL(string: defaultAgentServerURLString)!,
+            accessToken: accessToken
+        )
     }
 
     var selectedSession: ZSession? {
@@ -148,6 +152,10 @@ final class AppStore: ObservableObject {
     func rememberServerURL() {
         cleanServerURL()
         UserDefaults.standard.set(serverURLString, forKey: "serverURL")
+    }
+
+    func rememberAccessToken() {
+        ZenithTokenStore.save(accessToken)
     }
 
     func startLiveTracking() async {
@@ -644,11 +652,11 @@ final class AppStore: ObservableObject {
     }
 
     func fileURL(_ file: ZFile) -> URL {
-        api.url("/api/files/\(file.id)")
+        api.authenticatedURL("/api/files/\(file.id)")
     }
 
     private func connectEvents(sessionID: String, after: Int) {
-        let task = URLSession.shared.webSocketTask(with: api.wsURL(sessionID: sessionID, after: after))
+        let task = URLSession.shared.webSocketTask(with: api.wsRequest(sessionID: sessionID, after: after))
         webSocket = task
         task.resume()
         socketLive = true
@@ -871,6 +879,9 @@ final class AppStore: ObservableObject {
         }
         if ns.domain == NSURLErrorDomain {
             return "Cannot reach the Zenithbot agent server at \(serverURLString). The Mac internet may be fine; this means the app cannot reach Zen-nv or port 7850 right now."
+        }
+        if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
+            return "Agent server rejected the access token. Check ZENITHDOCK_AGENT_TOKEN on Zen-nv and the token field in the app."
         }
         return error.localizedDescription
     }

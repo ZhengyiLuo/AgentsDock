@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -26,9 +27,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -61,6 +62,7 @@ MAX_FORK_MEMORY_CHARS = int(os.environ.get("ZENITHBOT_FORK_MEMORY_CHARS", "24000
 MAX_FORK_MEMORY_ITEM_CHARS = int(os.environ.get("ZENITHBOT_FORK_MEMORY_ITEM_CHARS", "1800"))
 DEFAULT_SESSION_EVENT_LIMIT = int(os.environ.get("ZENITHBOT_SESSION_EVENT_LIMIT", "100"))
 MAX_EVENT_RESPONSE_LIMIT = int(os.environ.get("ZENITHBOT_MAX_EVENT_RESPONSE_LIMIT", "1000"))
+AGENT_TOKEN = os.environ.get("ZENITHDOCK_AGENT_TOKEN") or os.environ.get("ZENITHBOT_AGENT_TOKEN") or ""
 
 SYSTEM_PROMPT = """\
 You are responding through Zenith Dock, a native Mac frontend for Zenithbot.
@@ -154,6 +156,43 @@ def ensure_dirs(session_id: str | None = None) -> None:
         session_dir(session_id).mkdir(parents=True, exist_ok=True)
         uploads_dir(session_id).mkdir(parents=True, exist_ok=True)
         manifests_dir(session_id).mkdir(parents=True, exist_ok=True)
+
+
+def token_matches(candidate: str | None) -> bool:
+    if not AGENT_TOKEN:
+        return True
+    if not candidate:
+        return False
+    return hmac.compare_digest(candidate, AGENT_TOKEN)
+
+
+def bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() == "bearer" and value:
+        return value.strip()
+    return None
+
+
+def request_authorized(request: Request) -> bool:
+    if not AGENT_TOKEN:
+        return True
+    return (
+        token_matches(bearer_token(request.headers.get("authorization")))
+        or token_matches(request.headers.get("x-zenithdock-token"))
+        or token_matches(request.query_params.get("token"))
+    )
+
+
+def websocket_authorized(ws: WebSocket) -> bool:
+    if not AGENT_TOKEN:
+        return True
+    return (
+        token_matches(bearer_token(ws.headers.get("authorization")))
+        or token_matches(ws.headers.get("x-zenithdock-token"))
+        or token_matches(ws.query_params.get("token"))
+    )
 
 
 class CreateSessionRequest(BaseModel):
@@ -1596,6 +1635,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def require_agent_token(request: Request, call_next):
+    if request.method == "OPTIONS" or not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    if not request_authorized(request):
+        logger.warning("unauthorized request method=%s path=%s host=%s", request.method, request.url.path, request.client.host if request.client else "-")
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     async with ACTIVE_LOCK:
@@ -1607,6 +1656,7 @@ async def health() -> dict[str, Any]:
         "state_dir": str(STATE_DIR),
         "default_backend": DEFAULT_BACKEND,
         "default_cwd": existing_cwd(DEFAULT_CWD),
+        "auth_required": bool(AGENT_TOKEN),
         "active": active,
         "queued": queued,
         "jobs": len(JOBS.jobs),
@@ -1819,6 +1869,9 @@ async def run_job(job_id: str) -> dict[str, Any]:
 
 @app.websocket("/api/sessions/{session_id}/events")
 async def session_events(session_id: str, ws: WebSocket, after: int = 0) -> None:
+    if not websocket_authorized(ws):
+        await ws.close(code=4401)
+        return
     if session_id not in STORE.sessions:
         await ws.close(code=4404)
         return

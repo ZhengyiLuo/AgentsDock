@@ -17,5 +17,9 @@ echo "Restarting $SERVICE_NAME"
 ssh "$REMOTE_HOST" "systemctl --user restart '$SERVICE_NAME'"
 
 echo "Checking health"
-ssh "$REMOTE_HOST" "curl -fsS http://127.0.0.1:7850/api/health"
+if [[ -n "${ZENITHDOCK_AGENT_TOKEN:-}" ]]; then
+  ssh "$REMOTE_HOST" "curl -fsS -H 'Authorization: Bearer ${ZENITHDOCK_AGENT_TOKEN}' http://127.0.0.1:7850/api/health"
+else
+  ssh "$REMOTE_HOST" "curl -fsS http://127.0.0.1:7850/api/health"
+fi
 echo

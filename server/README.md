@@ -16,3 +16,30 @@ Useful checks:
 ssh nv 'systemctl --user status zenithbot-agent.service --no-pager -l'
 ssh nv 'curl -s http://127.0.0.1:7850/api/health'
 ```
+
+## Access Token
+
+Set `ZENITHDOCK_AGENT_TOKEN` on Zen-nv to require a shared bearer token for
+all API calls, uploads, file/video fetches, and websocket event streams.
+
+```bash
+systemctl --user edit zenithbot-agent.service
+```
+
+Add:
+
+```ini
+[Service]
+Environment=ZENITHDOCK_AGENT_TOKEN=replace-with-a-long-random-token
+```
+
+Then restart:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart zenithbot-agent.service
+curl -H 'Authorization: Bearer replace-with-a-long-random-token' \
+  http://127.0.0.1:7850/api/health
+```
+
+Leave the variable unset for open local development.
