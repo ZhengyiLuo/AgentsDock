@@ -32,8 +32,8 @@ final class AppStore: ObservableObject {
     @Published var isLoadingOlderHistory = false
     @Published var scrollToBottomRevision = 0
 
-    private let initialSessionEventLimit = 80
-    private let olderHistoryPageLimit = 100
+    private let initialSessionEventLimit = 60
+    private let olderHistoryPageLimit = 60
     private let maxLoadedTimelineEvents = 260
     private let maxCachedTimelineEvents = 160
     private let maxCachedStringCharacters = 12_000

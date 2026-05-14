@@ -8,7 +8,10 @@ struct TimelineView: View {
     @Binding var importerOpen: Bool
     @State private var isAtBottom = true
     @State private var isTimelineScrollable = false
+    @State private var olderHistoryLoadArmed = true
+    @State private var suppressScrollHistoryLoadUntilTopLeaves = false
     private let bottomID = "timeline-bottom"
+    private let coordinateSpaceName = "timelineScroll"
 
     var body: some View {
         let displayEvents = store.displayEvents
@@ -20,12 +23,24 @@ struct TimelineView: View {
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 14) {
                             if store.selectedSession == nil {
                                 EmptyStateView()
                             } else {
                                 if store.hiddenDisplayEventCount > 0 {
-                                    TimelineHistoryLoader()
+                                    TimelineHistoryLoader {
+                                        loadOlderHistoryFromIntent()
+                                    }
+                                    .background(TimelineHistoryTopReader(coordinateSpaceName: coordinateSpaceName))
+                                    .onAppear {
+                                        if !isAtBottom {
+                                            handleHistoryTopChange(0)
+                                        }
+                                    }
+                                    .onDisappear {
+                                        olderHistoryLoadArmed = true
+                                        suppressScrollHistoryLoadUntilTopLeaves = false
+                                    }
                                 }
                                 ForEach(rows) { row in
                                     switch row {
@@ -52,6 +67,7 @@ struct TimelineView: View {
                             }
                         )
                     }
+                    .coordinateSpace(name: coordinateSpaceName)
                     if isTimelineScrollable && !isAtBottom && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
@@ -72,6 +88,8 @@ struct TimelineView: View {
                 .onChange(of: store.selectedSessionID) {
                     isAtBottom = true
                     isTimelineScrollable = false
+                    olderHistoryLoadArmed = true
+                    suppressScrollHistoryLoadUntilTopLeaves = false
                     scrollToBottom(proxy)
                 }
                 .onChange(of: displayEvents.count) {
@@ -79,6 +97,15 @@ struct TimelineView: View {
                         isAtBottom = true
                         isTimelineScrollable = false
                     }
+                }
+                .onChange(of: store.hiddenDisplayEventCount) {
+                    if store.hiddenDisplayEventCount <= 0 {
+                        olderHistoryLoadArmed = false
+                        suppressScrollHistoryLoadUntilTopLeaves = false
+                    }
+                }
+                .onPreferenceChange(TimelineHistoryTopPreferenceKey.self) { topY in
+                    handleHistoryTopChange(topY)
                 }
             }
             Divider()
@@ -135,6 +162,57 @@ struct TimelineView: View {
         if isAtBottom != next {
             isAtBottom = next
         }
+    }
+
+    private func handleHistoryTopChange(_ topY: CGFloat?) {
+        guard let topY else { return }
+        let topIsVisible = topY >= -24 && topY <= 96
+        let topHasLeftViewport = topY < -64 || topY > 160
+
+        if topHasLeftViewport {
+            olderHistoryLoadArmed = true
+            suppressScrollHistoryLoadUntilTopLeaves = false
+            return
+        }
+
+        guard topIsVisible,
+              !isAtBottom,
+              olderHistoryLoadArmed,
+              !suppressScrollHistoryLoadUntilTopLeaves,
+              store.canLoadOlderHistory else {
+            return
+        }
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
+        Task { await store.loadOlderHistory() }
+    }
+
+    private func loadOlderHistoryFromIntent() {
+        guard store.canLoadOlderHistory else { return }
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
+        Task { await store.loadOlderHistory() }
+    }
+}
+
+private struct TimelineHistoryTopReader: View {
+    let coordinateSpaceName: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: TimelineHistoryTopPreferenceKey.self,
+                value: proxy.frame(in: .named(coordinateSpaceName)).minY
+            )
+        }
+    }
+}
+
+private struct TimelineHistoryTopPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
     }
 }
 
@@ -331,6 +409,7 @@ private enum TimelineRows {
 
 private struct TimelineHistoryLoader: View {
     @EnvironmentObject private var store: AppStore
+    let onLoadOlder: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -349,7 +428,7 @@ private struct TimelineHistoryLoader: View {
                     .foregroundStyle(.secondary)
             } else {
                 Button {
-                    Task { await store.loadOlderHistory() }
+                    onLoadOlder()
                 } label: {
                     Label("Load Older", systemImage: "arrow.up.circle")
                 }

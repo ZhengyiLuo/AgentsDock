@@ -56,6 +56,7 @@ private struct MarkdownText: View {
         Text(attributed)
             .lineSpacing(lineSpacing)
             .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
             .contextMenu {
                 Button("Copy Text") {
                     copyToPasteboard(text)
@@ -206,6 +207,7 @@ struct CodeBlock: View {
                 Text(CodeHighlighter.highlight(shown, language: language, fontSize: max(12, chatFontSize - 1)))
                     .padding(12)
                     .fixedSize(horizontal: true, vertical: false)
+                    .textSelection(.enabled)
                     .frame(minWidth: 0, alignment: .leading)
             }
         }
