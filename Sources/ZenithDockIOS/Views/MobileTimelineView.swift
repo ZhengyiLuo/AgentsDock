@@ -213,10 +213,6 @@ private struct MobileTimelineHistoryLoader: View {
             guard store.canLoadOlderHistory else { return }
             Task { await store.loadOlderHistory() }
         }
-        .task(id: store.hiddenDisplayEventCount) {
-            guard store.canLoadOlderHistory else { return }
-            await store.loadOlderHistory()
-        }
     }
 }
 

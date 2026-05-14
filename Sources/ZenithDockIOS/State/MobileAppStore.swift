@@ -93,6 +93,12 @@ final class MobileAppStore: ObservableObject {
         omittedHistoryEventCount > 0 && !isLoadingOlderHistory
     }
 
+    var pendingQueuedEvents: [ZEvent] {
+        events
+            .filter { isQueuedEventPending($0) }
+            .sorted { $0.seq < $1.seq }
+    }
+
     var displayEvents: [ZEvent] {
         let assistantRuns = Set(events.compactMap { event -> String? in
             guard event.type == "assistant_text",
@@ -101,17 +107,11 @@ final class MobileAppStore: ObservableObject {
             }
             return event.run_id
         })
-        let queuedTurnIDs = Set(events.compactMap { event -> String? in
-            event.type == "turn_queued" ? event.queued_id : nil
-        })
         return events.filter { event in
             switch event.type {
-            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_unqueued":
+            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued":
                 return false
             case "turn_started":
-                if let queuedID = event.queued_id, queuedTurnIDs.contains(queuedID) {
-                    return false
-                }
                 return true
             case "turn_finished":
                 guard event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {

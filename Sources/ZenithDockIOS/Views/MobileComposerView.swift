@@ -17,6 +17,10 @@ struct MobileComposerView: View {
                     .padding(.horizontal, 16)
                 }
             }
+            if !store.pendingQueuedEvents.isEmpty {
+                MobileQueuedShelf()
+                    .padding(.horizontal, 16)
+            }
             HStack(alignment: .bottom, spacing: 10) {
                 Button {
                     importerOpen = true
@@ -48,6 +52,59 @@ struct MobileComposerView: View {
         }
         .padding(.vertical, 10)
         .background(.bar)
+    }
+}
+
+private struct MobileQueuedShelf: View {
+    @EnvironmentObject private var store: MobileAppStore
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                Text("Queued \(store.pendingQueuedEvents.count)")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(alignment: .trailing, spacing: 6) {
+                    ForEach(store.pendingQueuedEvents) { event in
+                        MobileQueuedChip(event: event)
+                    }
+                }
+            }
+            .frame(maxHeight: 150)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+private struct MobileQueuedChip: View {
+    @EnvironmentObject private var store: MobileAppStore
+    let event: ZEvent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(event.prompt ?? "Queued message")
+                .font(.caption)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
+            Button {
+                Task { await store.unqueue(event) }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Unqueue message")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: 320, alignment: .trailing)
+        .background(.secondary.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.secondary.opacity(0.18)))
     }
 }
 
