@@ -101,8 +101,8 @@ struct MobileChatOptionsView: View {
         }
         .onAppear { syncDrafts() }
         .onChange(of: store.selectedSessionID) { syncDrafts() }
-        .confirmationDialog("Delete chat?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) {
+        .alert("Delete Chat?", isPresented: $confirmDelete) {
+            Button("Delete Chat", role: .destructive) {
                 guard let session = store.selectedSession else { return }
                 Task {
                     await store.deleteSession(session)
@@ -111,8 +111,15 @@ struct MobileChatOptionsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(store.selectedSession?.title ?? "This chat will be removed from ZenithDock.")
+            Text(deleteMessage)
         }
+    }
+
+    private var deleteMessage: String {
+        guard let title = store.selectedSession?.title else {
+            return "This chat will be removed from ZenithDock."
+        }
+        return "Delete \"\(title)\" from ZenithDock? This cannot be undone."
     }
 
     private func syncDrafts() {

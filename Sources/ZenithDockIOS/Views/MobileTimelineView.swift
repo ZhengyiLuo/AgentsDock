@@ -11,6 +11,7 @@ struct MobileTimelineView: View {
     @Binding var resumeOpen: Bool
     @State private var isAtBottom = true
     @State private var optionsOpen = false
+    @State private var olderHistoryLoadArmed = true
     private let bottomID = "mobile-timeline-bottom"
 
     var body: some View {
@@ -34,6 +35,7 @@ struct MobileTimelineView: View {
                             }
                             if store.hiddenDisplayEventCount > 0 {
                                 MobileTimelineHistoryLoader()
+                                    .background(MobileHistoryTopReader())
                             }
                             ForEach(rows) { row in
                                 switch row {
@@ -54,7 +56,9 @@ struct MobileTimelineView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
                     }
+                    .coordinateSpace(name: "mobileTimelineScroll")
                     .refreshable {
+                        olderHistoryLoadArmed = false
                         await store.refreshTimelineFromPull()
                     }
                     .scrollDismissesKeyboard(.interactively)
@@ -85,7 +89,11 @@ struct MobileTimelineView: View {
                 }
                 .onChange(of: store.selectedSessionID) {
                     isAtBottom = true
+                    olderHistoryLoadArmed = true
                     scrollToBottom(proxy)
+                }
+                .onPreferenceChange(MobileHistoryTopPreferenceKey.self) { topY in
+                    handleHistoryTopChange(topY)
                 }
             }
         }
@@ -103,6 +111,21 @@ struct MobileTimelineView: View {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
         }
+    }
+
+    private func handleHistoryTopChange(_ topY: CGFloat?) {
+        guard let topY else { return }
+        if topY < -160 {
+            olderHistoryLoadArmed = true
+            return
+        }
+        guard topY >= -20,
+              olderHistoryLoadArmed,
+              store.canLoadOlderHistory else {
+            return
+        }
+        olderHistoryLoadArmed = false
+        Task { await store.loadOlderHistory() }
     }
 }
 
@@ -229,10 +252,25 @@ private struct MobileTimelineHistoryLoader: View {
         .background(MobileTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
-        .onAppear {
-            guard store.canLoadOlderHistory else { return }
-            Task { await store.loadOlderHistory() }
+    }
+}
+
+private struct MobileHistoryTopReader: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: MobileHistoryTopPreferenceKey.self,
+                value: proxy.frame(in: .named("mobileTimelineScroll")).minY
+            )
         }
+    }
+}
+
+private struct MobileHistoryTopPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
     }
 }
 

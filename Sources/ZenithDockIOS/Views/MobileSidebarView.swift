@@ -48,11 +48,11 @@ struct MobileSidebarView: View {
                 }
             }
         }
-        .confirmationDialog("Delete chat?", isPresented: Binding(
+        .alert("Delete Chat?", isPresented: Binding(
             get: { deleteCandidate != nil },
             set: { if !$0 { deleteCandidate = nil } }
         )) {
-            Button("Delete", role: .destructive) {
+            Button("Delete Chat", role: .destructive) {
                 guard let deleteCandidate else { return }
                 Task { await store.deleteSession(deleteCandidate) }
                 self.deleteCandidate = nil
@@ -61,8 +61,15 @@ struct MobileSidebarView: View {
                 deleteCandidate = nil
             }
         } message: {
-            Text(deleteCandidate?.title ?? "This chat will be removed from ZenithDock.")
+            Text(deleteMessage)
         }
+    }
+
+    private var deleteMessage: String {
+        guard let title = deleteCandidate?.title else {
+            return "This chat will be removed from ZenithDock."
+        }
+        return "Delete \"\(title)\" from ZenithDock? This cannot be undone."
     }
 
     private func sessionRow(_ session: ZSession) -> some View {
