@@ -50,6 +50,9 @@ struct MobileTimelineView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
                     }
+                    .refreshable {
+                        await store.refreshTimelineFromPull()
+                    }
                     if !isAtBottom && !store.displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy)
@@ -193,22 +196,13 @@ private struct MobileTimelineHistoryLoader: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if store.loadedHistoryLimitReached {
-                Text("Window limit")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else if store.isLoadingOlderHistory {
+            if store.isLoadingOlderHistory {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Button {
-                    Task { await store.loadOlderHistory() }
-                } label: {
-                    Label("Load", systemImage: "arrow.up.circle")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!store.canLoadOlderHistory)
+                Text("Scroll or pull")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(10)
@@ -218,6 +212,10 @@ private struct MobileTimelineHistoryLoader: View {
         .onAppear {
             guard store.canLoadOlderHistory else { return }
             Task { await store.loadOlderHistory() }
+        }
+        .task(id: store.hiddenDisplayEventCount) {
+            guard store.canLoadOlderHistory else { return }
+            await store.loadOlderHistory()
         }
     }
 }

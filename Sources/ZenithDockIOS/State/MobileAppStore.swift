@@ -30,8 +30,7 @@ final class MobileAppStore: ObservableObject {
     @Published var scrollRevision = 0
 
     private let initialEventLimit = 80
-    private let olderHistoryPageLimit = 100
-    private let maxLoadedTimelineEvents = 360
+    private let olderHistoryPageLimit = 120
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
@@ -91,11 +90,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     var canLoadOlderHistory: Bool {
-        omittedHistoryEventCount > 0 && !isLoadingOlderHistory && events.count < maxLoadedTimelineEvents
-    }
-
-    var loadedHistoryLimitReached: Bool {
-        omittedHistoryEventCount > 0 && events.count >= maxLoadedTimelineEvents
+        omittedHistoryEventCount > 0 && !isLoadingOlderHistory
     }
 
     var displayEvents: [ZEvent] {
@@ -427,8 +422,7 @@ final class MobileAppStore: ObservableObject {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
-              let before = events.map(\.seq).min(),
-              events.count < maxLoadedTimelineEvents else {
+              let before = events.map(\.seq).min() else {
             return
         }
 
@@ -441,12 +435,11 @@ final class MobileAppStore: ObservableObject {
                 let events: [ZEvent]
                 let events_omitted_before: Int?
             }
-            let capacity = max(1, min(olderHistoryPageLimit, maxLoadedTimelineEvents - events.count))
             let res: Response = try await api.get(
                 "/api/sessions/\(sid)",
                 queryItems: [
                     URLQueryItem(name: "before", value: "\(before)"),
-                    URLQueryItem(name: "limit", value: "\(capacity)"),
+                    URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
                     URLQueryItem(name: "tail", value: "true")
                 ]
             )
@@ -461,6 +454,17 @@ final class MobileAppStore: ObservableObject {
             uploads = events.compactMap(\.file)
         } catch {
             report(error)
+        }
+    }
+
+    func refreshTimelineFromPull() async {
+        if canLoadOlderHistory {
+            await loadOlderHistory()
+            return
+        }
+        await refreshHealth(showErrors: true)
+        if let sid = selectedSessionID, serverReachable, !socketLive {
+            connectEvents(sessionID: sid, after: lastSeq)
         }
     }
 
@@ -661,11 +665,6 @@ final class MobileAppStore: ObservableObject {
         }
         guard !events.contains(where: { $0.id == event.id }) else { return }
         events.append(event)
-        if events.count > maxLoadedTimelineEvents {
-            let overflow = events.count - maxLoadedTimelineEvents
-            events.removeFirst(overflow)
-            omittedHistoryEventCount += overflow
-        }
         updateRunningState(from: event)
         if let file = event.file {
             uploads.append(file)
