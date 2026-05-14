@@ -20,7 +20,6 @@ struct MobileTimelineView: View {
 
         VStack(spacing: 0) {
             MobileChatHeader(
-                importerOpen: $importerOpen,
                 resumeOpen: $resumeOpen,
                 optionsOpen: $optionsOpen
             )
@@ -181,7 +180,6 @@ private func dismissMobileKeyboard() {
 
 private struct MobileChatHeader: View {
     @EnvironmentObject private var store: MobileAppStore
-    @Binding var importerOpen: Bool
     @Binding var resumeOpen: Bool
     @Binding var optionsOpen: Bool
 
@@ -215,13 +213,6 @@ private struct MobileChatHeader: View {
                 .background(.quaternary)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            Button {
-                importerOpen = true
-            } label: {
-                Image(systemName: "paperclip")
-            }
-            .disabled(store.selectedSessionID == nil)
-            .accessibilityLabel("Attach file")
             Menu {
                 Button {
                     resumeOpen = true
@@ -254,6 +245,7 @@ private struct MobileChatHeader: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
+                    .font(.title3)
             }
         }
         .padding(.horizontal, 16)
@@ -277,13 +269,12 @@ private struct MobileTimelineHistoryLoader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Older history")
-                    .font(.caption.weight(.semibold))
-                Text("\(store.hiddenDisplayEventCount) older events not loaded")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+                .foregroundStyle(.secondary)
+            Text("\(store.hiddenDisplayEventCount) older")
+                .font(.caption.weight(.semibold))
+            Text("messages")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
             if store.isLoadingOlderHistory {
                 ProgressView()
@@ -292,17 +283,19 @@ private struct MobileTimelineHistoryLoader: View {
                 Button {
                     onLoadOlder()
                 } label: {
-                    Label("Load", systemImage: "arrow.up.circle")
+                    Label("Load", systemImage: "arrow.up")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!store.canLoadOlderHistory)
             }
         }
-        .padding(10)
-        .background(MobileTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.thinMaterial)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(MobileTheme.softLine))
     }
 }
 

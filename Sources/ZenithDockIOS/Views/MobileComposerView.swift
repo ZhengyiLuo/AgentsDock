@@ -9,9 +9,10 @@ struct MobileComposerView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
     @State private var promptFocused = false
+    @State private var promptHeight: CGFloat = MobilePromptTextView.minimumHeight
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 7) {
             if !store.uploads.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -26,49 +27,62 @@ struct MobileComposerView: View {
                 MobileQueuedShelf()
                     .padding(.horizontal, 16)
             }
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
                 Button {
                     importerOpen = true
                 } label: {
                     Image(systemName: "paperclip")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .background(.quaternary)
+                .clipShape(Circle())
                 .disabled(store.selectedSessionID == nil)
+                .opacity(store.selectedSessionID == nil ? 0.45 : 1)
                 .accessibilityLabel("Attach file")
 
                 ZStack(alignment: .topLeading) {
                     MobilePromptTextView(
                         text: $store.prompt,
                         isFocused: $promptFocused,
+                        measuredHeight: $promptHeight,
                         isEditable: store.selectedSessionID != nil,
                         onSubmit: submitPrompt
                     )
-                    .frame(minHeight: 44, maxHeight: 128)
+                    .frame(height: promptHeight)
                     if store.prompt.isEmpty {
                         Text(store.selectedSessionID == nil ? "Select a chat" : "Message")
+                            .font(.body)
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 11)
+                            .padding(.vertical, 8)
                             .allowsHitTesting(false)
                     }
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 2)
                 .background(MobileTheme.card)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(promptFocused ? .blue.opacity(0.75) : MobileTheme.softLine))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(promptFocused ? .blue.opacity(0.75) : MobileTheme.softLine))
 
                 Button {
                     submitPrompt()
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(.plain)
+                .background(canSend ? Color.accentColor : Color.secondary.opacity(0.18))
+                .clipShape(Circle())
                 .disabled(!canSend)
                 .accessibilityLabel(store.isRunning ? "Queue message" : "Send message")
             }
             .padding(.horizontal, 16)
         }
-        .padding(.vertical, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 7)
         .background(.bar)
     }
 
@@ -83,8 +97,12 @@ struct MobileComposerView: View {
 }
 
 private struct MobilePromptTextView: UIViewRepresentable {
+    static let minimumHeight: CGFloat = 38
+    static let maximumHeight: CGFloat = 112
+
     @Binding var text: String
     @Binding var isFocused: Bool
+    @Binding var measuredHeight: CGFloat
     var isEditable: Bool
     var onSubmit: () -> Void
 
@@ -104,8 +122,10 @@ private struct MobilePromptTextView: UIViewRepresentable {
         textView.textContainer.lineFragmentPadding = 0
         textView.returnKeyType = .send
         textView.enablesReturnKeyAutomatically = true
-        textView.isScrollEnabled = true
+        textView.isScrollEnabled = false
         textView.isEditable = isEditable
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.required, for: .vertical)
         textView.accessibilityLabel = "Message"
 
         let toolbar = UIToolbar()
@@ -124,6 +144,7 @@ private struct MobilePromptTextView: UIViewRepresentable {
             textView.text = text
         }
         textView.isEditable = isEditable
+        context.coordinator.recalculateHeight(textView)
         if isFocused, !textView.isFirstResponder {
             textView.becomeFirstResponder()
         } else if !isFocused, textView.isFirstResponder {
@@ -148,6 +169,7 @@ private struct MobilePromptTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            recalculateHeight(textView)
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText replacement: String) -> Bool {
@@ -160,6 +182,18 @@ private struct MobilePromptTextView: UIViewRepresentable {
 
         @objc func doneTapped() {
             parent.isFocused = false
+        }
+
+        func recalculateHeight(_ textView: UITextView) {
+            let width = textView.bounds.width
+            guard width > 0 else { return }
+            let fittingSize = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+            let next = min(max(fittingSize.height, MobilePromptTextView.minimumHeight), MobilePromptTextView.maximumHeight)
+            textView.isScrollEnabled = fittingSize.height > MobilePromptTextView.maximumHeight
+            guard abs(parent.measuredHeight - next) > 0.5 else { return }
+            DispatchQueue.main.async {
+                self.parent.measuredHeight = next
+            }
         }
     }
 }
@@ -183,7 +217,7 @@ private struct MobileQueuedShelf: View {
                     }
                 }
             }
-            .frame(maxHeight: 150)
+            .frame(maxHeight: 110)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
