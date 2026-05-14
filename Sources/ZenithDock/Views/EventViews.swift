@@ -78,15 +78,16 @@ struct EventCard: View {
         case "assistant_text":
             MarkdownView(markdown: event.text ?? "")
         case "reasoning_summary":
-            DisclosureGroup(isExpanded: $expanded) {
+            TraceDisclosureHeader(
+                title: (event.text ?? "Reasoning").split(separator: "\n").first.map(String.init) ?? "Reasoning",
+                detail: nil,
+                isExpanded: $expanded
+            )
+            if expanded {
                 MarkdownView(markdown: event.text ?? "", compact: true)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
-            } label: {
-                Text((event.text ?? "Reasoning").split(separator: "\n").first.map(String.init) ?? "Reasoning")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
         case "tool_started":
             ToolBody(event: event, expanded: $expanded)
@@ -114,7 +115,8 @@ struct EventCard: View {
             Text(event.message ?? event.error ?? "Unknown error")
                 .foregroundStyle(.red)
         case "raw_event":
-            DisclosureGroup("Raw JSON") {
+            TraceDisclosureHeader(title: "Raw JSON", detail: nil, isExpanded: $expanded)
+            if expanded {
                 CodeBlock(text: event.raw ?? "", language: "json", limit: nil)
             }
         default:
@@ -363,23 +365,14 @@ struct TraceGroupCard: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 8) {
-                DisclosureGroup(isExpanded: $expanded) {
+                TraceDisclosureHeader(title: summaryTitle, detail: summaryDetail, isExpanded: $expanded)
+                if expanded {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(events) { event in
                             TraceEventDetail(event: event)
                         }
                     }
                     .padding(.top, 8)
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(summaryTitle)
-                            .font(.subheadline.weight(.semibold))
-                        Text(summaryDetail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer()
-                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -464,10 +457,10 @@ private struct TraceEventDetail: View {
         case "tool_finished":
             ToolBody(event: event, expanded: $expanded, output: event.output)
         case "raw_event":
-            DisclosureGroup("Raw JSON") {
+            TraceDisclosureHeader(title: "Raw JSON", detail: nil, isExpanded: $expanded)
+            if expanded {
                 CodeBlock(text: event.raw ?? "", language: "json", limit: nil)
             }
-            .font(.caption)
         case "process_started":
             if let argv = event.argv {
                 CodeBlock(text: argv.joined(separator: " "), language: "shell", limit: 1200)
@@ -519,6 +512,36 @@ private struct TraceEventDetail: View {
         case "error", "job_error", "artifact_error": .red
         default: .secondary
         }
+    }
+}
+
+private struct TraceDisclosureHeader: View {
+    let title: String
+    let detail: String?
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            isExpanded.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 12)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

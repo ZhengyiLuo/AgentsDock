@@ -56,7 +56,11 @@ private struct MarkdownText: View {
         Text(attributed)
             .lineSpacing(lineSpacing)
             .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
+            .contextMenu {
+                Button("Copy Text") {
+                    copyToPasteboard(text)
+                }
+            }
     }
 
     private var attributed: AttributedString {
@@ -67,6 +71,14 @@ private struct MarkdownText: View {
         max(3, chatFontSize * 0.22)
     }
 
+    private func copyToPasteboard(_ string: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        #elseif canImport(UIKit)
+        UIPasteboard.general.string = string
+        #endif
+    }
 }
 
 private enum EmojiShortcodes {
@@ -195,7 +207,6 @@ struct CodeBlock: View {
                     .padding(12)
                     .fixedSize(horizontal: true, vertical: false)
                     .frame(minWidth: 0, alignment: .leading)
-                    .textSelection(.enabled)
             }
         }
         .background(.black.opacity(0.065))

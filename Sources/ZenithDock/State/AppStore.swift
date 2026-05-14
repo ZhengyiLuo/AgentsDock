@@ -42,6 +42,8 @@ final class AppStore: ObservableObject {
     private var liveTrackingStarted = false
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
+    private var pendingScrollRequest: Task<Void, Never>?
+    private var lastScrollRequestAt = Date.distantPast
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
     private struct CachedChat: Codable, Sendable {
@@ -344,7 +346,7 @@ final class AppStore: ObservableObject {
             loadedFromCache = true
             status = "Loaded cached chat"
             AppLogger.info("loaded cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
-            scrollToBottomRevision += 1
+            requestScrollToBottom(immediate: true)
         } else {
             events = []
             rebuildDisplayEvents()
@@ -392,7 +394,7 @@ final class AppStore: ObservableObject {
             saveSelectedChatCache()
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
-            scrollToBottomRevision += 1
+            requestScrollToBottom(immediate: true)
         } catch {
             AppLogger.error("select failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
             if !loadedFromCache {
@@ -521,7 +523,7 @@ final class AppStore: ObservableObject {
                 latestSeenSeq = 0
                 omittedHistoryEventCount = 0
                 syncSelectedRunningState()
-                scrollToBottomRevision += 1
+                requestScrollToBottom(immediate: true)
                 uploads = []
                 if let next = sessions.first {
                     await select(sessionID: next.id)
@@ -758,7 +760,26 @@ final class AppStore: ObservableObject {
         if event.type != "raw_event" {
             saveSelectedChatCache()
         }
-        scrollToBottomRevision += 1
+        requestScrollToBottom()
+    }
+
+    private func requestScrollToBottom(immediate: Bool = false) {
+        let now = Date()
+        if immediate || now.timeIntervalSince(lastScrollRequestAt) >= 0.22 {
+            pendingScrollRequest?.cancel()
+            pendingScrollRequest = nil
+            lastScrollRequestAt = now
+            scrollToBottomRevision += 1
+            return
+        }
+
+        pendingScrollRequest?.cancel()
+        pendingScrollRequest = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard !Task.isCancelled else { return }
+            self.lastScrollRequestAt = Date()
+            self.scrollToBottomRevision += 1
+        }
     }
 
     private func mergeEvents(_ incoming: [ZEvent]) {
