@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import ZenithCore
@@ -6,6 +7,7 @@ struct TimelineView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var importerOpen: Bool
     @State private var isAtBottom = true
+    @State private var isTimelineScrollable = false
     private let bottomID = "timeline-bottom"
 
     var body: some View {
@@ -16,68 +18,66 @@ struct TimelineView: View {
             HeaderView()
             Divider()
             ScrollViewReader { proxy in
-                GeometryReader { geometry in
-                    ZStack(alignment: .bottomTrailing) {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 14) {
-                                if store.selectedSession == nil {
-                                    EmptyStateView()
-                                } else {
-                                    if store.hiddenDisplayEventCount > 0 {
-                                        TimelineHistoryLoader()
-                                    }
-                                    ForEach(rows) { row in
-                                        switch row {
-                                        case .event(let event):
-                                            EventCard(event: event)
-                                                .id(row.id)
-                                        case .trace(let id, let events):
-                                            TraceGroupCard(events: events)
-                                                .id(id)
-                                        }
-                                    }
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .id(bottomID)
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            if store.selectedSession == nil {
+                                EmptyStateView()
+                            } else {
+                                if store.hiddenDisplayEventCount > 0 {
+                                    TimelineHistoryLoader()
                                 }
-                            }
-                            .padding(20)
-                            .padding(.bottom, 56)
-                            .frame(maxWidth: 980, alignment: .leading)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .background(
-                                GeometryReader { content in
-                                    Color.clear.preference(
-                                        key: TimelineBottomOffsetKey.self,
-                                        value: content.frame(in: .named("timeline-scroll")).maxY
-                                    )
+                                ForEach(rows) { row in
+                                    switch row {
+                                    case .event(let event):
+                                        EventCard(event: event)
+                                            .id(row.id)
+                                    case .trace(let id, let events):
+                                        TraceGroupCard(events: events)
+                                            .id(id)
+                                    }
                                 }
-                            )
-                        }
-                        .coordinateSpace(name: "timeline-scroll")
-                        if !isAtBottom && !displayEvents.isEmpty {
-                            Button {
-                                scrollToBottom(proxy)
-                            } label: {
-                                Label("Bottom", systemImage: "arrow.down.to.line.compact")
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id(bottomID)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.regular)
-                            .padding(18)
-                            .help("Jump to latest message")
                         }
+                        .padding(20)
+                        .padding(.bottom, 56)
+                        .frame(maxWidth: 980, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .background(
+                            TimelineScrollObserver { metrics in
+                                updateBottomVisibility(metrics)
+                            }
+                        )
                     }
-                    .onPreferenceChange(TimelineBottomOffsetKey.self) { bottomY in
-                        updateBottomVisibility(bottomY: bottomY, viewportHeight: geometry.size.height)
-                    }
-                    .onChange(of: store.scrollToBottomRevision) {
-                        if isAtBottom {
+                    if isTimelineScrollable && !isAtBottom && !displayEvents.isEmpty {
+                        Button {
                             scrollToBottom(proxy)
+                        } label: {
+                            Label("Bottom", systemImage: "arrow.down.to.line.compact")
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .padding(18)
+                        .help("Jump to latest message")
                     }
-                    .onChange(of: store.selectedSessionID) {
-                        isAtBottom = true
+                }
+                .onChange(of: store.scrollToBottomRevision) {
+                    if isAtBottom {
                         scrollToBottom(proxy)
+                    }
+                }
+                .onChange(of: store.selectedSessionID) {
+                    isAtBottom = true
+                    isTimelineScrollable = false
+                    scrollToBottom(proxy)
+                }
+                .onChange(of: displayEvents.count) {
+                    if displayEvents.isEmpty {
+                        isAtBottom = true
+                        isTimelineScrollable = false
                     }
                 }
             }
@@ -115,23 +115,149 @@ struct TimelineView: View {
         }
     }
 
-    private func updateBottomVisibility(bottomY: CGFloat, viewportHeight: CGFloat) {
-        guard viewportHeight > 1, !store.displayEvents.isEmpty else {
+    private func updateBottomVisibility(_ metrics: TimelineScrollMetrics) {
+        guard metrics.viewportHeight > 1, !store.displayEvents.isEmpty else {
             if !isAtBottom { isAtBottom = true }
+            if isTimelineScrollable { isTimelineScrollable = false }
             return
         }
-        let next = bottomY <= viewportHeight + 72
+        if isTimelineScrollable != metrics.isScrollable {
+            isTimelineScrollable = metrics.isScrollable
+        }
+        let next = !metrics.isScrollable || metrics.distanceFromBottom <= 72
         if isAtBottom != next {
             isAtBottom = next
         }
     }
 }
 
-private struct TimelineBottomOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = .zero
+private struct TimelineScrollMetrics: Equatable {
+    var viewportHeight: CGFloat
+    var contentHeight: CGFloat
+    var distanceFromBottom: CGFloat
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+    var isScrollable: Bool {
+        contentHeight > viewportHeight + 8
+    }
+}
+
+private struct TimelineScrollObserver: NSViewRepresentable {
+    var onChange: (TimelineScrollMetrics) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onChange: onChange)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            context.coordinator.attach(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.onChange = onChange
+        DispatchQueue.main.async {
+            context.coordinator.attach(from: view)
+        }
+    }
+
+    final class Coordinator {
+        var onChange: (TimelineScrollMetrics) -> Void
+        private weak var scrollView: NSScrollView?
+        private weak var documentView: NSView?
+        private var lastMetrics: TimelineScrollMetrics?
+        private var boundsObserver: NSObjectProtocol?
+        private var documentFrameObserver: NSObjectProtocol?
+        private var scrollFrameObserver: NSObjectProtocol?
+
+        init(onChange: @escaping (TimelineScrollMetrics) -> Void) {
+            self.onChange = onChange
+        }
+
+        deinit {
+            detach()
+        }
+
+        func attach(from view: NSView) {
+            guard let nextScrollView = view.enclosingScrollView else { return }
+            let nextDocumentView = nextScrollView.documentView
+            if scrollView !== nextScrollView || documentView !== nextDocumentView {
+                detach()
+                scrollView = nextScrollView
+                documentView = nextDocumentView
+                observe(nextScrollView, documentView: nextDocumentView)
+            }
+            report()
+        }
+
+        private func observe(_ scrollView: NSScrollView, documentView: NSView?) {
+            let center = NotificationCenter.default
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            boundsObserver = center.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.report()
+            }
+
+            scrollView.postsFrameChangedNotifications = true
+            scrollFrameObserver = center.addObserver(
+                forName: NSView.frameDidChangeNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.report()
+            }
+
+            documentView?.postsFrameChangedNotifications = true
+            if let documentView {
+                documentFrameObserver = center.addObserver(
+                    forName: NSView.frameDidChangeNotification,
+                    object: documentView,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.report()
+                }
+            }
+        }
+
+        private func detach() {
+            let center = NotificationCenter.default
+            if let boundsObserver { center.removeObserver(boundsObserver) }
+            if let documentFrameObserver { center.removeObserver(documentFrameObserver) }
+            if let scrollFrameObserver { center.removeObserver(scrollFrameObserver) }
+            boundsObserver = nil
+            documentFrameObserver = nil
+            scrollFrameObserver = nil
+            scrollView = nil
+            documentView = nil
+            lastMetrics = nil
+        }
+
+        private func report() {
+            guard let scrollView, let documentView = scrollView.documentView else { return }
+            let visibleRect = scrollView.documentVisibleRect
+            let documentBounds = documentView.bounds
+            let viewportHeight = max(scrollView.contentView.bounds.height, 0)
+            let contentHeight = max(documentBounds.height, 0)
+            let rawDistance: CGFloat
+            if documentView.isFlipped {
+                rawDistance = documentBounds.maxY - visibleRect.maxY
+            } else {
+                rawDistance = visibleRect.minY - documentBounds.minY
+            }
+            let metrics = TimelineScrollMetrics(
+                viewportHeight: viewportHeight,
+                contentHeight: contentHeight,
+                distanceFromBottom: max(rawDistance, 0)
+            )
+            guard metrics != lastMetrics else { return }
+            lastMetrics = metrics
+            onChange(metrics)
+        }
     }
 }
 
