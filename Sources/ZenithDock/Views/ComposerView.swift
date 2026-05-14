@@ -24,16 +24,17 @@ struct ComposerView: View {
                     Image(systemName: "paperclip")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 PromptTextView(text: $store.prompt, isEditable: store.selectedSession != nil) {
                     Task { await store.sendPrompt() }
                 }
-                .frame(minHeight: 52, maxHeight: 140)
+                .frame(minHeight: 38, maxHeight: 104)
                 .overlay(alignment: .topLeading) {
                     if store.prompt.isEmpty {
                         Text("Message")
                             .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
                             .allowsHitTesting(false)
                     }
                 }
@@ -44,14 +45,15 @@ struct ComposerView: View {
                     Task { await store.sendPrompt() }
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                        .font(.title3)
                 }
                 .buttonStyle(.plain)
                 .disabled(store.selectedSession == nil || store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .help(store.isRunning ? "Queue message" : "Send message")
             }
         }
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(Theme.panel)
     }
 }
@@ -78,7 +80,7 @@ struct PromptTextView: NSViewRepresentable {
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.textColor = .labelColor
         textView.insertionPointColor = .controlAccentColor
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainerInset = NSSize(width: 7, height: 5)
         textView.isRichText = false
         textView.allowsUndo = true
         textView.importsGraphics = false
