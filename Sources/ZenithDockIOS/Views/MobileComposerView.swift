@@ -1,9 +1,14 @@
 import SwiftUI
 import ZenithCore
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct MobileComposerView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
+    @FocusState private var promptFocused: Bool
 
     var body: some View {
         VStack(spacing: 8) {
@@ -30,6 +35,7 @@ struct MobileComposerView: View {
                 .buttonStyle(.bordered)
 
                 TextField("Message", text: $store.prompt, axis: .vertical)
+                    .focused($promptFocused)
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 12)
@@ -39,6 +45,15 @@ struct MobileComposerView: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(MobileTheme.softLine))
                     .submitLabel(.send)
                     .onSubmit { Task { await store.sendPrompt() } }
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") {
+                                promptFocused = false
+                                dismissMobileKeyboard()
+                            }
+                        }
+                    }
 
                 Button {
                     Task { await store.sendPrompt() }
@@ -53,6 +68,13 @@ struct MobileComposerView: View {
         .padding(.vertical, 10)
         .background(.bar)
     }
+}
+
+@MainActor
+private func dismissMobileKeyboard() {
+    #if canImport(UIKit)
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
 }
 
 private struct MobileQueuedShelf: View {

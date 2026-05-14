@@ -1,6 +1,10 @@
 import SwiftUI
 import ZenithCore
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct MobileTimelineView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
@@ -53,6 +57,15 @@ struct MobileTimelineView: View {
                     .refreshable {
                         await store.refreshTimelineFromPull()
                     }
+                    .scrollDismissesKeyboard(.interactively)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { _ in dismissMobileKeyboard() }
+                    )
+                    .simultaneousGesture(
+                        TapGesture()
+                            .onEnded { dismissMobileKeyboard() }
+                    )
                     if !isAtBottom && !store.displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy)
@@ -91,6 +104,13 @@ struct MobileTimelineView: View {
             isAtBottom = true
         }
     }
+}
+
+@MainActor
+private func dismissMobileKeyboard() {
+    #if canImport(UIKit)
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
 }
 
 private struct MobileChatHeader: View {
