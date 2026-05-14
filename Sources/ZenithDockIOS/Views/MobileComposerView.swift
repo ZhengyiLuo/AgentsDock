@@ -8,7 +8,7 @@ import UIKit
 struct MobileComposerView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var importerOpen: Bool
-    @FocusState private var promptFocused: Bool
+    @State private var promptFocused = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -33,48 +33,135 @@ struct MobileComposerView: View {
                     Image(systemName: "paperclip")
                 }
                 .buttonStyle(.bordered)
+                .disabled(store.selectedSessionID == nil)
+                .accessibilityLabel("Attach file")
 
-                TextField("Message", text: $store.prompt, axis: .vertical)
-                    .focused($promptFocused)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(MobileTheme.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(MobileTheme.softLine))
-                    .submitLabel(.send)
-                    .onSubmit { Task { await store.sendPrompt() } }
-                    .toolbar {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("Done") {
-                                promptFocused = false
-                                dismissMobileKeyboard()
-                            }
-                        }
+                ZStack(alignment: .topLeading) {
+                    MobilePromptTextView(
+                        text: $store.prompt,
+                        isFocused: $promptFocused,
+                        isEditable: store.selectedSessionID != nil,
+                        onSubmit: submitPrompt
+                    )
+                    .frame(minHeight: 44, maxHeight: 128)
+                    if store.prompt.isEmpty {
+                        Text(store.selectedSessionID == nil ? "Select a chat" : "Message")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .allowsHitTesting(false)
                     }
+                }
+                .padding(.horizontal, 4)
+                .background(MobileTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(promptFocused ? .blue.opacity(0.75) : MobileTheme.softLine))
 
                 Button {
-                    Task { await store.sendPrompt() }
+                    submitPrompt()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
                 }
-                .disabled(store.selectedSessionID == nil || store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend)
+                .accessibilityLabel(store.isRunning ? "Queue message" : "Send message")
             }
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 10)
         .background(.bar)
     }
+
+    private var canSend: Bool {
+        store.selectedSessionID != nil && !store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitPrompt() {
+        guard canSend else { return }
+        Task { await store.sendPrompt() }
+    }
 }
 
-@MainActor
-private func dismissMobileKeyboard() {
-    #if canImport(UIKit)
-    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    #endif
+private struct MobilePromptTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var isEditable: Bool
+    var onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textColor = .label
+        textView.tintColor = .systemBlue
+        textView.textContainerInset = UIEdgeInsets(top: 9, left: 8, bottom: 9, right: 8)
+        textView.textContainer.lineFragmentPadding = 0
+        textView.returnKeyType = .send
+        textView.enablesReturnKeyAutomatically = true
+        textView.isScrollEnabled = true
+        textView.isEditable = isEditable
+        textView.accessibilityLabel = "Message"
+
+        let toolbar = UIToolbar()
+        toolbar.items = [
+            UIBarButtonItem(systemItem: .flexibleSpace),
+            UIBarButtonItem(title: "Done", style: .done, target: context.coordinator, action: #selector(Coordinator.doneTapped))
+        ]
+        toolbar.sizeToFit()
+        textView.inputAccessoryView = toolbar
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.parent = self
+        if textView.text != text {
+            textView.text = text
+        }
+        textView.isEditable = isEditable
+        if isFocused, !textView.isFirstResponder {
+            textView.becomeFirstResponder()
+        } else if !isFocused, textView.isFirstResponder {
+            textView.resignFirstResponder()
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: MobilePromptTextView
+
+        init(_ parent: MobilePromptTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText replacement: String) -> Bool {
+            guard replacement == "\n" else { return true }
+            if parent.isEditable && !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parent.onSubmit()
+            }
+            return false
+        }
+
+        @objc func doneTapped() {
+            parent.isFocused = false
+        }
+    }
 }
 
 private struct MobileQueuedShelf: View {

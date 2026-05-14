@@ -177,6 +177,8 @@ private struct MobileChatHeader: View {
             } label: {
                 Image(systemName: "paperclip")
             }
+            .disabled(store.selectedSessionID == nil)
+            .accessibilityLabel("Attach file")
             Menu {
                 Button {
                     resumeOpen = true
