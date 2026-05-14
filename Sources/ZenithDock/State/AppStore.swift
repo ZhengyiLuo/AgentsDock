@@ -53,7 +53,7 @@ final class AppStore: ObservableObject {
 
     var api: APIClient {
         APIClient(
-            baseURL: URL(string: serverURLString) ?? URL(string: defaultAgentServerURLString)!,
+            baseURL: ZenithServerURL.url(serverURLString, default: defaultAgentServerURLString),
             accessToken: accessToken
         )
     }
@@ -913,13 +913,7 @@ final class AppStore: ObservableObject {
     }
 
     private func cleanServerURL() {
-        var raw = serverURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.isEmpty {
-            raw = defaultAgentServerURLString
-        }
-        while raw.hasSuffix("/") {
-            raw.removeLast()
-        }
+        let raw = ZenithServerURL.normalized(serverURLString, default: defaultAgentServerURLString)
         if serverURLString != raw {
             serverURLString = raw
         }

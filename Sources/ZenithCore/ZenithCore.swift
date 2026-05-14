@@ -264,6 +264,42 @@ public struct APIClient: Sendable {
     }
 }
 
+public enum ZenithServerURL {
+    public static func normalized(_ value: String, default defaultValue: String) -> String {
+        var raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty {
+            raw = defaultValue
+        }
+        while raw.hasSuffix("/") {
+            raw.removeLast()
+        }
+        if !raw.contains("://") {
+            raw = "http://\(raw)"
+        }
+
+        if var comps = URLComponents(string: raw), comps.host != nil {
+            if comps.path == "/api/health" || comps.path == "/health" {
+                comps.path = ""
+            }
+            comps.query = nil
+            comps.fragment = nil
+            if let normalizedURL = comps.url {
+                raw = normalizedURL.absoluteString
+            }
+        }
+
+        while raw.hasSuffix("/") {
+            raw.removeLast()
+        }
+        return raw
+    }
+
+    public static func url(_ value: String, default defaultValue: String) -> URL {
+        let normalizedValue = normalized(value, default: defaultValue)
+        return URL(string: normalizedValue) ?? URL(string: defaultValue)!
+    }
+}
+
 public enum ZenithTokenStore {
     private static let service = "com.zhengyiluo.ZenithDock"
     private static let account = "agent-access-token"
