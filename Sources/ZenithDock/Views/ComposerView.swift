@@ -5,6 +5,7 @@ import ZenithCore
 struct ComposerView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var importerOpen: Bool
+    @State private var draftPrompt = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -25,12 +26,12 @@ struct ComposerView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                PromptTextView(text: $store.prompt, isEditable: store.selectedSession != nil) {
-                    Task { await store.sendPrompt() }
+                PromptTextView(text: $draftPrompt, isEditable: store.selectedSession != nil) {
+                    sendDraft()
                 }
                 .frame(height: promptHeight)
                 .overlay(alignment: .topLeading) {
-                    if store.prompt.isEmpty {
+                    if draftPrompt.isEmpty {
                         Text("Message")
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 10)
@@ -42,26 +43,45 @@ struct ComposerView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
                 Button {
-                    Task { await store.sendPrompt() }
+                    sendDraft()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
-                .disabled(store.selectedSession == nil || store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(store.selectedSession == nil || draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .help(store.isRunning ? "Queue message" : "Send message")
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(Theme.panel)
+        .onChange(of: store.selectedSessionID) {
+            draftPrompt = ""
+        }
     }
 
     private var promptHeight: CGFloat {
-        let hardLines = store.prompt.split(separator: "\n", omittingEmptySubsequences: false).count
-        let softLines = max(1, Int(ceil(Double(store.prompt.count) / 110.0)))
+        let hardLines = draftPrompt.split(separator: "\n", omittingEmptySubsequences: false).count
+        let softLines = max(1, Int(ceil(Double(draftPrompt.count) / 110.0)))
         let visibleLines = min(max(hardLines, softLines), 5)
         return CGFloat(visibleLines * 18 + 12)
+    }
+
+    private func sendDraft() {
+        let submitted = draftPrompt
+        guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        draftPrompt = ""
+        Task {
+            let accepted = await store.sendPrompt(submitted)
+            if !accepted {
+                await MainActor.run {
+                    if draftPrompt.isEmpty {
+                        draftPrompt = submitted
+                    }
+                }
+            }
+        }
     }
 }
 

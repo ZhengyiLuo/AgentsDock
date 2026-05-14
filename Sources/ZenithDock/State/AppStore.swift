@@ -564,10 +564,12 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func sendPrompt() async {
-        guard let sid = selectedSessionID else { return }
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+    @discardableResult
+    func sendPrompt(_ submittedPrompt: String? = nil) async -> Bool {
+        guard let sid = selectedSessionID else { return false }
+        let sourcePrompt = submittedPrompt ?? prompt
+        let trimmed = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
         let wasRunning = isRunning
         struct Body: Codable {
             let prompt: String
@@ -576,7 +578,9 @@ final class AppStore: ObservableObject {
         do {
             isRunning = true
             activeSessionIDs.insert(sid)
-            prompt = ""
+            if submittedPrompt == nil {
+                prompt = ""
+            }
             AppLogger.info("send prompt session=\(sid) chars=\(trimmed.count) files=\(uploads.count)")
             if let session = selectedSession {
                 let currentTitle = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -603,8 +607,9 @@ final class AppStore: ObservableObject {
                 AppLogger.info("turn started session=\(sid) run=\(res.run_id ?? "-")")
             }
             uploads = []
+            return true
         } catch {
-            if prompt.isEmpty {
+            if submittedPrompt == nil && prompt.isEmpty {
                 prompt = trimmed
             }
             isRunning = wasRunning
@@ -615,6 +620,7 @@ final class AppStore: ObservableObject {
             }
             AppLogger.error("send failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
+            return false
         }
     }
 

@@ -10,12 +10,16 @@ struct TimelineView: View {
     @State private var isTimelineScrollable = false
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
+    @State private var visibleRowLimit = 90
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
+    private let rowPageSize = 70
 
     var body: some View {
         let displayEvents = store.displayEvents
-        let rows = TimelineRows.build(from: displayEvents)
+        let allRows = TimelineRows.build(from: displayEvents)
+        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
+        let rows = Array(allRows.suffix(visibleRowLimit))
 
         VStack(spacing: 0) {
             HeaderView()
@@ -27,8 +31,10 @@ struct TimelineView: View {
                             if store.selectedSession == nil {
                                 EmptyStateView()
                             } else {
-                                if store.hiddenDisplayEventCount > 0 {
-                                    TimelineHistoryLoader {
+                                if store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0 {
+                                    TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
+                                        revealOlderRows()
+                                    } onLoadOlder: {
                                         loadOlderHistoryFromIntent()
                                     }
                                     .background(TimelineHistoryTopReader(coordinateSpaceName: coordinateSpaceName))
@@ -90,12 +96,16 @@ struct TimelineView: View {
                     isTimelineScrollable = false
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
+                    visibleRowLimit = 90
                     scrollToBottom(proxy)
                 }
                 .onChange(of: displayEvents.count) {
                     if displayEvents.isEmpty {
                         isAtBottom = true
                         isTimelineScrollable = false
+                        visibleRowLimit = 90
+                    } else if isAtBottom {
+                        visibleRowLimit = min(max(visibleRowLimit, 90), max(TimelineRows.build(from: displayEvents).count, 90))
                     }
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
@@ -178,20 +188,38 @@ struct TimelineView: View {
         guard topIsVisible,
               !isAtBottom,
               olderHistoryLoadArmed,
-              !suppressScrollHistoryLoadUntilTopLeaves,
-              store.canLoadOlderHistory else {
+              !suppressScrollHistoryLoadUntilTopLeaves else {
             return
         }
+        if revealOlderRows() {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = true
+            return
+        }
+        guard store.canLoadOlderHistory else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
         Task { await store.loadOlderHistory() }
     }
 
     private func loadOlderHistoryFromIntent() {
+        if revealOlderRows() {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = true
+            return
+        }
         guard store.canLoadOlderHistory else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
         Task { await store.loadOlderHistory() }
+    }
+
+    @discardableResult
+    private func revealOlderRows() -> Bool {
+        let rowCount = TimelineRows.build(from: store.displayEvents).count
+        guard visibleRowLimit < rowCount else { return false }
+        visibleRowLimit = min(rowCount, visibleRowLimit + rowPageSize)
+        return true
     }
 }
 
@@ -409,16 +437,26 @@ private enum TimelineRows {
 
 private struct TimelineHistoryLoader: View {
     @EnvironmentObject private var store: AppStore
+    let hiddenRenderedRowCount: Int
+    let onShowOlderRows: () -> Void
     let onLoadOlder: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
             Text("Showing latest messages")
-            Text("\(store.hiddenDisplayEventCount) older events not loaded")
+            Text("\(totalOlderCount) older hidden")
                 .foregroundStyle(.secondary)
             Spacer()
-            if store.loadedHistoryLimitReached {
+            if hiddenRenderedRowCount > 0 {
+                Button {
+                    onShowOlderRows()
+                } label: {
+                    Label("Show Older", systemImage: "arrow.up.circle")
+                }
+                .buttonStyle(.bordered)
+                .help("Show the previous rendered page")
+            } else if store.loadedHistoryLimitReached {
                 Text("Loaded window limit")
                     .foregroundStyle(.secondary)
             } else if store.isLoadingOlderHistory {
@@ -443,6 +481,10 @@ private struct TimelineHistoryLoader: View {
         .background(Theme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+    }
+
+    private var totalOlderCount: Int {
+        store.hiddenDisplayEventCount + hiddenRenderedRowCount
     }
 }
 
