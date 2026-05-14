@@ -299,6 +299,7 @@ private enum MarkdownRenderCache {
         )
         var parsed = (try? AttributedString(markdown: rendered, options: options)) ?? AttributedString(rendered)
         parsed.font = .system(size: fontSize, design: fontDesign(for: design))
+        autolinkBareURLs(in: &parsed)
         attributedCache.setObject(AttributedStringEntry(parsed), forKey: key, cost: rendered.utf8.count)
         return parsed
     }
@@ -325,6 +326,26 @@ private enum MarkdownRenderCache {
         case "serif": return .serif
         case "monospaced": return .monospaced
         default: return .default
+        }
+    }
+
+    private static func autolinkBareURLs(in attributed: inout AttributedString) {
+        let displayedText = String(attributed.characters)
+        guard displayedText.contains("://"),
+              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return
+        }
+
+        let nsRange = NSRange(displayedText.startIndex..<displayedText.endIndex, in: displayedText)
+        for match in detector.matches(in: displayedText, range: nsRange) {
+            guard let url = match.url,
+                  let range = Range(match.range, in: displayedText),
+                  let lower = AttributedString.Index(range.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(range.upperBound, within: attributed) else {
+                continue
+            }
+            attributed[lower..<upper].link = url
+            attributed[lower..<upper].foregroundColor = .accentColor
         }
     }
 }
