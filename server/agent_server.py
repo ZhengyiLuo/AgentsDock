@@ -73,6 +73,8 @@ You are responding through Zenith Dock, a native Mac frontend for Zenithbot.
 Use concise Markdown. Prefer clear sections, bullets, code fences, and direct
 answers. The UI renders rich traces separately, so do not narrate every tool
 call unless it matters to the user.
+Do not use emoji, Slack-style emoji aliases, or decorative status prefixes
+such as :mag:, :gear:, :rocket:, or :white_check_mark:.
 
 Files and artifacts:
 - User uploads are available as local paths in the prompt.
@@ -96,6 +98,8 @@ You are responding through a native Mac frontend for Zenithbot.
 
 Use concise Markdown. The UI renders tool calls, command output, reasoning
 summaries, and artifacts separately, so keep the final answer focused.
+Do not use emoji, Slack-style emoji aliases, or decorative status prefixes
+such as :mag:, :gear:, :rocket:, or :white_check_mark:.
 
 This is Zenith Dock, not Slack. Do not call Slack upload APIs or Slack file
 helpers. Create files locally on Zen-nv and publish them through the manifest.
@@ -779,6 +783,15 @@ def compact_memory_text(text: str, max_chars: int = MAX_FORK_MEMORY_ITEM_CHARS) 
     return text[:max_chars].rstrip() + "\n[trimmed]"
 
 
+LEADING_DECORATION_RE = re.compile(
+    r"(?m)^[ \t]*(?:(?::[A-Za-z0-9_+\-]+:|[\U0001F300-\U0001FAFF\u2600-\u27BF]\ufe0f?)[ \t]*)+"
+)
+
+
+def clean_assistant_text(text: str) -> str:
+    return LEADING_DECORATION_RE.sub("", str(text or "")).strip()
+
+
 def is_import_boilerplate(text: str) -> bool:
     stripped = text.strip()
     boilerplate_prefixes = (
@@ -1445,9 +1458,10 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
                 for block in event.get("message", {}).get("content", []):
                     btype = block.get("type")
                     if btype == "text" and block.get("text"):
-                        text = block["text"]
-                        text_parts.append(text)
-                        await append_event(session_id, "assistant_text", {"run_id": run_id, "text": text})
+                        text = clean_assistant_text(block["text"])
+                        if text:
+                            text_parts.append(text)
+                            await append_event(session_id, "assistant_text", {"run_id": run_id, "text": text})
                     elif btype == "thinking" and block.get("thinking"):
                         await append_event(session_id, "reasoning_summary", {"run_id": run_id, "text": block["thinking"]})
                     elif btype in ("tool_use", "server_tool_use"):
@@ -1490,7 +1504,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
         await append_event(session_id, "error", {"run_id": run_id, "message": stderr[:4000], "exit_code": proc.returncode})
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CLAUDE)
-    result_text = final_text or "\n\n".join(text_parts).strip()
+    result_text = clean_assistant_text(final_text or "\n\n".join(text_parts).strip())
     await collect_manifest(session_id, manifest_path)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
@@ -1608,7 +1622,7 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
                             "exit_code": item.get("exit_code"),
                         })
                 elif itype == "agent_message" and etype == "item.completed":
-                    text = (item.get("text") or "").strip()
+                    text = clean_assistant_text(item.get("text") or "")
                     if text:
                         text_parts.append(text)
                         await append_event(session_id, "assistant_text", {"run_id": run_id, "text": text})
@@ -1642,7 +1656,7 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
         "run_id": run_id,
         "backend": BACKEND_CODEX,
         "exit_code": proc.returncode,
-        "result_text": "\n\n".join(text_parts).strip(),
+        "result_text": clean_assistant_text("\n\n".join(text_parts).strip()),
         "stopped": stopped,
     })
     await release_turn_slot(session_id)

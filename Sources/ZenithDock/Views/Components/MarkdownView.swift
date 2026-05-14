@@ -35,6 +35,7 @@ struct MarkdownView: View {
     }
 
     private static func renderable(_ text: String) -> String {
+        let text = EmojiShortcodes.stripDecorativePrefixes(text)
         let max = 32_000
         guard text.count > max else { return text }
         return String(text.prefix(max)) + "\n\n[message trimmed for UI]"
@@ -145,6 +146,14 @@ private enum EmojiShortcodes {
             }
         }
         return result
+    }
+
+    static func stripDecorativePrefixes(_ text: String) -> String {
+        guard text.contains(":") else { return text }
+        let pattern = #"(?m)^[ \t]*(?::[A-Za-z0-9_+\-]+:[ \t]*)+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 }
 

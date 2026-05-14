@@ -260,7 +260,7 @@ struct MobileMarkdownView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            ForEach(MobileMarkdownParser.parse(markdown)) { block in
+            ForEach(MobileMarkdownParser.parse(MobileTextCleanup.stripDecorativePrefixes(markdown))) { block in
                 switch block.kind {
                 case .prose:
                     Text(attributed(block.text))
@@ -278,6 +278,16 @@ struct MobileMarkdownView: View {
     private func attributed(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+}
+
+private enum MobileTextCleanup {
+    static func stripDecorativePrefixes(_ text: String) -> String {
+        guard text.contains(":") else { return text }
+        let pattern = #"(?m)^[ \t]*(?::[A-Za-z0-9_+\-]+:[ \t]*)+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 }
 

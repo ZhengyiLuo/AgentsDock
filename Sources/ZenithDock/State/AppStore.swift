@@ -159,7 +159,6 @@ final class AppStore: ObservableObject {
     }
 
     func rememberServerURL() {
-        cleanServerURL()
         UserDefaults.standard.set(serverURLString, forKey: "serverURL")
     }
 
@@ -913,10 +912,6 @@ final class AppStore: ObservableObject {
     }
 
     private func cleanServerURL() {
-        let raw = ZenithServerURL.normalized(serverURLString, default: defaultAgentServerURLString)
-        if serverURLString != raw {
-            serverURLString = raw
-        }
-        UserDefaults.standard.set(raw, forKey: "serverURL")
+        UserDefaults.standard.set(serverURLString, forKey: "serverURL")
     }
 }
