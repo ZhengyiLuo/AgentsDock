@@ -59,13 +59,28 @@ private struct MobileServerStatusView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            TextField("Server URL", text: $store.serverURLString)
-                .font(.caption.monospaced())
-                .mobileURLInputStyle()
-                .onChange(of: store.serverURLString) {
-                    store.rememberServerURL()
-                }
-                .onSubmit { Task { await store.reconnect() } }
+            HStack(spacing: 8) {
+                TextField("Host", text: $store.serverHost)
+                    .font(.caption.monospaced())
+                    .mobileURLInputStyle()
+                    .onChange(of: store.serverHost) {
+                        store.rememberServerURL()
+                    }
+                    .onSubmit { Task { await store.reconnect() } }
+                TextField("Port", text: $store.serverPort)
+                    .font(.caption.monospaced())
+                    .frame(width: 68)
+                    .mobilePortInputStyle()
+                    .onChange(of: store.serverPort) {
+                        store.rememberServerURL()
+                    }
+                    .onSubmit { Task { await store.reconnect() } }
+            }
+            Text(store.connectionDetail)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .textSelection(.enabled)
             SecureField("Access token", text: $store.accessToken)
                 .font(.caption.monospaced())
                 .mobileTokenInputStyle()
@@ -104,6 +119,19 @@ private extension View {
         self
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+        #else
+        self
+        #endif
+    }
+
+
+    
+    func mobilePortInputStyle() -> some View {
+        #if os(iOS)
+        self
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .keyboardType(.numbersAndPunctuation)
         #else
         self
         #endif

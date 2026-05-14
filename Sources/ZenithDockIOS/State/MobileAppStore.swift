@@ -2,10 +2,14 @@ import Foundation
 import ZenithCore
 
 private let defaultAgentServerURLString = "http://10.112.215.37:7850"
+private let defaultAgentServerHost = "10.112.215.37"
+private let defaultAgentServerPort = "7850"
 
 @MainActor
 final class MobileAppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
+    @Published var serverHost = UserDefaults.standard.string(forKey: "serverHost") ?? defaultAgentServerHost
+    @Published var serverPort = UserDefaults.standard.string(forKey: "serverPort") ?? defaultAgentServerPort
     @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = []
     @Published var selectedSessionID: String?
@@ -17,6 +21,7 @@ final class MobileAppStore: ObservableObject {
     @Published var serverReachable = false
     @Published var socketLive = false
     @Published var status = "Disconnected"
+    @Published var connectionDetail = "No connection test yet"
     @Published var activeSessionIDs: Set<String> = []
     @Published var errorText: String?
     @Published var scrollRevision = 0
@@ -27,11 +32,43 @@ final class MobileAppStore: ObservableObject {
     private var liveTrackingStarted = false
     private var lastSeq: Int { events.map(\.seq).max() ?? 0 }
 
+    init() {
+        let savedURL = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
+        let parts = Self.serverParts(from: savedURL)
+        serverURLString = savedURL
+        if UserDefaults.standard.string(forKey: "serverHost") == nil {
+            serverHost = parts.host
+        }
+        if UserDefaults.standard.string(forKey: "serverPort") == nil {
+            serverPort = parts.port
+        }
+        serverURLString = effectiveServerAddress
+    }
+
     var api: APIClient {
         APIClient(
-            baseURL: ZenithServerURL.url(serverURLString, default: defaultAgentServerURLString),
+            baseURL: ZenithServerURL.url(effectiveServerAddress, default: defaultAgentServerURLString),
             accessToken: accessToken
         )
+    }
+
+    var resolvedServerURLString: String {
+        ZenithServerURL.normalized(effectiveServerAddress, default: defaultAgentServerURLString)
+    }
+
+    var effectiveServerAddress: String {
+        let host = serverHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = serverPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanHost = host.isEmpty ? defaultAgentServerHost : host
+        guard !port.isEmpty else { return cleanHost }
+        if cleanHost.contains("://"), var comps = URLComponents(string: cleanHost), comps.port == nil, let portValue = Int(port) {
+            comps.port = portValue
+            return comps.string ?? cleanHost
+        }
+        if cleanHost.contains("://") || cleanHost.contains("/") {
+            return cleanHost
+        }
+        return "\(cleanHost):\(port)"
     }
 
     var selectedSession: ZSession? {
@@ -92,6 +129,9 @@ final class MobileAppStore: ObservableObject {
     }
 
     func rememberServerURL() {
+        serverURLString = effectiveServerAddress
+        UserDefaults.standard.set(serverHost, forKey: "serverHost")
+        UserDefaults.standard.set(serverPort, forKey: "serverPort")
         UserDefaults.standard.set(serverURLString, forKey: "serverURL")
     }
 
@@ -121,6 +161,8 @@ final class MobileAppStore: ObservableObject {
     }
 
     func refreshHealth(showErrors: Bool = true) async {
+        let target = api.url("/api/health").absoluteString
+        connectionDetail = "Testing \(target)"
         do {
             struct Response: Codable {
                 let ok: Bool
@@ -131,12 +173,14 @@ final class MobileAppStore: ObservableObject {
             activeSessionIDs = Set(res.active)
             syncSelectedRunningState()
             status = socketLive ? "Live" : "Server connected"
+            connectionDetail = "Connected to \(resolvedServerURLString)"
         } catch {
             serverReachable = false
             socketLive = false
             activeSessionIDs = []
             syncSelectedRunningState()
             status = "Server offline"
+            connectionDetail = connectionFailureSummary(error)
             if showErrors { report(error) }
         }
     }
@@ -328,7 +372,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func cleanServerURL() {
-        UserDefaults.standard.set(serverURLString, forKey: "serverURL")
+        rememberServerURL()
     }
 
     func hasStartedQueuedEvent(_ event: ZEvent) -> Bool {
@@ -413,11 +457,30 @@ final class MobileAppStore: ObservableObject {
     private func report(_ error: Error) {
         let ns = error as NSError
         if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
-            errorText = "Agent server rejected the access token. Check the token on Zen-nv and in this app."
+            errorText = "Agent server rejected the access token for \(resolvedServerURLString). Check the token on Zen-nv and in this app."
         } else if ns.domain == NSURLErrorDomain {
-            errorText = "Cannot reach \(serverURLString). If Safari opens /api/health, tap Reconnect once; otherwise check Tailscale and port 7850. Code \(ns.code)."
+            errorText = "\(connectionFailureSummary(error)). If Safari works but Zen-nv logs do not show an app request, enable Local Network for ZenithDock in iOS Settings and make sure Tailscale is active."
         } else {
             errorText = error.localizedDescription
         }
     }
+
+    private func connectionFailureSummary(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            return "Cannot reach \(resolvedServerURLString). \(ns.localizedDescription) (\(ns.code))"
+        }
+        if ns.domain == "ZenithDock.API" {
+            return "Server replied \(ns.code) from \(resolvedServerURLString): \(ns.localizedDescription)"
+        }
+        return error.localizedDescription
+    }
+
+    private static func serverParts(from value: String) -> (host: String, port: String) {
+        let url = ZenithServerURL.url(value, default: defaultAgentServerURLString)
+        let host = url.host?.isEmpty == false ? url.host! : defaultAgentServerHost
+        let port = url.port.map(String.init) ?? defaultAgentServerPort
+        return (host, port)
+    }
 }
+
