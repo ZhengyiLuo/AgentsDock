@@ -57,18 +57,11 @@ final class MobileAppStore: ObservableObject {
     }
 
     var effectiveServerAddress: String {
-        let host = serverHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        let port = serverPort.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanHost = host.isEmpty ? defaultAgentServerHost : host
-        guard !port.isEmpty else { return cleanHost }
-        if cleanHost.contains("://"), var comps = URLComponents(string: cleanHost), comps.port == nil, let portValue = Int(port) {
-            comps.port = portValue
-            return comps.string ?? cleanHost
+        let parts = Self.serverParts(host: serverHost, port: serverPort)
+        if parts.port.isEmpty {
+            return "http://\(parts.host)"
         }
-        if cleanHost.contains("://") || cleanHost.contains("/") {
-            return cleanHost
-        }
-        return "\(cleanHost):\(port)"
+        return "http://\(parts.host):\(parts.port)"
     }
 
     var selectedSession: ZSession? {
@@ -468,6 +461,9 @@ final class MobileAppStore: ObservableObject {
     private func connectionFailureSummary(_ error: Error) -> String {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
+            if ns.code == NSURLErrorAppTransportSecurityRequiresSecureConnection {
+                return "iOS App Transport Security blocked HTTP to \(resolvedServerURLString) (-1022). Install the latest build with the ZenithDock ATS exception."
+            }
             return "Cannot reach \(resolvedServerURLString). \(ns.localizedDescription) (\(ns.code))"
         }
         if ns.domain == "ZenithDock.API" {
@@ -482,5 +478,25 @@ final class MobileAppStore: ObservableObject {
         let port = url.port.map(String.init) ?? defaultAgentServerPort
         return (host, port)
     }
-}
 
+    private static func serverParts(host rawHost: String, port rawPort: String) -> (host: String, port: String) {
+        var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        var port = rawPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        if host.isEmpty {
+            host = defaultAgentServerHost
+        }
+
+        let candidate = host.contains("://") ? host : "http://\(host)"
+        if let comps = URLComponents(string: candidate), let parsedHost = comps.host, !parsedHost.isEmpty {
+            host = parsedHost
+            if port.isEmpty, let parsedPort = comps.port {
+                port = String(parsedPort)
+            }
+        }
+
+        if port.isEmpty {
+            port = defaultAgentServerPort
+        }
+        return (host, port)
+    }
+}
