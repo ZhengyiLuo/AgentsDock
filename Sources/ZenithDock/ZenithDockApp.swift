@@ -71,7 +71,7 @@ final class ZenithDockAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        AppLogger.info("app did become active windows=\(NSApp.windows.count)")
+        AppLogger.info("app did become active \(ZenithDockWindowController.windowSummary())")
         ZenithDockWindowController.cullDuplicateMainWindowsSoon()
     }
 }
@@ -230,6 +230,18 @@ private enum ZenithDockWindowController {
             window.close()
         }
         AppLogger.warning("closed duplicate main windows kept=\(ObjectIdentifier(keeper).hashValue) closed=\(windows.count - 1)")
+    }
+
+    static func windowSummary() -> String {
+        let visibleWindows = NSApp.windows.filter(\.isVisible)
+        let titles = visibleWindows
+            .map { window in
+                let title = window.title.isEmpty ? String(describing: type(of: window)) : window.title
+                return title.replacingOccurrences(of: " ", with: "_")
+            }
+            .prefix(6)
+            .joined(separator: ",")
+        return "app_windows=\(NSApp.windows.count) visible_windows=\(visibleWindows.count) main_windows=\(mainWindows().count) titles=[\(titles)]"
     }
 
     private static func mainWindows() -> [NSWindow] {

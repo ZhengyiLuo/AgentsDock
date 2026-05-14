@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 #if os(macOS)
@@ -12,7 +13,7 @@ struct MarkdownView: View {
     var compact = false
 
     private var blocks: [MarkdownBlock] {
-        MarkdownParser.parse(Self.renderable(markdown))
+        MarkdownRenderCache.blocks(for: Self.renderable(markdown))
     }
 
     private var frameAlignment: Alignment {
@@ -59,26 +60,13 @@ private struct MarkdownText: View {
     }
 
     private var attributed: AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace
-        )
-        var parsed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-        parsed.font = .system(size: chatFontSize, design: fontDesign)
-        return parsed
+        MarkdownRenderCache.attributedText(for: text, fontSize: chatFontSize, design: chatFontDesign)
     }
 
     private var lineSpacing: CGFloat {
         max(3, chatFontSize * 0.22)
     }
 
-    private var fontDesign: Font.Design {
-        switch chatFontDesign {
-        case "rounded": return .rounded
-        case "serif": return .serif
-        case "monospaced": return .monospaced
-        default: return .default
-        }
-    }
 }
 
 private enum EmojiShortcodes {
@@ -166,7 +154,7 @@ struct CodeBlock: View {
     @AppStorage("chatFontSize") private var chatFontSize = 14.0
 
     private var shown: String {
-        let effectiveLimit = limit ?? 24_000
+        let effectiveLimit = limit ?? 12_000
         guard text.count > effectiveLimit else { return text }
         return String(text.prefix(effectiveLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n..."
     }
@@ -238,6 +226,96 @@ private struct MarkdownBlock: Identifiable {
     let language: String?
 }
 
+private final class MarkdownBlocksEntry: NSObject {
+    let blocks: [MarkdownBlock]
+
+    init(_ blocks: [MarkdownBlock]) {
+        self.blocks = blocks
+    }
+}
+
+private final class AttributedStringEntry: NSObject {
+    let value: AttributedString
+
+    init(_ value: AttributedString) {
+        self.value = value
+    }
+}
+
+private enum MarkdownRenderCache {
+    nonisolated(unsafe) private static let blockCache: NSCache<NSString, MarkdownBlocksEntry> = {
+        let cache = NSCache<NSString, MarkdownBlocksEntry>()
+        cache.countLimit = 600
+        cache.totalCostLimit = 6_000_000
+        return cache
+    }()
+
+    nonisolated(unsafe) private static let attributedCache: NSCache<NSString, AttributedStringEntry> = {
+        let cache = NSCache<NSString, AttributedStringEntry>()
+        cache.countLimit = 900
+        cache.totalCostLimit = 8_000_000
+        return cache
+    }()
+
+    nonisolated(unsafe) private static let codeCache: NSCache<NSString, AttributedStringEntry> = {
+        let cache = NSCache<NSString, AttributedStringEntry>()
+        cache.countLimit = 250
+        cache.totalCostLimit = 8_000_000
+        return cache
+    }()
+
+    static func blocks(for markdown: String) -> [MarkdownBlock] {
+        let key = cacheKey("blocks", markdown)
+        if let cached = blockCache.object(forKey: key) {
+            return cached.blocks
+        }
+        let parsed = MarkdownParser.parse(markdown)
+        blockCache.setObject(MarkdownBlocksEntry(parsed), forKey: key, cost: markdown.utf8.count)
+        return parsed
+    }
+
+    static func attributedText(for text: String, fontSize: Double, design: String) -> AttributedString {
+        let key = cacheKey("text:\(fontSize):\(design)", text)
+        if let cached = attributedCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let rendered = EmojiShortcodes.render(text)
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        var parsed = (try? AttributedString(markdown: rendered, options: options)) ?? AttributedString(rendered)
+        parsed.font = .system(size: fontSize, design: fontDesign(for: design))
+        attributedCache.setObject(AttributedStringEntry(parsed), forKey: key, cost: rendered.utf8.count)
+        return parsed
+    }
+
+    static func highlightedCode(_ source: String, language: String?, fontSize: Double) -> AttributedString {
+        let normalized = language ?? ""
+        let key = cacheKey("code:\(fontSize):\(normalized)", source)
+        if let cached = codeCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let highlighted = CodeHighlighter.highlightUncached(source, language: language, fontSize: fontSize)
+        codeCache.setObject(AttributedStringEntry(highlighted), forKey: key, cost: source.utf8.count)
+        return highlighted
+    }
+
+    private static func cacheKey(_ scope: String, _ text: String) -> NSString {
+        "\(scope):\(text.count):\(text.hashValue)" as NSString
+    }
+
+    private static func fontDesign(for name: String) -> Font.Design {
+        switch name {
+        case "rounded": return .rounded
+        case "serif": return .serif
+        case "monospaced": return .monospaced
+        default: return .default
+        }
+    }
+}
+
 private enum MarkdownParser {
     static func parse(_ markdown: String) -> [MarkdownBlock] {
         let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -295,6 +373,10 @@ private enum MarkdownParser {
 
 private enum CodeHighlighter {
     static func highlight(_ source: String, language: String?, fontSize: Double) -> AttributedString {
+        MarkdownRenderCache.highlightedCode(source, language: language, fontSize: fontSize)
+    }
+
+    fileprivate static func highlightUncached(_ source: String, language: String?, fontSize: Double) -> AttributedString {
         var attributed = AttributedString(source)
         attributed.font = .system(size: fontSize, design: .monospaced)
         attributed.foregroundColor = .primary

@@ -54,7 +54,7 @@ struct TimelineView: View {
                     }
                     if isTimelineScrollable && !isAtBottom && !displayEvents.isEmpty {
                         Button {
-                            scrollToBottom(proxy)
+                            scrollToBottom(proxy, animated: true)
                         } label: {
                             Label("Bottom", systemImage: "arrow.down.to.line.compact")
                         }
@@ -107,11 +107,18 @@ struct TimelineView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         guard !store.displayEvents.isEmpty else { return }
-        withAnimation(.snappy) {
+        let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
+        }
+        if animated {
+            withAnimation(.snappy) {
+                action()
+            }
+        } else {
+            action()
         }
     }
 
@@ -138,6 +145,12 @@ private struct TimelineScrollMetrics: Equatable {
 
     var isScrollable: Bool {
         contentHeight > viewportHeight + 8
+    }
+
+    static func == (lhs: TimelineScrollMetrics, rhs: TimelineScrollMetrics) -> Bool {
+        abs(lhs.viewportHeight - rhs.viewportHeight) < 0.5 &&
+            abs(lhs.contentHeight - rhs.contentHeight) < 0.5 &&
+            abs(lhs.distanceFromBottom - rhs.distanceFromBottom) < 0.5
     }
 }
 

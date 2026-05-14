@@ -197,6 +197,10 @@ struct MessageBubble: View {
     var actionSystemImage: String?
     var action: (() -> Void)?
 
+    @State private var showFullText = false
+
+    private let collapsedCharacterLimit = 12_000
+
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -224,8 +228,21 @@ struct MessageBubble: View {
                 if !isUser { Spacer(minLength: 0) }
             }
             .frame(maxWidth: .infinity)
-            MarkdownView(markdown: text, alignment: isUser ? .trailing : .leading)
+            MarkdownView(markdown: visibleText, alignment: isUser ? .trailing : .leading)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            if shouldClip {
+                HStack(spacing: 8) {
+                    Text(showFullText ? "Full message shown" : "\(hiddenCharacterCount) characters hidden")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(showFullText ? "Show less" : "Show full message") {
+                        showFullText.toggle()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -247,6 +264,19 @@ struct MessageBubble: View {
             return AnyShapeStyle(.secondary.opacity(0.30))
         }
         return isUser ? AnyShapeStyle(Color.accentColor.opacity(0.2)) : AnyShapeStyle(Theme.softLine)
+    }
+
+    private var shouldClip: Bool {
+        text.count > collapsedCharacterLimit
+    }
+
+    private var hiddenCharacterCount: Int {
+        max(text.count - collapsedCharacterLimit, 0)
+    }
+
+    private var visibleText: String {
+        guard shouldClip, !showFullText else { return text }
+        return String(text.prefix(collapsedCharacterLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[message clipped in UI; copy still uses full text]"
     }
 
     private func copyToPasteboard(_ string: String) {
