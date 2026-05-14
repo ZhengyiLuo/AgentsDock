@@ -495,10 +495,18 @@ struct ArtifactPreview: View {
                 HStack {
                     Label(file.size.map(byteString) ?? "Video", systemImage: "film")
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 12)
-                    Link(destination: url) {
-                        Label("Open", systemImage: "arrow.up.right.square")
-                    }
+	                    Spacer(minLength: 12)
+	                    #if os(macOS)
+	                    Button {
+	                        VideoFullscreenPresenter.present(url: url)
+	                    } label: {
+	                        Label("Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right")
+	                    }
+	                    .buttonStyle(.link)
+	                    #endif
+	                    Link(destination: url) {
+	                        Label("Open", systemImage: "arrow.up.right.square")
+	                    }
                 }
                 .font(.caption)
             }

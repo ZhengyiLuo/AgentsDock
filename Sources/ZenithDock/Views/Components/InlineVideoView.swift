@@ -1,11 +1,15 @@
 import SwiftUI
+#if os(macOS)
+import AVKit
+#else
 import WebKit
+#endif
 
 struct InlineVideoView: View {
     let url: URL
 
     var body: some View {
-        InlineVideoWebView(url: url)
+        InlineVideoPlayerView(url: url)
             .background(Color.black)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
@@ -13,23 +17,35 @@ struct InlineVideoView: View {
 }
 
 #if os(macOS)
-struct InlineVideoWebView: NSViewRepresentable {
+struct InlineVideoPlayerView: NSViewRepresentable {
     let url: URL
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> WKWebView {
-        makeWebView()
+    func makeNSView(context: Context) -> AVPlayerView {
+        let playerView = AVPlayerView()
+        playerView.controlsStyle = .floating
+        playerView.videoGravity = .resizeAspect
+        playerView.showsFullScreenToggleButton = true
+        return playerView
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        load(url, into: webView, coordinator: context.coordinator)
+    func updateNSView(_ playerView: AVPlayerView, context: Context) {
+        guard context.coordinator.loadedURL != url else { return }
+        context.coordinator.loadedURL = url
+        playerView.player?.pause()
+        playerView.player = AVPlayer(url: videoSourceURL(url))
+    }
+
+    static func dismantleNSView(_ playerView: AVPlayerView, coordinator: Coordinator) {
+        playerView.player?.pause()
+        playerView.player = nil
     }
 }
 #elseif os(iOS)
-struct InlineVideoWebView: UIViewRepresentable {
+struct InlineVideoPlayerView: UIViewRepresentable {
     let url: URL
 
     func makeCoordinator() -> Coordinator {
@@ -50,14 +66,43 @@ final class Coordinator {
     var loadedURL: URL?
 }
 
+#if os(macOS)
+@MainActor
+enum VideoFullscreenPresenter {
+    private static var windows: [NSWindow] = []
+
+    static func present(url: URL) {
+        let playerView = AVPlayerView()
+        playerView.controlsStyle = .floating
+        playerView.videoGravity = .resizeAspect
+        playerView.showsFullScreenToggleButton = true
+        playerView.player = AVPlayer(url: videoSourceURL(url))
+
+        let controller = NSViewController()
+        controller.view = playerView
+
+        let window = NSWindow(contentViewController: controller)
+        window.title = url.lastPathComponent
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.collectionBehavior = [.fullScreenPrimary]
+        window.setContentSize(NSSize(width: 1100, height: 720))
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        windows.append(window)
+
+        playerView.player?.play()
+        DispatchQueue.main.async {
+            window.toggleFullScreen(nil)
+        }
+    }
+}
+#else
 @MainActor
 private func makeWebView() -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     configuration.mediaTypesRequiringUserActionForPlayback = []
-#if os(iOS)
     configuration.allowsInlineMediaPlayback = true
-#endif
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.allowsBackForwardNavigationGestures = false
     webView.setValue(false, forKey: "drawsBackground")
@@ -70,6 +115,7 @@ private func load(_ url: URL, into webView: WKWebView, coordinator: Coordinator)
     coordinator.loadedURL = url
     webView.loadHTMLString(videoHTML(for: url), baseURL: url.deletingLastPathComponent())
 }
+#endif
 
 private func videoHTML(for url: URL) -> String {
     let src = escapeHTML(videoSourceURL(url).absoluteString)

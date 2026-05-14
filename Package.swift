@@ -22,7 +22,7 @@ let package = Package(
             dependencies: ["ZenithCore"],
             path: "Sources/ZenithDock",
             linkerSettings: [
-                .linkedFramework("WebKit")
+                .linkedFramework("AVKit")
             ]
         ),
         .executableTarget(
