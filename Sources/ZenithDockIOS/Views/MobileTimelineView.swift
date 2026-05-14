@@ -12,6 +12,7 @@ struct MobileTimelineView: View {
     @State private var isAtBottom = true
     @State private var optionsOpen = false
     @State private var olderHistoryLoadArmed = true
+    @State private var suppressScrollHistoryLoadUntilTopLeaves = false
     private let bottomID = "mobile-timeline-bottom"
 
     var body: some View {
@@ -34,8 +35,19 @@ struct MobileTimelineView: View {
                                     .padding(.top, 40)
                             }
                             if store.hiddenDisplayEventCount > 0 {
-                                MobileTimelineHistoryLoader()
+                                MobileTimelineHistoryLoader {
+                                    loadOlderHistoryFromIntent()
+                                }
                                     .background(MobileHistoryTopReader())
+                                    .onAppear {
+                                        if !isAtBottom {
+                                            handleHistoryTopChange(0)
+                                        }
+                                    }
+                                    .onDisappear {
+                                        olderHistoryLoadArmed = true
+                                        suppressScrollHistoryLoadUntilTopLeaves = false
+                                    }
                             }
                             ForEach(rows) { row in
                                 switch row {
@@ -58,8 +70,7 @@ struct MobileTimelineView: View {
                     }
                     .coordinateSpace(name: "mobileTimelineScroll")
                     .refreshable {
-                        olderHistoryLoadArmed = false
-                        await store.refreshTimelineFromPull()
+                        await loadOlderHistoryFromPull()
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .simultaneousGesture(
@@ -90,7 +101,14 @@ struct MobileTimelineView: View {
                 .onChange(of: store.selectedSessionID) {
                     isAtBottom = true
                     olderHistoryLoadArmed = true
+                    suppressScrollHistoryLoadUntilTopLeaves = false
                     scrollToBottom(proxy)
+                }
+                .onChange(of: store.hiddenDisplayEventCount) {
+                    if store.hiddenDisplayEventCount <= 0 {
+                        olderHistoryLoadArmed = false
+                        suppressScrollHistoryLoadUntilTopLeaves = false
+                    }
                 }
                 .onPreferenceChange(MobileHistoryTopPreferenceKey.self) { topY in
                     handleHistoryTopChange(topY)
@@ -115,17 +133,42 @@ struct MobileTimelineView: View {
 
     private func handleHistoryTopChange(_ topY: CGFloat?) {
         guard let topY else { return }
-        if topY < -160 {
+        let topIsVisible = topY >= -24 && topY <= 96
+        let topHasLeftViewport = topY < -64 || topY > 160
+
+        if topHasLeftViewport {
             olderHistoryLoadArmed = true
+            suppressScrollHistoryLoadUntilTopLeaves = false
             return
         }
-        guard topY >= -20,
+
+        guard topIsVisible,
+              !isAtBottom,
               olderHistoryLoadArmed,
+              !suppressScrollHistoryLoadUntilTopLeaves,
               store.canLoadOlderHistory else {
             return
         }
         olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
         Task { await store.loadOlderHistory() }
+    }
+
+    private func loadOlderHistoryFromIntent() {
+        guard store.canLoadOlderHistory else { return }
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
+        Task { await store.loadOlderHistory() }
+    }
+
+    private func loadOlderHistoryFromPull() async {
+        if store.canLoadOlderHistory {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = true
+            await store.loadOlderHistory()
+            return
+        }
+        await store.refreshTimelineFromPull()
     }
 }
 
@@ -229,6 +272,7 @@ private struct MobileChatHeader: View {
 
 private struct MobileTimelineHistoryLoader: View {
     @EnvironmentObject private var store: MobileAppStore
+    let onLoadOlder: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -245,9 +289,14 @@ private struct MobileTimelineHistoryLoader: View {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Text("Scroll or pull")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Button {
+                    onLoadOlder()
+                } label: {
+                    Label("Load", systemImage: "arrow.up.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!store.canLoadOlderHistory)
             }
         }
         .padding(10)
