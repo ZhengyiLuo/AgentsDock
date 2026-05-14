@@ -7,12 +7,93 @@ import WebKit
 
 struct InlineVideoView: View {
     let url: URL
+    @State private var isLoaded = false
 
     var body: some View {
-        InlineVideoPlayerView(url: url)
+        ZStack {
+            if isLoaded {
+                InlineVideoPlayerView(url: url)
+            } else {
+                VideoPlaceholderView(
+                    filename: url.lastPathComponent,
+                    play: { isLoaded = true },
+                    fullscreen: {
+                        #if os(macOS)
+                        VideoFullscreenPresenter.present(url: url)
+                        #endif
+                    }
+                )
+            }
+            #if os(macOS)
+            VStack {
+                HStack {
+                    Spacer()
+                    VideoOverlayButton(title: "Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right") {
+                        VideoFullscreenPresenter.present(url: url)
+                    }
+                }
+                Spacer()
+            }
+            .padding(10)
+            #endif
+        }
             .background(Color.black)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+    }
+}
+
+private struct VideoPlaceholderView: View {
+    let filename: String
+    let play: () -> Void
+    let fullscreen: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "film.stack")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.78))
+            Text(filename)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.68))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 360)
+            HStack(spacing: 10) {
+                VideoOverlayButton(title: "Play", systemImage: "play.fill", action: play)
+                #if os(macOS)
+                VideoOverlayButton(title: "Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right", action: fullscreen)
+                #endif
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            LinearGradient(
+                colors: [Color.black, Color(red: 0.08, green: 0.09, blue: 0.10)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+}
+
+private struct VideoOverlayButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(.black.opacity(0.62), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
+        .help(title)
     }
 }
 
@@ -26,7 +107,7 @@ struct InlineVideoPlayerView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AVPlayerView {
         let playerView = AVPlayerView()
-        playerView.controlsStyle = .floating
+        playerView.controlsStyle = .inline
         playerView.videoGravity = .resizeAspect
         playerView.showsFullScreenToggleButton = true
         return playerView
@@ -73,7 +154,7 @@ enum VideoFullscreenPresenter {
 
     static func present(url: URL) {
         let playerView = AVPlayerView()
-        playerView.controlsStyle = .floating
+        playerView.controlsStyle = .inline
         playerView.videoGravity = .resizeAspect
         playerView.showsFullScreenToggleButton = true
         playerView.player = AVPlayer(url: videoSourceURL(url))

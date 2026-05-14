@@ -57,6 +57,8 @@ IDLE_KILL_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_KILL_SECONDS", "21600"))
 MAX_UPLOAD_BYTES = int(os.environ.get("ZENITHBOT_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024 * 1024)))
 MAX_IMPORT_MESSAGES = int(os.environ.get("ZENITHBOT_HISTORY_IMPORT_LIMIT", "400"))
 MAX_IMPORTED_TEXT_CHARS = int(os.environ.get("ZENITHBOT_HISTORY_IMPORT_TEXT_CHARS", "12000"))
+MAX_FORK_MEMORY_CHARS = int(os.environ.get("ZENITHBOT_FORK_MEMORY_CHARS", "24000"))
+MAX_FORK_MEMORY_ITEM_CHARS = int(os.environ.get("ZENITHBOT_FORK_MEMORY_ITEM_CHARS", "1800"))
 DEFAULT_SESSION_EVENT_LIMIT = int(os.environ.get("ZENITHBOT_SESSION_EVENT_LIMIT", "100"))
 MAX_EVENT_RESPONSE_LIMIT = int(os.environ.get("ZENITHBOT_MAX_EVENT_RESPONSE_LIMIT", "1000"))
 
@@ -646,6 +648,13 @@ def compact_import_text(text: str) -> str:
     return text[:MAX_IMPORTED_TEXT_CHARS].rstrip() + "\n\n[import trimmed]"
 
 
+def compact_memory_text(text: str, max_chars: int = MAX_FORK_MEMORY_ITEM_CHARS) -> str:
+    text = re.sub(r"\n{3,}", "\n\n", str(text or "").strip())
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n[trimmed]"
+
+
 def is_import_boilerplate(text: str) -> bool:
     stripped = text.strip()
     boilerplate_prefixes = (
@@ -901,13 +910,75 @@ async def copy_fork_history(parent_id: str, child_id: str) -> int:
     return copied
 
 
+def build_fork_memory(parent: dict[str, Any], parent_id: str, *, reason: str | None = None) -> str:
+    provider_id = session_provider_id(parent)
+    header = [
+        "[ZenithDock memory fork]",
+        "This is a fresh provider thread seeded from a compact memory dump because the original provider-level fork was unavailable.",
+        "Use this memory as background context. Do not treat it as a new user request.",
+        "",
+        f"Parent ZenithDock session: {parent_id}",
+        f"Parent title: {parent.get('title') or 'Untitled'}",
+        f"Backend: {parent.get('backend') or DEFAULT_BACKEND}",
+        f"Working directory: {parent.get('cwd') or DEFAULT_CWD}",
+    ]
+    if provider_id:
+        header.append(f"Original provider session/thread: {provider_id}")
+    if reason:
+        header.append(f"Fork fallback reason: {compact_memory_text(reason, 800)}")
+
+    lines: list[str] = header + ["", "Recent rough conversation:"]
+    events = read_events(parent_id, limit=160, tail=True)
+    assistant_runs = {
+        event.get("run_id")
+        for event in events
+        if event.get("type") == "assistant_text" and str(event.get("text") or "").strip()
+    }
+
+    for event in events:
+        event_type = event.get("type")
+        if event_type == "turn_started":
+            text = compact_memory_text(event.get("prompt") or "")
+            if text:
+                lines.append(f"\nUser:\n{text}")
+        elif event_type == "assistant_text":
+            text = compact_memory_text(event.get("text") or "")
+            if text:
+                lines.append(f"\nAssistant:\n{text}")
+        elif event_type == "turn_finished" and event.get("run_id") not in assistant_runs:
+            text = compact_memory_text(event.get("result_text") or "")
+            if text:
+                lines.append(f"\nAssistant:\n{text}")
+        elif event_type == "reasoning_summary":
+            text = compact_memory_text(event.get("text") or "", 900)
+            if text:
+                lines.append(f"\nReasoning summary:\n{text}")
+        elif event_type == "artifact_created":
+            artifact = event.get("artifact") if isinstance(event.get("artifact"), dict) else {}
+            title = artifact.get("title") or artifact.get("filename") or artifact.get("id") or "artifact"
+            note = compact_memory_text(artifact.get("text") or "", 600)
+            artifact_line = f"\nArtifact: {title}"
+            if artifact.get("content_type"):
+                artifact_line += f" ({artifact.get('content_type')})"
+            if note:
+                artifact_line += f"\n{note}"
+            lines.append(artifact_line)
+
+    memory = "\n".join(lines).strip()
+    if len(memory) > MAX_FORK_MEMORY_CHARS:
+        memory = memory[-MAX_FORK_MEMORY_CHARS:].lstrip()
+        memory = "[ZenithDock memory fork]\n[Older memory trimmed]\n" + memory
+    return memory
+
+
 def public_session(sess: dict[str, Any]) -> dict[str, Any]:
     return {
         k: sess.get(k)
         for k in (
             "id", "title", "folder", "cwd", "backend", "model", "effort",
             "session_id", "claude_session_id", "codex_thread_id",
-            "parent_id", "pinned", "pinned_at", "created_at", "updated_at",
+            "parent_id", "fork_from", "memory_forked", "memory_seed_used",
+            "pinned", "pinned_at", "created_at", "updated_at",
         )
     }
 
@@ -1465,16 +1536,32 @@ async def start_turn(
                 prompt += f"- {rec.get('path')} ({rec.get('filename')}, {rec.get('content_type')})\n"
             prompt += "Use these local paths directly when needed.\n"
 
+        backend = sess.get("backend") or DEFAULT_BACKEND
+        memory_seed = str(sess.get("memory_seed") or "").strip()
+        if backend == BACKEND_CODEX and memory_seed and not sess.get("memory_seed_used"):
+            prompt = f"{memory_seed}\n\n[Current user prompt]\n{prompt}"
+            async with STORE._lock:
+                current = STORE.sessions.get(session_id)
+                if current:
+                    current["memory_seed_used"] = True
+                    current["updated_at"] = now_iso()
+                    sess = current
+                    await STORE.save()
+            await append_event(session_id, "history_imported", {
+                "run_id": run_id,
+                "backend": BACKEND_CODEX,
+                "message": "Applied memory fork context to this first Codex turn.",
+            })
+
         started_payload = {
             "run_id": run_id,
-            "backend": sess.get("backend") or DEFAULT_BACKEND,
+            "backend": backend,
             "prompt": req.prompt,
             "file_ids": req.file_ids,
         }
         if queued_id:
             started_payload["queued_id"] = queued_id
         await append_event(session_id, "turn_started", started_payload)
-        backend = sess.get("backend") or DEFAULT_BACKEND
         task = run_codex(session_id, run_id, prompt, dict(sess), manifest_path) if backend == BACKEND_CODEX else run_claude(session_id, run_id, prompt, dict(sess), manifest_path)
         asyncio.create_task(task)
         current_title = str(sess.get("title") or "").strip()
@@ -1606,6 +1693,7 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
         parent.get("session_id") if parent_backend == BACKEND_CODEX else None
     )
     forked_codex_thread_id: str | None = None
+    codex_fork_error: str | None = None
 
     if parent_backend == BACKEND_CODEX and parent_codex_thread_id:
         try:
@@ -1623,7 +1711,7 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
                 parent_codex_thread_id,
                 e,
             )
-            raise HTTPException(status_code=502, detail=f"Codex fork failed: {e}") from e
+            codex_fork_error = str(e)
 
     child = await STORE.create(
         CreateSessionRequest(
@@ -1638,6 +1726,14 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
         ),
         parent_id=session_id,
     )
+    if parent_backend == BACKEND_CODEX and codex_fork_error:
+        child["memory_seed"] = build_fork_memory(parent, session_id, reason=codex_fork_error)
+        child["memory_seed_used"] = False
+        child["memory_forked"] = True
+        child["memory_fork_reason"] = codex_fork_error[:2000]
+        async with STORE._lock:
+            STORE.sessions[child["id"]] = child
+            await STORE.save()
     if parent_backend == BACKEND_CLAUDE and (parent.get("claude_session_id") or parent.get("session_id")):
         child["fork_from"] = parent.get("claude_session_id") or parent.get("session_id")
         async with STORE._lock:
@@ -1652,6 +1748,18 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
                 "backend": BACKEND_CODEX,
                 "provider_session_id": forked_codex_thread_id,
                 "forked_from_provider_id": parent_codex_thread_id,
+            },
+        )
+    elif codex_fork_error:
+        await append_event(
+            child["id"],
+            "history_imported",
+            {
+                "backend": BACKEND_CODEX,
+                "provider_session_id": parent_codex_thread_id,
+                "message": "Codex provider fork was too large, so this is a memory fork with bounded rough history. The first turn will seed a fresh Codex thread with the memory dump.",
+                "error": codex_fork_error[:4000],
+                "copied_events": copied,
             },
         )
     return {"session": public_session(child)}

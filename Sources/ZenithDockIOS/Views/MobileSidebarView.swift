@@ -61,12 +61,34 @@ private struct MobileServerStatusView: View {
             }
             TextField("Server URL", text: $store.serverURLString)
                 .font(.caption.monospaced())
+                .mobileURLInputStyle()
                 .onChange(of: store.serverURLString) {
                     store.rememberServerURL()
                 }
-                .onSubmit { Task { await store.refresh() } }
+                .onSubmit { Task { await store.reconnect() } }
+            Button {
+                Task { await store.reconnect() }
+            } label: {
+                Label("Reconnect", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
         }
         .padding(.vertical, 4)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func mobileURLInputStyle() -> some View {
+        #if os(iOS)
+        self
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .keyboardType(.URL)
+        #else
+        self
+        #endif
     }
 }
 

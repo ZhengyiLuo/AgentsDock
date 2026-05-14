@@ -23,6 +23,7 @@ final class MobileAppStore: ObservableObject {
     private let eventLimit = 80
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
+    private var liveTrackingStarted = false
     private var lastSeq: Int { events.map(\.seq).max() ?? 0 }
 
     var api: APIClient {
@@ -68,11 +69,18 @@ final class MobileAppStore: ObservableObject {
     }
 
     func startLiveTracking() async {
+        guard !liveTrackingStarted else { return }
+        liveTrackingStarted = true
+        defer { liveTrackingStarted = false }
         await refresh(showErrors: false)
+        var tick = 0
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
+            tick += 1
             await refreshHealth(showErrors: false)
-            await refreshSessions(showErrors: false)
+            if tick % 6 == 0 {
+                await refreshSessions(showErrors: false)
+            }
             if let sid = selectedSessionID, serverReachable, !socketLive {
                 connectEvents(sessionID: sid, after: lastSeq)
             }
@@ -80,10 +88,26 @@ final class MobileAppStore: ObservableObject {
     }
 
     func rememberServerURL() {
+        cleanServerURL()
         UserDefaults.standard.set(serverURLString, forKey: "serverURL")
     }
 
+    func reconnect() async {
+        cleanServerURL()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        socketLive = false
+        serverReachable = false
+        status = "Connecting"
+        selectedSessionID = nil
+        events = []
+        uploads = []
+        sessions = []
+        await refresh(showErrors: true)
+    }
+
     func refresh(showErrors: Bool = true) async {
+        cleanServerURL()
         rememberServerURL()
         await refreshHealth(showErrors: showErrors)
         await refreshSessions(showErrors: showErrors)
@@ -114,7 +138,9 @@ final class MobileAppStore: ObservableObject {
         do {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.get("/api/sessions")
-            sessions = res.sessions
+            if sessions != res.sessions {
+                sessions = res.sessions
+            }
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
                 selectedSessionID = sessions.first?.id
                 if let selectedSessionID {
@@ -279,6 +305,20 @@ final class MobileAppStore: ObservableObject {
         api.url("/api/files/\(file.id)")
     }
 
+    private func cleanServerURL() {
+        var raw = serverURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty {
+            raw = defaultAgentServerURLString
+        }
+        while raw.hasSuffix("/") {
+            raw.removeLast()
+        }
+        if serverURLString != raw {
+            serverURLString = raw
+        }
+        UserDefaults.standard.set(raw, forKey: "serverURL")
+    }
+
     func hasStartedQueuedEvent(_ event: ZEvent) -> Bool {
         guard event.type == "turn_queued", let queuedID = event.queued_id else { return false }
         return events.contains { $0.type == "turn_started" && $0.queued_id == queuedID }
@@ -352,7 +392,7 @@ final class MobileAppStore: ObservableObject {
     private func report(_ error: Error) {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
-            errorText = "Cannot reach the ZenithDock server at \(serverURLString). Check VPN/Wi-Fi and port 7850 on Zen-nv."
+            errorText = "Cannot reach \(serverURLString). If Safari opens /api/health, tap Reconnect once; otherwise check Tailscale and port 7850. Code \(ns.code)."
         } else {
             errorText = error.localizedDescription
         }

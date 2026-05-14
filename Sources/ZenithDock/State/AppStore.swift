@@ -38,6 +38,7 @@ final class AppStore: ObservableObject {
     private let maxCachedStringCharacters = 12_000
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
+    private var liveTrackingStarted = false
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
@@ -145,17 +146,31 @@ final class AppStore: ObservableObject {
     }
 
     func rememberServerURL() {
+        cleanServerURL()
         UserDefaults.standard.set(serverURLString, forKey: "serverURL")
     }
 
     func startLiveTracking() async {
+        guard !liveTrackingStarted else {
+            AppLogger.info("start live tracking skipped existing loop")
+            return
+        }
+        liveTrackingStarted = true
+        defer {
+            liveTrackingStarted = false
+            AppLogger.info("stop live tracking")
+        }
         AppLogger.info("start live tracking")
         await refresh(showErrors: false)
+        var tick = 0
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
+            tick += 1
             await refreshHealth(showErrors: false)
-            await refreshSessions(showErrors: false)
-            await refreshJobs(showErrors: false)
+            if tick % 6 == 0 {
+                await refreshSessions(showErrors: false)
+                await refreshJobs(showErrors: false)
+            }
             if let sid = selectedSessionID, serverReachable, !socketLive {
                 connectEvents(sessionID: sid, after: lastSeq)
             }
@@ -163,6 +178,7 @@ final class AppStore: ObservableObject {
     }
 
     func refresh(showErrors: Bool = true) async {
+        cleanServerURL()
         rememberServerURL()
         await refreshHealth(showErrors: showErrors)
         await refreshSessions(showErrors: showErrors)
@@ -204,9 +220,11 @@ final class AppStore: ObservableObject {
             if !socketLive {
                 status = "Server connected"
             }
-            sessions = res.sessions
+            if sessions != res.sessions {
+                sessions = res.sessions
+                AppLogger.info("loaded sessions count=\(sessions.count)")
+            }
             lastLoadedAt = Date()
-            AppLogger.info("loaded sessions count=\(sessions.count)")
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
                 selectedSessionID = sessions.first?.id
                 if let selectedSessionID {
@@ -226,7 +244,9 @@ final class AppStore: ObservableObject {
             struct Response: Codable { let jobs: [ZJob] }
             let res: Response = try await api.get("/api/jobs")
             serverReachable = true
-            jobs = res.jobs
+            if jobs != res.jobs {
+                jobs = res.jobs
+            }
         } catch {
             if showErrors {
                 reportServerError(error)
@@ -853,5 +873,19 @@ final class AppStore: ObservableObject {
             return "Cannot reach the Zenithbot agent server at \(serverURLString). The Mac internet may be fine; this means the app cannot reach Zen-nv or port 7850 right now."
         }
         return error.localizedDescription
+    }
+
+    private func cleanServerURL() {
+        var raw = serverURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty {
+            raw = defaultAgentServerURLString
+        }
+        while raw.hasSuffix("/") {
+            raw.removeLast()
+        }
+        if serverURLString != raw {
+            serverURLString = raw
+        }
+        UserDefaults.standard.set(raw, forKey: "serverURL")
     }
 }

@@ -16,57 +16,69 @@ struct TimelineView: View {
             HeaderView()
             Divider()
             ScrollViewReader { proxy in
-                ZStack(alignment: .bottomTrailing) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            if store.selectedSession == nil {
-                                EmptyStateView()
-                            } else {
-                                if store.hiddenDisplayEventCount > 0 {
-                                    TimelineHistoryLoader()
-                                }
-                                ForEach(rows) { row in
-                                    switch row {
-                                    case .event(let event):
-                                        EventCard(event: event)
-                                            .id(row.id)
-                                    case .trace(let id, let events):
-                                        TraceGroupCard(events: events)
-                                            .id(id)
+                GeometryReader { geometry in
+                    ZStack(alignment: .bottomTrailing) {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 14) {
+                                if store.selectedSession == nil {
+                                    EmptyStateView()
+                                } else {
+                                    if store.hiddenDisplayEventCount > 0 {
+                                        TimelineHistoryLoader()
                                     }
+                                    ForEach(rows) { row in
+                                        switch row {
+                                        case .event(let event):
+                                            EventCard(event: event)
+                                                .id(row.id)
+                                        case .trace(let id, let events):
+                                            TraceGroupCard(events: events)
+                                                .id(id)
+                                        }
+                                    }
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id(bottomID)
+                                        .background(
+                                            GeometryReader { marker in
+                                                Color.clear.preference(
+                                                    key: TimelineBottomOffsetKey.self,
+                                                    value: marker.frame(in: .named("timeline-scroll")).maxY
+                                                )
+                                            }
+                                        )
                                 }
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id(bottomID)
-                                    .onAppear { isAtBottom = true }
-                                    .onDisappear { isAtBottom = false }
                             }
+                            .padding(20)
+                            .padding(.bottom, 56)
+                            .frame(maxWidth: 980, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .center)
                         }
-                        .padding(20)
-                        .padding(.bottom, 56)
-                        .frame(maxWidth: 980, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .coordinateSpace(name: "timeline-scroll")
+                        if !isAtBottom && !displayEvents.isEmpty {
+                            Button {
+                                scrollToBottom(proxy)
+                            } label: {
+                                Label("Bottom", systemImage: "arrow.down.to.line.compact")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                            .padding(18)
+                            .help("Jump to latest message")
+                        }
                     }
-                    if !isAtBottom && !displayEvents.isEmpty {
-                        Button {
+                    .onPreferenceChange(TimelineBottomOffsetKey.self) { bottomY in
+                        updateBottomVisibility(bottomY: bottomY, viewportHeight: geometry.size.height)
+                    }
+                    .onChange(of: store.scrollToBottomRevision) {
+                        if isAtBottom {
                             scrollToBottom(proxy)
-                        } label: {
-                            Label("Bottom", systemImage: "arrow.down.to.line.compact")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
-                        .padding(18)
-                        .help("Jump to latest message")
                     }
-                }
-                .onChange(of: store.scrollToBottomRevision) {
-                    if isAtBottom {
+                    .onChange(of: store.selectedSessionID) {
+                        isAtBottom = true
                         scrollToBottom(proxy)
                     }
-                }
-                .onChange(of: store.selectedSessionID) {
-                    isAtBottom = true
-                    scrollToBottom(proxy)
                 }
             }
             Divider()
@@ -101,6 +113,25 @@ struct TimelineView: View {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
         }
+    }
+
+    private func updateBottomVisibility(bottomY: CGFloat, viewportHeight: CGFloat) {
+        guard viewportHeight > 1, !store.displayEvents.isEmpty else {
+            if !isAtBottom { isAtBottom = true }
+            return
+        }
+        let next = bottomY <= viewportHeight + 72
+        if isAtBottom != next {
+            isAtBottom = next
+        }
+    }
+}
+
+private struct TimelineBottomOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = .zero
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
