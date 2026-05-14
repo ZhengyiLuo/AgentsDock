@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import time
 import uuid
 from collections import deque
@@ -55,6 +56,8 @@ REQUEST_TIMEOUT_SECONDS = int(os.environ.get("ZENITHBOT_REQUEST_TIMEOUT_SECONDS"
 CODEX_APP_SERVER_TIMEOUT_SECONDS = int(os.environ.get("ZENITHBOT_CODEX_APP_SERVER_TIMEOUT_SECONDS", "30"))
 IDLE_WARN_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_WARN_SECONDS", "1800"))
 IDLE_KILL_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_KILL_SECONDS", "21600"))
+STOP_GRACE_SECONDS = float(os.environ.get("ZENITHBOT_STOP_GRACE_SECONDS", "2.0"))
+PROCESS_STREAM_LIMIT = int(os.environ.get("ZENITHBOT_PROCESS_STREAM_LIMIT", str(16 * 1024 * 1024)))
 MAX_UPLOAD_BYTES = int(os.environ.get("ZENITHBOT_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024 * 1024)))
 MAX_IMPORT_MESSAGES = int(os.environ.get("ZENITHBOT_HISTORY_IMPORT_LIMIT", "400"))
 MAX_IMPORTED_TEXT_CHARS = int(os.environ.get("ZENITHBOT_HISTORY_IMPORT_TEXT_CHARS", "12000"))
@@ -551,6 +554,8 @@ class SubscriberHub:
 HUB = SubscriberHub()
 ACTIVE: dict[str, dict[str, Any]] = {}
 BUSY_SESSIONS: set[str] = set()
+STOP_REQUESTS: set[str] = set()
+STOPPED_RUNS: set[str] = set()
 ACTIVE_LOCK = asyncio.Lock()
 QUEUED_TURNS: dict[str, deque[dict[str, Any]]] = {}
 QUEUE_LOCK = asyncio.Lock()
@@ -679,10 +684,48 @@ def schedule_next_queued_turn(session_id: str) -> None:
     asyncio.create_task(start_next_queued_turn(session_id))
 
 
+async def terminate_process_tree(proc: asyncio.subprocess.Process, *, grace: float = STOP_GRACE_SECONDS) -> bool:
+    if proc.returncode is not None:
+        return False
+
+    sent = False
+    if os.name != "nt":
+        with suppress(ProcessLookupError, PermissionError):
+            pgid = os.getpgid(proc.pid)
+            if pgid != os.getpgrp():
+                os.killpg(pgid, signal.SIGTERM)
+                sent = True
+    if not sent:
+        with suppress(ProcessLookupError):
+            proc.terminate()
+            sent = True
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return sent
+    except asyncio.TimeoutError:
+        pass
+
+    killed = False
+    if os.name != "nt":
+        with suppress(ProcessLookupError, PermissionError):
+            pgid = os.getpgid(proc.pid)
+            if pgid != os.getpgrp():
+                os.killpg(pgid, signal.SIGKILL)
+                killed = True
+    if not killed:
+        with suppress(ProcessLookupError):
+            proc.kill()
+            killed = True
+    await proc.wait()
+    return sent or killed
+
+
 async def release_turn_slot(session_id: str) -> None:
     async with ACTIVE_LOCK:
         ACTIVE.pop(session_id, None)
         BUSY_SESSIONS.discard(session_id)
+        STOP_REQUESTS.discard(session_id)
 
 
 async def clear_active_process(session_id: str) -> None:
@@ -1147,6 +1190,8 @@ async def codex_app_server_request(method: str, params: dict[str, Any]) -> dict[
         stderr=asyncio.subprocess.PIPE,
         cwd=DEFAULT_CWD,
         env=env,
+        limit=PROCESS_STREAM_LIMIT,
+        start_new_session=True,
     )
     stderr_lines: list[str] = []
 
@@ -1198,13 +1243,7 @@ async def codex_app_server_request(method: str, params: dict[str, Any]) -> dict[
         await send(2, method, params)
         return await read_response(2)
     finally:
-        if proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+        await terminate_process_tree(proc, grace=3)
         stderr_task.cancel()
         with suppress(asyncio.CancelledError):
             await stderr_task
@@ -1331,6 +1370,8 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=runner_env(),
+            limit=PROCESS_STREAM_LIMIT,
+            start_new_session=True,
         )
     except Exception as e:
         await append_event(session_id, "error", {"run_id": run_id, "backend": BACKEND_CLAUDE, "message": f"failed to start Claude: {e}"})
@@ -1345,8 +1386,20 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
         return
     async with ACTIVE_LOCK:
         BUSY_SESSIONS.add(session_id)
-        ACTIVE[session_id] = {"proc": proc, "run_id": run_id, "backend": BACKEND_CLAUDE, "started_at": time.time()}
-    if proc.stdin:
+        stop_requested = session_id in STOP_REQUESTS
+        if stop_requested:
+            STOP_REQUESTS.discard(session_id)
+            STOPPED_RUNS.add(run_id)
+        ACTIVE[session_id] = {
+            "proc": proc,
+            "run_id": run_id,
+            "backend": BACKEND_CLAUDE,
+            "started_at": time.time(),
+            "stop_requested": stop_requested,
+        }
+    if stop_requested:
+        await terminate_process_tree(proc)
+    if not stop_requested and proc.stdin:
         proc.stdin.write(prompt.encode())
         await proc.stdin.drain()
         proc.stdin.close()
@@ -1357,6 +1410,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
     current_tools: dict[str, dict[str, Any]] = {}
     last_event = time.time()
     idle_killed = False
+    stream_error: str | None = None
 
     try:
         while True:
@@ -1368,7 +1422,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
                     await append_event(session_id, "idle_warning", {"run_id": run_id, "idle_seconds": int(idle)})
                 if idle >= IDLE_KILL_SECONDS:
                     idle_killed = True
-                    proc.terminate()
+                    await terminate_process_tree(proc)
                     break
                 continue
             if not raw:
@@ -1417,19 +1471,22 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
                 final_text = event.get("result", "") or final_text
                 if event.get("session_id"):
                     provider_id = event["session_id"]
+    except Exception as e:
+        stream_error = f"{type(e).__name__}: {e}"
+        logger.exception("Claude run failed session=%s run=%s", session_id, run_id)
     finally:
-        with suppress(ProcessLookupError):
-            if proc.returncode is None:
-                proc.terminate()
-        await proc.wait()
+        await terminate_process_tree(proc, grace=0.5)
         await clear_active_process(session_id)
 
     stderr = ""
     if proc.stderr:
         stderr = (await proc.stderr.read()).decode("utf-8", "replace").strip()
+    stopped = run_id in STOPPED_RUNS
+    if stream_error and not stopped:
+        await append_event(session_id, "error", {"run_id": run_id, "message": f"Claude stream failed: {stream_error}"})
     if idle_killed:
         await append_event(session_id, "error", {"run_id": run_id, "message": "killed after idle timeout"})
-    if proc.returncode not in (0, None) and stderr:
+    if not stopped and proc.returncode not in (0, None) and stderr:
         await append_event(session_id, "error", {"run_id": run_id, "message": stderr[:4000], "exit_code": proc.returncode})
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CLAUDE)
@@ -1440,8 +1497,10 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
         "backend": BACKEND_CLAUDE,
         "exit_code": proc.returncode,
         "result_text": result_text,
+        "stopped": stopped,
     })
     await release_turn_slot(session_id)
+    STOPPED_RUNS.discard(run_id)
     schedule_next_queued_turn(session_id)
 
 
@@ -1463,6 +1522,8 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            limit=PROCESS_STREAM_LIMIT,
+            start_new_session=True,
         )
     except Exception as e:
         await append_event(session_id, "error", {"run_id": run_id, "backend": BACKEND_CODEX, "message": f"failed to start Codex: {e}"})
@@ -1477,12 +1538,25 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
         return
     async with ACTIVE_LOCK:
         BUSY_SESSIONS.add(session_id)
-        ACTIVE[session_id] = {"proc": proc, "run_id": run_id, "backend": BACKEND_CODEX, "started_at": time.time()}
+        stop_requested = session_id in STOP_REQUESTS
+        if stop_requested:
+            STOP_REQUESTS.discard(session_id)
+            STOPPED_RUNS.add(run_id)
+        ACTIVE[session_id] = {
+            "proc": proc,
+            "run_id": run_id,
+            "backend": BACKEND_CODEX,
+            "started_at": time.time(),
+            "stop_requested": stop_requested,
+        }
+    if stop_requested:
+        await terminate_process_tree(proc)
 
     text_parts: list[str] = []
     provider_id: str | None = None
     last_event = time.time()
     idle_killed = False
+    stream_error: str | None = None
 
     try:
         while True:
@@ -1494,7 +1568,7 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
                     await append_event(session_id, "idle_warning", {"run_id": run_id, "idle_seconds": int(idle)})
                 if idle >= IDLE_KILL_SECONDS:
                     idle_killed = True
-                    proc.terminate()
+                    await terminate_process_tree(proc)
                     break
                 continue
             if not raw:
@@ -1544,19 +1618,22 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
                         text = "\n".join(x.get("text", "") for x in item["summary"] if isinstance(x, dict)).strip()
                     if text:
                         await append_event(session_id, "reasoning_summary", {"run_id": run_id, "text": text})
+    except Exception as e:
+        stream_error = f"{type(e).__name__}: {e}"
+        logger.exception("Codex run failed session=%s run=%s", session_id, run_id)
     finally:
-        with suppress(ProcessLookupError):
-            if proc.returncode is None:
-                proc.terminate()
-        await proc.wait()
+        await terminate_process_tree(proc, grace=0.5)
         await clear_active_process(session_id)
 
     stderr = ""
     if proc.stderr:
         stderr = (await proc.stderr.read()).decode("utf-8", "replace").strip()
+    stopped = run_id in STOPPED_RUNS
+    if stream_error and not stopped:
+        await append_event(session_id, "error", {"run_id": run_id, "message": f"Codex stream failed: {stream_error}"})
     if idle_killed:
         await append_event(session_id, "error", {"run_id": run_id, "message": "killed after idle timeout"})
-    if proc.returncode not in (0, None) and stderr:
+    if not stopped and proc.returncode not in (0, None) and stderr:
         await append_event(session_id, "error", {"run_id": run_id, "message": stderr[:4000], "exit_code": proc.returncode})
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CODEX)
@@ -1566,8 +1643,10 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
         "backend": BACKEND_CODEX,
         "exit_code": proc.returncode,
         "result_text": "\n\n".join(text_parts).strip(),
+        "stopped": stopped,
     })
     await release_turn_slot(session_id)
+    STOPPED_RUNS.discard(run_id)
     schedule_next_queued_turn(session_id)
 
 
@@ -1768,8 +1847,7 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     if active:
         proc = active.get("proc")
         if proc:
-            with suppress(ProcessLookupError):
-                proc.terminate()
+            await terminate_process_tree(proc)
     deleted = await STORE.delete(session_id)
     deleted_jobs = await JOBS.delete_for_session(session_id)
     return {"ok": True, "deleted": deleted, "deleted_jobs": deleted_jobs}
@@ -1871,13 +1949,28 @@ async def delete_queued_turn(session_id: str, queued_id: str) -> dict[str, Any]:
 async def stop_turn(session_id: str) -> dict[str, Any]:
     async with ACTIVE_LOCK:
         active = ACTIVE.get(session_id)
+        busy = session_id in BUSY_SESSIONS
+        if active:
+            active["stop_requested"] = True
+            if active.get("run_id"):
+                STOPPED_RUNS.add(str(active["run_id"]))
+        elif busy:
+            STOP_REQUESTS.add(session_id)
     if not active:
+        if busy:
+            await append_event(session_id, "turn_stopped", {
+                "run_id": None,
+                "message": "Stop requested before the agent process was ready.",
+            })
+            return {"ok": True, "stopped": True, "pending": True}
         return {"ok": True, "stopped": False}
     proc = active.get("proc") if active else None
     if proc:
-        with suppress(ProcessLookupError):
-            proc.terminate()
-    await append_event(session_id, "turn_stopped", {"run_id": active.get("run_id") if active else None})
+        await terminate_process_tree(proc)
+    await append_event(session_id, "turn_stopped", {
+        "run_id": active.get("run_id") if active else None,
+        "backend": active.get("backend") if active else None,
+    })
     return {"ok": True, "stopped": True}
 
 
