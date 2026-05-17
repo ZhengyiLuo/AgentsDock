@@ -954,3 +954,22 @@ Changes:
   - Hid the duplicate picker label in the Terminal tab header.
   - Renamed `Attach` to `Reconnect` when a tmux session exists, and `Start tmux`
     when one does not.
+
+### Local Job Next-Run Times
+
+User issue:
+
+- Job rows displayed raw UTC ISO timestamps such as
+  `2026-05-17T23:43:44Z`.
+- The app should show next-run times in the Mac's current time zone.
+
+Changes:
+
+- `Sources/ZenithDock/Support/Formatting.swift`
+  - Added shared server ISO timestamp parsing and local timestamp formatting
+    using `TimeZone.autoupdatingCurrent`.
+- `Sources/ZenithDock/Views/InspectorView.swift`
+  - Job subtitles now show local next-run times, e.g. `next 4:43 PM today`.
+- `Sources/ZenithDock/Views/EventViews.swift`
+  - Job-created/job-ran summaries use the same local formatter.
+  - Job runtime parsing now reuses the shared server date parser.

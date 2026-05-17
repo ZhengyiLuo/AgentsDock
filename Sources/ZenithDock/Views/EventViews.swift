@@ -579,15 +579,7 @@ private func jobRunRuntimeText(_ jobRun: JobRunRow) -> String? {
 }
 
 private func jobRunDate(_ value: String?) -> Date? {
-    guard let value, !value.isEmpty else { return nil }
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = fractional.date(from: value) {
-        return date
-    }
-    let plain = ISO8601DateFormatter()
-    plain.formatOptions = [.withInternetDateTime]
-    return plain.date(from: value)
+    parseServerDate(value)
 }
 
 private func jobRunDurationString(_ seconds: Int) -> String {
@@ -909,7 +901,7 @@ private struct JobEventSummary: View {
                 HStack(spacing: 8) {
                     Label(job.loop == true ? "Loop" : "One shot", systemImage: job.loop == true ? "repeat" : "timer")
                     Text("\(job.run_count ?? 0) run\(job.run_count == 1 ? "" : "s")")
-                    if let next = job.next_run_at_iso, job.enabled {
+                    if let next = localTimestampString(job.next_run_at_iso), job.enabled {
                         Text("Next \(next)")
                     } else if !job.enabled {
                         Text("Paused")

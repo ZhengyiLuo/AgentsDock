@@ -580,7 +580,7 @@ private struct ChatJobRow: View {
         if let interval = job.interval_seconds {
             parts.append(everyString(interval))
         }
-        if job.enabled, let next = job.next_run_at_iso {
+        if job.enabled, let next = localTimestampString(job.next_run_at_iso) {
             parts.append("next \(next)")
         } else if !job.enabled {
             parts.append("paused")
