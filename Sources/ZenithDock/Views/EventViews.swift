@@ -309,7 +309,7 @@ struct MessageBubble: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .frame(maxWidth: 760, alignment: isUser ? .trailing : .leading)
+        .frame(maxWidth: isUser ? 760 : .infinity, alignment: isUser ? .trailing : .leading)
         .background(bubbleBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(bubbleStroke))
@@ -473,7 +473,7 @@ struct JobRunGroupBubble: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.card)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(alignment: .leading) {

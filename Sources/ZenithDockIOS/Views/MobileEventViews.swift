@@ -203,7 +203,7 @@ struct MobileMessageBubble: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 11)
-        .frame(maxWidth: 700, alignment: isUser ? .trailing : .leading)
+        .frame(maxWidth: isUser ? 700 : .infinity, alignment: isUser ? .trailing : .leading)
         .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor))
@@ -360,7 +360,7 @@ struct MobileJobRunGroupBubble: View {
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 11)
-            .frame(maxWidth: 700, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(MobileTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .leading) {

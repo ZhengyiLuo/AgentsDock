@@ -96,8 +96,7 @@ struct TimelineView: View {
                         }
                         .padding(20)
                         .padding(.bottom, 56)
-                        .frame(maxWidth: 980, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             TimelineScrollObserver { metrics in
                                 updateBottomVisibility(metrics)

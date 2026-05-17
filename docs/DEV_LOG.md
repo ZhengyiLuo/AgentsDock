@@ -569,6 +569,33 @@ Important caution:
 
 ## 2026-05-17 Follow-Up
 
+### Wide-Screen Response Width
+
+User issue:
+
+- On wide Mac screens, assistant/job chat responses were still constrained by
+  narrow legacy caps, leaving too much unused horizontal space.
+
+Changes:
+
+- `Sources/ZenithDock/Views/TimelineView.swift`
+  - Removed the Mac timeline content cap of `980`.
+- `Sources/ZenithDock/Views/EventViews.swift`
+  - Assistant and job response bubbles can now expand to available width.
+  - User bubbles remain capped to keep short prompts readable.
+- `Sources/ZenithDockIOS/Views/MobileEventViews.swift`
+  - Mirrored the assistant/job expansion behavior for wide iPad layouts.
+
+Verification:
+
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ### Job Scheduling UX And Runtime
 
 User issue:
