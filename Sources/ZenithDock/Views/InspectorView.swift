@@ -22,6 +22,7 @@ struct InspectorView: View {
     @State private var newJobDetailsOpen = false
     @State private var confirmDelete = false
     @State private var handoffOpen = false
+    @State private var terminalOpen = false
 
     var body: some View {
         ScrollView {
@@ -169,6 +170,8 @@ struct InspectorView: View {
                 }
 
                 LiveProcessesInspector()
+
+                ChatTerminalInspector(isPresented: $terminalOpen)
 
                 ChatFilesInspector(files: store.sessionFiles)
 
@@ -742,6 +745,194 @@ private struct JobEditorSheet: View {
                 isPresented = false
             }
         }
+    }
+}
+
+private struct ChatTerminalInspector: View {
+    @EnvironmentObject private var store: AppStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        GroupBox("Terminal") {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(store.terminalSnapshot?.exists == true ? .green : .secondary)
+                        .frame(width: 7, height: 7)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.terminalSnapshot?.exists == true ? "tmux attached for this chat" : "No tmux session open")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if let snapshot = store.terminalSnapshot {
+                            Text(snapshot.name)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if store.isLoadingTerminal {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                if let cwd = store.terminalSnapshot?.cwd, !cwd.isEmpty {
+                    Text(cwd)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        isPresented = true
+                    } label: {
+                        Label(store.terminalSnapshot?.exists == true ? "Open Terminal" : "Start Terminal", systemImage: "terminal")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        Task { await store.refreshSelectedTerminal(showErrors: false) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh terminal status")
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .task(id: store.selectedSessionID) {
+            await store.refreshSelectedTerminal(showErrors: false)
+        }
+        .sheet(isPresented: $isPresented) {
+            ChatTerminalSheet()
+                .environmentObject(store)
+        }
+    }
+}
+
+private struct ChatTerminalSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmKill = false
+
+    private var terminalText: String {
+        let text = store.terminalSnapshot?.text ?? ""
+        return text.isEmpty ? "Terminal is ready. Send a command below." : text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Chat Terminal", systemImage: "terminal")
+                        .font(.title3.weight(.semibold))
+                    Text(statusLine)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button {
+                    Task { await store.sendTerminalInput("", enter: false, key: "C-c") }
+                } label: {
+                    Label("Interrupt", systemImage: "stop.circle")
+                }
+                .disabled(store.terminalSnapshot?.exists != true)
+                Button(role: .destructive) {
+                    confirmKill = true
+                } label: {
+                    Label("Kill", systemImage: "trash")
+                }
+                .disabled(store.terminalSnapshot?.exists != true)
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(terminalText)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                    Color.clear
+                        .frame(height: 1)
+                        .id("terminal-bottom")
+                }
+                .background(.black.opacity(0.20))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.softLine))
+                .onChange(of: store.terminalSnapshot?.updated_at) {
+                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Command", text: $store.terminalInput, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.body.monospaced())
+                    .lineLimit(1...4)
+                    .onSubmit {
+                        Task { await store.sendTerminalInput() }
+                    }
+                Button {
+                    Task { await store.sendTerminalInput() }
+                } label: {
+                    Label("Send", systemImage: "return")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.terminalInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button {
+                    Task { await store.refreshSelectedTerminal() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .help("Refresh terminal output")
+            }
+        }
+        .padding(18)
+        .frame(minWidth: 760, idealWidth: 980, minHeight: 560, idealHeight: 720)
+        .task {
+            await store.openSelectedTerminal()
+        }
+        .task(id: store.selectedSessionID) {
+            while !Task.isCancelled {
+                await store.refreshSelectedTerminal(showErrors: false)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+        .confirmationDialog("Kill tmux session?", isPresented: $confirmKill) {
+            Button("Kill Terminal", role: .destructive) {
+                Task { await store.killSelectedTerminal() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This kills the tmux session for the selected chat.")
+        }
+    }
+
+    private var statusLine: String {
+        guard let snapshot = store.terminalSnapshot else {
+            return "No snapshot yet"
+        }
+        var parts = [snapshot.name]
+        if let cwd = snapshot.cwd, !cwd.isEmpty {
+            parts.append(cwd)
+        }
+        if let command = snapshot.command, !command.isEmpty {
+            parts.append(command)
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

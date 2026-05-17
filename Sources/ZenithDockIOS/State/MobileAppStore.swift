@@ -33,6 +33,9 @@ final class MobileAppStore: ObservableObject {
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
+    @Published var terminalSnapshot: ZTerminalSnapshot?
+    @Published var isLoadingTerminal = false
+    @Published var terminalInput = ""
 
     private let initialEventLimit = 80
     private let olderHistoryPageLimit = 120
@@ -551,6 +554,8 @@ final class MobileAppStore: ObservableObject {
         isLoading = true
         processSnapshot = nil
         processLogTail = nil
+        terminalSnapshot = nil
+        terminalInput = ""
         status = serverReachable ? "Loading chat" : "Server offline"
         var loadedFromCache = false
 
@@ -689,6 +694,80 @@ final class MobileAppStore: ObservableObject {
             )
             guard selectedSessionID == sid else { return }
             processLogTail = res
+        } catch {
+            report(error)
+        }
+    }
+
+    func refreshSelectedTerminal(showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        isLoadingTerminal = true
+        defer { isLoadingTerminal = false }
+        do {
+            let res: ZTerminalSnapshot = try await api.get(
+                "/api/sessions/\(sid)/terminal",
+                queryItems: [URLQueryItem(name: "lines", value: "240")]
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+        } catch {
+            if showErrors {
+                report(error)
+            }
+        }
+    }
+
+    func openSelectedTerminal(showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        struct Body: Encodable {
+            var cwd: String?
+        }
+        isLoadingTerminal = true
+        defer { isLoadingTerminal = false }
+        do {
+            let res: ZTerminalSnapshot = try await api.post(
+                "/api/sessions/\(sid)/terminal/open",
+                body: Body(cwd: selectedSession?.cwd)
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+        } catch {
+            if showErrors {
+                report(error)
+            }
+        }
+    }
+
+    func sendTerminalInput(_ text: String? = nil, enter: Bool = true, key: String? = nil) async {
+        guard let sid = selectedSessionID else { return }
+        struct Body: Encodable {
+            var text: String?
+            var enter: Bool
+            var key: String?
+        }
+        let outgoing = text ?? terminalInput
+        guard key != nil || !outgoing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || enter else { return }
+        do {
+            let res: ZTerminalSnapshot = try await api.post(
+                "/api/sessions/\(sid)/terminal/input",
+                body: Body(text: outgoing, enter: enter, key: key)
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+            if text == nil && key == nil {
+                terminalInput = ""
+            }
+        } catch {
+            report(error)
+        }
+    }
+
+    func killSelectedTerminal() async {
+        guard let sid = selectedSessionID else { return }
+        do {
+            let res: ZTerminalSnapshot = try await api.delete("/api/sessions/\(sid)/terminal")
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
         } catch {
             report(error)
         }

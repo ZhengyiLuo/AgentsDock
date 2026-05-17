@@ -569,6 +569,60 @@ Important caution:
 
 ## 2026-05-17 Follow-Up
 
+### Per-Chat Tmux Terminal
+
+User request:
+
+- Add a terminal for each chat.
+- Opening the terminal should create a tmux session if needed, and reattach to
+  the same tmux session later from either Mac or iOS/iPadOS.
+- The app should support sending commands, refreshing output, interrupting, and
+  killing the tmux session.
+
+Scope/implementation:
+
+- This first version is server-backed and tmux-native, but not a full ANSI
+  terminal emulator.
+- The server uses deterministic tmux names derived from the ZenithDock chat id,
+  so Mac and iOS attach to the same tmux session.
+- The terminal UI renders `tmux capture-pane` output and sends input through
+  `tmux send-keys`.
+
+Changes:
+
+- `server/agent_server.py`
+  - Added terminal request models.
+  - Added tmux helpers for deterministic naming, create/attach, capture,
+    send input, interrupt key support, and kill.
+  - Added endpoints:
+    - `GET /api/sessions/{session_id}/terminal`
+    - `POST /api/sessions/{session_id}/terminal/open`
+    - `POST /api/sessions/{session_id}/terminal/input`
+    - `DELETE /api/sessions/{session_id}/terminal`
+  - Chat deletion best-effort kills the chat's tmux session.
+- `Sources/ZenithCore/ZenithCore.swift`
+  - Added `ZTerminalSnapshot`.
+- `Sources/ZenithDock/State/AppStore.swift`
+  - Added terminal snapshot/input state and terminal API methods.
+- `Sources/ZenithDock/Views/InspectorView.swift`
+  - Added a Mac Terminal inspector section and terminal sheet.
+  - Supports start/open, send command, refresh, interrupt, and kill.
+- `Sources/ZenithDockIOS/State/MobileAppStore.swift`
+  - Added mobile terminal state and API methods.
+- `Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift`
+  - Added iPhone/iPad Terminal section and terminal sheet.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ### Wide-Screen Response Width
 
 User issue:

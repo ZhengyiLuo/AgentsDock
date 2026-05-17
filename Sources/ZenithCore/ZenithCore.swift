@@ -329,6 +329,21 @@ public struct ZProcessLogTail: Codable, Hashable, Sendable {
     public var generated_at: String?
 }
 
+public struct ZTerminalSnapshot: Codable, Hashable, Sendable {
+    public var session_id: String
+    public var name: String
+    public var exists: Bool
+    public var created: Bool?
+    public var cwd: String?
+    public var command: String?
+    public var pane_pid: Int?
+    public var attached: Int?
+    public var lines: Int?
+    public var text: String?
+    public var killed: Bool?
+    public var updated_at: String?
+}
+
 public struct ZTool: Codable, Hashable, Sendable {
     public var id: String?
     public var name: String

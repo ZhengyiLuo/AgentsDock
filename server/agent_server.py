@@ -254,6 +254,16 @@ class HandoffDigestRequest(BaseModel):
     user_prompt: str | None = None
 
 
+class TerminalOpenRequest(BaseModel):
+    cwd: str | None = None
+
+
+class TerminalInputRequest(BaseModel):
+    text: str | None = None
+    enter: bool = True
+    key: str | None = None
+
+
 class CreateJobRequest(BaseModel):
     session_id: str
     title: str
@@ -604,6 +614,8 @@ LOG_PATH_SUFFIXES = {
 }
 LIVE_STDOUT_MAX_LINES = 400
 LIVE_STDOUT_MAX_LINE_CHARS = 12_000
+TMUX_CAPTURE_MAX_LINES = 2_000
+TMUX_COMMAND_TIMEOUT_SECONDS = 4
 
 
 async def append_event(session_id: str, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -947,6 +959,126 @@ def command_log_hints(args: str, cwd: str | None) -> list[dict[str, str]]:
                 hints.append({"source": "command", "path": str(candidate.resolve())})
                 break
     return hints
+
+
+def tmux_bin() -> str:
+    found = shutil.which("tmux")
+    if not found:
+        raise HTTPException(status_code=503, detail="tmux is not installed on the agent server")
+    return found
+
+
+def terminal_session_name(session_id: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_]", "_", session_id).strip("_") or "session"
+    return f"zd_{clean[:80]}"
+
+
+def run_tmux(args: list[str], *, check: bool = True, timeout: float = TMUX_COMMAND_TIMEOUT_SECONDS) -> subprocess.CompletedProcess[str]:
+    try:
+        result = subprocess.run(
+            [tmux_bin(), *args],
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="tmux command timed out")
+    if check and result.returncode != 0:
+        detail = (result.stderr or result.stdout or "tmux command failed").strip()
+        raise HTTPException(status_code=500, detail=detail[:1000])
+    return result
+
+
+def tmux_session_exists(name: str) -> bool:
+    return run_tmux(["has-session", "-t", name], check=False).returncode == 0
+
+
+def ensure_terminal_session(session_id: str, cwd: str | None = None) -> dict[str, Any]:
+    sess = STORE.sessions.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="session not found")
+    name = terminal_session_name(session_id)
+    created = False
+    if not tmux_session_exists(name):
+        workdir = existing_cwd(cwd or sess.get("cwd") or DEFAULT_CWD)
+        run_tmux(["new-session", "-d", "-s", name, "-c", workdir])
+        created = True
+    return terminal_snapshot(session_id, created=created)
+
+
+def terminal_snapshot(session_id: str, *, lines: int = 240, created: bool = False) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    name = terminal_session_name(session_id)
+    exists = tmux_session_exists(name)
+    line_count = max(20, min(int(lines or 240), TMUX_CAPTURE_MAX_LINES))
+    capture = ""
+    cwd = None
+    command = None
+    pane_pid = None
+    attached = None
+    if exists:
+        capture = run_tmux(["capture-pane", "-t", name, "-p", "-J", "-S", f"-{line_count}"]).stdout
+        meta = run_tmux(
+            [
+                "display-message",
+                "-p",
+                "-t",
+                name,
+                "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{session_attached}",
+            ],
+            check=False,
+        )
+        if meta.returncode == 0:
+            parts = meta.stdout.rstrip("\n").split("\t")
+            cwd = parts[0] if len(parts) > 0 and parts[0] else None
+            command = parts[1] if len(parts) > 1 and parts[1] else None
+            pane_pid = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+            attached = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+    return {
+        "session_id": session_id,
+        "name": name,
+        "exists": exists,
+        "created": created,
+        "cwd": cwd,
+        "command": command,
+        "pane_pid": pane_pid,
+        "attached": attached,
+        "lines": line_count,
+        "text": capture,
+        "updated_at": now_iso(),
+    }
+
+
+def send_terminal_input(session_id: str, text: str | None = None, *, enter: bool = True, key: str | None = None) -> dict[str, Any]:
+    name = terminal_session_name(session_id)
+    if not tmux_session_exists(name):
+        ensure_terminal_session(session_id)
+    if key:
+        run_tmux(["send-keys", "-t", name, key])
+    if text:
+        run_tmux(["send-keys", "-t", name, "-l", text])
+    if enter:
+        run_tmux(["send-keys", "-t", name, "Enter"])
+    return terminal_snapshot(session_id)
+
+
+def kill_terminal_session(session_id: str) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    name = terminal_session_name(session_id)
+    existed = tmux_session_exists(name)
+    if existed:
+        run_tmux(["kill-session", "-t", name], check=False)
+    return {
+        "session_id": session_id,
+        "name": name,
+        "exists": False,
+        "killed": existed,
+        "text": "",
+        "updated_at": now_iso(),
+    }
 
 
 def process_depth(pid: int, rows_by_pid: dict[int, dict[str, Any]], selected: set[int]) -> int:
@@ -2617,6 +2749,26 @@ async def runtime_catalog() -> dict[str, Any]:
     return await asyncio.to_thread(discover_runtime_catalog)
 
 
+@app.get("/api/sessions/{session_id}/terminal")
+async def get_session_terminal(session_id: str, lines: int = 240) -> dict[str, Any]:
+    return await asyncio.to_thread(terminal_snapshot, session_id, lines=lines)
+
+
+@app.post("/api/sessions/{session_id}/terminal/open")
+async def open_session_terminal(session_id: str, req: TerminalOpenRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(ensure_terminal_session, session_id, req.cwd)
+
+
+@app.post("/api/sessions/{session_id}/terminal/input")
+async def input_session_terminal(session_id: str, req: TerminalInputRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(send_terminal_input, session_id, req.text, enter=req.enter, key=req.key)
+
+
+@app.delete("/api/sessions/{session_id}/terminal")
+async def delete_session_terminal(session_id: str) -> dict[str, Any]:
+    return await asyncio.to_thread(kill_terminal_session, session_id)
+
+
 @app.get("/api/sessions/{session_id}/processes")
 async def get_session_processes(session_id: str) -> dict[str, Any]:
     if session_id not in STORE.sessions:
@@ -2725,6 +2877,8 @@ async def delete_session(session_id: str) -> dict[str, Any]:
         proc = active.get("proc")
         if proc:
             await terminate_process_tree(proc)
+    with suppress(Exception):
+        await asyncio.to_thread(kill_terminal_session, session_id)
     deleted = await STORE.delete(session_id)
     deleted_jobs = await JOBS.delete_for_session(session_id)
     return {"ok": True, "deleted": deleted, "deleted_jobs": deleted_jobs}

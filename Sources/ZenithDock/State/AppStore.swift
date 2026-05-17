@@ -41,6 +41,9 @@ final class AppStore: ObservableObject {
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
+    @Published var terminalSnapshot: ZTerminalSnapshot?
+    @Published var isLoadingTerminal = false
+    @Published var terminalInput = ""
 
     private let initialSessionEventLimit = 80
     private let olderHistoryPageLimit = 100
@@ -401,6 +404,8 @@ final class AppStore: ObservableObject {
         status = serverReachable ? "Loading chat" : "Server offline"
         processSnapshot = nil
         processLogTail = nil
+        terminalSnapshot = nil
+        terminalInput = ""
         AppLogger.info("select session=\(sessionID)")
         var loadedFromCache = false
         if let cached = memoryCachedChat(sessionID) {
@@ -578,6 +583,84 @@ final class AppStore: ObservableObject {
             processLogTail = res
         } catch {
             AppLogger.warning("process log tail failed \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+        }
+    }
+
+    func refreshSelectedTerminal(showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        isLoadingTerminal = true
+        defer { isLoadingTerminal = false }
+        do {
+            let res: ZTerminalSnapshot = try await api.get(
+                "/api/sessions/\(sid)/terminal",
+                queryItems: [URLQueryItem(name: "lines", value: "260")]
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+        } catch {
+            AppLogger.warning("terminal refresh failed \(serverErrorMessage(error) ?? "\(error)")")
+            if showErrors {
+                reportServerError(error)
+            }
+        }
+    }
+
+    func openSelectedTerminal(showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        struct Body: Encodable {
+            var cwd: String?
+        }
+        isLoadingTerminal = true
+        defer { isLoadingTerminal = false }
+        do {
+            let res: ZTerminalSnapshot = try await api.post(
+                "/api/sessions/\(sid)/terminal/open",
+                body: Body(cwd: selectedSession?.cwd)
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+        } catch {
+            AppLogger.warning("terminal open failed \(serverErrorMessage(error) ?? "\(error)")")
+            if showErrors {
+                reportServerError(error)
+            }
+        }
+    }
+
+    func sendTerminalInput(_ text: String? = nil, enter: Bool = true, key: String? = nil) async {
+        guard let sid = selectedSessionID else { return }
+        struct Body: Encodable {
+            var text: String?
+            var enter: Bool
+            var key: String?
+        }
+        let outgoing = text ?? terminalInput
+        guard key != nil || !outgoing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || enter else { return }
+        do {
+            let res: ZTerminalSnapshot = try await api.post(
+                "/api/sessions/\(sid)/terminal/input",
+                body: Body(text: outgoing, enter: enter, key: key)
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+            if text == nil && key == nil {
+                terminalInput = ""
+            }
+        } catch {
+            AppLogger.warning("terminal input failed \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+        }
+    }
+
+    func killSelectedTerminal() async {
+        guard let sid = selectedSessionID else { return }
+        do {
+            let res: ZTerminalSnapshot = try await api.delete("/api/sessions/\(sid)/terminal")
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+        } catch {
+            AppLogger.warning("terminal kill failed \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
         }
     }
