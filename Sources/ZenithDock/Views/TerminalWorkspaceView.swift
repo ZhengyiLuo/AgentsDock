@@ -6,6 +6,8 @@ import ZenithCore
 struct TerminalWorkspaceView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var selectedPane: WorkspacePane
+    @Binding var serverSettingsOpen: Bool
+    let isActive: Bool
     @AppStorage("terminalSSHUser") private var terminalSSHUser = "zen"
     @State private var confirmKill = false
     @State private var terminalStatus = "Terminal idle"
@@ -19,8 +21,8 @@ struct TerminalWorkspaceView: View {
             content
         }
         .background(Theme.window)
-        .task(id: store.selectedSessionID) {
-            guard store.selectedSessionID != nil else { return }
+        .task(id: "\(store.selectedSessionID ?? "none"):\(isActive)") {
+            guard isActive, store.selectedSessionID != nil else { return }
             terminalStatus = "Creating or attaching tmux..."
             await store.openSelectedTerminal(showErrors: false)
             await store.refreshSelectedTerminal(showErrors: false)
@@ -78,6 +80,9 @@ struct TerminalWorkspaceView: View {
                 }
             }
             .frame(minWidth: 220, maxWidth: .infinity, alignment: .leading)
+
+            ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
+                .layoutPriority(3)
 
             WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
 
@@ -283,8 +288,13 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
             ].joined(separator: " ")
             let args = [
                 "-tt",
+                "-F", "/dev/null",
                 "-o", "ServerAliveInterval=30",
                 "-o", "ServerAliveCountMax=2",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "UserKnownHostsFile=\(knownHostsPath())",
+                "-o", "GlobalKnownHostsFile=/dev/null",
+                "-o", "UpdateHostKeys=no",
                 "\(identity.user)@\(identity.host)",
                 remoteCommand
             ]
@@ -350,7 +360,17 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
             env["COLORTERM"] = "truecolor"
             env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
             env["LC_ALL"] = env["LC_ALL"] ?? "en_US.UTF-8"
+            env["SSH_ASKPASS_REQUIRE"] = "never"
             return env.map { "\($0.key)=\($0.value)" }
+        }
+
+        private func knownHostsPath() -> String {
+            let fm = FileManager.default
+            let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            let dir = base.appendingPathComponent("ZenithDock", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.appendingPathComponent("ssh_known_hosts").path
         }
     }
 }

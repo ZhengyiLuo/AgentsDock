@@ -16,6 +16,38 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Terminal Tab Visibility And Sandboxed SSH
+
+Problem:
+
+- The new tab strip pushed the server status button into the scrollable header
+  controls, so the green/red server state was no longer reliably visible.
+- Switching between Chat and Terminal felt sluggish because the root view was
+  tearing one workspace down and constructing the other.
+- The embedded SSH terminal failed in the signed app with:
+  `hostkeys_find_by_key_hostfile ... Operation not permitted` because sandboxed
+  `/usr/bin/ssh` could not read `/Users/zen/.ssh/known_hosts`.
+
+Decision:
+
+- Pin the server status pill outside the scrollable toolbar controls in the
+  Chat header and add the same pill to the Terminal header.
+- Keep Chat and Terminal mounted in a `ZStack` and switch by visibility/hit
+  testing, so the terminal process is not destroyed on every tab switch.
+- Gate terminal tmux creation on the terminal tab actually being active.
+- Launch SSH with an app-owned known-hosts file under Application Support,
+  `StrictHostKeyChecking=accept-new`, `GlobalKnownHostsFile=/dev/null`, and
+  `SSH_ASKPASS_REQUIRE=never`.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` was refreshed.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ## 2026-05-17 Follow-Up - Real Mac Terminal Tab
 
 Problem:

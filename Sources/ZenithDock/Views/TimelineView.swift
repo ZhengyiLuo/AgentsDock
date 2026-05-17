@@ -957,6 +957,9 @@ struct HeaderView: View {
                 .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(2)
 
+            ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
+                .layoutPriority(3)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 headerControls
                     .fixedSize(horizontal: true, vertical: true)
@@ -1010,7 +1013,6 @@ struct HeaderView: View {
         HStack(spacing: 8) {
             WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
             .help("Switch between chat and the per-chat tmux terminal")
-            ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
             Button {
                 Task { await store.refresh() }
             } label: {

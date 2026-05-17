@@ -83,18 +83,25 @@ struct RootView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
         } content: {
-            Group {
-                switch selectedPane {
-                case .chat:
-                    TimelineView(
-                        importerOpen: $importerOpen,
-                        resumeOpen: $resumeOpen,
-                        serverSettingsOpen: $serverSettingsOpen,
-                        selectedPane: $selectedPane
-                    )
-                case .terminal:
-                    TerminalWorkspaceView(selectedPane: $selectedPane)
-                }
+            ZStack {
+                TimelineView(
+                    importerOpen: $importerOpen,
+                    resumeOpen: $resumeOpen,
+                    serverSettingsOpen: $serverSettingsOpen,
+                    selectedPane: $selectedPane
+                )
+                .opacity(selectedPane == .chat ? 1 : 0)
+                .allowsHitTesting(selectedPane == .chat)
+                .accessibilityHidden(selectedPane != .chat)
+
+                TerminalWorkspaceView(
+                    selectedPane: $selectedPane,
+                    serverSettingsOpen: $serverSettingsOpen,
+                    isActive: selectedPane == .terminal
+                )
+                .opacity(selectedPane == .terminal ? 1 : 0)
+                .allowsHitTesting(selectedPane == .terminal)
+                .accessibilityHidden(selectedPane != .terminal)
             }
             .navigationSplitViewColumnWidth(min: 560, ideal: 720)
         } detail: {
@@ -135,18 +142,21 @@ struct ServerConnectionToolbarButton: View {
             isPresented.toggle()
         } label: {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(store.serverReachable ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
+                Image(systemName: store.serverReachable ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(store.serverReachable ? Color.green : Color.red)
                 Text(store.serverReachable ? "Online" : "Offline")
                     .font(.caption.weight(.semibold))
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 86)
         }
         .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: true)
         .help("Server settings")
     }
 }
