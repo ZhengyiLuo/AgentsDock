@@ -934,3 +934,23 @@ Changes:
 Verification:
 
 - `python3 -m py_compile server/agent_server.py` passed.
+
+### Mac Terminal Tab Header Polish
+
+User issue:
+
+- The new Chat/Terminal switcher looked like a form control in the Mac header:
+  the visible `Pane` label consumed space and made adjacent controls look
+  cramped.
+- The terminal `Attach` button was unclear; it sounded like file attachment
+  rather than reconnecting to tmux.
+
+Changes:
+
+- `Sources/ZenithDock/Views/TimelineView.swift`
+  - Hid the picker label so the header shows only the Chat/Terminal segmented
+    tab control.
+- `Sources/ZenithDock/Views/TerminalWorkspaceView.swift`
+  - Hid the duplicate picker label in the Terminal tab header.
+  - Renamed `Attach` to `Reconnect` when a tmux session exists, and `Start tmux`
+    when one does not.

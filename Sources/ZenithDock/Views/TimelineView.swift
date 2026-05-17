@@ -1014,6 +1014,7 @@ struct HeaderView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .frame(width: 156)
             .disabled(store.selectedSession == nil)
             .help("Switch between chat and the per-chat tmux terminal")

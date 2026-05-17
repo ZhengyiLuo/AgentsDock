@@ -82,15 +82,17 @@ struct TerminalWorkspaceView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .labelsHidden()
                     .frame(width: 156)
 
                     Button {
                         Task { await store.openSelectedTerminal() }
                     } label: {
-                        Label(store.terminalSnapshot?.exists == true ? "Attach" : "Start", systemImage: "terminal")
+                        Label(store.terminalSnapshot?.exists == true ? "Reconnect" : "Start tmux", systemImage: "terminal")
                     }
                     .labelStyle(.titleAndIcon)
                     .disabled(store.selectedSession == nil)
+                    .help("Open or reconnect the per-chat tmux session")
 
                     Button {
                         Task { await store.sendTerminalInput("", enter: false, key: "C-c", refresh: false) }
