@@ -57,6 +57,15 @@ final class MobileAppStore: ObservableObject {
         var omittedHistoryEventCount: Int
     }
 
+    private struct SessionEventsResponse: Codable, Sendable {
+        let session: ZSession
+        let events: [ZEvent]
+        let events_omitted_before: Int?
+        let events_omitted_after: Int?
+        let latest_seq: Int?
+        let event_count: Int?
+    }
+
     init() {
         let savedURL = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
         let parts = Self.serverParts(from: savedURL)
@@ -575,13 +584,8 @@ final class MobileAppStore: ObservableObject {
         guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
 
         do {
-            struct Response: Codable {
-                let session: ZSession
-                let events: [ZEvent]
-                let events_omitted_before: Int?
-            }
             let requestAfter = loadedFromCache ? lastSeq : 0
-            let res: Response = try await api.get(
+            let res: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: loadedFromCache && requestAfter > 0 ? [
                     URLQueryItem(name: "after", value: "\(requestAfter)"),
@@ -597,11 +601,24 @@ final class MobileAppStore: ObservableObject {
                 sessions[idx] = res.session
             }
             if loadedFromCache {
-                mergeEvents(res.events)
+                let omittedAfter = res.events_omitted_after ?? 0
+                let pageLikelyCapped = res.events_omitted_after == nil && res.events.count >= initialEventLimit
+                if omittedAfter > 0 || pageLikelyCapped {
+                    let fresh: SessionEventsResponse = try await api.get(
+                        "/api/sessions/\(sessionID)",
+                        queryItems: [
+                            URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
+                            URLQueryItem(name: "tail", value: "true")
+                        ]
+                    )
+                    guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
+                    applySessionEventSnapshot(fresh, sessionID: sessionID)
+                } else {
+                    mergeEvents(res.events)
+                    latestSeenSeq = max(latestSeenSeq, res.latest_seq ?? 0)
+                }
             } else {
-                events = timelineEvents(from: res.events)
-                latestSeenSeq = events.map(\.seq).max() ?? 0
-                omittedHistoryEventCount = res.events_omitted_before ?? 0
+                applySessionEventSnapshot(res, sessionID: sessionID)
             }
             refreshSessionFilesFromLoadedEvents()
             isLoading = false
@@ -1085,6 +1102,16 @@ final class MobileAppStore: ObservableObject {
         events.append(contentsOf: incomingEvents.filter { !existingIDs.contains($0.id) })
         events.sort { $0.seq < $1.seq }
         latestSeenSeq = max(latestSeenSeq, incomingEvents.map(\.seq).max() ?? 0)
+        refreshSessionFilesFromLoadedEvents()
+    }
+
+    private func applySessionEventSnapshot(_ response: SessionEventsResponse, sessionID: String) {
+        if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions[idx] = response.session
+        }
+        events = timelineEvents(from: response.events)
+        omittedHistoryEventCount = response.events_omitted_before ?? 0
+        latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
     }
 

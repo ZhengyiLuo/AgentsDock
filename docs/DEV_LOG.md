@@ -615,6 +615,44 @@ Changes:
 Verification:
 
 - `python3 -m py_compile server/agent_server.py` passed.
+
+### Stale Cache Catch-Up Without Live Backlog Replay
+
+User issue:
+
+- Opening the app on another machine, or after not syncing for a while, made
+  the app churn through old chat history.
+- Old `turn_started` / `turn_finished` traffic arrived over the WebSocket as if
+  it were live, causing visible "running" flicker and sluggish catch-up.
+
+Root cause:
+
+- The app showed cached chat history, fetched one small page after the cached
+  sequence, then opened the WebSocket from that still-stale sequence.
+- If many events happened while the device was away, the socket replayed the
+  backlog one event at a time through the live ingestion path.
+
+Changes:
+
+- `server/agent_server.py`
+  - `/api/sessions/{session_id}` now includes `latest_seq`,
+    `events_omitted_after`, and `event_count` metadata for after-cache
+    requests.
+  - Sequence-bound scanning is only used for catch-up requests that need to know
+    whether more events remain after the returned page.
+- `Sources/ZenithDock/State/AppStore.swift`
+  - Mac now uses cached chat only for instant display.
+  - If the cache is stale beyond one page, it loads the latest tail snapshot and
+    connects the live socket from the latest sequence instead of replaying the
+    backlog.
+- `Sources/ZenithDockIOS/State/MobileAppStore.swift`
+  - iPhone/iPad use the same stale-cache catch-up behavior.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build` passed.
 - `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
   passed.
 - `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`

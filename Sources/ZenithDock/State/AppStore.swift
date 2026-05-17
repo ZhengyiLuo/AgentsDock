@@ -74,6 +74,15 @@ final class AppStore: ObservableObject {
         var cachedAt: String
     }
 
+    private struct SessionEventsResponse: Codable, Sendable {
+        let session: ZSession
+        let events: [ZEvent]
+        let events_omitted_before: Int?
+        let events_omitted_after: Int?
+        let latest_seq: Int?
+        let event_count: Int?
+    }
+
     var api: APIClient {
         APIClient(
             baseURL: ZenithServerURL.url(serverURLString, default: defaultAgentServerURLString),
@@ -444,13 +453,8 @@ final class AppStore: ObservableObject {
             return
         }
         do {
-            struct Response: Codable {
-                let session: ZSession
-                let events: [ZEvent]
-                let events_omitted_before: Int?
-            }
             let requestAfter = loadedFromCache ? lastSeq : 0
-            let res: Response = try await api.get(
+            let res: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: loadedFromCache && requestAfter > 0 ? [
                     URLQueryItem(name: "after", value: "\(requestAfter)"),
@@ -469,12 +473,29 @@ final class AppStore: ObservableObject {
                 return
             }
             if loadedFromCache {
-                mergeEvents(res.events)
+                let omittedAfter = res.events_omitted_after ?? 0
+                let pageLikelyCapped = res.events_omitted_after == nil && res.events.count >= initialSessionEventLimit
+                if omittedAfter > 0 || pageLikelyCapped {
+                    AppLogger.info("cache stale session=\(sessionID) after=\(requestAfter) omitted_after=\(omittedAfter); loading latest tail")
+                    let fresh: SessionEventsResponse = try await api.get(
+                        "/api/sessions/\(sessionID)",
+                        queryItems: [
+                            URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
+                            URLQueryItem(name: "tail", value: "true")
+                        ]
+                    )
+                    guard selectedSessionID == sessionID, selectionGeneration == generation else {
+                        AppLogger.info("drop stale latest-tail response session=\(sessionID)")
+                        return
+                    }
+                    applySessionEventSnapshot(fresh, sessionID: sessionID)
+                    status = "Caught up to latest chat"
+                } else {
+                    mergeEvents(res.events)
+                    latestSeenSeq = max(latestSeenSeq, res.latest_seq ?? 0)
+                }
             } else {
-                events = timelineEvents(from: res.events)
-                omittedHistoryEventCount = res.events_omitted_before ?? 0
-                latestSeenSeq = events.map(\.seq).max() ?? 0
-                rebuildDisplayEvents()
+                applySessionEventSnapshot(res, sessionID: sessionID)
             }
             refreshSessionFilesFromLoadedEvents()
             loadedSessionID = sessionID
@@ -1266,6 +1287,17 @@ final class AppStore: ObservableObject {
         source.first { event in
             event.file?.id == fileID || event.artifact?.id == fileID
         }
+    }
+
+    private func applySessionEventSnapshot(_ response: SessionEventsResponse, sessionID: String) {
+        if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions[idx] = response.session
+        }
+        events = timelineEvents(from: response.events)
+        omittedHistoryEventCount = response.events_omitted_before ?? 0
+        latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
+        refreshSessionFilesFromLoadedEvents()
+        rebuildDisplayEvents()
     }
 
     private func requestScrollToEvent(_ eventID: String) {

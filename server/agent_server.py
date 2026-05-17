@@ -1559,6 +1559,30 @@ def read_events(
     return list(tail_out) if tail_out is not None else out
 
 
+def event_seq_bounds(session_id: str) -> tuple[int, int, int]:
+    path = events_path(session_id)
+    if not path.exists():
+        return 0, 0, 0
+    first_seq = 0
+    latest_seq = 0
+    count = 0
+    for line in path.open("r", encoding="utf-8", errors="ignore"):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        seq = int(event.get("seq", 0))
+        if seq <= 0:
+            continue
+        if first_seq <= 0:
+            first_seq = seq
+        latest_seq = seq
+        count += 1
+    return first_seq, latest_seq, count
+
+
 def compact_import_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text.strip())
     if len(text) <= MAX_IMPORTED_TEXT_CHARS:
@@ -3200,11 +3224,25 @@ async def get_session(
     if not sess:
         raise HTTPException(status_code=404, detail="session not found")
     events = read_events(session_id, after=after, before=before, limit=limit, tail=tail and after <= 0)
+    if after > 0 and before is None:
+        _, latest_seq, event_count = event_seq_bounds(session_id)
+    else:
+        latest_seq = int(events[-1].get("seq", 0)) if events else 0
+        event_count = 0
     omitted_before = max(0, int(events[0].get("seq", 1)) - 1) if tail and after <= 0 and events else 0
+    if events:
+        omitted_after = max(0, latest_seq - int(events[-1].get("seq", 0)))
+    elif after > 0:
+        omitted_after = max(0, latest_seq - after)
+    else:
+        omitted_after = 0
     return {
         "session": public_session(sess),
         "events": events,
         "events_omitted_before": omitted_before,
+        "events_omitted_after": omitted_after,
+        "latest_seq": latest_seq,
+        "event_count": event_count,
     }
 
 
