@@ -58,6 +58,12 @@ if DEFAULT_BACKEND not in VALID_BACKENDS:
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("ZENITHBOT_REQUEST_TIMEOUT_SECONDS", "86400"))
 CODEX_APP_SERVER_TIMEOUT_SECONDS = int(os.environ.get("ZENITHBOT_CODEX_APP_SERVER_TIMEOUT_SECONDS", "30"))
 RUNTIME_CATALOG_TIMEOUT_SECONDS = float(os.environ.get("ZENITHBOT_RUNTIME_CATALOG_TIMEOUT_SECONDS", "6"))
+JOB_SCHEDULER_INTERVAL_SECONDS = float(os.environ.get("ZENITHBOT_JOB_SCHEDULER_INTERVAL_SECONDS", "5"))
+JOB_BUSY_RETRY_SECONDS = int(os.environ.get("ZENITHBOT_JOB_BUSY_RETRY_SECONDS", "60"))
+JOB_MAX_ACTIVE_RUNS = int(os.environ.get("ZENITHBOT_JOB_MAX_ACTIVE_RUNS", "2"))
+JOB_MAX_LOAD_PER_CPU = float(os.environ.get("ZENITHBOT_JOB_MAX_LOAD_PER_CPU", "1.25"))
+JOB_MIN_AVAILABLE_MEM_MB = int(os.environ.get("ZENITHBOT_JOB_MIN_AVAILABLE_MEM_MB", "4096"))
+JOB_DEFER_EVENT_MIN_SECONDS = int(os.environ.get("ZENITHBOT_JOB_DEFER_EVENT_MIN_SECONDS", "300"))
 IDLE_WARN_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_WARN_SECONDS", "1800"))
 IDLE_KILL_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_KILL_SECONDS", "21600"))
 STOP_GRACE_SECONDS = float(os.environ.get("ZENITHBOT_STOP_GRACE_SECONDS", "2.0"))
@@ -168,6 +174,59 @@ def ensure_dirs(session_id: str | None = None) -> None:
         session_dir(session_id).mkdir(parents=True, exist_ok=True)
         uploads_dir(session_id).mkdir(parents=True, exist_ok=True)
         manifests_dir(session_id).mkdir(parents=True, exist_ok=True)
+
+
+EVENT_SEQ_CACHE: dict[str, int] = {}
+EVENT_SEQ_LOCK = asyncio.Lock()
+
+
+def last_event_seq_from_file(path: Path) -> int:
+    """Read the last JSONL event seq without scanning huge chat histories."""
+    if not path.exists():
+        return 0
+    try:
+        with path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            if size <= 0:
+                return 0
+            buffer = b""
+            pos = size
+            read_total = 0
+            max_backscan = min(size, 16 * 1024 * 1024)
+            while pos > 0 and read_total < max_backscan:
+                chunk_size = min(pos, 256 * 1024, max_backscan - read_total)
+                pos -= chunk_size
+                f.seek(pos)
+                buffer = f.read(chunk_size) + buffer
+                read_total += chunk_size
+                lines = buffer.splitlines()
+                if pos > 0 and buffer and not buffer.startswith(b"\n"):
+                    lines = lines[1:]
+                for raw_line in reversed(lines):
+                    if not raw_line.strip():
+                        continue
+                    with suppress(Exception):
+                        event = json.loads(raw_line.decode("utf-8", "replace"))
+                        return int(event.get("seq") or 0)
+    except Exception as exc:
+        logger.warning("failed to read last event seq for %s: %s", path, exc)
+    return 0
+
+
+async def next_event_seq(session_id: str, path: Path) -> int:
+    async with EVENT_SEQ_LOCK:
+        seq = EVENT_SEQ_CACHE.get(session_id)
+        if seq is None:
+            seq = await asyncio.to_thread(last_event_seq_from_file, path)
+        seq += 1
+        EVENT_SEQ_CACHE[session_id] = seq
+        return seq
+
+
+async def forget_event_seq(session_id: str) -> None:
+    async with EVENT_SEQ_LOCK:
+        EVENT_SEQ_CACHE.pop(session_id, None)
 
 
 def token_matches(candidate: str | None) -> bool:
@@ -382,6 +441,7 @@ class SessionStore:
             await self.save()
         if existed:
             shutil.rmtree(session_dir(sid), ignore_errors=True)
+            await forget_event_seq(sid)
         return existed is not None
 
     async def save_provider_session(self, sid: str, provider_id: str, backend: str) -> None:
@@ -502,6 +562,32 @@ class JobStore:
             job["updated_at"] = now_iso()
             await self.save()
 
+    async def defer(self, jid: str, reason: str, delay_seconds: int | None = None) -> None:
+        delay = int(delay_seconds or JOB_BUSY_RETRY_SECONDS)
+        emit_event = False
+        event_job: dict[str, Any] | None = None
+        async with self._lock:
+            job = self.jobs.get(jid)
+            if not job:
+                return
+            now = time.time()
+            job["next_run_at"] = now + max(delay, 5)
+            job["last_deferred_at"] = now_iso()
+            job["last_defer_reason"] = reason
+            last_emit = float(job.get("_last_defer_event_at") or 0)
+            if JOB_DEFER_EVENT_MIN_SECONDS <= 0 or now - last_emit >= JOB_DEFER_EVENT_MIN_SECONDS:
+                job["_last_defer_event_at"] = now
+                emit_event = True
+                event_job = public_job(job)
+            job["updated_at"] = now_iso()
+            await self.save()
+        if emit_event and event_job and event_job.get("session_id"):
+            await append_event(str(event_job["session_id"]), "job_deferred", {
+                "job": event_job,
+                "job_id": jid,
+                "message": f"Scheduled job deferred: {event_job.get('title') or jid} — {reason}",
+            })
+
     async def run_job(self, jid: str) -> dict[str, Any]:
         job = self.jobs.get(jid)
         if not job:
@@ -529,7 +615,7 @@ class JobStore:
     async def scheduler_loop(self) -> None:
         logger.info("job scheduler started")
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(max(JOB_SCHEDULER_INTERVAL_SECONDS, 1.0))
             now = time.time()
             due = [
                 job["id"] for job in list(self.jobs.values())
@@ -539,11 +625,9 @@ class JobStore:
                 job = self.jobs.get(jid)
                 if not job:
                     continue
-                async with ACTIVE_LOCK:
-                    busy = job["session_id"] in BUSY_SESSIONS
-                if busy:
-                    job["next_run_at"] = time.time() + 30
-                    await self.save()
+                blocker = await scheduled_job_blocker(str(job.get("session_id") or ""))
+                if blocker:
+                    await self.defer(jid, blocker, JOB_BUSY_RETRY_SECONDS)
                     continue
                 try:
                     await self.run_job(jid)
@@ -621,12 +705,9 @@ TMUX_COMMAND_TIMEOUT_SECONDS = 4
 async def append_event(session_id: str, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     ensure_dirs(session_id)
     path = events_path(session_id)
-    seq = 0
-    if path.exists():
-        with suppress(Exception):
-            seq = sum(1 for _ in path.open("r", encoding="utf-8"))
+    seq = await next_event_seq(session_id, path)
     event = {
-        "seq": seq + 1,
+        "seq": seq,
         "id": f"evt_{uuid.uuid4().hex[:16]}",
         "session_id": session_id,
         "type": event_type,
@@ -1843,10 +1924,65 @@ def public_session(sess: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
-    out = dict(job)
+    out = {k: v for k, v in job.items() if not str(k).startswith("_")}
     if out.get("next_run_at"):
         out["next_run_at_iso"] = datetime.fromtimestamp(float(out["next_run_at"]), tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     return out
+
+
+def host_pressure_snapshot() -> dict[str, Any]:
+    load_1m: float | None = None
+    load_per_cpu: float | None = None
+    cpu_count = os.cpu_count() or 1
+    with suppress(Exception):
+        load_1m = float(os.getloadavg()[0])
+        load_per_cpu = load_1m / max(cpu_count, 1)
+
+    available_mem_mb: int | None = None
+    meminfo = Path("/proc/meminfo")
+    if meminfo.exists():
+        with suppress(Exception):
+            for line in meminfo.read_text(errors="replace").splitlines():
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        available_mem_mb = int(int(parts[1]) / 1024)
+                    break
+
+    return {
+        "load_1m": load_1m,
+        "load_per_cpu": load_per_cpu,
+        "cpu_count": cpu_count,
+        "available_mem_mb": available_mem_mb,
+        "max_load_per_cpu": JOB_MAX_LOAD_PER_CPU,
+        "min_available_mem_mb": JOB_MIN_AVAILABLE_MEM_MB,
+        "max_active_runs": JOB_MAX_ACTIVE_RUNS,
+    }
+
+
+async def scheduled_job_blocker(session_id: str) -> str | None:
+    async with ACTIVE_LOCK:
+        if session_id in BUSY_SESSIONS:
+            return "chat already has a running turn"
+        active_count = len(BUSY_SESSIONS)
+
+    if JOB_MAX_ACTIVE_RUNS > 0 and active_count >= JOB_MAX_ACTIVE_RUNS:
+        return f"{active_count} active agent run(s)"
+
+    pressure = host_pressure_snapshot()
+    load_per_cpu = pressure.get("load_per_cpu")
+    if isinstance(load_per_cpu, (int, float)) and load_per_cpu >= JOB_MAX_LOAD_PER_CPU:
+        return f"host load high ({load_per_cpu:.2f}/CPU)"
+
+    available_mem_mb = pressure.get("available_mem_mb")
+    if (
+        isinstance(available_mem_mb, int)
+        and JOB_MIN_AVAILABLE_MEM_MB > 0
+        and available_mem_mb < JOB_MIN_AVAILABLE_MEM_MB
+    ):
+        return f"low available memory ({available_mem_mb} MB)"
+
+    return None
 
 
 def runner_env() -> dict[str, str]:
@@ -2732,6 +2868,7 @@ async def health() -> dict[str, Any]:
         active = sorted(BUSY_SESSIONS)
     async with QUEUE_LOCK:
         queued = {sid: len(queue) for sid, queue in QUEUED_TURNS.items() if queue}
+    pressure = host_pressure_snapshot()
     return {
         "ok": True,
         "state_dir": str(STATE_DIR),
@@ -2739,8 +2876,10 @@ async def health() -> dict[str, Any]:
         "default_cwd": existing_cwd(DEFAULT_CWD),
         "auth_required": bool(AGENT_TOKEN),
         "active": active,
+        "active_count": len(active),
         "queued": queued,
         "jobs": len(JOBS.jobs),
+        "job_guard": pressure,
     }
 
 

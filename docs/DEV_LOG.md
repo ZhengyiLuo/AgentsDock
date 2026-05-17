@@ -790,3 +790,36 @@ Verification:
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
 - `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
   passed.
+
+### Server Job Backpressure And Event Append Fix
+
+User issue:
+
+- `zen-nv` became flaky and eventually stopped responding while loop jobs were
+  active.
+- `/api/health` accepted a TCP connection but did not return, which pointed to
+  a wedged or overloaded agent server/host rather than a simple offline port.
+
+Likely cause found:
+
+- `append_event` reread the whole chat `events.jsonl` file to compute the next
+  sequence number every time the server wrote an event.
+- Long chats plus recurring job output made that an O(history size) disk/CPU
+  hit for every assistant/tool/job event.
+- Scheduled jobs also had no global active-run or host-pressure guard, so jobs
+  across different chats could start together.
+
+Changes:
+
+- `server/agent_server.py`
+  - Added an in-memory event sequence cache initialized by tail-reading the
+    latest JSONL event instead of counting every line.
+  - Added scheduled-job backpressure for active run count, load per CPU, and
+    available memory.
+  - Deferred scheduled jobs now reschedule instead of launching when the host is
+    already busy or low on memory.
+  - `/api/health` now reports active run count and job guard thresholds/state.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
