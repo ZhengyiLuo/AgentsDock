@@ -329,6 +329,11 @@ class TerminalInputRequest(BaseModel):
     key: str | None = None
 
 
+class TerminalResizeRequest(BaseModel):
+    columns: int = 100
+    rows: int = 30
+
+
 class CreateJobRequest(BaseModel):
     session_id: str
     title: str
@@ -1178,6 +1183,8 @@ def terminal_snapshot(session_id: str, *, lines: int = 240, created: bool = Fals
     command = None
     pane_pid = None
     attached = None
+    columns = None
+    rows = None
     if exists:
         capture = run_tmux(["capture-pane", "-t", name, "-p", "-J", "-S", f"-{line_count}"]).stdout
         meta = run_tmux(
@@ -1186,7 +1193,7 @@ def terminal_snapshot(session_id: str, *, lines: int = 240, created: bool = Fals
                 "-p",
                 "-t",
                 name,
-                "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{session_attached}",
+                "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{session_attached}\t#{pane_width}\t#{pane_height}",
             ],
             check=False,
         )
@@ -1196,6 +1203,8 @@ def terminal_snapshot(session_id: str, *, lines: int = 240, created: bool = Fals
             command = parts[1] if len(parts) > 1 and parts[1] else None
             pane_pid = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
             attached = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+            columns = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else None
+            rows = int(parts[5]) if len(parts) > 5 and parts[5].isdigit() else None
     return {
         "session_id": session_id,
         "name": name,
@@ -1205,6 +1214,8 @@ def terminal_snapshot(session_id: str, *, lines: int = 240, created: bool = Fals
         "command": command,
         "pane_pid": pane_pid,
         "attached": attached,
+        "columns": columns,
+        "rows": rows,
         "lines": line_count,
         "text": capture,
         "updated_at": now_iso(),
@@ -1222,6 +1233,16 @@ def send_terminal_input(session_id: str, text: str | None = None, *, enter: bool
     if enter:
         run_tmux(["send-keys", "-t", name, "Enter"])
     return terminal_snapshot(session_id)
+
+
+def resize_terminal_pane(session_id: str, columns: int, rows: int) -> dict[str, Any]:
+    name = terminal_session_name(session_id)
+    if not tmux_session_exists(name):
+        ensure_terminal_session(session_id)
+    cols = max(40, min(int(columns or 100), 300))
+    line_count = max(10, min(int(rows or 30), 120))
+    run_tmux(["resize-pane", "-t", name, "-x", str(cols), "-y", str(line_count)], check=False)
+    return terminal_snapshot(session_id, lines=line_count)
 
 
 def kill_terminal_session(session_id: str) -> dict[str, Any]:
@@ -3148,6 +3169,11 @@ async def open_session_terminal(session_id: str, req: TerminalOpenRequest) -> di
 @app.post("/api/sessions/{session_id}/terminal/input")
 async def input_session_terminal(session_id: str, req: TerminalInputRequest) -> dict[str, Any]:
     return await asyncio.to_thread(send_terminal_input, session_id, req.text, enter=req.enter, key=req.key)
+
+
+@app.post("/api/sessions/{session_id}/terminal/resize")
+async def resize_session_terminal(session_id: str, req: TerminalResizeRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(resize_terminal_pane, session_id, req.columns, req.rows)
 
 
 @app.delete("/api/sessions/{session_id}/terminal")

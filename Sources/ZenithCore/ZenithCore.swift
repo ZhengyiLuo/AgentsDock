@@ -338,6 +338,8 @@ public struct ZTerminalSnapshot: Codable, Hashable, Sendable {
     public var command: String?
     public var pane_pid: Int?
     public var attached: Int?
+    public var columns: Int?
+    public var rows: Int?
     public var lines: Int?
     public var text: String?
     public var killed: Bool?

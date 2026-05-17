@@ -649,7 +649,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func sendTerminalInput(_ text: String? = nil, enter: Bool = true, key: String? = nil) async {
+    func sendTerminalInput(_ text: String? = nil, enter: Bool = true, key: String? = nil, refresh: Bool = true) async {
         guard let sid = selectedSessionID else { return }
         struct Body: Encodable {
             var text: String?
@@ -657,20 +657,40 @@ final class AppStore: ObservableObject {
             var key: String?
         }
         let outgoing = text ?? terminalInput
-        guard key != nil || !outgoing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || enter else { return }
+        guard key != nil || !outgoing.isEmpty || enter else { return }
         do {
             let res: ZTerminalSnapshot = try await api.post(
                 "/api/sessions/\(sid)/terminal/input",
                 body: Body(text: outgoing, enter: enter, key: key)
             )
             guard selectedSessionID == sid else { return }
-            terminalSnapshot = res
+            if refresh {
+                terminalSnapshot = res
+            }
             if text == nil && key == nil {
                 terminalInput = ""
             }
         } catch {
             AppLogger.warning("terminal input failed \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
+        }
+    }
+
+    func resizeSelectedTerminal(columns: Int, rows: Int) async {
+        guard let sid = selectedSessionID else { return }
+        struct Body: Encodable {
+            var columns: Int
+            var rows: Int
+        }
+        do {
+            let res: ZTerminalSnapshot = try await api.post(
+                "/api/sessions/\(sid)/terminal/resize",
+                body: Body(columns: columns, rows: rows)
+            )
+            guard selectedSessionID == sid else { return }
+            terminalSnapshot = res
+        } catch {
+            AppLogger.warning("terminal resize failed \(serverErrorMessage(error) ?? "\(error)")")
         }
     }
 

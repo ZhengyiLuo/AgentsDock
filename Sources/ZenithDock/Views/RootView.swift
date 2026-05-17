@@ -1,24 +1,54 @@
 import SwiftUI
 
+enum WorkspacePane: String, CaseIterable, Identifiable {
+    case chat
+    case terminal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .chat: "Chat"
+        case .terminal: "Terminal"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .chat: "text.bubble"
+        case .terminal: "terminal"
+        }
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
     @State private var importerOpen = false
     @State private var resumeOpen = false
     @State private var serverSettingsOpen = false
+    @State private var selectedPane: WorkspacePane = .chat
 
     var body: some View {
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
         } content: {
-            TimelineView(
-                importerOpen: $importerOpen,
-                resumeOpen: $resumeOpen,
-                serverSettingsOpen: $serverSettingsOpen
-            )
-                .navigationSplitViewColumnWidth(min: 560, ideal: 720)
+            Group {
+                switch selectedPane {
+                case .chat:
+                    TimelineView(
+                        importerOpen: $importerOpen,
+                        resumeOpen: $resumeOpen,
+                        serverSettingsOpen: $serverSettingsOpen,
+                        selectedPane: $selectedPane
+                    )
+                case .terminal:
+                    TerminalWorkspaceView(selectedPane: $selectedPane)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 560, ideal: 720)
         } detail: {
-            InspectorView()
+            InspectorView(selectedPane: $selectedPane)
                 .navigationSplitViewColumnWidth(min: 340, ideal: 380, max: 480)
         }
         .background(Theme.window)

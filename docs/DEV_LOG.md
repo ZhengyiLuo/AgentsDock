@@ -616,6 +616,48 @@ Verification:
 
 - `python3 -m py_compile server/agent_server.py` passed.
 
+### Embedded Per-Chat Tmux Terminal Tab
+
+User issue:
+
+- The per-chat tmux feature opened as a popup and behaved like a command sender.
+- Desired behavior is a tab beside the chat timeline that feels like a normal
+  terminal attached to the chat's persistent tmux session.
+
+Changes:
+
+- `Sources/ZenithDock/Views/RootView.swift`
+  - Added a main content pane switcher for `Chat` and `Terminal`.
+- `Sources/ZenithDock/Views/TimelineView.swift`
+  - Added the same pane switcher to the chat header.
+- `Sources/ZenithDock/Views/TerminalWorkspaceView.swift`
+  - Added a native macOS terminal pane backed by the selected chat's tmux
+    session.
+  - Captures typed characters, paste, return, tab, escape, arrows, page keys,
+    backspace/delete, and Ctrl-letter chords and forwards them to tmux.
+  - Polls tmux output while the terminal tab is visible and auto-resizes the
+    tmux pane based on the visible terminal size.
+- `Sources/ZenithDock/Views/InspectorView.swift`
+  - The Terminal section now switches to the embedded terminal tab instead of
+    opening a separate terminal window.
+- `server/agent_server.py`
+  - Added terminal pane resize support and reports tmux pane dimensions in
+    terminal snapshots.
+- `Sources/ZenithCore/ZenithCore.swift`
+  - Added optional terminal `columns` and `rows` fields.
+
+Known limitation:
+
+- This is still a tmux capture-pane renderer, not a full ANSI/xterm emulator.
+  Normal shell typing and control keys work, but rich full-screen terminal apps
+  may not render perfectly until we add a real terminal emulator layer.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build` passed.
+
 ### Stale Cache Catch-Up Without Live Backlog Replay
 
 User issue:

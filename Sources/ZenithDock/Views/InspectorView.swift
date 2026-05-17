@@ -6,6 +6,7 @@ import ZenithCore
 
 struct InspectorView: View {
     @EnvironmentObject private var store: AppStore
+    @Binding var selectedPane: WorkspacePane
     @State private var serverURLDraft = ""
     @State private var accessTokenDraft = ""
     @State private var isApplyingServerSettings = false
@@ -22,7 +23,6 @@ struct InspectorView: View {
     @State private var newJobDetailsOpen = false
     @State private var confirmDelete = false
     @State private var handoffOpen = false
-    @State private var terminalOpen = false
 
     var body: some View {
         ScrollView {
@@ -171,7 +171,7 @@ struct InspectorView: View {
 
                 LiveProcessesInspector()
 
-                ChatTerminalInspector(isPresented: $terminalOpen)
+                ChatTerminalInspector(selectedPane: $selectedPane)
 
                 ChatFilesInspector(files: store.sessionFiles)
 
@@ -750,7 +750,7 @@ private struct JobEditorSheet: View {
 
 private struct ChatTerminalInspector: View {
     @EnvironmentObject private var store: AppStore
-    @Binding var isPresented: Bool
+    @Binding var selectedPane: WorkspacePane
 
     var body: some View {
         GroupBox("Terminal") {
@@ -788,9 +788,10 @@ private struct ChatTerminalInspector: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        isPresented = true
+                        selectedPane = .terminal
+                        Task { await store.openSelectedTerminal(showErrors: false) }
                     } label: {
-                        Label(store.terminalSnapshot?.exists == true ? "Open Terminal" : "Start Terminal", systemImage: "terminal")
+                        Label(store.terminalSnapshot?.exists == true ? "Go to Terminal" : "Start Terminal", systemImage: "terminal")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -808,10 +809,6 @@ private struct ChatTerminalInspector: View {
         }
         .task(id: store.selectedSessionID) {
             await store.refreshSelectedTerminal(showErrors: false)
-        }
-        .sheet(isPresented: $isPresented) {
-            ChatTerminalSheet()
-                .environmentObject(store)
         }
     }
 }
