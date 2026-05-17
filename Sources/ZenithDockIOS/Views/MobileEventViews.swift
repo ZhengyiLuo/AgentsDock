@@ -1,4 +1,5 @@
 import AVKit
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 import ZenithCore
@@ -315,6 +316,11 @@ struct MobileJobRunGroupBubble: View {
                     Text("· \(group.runs.count) runs")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    if let runtime = mobileJobRunRuntimeText(group.latest) {
+                        Text("· \(runtime)")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer(minLength: 0)
                     Button {
                         UIPasteboard.general.string = ZClipboardText.normalizedForCopy(latestText)
@@ -424,10 +430,16 @@ private struct MobileJobRunCompactLine: View {
 }
 
 private func mobileJobRunLabel(_ jobRun: MobileJobRunRow) -> String {
+    let title: String
     if jobRun.isFinished {
-        return "Job Response · \(jobRun.job.title)"
+        title = "Job Response · \(jobRun.job.title)"
+    } else {
+        title = "Job Running · \(jobRun.job.title)"
     }
-    return "Job Running · \(jobRun.job.title)"
+    guard let runtime = mobileJobRunRuntimeText(jobRun) else {
+        return title
+    }
+    return "\(title) · \(runtime)"
 }
 
 private func mobileJobRunBodyText(_ jobRun: MobileJobRunRow) -> String {
@@ -438,6 +450,40 @@ private func mobileJobRunBodyText(_ jobRun: MobileJobRunRow) -> String {
         return error
     }
     return "Scheduled job started. Waiting for agent output..."
+}
+
+private func mobileJobRunRuntimeText(_ jobRun: MobileJobRunRow) -> String? {
+    guard let start = mobileJobRunDate(jobRun.startedAt ?? jobRun.runEvent.ts) else { return nil }
+    let end = mobileJobRunDate(jobRun.finishedAt) ?? mobileJobRunDate(jobRun.lastEventAt) ?? start
+    let seconds = max(0, Int(end.timeIntervalSince(start)))
+    let suffix = jobRun.isFinished ? "" : " so far"
+    return "runtime \(mobileJobRunDurationString(seconds))\(suffix)"
+}
+
+private func mobileJobRunDate(_ value: String?) -> Date? {
+    guard let value, !value.isEmpty else { return nil }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) {
+        return date
+    }
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    return plain.date(from: value)
+}
+
+private func mobileJobRunDurationString(_ seconds: Int) -> String {
+    if seconds < 60 {
+        return "\(seconds)s"
+    }
+    if seconds < 3600 {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "\(minutes)m" : "\(minutes)m \(remainder)s"
+    }
+    let hours = seconds / 3600
+    let minutes = (seconds % 3600) / 60
+    return minutes == 0 ? "\(hours)h" : "\(hours)h \(minutes)m"
 }
 
 private struct MobileFullMessageSheet: View {

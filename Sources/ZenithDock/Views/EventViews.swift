@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import ZenithCore
 
@@ -431,6 +432,11 @@ struct JobRunGroupBubble: View {
                     Text("· \(group.runs.count) runs")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    if let runtime = jobRunRuntimeText(group.latest) {
+                        Text("· \(runtime)")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer(minLength: 0)
                     Button {
                         copyToPasteboard(ZClipboardText.normalizedForCopy(latestText))
@@ -542,10 +548,16 @@ private struct JobRunCompactLine: View {
 }
 
 private func jobRunLabel(_ jobRun: JobRunRow) -> String {
+    let title: String
     if jobRun.isFinished {
-        return "Job Response · \(jobRun.job.title)"
+        title = "Job Response · \(jobRun.job.title)"
+    } else {
+        title = "Job Running · \(jobRun.job.title)"
     }
-    return "Job Running · \(jobRun.job.title)"
+    guard let runtime = jobRunRuntimeText(jobRun) else {
+        return title
+    }
+    return "\(title) · \(runtime)"
 }
 
 private func jobRunBodyText(_ jobRun: JobRunRow) -> String {
@@ -556,6 +568,40 @@ private func jobRunBodyText(_ jobRun: JobRunRow) -> String {
         return error
     }
     return "Scheduled job started. Waiting for agent output..."
+}
+
+private func jobRunRuntimeText(_ jobRun: JobRunRow) -> String? {
+    guard let start = jobRunDate(jobRun.startedAt ?? jobRun.runEvent.ts) else { return nil }
+    let end = jobRunDate(jobRun.finishedAt) ?? jobRunDate(jobRun.lastEventAt) ?? start
+    let seconds = max(0, Int(end.timeIntervalSince(start)))
+    let suffix = jobRun.isFinished ? "" : " so far"
+    return "runtime \(jobRunDurationString(seconds))\(suffix)"
+}
+
+private func jobRunDate(_ value: String?) -> Date? {
+    guard let value, !value.isEmpty else { return nil }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) {
+        return date
+    }
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    return plain.date(from: value)
+}
+
+private func jobRunDurationString(_ seconds: Int) -> String {
+    if seconds < 60 {
+        return "\(seconds)s"
+    }
+    if seconds < 3600 {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "\(minutes)m" : "\(minutes)m \(remainder)s"
+    }
+    let hours = seconds / 3600
+    let minutes = (seconds % 3600) / 60
+    return minutes == 0 ? "\(hours)h" : "\(hours)h \(minutes)m"
 }
 
 private struct FullMessageSheet: View {

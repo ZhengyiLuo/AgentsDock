@@ -174,29 +174,23 @@ struct InspectorView: View {
 
                 GroupBox("Jobs") {
                     VStack(alignment: .leading, spacing: 8) {
-                        TextField("Job title", text: $jobTitle)
                         HStack {
-                            Button {
-                                newJobDetailsOpen = true
-                            } label: {
-                                Label("Job Details", systemImage: "slider.horizontal.3")
-                            }
-                            .controlSize(.small)
-                            Spacer(minLength: 8)
-                            Text(jobDraftSummary(for: session))
+                            Text("Schedule a recurring prompt for this chat.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                            Spacer(minLength: 8)
                         }
                         Button {
-                            createJob(for: session)
+                            newJobDetailsOpen = true
                         } label: {
-                            Label("New Job", systemImage: "clock.badge.plus")
+                            Label("Schedule Job...", systemImage: "clock.badge.plus")
+                                .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .disabled(!canCreateJob)
-                        .help("Schedule this prompt to run again")
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .help("Create a scheduled job for this chat")
 
                         Divider()
                         let chatJobs = store.jobs.filter { $0.session_id == session.id }
@@ -250,7 +244,13 @@ struct InspectorView: View {
                     prompt: $jobPrompt,
                     intervalText: $intervalText,
                     loop: $loopJob,
-                    isPresented: $newJobDetailsOpen
+                    isPresented: $newJobDetailsOpen,
+                    canSchedule: canCreateJob,
+                    scheduleSummary: jobDraftSummary(for: session),
+                    onSchedule: {
+                        createJob(for: session)
+                        newJobDetailsOpen = false
+                    }
                 )
             }
         }
@@ -391,12 +391,15 @@ private struct NewJobDetailsSheet: View {
     @Binding var intervalText: String
     @Binding var loop: Bool
     @Binding var isPresented: Bool
+    let canSchedule: Bool
+    let scheduleSummary: String
+    let onSchedule: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Job Details")
+                    Text("Schedule Job")
                         .font(.title3.weight(.semibold))
                     Text(sessionTitle)
                         .font(.caption)
@@ -404,9 +407,17 @@ private struct NewJobDetailsSheet: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Button("Done") {
+                Button("Cancel") {
                     isPresented = false
                 }
+                .keyboardShortcut(.cancelAction)
+                Button {
+                    onSchedule()
+                } label: {
+                    Label("Schedule Job", systemImage: "clock.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSchedule)
                 .keyboardShortcut(.defaultAction)
             }
 
@@ -462,6 +473,21 @@ private struct NewJobDetailsSheet: View {
                 Text(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Empty prompt uses the current composer text when you create the job." : "\(prompt.count) characters")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text(scheduleSummary)
+                    .font(.caption)
+                    .foregroundStyle(canSchedule ? Color.secondary : Color.red)
+                    .lineLimit(2)
+                Spacer()
+                Button {
+                    onSchedule()
+                } label: {
+                    Label("Schedule Job", systemImage: "clock.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSchedule)
             }
         }
         .padding(18)

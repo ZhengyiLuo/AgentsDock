@@ -631,10 +631,20 @@ private enum MobileTimelineRows {
         var rows: [String: MobileJobRunRow] = [:]
         var assistantText: [String: [String]] = [:]
         var errors: [String: [String]] = [:]
+        var startedAt: [String: String] = [:]
+        var finishedAt: [String: String] = [:]
+        var lastEventAt: [String: String] = [:]
 
         for event in events {
             guard let runID = event.run_id else { continue }
+            lastEventAt[runID] = event.ts
             switch event.type {
+            case "turn_started":
+                startedAt[runID] = event.ts
+            case "process_started":
+                if startedAt[runID] == nil {
+                    startedAt[runID] = event.ts
+                }
             case "job_ran":
                 if let job = event.job {
                     rows[runID] = MobileJobRunRow(
@@ -644,6 +654,9 @@ private enum MobileTimelineRows {
                         resultText: nil,
                         errorText: nil,
                         isFinished: false,
+                        startedAt: startedAt[runID] ?? event.ts,
+                        finishedAt: nil,
+                        lastEventAt: event.ts,
                         lastSeq: event.seq
                     )
                 }
@@ -652,10 +665,13 @@ private enum MobileTimelineRows {
                     assistantText[runID, default: []].append(text)
                 }
             case "turn_finished":
+                finishedAt[runID] = event.ts
                 if var row = rows[runID] {
                     let result = event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines)
                     row.resultText = result?.isEmpty == false ? result : assistantText[runID]?.joined(separator: "\n\n")
                     row.isFinished = true
+                    row.finishedAt = event.ts
+                    row.lastEventAt = event.ts
                     row.lastSeq = max(row.lastSeq, event.seq)
                     rows[runID] = row
                 }
@@ -681,6 +697,14 @@ private enum MobileTimelineRows {
         for (runID, errorParts) in errors {
             guard var row = rows[runID] else { continue }
             row.errorText = errorParts.joined(separator: "\n\n")
+            rows[runID] = row
+        }
+
+        for runID in rows.keys {
+            guard var row = rows[runID] else { continue }
+            row.startedAt = startedAt[runID] ?? row.startedAt ?? row.runEvent.ts
+            row.finishedAt = finishedAt[runID] ?? row.finishedAt
+            row.lastEventAt = lastEventAt[runID] ?? row.lastEventAt ?? row.finishedAt ?? row.runEvent.ts
             rows[runID] = row
         }
 
@@ -716,6 +740,9 @@ struct MobileJobRunRow: Identifiable, Hashable {
     var resultText: String?
     var errorText: String?
     var isFinished: Bool
+    var startedAt: String?
+    var finishedAt: String?
+    var lastEventAt: String?
     var lastSeq: Int
 }
 

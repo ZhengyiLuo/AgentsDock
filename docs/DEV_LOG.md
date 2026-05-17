@@ -569,6 +569,47 @@ Important caution:
 
 ## 2026-05-17 Follow-Up
 
+### Job Scheduling UX And Runtime
+
+User issue:
+
+- The old job creation flow was unintuitive because the user edited job details
+  in one control, then had to click a separate `New Job` / `Create Job` button
+  elsewhere to submit.
+- Job status cards needed to show how long each scheduled run took.
+
+Changes:
+
+- `Sources/ZenithDock/Views/InspectorView.swift`
+  - Replaced the split Mac job creation controls with a single prominent
+    `Schedule Job...` entry point.
+  - The schedule sheet now has explicit `Cancel` and `Schedule Job` actions.
+  - The sheet footer repeats the primary schedule action with the current
+    schedule summary.
+- `Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift`
+  - Mirrored the same `Schedule Job...` flow on iPhone/iPad.
+  - Added a bottom safe-area schedule action inside the mobile sheet.
+- `Sources/ZenithDock/Views/TimelineView.swift`
+  - Job run rows now track start, finish, and latest event timestamps.
+- `Sources/ZenithDockIOS/Views/MobileTimelineView.swift`
+  - Mirrored job run timing metadata on iPhone/iPad.
+- `Sources/ZenithDock/Views/EventViews.swift`
+  - Job status labels now include runtime, for example `runtime 2m 14s`.
+  - Grouped job status cards show runtime for the latest run, and expanded
+    older runs include runtime in their labels.
+- `Sources/ZenithDockIOS/Views/MobileEventViews.swift`
+  - Mirrored runtime labels on iPhone/iPad job status cards.
+
+Verification:
+
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ### Live Stdout Tail
 
 User issue:

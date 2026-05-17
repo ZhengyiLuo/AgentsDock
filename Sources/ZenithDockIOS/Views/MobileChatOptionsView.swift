@@ -125,22 +125,15 @@ struct MobileChatOptionsView: View {
                         Text("\(store.sessionFiles.count) files · \(store.sessionVideos.count) videos")
                     }
 
-                    Section("Loop Job") {
-                        TextField("Job title", text: $jobTitle)
+                    Section("Schedule Job") {
                         Button {
                             newJobDetailsOpen = true
                         } label: {
-                            Label("Job Details", systemImage: "slider.horizontal.3")
+                            Label("Schedule Job...", systemImage: "clock.badge.plus")
                         }
-                        Text(jobDraftSummary)
+                        Text("Create a recurring prompt for this chat.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Button {
-                            createJob(for: session)
-                        } label: {
-                            Label("Create Job", systemImage: "clock.badge.plus")
-                        }
-                        .disabled(!canCreateJob)
                     }
 
                     Section("Jobs") {
@@ -182,7 +175,13 @@ struct MobileChatOptionsView: View {
                     prompt: $jobPrompt,
                     intervalText: $intervalText,
                     loop: $loopJob,
-                    isPresented: $newJobDetailsOpen
+                    isPresented: $newJobDetailsOpen,
+                    canSchedule: canCreateJob,
+                    scheduleSummary: jobDraftSummary,
+                    onSchedule: {
+                        createJob(for: session)
+                        newJobDetailsOpen = false
+                    }
                 )
             }
         }
@@ -342,6 +341,9 @@ private struct MobileNewJobDetailsView: View {
     @Binding var intervalText: String
     @Binding var loop: Bool
     @Binding var isPresented: Bool
+    let canSchedule: Bool
+    let scheduleSummary: String
+    let onSchedule: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -379,16 +381,40 @@ private struct MobileNewJobDetailsView: View {
                     Text(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Empty prompt uses the current composer text when you create the job." : "\(prompt.count) characters")
                 }
             }
-            .navigationTitle("Job Details")
+            .navigationTitle("Schedule Job")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
                         isPresented = false
                     }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Schedule") {
+                        onSchedule()
+                    }
+                    .disabled(!canSchedule)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(scheduleSummary)
+                        .font(.caption)
+                        .foregroundStyle(canSchedule ? Color.secondary : Color.red)
+                        .lineLimit(2)
+                    Button {
+                        onSchedule()
+                    } label: {
+                        Label("Schedule Job", systemImage: "clock.badge.plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSchedule)
+                }
+                .padding()
+                .background(.bar)
             }
         }
     }
