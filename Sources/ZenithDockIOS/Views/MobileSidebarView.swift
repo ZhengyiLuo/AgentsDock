@@ -114,6 +114,16 @@ struct MobileSidebarView: View {
 
 private struct MobileServerStatusView: View {
     @EnvironmentObject private var store: MobileAppStore
+    @State private var draftHost = ""
+    @State private var draftPort = ""
+    @State private var draftToken = ""
+    @FocusState private var focusedField: FocusedField?
+
+    private enum FocusedField: Hashable {
+        case host
+        case port
+        case token
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -131,36 +141,30 @@ private struct MobileServerStatusView: View {
                 }
             }
             HStack(spacing: 8) {
-                TextField("Host", text: $store.serverHost)
+                TextField("Host", text: $draftHost)
                     .font(.caption.monospaced())
                     .mobileURLInputStyle()
-                    .onChange(of: store.serverHost) {
-                        store.rememberServerURL()
-                    }
-                    .onSubmit { Task { await store.reconnect() } }
-                TextField("Port", text: $store.serverPort)
+                    .focused($focusedField, equals: .host)
+                    .onSubmit { commitAndReconnect() }
+                TextField("Port", text: $draftPort)
                     .font(.caption.monospaced())
                     .frame(width: 68)
                     .mobilePortInputStyle()
-                    .onChange(of: store.serverPort) {
-                        store.rememberServerURL()
-                    }
-                    .onSubmit { Task { await store.reconnect() } }
+                    .focused($focusedField, equals: .port)
+                    .onSubmit { commitAndReconnect() }
             }
             Text(store.connectionDetail)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
                 .textSelection(.enabled)
-            SecureField("Access token", text: $store.accessToken)
+            SecureField("Access token", text: $draftToken)
                 .font(.caption.monospaced())
                 .mobileTokenInputStyle()
-                .onChange(of: store.accessToken) {
-                    store.rememberAccessToken()
-                }
-                .onSubmit { Task { await store.reconnect() } }
+                .focused($focusedField, equals: .token)
+                .onSubmit { commitAndReconnect() }
             Button {
-                Task { await store.reconnect() }
+                commitAndReconnect()
             } label: {
                 Label("Reconnect", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity)
@@ -168,6 +172,53 @@ private struct MobileServerStatusView: View {
             .buttonStyle(.bordered)
         }
         .padding(.vertical, 4)
+        .onAppear { syncDraftsFromStore() }
+        .onChange(of: focusedField) { oldValue, newValue in
+            if oldValue != nil, newValue == nil {
+                commitDrafts()
+            }
+        }
+        .onChange(of: store.serverHost) { _, newValue in
+            if focusedField != .host {
+                draftHost = newValue
+            }
+        }
+        .onChange(of: store.serverPort) { _, newValue in
+            if focusedField != .port {
+                draftPort = newValue
+            }
+        }
+        .onChange(of: store.accessToken) { _, newValue in
+            if focusedField != .token {
+                draftToken = newValue
+            }
+        }
+    }
+
+    private func commitDrafts() {
+        store.updateServerAddress(host: draftHost, port: draftPort)
+        if store.accessToken != draftToken {
+            store.accessToken = draftToken
+            store.rememberAccessToken()
+        }
+        if focusedField != .host {
+            draftHost = store.serverHost
+        }
+        if focusedField != .port {
+            draftPort = store.serverPort
+        }
+    }
+
+    private func commitAndReconnect() {
+        focusedField = nil
+        commitDrafts()
+        Task { await store.reconnect() }
+    }
+
+    private func syncDraftsFromStore() {
+        draftHost = store.serverHost
+        draftPort = store.serverPort
+        draftToken = store.accessToken
     }
 }
 
@@ -238,11 +289,14 @@ private struct MobileSessionRow: View {
     }
 
     private var subtitle: String {
-        var pieces = [session.backend.capitalized]
+        var pieces = [
+            session.backend.capitalized,
+            store.runtimeCatalog.modelLabel(session.model, backend: session.backend)
+        ]
         if store.activeSessionIDs.contains(session.id) {
             pieces.append("running")
-        } else if let folder = session.folder, !folder.isEmpty {
-            pieces.append(folder)
+        } else if let effort = session.effort, !effort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            pieces.append(store.runtimeCatalog.effortLabel(effort, backend: session.backend))
         }
         return pieces.joined(separator: " · ")
     }

@@ -20,9 +20,224 @@ public struct ZSession: Codable, Identifiable, Hashable, Sendable {
     public var updated_at: String?
 }
 
+public struct ZRuntimeOption: Codable, Identifiable, Hashable, Sendable {
+    public let value: String
+    public let label: String
+
+    public var id: String { value }
+
+    public init(value: String, label: String) {
+        self.value = value
+        self.label = label
+    }
+}
+
+public struct ZRuntimeBackendCatalog: Codable, Hashable, Sendable {
+    public var models: [ZRuntimeOption]
+    public var efforts: [ZRuntimeOption]
+    public var model_source: String?
+    public var effort_source: String?
+
+    public init(
+        models: [ZRuntimeOption] = [ZRuntimeCatalog.serverDefaultOption],
+        efforts: [ZRuntimeOption] = [ZRuntimeCatalog.serverDefaultOption],
+        model_source: String? = nil,
+        effort_source: String? = nil
+    ) {
+        self.models = models
+        self.efforts = efforts
+        self.model_source = model_source
+        self.effort_source = effort_source
+    }
+}
+
+public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
+    public var backends: [String: ZRuntimeBackendCatalog]
+    public var generated_at: String?
+
+    public init(backends: [String: ZRuntimeBackendCatalog] = [:], generated_at: String? = nil) {
+        self.backends = backends
+        self.generated_at = generated_at
+    }
+
+    public static let fallback = ZRuntimeCatalogSnapshot(backends: [
+        "claude": ZRuntimeBackendCatalog(),
+        "codex": ZRuntimeBackendCatalog()
+    ])
+
+    public func models(for backend: String) -> [ZRuntimeOption] {
+        options(backends[backend.lowercased()]?.models)
+    }
+
+    public func efforts(for backend: String) -> [ZRuntimeOption] {
+        options(backends[backend.lowercased()]?.efforts)
+    }
+
+    public func modelLabel(_ value: String?, backend: String) -> String {
+        let clean = ZRuntimeCatalog.cleaned(value)
+        guard !clean.isEmpty else { return "Server default" }
+        return models(for: backend).first { $0.value == clean }?.label ?? clean
+    }
+
+    public func effortLabel(_ value: String?, backend: String) -> String {
+        let clean = ZRuntimeCatalog.cleaned(value)
+        guard !clean.isEmpty else { return "Server default" }
+        return efforts(for: backend).first { $0.value == clean }?.label ?? clean
+    }
+
+    public func compactSummary(for session: ZSession?) -> String {
+        guard let session else { return "No runtime" }
+        if ZRuntimeCatalog.cleaned(session.model).isEmpty && ZRuntimeCatalog.cleaned(session.effort).isEmpty {
+            return "\(session.backend.capitalized) · server defaults"
+        }
+        return [
+            session.backend.capitalized,
+            modelLabel(session.model, backend: session.backend),
+            effortLabel(session.effort, backend: session.backend)
+        ].joined(separator: " · ")
+    }
+
+    private func options(_ values: [ZRuntimeOption]?) -> [ZRuntimeOption] {
+        var seen = Set<String>()
+        var out: [ZRuntimeOption] = []
+        for option in [ZRuntimeCatalog.serverDefaultOption] + (values ?? []) {
+            guard !seen.contains(option.value) else { continue }
+            seen.insert(option.value)
+            out.append(option)
+        }
+        return out
+    }
+}
+
+public enum ZRuntimeCatalog {
+    public static let defaultValue = ""
+    public static let serverDefaultOption = ZRuntimeOption(value: "", label: "Server default")
+
+    public static let efforts: [ZRuntimeOption] = ZRuntimeCatalogSnapshot.fallback.efforts(for: "codex")
+
+    public static func models(for backend: String) -> [ZRuntimeOption] {
+        ZRuntimeCatalogSnapshot.fallback.models(for: backend)
+    }
+
+    public static func modelLabel(_ value: String?, backend: String) -> String {
+        let clean = cleaned(value)
+        guard !clean.isEmpty else { return "Server default" }
+        return models(for: backend).first { $0.value == clean }?.label ?? clean
+    }
+
+    public static func effortLabel(_ value: String?) -> String {
+        let clean = cleaned(value)
+        guard !clean.isEmpty else { return "Server default" }
+        return efforts.first { $0.value == clean }?.label ?? clean
+    }
+
+    public static func cleanForAPI(_ value: String?) -> String? {
+        let clean = cleaned(value)
+        return clean.isEmpty ? "" : clean
+    }
+
+    public static func compactSummary(for session: ZSession?) -> String {
+        ZRuntimeCatalogSnapshot.fallback.compactSummary(for: session)
+    }
+
+    public static func cleaned(_ value: String?) -> String {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+}
+
+public enum ZClipboardText {
+    public static func normalizedForCopy(_ text: String, language: String? = nil) -> String {
+        guard text.contains("\\\\") else { return text }
+        let explicitShell = isShellLanguage(language)
+        let globalShell = explicitShell || looksShellLike(text)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var out: [String] = []
+        out.reserveCapacity(lines.count)
+
+        var inFence = false
+        var fenceLanguage: String?
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if language == nil, trimmed.hasPrefix("```") {
+                out.append(line)
+                if inFence {
+                    inFence = false
+                    fenceLanguage = nil
+                } else {
+                    inFence = true
+                    let rawLanguage = trimmed.dropFirst(3).trimmingCharacters(in: .whitespacesAndNewlines)
+                    fenceLanguage = rawLanguage.split(separator: " ").first.map(String.init)
+                }
+                continue
+            }
+
+            let activeLanguage = language ?? (inFence ? fenceLanguage : nil)
+            let shouldNormalize = isShellLanguage(activeLanguage) || (!inFence && globalShell)
+            out.append(shouldNormalize ? normalizedShellContinuationLine(line) : line)
+        }
+
+        return out.joined(separator: "\n")
+    }
+
+    private static func normalizedShellContinuationLine(_ line: String) -> String {
+        var core = line
+        var trailingWhitespace = ""
+        while let last = core.last, last == " " || last == "\t" {
+            trailingWhitespace.insert(last, at: trailingWhitespace.startIndex)
+            core.removeLast()
+        }
+
+        var prefix = core
+        var slashCount = 0
+        while prefix.last == "\\" {
+            slashCount += 1
+            prefix.removeLast()
+        }
+
+        guard slashCount >= 2, !looksLikeLatexLine(core) else {
+            return line
+        }
+        return prefix + "\\" + trailingWhitespace
+    }
+
+    private static func isShellLanguage(_ language: String?) -> Bool {
+        guard let language else { return false }
+        let clean = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["bash", "sh", "shell", "zsh", "console", "terminal"].contains(clean)
+    }
+
+    private static func looksShellLike(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower.contains("cuda_visible_devices=") ||
+            lower.contains(" python ") ||
+            lower.contains("\npython ") ||
+            lower.contains("\nbash ") ||
+            lower.contains("\ncd ") ||
+            lower.contains("\nexport ") ||
+            lower.contains("\nconda ") ||
+            lower.contains("\n  --") ||
+            lower.contains("--checkpoint_path") ||
+            lower.contains("--port ") ||
+            lower.contains("command not found") {
+            return true
+        }
+        return text.contains("$ ") && (lower.contains("--") || lower.contains("python") || lower.contains("bash"))
+    }
+
+    private static func looksLikeLatexLine(_ line: String) -> Bool {
+        line.contains("\\begin") ||
+            line.contains("\\end") ||
+            line.contains("\\hline") ||
+            line.contains(" & ")
+    }
+}
+
 public struct ZFile: Codable, Identifiable, Hashable, Sendable {
     public let id: String
     public var session_id: String?
+    public var event_id: String?
+    public var event_seq: Int?
     public var kind: String?
     public var title: String?
     public var text: String?
@@ -48,6 +263,57 @@ public struct ZJob: Codable, Identifiable, Hashable, Sendable {
     public var last_run_at: String?
     public var next_run_at_iso: String?
     public var run_count: Int?
+}
+
+public struct ZProcessLogHint: Codable, Identifiable, Hashable, Sendable {
+    public var source: String
+    public var path: String
+
+    public var id: String { "\(source):\(path)" }
+}
+
+public struct ZProcessInfo: Codable, Identifiable, Hashable, Sendable {
+    public var pid: Int
+    public var ppid: Int?
+    public var pgid: Int?
+    public var sid: Int?
+    public var stat: String?
+    public var elapsed_seconds: Int?
+    public var cpu_percent: Double?
+    public var mem_percent: Double?
+    public var rss_kb: Int?
+    public var command: String?
+    public var args: String?
+    public var cwd: String?
+    public var depth: Int?
+    public var log_hints: [ZProcessLogHint]?
+
+    public var id: Int { pid }
+}
+
+public struct ZProcessSnapshot: Codable, Hashable, Sendable {
+    public var session_id: String
+    public var active: Bool
+    public var run_id: String?
+    public var backend: String?
+    public var pid: Int?
+    public var pgid: Int?
+    public var cwd: String?
+    public var argv: [String]?
+    public var started_at: String?
+    public var elapsed_seconds: Int?
+    public var stop_requested: Bool?
+    public var processes: [ZProcessInfo]
+    public var generated_at: String?
+}
+
+public struct ZProcessLogTail: Codable, Hashable, Sendable {
+    public var path: String
+    public var size: Int?
+    public var truncated: Bool?
+    public var lines: Int?
+    public var text: String
+    public var generated_at: String?
 }
 
 public struct ZTool: Codable, Hashable, Sendable {
@@ -82,6 +348,44 @@ public struct ZEvent: Codable, Identifiable, Hashable, Sendable {
     public var tool: ZTool?
     public var file: ZFile?
     public var artifact: ZFile?
+    public var job: ZJob?
+    public var job_id: String?
+}
+
+public struct ZMarkdownLinkContext: Hashable, Sendable {
+    public var sessionID: String
+    public var baseURL: URL
+    public var accessToken: String?
+
+    public init(sessionID: String, baseURL: URL, accessToken: String?) {
+        self.sessionID = sessionID
+        self.baseURL = baseURL
+        let token = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accessToken = token?.isEmpty == false ? token : nil
+    }
+
+    public var cacheKey: String {
+        "\(baseURL.absoluteString)|\(sessionID)|\(accessToken ?? "")"
+    }
+
+    public func resolvedURL(for target: String) -> URL? {
+        let clean = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, !clean.hasPrefix("#") else { return nil }
+
+        if let url = URL(string: clean), let scheme = url.scheme?.lowercased() {
+            if scheme == "http" || scheme == "https" || scheme == "mailto" {
+                return url
+            }
+        }
+
+        var comps = URLComponents(url: baseURL.appending(path: "/api/sessions/\(sessionID)/links/file"), resolvingAgainstBaseURL: false)
+        var items = [URLQueryItem(name: "target", value: clean)]
+        if let accessToken {
+            items.append(URLQueryItem(name: "token", value: accessToken))
+        }
+        comps?.queryItems = items
+        return comps?.url
+    }
 }
 
 public enum JSONValue: Codable, Hashable, Sendable {

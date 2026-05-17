@@ -28,7 +28,7 @@ struct InlineVideoView: View {
             VStack {
                 HStack {
                     Spacer()
-                    VideoOverlayButton(title: "Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right") {
+                    VideoOverlayButton(title: "Open Player", systemImage: "play.rectangle") {
                         VideoFullscreenPresenter.present(url: url)
                     }
                 }
@@ -62,7 +62,7 @@ private struct VideoPlaceholderView: View {
             HStack(spacing: 10) {
                 VideoOverlayButton(title: "Play", systemImage: "play.fill", action: play)
                 #if os(macOS)
-                VideoOverlayButton(title: "Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right", action: fullscreen)
+                VideoOverlayButton(title: "Open Player", systemImage: "play.rectangle", action: fullscreen)
                 #endif
             }
         }
@@ -172,9 +172,6 @@ enum VideoFullscreenPresenter {
         windows.append(window)
 
         playerView.player?.play()
-        DispatchQueue.main.async {
-            window.toggleFullScreen(nil)
-        }
     }
 }
 #else

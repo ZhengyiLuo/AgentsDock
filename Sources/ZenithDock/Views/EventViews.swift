@@ -7,39 +7,71 @@ import AppKit
 import UIKit
 #endif
 
-struct EventCard: View {
-    @EnvironmentObject private var store: AppStore
+enum QueuedEventStatus: Equatable {
+    case none
+    case pending(position: Int?)
+    case started
+    case cancelled
+}
+
+struct EventCard: View, Equatable {
     let event: ZEvent
+    let showDebugEvents: Bool
+    let queueStatus: QueuedEventStatus
+    let artifactURL: URL?
+    let fileURL: URL?
+    let linkContext: ZMarkdownLinkContext?
+    let job: ZJob?
+    let onUnqueue: (ZEvent) -> Void
+
     @State private var expanded = false
+
+    nonisolated static func == (lhs: EventCard, rhs: EventCard) -> Bool {
+        lhs.event.id == rhs.event.id &&
+            lhs.event.seq == rhs.event.seq &&
+            lhs.event.type == rhs.event.type &&
+            lhs.showDebugEvents == rhs.showDebugEvents &&
+            lhs.queueStatus == rhs.queueStatus &&
+            lhs.artifactURL == rhs.artifactURL &&
+            lhs.fileURL == rhs.fileURL &&
+            lhs.linkContext == rhs.linkContext &&
+            lhs.job == rhs.job
+    }
 
     var body: some View {
         if event.type == "turn_started" {
             HStack {
                 Spacer(minLength: 80)
-                MessageBubble(label: "You", text: event.prompt ?? "", isUser: true)
+                MessageBubble(label: "You", text: event.prompt ?? "", isUser: true, linkContext: linkContext)
             }
         } else if event.type == "turn_queued" {
             HStack {
                 Spacer(minLength: 80)
-                let isPending = store.isQueuedEventPending(event)
                 MessageBubble(
                     label: queuedLabel,
                     text: event.prompt ?? "",
                     isUser: true,
-                    isQueued: isPending,
-                    actionTitle: isPending ? "Unqueue" : nil,
-                    actionSystemImage: isPending ? "xmark.circle" : nil,
-                    action: isPending ? { Task { await store.unqueue(event) } } : nil
+                    isQueued: queueStatus.isPending,
+                    actionTitle: queueStatus.isPending ? "Unqueue" : nil,
+                    actionSystemImage: queueStatus.isPending ? "xmark.circle" : nil,
+                    linkContext: linkContext,
+                    action: queueStatus.isPending ? { onUnqueue(event) } : nil
                 )
             }
         } else if event.type == "assistant_text" {
             HStack {
-                MessageBubble(label: "Assistant", text: event.text ?? "", isUser: false)
+                MessageBubble(label: "Assistant", text: event.text ?? "", isUser: false, linkContext: linkContext)
                 Spacer(minLength: 80)
             }
         } else if event.type == "turn_finished", let text = event.result_text, !text.isEmpty {
             HStack {
-                MessageBubble(label: "Assistant", text: text, isUser: false)
+                MessageBubble(
+                    label: job.map { "Job Response · \($0.title)" } ?? "Assistant",
+                    text: text,
+                    isUser: false,
+                    isJob: job != nil,
+                    linkContext: linkContext
+                )
                 Spacer(minLength: 80)
             }
         } else {
@@ -57,7 +89,7 @@ struct EventCard: View {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    if store.showDebugEvents {
+                    if showDebugEvents {
                         Text("#\(event.seq)")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -76,7 +108,7 @@ struct EventCard: View {
     var content: some View {
         switch event.type {
         case "assistant_text":
-            MarkdownView(markdown: event.text ?? "")
+            MarkdownView(markdown: event.text ?? "", linkContext: linkContext)
         case "reasoning_summary":
             TraceDisclosureHeader(
                 title: (event.text ?? "Reasoning").split(separator: "\n").first.map(String.init) ?? "Reasoning",
@@ -84,7 +116,7 @@ struct EventCard: View {
                 isExpanded: $expanded
             )
             if expanded {
-                MarkdownView(markdown: event.text ?? "", compact: true)
+                MarkdownView(markdown: event.text ?? "", compact: true, linkContext: linkContext)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
@@ -94,22 +126,22 @@ struct EventCard: View {
         case "tool_finished":
             ToolBody(event: event, expanded: $expanded, output: event.output)
         case "artifact_created":
-            if let artifact = event.artifact {
-                ArtifactPreview(file: artifact, url: store.fileURL(artifact))
+            if let artifact = event.artifact, let artifactURL {
+                ArtifactPreview(file: artifact, url: artifactURL, linkContext: linkContext)
             }
         case "file_uploaded":
             if let file = event.file {
-                Label(file.filename, systemImage: "tray.and.arrow.up")
+                UploadedFileLabel(file: file, url: fileURL)
             }
         case "turn_started":
-            MarkdownView(markdown: event.prompt ?? "", compact: true)
+            MarkdownView(markdown: event.prompt ?? "", compact: true, linkContext: linkContext)
                 .foregroundStyle(.secondary)
         case "turn_queued":
-            MarkdownView(markdown: event.prompt ?? "", compact: true)
+            MarkdownView(markdown: event.prompt ?? "", compact: true, linkContext: linkContext)
                 .foregroundStyle(.secondary)
         case "turn_finished":
             if let text = event.result_text, !text.isEmpty {
-                MarkdownView(markdown: text)
+                MarkdownView(markdown: text, linkContext: linkContext)
             }
         case "error":
             Text(event.message ?? event.error ?? "Unknown error")
@@ -120,7 +152,7 @@ struct EventCard: View {
                 CodeBlock(text: event.raw ?? "", language: "json", limit: nil)
             }
         default:
-            MarkdownView(markdown: event.message ?? event.text ?? event.type, compact: true)
+            MarkdownView(markdown: event.message ?? event.text ?? event.type, compact: true, linkContext: linkContext)
                 .foregroundStyle(.secondary)
         }
     }
@@ -152,6 +184,7 @@ struct EventCard: View {
         case "tool_started", "tool_finished": "terminal"
         case "artifact_created": "shippingbox"
         case "file_uploaded": "tray.and.arrow.up"
+        case "job_created", "job_ran": "clock.badge.checkmark"
         case "error": "exclamationmark.triangle"
         case "turn_started": "arrow.up.message"
         case "turn_queued": "text.badge.clock"
@@ -166,6 +199,7 @@ struct EventCard: View {
         case "error": .red
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
+        case "job_created", "job_ran": .orange
         case "turn_queued", "turn_unqueued": .secondary
         case "artifact_created": .green
         default: .accentColor
@@ -173,20 +207,36 @@ struct EventCard: View {
     }
 
     var cardBackground: some ShapeStyle {
-        event.type == "error" ? AnyShapeStyle(.red.opacity(0.08)) : AnyShapeStyle(Theme.card)
+        if event.type == "error" {
+            return AnyShapeStyle(.red.opacity(0.08))
+        }
+        if event.type == "job_created" || event.type == "job_ran" {
+            return AnyShapeStyle(Theme.jobBubble.opacity(0.70))
+        }
+        return AnyShapeStyle(Theme.card)
     }
 
     private var queuedLabel: String {
-        if store.hasCancelledQueuedEvent(event) {
+        switch queueStatus {
+        case .cancelled:
             return "Removed from queue"
-        }
-        if store.hasStartedQueuedEvent(event) {
+        case .started:
             return "Sent from queue"
+        case .pending(let position):
+            if let position, position > 1 {
+                return "Queued #\(position)"
+            }
+            return "Queued"
+        case .none:
+            return "Queued"
         }
-        if let position = event.position, position > 1 {
-            return "Queued #\(position)"
-        }
-        return "Queued"
+    }
+}
+
+private extension QueuedEventStatus {
+    var isPending: Bool {
+        if case .pending = self { return true }
+        return false
     }
 }
 
@@ -195,13 +245,13 @@ struct MessageBubble: View {
     let text: String
     let isUser: Bool
     var isQueued = false
+    var isJob = false
     var actionTitle: String?
     var actionSystemImage: String?
+    var linkContext: ZMarkdownLinkContext?
     var action: (() -> Void)?
 
-    @State private var showFullText = false
-
-    private let collapsedCharacterLimit = 12_000
+    @State private var fullTextOpen = false
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
@@ -219,8 +269,18 @@ struct MessageBubble: View {
                     .controlSize(.small)
                     .help(actionTitle ?? "Action")
                 }
+                if shouldClip {
+                    Button {
+                        fullTextOpen = true
+                    } label: {
+                        Label("Full text", systemImage: "text.page")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Open full message")
+                }
                 Button {
-                    copyToPasteboard(text)
+                    copyToPasteboard(ZClipboardText.normalizedForCopy(text))
                 } label: {
                     Image(systemName: "doc.on.doc")
                 }
@@ -230,15 +290,15 @@ struct MessageBubble: View {
                 if !isUser { Spacer(minLength: 0) }
             }
             .frame(maxWidth: .infinity)
-            MarkdownView(markdown: visibleText, alignment: isUser ? .trailing : .leading)
+            MarkdownView(markdown: visibleText, alignment: isUser ? .trailing : .leading, linkContext: linkContext)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
             if shouldClip {
                 HStack(spacing: 8) {
-                    Text(showFullText ? "Full message shown" : "\(hiddenCharacterCount) characters hidden")
+                    Text("\(hiddenCharacterCount) characters hidden")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button(showFullText ? "Show less" : "Show full message") {
-                        showFullText.toggle()
+                    Button("Open full text") {
+                        fullTextOpen = true
                     }
                     .buttonStyle(.borderless)
                     .font(.caption.weight(.semibold))
@@ -252,33 +312,68 @@ struct MessageBubble: View {
         .background(bubbleBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(bubbleStroke))
+        .sheet(isPresented: $fullTextOpen) {
+            FullMessageSheet(label: label, text: text)
+        }
     }
 
     private var bubbleBackground: some ShapeStyle {
         if isQueued {
-            return AnyShapeStyle(.secondary.opacity(0.10))
+            return AnyShapeStyle(Theme.queuedBubble)
         }
-        return isUser ? AnyShapeStyle(Color.accentColor.opacity(0.14)) : AnyShapeStyle(Theme.card)
+        if isJob {
+            return AnyShapeStyle(Theme.jobBubble)
+        }
+        return isUser ? AnyShapeStyle(Theme.userBubble) : AnyShapeStyle(Theme.card)
     }
 
     private var bubbleStroke: some ShapeStyle {
         if isQueued {
-            return AnyShapeStyle(.secondary.opacity(0.30))
+            return AnyShapeStyle(Theme.queuedBubbleStroke)
         }
-        return isUser ? AnyShapeStyle(Color.accentColor.opacity(0.2)) : AnyShapeStyle(Theme.softLine)
+        if isJob {
+            return AnyShapeStyle(Theme.jobBubbleStroke)
+        }
+        return isUser ? AnyShapeStyle(Theme.userBubbleStroke) : AnyShapeStyle(Theme.softLine)
     }
 
     private var shouldClip: Bool {
-        text.count > collapsedCharacterLimit
+        guard isContextDigest else { return false }
+        return text.count > collapsedCharacterLimit || lineCount > collapsedLineLimit
     }
 
     private var hiddenCharacterCount: Int {
-        max(text.count - collapsedCharacterLimit, 0)
+        max(text.count - clippedBody.count, 0)
     }
 
     private var visibleText: String {
-        guard shouldClip, !showFullText else { return text }
-        return String(text.prefix(collapsedCharacterLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[message clipped in UI; copy still uses full text]"
+        guard shouldClip else { return text }
+        return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[message folded in UI; copy and full text use the complete message]"
+    }
+
+    private var clippedBody: String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let lineClipped = lines.prefix(collapsedLineLimit).joined(separator: "\n")
+        if lineClipped.count > collapsedCharacterLimit {
+            return String(lineClipped.prefix(collapsedCharacterLimit))
+        }
+        return lineClipped
+    }
+
+    private var collapsedCharacterLimit: Int {
+        isContextDigest ? 1_200 : 1_600
+    }
+
+    private var collapsedLineLimit: Int {
+        isContextDigest ? 12 : 16
+    }
+
+    private var lineCount: Int {
+        text.split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+
+    private var isContextDigest: Bool {
+        text.contains("# ZenithDock Context Digest")
     }
 
     private func copyToPasteboard(_ string: String) {
@@ -288,6 +383,221 @@ struct MessageBubble: View {
         #elseif canImport(UIKit)
         UIPasteboard.general.string = string
         #endif
+    }
+}
+
+struct JobRunBubble: View {
+    let jobRun: JobRunRow
+    let linkContext: ZMarkdownLinkContext?
+
+    var body: some View {
+        HStack {
+            MessageBubble(
+                label: label,
+                text: bodyText,
+                isUser: false,
+                isJob: true,
+                linkContext: linkContext
+            )
+            Spacer(minLength: 80)
+        }
+    }
+
+    private var label: String {
+        jobRunLabel(jobRun)
+    }
+
+    private var bodyText: String {
+        jobRunBodyText(jobRun)
+    }
+}
+
+struct JobRunGroupBubble: View {
+    let group: JobRunGroupRow
+    let linkContext: ZMarkdownLinkContext?
+    @State private var olderOpen = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 6) {
+                    Label("Latest Job Status", systemImage: "clock.badge.checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("· \(group.latest.job.title)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("· \(group.runs.count) runs")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                    Button {
+                        copyToPasteboard(ZClipboardText.normalizedForCopy(latestText))
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Copy latest job output")
+                }
+
+                MarkdownView(markdown: latestText, linkContext: linkContext)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !group.olderNewestFirst.isEmpty {
+                    DisclosureGroup(isExpanded: $olderOpen) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(group.olderNewestFirst.prefix(6)), id: \.id) { run in
+                                JobRunCompactLine(jobRun: run)
+                            }
+                            if group.olderNewestFirst.count > 6 {
+                                Text("\(group.olderNewestFirst.count - 6) more earlier runs hidden")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.top, 4)
+                    } label: {
+                        Text("\(group.olderNewestFirst.count) earlier job run\(group.olderNewestFirst.count == 1 ? "" : "s") hidden")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 760, alignment: .leading)
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.orange.opacity(0.75))
+                    .frame(width: 3)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.jobBubbleStroke.opacity(0.65)))
+            Spacer(minLength: 80)
+        }
+    }
+
+    private var latestText: String {
+        jobRunBodyText(group.latest)
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+}
+
+private struct JobRunCompactLine: View {
+    let jobRun: JobRunRow
+    @State private var detailOpen = false
+
+    var body: some View {
+        Button {
+            detailOpen = true
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 16)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(jobRunLabel(jobRun))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                    Text(preview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Text("Open")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.softLine))
+        .help("Open full job run details")
+        .sheet(isPresented: $detailOpen) {
+            FullMessageSheet(label: jobRunLabel(jobRun), text: jobRunBodyText(jobRun))
+        }
+    }
+
+    private var preview: String {
+        jobRunBodyText(jobRun)
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? "No output yet"
+    }
+}
+
+private func jobRunLabel(_ jobRun: JobRunRow) -> String {
+    if jobRun.isFinished {
+        return "Job Response · \(jobRun.job.title)"
+    }
+    return "Job Running · \(jobRun.job.title)"
+}
+
+private func jobRunBodyText(_ jobRun: JobRunRow) -> String {
+    if let result = jobRun.resultText?.trimmingCharacters(in: .whitespacesAndNewlines), !result.isEmpty {
+        return result
+    }
+    if let error = jobRun.errorText?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
+        return error
+    }
+    return "Scheduled job started. Waiting for agent output..."
+}
+
+private struct FullMessageSheet: View {
+    let label: String
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+
+    private var displayText: String {
+        ZClipboardText.normalizedForCopy(text)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(label)
+                    .font(.headline)
+                Text("\(text.count) chars")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(displayText, forType: .string)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(14)
+            Divider()
+            ScrollView {
+                Text(displayText)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+        }
+        .frame(minWidth: 760, idealWidth: 900, minHeight: 560, idealHeight: 720)
     }
 }
 
@@ -355,9 +665,15 @@ struct ToolBody: View {
     }
 }
 
-struct TraceGroupCard: View {
+struct TraceGroupCard: View, Equatable {
     let events: [ZEvent]
+    let linkContext: ZMarkdownLinkContext?
     @State private var expanded = false
+
+    nonisolated static func == (lhs: TraceGroupCard, rhs: TraceGroupCard) -> Bool {
+        signature(for: lhs.events) == signature(for: rhs.events) &&
+            lhs.linkContext == rhs.linkContext
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -369,7 +685,7 @@ struct TraceGroupCard: View {
                 if expanded {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(events) { event in
-                            TraceEventDetail(event: event)
+                            TraceEventDetail(event: event, linkContext: linkContext)
                         }
                     }
                     .padding(.top, 8)
@@ -421,10 +737,19 @@ struct TraceGroupCard: View {
     private var reasoningCount: Int {
         events.filter { $0.type == "reasoning_summary" }.count
     }
+
+    private var signature: String {
+        Self.signature(for: events)
+    }
+
+    nonisolated private static func signature(for events: [ZEvent]) -> String {
+        "\(events.count):\(events.first?.id ?? ""):\(events.last?.id ?? "")"
+    }
 }
 
 private struct TraceEventDetail: View {
     let event: ZEvent
+    let linkContext: ZMarkdownLinkContext?
     @State private var expanded = false
 
     var body: some View {
@@ -450,7 +775,7 @@ private struct TraceEventDetail: View {
     private var content: some View {
         switch event.type {
         case "reasoning_summary":
-            MarkdownView(markdown: event.text ?? "", compact: true)
+            MarkdownView(markdown: event.text ?? "", compact: true, linkContext: linkContext)
                 .foregroundStyle(.secondary)
         case "tool_started":
             ToolBody(event: event, expanded: $expanded)
@@ -468,9 +793,18 @@ private struct TraceEventDetail: View {
                 Text(event.message ?? event.type)
                     .foregroundStyle(.secondary)
             }
+        case "job_created", "job_ran":
+            JobEventSummary(event: event)
         case "error", "job_error", "artifact_error":
-            Text(event.message ?? event.error ?? "Unknown error")
-                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(event.message ?? event.error ?? "Unknown error")
+                    .foregroundStyle(.red)
+                if let job = event.job {
+                    Text(job.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
         default:
             Text(event.message ?? event.text ?? event.type)
                 .foregroundStyle(.secondary)
@@ -488,7 +822,8 @@ private struct TraceEventDetail: View {
         case "cwd_fallback": "Directory"
         case "history_imported": "History"
         case "backend_changed": "Backend"
-        case "job_ran": "Job"
+        case "job_created": "Job Created"
+        case "job_ran": "Job Ran"
         case "job_error": "Job Error"
         case "artifact_error": "Artifact Error"
         default: event.type.replacingOccurrences(of: "_", with: " ").capitalized
@@ -500,6 +835,7 @@ private struct TraceEventDetail: View {
         case "reasoning_summary": "brain.head.profile"
         case "tool_started", "tool_finished": "terminal"
         case "raw_event": "curlybraces"
+        case "job_created", "job_ran": "clock.badge.checkmark"
         case "error", "job_error", "artifact_error": "exclamationmark.triangle"
         default: "circle"
         }
@@ -509,8 +845,45 @@ private struct TraceEventDetail: View {
         switch event.type {
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
+        case "job_created", "job_ran": .orange
         case "error", "job_error", "artifact_error": .red
         default: .secondary
+        }
+    }
+}
+
+private struct JobEventSummary: View {
+    let event: ZEvent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(event.message ?? fallbackMessage)
+                .font(.callout.weight(.medium))
+            if let job = event.job {
+                HStack(spacing: 8) {
+                    Label(job.loop == true ? "Loop" : "One shot", systemImage: job.loop == true ? "repeat" : "timer")
+                    Text("\(job.run_count ?? 0) run\(job.run_count == 1 ? "" : "s")")
+                    if let next = job.next_run_at_iso, job.enabled {
+                        Text("Next \(next)")
+                    } else if !job.enabled {
+                        Text("Paused")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+        }
+    }
+
+    private var fallbackMessage: String {
+        switch event.type {
+        case "job_created":
+            return "Scheduled job created"
+        case "job_ran":
+            return "Scheduled job ran"
+        default:
+            return event.type
         }
     }
 }
@@ -548,6 +921,7 @@ private struct TraceDisclosureHeader: View {
 struct ArtifactPreview: View {
     let file: ZFile
     let url: URL
+    var linkContext: ZMarkdownLinkContext?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -579,7 +953,7 @@ struct ArtifactPreview: View {
 	                    Button {
 	                        VideoFullscreenPresenter.present(url: url)
 	                    } label: {
-	                        Label("Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right")
+	                        Label("Open Player", systemImage: "play.rectangle")
 	                    }
 	                    .buttonStyle(.link)
 	                    #endif
@@ -590,15 +964,38 @@ struct ArtifactPreview: View {
                 .font(.caption)
             }
             if let text = file.text {
-                MarkdownView(markdown: text, compact: true)
+                MarkdownView(markdown: text, compact: true, linkContext: linkContext)
                     .foregroundStyle(.secondary)
             }
         }
+        .contentShape(Rectangle())
+        .onDrag {
+            ArtifactDragItemProvider.provider(for: file, url: url)
+        }
+        .help("Drag file to Finder or another app")
     }
 
     var icon: String {
         if file.content_type?.hasPrefix("video/") == true { return "film" }
         if file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
+    }
+}
+
+private struct UploadedFileLabel: View {
+    let file: ZFile
+    let url: URL?
+
+    var body: some View {
+        if let url {
+            Label(file.filename, systemImage: "tray.and.arrow.up")
+                .contentShape(Rectangle())
+                .onDrag {
+                    ArtifactDragItemProvider.provider(for: file, url: url)
+                }
+                .help("Drag file to Finder or another app")
+        } else {
+            Label(file.filename, systemImage: "tray.and.arrow.up")
+        }
     }
 }

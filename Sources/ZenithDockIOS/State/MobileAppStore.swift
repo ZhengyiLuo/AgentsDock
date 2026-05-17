@@ -15,7 +15,9 @@ final class MobileAppStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
+    @Published var sessionFiles: [ZFile] = []
     @Published var jobs: [ZJob] = []
+    @Published var runtimeCatalog = ZRuntimeCatalogSnapshot.fallback
     @Published var prompt = ""
     @Published var isRunning = false
     @Published var isLoading = false
@@ -28,6 +30,9 @@ final class MobileAppStore: ObservableObject {
     @Published var errorText: String?
     @Published var omittedHistoryEventCount = 0
     @Published var scrollRevision = 0
+    @Published var processSnapshot: ZProcessSnapshot?
+    @Published var processLogTail: ZProcessLogTail?
+    @Published var isLoadingProcesses = false
 
     private let initialEventLimit = 80
     private let olderHistoryPageLimit = 120
@@ -45,6 +50,7 @@ final class MobileAppStore: ObservableObject {
     private struct CachedChat {
         var session: ZSession
         var events: [ZEvent]
+        var sessionFiles: [ZFile]
         var omittedHistoryEventCount: Int
     }
 
@@ -104,6 +110,10 @@ final class MobileAppStore: ObservableObject {
         omittedHistoryEventCount > 0 && !isLoadingOlderHistory
     }
 
+    var sessionVideos: [ZFile] {
+        sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") }
+    }
+
     var pendingQueuedEvents: [ZEvent] {
         events
             .filter { isQueuedEventPending($0) }
@@ -159,10 +169,30 @@ final class MobileAppStore: ObservableObject {
     }
 
     func rememberServerURL() {
-        serverURLString = effectiveServerAddress
-        UserDefaults.standard.set(serverHost, forKey: "serverHost")
-        UserDefaults.standard.set(serverPort, forKey: "serverPort")
-        UserDefaults.standard.set(serverURLString, forKey: "serverURL")
+        let nextURL = effectiveServerAddress
+        if serverURLString != nextURL {
+            serverURLString = nextURL
+        }
+        if UserDefaults.standard.string(forKey: "serverHost") != serverHost {
+            UserDefaults.standard.set(serverHost, forKey: "serverHost")
+        }
+        if UserDefaults.standard.string(forKey: "serverPort") != serverPort {
+            UserDefaults.standard.set(serverPort, forKey: "serverPort")
+        }
+        if UserDefaults.standard.string(forKey: "serverURL") != serverURLString {
+            UserDefaults.standard.set(serverURLString, forKey: "serverURL")
+        }
+    }
+
+    func updateServerAddress(host rawHost: String, port rawPort: String) {
+        let parts = Self.serverParts(host: rawHost, port: rawPort)
+        if serverHost != parts.host {
+            serverHost = parts.host
+        }
+        if serverPort != parts.port {
+            serverPort = parts.port
+        }
+        rememberServerURL()
     }
 
     func rememberAccessToken() {
@@ -192,32 +222,67 @@ final class MobileAppStore: ObservableObject {
         cleanServerURL()
         rememberServerURL()
         await refreshHealth(showErrors: showErrors)
+        if serverReachable {
+            await refreshRuntimeCatalog(showErrors: false)
+        }
         await refreshSessions(showErrors: showErrors)
         await refreshJobs(showErrors: showErrors)
     }
 
+    func refreshRuntimeCatalog(showErrors: Bool = false) async {
+        do {
+            let res: ZRuntimeCatalogSnapshot = try await api.get("/api/runtime/catalog")
+            if runtimeCatalog != res {
+                runtimeCatalog = res
+            }
+        } catch {
+            if showErrors {
+                report(error)
+            }
+        }
+    }
+
     func refreshHealth(showErrors: Bool = true) async {
         let target = api.url("/api/health").absoluteString
-        connectionDetail = "Testing \(target)"
+        if showErrors || !serverReachable {
+            setConnectionDetail("Testing \(target)")
+        }
         do {
             struct Response: Codable {
                 let ok: Bool
                 let active: [String]
             }
             let res: Response = try await api.get("/api/health")
-            serverReachable = res.ok
-            activeSessionIDs = Set(res.active)
+            if serverReachable != res.ok {
+                serverReachable = res.ok
+            }
+            let nextActive = Set(res.active)
+            if activeSessionIDs != nextActive {
+                activeSessionIDs = nextActive
+            }
             syncSelectedRunningState()
-            status = socketLive ? "Live" : "Server connected"
-            connectionDetail = "Connected to \(resolvedServerURLString)"
+            setStatus(socketLive ? "Live" : "Server connected")
+            setConnectionDetail("Connected to \(resolvedServerURLString)")
+            if let sid = selectedSessionID, activeSessionIDs.contains(sid) {
+                await refreshSelectedProcesses(showErrors: false)
+            } else if processSnapshot?.active == true {
+                processSnapshot = nil
+                processLogTail = nil
+            }
         } catch {
             guard !isCancelledNetworkError(error) else { return }
-            serverReachable = false
-            socketLive = false
-            activeSessionIDs = []
+            if serverReachable {
+                serverReachable = false
+            }
+            if socketLive {
+                socketLive = false
+            }
+            if !activeSessionIDs.isEmpty {
+                activeSessionIDs = []
+            }
             syncSelectedRunningState()
-            status = "Server offline"
-            connectionDetail = connectionFailureSummary(error)
+            setStatus("Server offline")
+            setConnectionDetail(connectionFailureSummary(error))
             if showErrors { report(error) }
         }
     }
@@ -297,17 +362,19 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func updateSelected(backend: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
         guard let sid = selectedSessionID else { return }
-        await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, pinned: pinned)
+        await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned)
     }
 
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, pinned: Bool? = nil) async {
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil) async {
         struct Body: Codable {
             var title: String?
             var folder: String?
             var cwd: String?
             var backend: String?
+            var model: String?
+            var effort: String?
             var pinned: Bool?
         }
         do {
@@ -317,6 +384,8 @@ final class MobileAppStore: ObservableObject {
                 folder: folder,
                 cwd: cwd,
                 backend: backend,
+                model: model,
+                effort: effort,
                 pinned: pinned
             ))
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
@@ -381,6 +450,85 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
+    func createHandoffDigest(sourceSessionID: String, detail: String, userPrompt: String) async -> String? {
+        struct Body: Codable {
+            let detail: String
+            let user_prompt: String?
+        }
+        struct Response: Codable {
+            let digest: String
+            let source_session: ZSession?
+            let event_count: Int?
+            let file_count: Int?
+            let detail: String?
+        }
+        let cleanPrompt = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let res: Response = try await api.post(
+                "/api/sessions/\(sourceSessionID)/digest",
+                body: Body(
+                    detail: detail,
+                    user_prompt: cleanPrompt.isEmpty ? nil : cleanPrompt
+                )
+            )
+            return res.digest
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func sendPrompt(to sessionID: String, prompt submittedPrompt: String, fileIDs: [String] = []) async -> Bool {
+        let trimmed = submittedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        struct Body: Codable {
+            let prompt: String
+            let file_ids: [String]
+        }
+        struct Response: Codable {
+            let run_id: String?
+            let queued: Bool?
+            let session: ZSession
+        }
+        activeSessionIDs.insert(sessionID)
+        if sessionID == selectedSessionID {
+            syncSelectedRunningState()
+        }
+        do {
+            let res: Response = try await api.post(
+                "/api/sessions/\(sessionID)/turns",
+                body: Body(prompt: trimmed, file_ids: fileIDs)
+            )
+            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = res.session
+            }
+            syncSelectedRunningState()
+            return true
+        } catch {
+            activeSessionIDs.remove(sessionID)
+            syncSelectedRunningState()
+            report(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func sendHandoffDigest(sourceSessionID: String, targetSessionID: String, detail: String, userPrompt: String) async -> Bool {
+        guard sourceSessionID != targetSessionID else {
+            errorText = "Choose a different target chat for the digest."
+            return false
+        }
+        guard let digest = await createHandoffDigest(
+            sourceSessionID: sourceSessionID,
+            detail: detail,
+            userPrompt: userPrompt
+        ) else {
+            return false
+        }
+        return await sendPrompt(to: targetSessionID, prompt: digest)
+    }
+
     func select(sessionID: String) async {
         if loadingSessionID == sessionID {
             selectedSessionID = sessionID
@@ -401,6 +549,8 @@ final class MobileAppStore: ObservableObject {
         webSocket?.cancel(with: .goingAway, reason: nil)
         socketLive = false
         isLoading = true
+        processSnapshot = nil
+        processLogTail = nil
         status = serverReachable ? "Loading chat" : "Server offline"
         var loadedFromCache = false
 
@@ -412,6 +562,7 @@ final class MobileAppStore: ObservableObject {
         } else {
             events = []
             uploads = []
+            sessionFiles = []
             omittedHistoryEventCount = 0
             latestSeenSeq = 0
         }
@@ -447,10 +598,14 @@ final class MobileAppStore: ObservableObject {
                 latestSeenSeq = events.map(\.seq).max() ?? 0
                 omittedHistoryEventCount = res.events_omitted_before ?? 0
             }
-            uploads = events.compactMap(\.file)
+            refreshSessionFilesFromLoadedEvents()
             isLoading = false
             rememberSelectedChat()
+            Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
             connectEvents(sessionID: sessionID, after: lastSeq)
+            if activeSessionIDs.contains(sessionID) {
+                await refreshSelectedProcesses(showErrors: false)
+            }
             scrollRevision += 1
         } catch {
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
@@ -492,8 +647,48 @@ final class MobileAppStore: ObservableObject {
             events = (older + events).sorted { $0.seq < $1.seq }
             omittedHistoryEventCount = res.events_omitted_before ?? 0
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
-            uploads = events.compactMap(\.file)
+            refreshSessionFilesFromLoadedEvents()
             rememberSelectedChat()
+        } catch {
+            report(error)
+        }
+    }
+
+    func refreshSelectedFiles() async {
+        guard let sid = selectedSessionID else { return }
+        await loadSessionFiles(sessionID: sid, generation: selectionGeneration)
+    }
+
+    func refreshSelectedProcesses(showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        isLoadingProcesses = true
+        defer { isLoadingProcesses = false }
+        do {
+            let res: ZProcessSnapshot = try await api.get("/api/sessions/\(sid)/processes")
+            guard selectedSessionID == sid else { return }
+            processSnapshot = res.active ? res : nil
+            if res.active == false {
+                processLogTail = nil
+            }
+        } catch {
+            if showErrors {
+                report(error)
+            }
+        }
+    }
+
+    func tailProcessLog(_ hint: ZProcessLogHint) async {
+        guard let sid = selectedSessionID else { return }
+        do {
+            let res: ZProcessLogTail = try await api.get(
+                "/api/sessions/\(sid)/processes/log",
+                queryItems: [
+                    URLQueryItem(name: "path", value: hint.path),
+                    URLQueryItem(name: "lines", value: "220")
+                ]
+            )
+            guard selectedSessionID == sid else { return }
+            processLogTail = res
         } catch {
             report(error)
         }
@@ -594,7 +789,7 @@ final class MobileAppStore: ObservableObject {
             let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let res: Response = try await api.post("/api/jobs", body: Body(
                 session_id: sid,
-                title: cleanTitle.isEmpty ? "Loop: \(selectedSession?.title ?? "Chat")" : cleanTitle,
+                title: cleanTitle.isEmpty ? "\(loop ? "Loop" : "Job"): \(selectedSession?.title ?? "Chat")" : cleanTitle,
                 prompt: cleanPrompt,
                 interval_seconds: max(10, intervalSeconds),
                 loop: loop,
@@ -607,16 +802,46 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func updateJob(_ job: ZJob, enabled: Bool? = nil) async {
+    func updateJob(
+        _ job: ZJob,
+        title: String? = nil,
+        prompt: String? = nil,
+        intervalSeconds: Int? = nil,
+        loop: Bool? = nil,
+        enabled: Bool? = nil,
+        backend: String? = nil
+    ) async {
         struct Body: Codable {
+            var title: String?
+            var prompt: String?
             var enabled: Bool?
+            var interval_seconds: Int?
+            var loop: Bool?
+            var backend: String?
         }
         do {
             struct Response: Codable { let job: ZJob }
-            let res: Response = try await api.patch("/api/jobs/\(job.id)", body: Body(enabled: enabled))
+            let res: Response = try await api.patch("/api/jobs/\(job.id)", body: Body(
+                title: title,
+                prompt: prompt,
+                enabled: enabled,
+                interval_seconds: intervalSeconds.map { max(10, $0) },
+                loop: loop,
+                backend: backend
+            ))
             if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
                 jobs[idx] = res.job
             }
+        } catch {
+            report(error)
+        }
+    }
+
+    func runJobNow(_ job: ZJob) async {
+        struct Empty: Codable {}
+        do {
+            let _: JSONValue = try await api.post("/api/jobs/\(job.id)/run", body: Empty())
+            await refreshJobs(showErrors: false)
         } catch {
             report(error)
         }
@@ -642,19 +867,39 @@ final class MobileAppStore: ObservableObject {
             defer { if ok { url.stopAccessingSecurityScopedResource() } }
             do {
                 let file = try await api.upload(sessionID: sid, fileURL: url)
-                uploads.append(file)
+                addPendingUpload(file)
             } catch {
                 report(error)
             }
         }
     }
 
+    func removeUpload(_ file: ZFile) {
+        uploads.removeAll { $0.id == file.id }
+    }
+
     func fileURL(_ file: ZFile) -> URL {
         api.authenticatedURL("/api/files/\(file.id)")
     }
 
+    func markdownLinkContext(sessionID: String) -> ZMarkdownLinkContext {
+        ZMarkdownLinkContext(sessionID: sessionID, baseURL: api.baseURL, accessToken: accessToken)
+    }
+
     private func cleanServerURL() {
         rememberServerURL()
+    }
+
+    private func setStatus(_ next: String) {
+        if status != next {
+            status = next
+        }
+    }
+
+    private func setConnectionDetail(_ next: String) {
+        if connectionDetail != next {
+            connectionDetail = next
+        }
     }
 
     func hasStartedQueuedEvent(_ event: ZEvent) -> Bool {
@@ -675,8 +920,10 @@ final class MobileAppStore: ObservableObject {
         let task = URLSession.shared.webSocketTask(with: api.wsRequest(sessionID: sessionID, after: after))
         webSocket = task
         task.resume()
-        socketLive = true
-        status = "Live"
+        if !socketLive {
+            socketLive = true
+        }
+        setStatus("Live")
         receiveNext(task: task, sessionID: sessionID)
     }
 
@@ -697,8 +944,10 @@ final class MobileAppStore: ObservableObject {
                     self.receiveNext(task: task, sessionID: sessionID)
                 case .failure:
                     guard self.webSocket === task, self.selectedSessionID == sessionID else { return }
-                    self.socketLive = false
-                    self.status = self.serverReachable ? "Stream reconnecting" : "Server offline"
+                    if self.socketLive {
+                        self.socketLive = false
+                    }
+                    self.setStatus(self.serverReachable ? "Stream reconnecting" : "Server offline")
                 }
             }
         }
@@ -717,7 +966,11 @@ final class MobileAppStore: ObservableObject {
         events.append(event)
         updateRunningState(from: event)
         if let file = event.file {
-            uploads.append(file)
+            addPendingUpload(file)
+            upsertSessionFile(file)
+        }
+        if let artifact = event.artifact {
+            upsertSessionFile(artifact)
         }
         if event.type != "raw_event" {
             rememberSelectedChat()
@@ -728,9 +981,16 @@ final class MobileAppStore: ObservableObject {
     private func updateRunningState(from event: ZEvent) {
         if event.type == "turn_started" {
             activeSessionIDs.insert(event.session_id)
+            if event.session_id == selectedSessionID {
+                Task { await refreshSelectedProcesses(showErrors: false) }
+            }
         }
         if event.type == "turn_finished" || event.type == "error" || event.type == "turn_stopped" {
             activeSessionIDs.remove(event.session_id)
+            if event.session_id == selectedSessionID {
+                processSnapshot = nil
+                processLogTail = nil
+            }
         }
         syncSelectedRunningState()
     }
@@ -746,6 +1006,12 @@ final class MobileAppStore: ObservableObject {
         events.append(contentsOf: incomingEvents.filter { !existingIDs.contains($0.id) })
         events.sort { $0.seq < $1.seq }
         latestSeenSeq = max(latestSeenSeq, incomingEvents.map(\.seq).max() ?? 0)
+        refreshSessionFilesFromLoadedEvents()
+    }
+
+    private func addPendingUpload(_ file: ZFile) {
+        guard !uploads.contains(where: { $0.id == file.id }) else { return }
+        uploads.append(file)
     }
 
     private func applyCachedChat(_ cached: CachedChat) {
@@ -754,8 +1020,51 @@ final class MobileAppStore: ObservableObject {
         }
         events = timelineEvents(from: cached.events)
         omittedHistoryEventCount = cached.omittedHistoryEventCount
-        uploads = events.compactMap(\.file)
+        sessionFiles = mergedFiles(cached.sessionFiles + files(from: events))
+        refreshSessionFilesFromLoadedEvents()
         latestSeenSeq = events.map(\.seq).max() ?? 0
+    }
+
+    private func refreshSessionFilesFromLoadedEvents() {
+        let known = files(from: events)
+        guard !known.isEmpty || sessionFiles.isEmpty else { return }
+        sessionFiles = mergedFiles(sessionFiles + known)
+    }
+
+    private func files(from source: [ZEvent]) -> [ZFile] {
+        source.flatMap { event -> [ZFile] in
+            [event.file, event.artifact].compactMap { $0 }
+        }
+    }
+
+    private func upsertSessionFile(_ file: ZFile) {
+        sessionFiles = mergedFiles(sessionFiles + [file])
+    }
+
+    private func loadSessionFiles(sessionID: String, generation: Int) async {
+        do {
+            struct Response: Codable { let files: [ZFile] }
+            let res: Response = try await api.get("/api/sessions/\(sessionID)/files")
+            guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
+            sessionFiles = mergedFiles(res.files + files(from: events))
+        } catch {
+            guard !isCancelledNetworkError(error) else { return }
+        }
+    }
+
+    private func mergedFiles(_ files: [ZFile]) -> [ZFile] {
+        var byID: [String: ZFile] = [:]
+        for file in files {
+            byID[file.id] = file
+        }
+        return byID.values.sorted { lhs, rhs in
+            let leftDate = lhs.created_at ?? ""
+            let rightDate = rhs.created_at ?? ""
+            if leftDate != rightDate {
+                return leftDate > rightDate
+            }
+            return lhs.filename.localizedStandardCompare(rhs.filename) == .orderedAscending
+        }
     }
 
     private func rememberSelectedChat() {
@@ -765,6 +1074,7 @@ final class MobileAppStore: ObservableObject {
         let cached = CachedChat(
             session: session,
             events: cachedEvents,
+            sessionFiles: sessionFiles.isEmpty ? files(from: events) : sessionFiles,
             omittedHistoryEventCount: omittedHistoryEventCount + overflow
         )
         rememberChatCache(cached)
@@ -797,10 +1107,15 @@ final class MobileAppStore: ObservableObject {
 
     private func syncSelectedRunningState() {
         guard let selectedSessionID else {
-            isRunning = false
+            if isRunning {
+                isRunning = false
+            }
             return
         }
-        isRunning = activeSessionIDs.contains(selectedSessionID)
+        let next = activeSessionIDs.contains(selectedSessionID)
+        if isRunning != next {
+            isRunning = next
+        }
     }
 
     private func report(_ error: Error) {

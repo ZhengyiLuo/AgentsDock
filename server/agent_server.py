@@ -18,8 +18,10 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import signal
+import subprocess
 import time
 import uuid
 from collections import deque
@@ -27,8 +29,9 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -54,6 +57,7 @@ if DEFAULT_BACKEND not in VALID_BACKENDS:
 
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("ZENITHBOT_REQUEST_TIMEOUT_SECONDS", "86400"))
 CODEX_APP_SERVER_TIMEOUT_SECONDS = int(os.environ.get("ZENITHBOT_CODEX_APP_SERVER_TIMEOUT_SECONDS", "30"))
+RUNTIME_CATALOG_TIMEOUT_SECONDS = float(os.environ.get("ZENITHBOT_RUNTIME_CATALOG_TIMEOUT_SECONDS", "6"))
 IDLE_WARN_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_WARN_SECONDS", "1800"))
 IDLE_KILL_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_KILL_SECONDS", "21600"))
 STOP_GRACE_SECONDS = float(os.environ.get("ZENITHBOT_STOP_GRACE_SECONDS", "2.0"))
@@ -63,6 +67,7 @@ MAX_IMPORT_MESSAGES = int(os.environ.get("ZENITHBOT_HISTORY_IMPORT_LIMIT", "400"
 MAX_IMPORTED_TEXT_CHARS = int(os.environ.get("ZENITHBOT_HISTORY_IMPORT_TEXT_CHARS", "12000"))
 MAX_FORK_MEMORY_CHARS = int(os.environ.get("ZENITHBOT_FORK_MEMORY_CHARS", "24000"))
 MAX_FORK_MEMORY_ITEM_CHARS = int(os.environ.get("ZENITHBOT_FORK_MEMORY_ITEM_CHARS", "1800"))
+MAX_HANDOFF_DIGEST_CHARS = int(os.environ.get("ZENITHBOT_HANDOFF_DIGEST_CHARS", "56000"))
 DEFAULT_SESSION_EVENT_LIMIT = int(os.environ.get("ZENITHBOT_SESSION_EVENT_LIMIT", "100"))
 MAX_EVENT_RESPONSE_LIMIT = int(os.environ.get("ZENITHBOT_MAX_EVENT_RESPONSE_LIMIT", "1000"))
 AGENT_TOKEN = os.environ.get("ZENITHDOCK_AGENT_TOKEN") or os.environ.get("ZENITHBOT_AGENT_TOKEN") or ""
@@ -244,6 +249,11 @@ class ImportHistoryRequest(BaseModel):
     limit: int | None = None
 
 
+class HandoffDigestRequest(BaseModel):
+    detail: str = "normal"
+    user_prompt: str | None = None
+
+
 class CreateJobRequest(BaseModel):
     session_id: str
     title: str
@@ -337,9 +347,14 @@ class SessionStore:
                     sess["session_id"] = sess.get("claude_session_id" if backend == BACKEND_CLAUDE else "codex_thread_id")
                     sess["backend"] = backend
                     await append_event(sid, "backend_changed", {"old": old, "new": backend})
-            for key in ("title", "folder", "cwd", "model", "effort"):
+            for key in ("title", "folder", "cwd"):
                 if key in patch and patch[key] is not None:
                     sess[key] = patch[key]
+            for key in ("model", "effort"):
+                if key in patch:
+                    value = patch[key]
+                    clean = str(value).strip() if value is not None else ""
+                    sess[key] = clean or None
             if "pinned" in patch and patch["pinned"] is not None:
                 pinned = bool(patch["pinned"])
                 if pinned and not sess.get("pinned"):
@@ -422,7 +437,11 @@ class JobStore:
         async with self._lock:
             self.jobs[jid] = job
             await self.save()
-        await append_event(req.session_id, "job_created", {"job": public_job(job)})
+        await append_event(req.session_id, "job_created", {
+            "job": public_job(job),
+            "job_id": jid,
+            "message": f"Scheduled job created: {req.title}",
+        })
         return job
 
     async def update(self, jid: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -432,10 +451,11 @@ class JobStore:
                 raise HTTPException(status_code=404, detail="job not found")
             if "backend" in patch and patch["backend"] is not None and patch["backend"] not in VALID_BACKENDS:
                 raise HTTPException(status_code=400, detail=f"backend must be one of {sorted(VALID_BACKENDS)}")
+            should_reschedule = any(key in patch for key in ("interval_seconds", "loop", "enabled"))
             for key in ("title", "prompt", "interval_seconds", "loop", "enabled", "backend"):
                 if key in patch and patch[key] is not None:
                     job[key] = patch[key]
-            if job.get("enabled") and job.get("interval_seconds") and not job.get("next_run_at"):
+            if job.get("enabled") and job.get("interval_seconds") and (should_reschedule or not job.get("next_run_at")):
                 job["next_run_at"] = time.time() + int(job["interval_seconds"])
             if not job.get("enabled"):
                 job["next_run_at"] = None
@@ -464,9 +484,10 @@ class JobStore:
                 return
             job["last_run_at"] = now_iso()
             job["run_count"] = int(job.get("run_count") or 0) + 1
-            if job.get("enabled") and job.get("interval_seconds"):
+            if job.get("enabled") and job.get("loop") and job.get("interval_seconds"):
                 job["next_run_at"] = time.time() + int(job["interval_seconds"])
             else:
+                job["enabled"] = False
                 job["next_run_at"] = None
             job["updated_at"] = now_iso()
             await self.save()
@@ -482,7 +503,13 @@ class JobStore:
         )
         result = await start_turn(job["session_id"], req, queue_if_busy=False)
         await self.mark_ran(jid)
-        await append_event(job["session_id"], "job_ran", {"job": public_job(self.jobs[jid]), "run_id": result["run_id"]})
+        ran_job = public_job(self.jobs[jid])
+        await append_event(job["session_id"], "job_ran", {
+            "job": ran_job,
+            "job_id": jid,
+            "run_id": result["run_id"],
+            "message": f"Scheduled job ran: {ran_job.get('title') or jid}",
+        })
         return result
 
     def start_scheduler(self) -> None:
@@ -513,8 +540,16 @@ class JobStore:
                 except Exception as e:
                     logger.warning("scheduled job %s failed: %s", jid, e)
                     if job.get("session_id"):
-                        await append_event(job["session_id"], "job_error", {"job_id": jid, "message": str(e)})
-                    job["next_run_at"] = time.time() + int(job.get("interval_seconds") or 300)
+                        await append_event(job["session_id"], "job_error", {
+                            "job": public_job(job),
+                            "job_id": jid,
+                            "message": f"Scheduled job failed: {job.get('title') or jid} — {e}",
+                        })
+                    if job.get("loop") and job.get("interval_seconds"):
+                        job["next_run_at"] = time.time() + int(job.get("interval_seconds") or 300)
+                    else:
+                        job["enabled"] = False
+                        job["next_run_at"] = None
                     await self.save()
 
 
@@ -563,6 +598,10 @@ STOPPED_RUNS: set[str] = set()
 ACTIVE_LOCK = asyncio.Lock()
 QUEUED_TURNS: dict[str, deque[dict[str, Any]]] = {}
 QUEUE_LOCK = asyncio.Lock()
+
+LOG_PATH_SUFFIXES = {
+    ".log", ".out", ".err", ".stderr", ".stdout", ".txt", ".jsonl", ".trace"
+}
 
 
 async def append_event(session_id: str, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -725,6 +764,326 @@ async def terminate_process_tree(proc: asyncio.subprocess.Process, *, grace: flo
     return sent or killed
 
 
+def process_group_for_pid(pid: int) -> int | None:
+    with suppress(ProcessLookupError, PermissionError, OSError):
+        return os.getpgid(pid)
+    return None
+
+
+def procfs_process_rows() -> list[dict[str, Any]]:
+    if os.name == "nt" or not Path("/proc").is_dir():
+        return []
+    with suppress(Exception):
+        uptime = float(Path("/proc/uptime").read_text().split()[0])
+    if "uptime" not in locals():
+        uptime = 0.0
+    clk_tck = os.sysconf(os.sysconf_names.get("SC_CLK_TCK", "SC_CLK_TCK"))
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    mem_total_kb = 0
+    with suppress(Exception):
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                mem_total_kb = int(line.split()[1])
+                break
+
+    rows: list[dict[str, Any]] = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        try:
+            stat = (entry / "stat").read_text()
+            right = stat.rfind(")")
+            if right < 0:
+                continue
+            comm = stat[stat.find("(") + 1:right]
+            fields = stat[right + 2:].split()
+            if len(fields) < 20:
+                continue
+            state = fields[0]
+            ppid = int(fields[1])
+            pgid = int(fields[2])
+            sid = int(fields[3])
+            start_ticks = int(fields[19])
+            elapsed = int(max(0, uptime - (start_ticks / clk_tck))) if uptime else 0
+            rss_kb = 0
+            with suppress(Exception):
+                statm = (entry / "statm").read_text().split()
+                if len(statm) > 1:
+                    rss_kb = int(int(statm[1]) * page_size / 1024)
+            args = ""
+            with suppress(Exception):
+                raw = (entry / "cmdline").read_bytes()
+                args = raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+            if not args:
+                args = comm
+            rows.append({
+                "pid": pid,
+                "ppid": ppid,
+                "pgid": pgid,
+                "sid": sid,
+                "stat": state,
+                "elapsed_seconds": elapsed,
+                "cpu_percent": 0.0,
+                "mem_percent": (rss_kb / mem_total_kb * 100.0) if mem_total_kb else 0.0,
+                "rss_kb": rss_kb,
+                "command": comm,
+                "args": args,
+            })
+        except (OSError, PermissionError, ValueError):
+            continue
+    return rows
+
+
+def ps_process_rows() -> list[dict[str, Any]]:
+    proc_rows = procfs_process_rows()
+    if proc_rows:
+        return proc_rows
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,ppid=,pgid=,sid=,stat=,etimes=,pcpu=,pmem=,rss=,comm=,args="],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("process snapshot ps scan timed out")
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(None, 10)
+        if len(parts) < 10:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+            pgid = int(parts[2])
+            sid = int(parts[3])
+            etimes = int(float(parts[5]))
+            cpu = float(parts[6])
+            mem = float(parts[7])
+            rss = int(float(parts[8]))
+        except ValueError:
+            continue
+        rows.append({
+            "pid": pid,
+            "ppid": ppid,
+            "pgid": pgid,
+            "sid": sid,
+            "stat": parts[4],
+            "elapsed_seconds": etimes,
+            "cpu_percent": cpu,
+            "mem_percent": mem,
+            "rss_kb": rss,
+            "command": parts[9],
+            "args": parts[10] if len(parts) > 10 else parts[9],
+        })
+    return rows
+
+
+def proc_cwd(pid: int) -> str | None:
+    if os.name == "nt":
+        return None
+    with suppress(OSError, PermissionError):
+        return os.readlink(f"/proc/{pid}/cwd")
+    return None
+
+
+def unique_log_hints(hints: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    out: list[dict[str, str]] = []
+    for hint in hints:
+        path = hint.get("path", "")
+        source = hint.get("source", "")
+        key = (path, source)
+        if not path or key in seen:
+            continue
+        seen.add(key)
+        out.append(hint)
+    return out[:8]
+
+
+def fd_log_hints(pid: int) -> list[dict[str, str]]:
+    hints: list[dict[str, str]] = []
+    if os.name == "nt":
+        return hints
+    fd_dir = Path("/proc") / str(pid) / "fd"
+    for fd, label in (("1", "stdout"), ("2", "stderr")):
+        try:
+            target = os.readlink(fd_dir / fd)
+        except OSError:
+            continue
+        if target.startswith(("pipe:", "socket:", "anon_inode:")):
+            continue
+        clean = target.removesuffix(" (deleted)")
+        path = Path(clean)
+        if path.is_file():
+            hints.append({"source": label, "path": str(path)})
+    return hints
+
+
+def command_log_hints(args: str, cwd: str | None) -> list[dict[str, str]]:
+    try:
+        tokens = shlex.split(args)
+    except ValueError:
+        tokens = args.split()
+    hints: list[dict[str, str]] = []
+    base = Path(cwd) if cwd else None
+    for token in tokens:
+        clean = token.strip("'\" ,;")
+        if not clean:
+            continue
+        suffix = Path(clean).suffix.lower()
+        if suffix not in LOG_PATH_SUFFIXES:
+            continue
+        candidates = [Path(clean)]
+        if base and not Path(clean).is_absolute():
+            candidates.append(base / clean)
+        for candidate in candidates:
+            if candidate.is_file():
+                hints.append({"source": "command", "path": str(candidate.resolve())})
+                break
+    return hints
+
+
+def process_depth(pid: int, rows_by_pid: dict[int, dict[str, Any]], selected: set[int]) -> int:
+    depth = 0
+    seen: set[int] = set()
+    current = rows_by_pid.get(pid)
+    while current:
+        ppid = int(current.get("ppid") or 0)
+        if ppid not in selected or ppid in seen:
+            break
+        seen.add(ppid)
+        depth += 1
+        current = rows_by_pid.get(ppid)
+    return min(depth, 12)
+
+
+def ordered_process_tree(root_pid: int, selected: set[int], rows_by_pid: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    children: dict[int, list[int]] = {}
+    roots: list[int] = []
+    for pid in selected:
+        row = rows_by_pid.get(pid)
+        if not row:
+            continue
+        ppid = int(row.get("ppid") or 0)
+        if ppid in selected and ppid != pid:
+            children.setdefault(ppid, []).append(pid)
+        else:
+            roots.append(pid)
+    for values in children.values():
+        values.sort()
+
+    ordered: list[dict[str, Any]] = []
+    visited: set[int] = set()
+
+    def walk(pid: int) -> None:
+        if pid in visited:
+            return
+        row = rows_by_pid.get(pid)
+        if not row:
+            return
+        visited.add(pid)
+        ordered.append(row)
+        for child in children.get(pid, []):
+            walk(child)
+
+    if root_pid in selected:
+        walk(root_pid)
+    for root in sorted(roots):
+        walk(root)
+    for pid in sorted(selected - visited):
+        walk(pid)
+    return ordered
+
+
+def active_process_snapshot(session_id: str, active: dict[str, Any]) -> dict[str, Any]:
+    proc = active.get("proc")
+    pid = int(active.get("pid") or (proc.pid if proc else 0) or 0)
+    pgid = active.get("pgid")
+    if pid and not pgid:
+        pgid = process_group_for_pid(pid)
+    if not pid:
+        return {
+            "session_id": session_id,
+            "active": False,
+            "processes": [],
+            "generated_at": now_iso(),
+        }
+
+    rows = ps_process_rows()
+    rows_by_pid = {int(row["pid"]): row for row in rows}
+    selected: set[int] = set()
+    if pid in rows_by_pid:
+        selected.add(pid)
+    if pgid is not None:
+        selected.update(int(row["pid"]) for row in rows if int(row.get("pgid") or -1) == int(pgid))
+    changed = True
+    while changed:
+        changed = False
+        for row in rows:
+            row_pid = int(row["pid"])
+            if row_pid in selected:
+                continue
+            if int(row.get("ppid") or -1) in selected:
+                selected.add(row_pid)
+                changed = True
+
+    ordered = ordered_process_tree(pid, selected, rows_by_pid)
+    processes: list[dict[str, Any]] = []
+    for row in ordered:
+        row_pid = int(row["pid"])
+        cwd = proc_cwd(row_pid)
+        hints = unique_log_hints(fd_log_hints(row_pid) + command_log_hints(str(row.get("args") or ""), cwd))
+        processes.append({
+            **row,
+            "cwd": cwd,
+            "depth": process_depth(row_pid, rows_by_pid, selected),
+            "log_hints": hints,
+        })
+
+    return {
+        "session_id": session_id,
+        "active": bool(processes),
+        "run_id": active.get("run_id"),
+        "backend": active.get("backend"),
+        "pid": pid,
+        "pgid": pgid,
+        "cwd": active.get("cwd"),
+        "argv": active.get("argv") or [],
+        "started_at": active.get("started_at_iso"),
+        "elapsed_seconds": int(max(0, time.time() - float(active.get("started_at") or time.time()))),
+        "stop_requested": bool(active.get("stop_requested")),
+        "processes": processes,
+        "generated_at": now_iso(),
+    }
+
+
+def tail_text_file(path: str, lines: int = 200, max_bytes: int = 512 * 1024) -> dict[str, Any]:
+    target = Path(path).expanduser()
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="log file not found")
+    line_count = max(1, min(int(lines or 200), 1000))
+    byte_count = max(4096, min(int(max_bytes or 512 * 1024), 2 * 1024 * 1024))
+    size = target.stat().st_size
+    with target.open("rb") as f:
+        if size > byte_count:
+            f.seek(size - byte_count)
+        data = f.read(byte_count)
+    text = data.decode("utf-8", "replace")
+    text = "\n".join(text.splitlines()[-line_count:])
+    return {
+        "path": str(target),
+        "size": size,
+        "truncated": size > byte_count,
+        "lines": line_count,
+        "text": text,
+        "generated_at": now_iso(),
+    }
+
+
 async def release_turn_slot(session_id: str) -> None:
     async with ACTIVE_LOCK:
         ACTIVE.pop(session_id, None)
@@ -781,6 +1140,191 @@ def compact_memory_text(text: str, max_chars: int = MAX_FORK_MEMORY_ITEM_CHARS) 
     if len(text) <= max_chars:
         return text
     return text[:max_chars].rstrip() + "\n[trimmed]"
+
+
+def byte_string(size: int | None) -> str:
+    if size is None:
+        return ""
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(size)
+    unit = units[0]
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            break
+        value /= 1024
+    if unit == "B":
+        return f"{int(value)} {unit}"
+    return f"{value:.1f} {unit}"
+
+
+def digest_profile(detail: str) -> dict[str, int | bool]:
+    normalized = str(detail or "normal").strip().lower()
+    profiles: dict[str, dict[str, int | bool]] = {
+        "short": {
+            "events": 40,
+            "message_chars": 650,
+            "tool_chars": 120,
+            "files": 8,
+            "reasoning": False,
+        },
+        "normal": {
+            "events": 180,
+            "message_chars": 1600,
+            "tool_chars": 420,
+            "files": 24,
+            "reasoning": True,
+        },
+        "deep": {
+            "events": 420,
+            "message_chars": 2600,
+            "tool_chars": 850,
+            "files": 48,
+            "reasoning": True,
+        },
+    }
+    return profiles.get(normalized, profiles["normal"])
+
+
+def summarize_tool_input(tool_input: Any, max_chars: int) -> str:
+    if tool_input is None:
+        return ""
+    if isinstance(tool_input, dict):
+        for key in ("command", "cmd", "description", "query", "path"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                return compact_memory_text(value, max_chars)
+    if isinstance(tool_input, str):
+        return compact_memory_text(tool_input, max_chars)
+    return compact_memory_text(json.dumps(tool_input, separators=(",", ":"), ensure_ascii=False), max_chars)
+
+
+def digest_file_line(file: dict[str, Any]) -> str:
+    title = file.get("title") or file.get("filename") or file.get("id") or "file"
+    bits = []
+    if file.get("content_type"):
+        bits.append(str(file["content_type"]))
+    if file.get("size") is not None:
+        bits.append(byte_string(int(file["size"])))
+    if file.get("kind"):
+        bits.append(str(file["kind"]))
+    suffix = f" ({', '.join(bit for bit in bits if bit)})" if bits else ""
+    line = f"- {title}{suffix}"
+    path = file.get("source_path") or file.get("path")
+    if path:
+        line += f"\n  path: {path}"
+    note = compact_memory_text(file.get("text") or "", 420)
+    if note:
+        line += f"\n  note: {note}"
+    return line
+
+
+def build_handoff_digest(session_id: str, detail: str = "normal", user_prompt: str | None = None) -> dict[str, Any]:
+    source = STORE.sessions.get(session_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="source session not found")
+
+    profile = digest_profile(detail)
+    events = read_events(session_id, limit=int(profile["events"]), tail=True)
+    files = sorted(
+        list_session_file_records(session_id),
+        key=lambda rec: (str(rec.get("created_at") or ""), str(rec.get("filename") or "")),
+        reverse=True,
+    )
+    provider_id = session_provider_id(source)
+    prompt = compact_memory_text(user_prompt or "", 2200)
+
+    lines = [
+        "# ZenithDock Context Digest",
+        "",
+        "This is an explicit handoff from another ZenithDock chat. Use it as background context for the next response.",
+    ]
+    if prompt:
+        lines.extend(["", "## User Prompt For Target Agent", prompt])
+
+    lines.extend([
+        "",
+        "## Source Chat",
+        f"- Title: {source.get('title') or 'Untitled'}",
+        f"- ZenithDock session: {session_id}",
+        f"- Backend: {source.get('backend') or DEFAULT_BACKEND}",
+        f"- Working directory: {source.get('cwd') or DEFAULT_CWD}",
+    ])
+    if provider_id:
+        lines.append(f"- Provider session/thread: {provider_id}")
+    if source.get("updated_at"):
+        lines.append(f"- Updated: {source['updated_at']}")
+
+    file_limit = int(profile["files"])
+    if files:
+        lines.extend(["", f"## Files And Videos ({min(len(files), file_limit)} of {len(files)}, newest first)"])
+        for file in files[:file_limit]:
+            lines.append(digest_file_line(file))
+
+    lines.extend(["", f"## Recent Transcript ({len(events)} events, newest window)"])
+    assistant_runs = {
+        event.get("run_id")
+        for event in events
+        if event.get("type") == "assistant_text" and str(event.get("text") or "").strip()
+    }
+    message_chars = int(profile["message_chars"])
+    tool_chars = int(profile["tool_chars"])
+    include_reasoning = bool(profile["reasoning"])
+
+    for event in events:
+        event_type = event.get("type")
+        if event_type == "turn_started":
+            text = compact_memory_text(event.get("prompt") or "", message_chars)
+            if text:
+                lines.append(f"\nUser:\n{text}")
+        elif event_type == "turn_queued":
+            text = compact_memory_text(event.get("prompt") or "", min(message_chars, 900))
+            if text:
+                lines.append(f"\nQueued user turn:\n{text}")
+        elif event_type == "assistant_text":
+            text = compact_memory_text(clean_assistant_text(event.get("text") or ""), message_chars)
+            if text:
+                lines.append(f"\nAssistant:\n{text}")
+        elif event_type == "turn_finished" and event.get("run_id") not in assistant_runs:
+            text = compact_memory_text(clean_assistant_text(event.get("result_text") or ""), message_chars)
+            if text:
+                lines.append(f"\nAssistant:\n{text}")
+        elif event_type == "reasoning_summary" and include_reasoning:
+            text = compact_memory_text(event.get("text") or "", min(message_chars, 1200))
+            if text:
+                lines.append(f"\nReasoning summary:\n{text}")
+        elif event_type == "tool_started":
+            tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
+            name = tool.get("name") or event.get("tool_id") or "tool"
+            summary = summarize_tool_input(tool.get("input"), tool_chars)
+            lines.append(f"\nTool started: {name}" + (f"\n{summary}" if summary else ""))
+        elif event_type == "tool_finished" and str(detail or "normal").lower() == "deep":
+            tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
+            name = tool.get("name") or event.get("tool_id") or "tool"
+            status = "error" if event.get("is_error") else "ok"
+            output = compact_memory_text(event.get("output") or event.get("message") or "", tool_chars)
+            lines.append(f"\nTool finished: {name} ({status})" + (f"\n{output}" if output else ""))
+        elif event_type == "artifact_created":
+            artifact = event.get("artifact") if isinstance(event.get("artifact"), dict) else {}
+            if artifact:
+                lines.append(f"\nArtifact:\n{digest_file_line(artifact)}")
+        elif event_type in {"error", "turn_stopped"}:
+            text = compact_memory_text(event.get("message") or event.get("error") or "", 1000)
+            if text:
+                lines.append(f"\n{event_type.replace('_', ' ').title()}:\n{text}")
+
+    digest = "\n".join(lines).strip()
+    if len(digest) > MAX_HANDOFF_DIGEST_CHARS:
+        head, sep, tail = digest.partition("## Recent Transcript")
+        tail_budget = max(4000, MAX_HANDOFF_DIGEST_CHARS - len(head) - len(sep) - 120)
+        digest = f"{head}{sep}\n[Older digest content trimmed]\n{tail[-tail_budget:].lstrip()}"
+
+    return {
+        "digest": digest,
+        "source_session": public_session(source),
+        "event_count": len(events),
+        "file_count": len(files),
+        "detail": str(detail or "normal").strip().lower() or "normal",
+    }
 
 
 LEADING_DECORATION_RE = re.compile(
@@ -1145,6 +1689,154 @@ def runner_env() -> dict[str, str]:
     return env
 
 
+def runtime_option(value: str, label: str | None = None) -> dict[str, str]:
+    clean = str(value or "").strip()
+    return {"value": clean, "label": str(label or clean or "Server default").strip()}
+
+
+def server_default_runtime_option() -> dict[str, str]:
+    return runtime_option("", "Server default")
+
+
+def title_model_label(value: str) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        return "Server default"
+    special = {
+        "gpt": "GPT",
+        "codex": "Codex",
+        "claude": "Claude",
+    }
+    return " ".join(special.get(part.lower(), part.upper() if part.lower().startswith("gpt") else part.capitalize()) for part in re.split(r"[-_\s]+", clean) if part)
+
+
+def title_effort_label(value: str) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        return "Server default"
+    if clean.lower() == "xhigh":
+        return "XHigh"
+    return clean.capitalize()
+
+
+def unique_runtime_options(options: list[dict[str, str]]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for option in [server_default_runtime_option(), *options]:
+        value = str(option.get("value") or "").strip()
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(runtime_option(value, option.get("label") or None))
+    return out
+
+
+def run_catalog_command(cmd: list[str]) -> str:
+    result = subprocess.run(
+        cmd,
+        cwd=DEFAULT_CWD if Path(DEFAULT_CWD).exists() else str(Path.home()),
+        env=runner_env(),
+        text=True,
+        capture_output=True,
+        timeout=RUNTIME_CATALOG_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()[:500]
+        raise RuntimeError(f"{cmd[0]} exited {result.returncode}: {stderr}")
+    return result.stdout
+
+
+def discover_codex_catalog() -> dict[str, Any]:
+    models: list[dict[str, Any]] = []
+    model_options: list[dict[str, str]] = []
+    effort_options: list[dict[str, str]] = []
+    model_source = "codex debug models"
+    effort_source = "codex debug models"
+    try:
+        payload = json.loads(run_catalog_command([CODEX_BIN, "debug", "models"]))
+        raw_models = payload.get("models") if isinstance(payload, dict) else None
+        if isinstance(raw_models, list):
+            models = [model for model in raw_models if isinstance(model, dict)]
+    except Exception as exc:
+        logger.warning("codex model discovery failed: %s", exc)
+        model_source = f"{model_source} failed"
+        effort_source = f"{effort_source} failed"
+
+    visible_models = [
+        model for model in models
+        if str(model.get("visibility") or "list") == "list" and model.get("supported_in_api", True) is not False
+    ]
+    visible_models.sort(key=lambda model: int(model.get("priority") or 9999))
+    for model in visible_models:
+        slug = str(model.get("slug") or model.get("id") or "").strip()
+        if not slug:
+            continue
+        model_options.append(runtime_option(slug, model.get("display_name") or title_model_label(slug)))
+        levels = model.get("supported_reasoning_levels")
+        if isinstance(levels, list):
+            for level in levels:
+                if not isinstance(level, dict):
+                    continue
+                effort = str(level.get("effort") or "").strip()
+                if effort:
+                    effort_options.append(runtime_option(effort, title_effort_label(effort)))
+
+    return {
+        "models": unique_runtime_options(model_options),
+        "efforts": unique_runtime_options(effort_options),
+        "model_source": model_source,
+        "effort_source": effort_source,
+    }
+
+
+def parse_claude_help_catalog() -> dict[str, Any]:
+    model_options: list[dict[str, str]] = []
+    effort_options: list[dict[str, str]] = []
+    model_source = "claude --help"
+    effort_source = "claude --help"
+    try:
+        help_text = run_catalog_command(["claude", "--help"])
+    except Exception as exc:
+        logger.warning("claude model discovery failed: %s", exc)
+        return {
+            "models": [server_default_runtime_option()],
+            "efforts": [server_default_runtime_option()],
+            "model_source": f"{model_source} failed",
+            "effort_source": f"{effort_source} failed",
+        }
+
+    model_match = re.search(r"--model <model>.*?\((?:e\.g\.\s*)?([^)]+)\)", help_text, re.IGNORECASE | re.DOTALL)
+    if model_match:
+        aliases = re.findall(r"'([^']+)'", model_match.group(1))
+        for alias in aliases:
+            model_options.append(runtime_option(alias, title_model_label(alias)))
+
+    effort_match = re.search(r"--effort <level>.*?\(([^)]+)\)", help_text, re.IGNORECASE)
+    if effort_match:
+        for effort in re.split(r"[,/\s]+", effort_match.group(1)):
+            clean = effort.strip()
+            if clean:
+                effort_options.append(runtime_option(clean, title_effort_label(clean)))
+
+    return {
+        "models": unique_runtime_options(model_options),
+        "efforts": unique_runtime_options(effort_options),
+        "model_source": model_source,
+        "effort_source": effort_source,
+    }
+
+
+def discover_runtime_catalog() -> dict[str, Any]:
+    return {
+        "generated_at": now_iso(),
+        "backends": {
+            BACKEND_CLAUDE: parse_claude_help_catalog(),
+            BACKEND_CODEX: discover_codex_catalog(),
+        },
+    }
+
+
 def build_claude_cmd(sess: dict[str, Any], manifest_path: Path) -> list[str]:
     cmd = [
         "claude", "-p",
@@ -1177,6 +1869,10 @@ def build_codex_cmd(sess: dict[str, Any], prompt: str, manifest_path: Path) -> l
     )
     full_prompt = CODEX_PROMPT_PRELUDE.format(manifest_path=str(manifest_path)) + prompt
     cmd = [CODEX_BIN, "exec"]
+    if sess.get("model"):
+        cmd.extend(["--model", str(sess["model"])])
+    if sess.get("effort"):
+        cmd.extend(["-c", f"model_reasoning_effort={sess['effort']}"])
     if provider_id:
         cmd.extend(["resume", provider_id])
     cmd.append("--json")
@@ -1321,6 +2017,43 @@ def artifact_record(session_id: str, entry: str | dict[str, Any]) -> dict[str, A
     return rec
 
 
+def path_is_relative_to(path: Path, root: Path) -> bool:
+    with suppress(ValueError):
+        path.relative_to(root)
+        return True
+    return False
+
+
+def normalized_link_target(target: str) -> str:
+    clean = target.strip()
+    if clean.startswith("file://"):
+        parsed = urlparse(clean)
+        return unquote(parsed.path)
+    return unquote(clean)
+
+
+def session_file_for_link(session_id: str, target: str) -> dict[str, Any]:
+    clean = normalized_link_target(target)
+    if not clean:
+        raise HTTPException(status_code=400, detail="missing target")
+    clean_name = Path(clean).name
+    files_root = FILES_ROOT.resolve()
+    for rec in list_session_file_records(session_id):
+        candidates = {
+            str(rec.get("id") or ""),
+            str(rec.get("filename") or ""),
+            str(rec.get("title") or ""),
+            str(rec.get("source_path") or ""),
+            str(rec.get("path") or ""),
+        }
+        if clean not in candidates and clean_name not in candidates:
+            continue
+        path = Path(str(rec.get("path") or "")).resolve()
+        if path.is_file() and path_is_relative_to(path, files_root):
+            return rec
+    raise HTTPException(status_code=404, detail=f"linked file is not a registered artifact: {clean}")
+
+
 def guess_content_type(filename: str) -> str:
     lower = filename.lower()
     if lower.endswith((".mp4", ".m4v")):
@@ -1337,11 +2070,24 @@ def guess_content_type(filename: str) -> str:
         return "image/gif"
     if lower.endswith(".pdf"):
         return "application/pdf"
+    if lower.endswith((".md", ".markdown")):
+        return "text/markdown"
+    if lower.endswith(".txt"):
+        return "text/plain"
     if lower.endswith(".csv"):
         return "text/csv"
     if lower.endswith(".json"):
         return "application/json"
     return "application/octet-stream"
+
+
+def file_response_media_type(meta: dict[str, Any]) -> str:
+    filename = str(meta.get("filename") or Path(str(meta.get("path") or "")).name)
+    guessed = guess_content_type(filename)
+    recorded = str(meta.get("content_type") or "")
+    if not recorded or recorded == "application/octet-stream":
+        return guessed
+    return recorded
 
 
 async def collect_manifest(session_id: str, manifest_path: Path) -> None:
@@ -1403,11 +2149,17 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
         if stop_requested:
             STOP_REQUESTS.discard(session_id)
             STOPPED_RUNS.add(run_id)
+        pgid = process_group_for_pid(proc.pid)
         ACTIVE[session_id] = {
             "proc": proc,
             "run_id": run_id,
             "backend": BACKEND_CLAUDE,
+            "pid": proc.pid,
+            "pgid": pgid,
+            "cwd": cwd,
+            "argv": cmd,
             "started_at": time.time(),
+            "started_at_iso": now_iso(),
             "stop_requested": stop_requested,
         }
     if stop_requested:
@@ -1556,11 +2308,17 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
         if stop_requested:
             STOP_REQUESTS.discard(session_id)
             STOPPED_RUNS.add(run_id)
+        pgid = process_group_for_pid(proc.pid)
         ACTIVE[session_id] = {
             "proc": proc,
             "run_id": run_id,
             "backend": BACKEND_CODEX,
+            "pid": proc.pid,
+            "pgid": pgid,
+            "cwd": cwd,
+            "argv": cmd[:-1] + ["<prompt>"],
             "started_at": time.time(),
+            "started_at_iso": now_iso(),
             "stop_requested": stop_requested,
         }
     if stop_requested:
@@ -1798,6 +2556,52 @@ async def health() -> dict[str, Any]:
     }
 
 
+@app.get("/api/runtime/catalog")
+async def runtime_catalog() -> dict[str, Any]:
+    return await asyncio.to_thread(discover_runtime_catalog)
+
+
+@app.get("/api/sessions/{session_id}/processes")
+async def get_session_processes(session_id: str) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    async with ACTIVE_LOCK:
+        active = ACTIVE.get(session_id)
+    if not active:
+        return {
+            "session_id": session_id,
+            "active": False,
+            "processes": [],
+            "generated_at": now_iso(),
+        }
+    snapshot_input = {key: value for key, value in active.items() if key != "proc"}
+    snapshot_input["proc"] = active.get("proc")
+    return await asyncio.to_thread(active_process_snapshot, session_id, snapshot_input)
+
+
+@app.get("/api/sessions/{session_id}/processes/log")
+async def tail_session_process_log(session_id: str, path: str, lines: int = 200) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    async with ACTIVE_LOCK:
+        active = ACTIVE.get(session_id)
+    if not active:
+        raise HTTPException(status_code=404, detail="session has no live process")
+    snapshot_input = {key: value for key, value in active.items() if key != "proc"}
+    snapshot_input["proc"] = active.get("proc")
+    snapshot = await asyncio.to_thread(active_process_snapshot, session_id, snapshot_input)
+    allowed: set[Path] = set()
+    for proc in snapshot.get("processes", []):
+        for hint in proc.get("log_hints", []) or []:
+            with suppress(OSError):
+                allowed.add(Path(str(hint.get("path") or "")).expanduser().resolve())
+    with suppress(OSError):
+        target = Path(path).expanduser().resolve()
+        if target in allowed:
+            return await asyncio.to_thread(tail_text_file, str(target), lines)
+    raise HTTPException(status_code=403, detail="log path is not attached to the live process")
+
+
 @app.get("/api/sessions")
 async def list_sessions() -> dict[str, Any]:
     sessions = [public_session(s) for s in STORE.sessions.values()]
@@ -1843,6 +2647,11 @@ async def import_history(session_id: str, req: ImportHistoryRequest) -> dict[str
         raise HTTPException(status_code=404, detail="session not found")
     result = await import_session_history(sess, force=req.force, limit=req.limit)
     return {"ok": True, **result}
+
+
+@app.post("/api/sessions/{session_id}/digest")
+async def create_handoff_digest(session_id: str, req: HandoffDigestRequest) -> dict[str, Any]:
+    return build_handoff_digest(session_id, detail=req.detail, user_prompt=req.user_prompt)
 
 
 @app.patch("/api/sessions/{session_id}")
@@ -2098,13 +2907,120 @@ def load_file_meta(file_id: str) -> dict[str, Any]:
     return meta
 
 
+def iter_session_events(session_id: str):
+    path = events_path(session_id)
+    if not path.exists():
+        return
+    for line in path.open("r", encoding="utf-8", errors="ignore"):
+        if not line.strip():
+            continue
+        try:
+            yield json.loads(line)
+        except Exception:
+            continue
+
+
+def file_event_record(event: dict[str, Any], file_id: str) -> dict[str, Any] | None:
+    for key in ("file", "artifact"):
+        rec = event.get(key)
+        if isinstance(rec, dict) and str(rec.get("id") or "") == file_id:
+            out = dict(rec)
+            out["event_id"] = event.get("id")
+            out["event_seq"] = event.get("seq")
+            out["event_type"] = event.get("type")
+            return out
+    return None
+
+
+def list_session_file_records(session_id: str) -> list[dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for meta_path in FILES_ROOT.glob("*/meta.json"):
+        try:
+            rec = json.loads(meta_path.read_text())
+        except Exception:
+            continue
+        if rec.get("session_id") == session_id and rec.get("id"):
+            records[str(rec["id"])] = rec
+
+    for event in iter_session_events(session_id):
+        for key in ("file", "artifact"):
+            rec = event.get(key)
+            if isinstance(rec, dict) and rec.get("id"):
+                out = dict(rec)
+                out["event_id"] = event.get("id")
+                out["event_seq"] = event.get("seq")
+                out["event_type"] = event.get("type")
+                records[str(rec["id"])] = out
+
+    return sorted(
+        records.values(),
+        key=lambda rec: (str(rec.get("created_at") or ""), str(rec.get("filename") or "")),
+        reverse=True,
+    )
+
+
+@app.get("/api/sessions/{session_id}/files")
+async def list_session_files(
+    session_id: str,
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    records = list_session_file_records(session_id)
+    total = len(records)
+    if limit is None:
+        return {
+            "files": records,
+            "total": total,
+            "offset": 0,
+            "limit": total,
+            "has_more": False,
+        }
+    page = records[offset:offset + limit]
+    return {
+        "files": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(page) < total,
+    }
+
+
+@app.get("/api/sessions/{session_id}/files/{file_id}/event")
+async def get_session_file_event(session_id: str, file_id: str) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    clean_file_id = str(file_id or "").strip()
+    if not clean_file_id:
+        raise HTTPException(status_code=404, detail="file not found")
+    for event in iter_session_events(session_id):
+        if file_event_record(event, clean_file_id):
+            return {"event": event}
+    raise HTTPException(status_code=404, detail="file event not found")
+
+
+@app.get("/api/sessions/{session_id}/links/file")
+@app.head("/api/sessions/{session_id}/links/file")
+async def get_session_linked_file(session_id: str, target: str) -> FileResponse:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    meta = session_file_for_link(session_id, target)
+    return FileResponse(
+        meta["path"],
+        media_type=file_response_media_type(meta),
+        filename=meta.get("filename"),
+        content_disposition_type="inline",
+    )
+
+
 @app.get("/api/files/{file_id}")
 @app.head("/api/files/{file_id}")
 async def get_file(file_id: str) -> FileResponse:
     meta = load_file_meta(file_id)
     return FileResponse(
         meta["path"],
-        media_type=meta.get("content_type"),
+        media_type=file_response_media_type(meta),
         filename=meta.get("filename"),
         content_disposition_type="inline",
     )

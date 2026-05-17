@@ -194,6 +194,15 @@ struct SessionRow: View {
     }
 
     private var rowSubtitle: String {
-        store.activeSessionIDs.contains(session.id) ? "\(session.backend.capitalized) · running" : session.backend.capitalized
+        var pieces = [
+            session.backend.capitalized,
+            store.runtimeCatalog.modelLabel(session.model, backend: session.backend)
+        ]
+        if store.activeSessionIDs.contains(session.id) {
+            pieces.append("running")
+        } else if let effort = session.effort, !effort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            pieces.append(store.runtimeCatalog.effortLabel(effort, backend: session.backend))
+        }
+        return pieces.joined(separator: " · ")
     }
 }

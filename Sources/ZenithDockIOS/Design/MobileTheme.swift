@@ -16,5 +16,10 @@ enum MobileTheme {
     static let card = Color(nsColor: .textBackgroundColor)
     static let softLine = Color(nsColor: .separatorColor).opacity(0.22)
     #endif
-    static let userBubble = Color.accentColor.opacity(0.16)
+    static let userBubble = Color.green.opacity(0.19)
+    static let userBubbleStroke = Color.green.opacity(0.38)
+    static let queuedBubble = Color.orange.opacity(0.14)
+    static let queuedBubbleStroke = Color.orange.opacity(0.45)
+    static let jobBubble = Color.orange.opacity(0.08)
+    static let jobBubbleStroke = Color.orange.opacity(0.34)
 }

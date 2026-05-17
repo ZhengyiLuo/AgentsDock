@@ -2,6 +2,12 @@
 
 Native macOS frontend for Zenithbot running on `zen-nv`.
 
+## Dev Log
+
+Keep implementation memory in [`docs/DEV_LOG.md`](docs/DEV_LOG.md). Update it
+after meaningful debugging sessions, architecture decisions, deploys, and UX
+rules that we should not rediscover the hard way.
+
 ## Run The Server On Zen-nv
 
 The local source of truth is:

@@ -12,11 +12,16 @@ final class AppStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
+    @Published var sessionFiles: [ZFile] = []
+    @Published var sessionFilesTotal: Int?
+    @Published var sessionFilesHasMore = false
+    @Published var isLoadingSessionFiles = false
     @Published var prompt = ""
     @Published var isRunning = false
     @Published var status = "Disconnected"
     @Published var errorText: String?
     @Published var jobs: [ZJob] = []
+    @Published var runtimeCatalog = ZRuntimeCatalogSnapshot.fallback
     @Published var showDebugEvents = false {
         didSet { rebuildDisplayEvents() }
     }
@@ -31,13 +36,20 @@ final class AppStore: ObservableObject {
     @Published var omittedHistoryEventCount = 0
     @Published var isLoadingOlderHistory = false
     @Published var scrollToBottomRevision = 0
+    @Published var scrollToEventID: String?
+    @Published var scrollToEventRevision = 0
+    @Published var processSnapshot: ZProcessSnapshot?
+    @Published var processLogTail: ZProcessLogTail?
+    @Published var isLoadingProcesses = false
 
-    private let initialSessionEventLimit = 60
-    private let olderHistoryPageLimit = 60
-    private let maxLoadedTimelineEvents = 260
-    private let maxCachedTimelineEvents = 160
+    private let initialSessionEventLimit = 80
+    private let olderHistoryPageLimit = 100
+    private let maxLoadedTimelineEvents = 800
+    private let maxCachedTimelineEvents = 320
     private let maxCachedStringCharacters = 12_000
+    private let sessionFilesPageLimit = 48
     private var webSocket: URLSessionWebSocketTask?
+    private var webSocketSessionID: String?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
     private var latestSeenSeq = 0
@@ -47,12 +59,14 @@ final class AppStore: ObservableObject {
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
     private var lastScrollRequestAt = Date.distantPast
+    private var sessionFilesNextOffset = 0
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
     private let maxMemoryCachedChats = 8
 
     private struct CachedChat: Codable, Sendable {
         var session: ZSession
         var events: [ZEvent]
+        var sessionFiles: [ZFile]?
         var omittedHistoryEventCount: Int
         var cachedAt: String
     }
@@ -103,6 +117,10 @@ final class AppStore: ObservableObject {
 
     var canLoadOlderHistory: Bool {
         omittedHistoryEventCount > 0 && !isLoadingOlderHistory && events.count < maxLoadedTimelineEvents
+    }
+
+    var sessionVideos: [ZFile] {
+        sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") }
     }
 
     var loadedHistoryLimitReached: Bool {
@@ -172,6 +190,16 @@ final class AppStore: ObservableObject {
         ZenithTokenStore.save(accessToken)
     }
 
+    func applyServerSettings(serverURL: String, accessToken: String) async {
+        let cleanURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanURL.isEmpty else { return }
+        serverURLString = cleanURL
+        self.accessToken = accessToken
+        rememberServerURL()
+        rememberAccessToken()
+        await refresh()
+    }
+
     func startLiveTracking() async {
         guard !liveTrackingStarted else {
             AppLogger.info("start live tracking skipped existing loop")
@@ -193,7 +221,7 @@ final class AppStore: ObservableObject {
                 await refreshSessions(showErrors: false)
                 await refreshJobs(showErrors: false)
             }
-            if let sid = selectedSessionID, serverReachable, !socketLive {
+            if let sid = selectedSessionID, serverReachable, !socketLive, loadingSessionID == nil {
                 connectEvents(sessionID: sid, after: lastSeq)
             }
         }
@@ -203,8 +231,26 @@ final class AppStore: ObservableObject {
         cleanServerURL()
         rememberServerURL()
         await refreshHealth(showErrors: showErrors)
+        if serverReachable {
+            await refreshRuntimeCatalog(showErrors: false)
+        }
         await refreshSessions(showErrors: showErrors)
         await refreshJobs(showErrors: showErrors)
+    }
+
+    func refreshRuntimeCatalog(showErrors: Bool = false) async {
+        do {
+            let res: ZRuntimeCatalogSnapshot = try await api.get("/api/runtime/catalog")
+            if runtimeCatalog != res {
+                runtimeCatalog = res
+                AppLogger.info("loaded runtime catalog backends=\(res.backends.keys.sorted().joined(separator: ","))")
+            }
+        } catch {
+            AppLogger.warning("runtime catalog failed \(serverErrorMessage(error) ?? "\(error)")")
+            if showErrors {
+                reportServerError(error)
+            }
+        }
     }
 
     func refreshHealth(showErrors: Bool = true) async {
@@ -221,6 +267,12 @@ final class AppStore: ObservableObject {
             lastHealthAt = Date()
             syncSelectedRunningState()
             status = socketLive ? "Live" : "Server connected"
+            if let sid = selectedSessionID, activeSessionIDs.contains(sid) {
+                await refreshSelectedProcesses(showErrors: false)
+            } else if processSnapshot?.active == true {
+                processSnapshot = nil
+                processLogTail = nil
+            }
         } catch {
             serverReachable = false
             socketLive = false
@@ -343,8 +395,12 @@ final class AppStore: ObservableObject {
         selectedSessionID = sessionID
         syncSelectedRunningState()
         webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        webSocketSessionID = nil
         socketLive = false
         status = serverReachable ? "Loading chat" : "Server offline"
+        processSnapshot = nil
+        processLogTail = nil
         AppLogger.info("select session=\(sessionID)")
         var loadedFromCache = false
         if let cached = memoryCachedChat(sessionID) {
@@ -357,6 +413,10 @@ final class AppStore: ObservableObject {
             events = []
             rebuildDisplayEvents()
             uploads = []
+            sessionFiles = []
+            sessionFilesTotal = nil
+            sessionFilesHasMore = false
+            sessionFilesNextOffset = 0
             omittedHistoryEventCount = 0
             loadedSessionID = nil
             latestSeenSeq = 0
@@ -411,12 +471,16 @@ final class AppStore: ObservableObject {
                 latestSeenSeq = events.map(\.seq).max() ?? 0
                 rebuildDisplayEvents()
             }
-            uploads = events.compactMap(\.file)
+            refreshSessionFilesFromLoadedEvents()
             loadedSessionID = sessionID
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             saveSelectedChatCache()
+            Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
+            if activeSessionIDs.contains(sessionID) {
+                await refreshSelectedProcesses(showErrors: false)
+            }
             requestScrollToBottom(immediate: true)
         } catch {
             AppLogger.error("select failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
@@ -460,7 +524,7 @@ final class AppStore: ObservableObject {
             let older = timelineEvents(from: res.events).filter { !existingIDs.contains($0.id) }
             events = (older + events).sorted { $0.seq < $1.seq }
             omittedHistoryEventCount = res.events_omitted_before ?? 0
-            uploads = events.compactMap(\.file)
+            refreshSessionFilesFromLoadedEvents()
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             rebuildDisplayEvents()
             saveSelectedChatCache()
@@ -471,18 +535,93 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func updateSelected(backend: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
+    func refreshSelectedFiles() async {
+        guard let sid = selectedSessionID else { return }
+        await loadSessionFiles(sessionID: sid, generation: selectionGeneration, reset: true)
+    }
+
+    func loadMoreSelectedFiles() async {
+        guard let sid = selectedSessionID, sessionFilesHasMore, !isLoadingSessionFiles else { return }
+        await loadSessionFiles(sessionID: sid, generation: selectionGeneration, reset: false)
+    }
+
+    func refreshSelectedProcesses(showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        isLoadingProcesses = true
+        defer { isLoadingProcesses = false }
+        do {
+            let res: ZProcessSnapshot = try await api.get("/api/sessions/\(sid)/processes")
+            guard selectedSessionID == sid else { return }
+            processSnapshot = res.active ? res : nil
+            if res.active == false {
+                processLogTail = nil
+            }
+        } catch {
+            AppLogger.warning("process refresh failed \(serverErrorMessage(error) ?? "\(error)")")
+            if showErrors {
+                reportServerError(error)
+            }
+        }
+    }
+
+    func tailProcessLog(_ hint: ZProcessLogHint) async {
+        guard let sid = selectedSessionID else { return }
+        do {
+            let res: ZProcessLogTail = try await api.get(
+                "/api/sessions/\(sid)/processes/log",
+                queryItems: [
+                    URLQueryItem(name: "path", value: hint.path),
+                    URLQueryItem(name: "lines", value: "240")
+                ]
+            )
+            guard selectedSessionID == sid else { return }
+            processLogTail = res
+        } catch {
+            AppLogger.warning("process log tail failed \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+        }
+    }
+
+    func findFileInChat(_ file: ZFile) async {
+        guard let sid = selectedSessionID else { return }
+        if let event = eventContaining(fileID: file.id, in: events) {
+            requestScrollToEvent(event.id)
+            return
+        }
+        do {
+            struct Response: Codable { let event: ZEvent }
+            let res: Response = try await api.get("/api/sessions/\(sid)/files/\(file.id)/event")
+            mergeEventsKeeping(res.event)
+            requestScrollToEvent(res.event.id)
+            status = "Found file in chat"
+        } catch {
+            AppLogger.warning("find file event failed file=\(file.id) \(serverErrorMessage(error) ?? "\(error)")")
+            errorText = "I could not find that file in this chat history."
+        }
+    }
+
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
         guard let sid = selectedSessionID else { return }
         struct Body: Codable {
             var title: String?
             var folder: String?
             var cwd: String?
             var backend: String?
+            var model: String?
+            var effort: String?
             var pinned: Bool?
         }
         do {
             struct Response: Codable { let session: ZSession }
-            let body = Body(title: title, folder: folder, cwd: cwd, backend: backend, pinned: pinned)
+            let body = Body(
+                title: title,
+                folder: folder,
+                cwd: cwd,
+                backend: backend,
+                model: model,
+                effort: effort,
+                pinned: pinned
+            )
             let res: Response = try await api.patch("/api/sessions/\(sid)", body: body)
             if let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = res.session
@@ -501,12 +640,14 @@ final class AppStore: ObservableObject {
         await updateSession(session.id, folder: cleanFolder.isEmpty ? "General" : cleanFolder)
     }
 
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, pinned: Bool? = nil) async {
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil) async {
         struct Body: Codable {
             var title: String?
             var folder: String?
             var cwd: String?
             var backend: String?
+            var model: String?
+            var effort: String?
             var pinned: Bool?
         }
         do {
@@ -516,6 +657,8 @@ final class AppStore: ObservableObject {
                 folder: folder,
                 cwd: cwd,
                 backend: backend,
+                model: model,
+                effort: effort,
                 pinned: pinned
             ))
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
@@ -573,6 +716,100 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func createHandoffDigest(sourceSessionID: String, detail: String, userPrompt: String) async -> String? {
+        struct Body: Codable {
+            let detail: String
+            let user_prompt: String?
+        }
+        struct Response: Codable {
+            let digest: String
+            let source_session: ZSession?
+            let event_count: Int?
+            let file_count: Int?
+            let detail: String?
+        }
+        let cleanPrompt = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let res: Response = try await api.post(
+                "/api/sessions/\(sourceSessionID)/digest",
+                body: Body(
+                    detail: detail,
+                    user_prompt: cleanPrompt.isEmpty ? nil : cleanPrompt
+                )
+            )
+            return res.digest
+        } catch {
+            AppLogger.error("digest failed source=\(sourceSessionID) \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func sendPrompt(to sessionID: String, prompt submittedPrompt: String, fileIDs: [String] = []) async -> Bool {
+        let trimmed = submittedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let wasRunning = isRunning
+        struct Body: Codable {
+            let prompt: String
+            let file_ids: [String]
+        }
+        struct Response: Codable {
+            let run_id: String?
+            let queued: Bool?
+            let queued_id: String?
+            let position: Int?
+            let session: ZSession
+        }
+        do {
+            activeSessionIDs.insert(sessionID)
+            if sessionID == selectedSessionID {
+                isRunning = true
+            }
+            let res: Response = try await api.post(
+                "/api/sessions/\(sessionID)/turns",
+                body: Body(prompt: trimmed, file_ids: fileIDs)
+            )
+            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = res.session
+            }
+            if res.queued == true {
+                AppLogger.info("turn queued session=\(sessionID) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
+            } else {
+                AppLogger.info("turn started session=\(sessionID) run=\(res.run_id ?? "-")")
+            }
+            syncSelectedRunningState()
+            return true
+        } catch {
+            if sessionID == selectedSessionID {
+                isRunning = wasRunning
+            }
+            if !wasRunning {
+                activeSessionIDs.remove(sessionID)
+            }
+            syncSelectedRunningState()
+            AppLogger.error("send failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func sendHandoffDigest(sourceSessionID: String, targetSessionID: String, detail: String, userPrompt: String) async -> Bool {
+        guard sourceSessionID != targetSessionID else {
+            errorText = "Choose a different target chat for the digest."
+            return false
+        }
+        guard let digest = await createHandoffDigest(
+            sourceSessionID: sourceSessionID,
+            detail: detail,
+            userPrompt: userPrompt
+        ) else {
+            return false
+        }
+        return await sendPrompt(to: targetSessionID, prompt: digest)
+    }
+
     func upload(urls: [URL]) async {
         guard let sid = selectedSessionID else { return }
         for url in urls {
@@ -580,11 +817,15 @@ final class AppStore: ObservableObject {
             defer { if ok { url.stopAccessingSecurityScopedResource() } }
             do {
                 let file = try await api.upload(sessionID: sid, fileURL: url)
-                uploads.append(file)
+                addPendingUpload(file)
             } catch {
                 reportServerError(error)
             }
         }
+    }
+
+    func removeUpload(_ file: ZFile) {
+        uploads.removeAll { $0.id == file.id }
     }
 
     @discardableResult
@@ -680,6 +921,8 @@ final class AppStore: ObservableObject {
 
     func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool) async {
         guard let sid = selectedSessionID else { return }
+        let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPrompt.isEmpty else { return }
         struct Body: Codable {
             let session_id: String
             let title: String
@@ -691,10 +934,11 @@ final class AppStore: ObservableObject {
         }
         do {
             struct Response: Codable { let job: ZJob }
+            let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let body = Body(
                 session_id: sid,
-                title: title,
-                prompt: prompt,
+                title: cleanTitle.isEmpty ? "\(loop ? "Loop" : "Job"): \(selectedSession?.title ?? "Chat")" : cleanTitle,
+                prompt: cleanPrompt,
                 interval_seconds: intervalSeconds,
                 loop: loop,
                 enabled: true,
@@ -707,13 +951,82 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func updateJob(
+        _ job: ZJob,
+        title: String? = nil,
+        prompt: String? = nil,
+        intervalSeconds: Int? = nil,
+        loop: Bool? = nil,
+        enabled: Bool? = nil,
+        backend: String? = nil
+    ) async {
+        struct Body: Codable {
+            var title: String?
+            var prompt: String?
+            var enabled: Bool?
+            var interval_seconds: Int?
+            var loop: Bool?
+            var backend: String?
+        }
+        do {
+            struct Response: Codable { let job: ZJob }
+            let res: Response = try await api.patch("/api/jobs/\(job.id)", body: Body(
+                title: title,
+                prompt: prompt,
+                enabled: enabled,
+                interval_seconds: intervalSeconds.map { max(10, $0) },
+                loop: loop,
+                backend: backend
+            ))
+            if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
+                jobs[idx] = res.job
+            }
+        } catch {
+            reportServerError(error)
+        }
+    }
+
+    func runJobNow(_ job: ZJob) async {
+        struct Empty: Codable {}
+        do {
+            let _: JSONValue = try await api.post("/api/jobs/\(job.id)/run", body: Empty())
+            await refreshJobs(showErrors: false)
+        } catch {
+            reportServerError(error)
+        }
+    }
+
+    func deleteJob(_ job: ZJob) async {
+        struct Response: Codable {
+            let ok: Bool
+            let deleted: Bool
+        }
+        do {
+            let _: Response = try await api.delete("/api/jobs/\(job.id)")
+            jobs.removeAll { $0.id == job.id }
+        } catch {
+            reportServerError(error)
+        }
+    }
+
     func fileURL(_ file: ZFile) -> URL {
         api.authenticatedURL("/api/files/\(file.id)")
     }
 
+    func markdownLinkContext(sessionID: String) -> ZMarkdownLinkContext {
+        ZMarkdownLinkContext(sessionID: sessionID, baseURL: api.baseURL, accessToken: accessToken)
+    }
+
     private func connectEvents(sessionID: String, after: Int) {
+        if socketLive, webSocketSessionID == sessionID, webSocket != nil {
+            return
+        }
+        if let webSocket {
+            webSocket.cancel(with: .goingAway, reason: nil)
+        }
         let task = URLSession.shared.webSocketTask(with: api.wsRequest(sessionID: sessionID, after: after))
         webSocket = task
+        webSocketSessionID = sessionID
         task.resume()
         socketLive = true
         status = "Live"
@@ -728,7 +1041,10 @@ final class AppStore: ObservableObject {
                 guard let self else { return }
                 switch result {
                 case .success(let message):
-                    guard self.webSocket === task, self.selectedSessionID == sessionID else { return }
+                    guard self.webSocket === task, self.selectedSessionID == sessionID else {
+                        task.cancel(with: .goingAway, reason: nil)
+                        return
+                    }
                     if case .string(let text) = message, let data = text.data(using: .utf8) {
                         if let event = try? JSONDecoder().decode(ZEvent.self, from: data) {
                             self.ingest(event)
@@ -742,6 +1058,8 @@ final class AppStore: ObservableObject {
                 case .failure(let error):
                     guard self.webSocket === task, self.selectedSessionID == sessionID else { return }
                     self.socketLive = false
+                    self.webSocket = nil
+                    self.webSocketSessionID = nil
                     self.status = self.serverReachable ? "Stream reconnecting" : "Server offline"
                     self.lastSocketError = self.serverErrorMessage(error)
                     AppLogger.warning("websocket failed session=\(sessionID) \(self.lastSocketError ?? "\(error)")")
@@ -778,13 +1096,24 @@ final class AppStore: ObservableObject {
         if event.type == "turn_started" {
             activeSessionIDs.insert(event.session_id)
             syncSelectedRunningState()
+            if event.session_id == selectedSessionID {
+                Task { await refreshSelectedProcesses(showErrors: false) }
+            }
         }
         if event.type == "turn_finished" || event.type == "error" || event.type == "turn_stopped" {
             activeSessionIDs.remove(event.session_id)
             syncSelectedRunningState()
+            if event.session_id == selectedSessionID {
+                processSnapshot = nil
+                processLogTail = nil
+            }
         }
         if let file = event.file {
-            uploads.append(file)
+            addPendingUpload(file)
+            upsertSessionFile(file)
+        }
+        if let artifact = event.artifact {
+            upsertSessionFile(artifact)
         }
         if event.type != "raw_event" {
             saveSelectedChatCache()
@@ -823,7 +1152,47 @@ final class AppStore: ObservableObject {
             omittedHistoryEventCount += overflow
         }
         latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
+        refreshSessionFilesFromLoadedEvents()
         rebuildDisplayEvents()
+    }
+
+    private func mergeEventsKeeping(_ incoming: ZEvent) {
+        let incomingEvents = timelineEvents(from: [incoming])
+        guard !incomingEvents.isEmpty else { return }
+        let existingIDs = Set(events.map(\.id))
+        let newEvents = incomingEvents.filter { !existingIDs.contains($0.id) }
+        if !newEvents.isEmpty {
+            events.append(contentsOf: newEvents)
+            events.sort { $0.seq < $1.seq }
+        }
+        let protectedIDs = Set(incomingEvents.map(\.id))
+        while events.count > maxLoadedTimelineEvents {
+            guard let index = events.firstIndex(where: { !protectedIDs.contains($0.id) }) else { break }
+            if index == 0 {
+                omittedHistoryEventCount += 1
+            }
+            events.remove(at: index)
+        }
+        latestSeenSeq = max(latestSeenSeq, incoming.seq)
+        refreshSessionFilesFromLoadedEvents()
+        rebuildDisplayEvents()
+        saveSelectedChatCache()
+    }
+
+    private func eventContaining(fileID: String, in source: [ZEvent]) -> ZEvent? {
+        source.first { event in
+            event.file?.id == fileID || event.artifact?.id == fileID
+        }
+    }
+
+    private func requestScrollToEvent(_ eventID: String) {
+        scrollToEventID = eventID
+        scrollToEventRevision += 1
+    }
+
+    private func addPendingUpload(_ file: ZFile) {
+        guard !uploads.contains(where: { $0.id == file.id }) else { return }
+        uploads.append(file)
     }
 
     private func applyCachedChat(_ cached: CachedChat) {
@@ -832,10 +1201,84 @@ final class AppStore: ObservableObject {
         }
         events = timelineEvents(from: cached.events)
         omittedHistoryEventCount = cached.omittedHistoryEventCount
-        uploads = events.compactMap(\.file)
+        sessionFiles = mergedFiles((cached.sessionFiles ?? []) + files(from: events))
+        sessionFilesTotal = sessionFiles.isEmpty ? nil : sessionFiles.count
+        sessionFilesHasMore = false
+        sessionFilesNextOffset = 0
+        refreshSessionFilesFromLoadedEvents()
         loadedSessionID = cached.session.id
         latestSeenSeq = events.map(\.seq).max() ?? 0
         rebuildDisplayEvents()
+    }
+
+    private func refreshSessionFilesFromLoadedEvents() {
+        let known = files(from: events)
+        guard !known.isEmpty || sessionFiles.isEmpty else { return }
+        sessionFiles = mergedFiles(sessionFiles + known)
+    }
+
+    private func files(from source: [ZEvent]) -> [ZFile] {
+        source.flatMap { event -> [ZFile] in
+            [event.file, event.artifact].compactMap { $0 }
+        }
+    }
+
+    private func upsertSessionFile(_ file: ZFile) {
+        sessionFiles = mergedFiles(sessionFiles + [file])
+        if let total = sessionFilesTotal {
+            sessionFilesTotal = max(total, sessionFiles.count)
+        }
+    }
+
+    private func loadSessionFiles(sessionID: String, generation: Int, reset: Bool = true) async {
+        guard !isLoadingSessionFiles else { return }
+        isLoadingSessionFiles = true
+        defer { isLoadingSessionFiles = false }
+        let offset = reset ? 0 : sessionFilesNextOffset
+        do {
+            struct Response: Codable {
+                let files: [ZFile]
+                let total: Int?
+                let offset: Int?
+                let limit: Int?
+                let has_more: Bool?
+            }
+            let res: Response = try await api.get(
+                "/api/sessions/\(sessionID)/files",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: "\(sessionFilesPageLimit)"),
+                    URLQueryItem(name: "offset", value: "\(offset)")
+                ]
+            )
+            guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
+            let timelineFiles = files(from: events)
+            if reset {
+                sessionFiles = mergedFiles(res.files + timelineFiles)
+            } else {
+                sessionFiles = mergedFiles(sessionFiles + res.files + timelineFiles)
+            }
+            sessionFilesTotal = res.total ?? max(sessionFilesTotal ?? 0, sessionFiles.count)
+            sessionFilesNextOffset = (res.offset ?? offset) + res.files.count
+            sessionFilesHasMore = res.has_more ?? false
+            saveSelectedChatCache()
+        } catch {
+            AppLogger.error("files failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
+        }
+    }
+
+    private func mergedFiles(_ files: [ZFile]) -> [ZFile] {
+        var byID: [String: ZFile] = [:]
+        for file in files {
+            byID[file.id] = file
+        }
+        return byID.values.sorted { lhs, rhs in
+            let leftDate = lhs.created_at ?? ""
+            let rightDate = rhs.created_at ?? ""
+            if leftDate != rightDate {
+                return leftDate > rightDate
+            }
+            return lhs.filename.localizedStandardCompare(rhs.filename) == .orderedAscending
+        }
     }
 
     private var chatCacheDirectory: URL {
@@ -878,6 +1321,22 @@ final class AppStore: ObservableObject {
     }
 
     private func saveSelectedChatCache() {
+        let sessionID = selectedSessionID
+        let generation = selectionGeneration
+        pendingCacheWrite?.cancel()
+        pendingCacheWrite = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard let self,
+                  !Task.isCancelled,
+                  self.selectedSessionID == sessionID,
+                  self.selectionGeneration == generation else {
+                return
+            }
+            self.writeSelectedChatCacheSnapshot()
+        }
+    }
+
+    private func writeSelectedChatCacheSnapshot() {
         guard let session = selectedSession else { return }
         let directory = chatCacheDirectory
         let url = chatCacheURL(session.id)
@@ -888,14 +1347,12 @@ final class AppStore: ObservableObject {
         let cached = CachedChat(
             session: session,
             events: Array(eventsToCache),
+            sessionFiles: sessionFiles.isEmpty ? files(from: events) : sessionFiles,
             omittedHistoryEventCount: omittedHistoryEventCount,
             cachedAt: ISO8601DateFormatter().string(from: Date())
         )
         rememberChatCache(cached)
-        pendingCacheWrite?.cancel()
-        pendingCacheWrite = Task.detached(priority: .utility) {
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled else { return }
+        Task.detached(priority: .utility) {
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 let data = try JSONEncoder().encode(cached)
@@ -956,7 +1413,7 @@ final class AppStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             await MainActor.run {
                 guard let self,
-                      self.webSocket === failedTask,
+                      self.webSocket == nil || self.webSocket === failedTask,
                       self.selectedSessionID == sessionID,
                       self.serverReachable else {
                     return

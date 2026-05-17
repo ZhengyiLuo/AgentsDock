@@ -6,9 +6,8 @@ struct RunningAgentBanner: View {
     var backend: String
 
     var body: some View {
-        HStack(spacing: 7) {
-            ProgressView()
-                .controlSize(.small)
+        HStack(spacing: 6) {
+            RunningAgentIcon(backend: backend)
             Text("\(backend.capitalized) running")
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
@@ -27,5 +26,21 @@ struct RunningAgentBanner: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
         .help(store.socketLive ? "Live trace connected. New messages will queue." : "Server connected. Trace is reconnecting.")
+    }
+}
+
+struct RunningAgentIcon: View {
+    var backend: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 12, height: 12)
+            Image(systemName: backend == "codex" ? "sparkle.magnifyingglass" : "circle.hexagongrid")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(backend == "codex" ? .orange : .blue)
+        }
+        .accessibilityLabel("\(backend.capitalized) running")
     }
 }

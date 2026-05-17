@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import ZenithCore
 
 #if os(macOS)
 import AppKit
@@ -11,6 +12,7 @@ struct MarkdownView: View {
     let markdown: String
     var alignment: HorizontalAlignment = .leading
     var compact = false
+    var linkContext: ZMarkdownLinkContext?
 
     private var blocks: [MarkdownBlock] {
         MarkdownRenderCache.blocks(for: Self.renderable(markdown))
@@ -25,10 +27,14 @@ struct MarkdownView: View {
             ForEach(blocks) { block in
                 switch block.kind {
                 case .prose:
-                    MarkdownText(block.text)
+                    MarkdownText(block.text, linkContext: linkContext)
                         .frame(maxWidth: .infinity, alignment: frameAlignment)
                 case .code:
                     CodeBlock(text: block.text, language: block.language)
+                case .table:
+                    if let table = block.table {
+                        MarkdownTableView(table: table, linkContext: linkContext)
+                    }
                 }
             }
         }
@@ -45,11 +51,13 @@ struct MarkdownView: View {
 
 private struct MarkdownText: View {
     let text: String
+    var linkContext: ZMarkdownLinkContext?
     @AppStorage("chatFontSize") private var chatFontSize = 14.0
     @AppStorage("chatFontDesign") private var chatFontDesign = "default"
 
-    init(_ text: String) {
+    init(_ text: String, linkContext: ZMarkdownLinkContext? = nil) {
         self.text = EmojiShortcodes.render(text)
+        self.linkContext = linkContext
     }
 
     var body: some View {
@@ -59,13 +67,13 @@ private struct MarkdownText: View {
             .textSelection(.enabled)
             .contextMenu {
                 Button("Copy Text") {
-                    copyToPasteboard(text)
+                    copyToPasteboard(ZClipboardText.normalizedForCopy(text))
                 }
             }
     }
 
     private var attributed: AttributedString {
-        MarkdownRenderCache.attributedText(for: text, fontSize: chatFontSize, design: chatFontDesign)
+        MarkdownRenderCache.attributedText(for: text, fontSize: chatFontSize, design: chatFontDesign, linkContext: linkContext)
     }
 
     private var lineSpacing: CGFloat {
@@ -158,6 +166,82 @@ private enum EmojiShortcodes {
     }
 }
 
+private struct MarkdownTableView: View {
+    let table: MarkdownTable
+    var linkContext: ZMarkdownLinkContext?
+    @AppStorage("chatFontSize") private var chatFontSize = 14.0
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                tableRow(table.headers, isHeader: true)
+                Divider()
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { index, row in
+                    tableRow(row, isHeader: false)
+                        .background(index.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.025))
+                    if index < table.rows.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+            .textSelection(.enabled)
+            .contextMenu {
+                Button("Copy Table") {
+                    copyToPasteboard(table.plainText)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tableRow(_ cells: [String], isHeader: Bool) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(0..<table.columnCount, id: \.self) { column in
+                tableCell(
+                    text: column < cells.count ? cells[column] : "",
+                    column: column,
+                    isHeader: isHeader
+                )
+            }
+        }
+    }
+
+    private func tableCell(text: String, column: Int, isHeader: Bool) -> some View {
+        Text(MarkdownRenderCache.attributedText(
+            for: text,
+            fontSize: max(12, chatFontSize - (isHeader ? 0 : 1)),
+            design: isHeader ? "default" : "default",
+            linkContext: linkContext
+        ))
+        .fontWeight(isHeader ? .semibold : .regular)
+        .lineLimit(nil)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: table.columnWidth(column), alignment: table.alignments[safe: column]?.swiftAlignment ?? .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, isHeader ? 9 : 8)
+        .background(isHeader ? Color.primary.opacity(0.045) : Color.clear)
+        .overlay(alignment: .trailing) {
+            if column < table.columnCount - 1 {
+                Rectangle()
+                    .fill(Theme.softLine)
+                    .frame(width: 1)
+            }
+        }
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        #elseif canImport(UIKit)
+        UIPasteboard.general.string = string
+        #endif
+    }
+}
+
 struct CodeBlock: View {
     let text: String
     var language: String?
@@ -170,6 +254,10 @@ struct CodeBlock: View {
         let effectiveLimit = limit ?? 12_000
         guard text.count > effectiveLimit else { return text }
         return String(text.prefix(effectiveLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n..."
+    }
+
+    private var displayText: String {
+        ZClipboardText.normalizedForCopy(shown, language: language)
     }
 
     private var languageLabel: String {
@@ -185,7 +273,7 @@ struct CodeBlock: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    copyToPasteboard(shown)
+                    copyToPasteboard(displayText)
                     copied = true
                     Task {
                         try? await Task.sleep(for: .seconds(1.2))
@@ -204,11 +292,16 @@ struct CodeBlock: View {
             Divider()
 
             ScrollView(.horizontal, showsIndicators: true) {
-                Text(CodeHighlighter.highlight(shown, language: language, fontSize: max(12, chatFontSize - 1)))
+                Text(CodeHighlighter.highlight(displayText, language: language, fontSize: max(12, chatFontSize - 1)))
                     .padding(12)
                     .fixedSize(horizontal: true, vertical: false)
                     .textSelection(.enabled)
                     .frame(minWidth: 0, alignment: .leading)
+                    .contextMenu {
+                        Button("Copy Code") {
+                            copyToPasteboard(displayText)
+                        }
+                    }
             }
         }
         .background(.black.opacity(0.065))
@@ -231,12 +324,59 @@ private struct MarkdownBlock: Identifiable {
     enum Kind {
         case prose
         case code
+        case table
     }
 
     let id: Int
     let kind: Kind
     let text: String
     let language: String?
+    let table: MarkdownTable?
+}
+
+private enum MarkdownColumnAlignment: Hashable {
+    case leading
+    case center
+    case trailing
+
+    var swiftAlignment: Alignment {
+        switch self {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+}
+
+private struct MarkdownTable: Hashable {
+    let headers: [String]
+    let alignments: [MarkdownColumnAlignment]
+    let rows: [[String]]
+
+    var columnCount: Int {
+        max(headers.count, rows.map(\.count).max() ?? 0)
+    }
+
+    func columnWidth(_ column: Int) -> CGFloat {
+        let samples = ([headers[safe: column]] + rows.map { $0[safe: column] }).compactMap { $0 }
+        let longest = samples.map(\.count).max() ?? 0
+        if alignments[safe: column] == .trailing {
+            return min(max(CGFloat(longest) * 8.5 + 24, 76), 130)
+        }
+        return min(max(CGFloat(longest) * 7.6 + 28, 96), 360)
+    }
+
+    var plainText: String {
+        ([headers] + rows)
+            .map { $0.joined(separator: "\t") }
+            .joined(separator: "\n")
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
 }
 
 private final class MarkdownBlocksEntry: NSObject {
@@ -287,8 +427,8 @@ private enum MarkdownRenderCache {
         return parsed
     }
 
-    static func attributedText(for text: String, fontSize: Double, design: String) -> AttributedString {
-        let key = cacheKey("text:\(fontSize):\(design)", text)
+    static func attributedText(for text: String, fontSize: Double, design: String, linkContext: ZMarkdownLinkContext? = nil) -> AttributedString {
+        let key = cacheKey("text:\(fontSize):\(design):\(linkContext?.cacheKey ?? "-")", text)
         if let cached = attributedCache.object(forKey: key) {
             return cached.value
         }
@@ -300,6 +440,7 @@ private enum MarkdownRenderCache {
         var parsed = (try? AttributedString(markdown: rendered, options: options)) ?? AttributedString(rendered)
         parsed.font = .system(size: fontSize, design: fontDesign(for: design))
         autolinkBareURLs(in: &parsed)
+        resolveMarkdownLinks(in: &parsed, context: linkContext)
         attributedCache.setObject(AttributedStringEntry(parsed), forKey: key, cost: rendered.utf8.count)
         return parsed
     }
@@ -348,6 +489,18 @@ private enum MarkdownRenderCache {
             attributed[lower..<upper].foregroundColor = .accentColor
         }
     }
+
+    private static func resolveMarkdownLinks(in attributed: inout AttributedString, context: ZMarkdownLinkContext?) {
+        guard let context else { return }
+        for run in attributed.runs {
+            guard let link = run.link else { continue }
+            let raw = link.scheme == nil ? link.relativeString : link.absoluteString
+            guard let resolved = context.resolvedURL(for: raw) else { continue }
+            attributed[run.range].link = resolved
+            attributed[run.range].foregroundColor = .accentColor
+            attributed[run.range].underlineStyle = .single
+        }
+    }
 }
 
 private enum MarkdownParser {
@@ -362,18 +515,24 @@ private enum MarkdownParser {
         func flushProse() {
             let text = prose.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
-                blocks.append(MarkdownBlock(id: blocks.count, kind: .prose, text: text, language: nil))
+                blocks.append(MarkdownBlock(id: blocks.count, kind: .prose, text: text, language: nil, table: nil))
             }
             prose.removeAll(keepingCapacity: true)
         }
 
         func flushCode() {
-            blocks.append(MarkdownBlock(id: blocks.count, kind: .code, text: code.joined(separator: "\n"), language: language))
+            blocks.append(MarkdownBlock(id: blocks.count, kind: .code, text: code.joined(separator: "\n"), language: language, table: nil))
             code.removeAll(keepingCapacity: true)
             language = nil
         }
 
-        for line in lines {
+        func appendTable(_ table: MarkdownTable) {
+            blocks.append(MarkdownBlock(id: blocks.count, kind: .table, text: "", language: nil, table: table))
+        }
+
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") {
                 if inFence {
@@ -387,9 +546,15 @@ private enum MarkdownParser {
                 }
             } else if inFence {
                 code.append(line)
+            } else if let parsed = parseTable(lines: lines, start: index) {
+                flushProse()
+                appendTable(parsed.table)
+                index += parsed.consumed
+                continue
             } else {
                 prose.append(line)
             }
+            index += 1
         }
 
         if inFence {
@@ -399,9 +564,88 @@ private enum MarkdownParser {
         }
 
         if blocks.isEmpty {
-            blocks.append(MarkdownBlock(id: 0, kind: .prose, text: markdown, language: nil))
+            blocks.append(MarkdownBlock(id: 0, kind: .prose, text: markdown, language: nil, table: nil))
         }
         return blocks
+    }
+
+    private static func parseTable(lines: [String], start: Int) -> (table: MarkdownTable, consumed: Int)? {
+        guard start + 1 < lines.count else { return nil }
+        let header = splitTableRow(lines[start])
+        let separator = splitTableRow(lines[start + 1])
+        guard header.count >= 2,
+              separator.count == header.count,
+              separator.allSatisfy(isSeparatorCell) else {
+            return nil
+        }
+
+        var rows: [[String]] = []
+        var index = start + 2
+        while index < lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.contains("|"), !trimmed.isEmpty else { break }
+            let row = splitTableRow(lines[index])
+            guard row.count >= 2 else { break }
+            rows.append(padded(row, count: header.count))
+            index += 1
+        }
+
+        let alignments = separator.map(alignment)
+        return (
+            MarkdownTable(headers: header, alignments: alignments, rows: rows),
+            index - start
+        )
+    }
+
+    private static func splitTableRow(_ line: String) -> [String] {
+        var trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.first == "|" {
+            trimmed.removeFirst()
+        }
+        if trimmed.last == "|" {
+            trimmed.removeLast()
+        }
+
+        var cells: [String] = []
+        var current = ""
+        var escaped = false
+        for char in trimmed {
+            if escaped {
+                current.append(char)
+                escaped = false
+            } else if char == "\\" {
+                escaped = true
+            } else if char == "|" {
+                cells.append(cleanCell(current))
+                current.removeAll(keepingCapacity: true)
+            } else {
+                current.append(char)
+            }
+        }
+        cells.append(cleanCell(current))
+        return cells
+    }
+
+    private static func cleanCell(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isSeparatorCell(_ value: String) -> Bool {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 3 else { return false }
+        return clean.allSatisfy { $0 == "-" || $0 == ":" }
+    }
+
+    private static func alignment(_ value: String) -> MarkdownColumnAlignment {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.hasPrefix(":"), clean.hasSuffix(":") { return .center }
+        if clean.hasSuffix(":") { return .trailing }
+        return .leading
+    }
+
+    private static func padded(_ row: [String], count: Int) -> [String] {
+        if row.count >= count { return Array(row.prefix(count)) }
+        return row + Array(repeating: "", count: count - row.count)
     }
 }
 
