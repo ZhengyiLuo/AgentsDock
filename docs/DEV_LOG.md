@@ -16,6 +16,54 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Real Mac Terminal Tab
+
+Problem:
+
+- The first per-chat terminal UI was a tmux `capture-pane` viewer with HTTP
+  input forwarding.
+- It did not feel like a terminal: no proper cursor behavior, no native
+  interactive PTY, and tmux pane/window workflows were awkward.
+- The Chat/Terminal switch also looked like a settings segmented control
+  labeled `Pane`, not a tab.
+
+Decision:
+
+- Add SwiftTerm to the macOS target and replace the fake terminal surface with
+  an embedded `LocalProcessTerminalView`.
+- Opening the Terminal tab now ensures the server-side per-chat tmux session
+  exists, then runs a local PTY command:
+  `ssh -tt <user>@<server-host> tmux new-session -A -s <session> -c <cwd>`.
+- Removed the explicit attach mental model from the terminal surface. Existing
+  tmux sessions attach automatically; missing ones are created by the server.
+- Added terminal toolbar actions that send tmux shortcuts into the PTY:
+  new window, split right, split down, interrupt, and kill session.
+- Replaced the macOS Chat/Terminal picker with a shared tab-strip component in
+  both chat and terminal headers.
+
+Files changed:
+
+- `Package.swift`
+- `Package.resolved`
+- `ZenithDock.xcodeproj/project.pbxproj`
+- `ZenithDock.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+- `Sources/ZenithDock/Views/RootView.swift`
+- `Sources/ZenithDock/Views/TimelineView.swift`
+- `Sources/ZenithDock/Views/TerminalWorkspaceView.swift`
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- Installed the missing Xcode Metal Toolchain component with
+  `xcodebuild -downloadComponent MetalToolchain` because SwiftTerm includes a
+  Metal shader resource.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` was refreshed from the Xcode
+  Release build.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ## 2026-05-16 Follow-Up - Click Into Collapsed Job Runs
 
 Problem:

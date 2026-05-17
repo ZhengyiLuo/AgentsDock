@@ -42,6 +42,7 @@
 		B00000000000000000000024 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000024 /* TerminalWorkspaceView.swift */; };
 		B00000000000000000000020 /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
 		B00000000000000000000021 /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B00000000000000000000025 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = PD00000000000000000000001 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -146,6 +147,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000020 /* ZenithCore.framework in Frameworks */,
+				B00000000000000000000025 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -399,6 +401,9 @@
 				D00000000000000000000002 /* PBXTargetDependency */,
 			);
 			name = ZenithDockMac;
+			packageProductDependencies = (
+				PD00000000000000000000001 /* SwiftTerm */,
+			);
 			productName = ZenithDock;
 			productReference = P00000000000000000000003 /* ZenithDock.app */;
 			productType = "com.apple.product-type.application";
@@ -433,6 +438,9 @@
 				Base,
 			);
 			mainGroup = G00000000000000000000000;
+			packageReferences = (
+				PK00000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			productRefGroup = G00000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -528,6 +536,25 @@
 			targetProxy = C00000000000000000000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		PK00000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.7;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		PD00000000000000000000001 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK00000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		XC0000000000000000000011 /* Debug */ = {

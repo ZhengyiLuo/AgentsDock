@@ -1008,15 +1008,7 @@ struct HeaderView: View {
 
     private var headerControls: some View {
         HStack(spacing: 8) {
-            Picker("Pane", selection: $selectedPane) {
-                ForEach(WorkspacePane.allCases) { pane in
-                    Label(pane.title, systemImage: pane.systemImage).tag(pane)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 156)
-            .disabled(store.selectedSession == nil)
+            WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
             .help("Switch between chat and the per-chat tmux terminal")
             ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
             Button {

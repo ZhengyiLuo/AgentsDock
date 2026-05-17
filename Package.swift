@@ -12,6 +12,9 @@ let package = Package(
         .executable(name: "ZenithDock", targets: ["ZenithDock"]),
         .executable(name: "ZenithDockIOS", targets: ["ZenithDockIOS"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.0.7")
+    ],
     targets: [
         .target(
             name: "ZenithCore",
@@ -19,7 +22,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "ZenithDock",
-            dependencies: ["ZenithCore"],
+            dependencies: [
+                "ZenithCore",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             path: "Sources/ZenithDock",
             linkerSettings: [
                 .linkedFramework("AVKit")

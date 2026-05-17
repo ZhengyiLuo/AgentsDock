@@ -21,6 +21,56 @@ enum WorkspacePane: String, CaseIterable, Identifiable {
     }
 }
 
+struct WorkspaceTabStrip: View {
+    @Binding var selection: WorkspacePane
+    var isEnabled = true
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(WorkspacePane.allCases) { pane in
+                Button {
+                    selection = pane
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: pane.systemImage)
+                            .font(.caption.weight(.semibold))
+                        Text(pane.title)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(selection == pane ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .background(tabBackground(for: pane))
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(selection == pane ? Color.accentColor : Color.clear)
+                            .frame(height: 2)
+                            .padding(.horizontal, 8)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!isEnabled)
+                .help("Show \(pane.title.lowercased())")
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+        .background(Theme.window.opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+    }
+
+    @ViewBuilder
+    private func tabBackground(for pane: WorkspacePane) -> some View {
+        if selection == pane {
+            UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 2, bottomTrailingRadius: 2, topTrailingRadius: 6)
+                .fill(Theme.card)
+        } else {
+            Color.clear
+        }
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
     @State private var importerOpen = false
