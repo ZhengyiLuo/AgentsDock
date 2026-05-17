@@ -763,6 +763,9 @@ private struct MobileLiveProcessesSection: View {
                 ForEach(snapshot.processes) { process in
                     MobileLiveProcessRow(process: process)
                 }
+                if let output = snapshot.stdout_tail {
+                    MobileLiveProcessOutputView(output: output)
+                }
                 if let log = store.processLogTail {
                     MobileLiveProcessLogView(log: log)
                 }
@@ -783,6 +786,13 @@ private struct MobileLiveProcessesSection: View {
         .task(id: store.selectedSessionID) {
             if store.isRunning {
                 await store.refreshSelectedProcesses(showErrors: false)
+            }
+        }
+        .task(id: "\(store.selectedSessionID ?? "none"):\(store.isRunning)") {
+            guard store.isRunning else { return }
+            while !Task.isCancelled && store.isRunning {
+                await store.refreshSelectedProcesses(showErrors: false)
+                try? await Task.sleep(for: .seconds(1.5))
             }
         }
     }
@@ -978,6 +988,90 @@ private struct MobileLiveProcessDetailSheet: View {
             return true
         }
         return URL(fileURLWithPath: lhs).standardizedFileURL.path == URL(fileURLWithPath: rhs).standardizedFileURL.path
+    }
+}
+
+private struct MobileLiveProcessOutputView: View {
+    let output: ZProcessOutputTail
+    @State private var copied = false
+    @State private var isExpanded = true
+
+    private var bodyText: String {
+        output.text.isEmpty ? "(no stdout captured yet)" : output.text
+    }
+
+    private var detailText: String {
+        var parts: [String] = []
+        if let backend = output.backend {
+            parts.append(backend)
+        }
+        if let total = output.total_lines {
+            parts.append("\(total) line\(total == 1 ? "" : "s")")
+        }
+        if output.truncated == true {
+            parts.append("tail")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    Label("Live stdout", systemImage: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                if !detailText.isEmpty {
+                    Text(detailText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Button {
+                    UIPasteboard.general.string = output.text
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.9))
+                        await MainActor.run { copied = false }
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .disabled(output.text.isEmpty)
+                .accessibilityLabel("Copy stdout")
+                Button {
+                    isExpanded = false
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .disabled(!isExpanded)
+                .accessibilityLabel("Hide stdout details")
+            }
+            if isExpanded {
+                ScrollView {
+                    Text(bodyText)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(output.text.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(minHeight: 120, maxHeight: 260)
+                .background(Color.black.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if !output.text.isEmpty {
+                Text(output.text.split(separator: "\n").last.map(String.init) ?? "")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

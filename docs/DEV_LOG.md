@@ -569,6 +569,41 @@ Important caution:
 
 ## 2026-05-17 Follow-Up
 
+### Live Stdout Tail
+
+User issue:
+
+- The live process inspector needed the process stdout, not just PID/process
+  metadata or attached log files.
+- The first stdout panel was readable but had no close/collapse affordance.
+
+Changes:
+
+- `server/agent_server.py`
+  - Added a bounded per-active-run stdout ring buffer.
+  - Claude/Codex stdout is copied into this buffer as the server reads it, so
+    the app never competes with the parser for the underlying pipe.
+  - Process snapshots now include `stdout_tail`.
+- `Sources/ZenithCore/ZenithCore.swift`
+  - Added `ZProcessOutputTail` and exposed it on `ZProcessSnapshot`.
+- `Sources/ZenithDock/Views/InspectorView.swift`
+  - Added a Live stdout panel to the Mac process inspector.
+  - The panel supports copy, collapse/expand, and an explicit hide button.
+  - Collapsed mode shows only the latest stdout line.
+- `Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift`
+  - Added the same Live stdout panel for iPhone and iPad.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ### Live Process Inspector Details
 
 User issue:

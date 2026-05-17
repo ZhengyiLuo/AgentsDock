@@ -602,6 +602,8 @@ QUEUE_LOCK = asyncio.Lock()
 LOG_PATH_SUFFIXES = {
     ".log", ".out", ".err", ".stderr", ".stdout", ".txt", ".jsonl", ".trace"
 }
+LIVE_STDOUT_MAX_LINES = 400
+LIVE_STDOUT_MAX_LINE_CHARS = 12_000
 
 
 async def append_event(session_id: str, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1057,8 +1059,42 @@ def active_process_snapshot(session_id: str, active: dict[str, Any]) -> dict[str
         "elapsed_seconds": int(max(0, time.time() - float(active.get("started_at") or time.time()))),
         "stop_requested": bool(active.get("stop_requested")),
         "processes": processes,
+        "stdout_tail": live_output_tail(active),
         "generated_at": now_iso(),
     }
+
+
+def live_output_tail(active: dict[str, Any]) -> dict[str, Any]:
+    lines = list(active.get("stdout_lines") or active.get("stdout_tail") or [])
+    total_lines = int(active.get("stdout_total_lines") or len(lines))
+    return {
+        "stream": "stdout",
+        "run_id": active.get("run_id"),
+        "backend": active.get("backend"),
+        "lines": len(lines),
+        "total_lines": total_lines,
+        "truncated": total_lines > len(lines),
+        "text": "\n".join(lines),
+        "updated_at": active.get("stdout_updated_at"),
+        "generated_at": now_iso(),
+    }
+
+
+async def append_active_stdout(session_id: str, text: str) -> None:
+    line = text.rstrip("\r\n")
+    if len(line) > LIVE_STDOUT_MAX_LINE_CHARS:
+        line = line[:LIVE_STDOUT_MAX_LINE_CHARS] + "\n... stdout line truncated ..."
+    async with ACTIVE_LOCK:
+        active = ACTIVE.get(session_id)
+        if not active:
+            return
+        tail = active.get("stdout_tail")
+        if tail is None:
+            tail = deque(maxlen=LIVE_STDOUT_MAX_LINES)
+            active["stdout_tail"] = tail
+        tail.append(line)
+        active["stdout_total_lines"] = int(active.get("stdout_total_lines") or 0) + 1
+        active["stdout_updated_at"] = now_iso()
 
 
 def tail_text_file(path: str, lines: int = 200, max_bytes: int = 512 * 1024) -> dict[str, Any]:
@@ -1094,6 +1130,16 @@ async def release_turn_slot(session_id: str) -> None:
 async def clear_active_process(session_id: str) -> None:
     async with ACTIVE_LOCK:
         ACTIVE.pop(session_id, None)
+
+
+def active_snapshot_input(active: dict[str, Any]) -> dict[str, Any]:
+    snapshot_input = {
+        key: value for key, value in active.items()
+        if key not in {"proc", "stdout_tail"}
+    }
+    snapshot_input["proc"] = active.get("proc")
+    snapshot_input["stdout_lines"] = list(active.get("stdout_tail") or [])
+    return snapshot_input
 
 
 def read_events(
@@ -2161,6 +2207,9 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
             "started_at": time.time(),
             "started_at_iso": now_iso(),
             "stop_requested": stop_requested,
+            "stdout_tail": deque(maxlen=LIVE_STDOUT_MAX_LINES),
+            "stdout_total_lines": 0,
+            "stdout_updated_at": None,
         }
     if stop_requested:
         await terminate_process_tree(proc)
@@ -2193,7 +2242,9 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
             if not raw:
                 break
             last_event = time.time()
-            line = raw.decode("utf-8", "replace").strip()
+            decoded = raw.decode("utf-8", "replace").rstrip("\r\n")
+            await append_active_stdout(session_id, decoded)
+            line = decoded.strip()
             if not line:
                 continue
             await append_event(session_id, "raw_event", {"run_id": run_id, "backend": BACKEND_CLAUDE, "raw": line})
@@ -2320,6 +2371,9 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
             "started_at": time.time(),
             "started_at_iso": now_iso(),
             "stop_requested": stop_requested,
+            "stdout_tail": deque(maxlen=LIVE_STDOUT_MAX_LINES),
+            "stdout_total_lines": 0,
+            "stdout_updated_at": None,
         }
     if stop_requested:
         await terminate_process_tree(proc)
@@ -2346,7 +2400,9 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
             if not raw:
                 break
             last_event = time.time()
-            line = raw.decode("utf-8", "replace").strip()
+            decoded = raw.decode("utf-8", "replace").rstrip("\r\n")
+            await append_active_stdout(session_id, decoded)
+            line = decoded.strip()
             if not line or not line.startswith("{"):
                 continue
             await append_event(session_id, "raw_event", {"run_id": run_id, "backend": BACKEND_CODEX, "raw": line})
@@ -2567,6 +2623,7 @@ async def get_session_processes(session_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="session not found")
     async with ACTIVE_LOCK:
         active = ACTIVE.get(session_id)
+        snapshot_input = active_snapshot_input(active) if active else None
     if not active:
         return {
             "session_id": session_id,
@@ -2574,8 +2631,6 @@ async def get_session_processes(session_id: str) -> dict[str, Any]:
             "processes": [],
             "generated_at": now_iso(),
         }
-    snapshot_input = {key: value for key, value in active.items() if key != "proc"}
-    snapshot_input["proc"] = active.get("proc")
     return await asyncio.to_thread(active_process_snapshot, session_id, snapshot_input)
 
 
@@ -2585,10 +2640,9 @@ async def tail_session_process_log(session_id: str, path: str, lines: int = 200)
         raise HTTPException(status_code=404, detail="session not found")
     async with ACTIVE_LOCK:
         active = ACTIVE.get(session_id)
+        snapshot_input = active_snapshot_input(active) if active else None
     if not active:
         raise HTTPException(status_code=404, detail="session has no live process")
-    snapshot_input = {key: value for key, value in active.items() if key != "proc"}
-    snapshot_input["proc"] = active.get("proc")
     snapshot = await asyncio.to_thread(active_process_snapshot, session_id, snapshot_input)
     allowed: set[Path] = set()
     for proc in snapshot.get("processes", []):

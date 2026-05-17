@@ -291,6 +291,18 @@ public struct ZProcessInfo: Codable, Identifiable, Hashable, Sendable {
     public var id: Int { pid }
 }
 
+public struct ZProcessOutputTail: Codable, Hashable, Sendable {
+    public var stream: String
+    public var run_id: String?
+    public var backend: String?
+    public var lines: Int?
+    public var total_lines: Int?
+    public var truncated: Bool?
+    public var text: String
+    public var updated_at: String?
+    public var generated_at: String?
+}
+
 public struct ZProcessSnapshot: Codable, Hashable, Sendable {
     public var session_id: String
     public var active: Bool
@@ -304,6 +316,7 @@ public struct ZProcessSnapshot: Codable, Hashable, Sendable {
     public var elapsed_seconds: Int?
     public var stop_requested: Bool?
     public var processes: [ZProcessInfo]
+    public var stdout_tail: ZProcessOutputTail?
     public var generated_at: String?
 }
 

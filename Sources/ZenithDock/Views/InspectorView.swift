@@ -750,6 +750,9 @@ private struct LiveProcessesInspector: View {
                                 .environmentObject(store)
                         }
                     }
+                    if let output = snapshot.stdout_tail {
+                        LiveProcessOutputView(output: output)
+                    }
                     if let log = store.processLogTail {
                         LiveProcessLogView(log: log)
                     }
@@ -764,6 +767,13 @@ private struct LiveProcessesInspector: View {
         .task(id: store.selectedSessionID) {
             if store.isRunning {
                 await store.refreshSelectedProcesses(showErrors: false)
+            }
+        }
+        .task(id: "\(store.selectedSessionID ?? "none"):\(store.isRunning)") {
+            guard store.isRunning else { return }
+            while !Task.isCancelled && store.isRunning {
+                await store.refreshSelectedProcesses(showErrors: false)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
         }
     }
@@ -1018,6 +1028,98 @@ private struct LiveProcessDetailSheet: View {
             return true
         }
         return URL(fileURLWithPath: lhs).standardizedFileURL.path == URL(fileURLWithPath: rhs).standardizedFileURL.path
+    }
+}
+
+private struct LiveProcessOutputView: View {
+    let output: ZProcessOutputTail
+    @State private var copied = false
+    @State private var isExpanded = true
+
+    private var bodyText: String {
+        output.text.isEmpty ? "(no stdout captured yet)" : output.text
+    }
+
+    private var detailText: String {
+        var parts: [String] = []
+        if let backend = output.backend {
+            parts.append(backend)
+        }
+        if let runID = output.run_id {
+            parts.append(runID)
+        }
+        if let total = output.total_lines {
+            parts.append("\(total) line\(total == 1 ? "" : "s")")
+        }
+        if output.truncated == true {
+            parts.append("tail")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    Label("Live stdout", systemImage: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse stdout" : "Expand stdout")
+                Spacer()
+                if !detailText.isEmpty {
+                    Text(detailText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(output.text, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 900_000_000)
+                        await MainActor.run { copied = false }
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help("Copy stdout")
+                .disabled(output.text.isEmpty)
+                Button {
+                    isExpanded = false
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Hide stdout details")
+                .disabled(!isExpanded)
+            }
+            if isExpanded {
+                ScrollView {
+                    Text(bodyText)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(output.text.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(minHeight: 110, maxHeight: 240)
+                .background(Color.black.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.softLine))
+            } else if !output.text.isEmpty {
+                Text(output.text.split(separator: "\n").last.map(String.init) ?? "")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.top, 2)
     }
 }
 
