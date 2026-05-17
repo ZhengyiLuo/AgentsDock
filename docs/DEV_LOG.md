@@ -823,3 +823,34 @@ Changes:
 Verification:
 
 - `python3 -m py_compile server/agent_server.py` passed.
+
+### Server Crash Breadcrumbs And Launch Guards
+
+User issue:
+
+- After `zen-nv` hung, we needed a way to tell whether the culprit was a
+  scheduled job, a rendering/training process, or unrelated host pressure.
+- Guardrails should live on the server, because the frontend may not be open
+  when loop jobs or long renders are running.
+
+Changes:
+
+- `server/agent_server.py`
+  - Added a rolling host-health JSONL log at
+    `$ZENITHBOT_AGENT_DIR/host_health.jsonl`.
+  - The health monitor samples load, available memory, active ZenithDock runs,
+    and top host processes every 15 seconds by default.
+  - Top processes are marked when their process group belongs to an active
+    ZenithDock agent run, which helps distinguish agent-owned work from other
+    rendering/training sessions.
+  - Added `/api/diagnostics/host` to return the latest host snapshot plus a
+    tail of recent breadcrumb records.
+  - Added general launch admission guards for manual/queued turns, separate
+    from the scheduled-job guard. New launches are rejected/deferred when active
+    run count, load per CPU, or available memory exceed configured thresholds.
+  - Queued turns now requeue and retry later when a launch is deferred by host
+    pressure instead of being dropped.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.

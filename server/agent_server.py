@@ -47,6 +47,7 @@ STATE_DIR = Path(os.environ.get("ZENITHBOT_AGENT_DIR", Path.home() / ".zenithbot
 SESSIONS_FILE = STATE_DIR / "sessions.json"
 JOBS_FILE = STATE_DIR / "jobs.json"
 FILES_ROOT = STATE_DIR / "files"
+HOST_HEALTH_FILE = STATE_DIR / "host_health.jsonl"
 CLAUDE_PROJECTS_ROOT = Path(os.environ.get("CLAUDE_PROJECTS_ROOT", Path.home() / ".claude" / "projects"))
 CODEX_SESSIONS_ROOT = Path(os.environ.get("CODEX_SESSIONS_ROOT", Path.home() / ".codex" / "sessions"))
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
@@ -64,6 +65,11 @@ JOB_MAX_ACTIVE_RUNS = int(os.environ.get("ZENITHBOT_JOB_MAX_ACTIVE_RUNS", "2"))
 JOB_MAX_LOAD_PER_CPU = float(os.environ.get("ZENITHBOT_JOB_MAX_LOAD_PER_CPU", "1.25"))
 JOB_MIN_AVAILABLE_MEM_MB = int(os.environ.get("ZENITHBOT_JOB_MIN_AVAILABLE_MEM_MB", "4096"))
 JOB_DEFER_EVENT_MIN_SECONDS = int(os.environ.get("ZENITHBOT_JOB_DEFER_EVENT_MIN_SECONDS", "300"))
+MAX_ACTIVE_AGENT_RUNS = int(os.environ.get("ZENITHBOT_MAX_ACTIVE_AGENT_RUNS", "4"))
+MAX_START_LOAD_PER_CPU = float(os.environ.get("ZENITHBOT_MAX_START_LOAD_PER_CPU", "2.0"))
+MIN_START_AVAILABLE_MEM_MB = int(os.environ.get("ZENITHBOT_MIN_START_AVAILABLE_MEM_MB", "2048"))
+HOST_MONITOR_INTERVAL_SECONDS = float(os.environ.get("ZENITHBOT_HOST_MONITOR_INTERVAL_SECONDS", "15"))
+HOST_HEALTH_MAX_BYTES = int(os.environ.get("ZENITHBOT_HOST_HEALTH_MAX_BYTES", str(20 * 1024 * 1024)))
 IDLE_WARN_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_WARN_SECONDS", "1800"))
 IDLE_KILL_SECONDS = int(os.environ.get("ZENITHBOT_IDLE_KILL_SECONDS", "21600"))
 STOP_GRACE_SECONDS = float(os.environ.get("ZENITHBOT_STOP_GRACE_SECONDS", "2.0"))
@@ -792,6 +798,17 @@ async def unqueue_turn(session_id: str, queued_id: str) -> dict[str, Any]:
     }
 
 
+async def requeue_turn_front(session_id: str, item: dict[str, Any]) -> None:
+    async with QUEUE_LOCK:
+        queue = QUEUED_TURNS.setdefault(session_id, deque())
+        queue.appendleft(item)
+
+
+async def retry_next_queued_turn_later(session_id: str, delay_seconds: int | None = None) -> None:
+    await asyncio.sleep(max(int(delay_seconds or JOB_BUSY_RETRY_SECONDS), 5))
+    await start_next_queued_turn(session_id)
+
+
 async def start_next_queued_turn(session_id: str) -> None:
     async with QUEUE_LOCK:
         queue = QUEUED_TURNS.get(session_id)
@@ -810,6 +827,20 @@ async def start_next_queued_turn(session_id: str) -> None:
     )
     try:
         await start_turn(session_id, req, queue_if_busy=False, queued_id=str(item["queued_id"]))
+    except HTTPException as e:
+        if e.status_code in (409, 503):
+            await requeue_turn_front(session_id, item)
+            await append_event(session_id, "turn_deferred", {
+                "queued_id": item.get("queued_id"),
+                "message": f"Queued turn deferred: {e.detail}",
+            })
+            asyncio.create_task(retry_next_queued_turn_later(session_id))
+            return
+        logger.warning("queued turn failed session=%s queued_id=%s: %s", session_id, item.get("queued_id"), e.detail)
+        await append_event(session_id, "error", {
+            "queued_id": item.get("queued_id"),
+            "message": f"queued turn failed: {e.detail}",
+        })
     except Exception as e:
         logger.warning("queued turn failed session=%s queued_id=%s: %s", session_id, item.get("queued_id"), e)
         await append_event(session_id, "error", {
@@ -975,6 +1006,54 @@ def ps_process_rows() -> list[dict[str, Any]]:
             "args": parts[10] if len(parts) > 10 else parts[9],
         })
     return rows
+
+
+def parse_ps_rows(stdout: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        parts = line.strip().split(None, 10)
+        if len(parts) < 10:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+            pgid = int(parts[2])
+            sid = int(parts[3])
+            etimes = int(float(parts[5]))
+            cpu = float(parts[6])
+            mem = float(parts[7])
+            rss = int(float(parts[8]))
+        except ValueError:
+            continue
+        rows.append({
+            "pid": pid,
+            "ppid": ppid,
+            "pgid": pgid,
+            "sid": sid,
+            "stat": parts[4],
+            "elapsed_seconds": etimes,
+            "cpu_percent": cpu,
+            "mem_percent": mem,
+            "rss_kb": rss,
+            "command": parts[9],
+            "args": parts[10] if len(parts) > 10 else parts[9],
+        })
+    return rows
+
+
+def top_process_rows(limit: int = 20) -> list[dict[str, Any]]:
+    command = ["ps", "-eo", "pid=,ppid=,pgid=,sid=,stat=,etimes=,pcpu=,pmem=,rss=,comm=,args=", "--sort=-pcpu"]
+    try:
+        result = subprocess.run(command, text=True, capture_output=True, timeout=3, check=False)
+        if result.returncode != 0:
+            result = subprocess.run(command[:-1], text=True, capture_output=True, timeout=3, check=False)
+    except subprocess.TimeoutExpired:
+        logger.warning("top process ps scan timed out")
+        return []
+    rows = parse_ps_rows(result.stdout)
+    if not rows:
+        rows = sorted(procfs_process_rows(), key=lambda row: int(row.get("rss_kb") or 0), reverse=True)
+    return rows[: max(1, min(limit, 50))]
 
 
 def proc_cwd(pid: int) -> str | None:
@@ -1293,6 +1372,80 @@ def live_output_tail(active: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def jsonable_active_run(session_id: str, active: dict[str, Any]) -> dict[str, Any]:
+    started = float(active.get("started_at") or time.time())
+    return {
+        "session_id": session_id,
+        "run_id": active.get("run_id"),
+        "backend": active.get("backend"),
+        "pid": active.get("pid"),
+        "pgid": active.get("pgid"),
+        "cwd": active.get("cwd"),
+        "argv": active.get("argv") or [],
+        "started_at": active.get("started_at_iso"),
+        "elapsed_seconds": int(max(0, time.time() - started)),
+        "stop_requested": bool(active.get("stop_requested")),
+        "stdout_total_lines": int(active.get("stdout_total_lines") or 0),
+        "stdout_updated_at": active.get("stdout_updated_at"),
+    }
+
+
+async def active_run_summaries() -> list[dict[str, Any]]:
+    async with ACTIVE_LOCK:
+        return [jsonable_active_run(session_id, active) for session_id, active in ACTIVE.items()]
+
+
+def trim_process_args(row: dict[str, Any], max_chars: int = 500) -> dict[str, Any]:
+    out = dict(row)
+    args = str(out.get("args") or "")
+    if len(args) > max_chars:
+        out["args"] = args[:max_chars].rstrip() + "... [trimmed]"
+    return out
+
+
+def write_bounded_jsonl(path: Path, record: dict[str, Any], max_bytes: int) -> None:
+    ensure_dirs()
+    with suppress(Exception):
+        if path.exists() and path.stat().st_size > max_bytes:
+            rotated = path.with_suffix(path.suffix + ".1")
+            with suppress(FileNotFoundError):
+                rotated.unlink()
+            path.replace(rotated)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
+
+
+async def host_health_record() -> dict[str, Any]:
+    active_runs = await active_run_summaries()
+    active_pgids = {int(run["pgid"]) for run in active_runs if run.get("pgid") is not None}
+    top_rows = await asyncio.to_thread(top_process_rows, 20)
+    top_processes = []
+    for row in top_rows:
+        clean = trim_process_args(row)
+        clean["tracked_by_zenithdock"] = int(clean.get("pgid") or -1) in active_pgids
+        top_processes.append(clean)
+    return {
+        "ts": now_iso(),
+        "pressure": host_pressure_snapshot(),
+        "active_runs": active_runs,
+        "top_processes": top_processes,
+        "jobs": len(JOBS.jobs),
+    }
+
+
+async def host_monitor_loop() -> None:
+    logger.info("host health monitor started path=%s", HOST_HEALTH_FILE)
+    while True:
+        try:
+            record = await host_health_record()
+            await asyncio.to_thread(write_bounded_jsonl, HOST_HEALTH_FILE, record, HOST_HEALTH_MAX_BYTES)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("host health monitor failed: %s", exc)
+        await asyncio.sleep(max(HOST_MONITOR_INTERVAL_SECONDS, 5.0))
+
+
 async def append_active_stdout(session_id: str, text: str) -> None:
     line = text.rstrip("\r\n")
     if len(line) > LIVE_STDOUT_MAX_LINE_CHARS:
@@ -1331,6 +1484,25 @@ def tail_text_file(path: str, lines: int = 200, max_bytes: int = 512 * 1024) -> 
         "text": text,
         "generated_at": now_iso(),
     }
+
+
+def tail_jsonl_file(path: Path, limit: int = 40, max_bytes: int = 2 * 1024 * 1024) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    line_count = max(1, min(int(limit or 40), 200))
+    size = path.stat().st_size
+    byte_count = max(4096, min(int(max_bytes or 2 * 1024 * 1024), 8 * 1024 * 1024))
+    with path.open("rb") as f:
+        if size > byte_count:
+            f.seek(size - byte_count)
+        data = f.read(byte_count)
+    records: list[dict[str, Any]] = []
+    for line in data.decode("utf-8", "replace").splitlines()[-line_count:]:
+        with suppress(Exception):
+            parsed = json.loads(line)
+            if isinstance(parsed, dict):
+                records.append(parsed)
+    return records
 
 
 async def release_turn_slot(session_id: str) -> None:
@@ -1954,9 +2126,12 @@ def host_pressure_snapshot() -> dict[str, Any]:
         "load_per_cpu": load_per_cpu,
         "cpu_count": cpu_count,
         "available_mem_mb": available_mem_mb,
-        "max_load_per_cpu": JOB_MAX_LOAD_PER_CPU,
-        "min_available_mem_mb": JOB_MIN_AVAILABLE_MEM_MB,
-        "max_active_runs": JOB_MAX_ACTIVE_RUNS,
+        "job_max_load_per_cpu": JOB_MAX_LOAD_PER_CPU,
+        "job_min_available_mem_mb": JOB_MIN_AVAILABLE_MEM_MB,
+        "job_max_active_runs": JOB_MAX_ACTIVE_RUNS,
+        "start_max_load_per_cpu": MAX_START_LOAD_PER_CPU,
+        "start_min_available_mem_mb": MIN_START_AVAILABLE_MEM_MB,
+        "start_max_active_runs": MAX_ACTIVE_AGENT_RUNS,
     }
 
 
@@ -1979,6 +2154,29 @@ async def scheduled_job_blocker(session_id: str) -> str | None:
         isinstance(available_mem_mb, int)
         and JOB_MIN_AVAILABLE_MEM_MB > 0
         and available_mem_mb < JOB_MIN_AVAILABLE_MEM_MB
+    ):
+        return f"low available memory ({available_mem_mb} MB)"
+
+    return None
+
+
+async def turn_start_blocker(*, ignore_session_id: str | None = None) -> str | None:
+    async with ACTIVE_LOCK:
+        active_count = len(BUSY_SESSIONS - ({ignore_session_id} if ignore_session_id else set()))
+
+    if MAX_ACTIVE_AGENT_RUNS > 0 and active_count >= MAX_ACTIVE_AGENT_RUNS:
+        return f"server already has {active_count} active agent run(s)"
+
+    pressure = host_pressure_snapshot()
+    load_per_cpu = pressure.get("load_per_cpu")
+    if isinstance(load_per_cpu, (int, float)) and load_per_cpu >= MAX_START_LOAD_PER_CPU:
+        return f"host load high ({load_per_cpu:.2f}/CPU)"
+
+    available_mem_mb = pressure.get("available_mem_mb")
+    if (
+        isinstance(available_mem_mb, int)
+        and MIN_START_AVAILABLE_MEM_MB > 0
+        and available_mem_mb < MIN_START_AVAILABLE_MEM_MB
     ):
         return f"low available memory ({available_mem_mb} MB)"
 
@@ -2770,6 +2968,13 @@ async def start_turn(
     if should_queue:
         return await enqueue_turn(session_id, req, sess)
 
+    blocker = await turn_start_blocker(ignore_session_id=session_id)
+    if blocker:
+        if reserved:
+            await release_turn_slot(session_id)
+            reserved = False
+        raise HTTPException(status_code=503, detail=f"agent launch deferred: {blocker}")
+
     try:
         if req.backend:
             sess = await STORE.update(session_id, {"backend": req.backend})
@@ -2839,8 +3044,14 @@ async def lifespan(app: FastAPI):
     await JOBS.load()
     ensure_dirs()
     JOBS.start_scheduler()
+    host_monitor_task = asyncio.create_task(host_monitor_loop())
     logger.info("agent server ready state=%s sessions=%d jobs=%d", STATE_DIR, len(STORE.sessions), len(JOBS.jobs))
-    yield
+    try:
+        yield
+    finally:
+        host_monitor_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await host_monitor_task
 
 
 app = FastAPI(title="Zenithbot Agent Server", lifespan=lifespan)
@@ -2880,6 +3091,18 @@ async def health() -> dict[str, Any]:
         "queued": queued,
         "jobs": len(JOBS.jobs),
         "job_guard": pressure,
+        "host_health_log": str(HOST_HEALTH_FILE),
+    }
+
+
+@app.get("/api/diagnostics/host")
+async def host_diagnostics(limit: int = 40) -> dict[str, Any]:
+    latest = await host_health_record()
+    records = await asyncio.to_thread(tail_jsonl_file, HOST_HEALTH_FILE, limit)
+    return {
+        "latest": latest,
+        "records": records,
+        "log_path": str(HOST_HEALTH_FILE),
     }
 
 
