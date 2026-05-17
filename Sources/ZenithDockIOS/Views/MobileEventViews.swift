@@ -1,3 +1,4 @@
+import AVFoundation
 import AVKit
 import Foundation
 import SwiftUI
@@ -798,6 +799,8 @@ struct MobileArtifactView: View {
     let url: URL
     var linkContext: ZMarkdownLinkContext?
     @State private var fullscreenVideo = false
+    @State private var videoThumbnail: UIImage?
+    @State private var videoThumbnailFailed = false
 
     var body: some View {
         MobileSystemCard(icon: icon, title: file.title ?? file.filename, tint: .green) {
@@ -811,9 +814,11 @@ struct MobileArtifactView: View {
                     .frame(maxHeight: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 } else if file.content_type?.hasPrefix("video/") == true {
-                    VideoPlayer(player: AVPlayer(url: url))
+                    MobileTimelineVideoPoster(image: videoThumbnail, failed: videoThumbnailFailed)
                         .frame(height: 240)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .onTapGesture {
+                            fullscreenVideo = true
+                        }
                     HStack(spacing: 12) {
                         Label(file.size.map(mobileByteString) ?? "Video", systemImage: "film")
                             .foregroundStyle(.secondary)
@@ -840,6 +845,11 @@ struct MobileArtifactView: View {
         .onDrag {
             MobileArtifactDragItemProvider.provider(for: file, url: url)
         }
+        .task(id: url) {
+            if file.content_type?.hasPrefix("video/") == true {
+                await loadVideoThumbnail()
+            }
+        }
     }
 
     private var icon: String {
@@ -847,6 +857,105 @@ struct MobileArtifactView: View {
         if file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
     }
+
+    private func loadVideoThumbnail() async {
+        videoThumbnail = nil
+        videoThumbnailFailed = false
+        let data = await MobileTimelineVideoThumbnailCache.shared.thumbnailData(for: url)
+        guard let data else {
+            videoThumbnailFailed = true
+            return
+        }
+        videoThumbnail = UIImage(data: data)
+        videoThumbnailFailed = videoThumbnail == nil
+    }
+}
+
+private struct MobileTimelineVideoPoster: View {
+    let image: UIImage?
+    let failed: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.black.opacity(0.18))
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: failed ? "film" : "photo.on.rectangle")
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
+            LinearGradient(
+                colors: [.black.opacity(0.32), .clear, .black.opacity(0.24)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            Image(systemName: "play.circle.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.94))
+                .shadow(radius: 4)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipped()
+    }
+}
+
+private actor MobileTimelineVideoThumbnailCache {
+    static let shared = MobileTimelineVideoThumbnailCache()
+
+    private var cached: [String: Data] = [:]
+    private var order: [String] = []
+    private var failed: Set<String> = []
+    private let maxCached = 160
+
+    func thumbnailData(for url: URL) async -> Data? {
+        let key = url.absoluteString
+        if let data = cached[key] {
+            return data
+        }
+        if failed.contains(key) {
+            return nil
+        }
+        do {
+            let data = try await Task.detached(priority: .utility) {
+                try makeMobileTimelineVideoThumbnailData(from: url)
+            }.value
+            cached[key] = data
+            order.append(key)
+            trimIfNeeded()
+            return data
+        } catch {
+            failed.insert(key)
+            return nil
+        }
+    }
+
+    private func trimIfNeeded() {
+        guard order.count > maxCached else { return }
+        let overflow = order.count - maxCached
+        let expired = order.prefix(overflow)
+        for key in expired {
+            cached.removeValue(forKey: key)
+        }
+        order.removeFirst(overflow)
+    }
+}
+
+private func makeMobileTimelineVideoThumbnailData(from url: URL) throws -> Data {
+    let asset = AVURLAsset(url: url)
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = CGSize(width: 720, height: 420)
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+    let image = try generator.copyCGImage(at: CMTime(seconds: 0.2, preferredTimescale: 600), actualTime: nil)
+    guard let data = UIImage(cgImage: image).jpegData(compressionQuality: 0.72) else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    return data
 }
 
 private struct MobileUploadedFileLabel: View {

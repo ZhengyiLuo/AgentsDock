@@ -756,3 +756,37 @@ Verification:
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
 - `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
   passed.
+
+### Timeline Video Posters And Queued Color
+
+User issue:
+
+- Queued messages visually collided with job cards because both used the same
+  warm/orange treatment.
+- Timeline videos could look blank or unplayable before opening, especially
+  when the system video control did not expose an obvious poster frame.
+
+Changes:
+
+- `Sources/ZenithDock/Design/Theme.swift`
+  - Changed queued message bubbles/strokes to a yellow status treatment so they
+    are distinct from orange job cards.
+- `Sources/ZenithDockIOS/Design/MobileTheme.swift`
+  - Mirrored the queued yellow treatment for iPhone and iPad.
+- `Sources/ZenithDock/Views/Components/InlineVideoView.swift`
+  - Added macOS video thumbnail generation with a small cache.
+  - Timeline videos now show a poster-style preview with play/open controls
+    before launching the inline player.
+- `Sources/ZenithDockIOS/Views/MobileEventViews.swift`
+  - Added iPhone/iPad timeline video poster generation and a tappable preview
+    that opens the existing video sheet.
+
+Verification:
+
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.

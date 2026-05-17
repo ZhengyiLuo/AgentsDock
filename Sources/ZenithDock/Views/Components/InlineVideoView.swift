@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(macOS)
+import AVFoundation
 import AVKit
 #else
 import WebKit
@@ -8,14 +9,21 @@ import WebKit
 struct InlineVideoView: View {
     let url: URL
     @State private var isLoaded = false
+    #if os(macOS)
+    @State private var thumbnail: NSImage?
+    @State private var thumbnailFailed = false
+    #endif
 
     var body: some View {
         ZStack {
             if isLoaded {
                 InlineVideoPlayerView(url: url)
             } else {
+                #if os(macOS)
                 VideoPlaceholderView(
                     filename: url.lastPathComponent,
+                    thumbnail: thumbnail,
+                    thumbnailFailed: thumbnailFailed,
                     play: { isLoaded = true },
                     fullscreen: {
                         #if os(macOS)
@@ -23,6 +31,13 @@ struct InlineVideoView: View {
                         #endif
                     }
                 )
+                #else
+                VideoPlaceholderView(
+                    filename: url.lastPathComponent,
+                    play: { isLoaded = true },
+                    fullscreen: {}
+                )
+                #endif
             }
             #if os(macOS)
             VStack {
@@ -40,40 +55,94 @@ struct InlineVideoView: View {
             .background(Color.black)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+            #if os(macOS)
+            .task(id: url) {
+                await loadThumbnail()
+            }
+            #endif
     }
+
+    #if os(macOS)
+    private func loadThumbnail() async {
+        thumbnail = nil
+        thumbnailFailed = false
+        let data = await InlineVideoThumbnailCache.shared.thumbnailData(for: url)
+        guard let data else {
+            thumbnailFailed = true
+            return
+        }
+        thumbnail = NSImage(data: data)
+        thumbnailFailed = thumbnail == nil
+    }
+    #endif
 }
 
 private struct VideoPlaceholderView: View {
     let filename: String
+    #if os(macOS)
+    let thumbnail: NSImage?
+    let thumbnailFailed: Bool
+    #endif
     let play: () -> Void
     let fullscreen: () -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "film.stack")
-                .font(.system(size: 34, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.78))
-            Text(filename)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.68))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 360)
-            HStack(spacing: 10) {
-                VideoOverlayButton(title: "Play", systemImage: "play.fill", action: play)
-                #if os(macOS)
-                VideoOverlayButton(title: "Open Player", systemImage: "play.rectangle", action: fullscreen)
-                #endif
+        ZStack {
+            #if os(macOS)
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                fallbackBackground
             }
+            #else
+            fallbackBackground
+            #endif
+            LinearGradient(
+                colors: [.black.opacity(0.62), .clear, .black.opacity(0.42)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            VStack(spacing: 12) {
+                Spacer()
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 46, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .shadow(radius: 4)
+                Text(filename)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.84))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 420)
+                HStack(spacing: 10) {
+                    VideoOverlayButton(title: "Play", systemImage: "play.fill", action: play)
+                    #if os(macOS)
+                    VideoOverlayButton(title: "Open Player", systemImage: "play.rectangle", action: fullscreen)
+                    #endif
+                }
+                Spacer()
+            }
+            .padding(16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
+        .contentShape(Rectangle())
+        .onTapGesture(perform: play)
+    }
+
+    private var fallbackBackground: some View {
+        ZStack {
             LinearGradient(
                 colors: [Color.black, Color(red: 0.08, green: 0.09, blue: 0.10)],
                 startPoint: .top,
                 endPoint: .bottom
             )
-        )
+            Image(systemName: "film.stack")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+        }
     }
 }
 
@@ -173,6 +242,62 @@ enum VideoFullscreenPresenter {
 
         playerView.player?.play()
     }
+}
+
+private actor InlineVideoThumbnailCache {
+    static let shared = InlineVideoThumbnailCache()
+
+    private var cached: [String: Data] = [:]
+    private var order: [String] = []
+    private var failed: Set<String> = []
+    private let maxCached = 160
+
+    func thumbnailData(for url: URL) async -> Data? {
+        let key = url.absoluteString
+        if let data = cached[key] {
+            return data
+        }
+        if failed.contains(key) {
+            return nil
+        }
+        do {
+            let data = try await Task.detached(priority: .utility) {
+                try makeInlineVideoThumbnailData(from: url)
+            }.value
+            cached[key] = data
+            order.append(key)
+            trimIfNeeded()
+            return data
+        } catch {
+            failed.insert(key)
+            return nil
+        }
+    }
+
+    private func trimIfNeeded() {
+        guard order.count > maxCached else { return }
+        let overflow = order.count - maxCached
+        let expired = order.prefix(overflow)
+        for key in expired {
+            cached.removeValue(forKey: key)
+        }
+        order.removeFirst(overflow)
+    }
+}
+
+private func makeInlineVideoThumbnailData(from url: URL) throws -> Data {
+    let asset = AVURLAsset(url: videoSourceURL(url))
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = CGSize(width: 960, height: 540)
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+    let image = try generator.copyCGImage(at: CMTime(seconds: 0.2, preferredTimescale: 600), actualTime: nil)
+    let rep = NSBitmapImageRep(cgImage: image)
+    guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.72]) else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    return data
 }
 #else
 @MainActor
