@@ -46,6 +46,7 @@ struct TerminalWorkspaceView: View {
             SwiftTermTerminalView(
                 identity: identity,
                 action: pendingAction,
+                isActive: isActive,
                 onStatus: { terminalStatus = $0 }
             )
             .background(Color.black)
@@ -63,81 +64,137 @@ struct TerminalWorkspaceView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(store.selectedSession?.title ?? "Terminal")
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(store.terminalSnapshot?.exists == true ? .green : .secondary)
-                        .frame(width: 7, height: 7)
-                    Text(statusLine)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center, spacing: 12) {
+                terminalTitleBlock
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
+                    .layoutPriority(3)
             }
-            .frame(minWidth: 220, maxWidth: .infinity, alignment: .leading)
 
-            ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
-                .layoutPriority(3)
+            HStack(spacing: 10) {
+                WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
+                    .layoutPriority(3)
 
-            WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
+                Spacer(minLength: 8)
 
-            HStack(spacing: 6) {
-                Button {
-                    Task { await store.openSelectedTerminal() }
-                } label: {
-                    Label("Reconnect", systemImage: "arrow.clockwise")
+                ViewThatFits(in: .horizontal) {
+                    terminalActionStrip
+                    terminalActionMenu
                 }
-                .help("Reconnect the embedded SSH terminal to this chat's tmux session")
-
-                Button {
-                    sendTerminalAction(.newWindow)
-                } label: {
-                    Label("New tmux window", systemImage: "plus.square.on.square")
-                }
-                .help("Create a new tmux window")
-
-                Button {
-                    sendTerminalAction(.splitRight)
-                } label: {
-                    Label("Split right", systemImage: "rectangle.split.2x1")
-                }
-                .help("Split the tmux pane to the right")
-
-                Button {
-                    sendTerminalAction(.splitDown)
-                } label: {
-                    Label("Split down", systemImage: "rectangle.split.1x2")
-                }
-                .help("Split the tmux pane downward")
-
-                Button {
-                    sendTerminalAction(.interrupt)
-                } label: {
-                    Label("Interrupt", systemImage: "stop.circle")
-                }
-                .help("Send Ctrl-C")
-
-                Button(role: .destructive) {
-                    confirmKill = true
-                } label: {
-                    Label("Kill tmux session", systemImage: "trash")
-                }
-                .help("Kill this chat's tmux session")
+                .layoutPriority(2)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(store.selectedSession == nil)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .frame(minHeight: 68)
+        .padding(.vertical, 10)
+        .frame(minHeight: 94)
         .background(Theme.panel)
+    }
+
+    private var terminalTitleBlock: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(store.selectedSession?.title ?? "Terminal")
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(store.terminalSnapshot?.exists == true ? .green : .secondary)
+                    .frame(width: 7, height: 7)
+                Text(statusLine)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+    }
+
+    private var terminalActionStrip: some View {
+        HStack(spacing: 6) {
+            reconnectButton
+            newWindowButton
+            splitRightButton
+            splitDownButton
+            interruptButton
+            killButton
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(store.selectedSession == nil)
+    }
+
+    private var terminalActionMenu: some View {
+        Menu {
+            reconnectButton
+            newWindowButton
+            splitRightButton
+            splitDownButton
+            interruptButton
+            killButton
+        } label: {
+            Label("Terminal Actions", systemImage: "ellipsis.circle")
+        }
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(store.selectedSession == nil)
+        .help("Terminal actions")
+    }
+
+    private var reconnectButton: some View {
+        Button {
+            Task { await store.openSelectedTerminal() }
+        } label: {
+            Label("Reconnect", systemImage: "arrow.clockwise")
+        }
+        .help("Reconnect the embedded SSH terminal to this chat's tmux session")
+    }
+
+    private var newWindowButton: some View {
+        Button {
+            sendTerminalAction(.newWindow)
+        } label: {
+            Label("New tmux window", systemImage: "plus.square.on.square")
+        }
+        .help("Create a new tmux window")
+    }
+
+    private var splitRightButton: some View {
+        Button {
+            sendTerminalAction(.splitRight)
+        } label: {
+            Label("Split right", systemImage: "rectangle.split.2x1")
+        }
+        .help("Split the tmux pane to the right")
+    }
+
+    private var splitDownButton: some View {
+        Button {
+            sendTerminalAction(.splitDown)
+        } label: {
+            Label("Split down", systemImage: "rectangle.split.1x2")
+        }
+        .help("Split the tmux pane downward")
+    }
+
+    private var interruptButton: some View {
+        Button {
+            sendTerminalAction(.interrupt)
+        } label: {
+            Label("Interrupt", systemImage: "stop.circle")
+        }
+        .help("Send Ctrl-C")
+    }
+
+    private var killButton: some View {
+        Button(role: .destructive) {
+            confirmKill = true
+        } label: {
+            Label("Kill tmux session", systemImage: "trash")
+        }
+        .help("Kill this chat's tmux session")
     }
 
     private var terminalIdentity: TerminalIdentity? {
@@ -218,6 +275,7 @@ private struct TerminalAction: Equatable {
 private struct SwiftTermTerminalView: NSViewRepresentable {
     let identity: TerminalIdentity
     let action: TerminalAction?
+    let isActive: Bool
     var onStatus: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -237,13 +295,13 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
         terminal.backspaceSendsControlH = false
         try? terminal.setUseMetal(true)
 
-        context.coordinator.configure(terminal: terminal, identity: identity)
+        context.coordinator.configure(terminal: terminal, identity: identity, isActive: isActive)
         return terminal
     }
 
     func updateNSView(_ terminal: LocalProcessTerminalView, context: Context) {
         context.coordinator.onStatus = onStatus
-        context.coordinator.configure(terminal: terminal, identity: identity)
+        context.coordinator.configure(terminal: terminal, identity: identity, isActive: isActive)
         context.coordinator.perform(action, in: terminal)
     }
 
@@ -264,9 +322,11 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
             self.onStatus = onStatus
         }
 
-        func configure(terminal: LocalProcessTerminalView, identity: TerminalIdentity) {
+        func configure(terminal: LocalProcessTerminalView, identity: TerminalIdentity, isActive: Bool) {
             guard activeIdentity != identity else {
-                focus(terminal)
+                if isActive {
+                    focus(terminal)
+                }
                 return
             }
 
@@ -278,9 +338,14 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
             onStatus("Connecting")
 
             let remoteCommand = [
+                "cd",
+                shellQuote(identity.cwd),
+                "&&",
+                "exec",
                 "tmux",
                 "new-session",
                 "-A",
+                "-D",
                 "-s",
                 shellQuote(identity.tmuxName),
                 "-c",
@@ -288,7 +353,6 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
             ].joined(separator: " ")
             let args = [
                 "-tt",
-                "-F", "/dev/null",
                 "-o", "ServerAliveInterval=30",
                 "-o", "ServerAliveCountMax=2",
                 "-o", "StrictHostKeyChecking=accept-new",
@@ -296,7 +360,7 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
                 "-o", "GlobalKnownHostsFile=/dev/null",
                 "-o", "UpdateHostKeys=no",
                 "\(identity.user)@\(identity.host)",
-                remoteCommand
+                "bash -lc \(shellQuote(remoteCommand))"
             ]
 
             terminal.startProcess(
@@ -306,7 +370,9 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
                 execName: "ssh",
                 currentDirectory: NSHomeDirectory()
             )
-            focus(terminal)
+            if isActive {
+                focus(terminal)
+            }
         }
 
         func perform(_ action: TerminalAction?, in terminal: LocalProcessTerminalView) {

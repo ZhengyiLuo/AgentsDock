@@ -16,6 +16,39 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Responsive Mac Headers And Terminal Focus
+
+Problem:
+
+- The Mac chat and terminal headers still clipped buttons at narrow content
+  widths, even after pinning the server status pill.
+- Keeping the terminal mounted made Chat/Terminal switching faster, but the
+  hidden terminal still called `makeFirstResponder` and stole focus from the
+  chat composer while typing.
+- The first embedded SSH command exited immediately after printing
+  `[exited] Connection ... closed` on at least one launch.
+
+Decision:
+
+- Convert the chat and terminal headers to two-row layouts: title/status on top,
+  visible Chat/Terminal tabs plus actions on the second row.
+- Use `ViewThatFits` so secondary controls collapse into an actions menu instead
+  of disappearing off the right edge.
+- Pass `isActive` into the SwiftTerm wrapper and only focus the terminal when
+  the Terminal tab is active.
+- Keep the user's SSH config available again, but keep known-hosts sandbox-safe
+  via app-owned known-hosts and an explicit `bash -lc 'cd ... && exec tmux ...'`
+  remote command.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` was refreshed.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ## 2026-05-17 Follow-Up - Terminal Tab Visibility And Sandboxed SSH
 
 Problem:

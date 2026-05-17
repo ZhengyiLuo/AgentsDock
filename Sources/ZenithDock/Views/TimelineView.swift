@@ -952,23 +952,33 @@ struct HeaderView: View {
     @AppStorage("chatFontDesign") private var chatFontDesign = "default"
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            titleBlock
-                .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(2)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center, spacing: 12) {
+                titleBlock
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
 
-            ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
-                .layoutPriority(3)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                headerControls
-                    .fixedSize(horizontal: true, vertical: true)
+                ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
+                    .layoutPriority(3)
             }
-            .frame(minWidth: 180, idealWidth: 500, maxWidth: 620, alignment: .trailing)
+
+            HStack(spacing: 10) {
+                WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
+                    .help("Switch between chat and the per-chat tmux terminal")
+                    .layoutPriority(3)
+
+                Spacer(minLength: 8)
+
+                ViewThatFits(in: .horizontal) {
+                    headerControls
+                    headerActionsMenu
+                }
+                .layoutPriority(2)
+            }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .frame(minHeight: 68)
+        .padding(.vertical, 10)
+        .frame(minHeight: 94)
         .background(Theme.panel)
         .onAppear { syncTitle() }
         .onChange(of: store.selectedSessionID) { syncTitle() }
@@ -1011,85 +1021,129 @@ struct HeaderView: View {
 
     private var headerControls: some View {
         HStack(spacing: 8) {
-            WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
-            .help("Switch between chat and the per-chat tmux terminal")
-            Button {
-                Task { await store.refresh() }
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .labelStyle(.iconOnly)
-            .help("Refresh server status, chats, and jobs")
-            Button {
-                resumeOpen = true
-            } label: {
-                Label("Resume by ID", systemImage: "arrow.uturn.forward.circle")
-            }
-            .labelStyle(.iconOnly)
-            .help("Create a chat from an existing Claude or Codex session ID")
-            Button {
-                importerOpen = true
-            } label: {
-                Label("Attach Files", systemImage: "paperclip")
-            }
-            .labelStyle(.iconOnly)
-            .disabled(store.selectedSession == nil)
-            .help("Attach files to the selected chat")
-            Button {
-                Task { await store.forkSelected() }
-            } label: {
-                Label("Fork Chat", systemImage: "arrow.triangle.branch")
-            }
-            .labelStyle(.iconOnly)
-            .disabled(store.selectedSession == nil)
-            .help("Create a new chat from the selected chat")
-            Button(role: .destructive) {
-                Task { await store.stop() }
-            } label: {
-                Label("Stop Agent", systemImage: "stop.circle")
-            }
-            .labelStyle(.iconOnly)
-            .disabled(!store.isRunning)
-            .help("Stop the currently running Claude or Codex turn")
+            refreshButton
+            resumeButton
+            attachButton
+            forkButton
+            stopButton
             Divider()
                 .frame(height: 18)
-            if let session = store.selectedSession {
-                Button {
-                    Task { await store.togglePin(session) }
-                } label: {
-                    Label(session.pinned == true ? "Unpin" : "Pin", systemImage: session.pinned == true ? "pin.fill" : "pin")
-                }
-                .buttonStyle(.borderless)
-                .labelStyle(.iconOnly)
-                .help(session.pinned == true ? "Unpin chat" : "Pin chat")
-            }
-            Toggle(isOn: $store.showDebugEvents) {
-                Label("Trace", systemImage: "waveform.path.ecg")
-            }
-            .toggleStyle(.button)
-            .help("Show or hide raw process events")
-            Menu {
-                Picker("Typeface", selection: $chatFontDesign) {
-                    Text("System").tag("default")
-                    Text("Rounded").tag("rounded")
-                    Text("Serif").tag("serif")
-                    Text("Mono").tag("monospaced")
-                }
-                Divider()
-                Picker("Text Size", selection: $chatFontSize) {
-                    Text("Small").tag(13.0)
-                    Text("Default").tag(14.0)
-                    Text("Large").tag(16.0)
-                    Text("Huge").tag(18.0)
-                }
-            } label: {
-                Label("Font", systemImage: "textformat.size")
-            }
-            .help("Change chat font")
+            pinButton
+            traceToggle
+            fontMenu
             RuntimeSwitcher()
         }
         .lineLimit(1)
         .controlSize(.small)
+        .labelStyle(.iconOnly)
+    }
+
+    private var headerActionsMenu: some View {
+        Menu {
+            refreshButton
+            resumeButton
+            attachButton
+            forkButton
+            stopButton
+            pinButton
+            traceToggle
+            fontMenu
+        } label: {
+            Label("Actions", systemImage: "ellipsis.circle")
+        }
+        .controlSize(.small)
+        .fixedSize()
+        .help("Chat actions")
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await store.refresh() }
+        } label: {
+            Label("Refresh", systemImage: "arrow.clockwise")
+        }
+        .help("Refresh server status, chats, and jobs")
+    }
+
+    private var resumeButton: some View {
+        Button {
+            resumeOpen = true
+        } label: {
+            Label("Resume by ID", systemImage: "arrow.uturn.forward.circle")
+        }
+        .help("Create a chat from an existing Claude or Codex session ID")
+    }
+
+    private var attachButton: some View {
+        Button {
+            importerOpen = true
+        } label: {
+            Label("Attach Files", systemImage: "paperclip")
+        }
+        .disabled(store.selectedSession == nil)
+        .help("Attach files to the selected chat")
+    }
+
+    private var forkButton: some View {
+        Button {
+            Task { await store.forkSelected() }
+        } label: {
+            Label("Fork Chat", systemImage: "arrow.triangle.branch")
+        }
+        .disabled(store.selectedSession == nil)
+        .help("Create a new chat from the selected chat")
+    }
+
+    private var stopButton: some View {
+        Button(role: .destructive) {
+            Task { await store.stop() }
+        } label: {
+            Label("Stop Agent", systemImage: "stop.circle")
+        }
+        .disabled(!store.isRunning)
+        .help("Stop the currently running Claude or Codex turn")
+    }
+
+    @ViewBuilder
+    private var pinButton: some View {
+        if let session = store.selectedSession {
+            Button {
+                Task { await store.togglePin(session) }
+            } label: {
+                Label(session.pinned == true ? "Unpin" : "Pin", systemImage: session.pinned == true ? "pin.fill" : "pin")
+            }
+            .buttonStyle(.borderless)
+            .help(session.pinned == true ? "Unpin chat" : "Pin chat")
+        }
+    }
+
+    private var traceToggle: some View {
+        Toggle(isOn: $store.showDebugEvents) {
+            Label("Trace", systemImage: "waveform.path.ecg")
+        }
+        .toggleStyle(.button)
+        .help("Show or hide raw process events")
+    }
+
+    private var fontMenu: some View {
+        Menu {
+            Picker("Typeface", selection: $chatFontDesign) {
+                Text("System").tag("default")
+                Text("Rounded").tag("rounded")
+                Text("Serif").tag("serif")
+                Text("Mono").tag("monospaced")
+            }
+            Divider()
+            Picker("Text Size", selection: $chatFontSize) {
+                Text("Small").tag(13.0)
+                Text("Default").tag(14.0)
+                Text("Large").tag(16.0)
+                Text("Huge").tag(18.0)
+            }
+        } label: {
+            Label("Font", systemImage: "textformat.size")
+        }
+        .help("Change chat font")
     }
 
     private var sessionSubtitle: String {
