@@ -1031,7 +1031,6 @@ struct HeaderView: View {
             pinButton
             traceToggle
             fontMenu
-            RuntimeSwitcher()
         }
         .lineLimit(1)
         .controlSize(.small)
@@ -1162,112 +1161,5 @@ struct HeaderView: View {
         let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         Task { await store.updateSelected(title: title) }
-    }
-}
-
-private struct RuntimeSwitcher: View {
-    @EnvironmentObject private var store: AppStore
-
-    var body: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 2) {
-                backendButton("Claude", value: "claude")
-                backendButton("Codex", value: "codex")
-            }
-            .padding(2)
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.softLine))
-
-            Menu {
-                if let session = store.selectedSession {
-                    Section("Model") {
-                        ForEach(modelOptions(for: session)) { option in
-                            Button {
-                                Task { await store.updateSelected(model: option.value) }
-                            } label: {
-                                HStack {
-                                    if normalized(session.model) == option.value {
-                                        Image(systemName: "checkmark")
-                                    }
-                                    Text(option.label)
-                                }
-                            }
-                        }
-                    }
-                    Section("Effort") {
-                        ForEach(effortOptions(for: session)) { option in
-                            Button {
-                                Task { await store.updateSelected(effort: option.value) }
-                            } label: {
-                                HStack {
-                                    if normalized(session.effort) == option.value {
-                                        Image(systemName: "checkmark")
-                                    }
-                                    Text(option.label)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Text("No chat selected")
-                }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "cpu")
-                    Text(runtimeLabel)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 150, alignment: .leading)
-                }
-            }
-            .disabled(store.selectedSession == nil)
-        }
-        .help("Switch backend, model, and effort")
-    }
-
-    private func backendButton(_ title: String, value: String) -> some View {
-        Button {
-            guard store.selectedSession?.backend != value else { return }
-            Task { await store.updateSelected(backend: value, model: "") }
-        } label: {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .frame(width: 54, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(store.selectedSession?.backend == value ? .white : .primary)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(store.selectedSession?.backend == value ? Color.accentColor : Color.clear)
-        )
-        .disabled(store.selectedSession == nil)
-        .accessibilityLabel("Use \(title)")
-    }
-
-    private var runtimeLabel: String {
-        guard let session = store.selectedSession else { return "Runtime" }
-        return "\(store.runtimeCatalog.modelLabel(session.model, backend: session.backend)) · \(store.runtimeCatalog.effortLabel(session.effort, backend: session.backend))"
-    }
-
-    private func modelOptions(for session: ZSession) -> [ZRuntimeOption] {
-        optionsWithCurrent(store.runtimeCatalog.models(for: session.backend), current: session.model)
-    }
-
-    private func effortOptions(for session: ZSession) -> [ZRuntimeOption] {
-        optionsWithCurrent(store.runtimeCatalog.efforts(for: session.backend), current: session.effort)
-    }
-
-    private func optionsWithCurrent(_ options: [ZRuntimeOption], current: String?) -> [ZRuntimeOption] {
-        let clean = normalized(current)
-        guard !clean.isEmpty, !options.contains(where: { $0.value == clean }) else {
-            return options
-        }
-        return options + [ZRuntimeOption(value: clean, label: clean)]
-    }
-
-    private func normalized(_ value: String?) -> String {
-        value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }

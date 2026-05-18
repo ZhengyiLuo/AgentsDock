@@ -12,6 +12,7 @@ struct TerminalWorkspaceView: View {
     @State private var confirmKill = false
     @State private var terminalStatus = "Terminal idle"
     @State private var actionSerial = 0
+    @State private var terminalRevision = 0
     @State private var pendingAction: TerminalAction?
 
     var body: some View {
@@ -23,9 +24,7 @@ struct TerminalWorkspaceView: View {
         .background(Theme.window)
         .task(id: "\(store.selectedSessionID ?? "none"):\(isActive)") {
             guard isActive, store.selectedSessionID != nil else { return }
-            terminalStatus = "Creating or attaching tmux..."
-            await store.openSelectedTerminal(showErrors: false)
-            await store.refreshSelectedTerminal(showErrors: false)
+            terminalStatus = "Connecting"
         }
         .confirmationDialog("Kill tmux session?", isPresented: $confirmKill) {
             Button("Kill Terminal", role: .destructive) {
@@ -41,6 +40,9 @@ struct TerminalWorkspaceView: View {
     private var content: some View {
         if store.selectedSession == nil {
             EmptyStateView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !isActive {
+            Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let identity = terminalIdentity {
             SwiftTermTerminalView(
@@ -100,7 +102,7 @@ struct TerminalWorkspaceView: View {
                 .lineLimit(1)
             HStack(spacing: 6) {
                 Circle()
-                    .fill(store.terminalSnapshot?.exists == true ? .green : .secondary)
+                    .fill(isActive ? .green : .secondary)
                     .frame(width: 7, height: 7)
                 Text(statusLine)
                     .font(.caption.monospaced())
@@ -145,7 +147,8 @@ struct TerminalWorkspaceView: View {
 
     private var reconnectButton: some View {
         Button {
-            Task { await store.openSelectedTerminal() }
+            terminalStatus = "Reconnecting"
+            terminalRevision += 1
         } label: {
             Label("Reconnect", systemImage: "arrow.clockwise")
         }
@@ -199,8 +202,6 @@ struct TerminalWorkspaceView: View {
 
     private var terminalIdentity: TerminalIdentity? {
         guard let session = store.selectedSession,
-              let snapshot = store.terminalSnapshot,
-              snapshot.exists,
               let host = store.api.baseURL.host,
               !host.isEmpty else {
             return nil
@@ -210,17 +211,17 @@ struct TerminalWorkspaceView: View {
             sessionID: session.id,
             host: host,
             user: terminalSSHUser.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "zen" : terminalSSHUser,
-            tmuxName: snapshot.name,
-            cwd: snapshot.cwd ?? session.cwd ?? "/home/zen"
+            tmuxName: terminalSessionName(for: session.id),
+            cwd: session.cwd ?? store.terminalSnapshot?.cwd ?? "/home/zen",
+            revision: terminalRevision
         )
     }
 
     private var statusLine: String {
         guard store.selectedSession != nil else { return "No chat selected" }
-        guard let snapshot = store.terminalSnapshot, snapshot.exists else { return waitingText }
         let host = store.api.baseURL.host ?? "server"
-        let cwd = snapshot.cwd?.isEmpty == false ? snapshot.cwd! : "/home/zen"
-        return "\(terminalSSHUser)@\(host) -> \(snapshot.name) · \(cwd) · \(terminalStatus)"
+        let cwd = store.selectedSession?.cwd ?? store.terminalSnapshot?.cwd ?? "/home/zen"
+        return "\(terminalSSHUser)@\(host) -> \(terminalSessionName(for: store.selectedSessionID ?? "session")) · \(cwd) · \(terminalStatus)"
     }
 
     private var waitingText: String {
@@ -237,6 +238,17 @@ struct TerminalWorkspaceView: View {
         actionSerial += 1
         pendingAction = TerminalAction(id: actionSerial, kind: kind)
     }
+
+    private func terminalSessionName(for sessionID: String) -> String {
+        let scalars = sessionID.unicodeScalars.map { scalar -> Character in
+            if CharacterSet.alphanumerics.contains(scalar) || scalar == "_" {
+                return Character(scalar)
+            }
+            return "_"
+        }
+        let clean = String(scalars).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        return "zd_\(String((clean.isEmpty ? "session" : clean).prefix(80)))"
+    }
 }
 
 private struct TerminalIdentity: Equatable {
@@ -245,6 +257,7 @@ private struct TerminalIdentity: Equatable {
     let user: String
     let tmuxName: String
     let cwd: String
+    let revision: Int
 }
 
 private struct TerminalAction: Equatable {
@@ -337,20 +350,19 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
             activeIdentity = identity
             onStatus("Connecting")
 
-            let remoteCommand = [
-                "cd",
-                shellQuote(identity.cwd),
-                "&&",
-                "exec",
-                "tmux",
-                "new-session",
-                "-A",
-                "-D",
-                "-s",
-                shellQuote(identity.tmuxName),
-                "-c",
-                shellQuote(identity.cwd)
-            ].joined(separator: " ")
+            let remoteCommand = """
+            SESSION=\(shellQuote(identity.tmuxName))
+            CWD=\(shellQuote(identity.cwd))
+            cd "$CWD" 2>/dev/null || cd "$HOME"
+            if tmux has-session -t "$SESSION" 2>/dev/null; then
+              LIVE=$(tmux list-panes -t "$SESSION" -F '#{pane_dead}' 2>/dev/null | awk '$1 == 0 { n++ } END { print n+0 }')
+              if [ "$LIVE" = "0" ]; then
+                tmux kill-session -t "$SESSION" 2>/dev/null || true
+              fi
+            fi
+            tmux has-session -t "$SESSION" 2>/dev/null || tmux new-session -d -s "$SESSION" -c "$PWD"
+            exec tmux attach-session -t "$SESSION"
+            """
             let args = [
                 "-tt",
                 "-o", "ServerAliveInterval=30",

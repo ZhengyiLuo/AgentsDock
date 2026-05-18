@@ -16,6 +16,43 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Strip Header Runtime Knobs And Repair Terminal Attach
+
+Problem:
+
+- The chat header still had backend/model/effort runtime controls even though
+  the inspector already owns those settings.
+- The embedded terminal could still show a dead `[exited]` tmux pane because it
+  attached to server-created tmux state without repairing dead sessions first.
+- Keeping the terminal mounted while Chat was active made composer typing feel
+  sluggish.
+
+Decision:
+
+- Remove the runtime switcher from the chat header entirely. Runtime settings
+  stay in the side inspector.
+- Stop pre-creating the terminal session through the server when opening the
+  Terminal tab.
+- Compute the per-chat tmux name in the Mac app using the same `zd_<session>`
+  convention as the server.
+- Launch SSH with a remote script that:
+  - enters the chat working directory,
+  - detects an existing tmux session,
+  - kills it if every pane is dead,
+  - creates it when missing,
+  - then `exec`s `tmux attach-session`.
+- Do not instantiate SwiftTerm while the Terminal tab is hidden, so the chat
+  composer is not competing with a hidden terminal renderer.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` was refreshed.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ## 2026-05-17 Follow-Up - Responsive Mac Headers And Terminal Focus
 
 Problem:
