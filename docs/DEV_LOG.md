@@ -38,11 +38,20 @@ Guardrail:
   - Verifies `ZTextPresenceGate` behavior.
   - Scans `ComposerView.swift` to ensure the composer still uses the gate before
     calling `onTextPresenceChange`.
+- Expanded `ZenithGuardrails` into the first targeted regression suite:
+  - Endpoint cache keys include normalized server URL, so cloned servers with
+    the same session IDs cannot share local chat cache.
+  - Runtime default labels show actual server defaults when the catalog knows
+    them.
+  - Pasted `/api/health` URLs normalize back to the server root.
+  - Shell copy normalization collapses accidental double continuations while
+    leaving LaTeX-looking text alone.
 
 Verification:
 
 - `swift run ZenithGuardrails` passed.
 - `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed after rerunning serially; the first parallel attempt hit Xcode's shared build DB lock.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
   build and verified codesign.
 

@@ -192,6 +192,24 @@ public struct ZTextPresenceGate: Sendable {
     }
 }
 
+public enum ZEndpointCache {
+    public static func namespace(serverURL: String, default defaultValue: String) -> String {
+        safeComponent(ZenithServerURL.normalized(serverURL, default: defaultValue))
+    }
+
+    public static func key(serverURL: String, sessionID: String, default defaultValue: String) -> String {
+        "\(namespace(serverURL: serverURL, default: defaultValue))|\(sessionID)"
+    }
+
+    private static func safeComponent(_ value: String) -> String {
+        let clean = value.map { char -> Character in
+            char.isLetter || char.isNumber ? char : "_"
+        }
+        let out = String(clean).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        return out.isEmpty ? "default" : out
+    }
+}
+
 public enum ZClipboardText {
     public static func normalizedForCopy(_ text: String, language: String? = nil) -> String {
         guard text.contains("\\\\") else { return text }

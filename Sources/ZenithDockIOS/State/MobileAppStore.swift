@@ -1123,7 +1123,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func chatCacheKey(_ sessionID: String) -> String {
-        "\(resolvedServerURLString)|\(sessionID)"
+        ZEndpointCache.key(serverURL: resolvedServerURLString, sessionID: sessionID, default: defaultAgentServerURLString)
     }
 
     private func syncSelectedRunningState() {

@@ -1335,19 +1335,11 @@ final class AppStore: ObservableObject {
     }
 
     private var serverCacheNamespace: String {
-        Self.safeCacheComponent(ZenithServerURL.normalized(serverURLString, default: defaultAgentServerURLString))
-    }
-
-    private static func safeCacheComponent(_ value: String) -> String {
-        let clean = value.map { char -> Character in
-            char.isLetter || char.isNumber ? char : "_"
-        }
-        let out = String(clean).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-        return out.isEmpty ? "default" : out
+        ZEndpointCache.namespace(serverURL: serverURLString, default: defaultAgentServerURLString)
     }
 
     private func chatCacheKey(_ sessionID: String) -> String {
-        "\(serverCacheNamespace)|\(sessionID)"
+        ZEndpointCache.key(serverURL: serverURLString, sessionID: sessionID, default: defaultAgentServerURLString)
     }
 
     private func chatCacheURL(_ sessionID: String) -> URL {
