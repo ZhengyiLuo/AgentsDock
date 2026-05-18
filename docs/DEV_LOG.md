@@ -16,6 +16,27 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Mac TestFlight Build 23 Uploaded
+
+Summary:
+
+- Build `22` included the composer typing regression from the immediate
+  placeholder state callback.
+- Committed the fix:
+  `e61ed08 Fix Mac composer typing regression`.
+- Bumped all project targets from build `22` to build `23` for a macOS-only
+  TestFlight replacement.
+- Committed the build bump:
+  `4584978 Bump build number for Mac TestFlight 23`.
+- Archived and uploaded macOS build `23` successfully:
+  `Uploaded ZenithDockMac`.
+- The package is processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-23.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-23.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-23 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-18 Follow-Up - Composer Typing Regression
 
 Problem:
