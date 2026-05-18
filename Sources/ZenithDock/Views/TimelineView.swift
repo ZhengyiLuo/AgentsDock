@@ -1188,7 +1188,7 @@ struct HeaderView: View {
         if let provider = session.session_id, !provider.isEmpty {
             return "\(store.runtimeCatalog.compactSummary(for: session)) · session \(String(provider.prefix(12)))"
         }
-        return "\(store.runtimeCatalog.compactSummary(for: session)) · \(session.folder ?? "General") · \(session.cwd ?? "/home/zen")"
+        return "\(store.runtimeCatalog.compactSummary(for: session)) · \(session.folder ?? "General") · \(session.cwd ?? store.defaultCwd)"
     }
 
     private func syncTitle() {

@@ -7,7 +7,7 @@ struct MobileResumeView: View {
     @State private var providerID = ""
     @State private var title = ""
     @State private var folder = "General"
-    @State private var cwd = "/home/zen"
+    @State private var cwd = ""
 
     var body: some View {
         NavigationStack {

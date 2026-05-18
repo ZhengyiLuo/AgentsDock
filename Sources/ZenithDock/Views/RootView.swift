@@ -110,7 +110,7 @@ struct ServerSettingsSheet: View {
                     .focused($focusedField, equals: .serverURL)
                     .textSelection(.enabled)
                     .onSubmit { applyAndReconnect() }
-                Text("Example: 10.112.215.37:7850 or http://10.112.215.37:7850")
+                Text("Example: host:7850 or http://host:7850")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 SecureField("Access token", text: $draftAccessToken)

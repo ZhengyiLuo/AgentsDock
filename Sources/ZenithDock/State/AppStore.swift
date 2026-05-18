@@ -2,7 +2,8 @@ import Combine
 import Foundation
 import ZenithCore
 
-private let defaultAgentServerURLString = "http://10.112.215.37:7850"
+private let defaultAgentServerURLString = "http://127.0.0.1:7850"
+private let fallbackServerCwd = "~"
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -30,6 +31,7 @@ final class AppStore: ObservableObject {
     @Published var serverReachable = false
     @Published var socketLive = false
     @Published var activeSessionIDs: Set<String> = []
+    @Published var defaultCwd = fallbackServerCwd
     @Published var lastHealthAt: Date?
     @Published var lastLoadedAt: Date?
     @Published var lastSocketError: String?
@@ -272,6 +274,9 @@ final class AppStore: ObservableObject {
             }
             let res: Response = try await api.get("/api/health")
             serverReachable = res.ok
+            if let cleanCwd = res.default_cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cleanCwd.isEmpty {
+                defaultCwd = cleanCwd
+            }
             activeSessionIDs = Set(res.active)
             lastHealthAt = Date()
             syncSelectedRunningState()
@@ -340,14 +345,15 @@ final class AppStore: ObservableObject {
             struct Body: Codable {
                 var title: String
                 var folder: String
-                var cwd = "/home/zen"
+                var cwd: String
                 var backend = "claude"
             }
             struct Response: Codable { let session: ZSession }
             let cleanFolder = folder.trimmingCharacters(in: .whitespacesAndNewlines)
             let res: Response = try await api.post("/api/sessions", body: Body(
                 title: title,
-                folder: cleanFolder.isEmpty ? "General" : cleanFolder
+                folder: cleanFolder.isEmpty ? "General" : cleanFolder,
+                cwd: defaultCwd
             ))
             sessions.insert(res.session, at: 0)
             await select(sessionID: res.session.id)
@@ -374,7 +380,7 @@ final class AppStore: ObservableObject {
             let res: Response = try await api.post("/api/sessions", body: Body(
                 title: cleanTitle.isEmpty ? nil : cleanTitle,
                 folder: cleanFolder.isEmpty ? "General" : cleanFolder,
-                cwd: cleanCwd.isEmpty ? "/home/zen" : cleanCwd,
+                cwd: cleanCwd.isEmpty ? defaultCwd : cleanCwd,
                 backend: backend,
                 provider_session_id: cleanID
             ))
@@ -1444,10 +1450,10 @@ final class AppStore: ObservableObject {
             return nil
         }
         if ns.domain == NSURLErrorDomain {
-            return "Cannot reach the Zenithbot agent server at \(serverURLString). The Mac internet may be fine; this means the app cannot reach Zen-nv or port 7850 right now."
+            return "Cannot reach the ZenithDock agent server at \(serverURLString). The Mac internet may be fine; this means the app cannot reach the configured host or port 7850 right now."
         }
         if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
-            return "Agent server rejected the access token. Check ZENITHDOCK_AGENT_TOKEN on Zen-nv and the token field in the app."
+            return "Agent server rejected the access token. Check ZENITHDOCK_AGENT_TOKEN on the server and the token field in the app."
         }
         return error.localizedDescription
     }

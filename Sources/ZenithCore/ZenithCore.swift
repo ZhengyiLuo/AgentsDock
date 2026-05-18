@@ -37,17 +37,23 @@ public struct ZRuntimeBackendCatalog: Codable, Hashable, Sendable {
     public var efforts: [ZRuntimeOption]
     public var model_source: String?
     public var effort_source: String?
+    public var default_model: String?
+    public var default_effort: String?
 
     public init(
         models: [ZRuntimeOption] = [ZRuntimeCatalog.serverDefaultOption],
         efforts: [ZRuntimeOption] = [ZRuntimeCatalog.serverDefaultOption],
         model_source: String? = nil,
-        effort_source: String? = nil
+        effort_source: String? = nil,
+        default_model: String? = nil,
+        default_effort: String? = nil
     ) {
         self.models = models
         self.efforts = efforts
         self.model_source = model_source
         self.effort_source = effort_source
+        self.default_model = default_model
+        self.default_effort = default_effort
     }
 }
 
@@ -75,37 +81,58 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
 
     public func modelLabel(_ value: String?, backend: String) -> String {
         let clean = ZRuntimeCatalog.cleaned(value)
-        guard !clean.isEmpty else { return "Server default" }
+        guard !clean.isEmpty else { return serverDefaultModelLabel(for: backend) }
         return models(for: backend).first { $0.value == clean }?.label ?? clean
     }
 
     public func effortLabel(_ value: String?, backend: String) -> String {
         let clean = ZRuntimeCatalog.cleaned(value)
-        guard !clean.isEmpty else { return "Server default" }
+        guard !clean.isEmpty else { return serverDefaultEffortLabel(for: backend) }
         return efforts(for: backend).first { $0.value == clean }?.label ?? clean
     }
 
     public func compactSummary(for session: ZSession?) -> String {
         guard let session else { return "No runtime" }
-        if ZRuntimeCatalog.cleaned(session.model).isEmpty && ZRuntimeCatalog.cleaned(session.effort).isEmpty {
-            return "\(session.backend.capitalized) · server defaults"
-        }
         return [
             session.backend.capitalized,
             modelLabel(session.model, backend: session.backend),
             effortLabel(session.effort, backend: session.backend)
-        ].joined(separator: " · ")
+        ].filter { !$0.isEmpty && $0 != "Server default" }.joined(separator: " · ")
     }
 
     private func options(_ values: [ZRuntimeOption]?) -> [ZRuntimeOption] {
         var seen = Set<String>()
         var out: [ZRuntimeOption] = []
-        for option in [ZRuntimeCatalog.serverDefaultOption] + (values ?? []) {
+        for option in values ?? [] {
             guard !seen.contains(option.value) else { continue }
             seen.insert(option.value)
             out.append(option)
         }
+        if !seen.contains(ZRuntimeCatalog.defaultValue) {
+            out.insert(ZRuntimeCatalog.serverDefaultOption, at: 0)
+        }
         return out
+    }
+
+    private func serverDefaultModelLabel(for backend: String) -> String {
+        serverDefaultLabel(
+            value: backends[backend.lowercased()]?.default_model,
+            options: models(for: backend)
+        )
+    }
+
+    private func serverDefaultEffortLabel(for backend: String) -> String {
+        serverDefaultLabel(
+            value: backends[backend.lowercased()]?.default_effort,
+            options: efforts(for: backend)
+        )
+    }
+
+    private func serverDefaultLabel(value: String?, options: [ZRuntimeOption]) -> String {
+        let clean = ZRuntimeCatalog.cleaned(value)
+        guard !clean.isEmpty else { return "Server default" }
+        let label = options.first { $0.value == clean }?.label ?? clean
+        return "Server default (\(label))"
     }
 }
 

@@ -1,6 +1,6 @@
 # ZenithDock
 
-Native macOS frontend for Zenithbot running on `zen-nv`.
+Native macOS, iOS, and iPadOS frontend for a remote ZenithDock agent server.
 
 ## Dev Log
 
@@ -8,33 +8,32 @@ Keep implementation memory in [`docs/DEV_LOG.md`](docs/DEV_LOG.md). Update it
 after meaningful debugging sessions, architecture decisions, deploys, and UX
 rules that we should not rediscover the hard way.
 
-## Run The Server On Zen-nv
+## Run The Server
 
 The local source of truth is:
 
 ```bash
-/Users/zen/agi/ZenithDock/server/agent_server.py
+server/agent_server.py
 ```
 
-Deploy it to Zen-nv:
+Deploy it to your server:
 
 ```bash
-cd /Users/zen/agi/ZenithDock
-./server/deploy.sh nv
+./server/deploy.sh <ssh-host>
 ```
 
-The deployed runtime copy lives at `/home/zen/Zenithbot/scripts/agent_server.py`.
+The deployed runtime copy lives under the configured remote app directory.
 
 ```bash
-cd /home/zen/Zenithbot
-/home/zen/anaconda3/bin/python3 scripts/agent_server.py serve --bind 0.0.0.0 --port 7850
+cd ~/Zenithbot
+uv run python scripts/agent_server.py serve --bind 0.0.0.0 --port 7850
 ```
 
 Optional user service:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp /home/zen/Zenithbot/systemd/zenithbot-agent.service ~/.config/systemd/user/
+cp ~/Zenithbot/systemd/zenithbot-agent.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now zenithbot-agent.service
 ```
@@ -58,18 +57,16 @@ uploads, websocket live traces, and file/video previews.
 ## Run The Mac App
 
 ```bash
-cd /Users/zen/agi/ZenithDock
 swift run
 ```
 
-Default server URL is `http://10.112.215.37:7850`; edit it in the toolbar if needed.
+Edit the server URL in the app toolbar or inspector.
 
 ## Build The iOS/iPadOS App
 
 The mobile SwiftUI target is `ZenithDockIOS` and reuses `ZenithCore`.
 
 ```bash
-cd /Users/zen/agi/ZenithDock
 swift build -c release --target ZenithDockIOS
 xcodebuild -scheme ZenithDockIOS -destination 'generic/platform=iOS' build
 xcodebuild -scheme ZenithDockIOS -destination 'platform=iOS Simulator,name=iPhone 17' build
@@ -103,8 +100,7 @@ For real TestFlight uploads, use Xcode with automatic signing enabled for both
 `ZenithDockIOS` and `ZenithDockMac`, then upload the archives from Organizer.
 
 Open `Package.swift` in Xcode and select the `ZenithDockIOS` scheme for mobile
-iteration. The default server URL is the same Zen-nv endpoint:
-`http://10.112.215.37:7850`.
+iteration. Set the server URL from the app's server settings.
 
 ## Current V1
 
@@ -112,7 +108,7 @@ iteration. The default server URL is the same Zen-nv endpoint:
 - Claude/Codex backend switch per chat
 - Fork chat action
 - Prompt streaming via WebSocket event timeline
-- File upload to Zen-nv
+- File upload to the agent server
 - Artifact/video/image preview from returned manifests
 - Interval/loop job creation panel
 
@@ -126,5 +122,5 @@ The package has a platform-neutral `ZenithCore` library target with:
 - multipart file upload
 
 The macOS app target is the desktop UI. The iOS/iPadOS target imports
-`ZenithCore` and has its own mobile state/view layer around the same Zen-nv
+`ZenithCore` and has its own mobile state/view layer around the same remote
 server API. Both app targets archive from `ZenithDock.xcodeproj`.

@@ -10,7 +10,7 @@ struct MobileChatOptionsView: View {
 
     @State private var title = ""
     @State private var folder = "General"
-    @State private var cwd = "/home/zen"
+    @State private var cwd = ""
     @State private var backend = "claude"
     @State private var model = ""
     @State private var effort = ""
@@ -229,7 +229,7 @@ struct MobileChatOptionsView: View {
         guard let session = store.selectedSession else { return }
         title = session.title
         folder = session.folder ?? "General"
-        cwd = session.cwd ?? "/home/zen"
+        cwd = session.cwd ?? store.defaultCwd
         backend = session.backend
         model = session.model ?? ""
         effort = session.effort ?? ""
@@ -248,7 +248,7 @@ struct MobileChatOptionsView: View {
                 effort: ZRuntimeCatalog.cleanForAPI(effort),
                 folder: cleanFolder.isEmpty ? "General" : cleanFolder,
                 title: cleanTitle,
-                cwd: cleanCwd.isEmpty ? "/home/zen" : cleanCwd,
+                cwd: cleanCwd.isEmpty ? store.defaultCwd : cleanCwd,
                 pinned: pinned
             )
             syncDrafts()

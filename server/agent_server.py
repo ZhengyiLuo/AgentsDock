@@ -2250,8 +2250,8 @@ def runtime_option(value: str, label: str | None = None) -> dict[str, str]:
     return {"value": clean, "label": str(label or clean or "Server default").strip()}
 
 
-def server_default_runtime_option() -> dict[str, str]:
-    return runtime_option("", "Server default")
+def server_default_runtime_option(label: str | None = None) -> dict[str, str]:
+    return runtime_option("", label or "Server default")
 
 
 def title_model_label(value: str) -> str:
@@ -2275,10 +2275,10 @@ def title_effort_label(value: str) -> str:
     return clean.capitalize()
 
 
-def unique_runtime_options(options: list[dict[str, str]]) -> list[dict[str, str]]:
+def unique_runtime_options(options: list[dict[str, str]], default_label: str | None = None) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[str] = set()
-    for option in [server_default_runtime_option(), *options]:
+    for option in [server_default_runtime_option(default_label), *options]:
         value = str(option.get("value") or "").strip()
         if value in seen:
             continue
@@ -2303,10 +2303,21 @@ def run_catalog_command(cmd: list[str]) -> str:
     return result.stdout
 
 
+def runtime_priority(model: dict[str, Any]) -> int:
+    try:
+        return int(model["priority"])
+    except Exception:
+        return 9999
+
+
 def discover_codex_catalog() -> dict[str, Any]:
     models: list[dict[str, Any]] = []
     model_options: list[dict[str, str]] = []
     effort_options: list[dict[str, str]] = []
+    default_model = ""
+    default_model_label = ""
+    default_effort = ""
+    default_effort_label = ""
     model_source = "codex debug models"
     effort_source = "codex debug models"
     try:
@@ -2323,12 +2334,18 @@ def discover_codex_catalog() -> dict[str, Any]:
         model for model in models
         if str(model.get("visibility") or "list") == "list" and model.get("supported_in_api", True) is not False
     ]
-    visible_models.sort(key=lambda model: int(model.get("priority") or 9999))
+    visible_models.sort(key=runtime_priority)
     for model in visible_models:
         slug = str(model.get("slug") or model.get("id") or "").strip()
         if not slug:
             continue
-        model_options.append(runtime_option(slug, model.get("display_name") or title_model_label(slug)))
+        label = str(model.get("display_name") or title_model_label(slug)).strip()
+        model_options.append(runtime_option(slug, label))
+        if not default_model:
+            default_model = slug
+            default_model_label = label
+            default_effort = str(model.get("default_reasoning_level") or "").strip()
+            default_effort_label = title_effort_label(default_effort) if default_effort else ""
         levels = model.get("supported_reasoning_levels")
         if isinstance(levels, list):
             for level in levels:
@@ -2339,10 +2356,12 @@ def discover_codex_catalog() -> dict[str, Any]:
                     effort_options.append(runtime_option(effort, title_effort_label(effort)))
 
     return {
-        "models": unique_runtime_options(model_options),
-        "efforts": unique_runtime_options(effort_options),
+        "models": unique_runtime_options(model_options, f"Server default ({default_model_label})" if default_model_label else None),
+        "efforts": unique_runtime_options(effort_options, f"Server default ({default_effort_label})" if default_effort_label else None),
         "model_source": model_source,
         "effort_source": effort_source,
+        "default_model": default_model or None,
+        "default_effort": default_effort or None,
     }
 
 
@@ -2380,6 +2399,8 @@ def parse_claude_help_catalog() -> dict[str, Any]:
         "efforts": unique_runtime_options(effort_options),
         "model_source": model_source,
         "effort_source": effort_source,
+        "default_model": os.environ.get("CLAUDE_MODEL") or os.environ.get("ANTHROPIC_MODEL") or None,
+        "default_effort": os.environ.get("CLAUDE_EFFORT") or None,
     }
 
 

@@ -1,9 +1,10 @@
 import Foundation
 import ZenithCore
 
-private let defaultAgentServerURLString = "http://10.112.215.37:7850"
-private let defaultAgentServerHost = "10.112.215.37"
+private let defaultAgentServerURLString = "http://127.0.0.1:7850"
+private let defaultAgentServerHost = "127.0.0.1"
 private let defaultAgentServerPort = "7850"
+private let fallbackServerCwd = "~"
 
 @MainActor
 final class MobileAppStore: ObservableObject {
@@ -27,6 +28,7 @@ final class MobileAppStore: ObservableObject {
     @Published var status = "Disconnected"
     @Published var connectionDetail = "No connection test yet"
     @Published var activeSessionIDs: Set<String> = []
+    @Published var defaultCwd = fallbackServerCwd
     @Published var errorText: String?
     @Published var omittedHistoryEventCount = 0
     @Published var scrollRevision = 0
@@ -259,11 +261,15 @@ final class MobileAppStore: ObservableObject {
         do {
             struct Response: Codable {
                 let ok: Bool
+                let default_cwd: String?
                 let active: [String]
             }
             let res: Response = try await api.get("/api/health")
             if serverReachable != res.ok {
                 serverReachable = res.ok
+            }
+            if let cleanCwd = res.default_cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cleanCwd.isEmpty {
+                defaultCwd = cleanCwd
             }
             let nextActive = Set(res.active)
             if activeSessionIDs != nextActive {
@@ -330,12 +336,12 @@ final class MobileAppStore: ObservableObject {
         struct Body: Codable {
             var title = "New chat"
             var folder = "General"
-            var cwd = "/home/zen"
+            var cwd: String
             var backend = "claude"
         }
         do {
             struct Response: Codable { let session: ZSession }
-            let res: Response = try await api.post("/api/sessions", body: Body())
+            let res: Response = try await api.post("/api/sessions", body: Body(cwd: defaultCwd))
             sessions.insert(res.session, at: 0)
             await select(sessionID: res.session.id)
         } catch {
@@ -358,7 +364,7 @@ final class MobileAppStore: ObservableObject {
             let res: Response = try await api.post("/api/sessions", body: Body(
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title,
                 folder: folder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "General" : folder,
-                cwd: cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "/home/zen" : cwd,
+                cwd: cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultCwd : cwd,
                 backend: backend,
                 provider_session_id: cleanID
             ))
@@ -1130,9 +1136,9 @@ final class MobileAppStore: ObservableObject {
         guard !isCancelledNetworkError(error) else { return }
         let ns = error as NSError
         if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
-            errorText = "Agent server rejected the access token for \(resolvedServerURLString). Check the token on Zen-nv and in this app."
+            errorText = "Agent server rejected the access token for \(resolvedServerURLString). Check the token on the server and in this app."
         } else if ns.domain == NSURLErrorDomain {
-            errorText = "\(connectionFailureSummary(error)). If Safari works but Zen-nv logs do not show an app request, enable Local Network for ZenithDock in iOS Settings and make sure Tailscale is active."
+            errorText = "\(connectionFailureSummary(error)). If Safari works but server logs do not show an app request, enable Local Network for ZenithDock in iOS Settings and make sure Tailscale is active."
         } else {
             errorText = error.localizedDescription
         }

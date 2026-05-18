@@ -1424,3 +1424,41 @@ Changes:
   - Added an explicit ATS exception for `100.73.184.23`.
 - `Apps/ZenithDockIOS/Info.plist`
   - Added the same explicit `100.73.184.23` exception.
+
+### Public-Facing Server Labels And Runtime Defaults
+
+User issue:
+
+- App copy still mentioned the original machine name in empty states, error
+  text, README snippets, and local-network usage text.
+- The model picker showed `Server default` without explaining which model and
+  reasoning effort the server would actually use.
+
+Changes:
+
+- Removed machine-specific wording from user-facing app strings and README
+  examples.
+- Replaced hardcoded `/home/zen` fallback working directories with the
+  `default_cwd` reported by `/api/health`, falling back to `~` before the first
+  health response.
+- Changed fresh-install default endpoint to localhost; saved user endpoints are
+  still preserved by UserDefaults.
+- Extended `/api/runtime/catalog` so the server reports `default_model` and
+  `default_effort` where the backend CLI exposes them.
+- Fixed Codex catalog sorting so priority `0` is treated as the highest
+  priority instead of missing. This makes Codex server default display as
+  `GPT-5.5` with `XHigh` effort on the updated server.
+- Updated runtime labels so menus and summaries show labels such as
+  `Server default (GPT-5.5)` instead of opaque `Server default`.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
+  build and verified codesign.
+- Deployed the server update to the `sonic` endpoint and verified
+  `/api/runtime/catalog` reports `default_model = gpt-5.5` and
+  `default_effort = xhigh` for Codex.

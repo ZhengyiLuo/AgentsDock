@@ -264,7 +264,7 @@ struct InspectorView: View {
     func syncDrafts() {
         title = store.selectedSession?.title ?? ""
         folder = store.selectedSession?.folder ?? "General"
-        cwd = store.selectedSession?.cwd ?? "/home/zen"
+        cwd = store.selectedSession?.cwd ?? store.defaultCwd
         backend = store.selectedSession?.backend ?? "claude"
         model = store.selectedSession?.model ?? ""
         effort = store.selectedSession?.effort ?? ""
