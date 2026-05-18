@@ -1095,28 +1095,35 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func memoryCachedChat(_ sessionID: String) -> CachedChat? {
-        guard let cached = memoryChatCache[sessionID] else { return nil }
-        touchMemoryChatCache(sessionID)
+        let key = chatCacheKey(sessionID)
+        guard let cached = memoryChatCache[key] else { return nil }
+        touchMemoryChatCache(key)
         return cached
     }
 
     private func rememberChatCache(_ cached: CachedChat) {
-        memoryChatCache[cached.session.id] = cached
-        touchMemoryChatCache(cached.session.id)
+        let key = chatCacheKey(cached.session.id)
+        memoryChatCache[key] = cached
+        touchMemoryChatCache(key)
         while memoryChatCacheOrder.count > maxMemoryCachedChats, let staleID = memoryChatCacheOrder.first {
             memoryChatCacheOrder.removeFirst()
             memoryChatCache.removeValue(forKey: staleID)
         }
     }
 
-    private func touchMemoryChatCache(_ sessionID: String) {
-        memoryChatCacheOrder.removeAll { $0 == sessionID }
-        memoryChatCacheOrder.append(sessionID)
+    private func touchMemoryChatCache(_ key: String) {
+        memoryChatCacheOrder.removeAll { $0 == key }
+        memoryChatCacheOrder.append(key)
     }
 
     private func forgetMemoryChatCache(_ sessionID: String) {
-        memoryChatCache.removeValue(forKey: sessionID)
-        memoryChatCacheOrder.removeAll { $0 == sessionID }
+        let key = chatCacheKey(sessionID)
+        memoryChatCache.removeValue(forKey: key)
+        memoryChatCacheOrder.removeAll { $0 == key }
+    }
+
+    private func chatCacheKey(_ sessionID: String) -> String {
+        "\(resolvedServerURLString)|\(sessionID)"
     }
 
     private func syncSelectedRunningState() {

@@ -204,11 +204,39 @@ final class AppStore: ObservableObject {
     func applyServerSettings(serverURL: String, accessToken: String) async {
         let cleanURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanURL.isEmpty else { return }
+        let oldEndpoint = ZenithServerURL.normalized(serverURLString, default: defaultAgentServerURLString)
+        let newEndpoint = ZenithServerURL.normalized(cleanURL, default: defaultAgentServerURLString)
         serverURLString = cleanURL
         self.accessToken = accessToken
         rememberServerURL()
         rememberAccessToken()
+        if oldEndpoint != newEndpoint {
+            resetEndpointState()
+        }
         await refresh()
+    }
+
+    private func resetEndpointState() {
+        pendingCacheWrite?.cancel()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        webSocketSessionID = nil
+        socketLive = false
+        selectedSessionID = nil
+        loadedSessionID = nil
+        sessions = []
+        events = []
+        displayEvents = []
+        uploads = []
+        sessionFiles = []
+        sessionFilesTotal = nil
+        sessionFilesHasMore = false
+        jobs = []
+        activeSessionIDs = []
+        latestSeenSeq = 0
+        omittedHistoryEventCount = 0
+        memoryChatCache = [:]
+        memoryChatCacheOrder = []
     }
 
     func startLiveTracking() async {
@@ -1303,6 +1331,23 @@ final class AppStore: ObservableObject {
         return base
             .appendingPathComponent("ZenithDock", isDirectory: true)
             .appendingPathComponent("ChatCache", isDirectory: true)
+            .appendingPathComponent(serverCacheNamespace, isDirectory: true)
+    }
+
+    private var serverCacheNamespace: String {
+        Self.safeCacheComponent(ZenithServerURL.normalized(serverURLString, default: defaultAgentServerURLString))
+    }
+
+    private static func safeCacheComponent(_ value: String) -> String {
+        let clean = value.map { char -> Character in
+            char.isLetter || char.isNumber ? char : "_"
+        }
+        let out = String(clean).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        return out.isEmpty ? "default" : out
+    }
+
+    private func chatCacheKey(_ sessionID: String) -> String {
+        "\(serverCacheNamespace)|\(sessionID)"
     }
 
     private func chatCacheURL(_ sessionID: String) -> URL {
@@ -1310,23 +1355,25 @@ final class AppStore: ObservableObject {
     }
 
     private func memoryCachedChat(_ sessionID: String) -> CachedChat? {
-        guard let cached = memoryChatCache[sessionID] else { return nil }
-        touchMemoryChatCache(sessionID)
+        let key = chatCacheKey(sessionID)
+        guard let cached = memoryChatCache[key] else { return nil }
+        touchMemoryChatCache(key)
         return cached
     }
 
     private func rememberChatCache(_ cached: CachedChat) {
-        memoryChatCache[cached.session.id] = cached
-        touchMemoryChatCache(cached.session.id)
+        let key = chatCacheKey(cached.session.id)
+        memoryChatCache[key] = cached
+        touchMemoryChatCache(key)
         while memoryChatCacheOrder.count > maxMemoryCachedChats, let staleID = memoryChatCacheOrder.first {
             memoryChatCacheOrder.removeFirst()
             memoryChatCache.removeValue(forKey: staleID)
         }
     }
 
-    private func touchMemoryChatCache(_ sessionID: String) {
-        memoryChatCacheOrder.removeAll { $0 == sessionID }
-        memoryChatCacheOrder.append(sessionID)
+    private func touchMemoryChatCache(_ key: String) {
+        memoryChatCacheOrder.removeAll { $0 == key }
+        memoryChatCacheOrder.append(key)
     }
 
     nonisolated private static func loadCachedChat(from url: URL) async -> CachedChat? {
@@ -1381,8 +1428,9 @@ final class AppStore: ObservableObject {
 
     private func deleteCachedChat(_ sessionID: String) {
         pendingCacheWrite?.cancel()
-        memoryChatCache.removeValue(forKey: sessionID)
-        memoryChatCacheOrder.removeAll { $0 == sessionID }
+        let key = chatCacheKey(sessionID)
+        memoryChatCache.removeValue(forKey: key)
+        memoryChatCacheOrder.removeAll { $0 == key }
         try? FileManager.default.removeItem(at: chatCacheURL(sessionID))
     }
 

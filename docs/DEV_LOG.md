@@ -16,6 +16,36 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Endpoint-Scoped Chat Cache
+
+Problem:
+
+- After copying server state from one host to another, both servers shared the
+  same ZenithDock session IDs.
+- The app cache was keyed only by session ID, so switching server endpoints
+  could briefly show cached chat history from the previous endpoint and make the
+  two independent servers look live-synced.
+
+Changes:
+
+- `Sources/ZenithDock/State/AppStore.swift`
+  - Reset session/event/job state when the configured server endpoint changes.
+  - Namespaced memory and disk chat cache by normalized server URL.
+- `Sources/ZenithDockIOS/State/MobileAppStore.swift`
+  - Namespaced the in-memory chat cache by resolved server URL.
+
+Behavior:
+
+- Switching endpoints now clears the old selection and fetches the new server's
+  session list/history window from the network.
+- Long chats still load the latest window first; older pages are pulled as the
+  user scrolls up.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+
 ## 2026-05-18 Follow-Up - TestFlight Build 21 Uploaded
 
 Summary:
