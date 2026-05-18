@@ -20,7 +20,7 @@ Deploy it to Zen-nv:
 
 ```bash
 cd /Users/zen/agi/ZenithDock
-./server/deploy_nv.sh
+./server/deploy.sh nv
 ```
 
 The deployed runtime copy lives at `/home/zen/Zenithbot/scripts/agent_server.py`.

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Zhengyi Luo
 """Zenithbot Agent Server.
 
 FastAPI service for a native Mac frontend. The server owns agent execution on
-zen-nv and streams normalized events from Claude Code / Codex CLI runs.
+the agent host and streams normalized events from Claude Code / Codex CLI runs.
 
 This intentionally mirrors the newest Slack bot's runner shape while removing
 Slack-specific transport, formatting, and upload constraints.
@@ -119,7 +118,7 @@ Do not use emoji, Slack-style emoji aliases, or decorative status prefixes
 such as :mag:, :gear:, :rocket:, or :white_check_mark:.
 
 This is Zenith Dock, not Slack. Do not call Slack upload APIs or Slack file
-helpers. Create files locally on Zen-nv and publish them through the manifest.
+helpers. Create files locally on the agent host and publish them through the manifest.
 
 If you create files the user should receive, write a JSON manifest at exactly:
 {manifest_path}

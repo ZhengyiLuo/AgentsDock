@@ -16,6 +16,34 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Public-Clean Server Deploy Script
+
+Problem:
+
+- The server folder is being prepared for a public repository.
+- The deploy helper was named `deploy_nv.sh` and baked in private machine
+  defaults like `nv` and `/home/zen/Zenithbot`.
+- The server script still mentioned the private agent host name in comments and
+  prompt prelude text.
+
+Decision:
+
+- Rename `server/deploy_nv.sh` to `server/deploy.sh`.
+- Make the deploy host explicit via `ZENITHDOCK_REMOTE_HOST` or the first
+  command argument.
+- Default the remote app directory to `~/Zenithbot` instead of an absolute
+  personal home path.
+- Neutralize server README examples to use `<ssh-host>`.
+- Remove the personal copyright line and private host wording from
+  `server/agent_server.py`.
+
+Verification:
+
+- Scanned `server/` for private hostnames, personal names, home paths, obvious
+  token/API key patterns, and hardcoded Tailscale/LAN IPs.
+- Remaining `zenith*` matches in `server/` are product/service names, not
+  personal information.
+
 ## 2026-05-17 Follow-Up - Punt Mac Terminal And Isolate Composer
 
 Problem:

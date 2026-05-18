@@ -2,10 +2,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REMOTE_HOST="${ZENITHDOCK_REMOTE_HOST:-nv}"
-REMOTE_APP_DIR="${ZENITHDOCK_REMOTE_APP_DIR:-/home/zen/Zenithbot}"
+REMOTE_HOST="${ZENITHDOCK_REMOTE_HOST:-${1:-}}"
+REMOTE_APP_DIR="${ZENITHDOCK_REMOTE_APP_DIR:-~/Zenithbot}"
 REMOTE_SERVER_PATH="$REMOTE_APP_DIR/scripts/agent_server.py"
 SERVICE_NAME="${ZENITHDOCK_AGENT_SERVICE:-zenithbot-agent.service}"
+
+if [[ -z "$REMOTE_HOST" ]]; then
+  cat >&2 <<'USAGE'
+Usage:
+  ZENITHDOCK_REMOTE_HOST=<ssh-host> ./server/deploy.sh
+  ./server/deploy.sh <ssh-host>
+
+Optional:
+  ZENITHDOCK_REMOTE_APP_DIR=<remote-app-dir>
+  ZENITHDOCK_AGENT_SERVICE=<systemd-user-service>
+  ZENITHDOCK_AGENT_TOKEN=<health-check-token>
+USAGE
+  exit 2
+fi
 
 echo "Deploying $SCRIPT_DIR/agent_server.py to $REMOTE_HOST:$REMOTE_SERVER_PATH"
 scp "$SCRIPT_DIR/agent_server.py" "$REMOTE_HOST:$REMOTE_SERVER_PATH"
