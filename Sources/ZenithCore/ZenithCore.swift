@@ -172,6 +172,26 @@ public enum ZRuntimeCatalog {
     }
 }
 
+public struct ZTextPresenceGate: Sendable {
+    private var lastPublishedPresence: Bool?
+
+    public init() {}
+
+    public mutating func shouldPublish(_ text: String) -> Bool {
+        shouldPublish(hasText: !text.isEmpty)
+    }
+
+    public mutating func shouldPublish(hasText: Bool) -> Bool {
+        guard lastPublishedPresence != hasText else { return false }
+        lastPublishedPresence = hasText
+        return true
+    }
+
+    public mutating func reset() {
+        lastPublishedPresence = nil
+    }
+}
+
 public enum ZClipboardText {
     public static func normalizedForCopy(_ text: String, language: String? = nil) -> String {
         guard text.contains("\\\\") else { return text }

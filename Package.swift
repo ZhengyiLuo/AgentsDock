@@ -10,7 +10,8 @@ let package = Package(
     products: [
         .library(name: "ZenithCore", targets: ["ZenithCore"]),
         .executable(name: "ZenithDock", targets: ["ZenithDock"]),
-        .executable(name: "ZenithDockIOS", targets: ["ZenithDockIOS"])
+        .executable(name: "ZenithDockIOS", targets: ["ZenithDockIOS"]),
+        .executable(name: "ZenithGuardrails", targets: ["ZenithGuardrails"])
     ],
     targets: [
         .target(
@@ -35,6 +36,11 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AVKit")
             ]
+        ),
+        .executableTarget(
+            name: "ZenithGuardrails",
+            dependencies: ["ZenithCore"],
+            path: "Tools/ZenithGuardrails"
         )
     ]
 )

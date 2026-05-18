@@ -16,6 +16,42 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Composer Typing Guardrail
+
+Why the regression happened:
+
+- The earlier composer isolation kept normal typing inside `NSTextView` and
+  debounced updates back to SwiftUI.
+- The immediate-placeholder fix accidentally added a SwiftUI state callback from
+  `textDidChange` on every keystroke.
+- That made the placeholder update instantly, but it also invalidated the
+  composer SwiftUI tree while typing, bringing back sluggish input.
+
+Guardrail:
+
+- Added `ZTextPresenceGate` in `Sources/ZenithCore/ZenithCore.swift`.
+  - It publishes only when text crosses empty/non-empty.
+  - It explicitly does not publish during continued typing.
+- `Sources/ZenithDock/Views/ComposerView.swift` now uses the gate at the
+  NSTextView-to-SwiftUI bridge, with a comment explaining the footgun.
+- Added `ZenithGuardrails`, a lightweight Swift executable guardrail:
+  - Verifies `ZTextPresenceGate` behavior.
+  - Scans `ComposerView.swift` to ensure the composer still uses the gate before
+    calling `onTextPresenceChange`.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
+  build and verified codesign.
+
+Note:
+
+- Plain `swift test` is still not the right guardrail command for this package,
+  because SwiftPM tries to compile the iOS executable target for macOS and fails
+  on `UIKit`. Use `swift run ZenithGuardrails` for this regression check.
+
 ## 2026-05-18 Follow-Up - Mac TestFlight Build 23 Uploaded
 
 Summary:
