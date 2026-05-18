@@ -8,7 +8,6 @@ struct TimelineView: View {
     @Binding var importerOpen: Bool
     @Binding var resumeOpen: Bool
     @Binding var serverSettingsOpen: Bool
-    @Binding var selectedPane: WorkspacePane
     @State private var isAtBottom = true
     @State private var isTimelineScrollable = false
     @State private var olderHistoryLoadArmed = true
@@ -31,8 +30,7 @@ struct TimelineView: View {
             HeaderView(
                 importerOpen: $importerOpen,
                 resumeOpen: $resumeOpen,
-                serverSettingsOpen: $serverSettingsOpen,
-                selectedPane: $selectedPane
+                serverSettingsOpen: $serverSettingsOpen
             )
             Divider()
             ScrollViewReader { proxy in
@@ -946,7 +944,6 @@ struct HeaderView: View {
     @Binding var importerOpen: Bool
     @Binding var resumeOpen: Bool
     @Binding var serverSettingsOpen: Bool
-    @Binding var selectedPane: WorkspacePane
     @State private var draftTitle = ""
     @AppStorage("chatFontSize") private var chatFontSize = 14.0
     @AppStorage("chatFontDesign") private var chatFontDesign = "default"
@@ -963,17 +960,12 @@ struct HeaderView: View {
             }
 
             HStack(spacing: 10) {
-                WorkspaceTabStrip(selection: $selectedPane, isEnabled: store.selectedSession != nil)
-                    .help("Switch between chat and the per-chat tmux terminal")
-                    .layoutPriority(3)
-
-                Spacer(minLength: 8)
-
                 ViewThatFits(in: .horizontal) {
                     headerControls
                     headerActionsMenu
                 }
                 .layoutPriority(2)
+                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 20)

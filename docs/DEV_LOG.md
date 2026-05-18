@@ -16,6 +16,43 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Punt Mac Terminal And Isolate Composer
+
+Problem:
+
+- The embedded terminal kept consuming time without reaching a polished result.
+- Keeping terminal machinery in the Mac app made the chat UI harder to reason
+  about while debugging typing latency.
+- The composer still felt sluggish because live `AppStore` updates could
+  invalidate the composer tree while the user was typing.
+
+Decision:
+
+- Remove the Mac Terminal tab entirely.
+- Delete `TerminalWorkspaceView.swift`.
+- Remove SwiftTerm from `Package.swift`, the Xcode project, and package lock
+  files.
+- Remove the Terminal inspector card and old terminal sheet.
+- Simplify the root/content area back to a single chat timeline.
+- Wrap the native message editor in an equatable `StablePromptEditor` so
+  global `AppStore` churn does not poke the AppKit text view unless editability
+  or an explicit reset changes.
+- Increase draft binding debounce from 40 ms to 180 ms. AppKit owns keystrokes;
+  SwiftUI receives slower metadata updates for send enablement/height.
+
+Verification:
+
+- Source/project search has no active `SwiftTerm`, `TerminalWorkspaceView`,
+  `WorkspacePane`, or `ChatTerminal` references.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- Replaced `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` cleanly instead of
+  overlaying with `ditto`, because stale removed resources broke codesign.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+- Confirmed the dist bundle contains no SwiftTerm resources.
+
 ## 2026-05-17 Follow-Up - Composer Typing Performance And Terminal Cursor
 
 Problem:

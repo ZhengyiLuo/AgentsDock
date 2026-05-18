@@ -6,6 +6,7 @@ struct ComposerView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var importerOpen: Bool
     @State private var draftPrompt = ""
+    @State private var editorResetID = 0
     @State private var isAttachmentDropTargeted = false
 
     var body: some View {
@@ -22,11 +23,12 @@ struct ComposerView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
-                PromptTextView(text: $draftPrompt, isEditable: store.selectedSession != nil) {
+                StablePromptEditor(text: $draftPrompt, isEditable: store.selectedSession != nil, resetID: editorResetID) {
                     sendDraft($0)
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
                 }
+                .equatable()
                 .frame(height: promptHeight)
                 .overlay(alignment: .topLeading) {
                     if draftPrompt.isEmpty {
@@ -104,6 +106,7 @@ struct ComposerView: View {
         .background(Theme.panel)
         .onChange(of: store.selectedSessionID) {
             draftPrompt = ""
+            editorResetID += 1
         }
     }
 
@@ -126,12 +129,14 @@ struct ComposerView: View {
         let submitted = explicitText ?? draftPrompt
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draftPrompt = ""
+        editorResetID += 1
         Task {
             let accepted = await store.sendPrompt(submitted)
             if !accepted {
                 await MainActor.run {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
+                        editorResetID += 1
                     }
                 }
             }
@@ -184,9 +189,32 @@ private struct ComposerRunningStatus: View {
     }
 }
 
+private struct StablePromptEditor: View, Equatable {
+    @Binding var text: String
+    var isEditable: Bool
+    var resetID: Int
+    var onSubmit: (String) -> Void
+    var onDropFiles: ([URL]) -> Void
+
+    nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
+        lhs.isEditable == rhs.isEditable && lhs.resetID == rhs.resetID
+    }
+
+    var body: some View {
+        PromptTextView(
+            text: $text,
+            isEditable: isEditable,
+            resetID: resetID,
+            onSubmit: onSubmit,
+            onDropFiles: onDropFiles
+        )
+    }
+}
+
 struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool
+    var resetID: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
 
@@ -233,9 +261,10 @@ struct PromptTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? SubmitTextView else { return }
-        if textView.string != text && (!context.coordinator.hasPendingLocalEdit || text.isEmpty) {
+        if context.coordinator.lastAppliedResetID != resetID || (textView.string != text && (!context.coordinator.hasPendingLocalEdit || text.isEmpty)) {
             context.coordinator.cancelPendingSync()
             textView.string = text
+            context.coordinator.lastAppliedResetID = resetID
         }
         textView.isEditable = isEditable
         textView.onSubmitText = { context.coordinator.submit(textView: textView) }
@@ -247,6 +276,7 @@ struct PromptTextView: NSViewRepresentable {
         var parent: PromptTextView
         private var pendingSync: DispatchWorkItem?
         private var pendingText = ""
+        var lastAppliedResetID = 0
         private(set) var hasPendingLocalEdit = false
 
         init(_ parent: PromptTextView) {
@@ -280,7 +310,7 @@ struct PromptTextView: NSViewRepresentable {
                 self.pendingSync = nil
             }
             pendingSync = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
         }
 
         private func flush(_ value: String) -> String {

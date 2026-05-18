@@ -1,111 +1,24 @@
 import SwiftUI
 
-enum WorkspacePane: String, CaseIterable, Identifiable {
-    case chat
-    case terminal
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .chat: "Chat"
-        case .terminal: "Terminal"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .chat: "text.bubble"
-        case .terminal: "terminal"
-        }
-    }
-}
-
-struct WorkspaceTabStrip: View {
-    @Binding var selection: WorkspacePane
-    var isEnabled = true
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(WorkspacePane.allCases) { pane in
-                Button {
-                    selection = pane
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: pane.systemImage)
-                            .font(.caption.weight(.semibold))
-                        Text(pane.title)
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(selection == pane ? Color.primary : Color.secondary)
-                    .padding(.horizontal, 12)
-                    .frame(height: 28)
-                    .background(tabBackground(for: pane))
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(selection == pane ? Color.accentColor : Color.clear)
-                            .frame(height: 2)
-                            .padding(.horizontal, 8)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(!isEnabled)
-                .help("Show \(pane.title.lowercased())")
-            }
-        }
-        .padding(.horizontal, 4)
-        .padding(.top, 4)
-        .background(Theme.window.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
-    }
-
-    @ViewBuilder
-    private func tabBackground(for pane: WorkspacePane) -> some View {
-        if selection == pane {
-            UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 2, bottomTrailingRadius: 2, topTrailingRadius: 6)
-                .fill(Theme.card)
-        } else {
-            Color.clear
-        }
-    }
-}
-
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
     @State private var importerOpen = false
     @State private var resumeOpen = false
     @State private var serverSettingsOpen = false
-    @State private var selectedPane: WorkspacePane = .chat
 
     var body: some View {
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
         } content: {
-            ZStack {
-                TimelineView(
-                    importerOpen: $importerOpen,
-                    resumeOpen: $resumeOpen,
-                    serverSettingsOpen: $serverSettingsOpen,
-                    selectedPane: $selectedPane
-                )
-                .opacity(selectedPane == .chat ? 1 : 0)
-                .allowsHitTesting(selectedPane == .chat)
-                .accessibilityHidden(selectedPane != .chat)
-
-                TerminalWorkspaceView(
-                    selectedPane: $selectedPane,
-                    serverSettingsOpen: $serverSettingsOpen,
-                    isActive: selectedPane == .terminal
-                )
-                .opacity(selectedPane == .terminal ? 1 : 0)
-                .allowsHitTesting(selectedPane == .terminal)
-                .accessibilityHidden(selectedPane != .terminal)
-            }
+            TimelineView(
+                importerOpen: $importerOpen,
+                resumeOpen: $resumeOpen,
+                serverSettingsOpen: $serverSettingsOpen
+            )
             .navigationSplitViewColumnWidth(min: 560, ideal: 720)
         } detail: {
-            InspectorView(selectedPane: $selectedPane)
+            InspectorView()
                 .navigationSplitViewColumnWidth(min: 340, ideal: 380, max: 480)
         }
         .background(Theme.window)
