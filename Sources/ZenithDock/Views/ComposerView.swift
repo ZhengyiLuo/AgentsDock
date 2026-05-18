@@ -29,7 +29,9 @@ struct ComposerView: View {
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
                 } onTextPresenceChange: { hasText in
-                    editorHasVisibleText = hasText
+                    if editorHasVisibleText != hasText {
+                        editorHasVisibleText = hasText
+                    }
                 }
                 .equatable()
                 .frame(height: promptHeight)
@@ -286,6 +288,7 @@ struct PromptTextView: NSViewRepresentable {
         var parent: PromptTextView
         private var pendingSync: DispatchWorkItem?
         private var pendingText = ""
+        private var lastPublishedPresence: Bool?
         var lastAppliedResetID = 0
         private(set) var hasPendingLocalEdit = false
 
@@ -311,7 +314,10 @@ struct PromptTextView: NSViewRepresentable {
         }
 
         func publishPresence(_ value: String) {
-            parent.onTextPresenceChange(!value.isEmpty)
+            let hasText = !value.isEmpty
+            guard lastPublishedPresence != hasText else { return }
+            lastPublishedPresence = hasText
+            parent.onTextPresenceChange(hasText)
         }
 
         private func scheduleSync(_ value: String) {

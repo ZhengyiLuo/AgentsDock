@@ -16,6 +16,29 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Composer Typing Regression
+
+Problem:
+
+- Mac TestFlight build `22` made the composer feel sluggish again.
+- The regression came from the immediate placeholder fix: the `NSTextView`
+  delegate called back into SwiftUI state on every keystroke to update text
+  presence, undoing the earlier composer isolation.
+
+Changes:
+
+- `Sources/ZenithDock/Views/ComposerView.swift`
+  - Only publish text presence when the editor crosses empty/non-empty.
+  - Guard the SwiftUI state assignment as well, so normal typing remains inside
+    `NSTextView` and does not invalidate the composer view tree.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
+  build and verified codesign.
+
 ## 2026-05-18 Follow-Up - Mac TestFlight Build 22 Uploaded
 
 Summary:
