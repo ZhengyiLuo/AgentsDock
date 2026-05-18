@@ -16,6 +16,23 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Mac TestFlight Build 22 Uploaded
+
+Summary:
+
+- Bumped all project targets from build `21` to build `22` for a macOS-only
+  TestFlight upload.
+- Committed the build bump before archiving:
+  `8b8763e Bump build number for Mac TestFlight 22`.
+- Archived and uploaded macOS build `22` successfully:
+  `Uploaded ZenithDockMac`.
+- The package is processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-22.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-22.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-22 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-18 Follow-Up - Endpoint-Scoped Chat Cache
 
 Problem:
