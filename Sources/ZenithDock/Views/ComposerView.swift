@@ -23,7 +23,7 @@ struct ComposerView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 PromptTextView(text: $draftPrompt, isEditable: store.selectedSession != nil) {
-                    sendDraft()
+                    sendDraft($0)
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
                 }
@@ -122,8 +122,8 @@ struct ComposerView: View {
         return [compactModel, compactEffort].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    private func sendDraft() {
-        let submitted = draftPrompt
+    private func sendDraft(_ explicitText: String? = nil) {
+        let submitted = explicitText ?? draftPrompt
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draftPrompt = ""
         Task {
@@ -187,7 +187,7 @@ private struct ComposerRunningStatus: View {
 struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool
-    var onSubmit: () -> Void
+    var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
@@ -213,12 +213,16 @@ struct PromptTextView: NSViewRepresentable {
         textView.importsGraphics = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.smartInsertDeleteEnabled = false
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
-        textView.onSubmit = onSubmit
+        textView.onSubmitText = { context.coordinator.submit(textView: textView) }
         textView.onDropFiles = onDropFiles
         textView.registerForDraggedTypes([.fileURL, .URL])
 
@@ -229,16 +233,21 @@ struct PromptTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? SubmitTextView else { return }
-        if textView.string != text {
+        if textView.string != text && (!context.coordinator.hasPendingLocalEdit || text.isEmpty) {
+            context.coordinator.cancelPendingSync()
             textView.string = text
         }
         textView.isEditable = isEditable
-        textView.onSubmit = onSubmit
+        textView.onSubmitText = { context.coordinator.submit(textView: textView) }
         textView.onDropFiles = onDropFiles
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: PromptTextView
+        private var pendingSync: DispatchWorkItem?
+        private var pendingText = ""
+        private(set) var hasPendingLocalEdit = false
 
         init(_ parent: PromptTextView) {
             self.parent = parent
@@ -246,12 +255,46 @@ struct PromptTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.string
+            scheduleSync(textView.string)
+        }
+
+        func submit(textView: NSTextView) {
+            let submitted = flush(textView.string)
+            parent.onSubmit(submitted)
+        }
+
+        func cancelPendingSync() {
+            pendingSync?.cancel()
+            pendingSync = nil
+            hasPendingLocalEdit = false
+        }
+
+        private func scheduleSync(_ value: String) {
+            pendingText = value
+            hasPendingLocalEdit = true
+            pendingSync?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.parent.text = self.pendingText
+                self.hasPendingLocalEdit = false
+                self.pendingSync = nil
+            }
+            pendingSync = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: work)
+        }
+
+        private func flush(_ value: String) -> String {
+            pendingSync?.cancel()
+            pendingSync = nil
+            pendingText = value
+            parent.text = value
+            hasPendingLocalEdit = false
+            return value
         }
     }
 
     final class SubmitTextView: NSTextView {
-        var onSubmit: (() -> Void)?
+        var onSubmitText: (() -> Void)?
         var onDropFiles: (([URL]) -> Void)?
 
         override func keyDown(with event: NSEvent) {
@@ -259,7 +302,7 @@ struct PromptTextView: NSViewRepresentable {
             let isReturn = event.keyCode == 36 || event.keyCode == 76
             let wantsNewline = flags.contains(.shift) || flags.contains(.option) || flags.contains(.control)
             if isReturn && !wantsNewline {
-                onSubmit?()
+                onSubmitText?()
                 return
             }
             super.keyDown(with: event)

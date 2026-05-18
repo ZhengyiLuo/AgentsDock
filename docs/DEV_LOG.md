@@ -16,6 +16,33 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Composer Typing Performance And Terminal Cursor
+
+Problem:
+
+- The Mac composer felt sluggish while typing.
+- The embedded terminal cursor rendered as an oversized bright green block.
+
+Decision:
+
+- Let the native `NSTextView` own the immediate keystroke stream and throttle
+  SwiftUI binding sync by 40 ms.
+- Flush the current AppKit text immediately on Return/send so queued sends still
+  use the exact typed content.
+- Disable spell checking, grammar checking, autocorrection, and smart insert/
+  delete for the message box.
+- Switch SwiftTerm to a steady bar cursor and ask tmux to use `cursor-style bar`
+  for the attached chat session.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` was refreshed.
+- `codesign --verify --deep --strict /Users/zen/agi/ZenithDock/dist/ZenithDock.app`
+  passed.
+
 ## 2026-05-17 Follow-Up - Strip Header Runtime Knobs And Repair Terminal Attach
 
 Problem:

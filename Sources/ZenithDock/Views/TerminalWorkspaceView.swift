@@ -301,12 +301,14 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
         terminal.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.nativeBackgroundColor = NSColor(calibratedWhite: 0.045, alpha: 1)
         terminal.nativeForegroundColor = NSColor(calibratedWhite: 0.92, alpha: 1)
-        terminal.caretColor = .systemGreen
-        terminal.caretTextColor = .black
+        terminal.getTerminal().setCursorStyle(.steadyBar)
+        terminal.caretColor = NSColor(calibratedWhite: 0.86, alpha: 1)
+        terminal.caretTextColor = nil
         terminal.selectedTextBackgroundColor = NSColor.systemBlue.withAlphaComponent(0.45)
         terminal.allowMouseReporting = true
         terminal.backspaceSendsControlH = false
         try? terminal.setUseMetal(true)
+        terminal.getTerminal().setCursorStyle(.steadyBar)
 
         context.coordinator.configure(terminal: terminal, identity: identity, isActive: isActive)
         return terminal
@@ -361,6 +363,7 @@ private struct SwiftTermTerminalView: NSViewRepresentable {
               fi
             fi
             tmux has-session -t "$SESSION" 2>/dev/null || tmux new-session -d -s "$SESSION" -c "$PWD"
+            tmux set-option -g -t "$SESSION" cursor-style bar 2>/dev/null || true
             exec tmux attach-session -t "$SESSION"
             """
             let args = [
