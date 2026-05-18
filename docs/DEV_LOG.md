@@ -16,6 +16,26 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - TestFlight Build 20 Uploaded
+
+Result:
+
+- Bumped all project targets from build `19` to build `20`.
+- Committed and pushed the build bump before archiving:
+  `bde2a22 Bump build number for TestFlight 20`.
+- Archived and uploaded iOS/iPadOS build `20` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `20` successfully:
+  `Uploaded ZenithDockMac`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-20.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-20.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-20 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-20.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-20.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-20 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-17 Follow-Up - Instant Mac Composer Placeholder
 
 Problem:
