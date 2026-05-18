@@ -45,10 +45,10 @@ final class AppStore: ObservableObject {
     @Published var isLoadingTerminal = false
     @Published var terminalInput = ""
 
-    private let initialSessionEventLimit = 80
-    private let olderHistoryPageLimit = 100
-    private let maxLoadedTimelineEvents = 800
-    private let maxCachedTimelineEvents = 320
+    private let initialSessionEventLimit = 160
+    private let olderHistoryPageLimit = 160
+    private let maxLoadedTimelineEvents = 2_000
+    private let maxCachedTimelineEvents = 520
     private let maxCachedStringCharacters = 12_000
     private let sessionFilesPageLimit = 48
     private var webSocket: URLSessionWebSocketTask?
@@ -474,26 +474,9 @@ final class AppStore: ObservableObject {
             }
             if loadedFromCache {
                 let omittedAfter = res.events_omitted_after ?? 0
-                let pageLikelyCapped = res.events_omitted_after == nil && res.events.count >= initialSessionEventLimit
-                if omittedAfter > 0 || pageLikelyCapped {
-                    AppLogger.info("cache stale session=\(sessionID) after=\(requestAfter) omitted_after=\(omittedAfter); loading latest tail")
-                    let fresh: SessionEventsResponse = try await api.get(
-                        "/api/sessions/\(sessionID)",
-                        queryItems: [
-                            URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
-                            URLQueryItem(name: "tail", value: "true")
-                        ]
-                    )
-                    guard selectedSessionID == sessionID, selectionGeneration == generation else {
-                        AppLogger.info("drop stale latest-tail response session=\(sessionID)")
-                        return
-                    }
-                    applySessionEventSnapshot(fresh, sessionID: sessionID)
-                    status = "Caught up to latest chat"
-                } else {
-                    mergeEvents(res.events)
-                    latestSeenSeq = max(latestSeenSeq, res.latest_seq ?? 0)
-                }
+                mergeEvents(res.events)
+                latestSeenSeq = events.map(\.seq).max() ?? latestSeenSeq
+                status = omittedAfter > 0 ? "Loaded recent chat page" : "Caught up to latest chat"
             } else {
                 applySessionEventSnapshot(res, sessionID: sessionID)
             }
@@ -516,13 +499,14 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func loadOlderHistory() async {
+    @discardableResult
+    func loadOlderHistory() async -> Int {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
               let before = events.map(\.seq).min(),
               events.count < maxLoadedTimelineEvents else {
-            return
+            return 0
         }
 
         isLoadingOlderHistory = true
@@ -555,9 +539,11 @@ final class AppStore: ObservableObject {
             rebuildDisplayEvents()
             saveSelectedChatCache()
             AppLogger.info("loaded older session=\(sid) added=\(older.count) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            return older.count
         } catch {
             AppLogger.error("load older failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
+            return 0
         }
     }
 

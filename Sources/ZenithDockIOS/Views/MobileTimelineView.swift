@@ -14,10 +14,11 @@ struct MobileTimelineView: View {
     @State private var optionsOpen = false
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
-    @State private var visibleRowLimit = 90
+    @State private var visibleRowLimit = 110
     @State private var isFileDropTargeted = false
     private let bottomID = "mobile-timeline-bottom"
-    private let rowPageSize = 70
+    private let defaultVisibleRowLimit = 110
+    private let rowPageSize = 100
 
     var body: some View {
         let displayEvents = store.displayEvents
@@ -49,9 +50,7 @@ struct MobileTimelineView: View {
                                 }
                                     .background(MobileHistoryTopReader())
                                     .onAppear {
-                                        if !isAtBottom {
-                                            handleHistoryTopChange(0, proxy: proxy)
-                                        }
+                                        handleHistoryTopChange(0, proxy: proxy)
                                     }
                                     .onDisappear {
                                         olderHistoryLoadArmed = true
@@ -134,14 +133,17 @@ struct MobileTimelineView: View {
                     isAtBottom = true
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
-                    visibleRowLimit = 90
+                    visibleRowLimit = defaultVisibleRowLimit
                     scrollToBottom(proxy)
                 }
-                .onChange(of: displayEvents.count) {
-                    if displayEvents.isEmpty {
-                        visibleRowLimit = 90
+                .onChange(of: displayEvents.count) { oldCount, newCount in
+                    let rowCount = MobileTimelineRows.build(from: displayEvents).count
+                    if newCount == 0 {
+                        visibleRowLimit = defaultVisibleRowLimit
                     } else if isAtBottom {
-                        visibleRowLimit = min(max(visibleRowLimit, 90), max(MobileTimelineRows.build(from: displayEvents).count, 90))
+                        visibleRowLimit = min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit))
+                    } else if newCount > oldCount {
+                        visibleRowLimit = min(rowCount, visibleRowLimit + max(1, newCount - oldCount))
                     }
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
@@ -183,7 +185,6 @@ struct MobileTimelineView: View {
         }
 
         guard topIsVisible,
-              !isAtBottom,
               olderHistoryLoadArmed,
               !suppressScrollHistoryLoadUntilTopLeaves else {
             return
@@ -219,9 +220,17 @@ struct MobileTimelineView: View {
         }
         if store.canLoadOlderHistory {
             let anchorID = firstRenderedRowID()
+            let beforeRowCount = MobileTimelineRows.build(from: store.displayEvents).count
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
-            await store.loadOlderHistory()
+            let addedEvents = await store.loadOlderHistory()
+            if addedEvents > 0 {
+                let afterRowCount = MobileTimelineRows.build(from: store.displayEvents).count
+                let addedRows = max(0, afterRowCount - beforeRowCount)
+                if addedRows > 0 {
+                    visibleRowLimit = min(afterRowCount, visibleRowLimit + addedRows)
+                }
+            }
             restoreScrollPosition(to: anchorID, proxy: proxy)
             return
         }
@@ -240,8 +249,16 @@ struct MobileTimelineView: View {
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
         let anchorID = firstRenderedRowID()
+        let beforeRowCount = MobileTimelineRows.build(from: store.displayEvents).count
         Task {
-            await store.loadOlderHistory()
+            let addedEvents = await store.loadOlderHistory()
+            if addedEvents > 0 {
+                let afterRowCount = MobileTimelineRows.build(from: store.displayEvents).count
+                let addedRows = max(0, afterRowCount - beforeRowCount)
+                if addedRows > 0 {
+                    visibleRowLimit = min(afterRowCount, visibleRowLimit + addedRows)
+                }
+            }
             restoreScrollPosition(to: anchorID, proxy: proxy)
         }
     }

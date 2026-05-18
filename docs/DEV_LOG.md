@@ -16,6 +16,47 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Timeline Paging And Scroll Anchors
+
+Problem:
+
+- The default loaded chat window felt too short on long chats.
+- Auto-load older history on scroll-top could fire once and then appear stuck.
+- When a server history page was fetched, the store prepended events but the
+  timeline kept rendering the same suffix window, so newly loaded older rows
+  could remain hidden.
+- Loading recent content from cache replacement could throw away the old
+  position instead of merging into the cached timeline.
+
+Decision:
+
+- Increase Mac initial/older event pages to 160 and the in-memory loaded cap to
+  2,000 events.
+- Increase iOS/iPadOS initial/older event pages to 160.
+- Increase rendered row windows: Mac starts at 100 rows and reveals 100 rows
+  per page; iOS/iPadOS starts at 110 rows and reveals 100 rows per page.
+- Make `loadOlderHistory()` return the count of newly inserted events.
+- After fetching older history, expand the rendered row limit by the number of
+  newly inserted timeline rows and restore the previous top row anchor.
+- When new content arrives while the user is not at bottom, grow the rendered
+  window enough to preserve the current visible rows rather than sliding the
+  suffix window forward.
+- Cached chat catch-up now merges the fetched page instead of replacing the
+  cached event window with only the latest tail.
+
+Verification:
+
+- `git diff --check` passed.
+- `swift build --product ZenithDock` passed.
+- Plain `swift build --product ZenithDockIOS` is not a valid iOS verifier
+  because it builds for macOS and cannot import `UIKit`.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and verified
+  codesign.
+
 ## 2026-05-17 Follow-Up - Public-Clean Server Deploy Script
 
 Problem:

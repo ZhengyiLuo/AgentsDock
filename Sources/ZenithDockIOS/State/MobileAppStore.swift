@@ -37,10 +37,10 @@ final class MobileAppStore: ObservableObject {
     @Published var isLoadingTerminal = false
     @Published var terminalInput = ""
 
-    private let initialEventLimit = 80
-    private let olderHistoryPageLimit = 120
+    private let initialEventLimit = 160
+    private let olderHistoryPageLimit = 160
     private let maxMemoryCachedChats = 8
-    private let maxMemoryCachedEvents = 180
+    private let maxMemoryCachedEvents = 360
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
@@ -601,22 +601,8 @@ final class MobileAppStore: ObservableObject {
                 sessions[idx] = res.session
             }
             if loadedFromCache {
-                let omittedAfter = res.events_omitted_after ?? 0
-                let pageLikelyCapped = res.events_omitted_after == nil && res.events.count >= initialEventLimit
-                if omittedAfter > 0 || pageLikelyCapped {
-                    let fresh: SessionEventsResponse = try await api.get(
-                        "/api/sessions/\(sessionID)",
-                        queryItems: [
-                            URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
-                            URLQueryItem(name: "tail", value: "true")
-                        ]
-                    )
-                    guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
-                    applySessionEventSnapshot(fresh, sessionID: sessionID)
-                } else {
-                    mergeEvents(res.events)
-                    latestSeenSeq = max(latestSeenSeq, res.latest_seq ?? 0)
-                }
+                mergeEvents(res.events)
+                latestSeenSeq = events.map(\.seq).max() ?? latestSeenSeq
             } else {
                 applySessionEventSnapshot(res, sessionID: sessionID)
             }
@@ -636,12 +622,13 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func loadOlderHistory() async {
+    @discardableResult
+    func loadOlderHistory() async -> Int {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
               let before = events.map(\.seq).min() else {
-            return
+            return 0
         }
 
         isLoadingOlderHistory = true
@@ -671,8 +658,10 @@ final class MobileAppStore: ObservableObject {
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             refreshSessionFilesFromLoadedEvents()
             rememberSelectedChat()
+            return older.count
         } catch {
             report(error)
+            return 0
         }
     }
 

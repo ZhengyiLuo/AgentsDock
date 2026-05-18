@@ -12,11 +12,12 @@ struct TimelineView: View {
     @State private var isTimelineScrollable = false
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
-    @State private var visibleRowLimit = 60
+    @State private var visibleRowLimit = 100
     @State private var isFileDropTargeted = false
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
-    private let rowPageSize = 50
+    private let defaultVisibleRowLimit = 100
+    private let rowPageSize = 100
     private let bottomButtonHideDistance: CGFloat = 180
 
     var body: some View {
@@ -48,9 +49,7 @@ struct TimelineView: View {
                                     }
                                     .background(TimelineHistoryTopReader(coordinateSpaceName: coordinateSpaceName))
                                     .onAppear {
-                                        if !isAtBottom {
-                                            handleHistoryTopChange(0, proxy: proxy)
-                                        }
+                                        handleHistoryTopChange(0, proxy: proxy)
                                     }
                                     .onDisappear {
                                         olderHistoryLoadArmed = true
@@ -140,16 +139,19 @@ struct TimelineView: View {
                     isTimelineScrollable = false
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
-                    visibleRowLimit = 60
+                    visibleRowLimit = defaultVisibleRowLimit
                     scrollToBottom(proxy)
                 }
-                .onChange(of: displayEvents.count) {
-                    if displayEvents.isEmpty {
+                .onChange(of: displayEvents.count) { oldCount, newCount in
+                    let rowCount = TimelineRows.build(from: displayEvents).count
+                    if newCount == 0 {
                         isAtBottom = true
                         isTimelineScrollable = false
-                        visibleRowLimit = 60
+                        visibleRowLimit = defaultVisibleRowLimit
                     } else if isAtBottom {
-                        visibleRowLimit = min(max(visibleRowLimit, 60), max(TimelineRows.build(from: displayEvents).count, 60))
+                        visibleRowLimit = min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit))
+                    } else if newCount > oldCount {
+                        visibleRowLimit = min(rowCount, visibleRowLimit + max(1, newCount - oldCount))
                     }
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
@@ -255,7 +257,6 @@ struct TimelineView: View {
         }
 
         guard topIsVisible,
-              !isAtBottom,
               olderHistoryLoadArmed,
               !suppressScrollHistoryLoadUntilTopLeaves else {
             return
@@ -295,8 +296,16 @@ struct TimelineView: View {
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
         let anchorID = firstRenderedRowID()
+        let beforeRowCount = TimelineRows.build(from: store.displayEvents).count
         Task {
-            await store.loadOlderHistory()
+            let addedEvents = await store.loadOlderHistory()
+            if addedEvents > 0 {
+                let afterRowCount = TimelineRows.build(from: store.displayEvents).count
+                let addedRows = max(0, afterRowCount - beforeRowCount)
+                if addedRows > 0 {
+                    visibleRowLimit = min(afterRowCount, visibleRowLimit + addedRows)
+                }
+            }
             restoreScrollPosition(to: anchorID, proxy: proxy)
         }
     }
