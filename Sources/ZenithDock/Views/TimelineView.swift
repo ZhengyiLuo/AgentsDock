@@ -14,10 +14,11 @@ struct TimelineView: View {
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
     @State private var visibleRowLimit = 100
     @State private var isFileDropTargeted = false
+    @State private var historyLoadSuppressedUntil = Date.distantPast
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
     private let defaultVisibleRowLimit = 100
-    private let rowPageSize = 100
+    private let rowPageSize = 40
     private let bottomButtonHideDistance: CGFloat = 180
 
     var body: some View {
@@ -138,6 +139,7 @@ struct TimelineView: View {
                     isTimelineScrollable = false
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
+                    historyLoadSuppressedUntil = Date.distantPast
                     visibleRowLimit = defaultVisibleRowLimit
                     scrollToBottom(proxy)
                 }
@@ -146,11 +148,11 @@ struct TimelineView: View {
                     if newCount == 0 {
                         isAtBottom = true
                         isTimelineScrollable = false
-                        visibleRowLimit = defaultVisibleRowLimit
+                        setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
-                        visibleRowLimit = min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit))
+                        setVisibleRowLimit(min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit)))
                     } else if newCount > oldCount {
-                        visibleRowLimit = min(rowCount, visibleRowLimit + max(1, newCount - oldCount))
+                        setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
                     }
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
@@ -258,7 +260,8 @@ struct TimelineView: View {
         guard topIsVisible,
               !isAtBottom,
               olderHistoryLoadArmed,
-              !suppressScrollHistoryLoadUntilTopLeaves else {
+              !suppressScrollHistoryLoadUntilTopLeaves,
+              Date() >= historyLoadSuppressedUntil else {
             return
         }
         if revealOlderRows(preservingPositionWith: proxy) {
@@ -289,7 +292,7 @@ struct TimelineView: View {
         let anchorID = firstRenderedRowID()
         let rowCount = TimelineRows.build(from: store.displayEvents).count
         guard visibleRowLimit < rowCount else { return false }
-        visibleRowLimit = min(rowCount, visibleRowLimit + rowPageSize)
+        setVisibleRowLimit(min(rowCount, visibleRowLimit + rowPageSize))
         restoreScrollPosition(to: anchorID, proxy: proxy)
         return true
     }
@@ -303,7 +306,7 @@ struct TimelineView: View {
                 let afterRowCount = TimelineRows.build(from: store.displayEvents).count
                 let addedRows = max(0, afterRowCount - beforeRowCount)
                 if addedRows > 0 {
-                    visibleRowLimit = min(afterRowCount, visibleRowLimit + addedRows)
+                    setVisibleRowLimit(min(afterRowCount, visibleRowLimit + min(rowPageSize, addedRows)))
                 }
             }
             restoreScrollPosition(to: anchorID, proxy: proxy)
@@ -317,14 +320,33 @@ struct TimelineView: View {
 
     private func restoreScrollPosition(to rowID: String?, proxy: ScrollViewProxy) {
         guard let rowID else { return }
-        DispatchQueue.main.async {
+        historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
+        withTransaction(noAnimationTransaction) {
             proxy.scrollTo(rowID, anchor: .top)
             isAtBottom = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        }
+        DispatchQueue.main.async {
+            withTransaction(noAnimationTransaction) {
+                proxy.scrollTo(rowID, anchor: .top)
+            }
+            isAtBottom = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 olderHistoryLoadArmed = true
                 suppressScrollHistoryLoadUntilTopLeaves = false
             }
         }
+    }
+
+    private func setVisibleRowLimit(_ nextLimit: Int) {
+        withTransaction(noAnimationTransaction) {
+            visibleRowLimit = nextLimit
+        }
+    }
+
+    private var noAnimationTransaction: Transaction {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        return transaction
     }
 
     private func queueStatus(for event: ZEvent) -> QueuedEventStatus {

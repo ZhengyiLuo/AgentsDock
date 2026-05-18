@@ -16,6 +16,35 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Smooth Older Timeline Paging
+
+Problem:
+
+- Pulling/reaching the top of long chats could feel janky, with a large amount
+  of old transcript visibly flying through the timeline.
+- The old behavior revealed about 100 rows at a time and, when a server page was
+  fetched, made every newly fetched row visible immediately before restoring the
+  previous anchor.
+
+Decision:
+
+- Keep infinite scroll, but reveal older history in smaller slices.
+- Mac now reveals 40 rows per top reach; iOS/iPadOS reveals 36.
+- When a server page returns, keep most fetched rows hidden and reveal only one
+  slice above the current anchor.
+- Apply row-window changes in a no-animation transaction and restore the anchor
+  both immediately and on the next run loop.
+- Add a short history-load cooldown so one top reach cannot cascade through
+  multiple hidden/server pages.
+
+Verification:
+
+- `git diff --check` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed after rerunning once; the first concurrent attempt hit Xcode's shared build DB lock.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
+  build and verified codesign.
+
 ## 2026-05-17 Follow-Up - TestFlight Build 20 Uploaded
 
 Result:
