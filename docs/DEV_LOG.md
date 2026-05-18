@@ -1401,3 +1401,26 @@ Changes:
 - `Sources/ZenithDock/Views/EventViews.swift`
   - Job-created/job-ran summaries use the same local formatter.
   - Job runtime parsing now reuses the shared server date parser.
+
+### Supersonic Tailscale HTTP Endpoint
+
+User issue:
+
+- After migrating the server to `supersonic00`, curl with the copied token
+  returned `ok: true` for `http://100.73.184.23:7850/api/health`, but the Mac
+  app only connected to the old `http://100.88.206.6:7850` Tailscale endpoint.
+
+Finding:
+
+- The Mac app bundle had ATS exceptions for `10.112.215.37` and
+  `100.88.206.6`, but not the new `100.73.184.23` Tailscale IP.
+- `NSAllowsLocalNetworking` alone is not enough for every Tailscale
+  `100.64.0.0/10` address on macOS, so the old endpoint worked because it was
+  explicitly whitelisted.
+
+Changes:
+
+- `Apps/ZenithDockMac/Info.plist`
+  - Added an explicit ATS exception for `100.73.184.23`.
+- `Apps/ZenithDockIOS/Info.plist`
+  - Added the same explicit `100.73.184.23` exception.
