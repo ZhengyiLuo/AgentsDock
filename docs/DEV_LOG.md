@@ -16,6 +16,26 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Instant Mac Composer Placeholder
+
+Problem:
+
+- The Mac composer placeholder text (`Message`) disappeared on the debounced
+  SwiftUI draft update, so it could linger briefly after typing began.
+
+Decision:
+
+- Keep the debounced full draft sync for typing performance.
+- Add a lightweight immediate text-presence callback from the native
+  `NSTextView` delegate.
+- Drive placeholder visibility from that immediate boolean instead of the
+  debounced draft string.
+
+Verification:
+
+- `git diff --check` passed.
+- `swift build --product ZenithDock` passed.
+
 ## 2026-05-17 Follow-Up - Make Live Process Inspection Opt-In
 
 Problem:

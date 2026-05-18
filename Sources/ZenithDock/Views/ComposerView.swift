@@ -7,6 +7,7 @@ struct ComposerView: View {
     @Binding var importerOpen: Bool
     @State private var draftPrompt = ""
     @State private var editorResetID = 0
+    @State private var editorHasVisibleText = false
     @State private var isAttachmentDropTargeted = false
 
     var body: some View {
@@ -27,11 +28,13 @@ struct ComposerView: View {
                     sendDraft($0)
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
+                } onTextPresenceChange: { hasText in
+                    editorHasVisibleText = hasText
                 }
                 .equatable()
                 .frame(height: promptHeight)
                 .overlay(alignment: .topLeading) {
-                    if draftPrompt.isEmpty {
+                    if !editorHasVisibleText {
                         Text("Message")
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 10)
@@ -106,6 +109,7 @@ struct ComposerView: View {
         .background(Theme.panel)
         .onChange(of: store.selectedSessionID) {
             draftPrompt = ""
+            editorHasVisibleText = false
             editorResetID += 1
         }
     }
@@ -129,6 +133,7 @@ struct ComposerView: View {
         let submitted = explicitText ?? draftPrompt
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draftPrompt = ""
+        editorHasVisibleText = false
         editorResetID += 1
         Task {
             let accepted = await store.sendPrompt(submitted)
@@ -136,6 +141,7 @@ struct ComposerView: View {
                 await MainActor.run {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
+                        editorHasVisibleText = true
                         editorResetID += 1
                     }
                 }
@@ -195,6 +201,7 @@ private struct StablePromptEditor: View, Equatable {
     var resetID: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void
+    var onTextPresenceChange: (Bool) -> Void
 
     nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
         lhs.isEditable == rhs.isEditable && lhs.resetID == rhs.resetID
@@ -206,7 +213,8 @@ private struct StablePromptEditor: View, Equatable {
             isEditable: isEditable,
             resetID: resetID,
             onSubmit: onSubmit,
-            onDropFiles: onDropFiles
+            onDropFiles: onDropFiles,
+            onTextPresenceChange: onTextPresenceChange
         )
     }
 }
@@ -217,6 +225,7 @@ struct PromptTextView: NSViewRepresentable {
     var resetID: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
+    var onTextPresenceChange: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -265,6 +274,7 @@ struct PromptTextView: NSViewRepresentable {
             context.coordinator.cancelPendingSync()
             textView.string = text
             context.coordinator.lastAppliedResetID = resetID
+            context.coordinator.publishPresence(textView.string)
         }
         textView.isEditable = isEditable
         textView.onSubmitText = { context.coordinator.submit(textView: textView) }
@@ -285,6 +295,7 @@ struct PromptTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            publishPresence(textView.string)
             scheduleSync(textView.string)
         }
 
@@ -297,6 +308,10 @@ struct PromptTextView: NSViewRepresentable {
             pendingSync?.cancel()
             pendingSync = nil
             hasPendingLocalEdit = false
+        }
+
+        func publishPresence(_ value: String) {
+            parent.onTextPresenceChange(!value.isEmpty)
         }
 
         private func scheduleSync(_ value: String) {
