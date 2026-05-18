@@ -75,6 +75,8 @@ Decision:
 - Default the remote app directory to `~/Zenithbot` instead of an absolute
   personal home path.
 - Neutralize server README examples to use `<ssh-host>`.
+- Make the server README read correctly when `server/` is split into the root
+  of the standalone public server repository.
 - Remove the personal copyright line and private host wording from
   `server/agent_server.py`.
 
