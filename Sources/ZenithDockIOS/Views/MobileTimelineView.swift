@@ -22,10 +22,12 @@ struct MobileTimelineView: View {
 
     var body: some View {
         let displayEvents = store.displayEvents
-        let allRows = MobileTimelineRows.build(from: displayEvents)
-        let jobsByRunID = MobileTimelineRows.jobsByRunID(displayEvents)
+        let projection = MobileTimelineRows.project(from: displayEvents)
+        let allRows = projection.rows
+        let jobsByRunID = projection.jobsByRunID
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
+        let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
 
         VStack(spacing: 0) {
             MobileChatHeader(
@@ -49,9 +51,6 @@ struct MobileTimelineView: View {
                                     loadOlderHistoryFromIntent(proxy)
                                 }
                                     .background(MobileHistoryTopReader())
-                                    .onAppear {
-                                        handleHistoryTopChange(0, proxy: proxy)
-                                    }
                                     .onDisappear {
                                         olderHistoryLoadArmed = true
                                         suppressScrollHistoryLoadUntilTopLeaves = false
@@ -65,19 +64,19 @@ struct MobileTimelineView: View {
                                 case .job(let jobRun):
                                     MobileJobRunBubble(
                                         jobRun: jobRun,
-                                        linkContext: store.markdownLinkContext(sessionID: jobRun.runEvent.session_id)
+                                        linkContext: linkContext
                                     )
                                         .id(row.id)
                                 case .jobGroup(let group):
                                     MobileJobRunGroupBubble(
                                         group: group,
-                                        linkContext: store.markdownLinkContext(sessionID: group.latest.runEvent.session_id)
+                                        linkContext: linkContext
                                     )
                                         .id(row.id)
                                 case .trace(_, let events):
                                     MobileTraceCard(
                                         events: events,
-                                        linkContext: events.first.map { store.markdownLinkContext(sessionID: $0.session_id) }
+                                        linkContext: linkContext
                                     )
                                         .id(row.id)
                                 }
@@ -185,6 +184,7 @@ struct MobileTimelineView: View {
         }
 
         guard topIsVisible,
+              !isAtBottom,
               olderHistoryLoadArmed,
               !suppressScrollHistoryLoadUntilTopLeaves else {
             return
@@ -572,7 +572,26 @@ private enum MobileTimelineRow: Identifiable {
     }
 }
 
+private struct MobileTimelineProjection {
+    let rows: [MobileTimelineRow]
+    let jobsByRunID: [String: ZJob]
+}
+
 private enum MobileTimelineRows {
+    private final class Entry: NSObject {
+        let projection: MobileTimelineProjection
+
+        init(_ projection: MobileTimelineProjection) {
+            self.projection = projection
+        }
+    }
+
+    nonisolated(unsafe) private static let cache: NSCache<NSString, Entry> = {
+        let cache = NSCache<NSString, Entry>()
+        cache.countLimit = 80
+        return cache
+    }()
+
     private static let traceTypes: Set<String> = [
         "reasoning_summary",
         "tool_started",
@@ -588,8 +607,24 @@ private enum MobileTimelineRows {
         "session_created"
     ]
 
-    static func build(from events: [ZEvent]) -> [MobileTimelineRow] {
+    static func project(from events: [ZEvent]) -> MobileTimelineProjection {
+        let key = cacheKey(for: events)
+        if let cached = cache.object(forKey: key) {
+            return cached.projection
+        }
+
         let jobRuns = jobRunsByRunID(events)
+        let rows = buildRows(from: events, jobRuns: jobRuns)
+        let projection = MobileTimelineProjection(rows: rows, jobsByRunID: jobRuns.mapValues(\.job))
+        cache.setObject(Entry(projection), forKey: key)
+        return projection
+    }
+
+    static func build(from events: [ZEvent]) -> [MobileTimelineRow] {
+        project(from: events).rows
+    }
+
+    private static func buildRows(from events: [ZEvent], jobRuns: [String: MobileJobRunRow]) -> [MobileTimelineRow] {
         let jobRunIDs = Set(jobRuns.keys)
         var rows: [MobileTimelineRow] = []
         var trace: [ZEvent] = []
@@ -641,7 +676,7 @@ private enum MobileTimelineRows {
     }
 
     static func jobsByRunID(_ events: [ZEvent]) -> [String: ZJob] {
-        jobRunsByRunID(events).mapValues(\.job)
+        project(from: events).jobsByRunID
     }
 
     static func jobRunsByRunID(_ events: [ZEvent]) -> [String: MobileJobRunRow] {
@@ -747,6 +782,14 @@ private enum MobileTimelineRows {
         default:
             return false
         }
+    }
+
+    private static func cacheKey(for events: [ZEvent]) -> NSString {
+        guard let first = events.first, let last = events.last else {
+            return "empty" as NSString
+        }
+        let middle = events.count > 2 ? events[events.count / 2] : last
+        return "\(events.count):\(first.seq):\(first.id):\(middle.seq):\(middle.id):\(last.seq):\(last.id)" as NSString
     }
 }
 

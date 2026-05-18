@@ -16,6 +16,43 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Stop Timeline Jump And Remove Terminal Churn
+
+Problem:
+
+- The chat timeline could jump upward while typing or clicking in the composer.
+- The history loader had an `onAppear` path that synthesized a top-of-scroll
+  geometry value. When the view re-rendered, it could reveal older rows and
+  restore an old anchor even though the user had not scrolled to the top.
+- Timeline body evaluation also walked long event arrays more than once per
+  render to derive rows and job metadata.
+- The terminal UI had been punted, but stale terminal state/methods were still
+  present in the Mac store and iOS still had a terminal section/sheet.
+
+Decision:
+
+- Remove the synthetic `handleHistoryTopChange(0)` calls from Mac and iOS.
+- Gate automatic history loading on real scroll geometry and `!isAtBottom`.
+- Keep manual `Load Older` behavior unchanged.
+- Add cached timeline projections on Mac and iOS so a render derives rows and
+  job metadata together instead of recomputing them separately.
+- Reuse one markdown link context per selected chat render instead of creating
+  it per row.
+- Remove client-side terminal state, terminal polling, and the iOS terminal UI.
+  Server terminal endpoints remain dormant for a future separate design.
+
+Verification:
+
+- Confirmed no `handleHistoryTopChange(0)` synthetic trigger remains.
+- Confirmed no client-side `terminalSnapshot`, `terminalInput`, terminal
+  refresh/open/input/kill hooks, or mobile terminal view references remain.
+- `git diff --check` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+
 ## 2026-05-17 Follow-Up - Timeline Paging And Scroll Anchors
 
 Problem:

@@ -22,10 +22,12 @@ struct TimelineView: View {
 
     var body: some View {
         let displayEvents = store.displayEvents
-        let allRows = TimelineRows.build(from: displayEvents)
-        let jobsByRunID = TimelineRows.jobsByRunID(displayEvents)
+        let projection = TimelineRows.project(from: displayEvents)
+        let allRows = projection.rows
+        let jobsByRunID = projection.jobsByRunID
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
+        let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
 
         VStack(spacing: 0) {
             HeaderView(
@@ -48,9 +50,6 @@ struct TimelineView: View {
                                         loadOlderHistoryFromIntent(proxy)
                                     }
                                     .background(TimelineHistoryTopReader(coordinateSpaceName: coordinateSpaceName))
-                                    .onAppear {
-                                        handleHistoryTopChange(0, proxy: proxy)
-                                    }
                                     .onDisappear {
                                         olderHistoryLoadArmed = true
                                         suppressScrollHistoryLoadUntilTopLeaves = false
@@ -65,7 +64,7 @@ struct TimelineView: View {
                                             queueStatus: queueStatus(for: event),
                                             artifactURL: event.artifact.map { store.fileURL($0) },
                                             fileURL: event.file.map { store.fileURL($0) },
-                                            linkContext: store.markdownLinkContext(sessionID: event.session_id),
+                                            linkContext: linkContext,
                                             job: event.run_id.flatMap { jobsByRunID[$0] },
                                             onUnqueue: { event in
                                                 Task { await store.unqueue(event) }
@@ -74,15 +73,15 @@ struct TimelineView: View {
                                         .equatable()
                                             .id(row.id)
                                     case .job(let jobRun):
-                                        JobRunBubble(jobRun: jobRun, linkContext: store.markdownLinkContext(sessionID: jobRun.runEvent.session_id))
+                                        JobRunBubble(jobRun: jobRun, linkContext: linkContext)
                                             .id(row.id)
                                     case .jobGroup(let group):
-                                        JobRunGroupBubble(group: group, linkContext: store.markdownLinkContext(sessionID: group.latest.runEvent.session_id))
+                                        JobRunGroupBubble(group: group, linkContext: linkContext)
                                             .id(row.id)
                                     case .trace(let events):
                                         TraceGroupCard(
                                             events: events,
-                                            linkContext: events.first.map { store.markdownLinkContext(sessionID: $0.session_id) }
+                                            linkContext: linkContext
                                         )
                                             .equatable()
                                             .id(row.id)
@@ -257,6 +256,7 @@ struct TimelineView: View {
         }
 
         guard topIsVisible,
+              !isAtBottom,
               olderHistoryLoadArmed,
               !suppressScrollHistoryLoadUntilTopLeaves else {
             return
@@ -655,12 +655,17 @@ private final class TimelineRow: Identifiable {
     }
 }
 
+private struct TimelineProjection {
+    let rows: [TimelineRow]
+    let jobsByRunID: [String: ZJob]
+}
+
 private enum TimelineRows {
     private final class Entry: NSObject {
-        let rows: [TimelineRow]
+        let projection: TimelineProjection
 
-        init(_ rows: [TimelineRow]) {
-            self.rows = rows
+        init(_ projection: TimelineProjection) {
+            self.projection = projection
         }
     }
 
@@ -685,13 +690,24 @@ private enum TimelineRows {
         "session_created"
     ]
 
-    static func build(from events: [ZEvent]) -> [TimelineRow] {
+    static func project(from events: [ZEvent]) -> TimelineProjection {
         let key = cacheKey(for: events)
         if let cached = cache.object(forKey: key) {
-            return cached.rows
+            return cached.projection
         }
 
         let jobRuns = jobRunsByRunID(events)
+        let rows = buildRows(from: events, jobRuns: jobRuns)
+        let projection = TimelineProjection(rows: rows, jobsByRunID: jobRuns.mapValues(\.job))
+        cache.setObject(Entry(projection), forKey: key)
+        return projection
+    }
+
+    static func build(from events: [ZEvent]) -> [TimelineRow] {
+        project(from: events).rows
+    }
+
+    private static func buildRows(from events: [ZEvent], jobRuns: [String: JobRunRow]) -> [TimelineRow] {
         let jobRunIDs = Set(jobRuns.keys)
         var rows: [TimelineRow] = []
         var trace: [ZEvent] = []
@@ -740,12 +756,11 @@ private enum TimelineRows {
         }
         flushJobRuns()
         flushTrace()
-        cache.setObject(Entry(rows), forKey: key)
         return rows
     }
 
     static func jobsByRunID(_ events: [ZEvent]) -> [String: ZJob] {
-        jobRunsByRunID(events).mapValues(\.job)
+        project(from: events).jobsByRunID
     }
 
     static func jobRunsByRunID(_ events: [ZEvent]) -> [String: JobRunRow] {

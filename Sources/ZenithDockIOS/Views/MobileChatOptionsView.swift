@@ -22,7 +22,6 @@ struct MobileChatOptionsView: View {
     @State private var newJobDetailsOpen = false
     @State private var confirmDelete = false
     @State private var handoffOpen = false
-    @State private var terminalOpen = false
 
     var body: some View {
         NavigationStack {
@@ -91,8 +90,6 @@ struct MobileChatOptionsView: View {
                     }
 
                     MobileLiveProcessesSection()
-
-                    MobileTerminalSection(isPresented: $terminalOpen)
 
                     Section {
                         if store.sessionFiles.isEmpty {
@@ -186,12 +183,6 @@ struct MobileChatOptionsView: View {
                         newJobDetailsOpen = false
                     }
                 )
-            }
-        }
-        .sheet(isPresented: $terminalOpen) {
-            NavigationStack {
-                MobileTerminalView()
-                    .environmentObject(store)
             }
         }
         .alert("Delete Chat?", isPresented: $confirmDelete) {
@@ -770,172 +761,6 @@ private struct MobileChatFileRow: View {
         var parts = [file.kind?.capitalized ?? "File"]
         if let size = file.size {
             parts.append(mobileByteString(size))
-        }
-        return parts.joined(separator: " · ")
-    }
-}
-
-private struct MobileTerminalSection: View {
-    @EnvironmentObject private var store: MobileAppStore
-    @Binding var isPresented: Bool
-
-    var body: some View {
-        Section("Terminal") {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(store.terminalSnapshot?.exists == true ? .green : .secondary)
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(store.terminalSnapshot?.exists == true ? "tmux session ready" : "No tmux session open")
-                    if let snapshot = store.terminalSnapshot {
-                        Text(snapshot.name)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                Spacer()
-                if store.isLoadingTerminal {
-                    ProgressView()
-                }
-            }
-
-            Button {
-                isPresented = true
-            } label: {
-                Label(store.terminalSnapshot?.exists == true ? "Open Terminal" : "Start Terminal", systemImage: "terminal")
-            }
-
-            Button {
-                Task { await store.refreshSelectedTerminal(showErrors: false) }
-            } label: {
-                Label("Refresh Terminal", systemImage: "arrow.clockwise")
-            }
-        }
-        .task(id: store.selectedSessionID) {
-            await store.refreshSelectedTerminal(showErrors: false)
-        }
-    }
-}
-
-private struct MobileTerminalView: View {
-    @EnvironmentObject private var store: MobileAppStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var confirmKill = false
-
-    private var terminalText: String {
-        let text = store.terminalSnapshot?.text ?? ""
-        return text.isEmpty ? "Terminal is ready. Send a command below." : text
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(terminalText)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                    Color.clear
-                        .frame(height: 1)
-                        .id("mobile-terminal-bottom")
-                }
-                .background(Color.black.opacity(0.18))
-                .onChange(of: store.terminalSnapshot?.updated_at) {
-                    proxy.scrollTo("mobile-terminal-bottom", anchor: .bottom)
-                }
-            }
-
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    TextField("Command", text: $store.terminalInput, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                        .lineLimit(1...4)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            Task { await store.sendTerminalInput() }
-                        }
-                    Button {
-                        Task { await store.sendTerminalInput() }
-                    } label: {
-                        Image(systemName: "return")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.terminalInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await store.sendTerminalInput("", enter: false, key: "C-c") }
-                    } label: {
-                        Label("Interrupt", systemImage: "stop.circle")
-                    }
-                    .disabled(store.terminalSnapshot?.exists != true)
-                    Button {
-                        Task { await store.refreshSelectedTerminal() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    Spacer()
-                    Button(role: .destructive) {
-                        confirmKill = true
-                    } label: {
-                        Label("Kill", systemImage: "trash")
-                    }
-                    .disabled(store.terminalSnapshot?.exists != true)
-                }
-                .font(.caption)
-                if let snapshot = store.terminalSnapshot {
-                    Text(terminalStatus(snapshot))
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding()
-            .background(.bar)
-        }
-        .navigationTitle("Chat Terminal")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Done") {
-                    dismiss()
-                }
-            }
-        }
-        .task {
-            await store.openSelectedTerminal()
-        }
-        .task(id: store.selectedSessionID) {
-            while !Task.isCancelled {
-                await store.refreshSelectedTerminal(showErrors: false)
-                try? await Task.sleep(for: .seconds(1.5))
-            }
-        }
-        .alert("Kill tmux session?", isPresented: $confirmKill) {
-            Button("Kill Terminal", role: .destructive) {
-                Task { await store.killSelectedTerminal() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This kills the tmux session for the selected chat.")
-        }
-    }
-
-    private func terminalStatus(_ snapshot: ZTerminalSnapshot) -> String {
-        var parts = [snapshot.name]
-        if let cwd = snapshot.cwd, !cwd.isEmpty {
-            parts.append(cwd)
-        }
-        if let command = snapshot.command, !command.isEmpty {
-            parts.append(command)
         }
         return parts.joined(separator: " · ")
     }
