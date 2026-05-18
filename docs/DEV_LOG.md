@@ -16,6 +16,26 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - TestFlight Build 21 Uploaded
+
+Summary:
+
+- Bumped all project targets from build `20` to build `21`.
+- Committed the build bump before archiving:
+  `cdb3e6f Bump build number for TestFlight 21`.
+- Archived and uploaded iOS/iPadOS build `21` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `21` successfully:
+  `Uploaded ZenithDockMac`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-21.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-21.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-21 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-21.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-21.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-21 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-17 Follow-Up - Smooth Older Timeline Paging
 
 Problem:
