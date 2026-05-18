@@ -272,9 +272,7 @@ final class MobileAppStore: ObservableObject {
             syncSelectedRunningState()
             setStatus(socketLive ? "Live" : "Server connected")
             setConnectionDetail("Connected to \(resolvedServerURLString)")
-            if let sid = selectedSessionID, activeSessionIDs.contains(sid) {
-                await refreshSelectedProcesses(showErrors: false)
-            } else if processSnapshot?.active == true {
+            if let sid = selectedSessionID, !activeSessionIDs.contains(sid), processSnapshot?.active == true {
                 processSnapshot = nil
                 processLogTail = nil
             }
@@ -606,9 +604,6 @@ final class MobileAppStore: ObservableObject {
             rememberSelectedChat()
             Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
             connectEvents(sessionID: sessionID, after: lastSeq)
-            if activeSessionIDs.contains(sessionID) {
-                await refreshSelectedProcesses(showErrors: false)
-            }
             scrollRevision += 1
         } catch {
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
@@ -987,9 +982,6 @@ final class MobileAppStore: ObservableObject {
     private func updateRunningState(from event: ZEvent) {
         if event.type == "turn_started" {
             activeSessionIDs.insert(event.session_id)
-            if event.session_id == selectedSessionID {
-                Task { await refreshSelectedProcesses(showErrors: false) }
-            }
         }
         if event.type == "turn_finished" || event.type == "error" || event.type == "turn_stopped" {
             activeSessionIDs.remove(event.session_id)

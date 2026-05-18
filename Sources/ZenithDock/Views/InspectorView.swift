@@ -747,6 +747,7 @@ private struct JobEditorSheet: View {
 
 private struct LiveProcessesInspector: View {
     @EnvironmentObject private var store: AppStore
+    @State private var isOpen = false
 
     var body: some View {
         GroupBox {
@@ -759,48 +760,68 @@ private struct LiveProcessesInspector: View {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Button {
-                        Task { await store.refreshSelectedProcesses() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    if isOpen {
+                        Button {
+                            Task { await store.refreshSelectedProcesses() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Refresh live processes")
+                        Button {
+                            isOpen = false
+                            store.processSnapshot = nil
+                            store.processLogTail = nil
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Hide live process output")
                     }
-                    .buttonStyle(.borderless)
-                    .help("Refresh live processes")
                 }
 
-                if let snapshot = store.processSnapshot, snapshot.active {
-                    snapshotHeader(snapshot)
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(snapshot.processes) { process in
-                            LiveProcessRow(process: process)
-                                .environmentObject(store)
+                if isOpen {
+                    if let snapshot = store.processSnapshot, snapshot.active {
+                        snapshotHeader(snapshot)
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(snapshot.processes) { process in
+                                LiveProcessRow(process: process)
+                                    .environmentObject(store)
+                            }
                         }
-                    }
-                    if let output = snapshot.stdout_tail {
-                        LiveProcessOutputView(output: output)
-                    }
-                    if let log = store.processLogTail {
-                        LiveProcessLogView(log: log)
+                        if let output = snapshot.stdout_tail {
+                            LiveProcessOutputView(output: output)
+                        }
+                        if let log = store.processLogTail {
+                            LiveProcessLogView(log: log)
+                        }
+                    } else {
+                        Text(store.isRunning ? "No process snapshot yet" : "No live process for this chat")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text(store.isRunning ? "No process snapshot yet" : "No live process for this chat")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(store.isRunning ? "Live process inspection is available on request." : "No live process inspection loaded.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            isOpen = true
+                            Task { await store.refreshSelectedProcesses() }
+                        } label: {
+                            Label("Inspect Live Process", systemImage: "terminal")
+                        }
+                        .controlSize(.small)
+                        .disabled(store.selectedSessionID == nil || store.isLoadingProcesses)
+                    }
                 }
             }
             .padding(.vertical, 4)
         }
-        .task(id: store.selectedSessionID) {
-            if store.isRunning {
-                await store.refreshSelectedProcesses(showErrors: false)
-            }
-        }
-        .task(id: "\(store.selectedSessionID ?? "none"):\(store.isRunning)") {
-            guard store.isRunning else { return }
-            while !Task.isCancelled && store.isRunning {
-                await store.refreshSelectedProcesses(showErrors: false)
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-            }
+        .onChange(of: store.selectedSessionID) {
+            isOpen = false
+            store.processSnapshot = nil
+            store.processLogTail = nil
         }
     }
 

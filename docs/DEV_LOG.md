@@ -16,6 +16,43 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-17 Follow-Up - Make Live Process Inspection Opt-In
+
+Problem:
+
+- Live process/stdout details were displayed and refreshed automatically when a
+  chat was running.
+- Health refresh, session selection, and `turn_started` events could all fetch
+  process snapshots without the user asking.
+- The Mac and iOS process inspectors also polled the server every 1.5 seconds
+  while visible.
+
+Decision:
+
+- Remove automatic process snapshot fetches from health refresh, session
+  selection, and turn-start handling.
+- Keep process snapshot cleanup when a selected chat is no longer active or
+  when the selected chat changes.
+- Change Mac and iOS process sections to opt-in controls: collapsed by default,
+  with an explicit `Inspect Live Process` button.
+- Show process rows, stdout tail, and attached log output only while the
+  inspector is open.
+- Add `Hide`/collapse behavior that clears process/stdout/log state.
+- Keep manual `Refresh` available after the inspector is opened.
+
+Verification:
+
+- Searched for eager `refreshSelectedProcesses(showErrors: false)` calls and
+  polling `.task` loops; none remain.
+- `git diff --check` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+  passed.
+- First iOS Xcode build failed because parallel Xcode builds locked the shared
+  DerivedData build database; reran serially.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+  passed.
+
 ## 2026-05-17 Follow-Up - Stop Timeline Jump And Remove Terminal Churn
 
 Problem:

@@ -768,58 +768,73 @@ private struct MobileChatFileRow: View {
 
 private struct MobileLiveProcessesSection: View {
     @EnvironmentObject private var store: MobileAppStore
+    @State private var isOpen = false
 
     var body: some View {
         Section {
-            if let snapshot = store.processSnapshot, snapshot.active {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("\(snapshot.backend?.capitalized ?? "Agent") · pid \(snapshot.pid ?? 0)")
-                        .font(.caption.weight(.semibold))
-                    Text(mobileElapsedString(snapshot.elapsed_seconds ?? 0))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    if let cwd = snapshot.cwd {
-                        Text(cwd)
-                            .font(.caption2.monospaced())
+            if isOpen {
+                if let snapshot = store.processSnapshot, snapshot.active {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("\(snapshot.backend?.capitalized ?? "Agent") · pid \(snapshot.pid ?? 0)")
+                            .font(.caption.weight(.semibold))
+                        Text(mobileElapsedString(snapshot.elapsed_seconds ?? 0))
+                            .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        if let cwd = snapshot.cwd {
+                            Text(cwd)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    ForEach(snapshot.processes) { process in
+                        MobileLiveProcessRow(process: process)
+                    }
+                    if let output = snapshot.stdout_tail {
+                        MobileLiveProcessOutputView(output: output)
+                    }
+                    if let log = store.processLogTail {
+                        MobileLiveProcessLogView(log: log)
+                    }
+                } else {
+                    Text(store.isRunning ? "No process snapshot yet" : "No live process for this chat")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button {
+                        Task { await store.refreshSelectedProcesses() }
+                    } label: {
+                        Label(store.isLoadingProcesses ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        isOpen = false
+                        store.processSnapshot = nil
+                        store.processLogTail = nil
+                    } label: {
+                        Label("Hide", systemImage: "chevron.up")
                     }
                 }
-                ForEach(snapshot.processes) { process in
-                    MobileLiveProcessRow(process: process)
-                }
-                if let output = snapshot.stdout_tail {
-                    MobileLiveProcessOutputView(output: output)
-                }
-                if let log = store.processLogTail {
-                    MobileLiveProcessLogView(log: log)
-                }
             } else {
-                Text(store.isRunning ? "No process snapshot yet" : "No live process for this chat")
+                Text(store.isRunning ? "Live process inspection is available on request." : "No live process inspection loaded.")
                     .foregroundStyle(.secondary)
-            }
-            Button {
-                Task { await store.refreshSelectedProcesses() }
-            } label: {
-                Label(store.isLoadingProcesses ? "Refreshing" : "Refresh Processes", systemImage: "arrow.clockwise")
+                Button {
+                    isOpen = true
+                    Task { await store.refreshSelectedProcesses() }
+                } label: {
+                    Label("Inspect Live Process", systemImage: "terminal")
+                }
+                .disabled(store.selectedSessionID == nil || store.isLoadingProcesses)
             }
         } header: {
             Text("Live Processes")
         } footer: {
-            Text("Shows the selected chat's active agent process group and log files attached to live child processes.")
+            Text("Loads the selected chat's active process group and stdout only when requested.")
         }
-        .task(id: store.selectedSessionID) {
-            if store.isRunning {
-                await store.refreshSelectedProcesses(showErrors: false)
-            }
-        }
-        .task(id: "\(store.selectedSessionID ?? "none"):\(store.isRunning)") {
-            guard store.isRunning else { return }
-            while !Task.isCancelled && store.isRunning {
-                await store.refreshSelectedProcesses(showErrors: false)
-                try? await Task.sleep(for: .seconds(1.5))
-            }
+        .onChange(of: store.selectedSessionID) {
+            isOpen = false
+            store.processSnapshot = nil
+            store.processLogTail = nil
         }
     }
 }

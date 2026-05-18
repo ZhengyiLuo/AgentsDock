@@ -276,9 +276,7 @@ final class AppStore: ObservableObject {
             lastHealthAt = Date()
             syncSelectedRunningState()
             status = socketLive ? "Live" : "Server connected"
-            if let sid = selectedSessionID, activeSessionIDs.contains(sid) {
-                await refreshSelectedProcesses(showErrors: false)
-            } else if processSnapshot?.active == true {
+            if let sid = selectedSessionID, !activeSessionIDs.contains(sid), processSnapshot?.active == true {
                 processSnapshot = nil
                 processLogTail = nil
             }
@@ -482,9 +480,6 @@ final class AppStore: ObservableObject {
             Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
-            if activeSessionIDs.contains(sessionID) {
-                await refreshSelectedProcesses(showErrors: false)
-            }
             requestScrollToBottom(immediate: true)
         } catch {
             AppLogger.error("select failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
@@ -1103,9 +1098,6 @@ final class AppStore: ObservableObject {
         if event.type == "turn_started" {
             activeSessionIDs.insert(event.session_id)
             syncSelectedRunningState()
-            if event.session_id == selectedSessionID {
-                Task { await refreshSelectedProcesses(showErrors: false) }
-            }
         }
         if event.type == "turn_finished" || event.type == "error" || event.type == "turn_stopped" {
             activeSessionIDs.remove(event.session_id)
