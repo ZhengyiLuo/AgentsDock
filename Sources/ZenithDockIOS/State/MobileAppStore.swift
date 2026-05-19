@@ -591,8 +591,6 @@ final class MobileAppStore: ObservableObject {
 
         if let cached = memoryCachedChat(sessionID) {
             applyCachedChat(cached)
-            isLoading = false
-            scrollRevision += 1
         } else {
             events = []
             uploads = []

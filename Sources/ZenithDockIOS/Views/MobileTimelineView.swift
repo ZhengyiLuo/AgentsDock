@@ -22,7 +22,8 @@ struct MobileTimelineView: View {
     private let rowPageSize = 36
 
     var body: some View {
-        let displayEvents = store.displayEvents
+        let timelineRowsSuspended = store.isLoading && store.selectedSessionID != nil
+        let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
         let projection = MobileTimelineRows.project(from: displayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
@@ -45,7 +46,7 @@ struct MobileTimelineView: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 40)
                             }
-                            if store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0 {
+                            if !timelineRowsSuspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
                                 MobileTimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
                                     revealOlderRows(preservingPositionWith: proxy)
                                 } onLoadOlder: {

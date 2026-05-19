@@ -26,7 +26,11 @@ struct TimelineView: View {
     private let bottomButtonHideDistance: CGFloat = 180
 
     var body: some View {
-        let displayEvents = store.displayEvents
+        let timelineRowsSuspended = isInitialTimelineMasked && (
+            store.isSelectingSession ||
+            store.loadedSessionID != store.selectedSessionID
+        )
+        let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
         let projection = TimelineRows.project(from: displayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
@@ -49,7 +53,7 @@ struct TimelineView: View {
                             if store.selectedSession == nil {
                                 EmptyStateView()
                             } else {
-                                if store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0 {
+                                if !timelineRowsSuspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
                                     TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
                                         revealOlderRows(preservingPositionWith: proxy)
                                     } onLoadOlder: {

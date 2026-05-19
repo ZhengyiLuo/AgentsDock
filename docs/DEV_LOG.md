@@ -16,6 +16,30 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - Suspend Timeline Rows While Opening
+
+Problem:
+
+- The timeline fly-by also caused high CPU, because SwiftUI still laid out
+  hidden rows under the loading mask.
+
+Finding:
+
+- `.opacity(0)` hid the timeline visually but did not stop row projection,
+  Markdown rendering, card layout, or scroll metric work.
+- iOS could do similar work after applying a memory cache because it cleared
+  `isLoading` before the network tail snapshot replaced the cache.
+
+Change:
+
+- Mac timeline now structurally suspends row projection/rendering while the
+  initial mask is up and the selected latest snapshot is not loaded yet.
+- iOS/iPadOS timeline does the same while chat loading is active.
+- The timelines render only a lightweight loading shell until the latest tail
+  snapshot is ready, then render one invisible layout pass, scroll to bottom,
+  and reveal.
+- Added guardrails that fail if row rendering is not suspended during open.
+
 ## 2026-05-19 Follow-Up - Latest Tail Snapshot On Chat Open
 
 Problem:
