@@ -28,6 +28,7 @@ final class AppStore: ObservableObject {
     }
     @Published private(set) var displayEvents: [ZEvent] = []
     @Published var loadedSessionID: String?
+    @Published var isSelectingSession = false
     @Published var serverReachable = false
     @Published var socketLive = false
     @Published var activeSessionIDs: Set<String> = []
@@ -271,6 +272,7 @@ final class AppStore: ObservableObject {
         socketLive = false
         selectedSessionID = nil
         loadedSessionID = nil
+        isSelectingSession = false
         sessions = []
         events = []
         displayEvents = []
@@ -477,9 +479,13 @@ final class AppStore: ObservableObject {
         selectionGeneration += 1
         let generation = selectionGeneration
         loadingSessionID = sessionID
+        isSelectingSession = true
         defer {
             if loadingSessionID == sessionID {
                 loadingSessionID = nil
+            }
+            if selectedSessionID == sessionID, selectionGeneration == generation {
+                isSelectingSession = false
             }
         }
         selectedSessionID = sessionID
@@ -783,6 +789,7 @@ final class AppStore: ObservableObject {
                 webSocket?.cancel(with: .goingAway, reason: nil)
                 selectedSessionID = nil
                 loadedSessionID = nil
+                isSelectingSession = false
                 events = []
                 displayEvents = []
                 latestSeenSeq = 0

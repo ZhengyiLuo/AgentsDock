@@ -188,6 +188,11 @@ struct TimelineView: View {
                 .onChange(of: store.loadedSessionID) {
                     settleInitialTimelinePosition(proxy)
                 }
+                .onChange(of: store.isSelectingSession) {
+                    if !store.isSelectingSession {
+                        settleInitialTimelinePosition(proxy)
+                    }
+                }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
                         olderHistoryLoadArmed = false
@@ -212,7 +217,7 @@ struct TimelineView: View {
             if isAtBottom {
                 store.markSelectedSessionRead()
             }
-            if isInitialTimelineMasked {
+            if isInitialTimelineMasked && !store.isSelectingSession {
                 isInitialTimelineMasked = false
             }
         }
@@ -230,6 +235,7 @@ struct TimelineView: View {
               sessionID == store.selectedSessionID else {
             return
         }
+        guard !store.isSelectingSession else { return }
         let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
         guard canSettle else { return }
         initialTimelineRevealRevision += 1

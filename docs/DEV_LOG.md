@@ -1824,3 +1824,25 @@ Changes:
 - Added Archive/Unarchive actions on macOS and iOS/iPadOS.
 - Filtered digest target pickers to active, non-archived chats.
 - Added a guardrail check so archive state and digest filtering do not regress.
+
+### Latest Timeline Reveal Gating
+
+User issue:
+
+- Opening a chat showed the `Opening latest messages` spinner briefly, then
+  the timeline still visibly flew through intermediate text before landing.
+
+Finding:
+
+- The Mac timeline masked the view during session switching, but the store
+  published cached chat rows before the network/latest snapshot finished.
+- The reveal logic treated non-empty cached rows as ready, so the mask could
+  drop before the final latest-page layout had settled.
+
+Changes:
+
+- Added explicit Mac session-selection loading state to `AppStore`.
+- Kept the timeline masked while the latest snapshot is still loading.
+- Retried the reveal when the latest snapshot load completes, then scrolled to
+  bottom without animation before showing the timeline.
+- Added a guardrail check for this reveal contract.

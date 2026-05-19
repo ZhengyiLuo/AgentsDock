@@ -117,6 +117,17 @@ func checkArchiveSessionBehavior() throws {
     try assert(server.contains("\"archived\", \"archived_at\""), "Server public sessions must expose archived state")
 }
 
+func checkTimelineRevealWaitsForLatestSnapshot() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
+    try assert(macStore.contains("isSelectingSession = true"), "Mac session select must mark the latest snapshot as loading")
+    try assert(timeline.contains("guard !store.isSelectingSession else { return }"), "Timeline must not reveal cached/intermediate history while latest snapshot is still loading")
+    try assert(timeline.contains(".onChange(of: store.isSelectingSession)"), "Timeline must retry reveal when the latest snapshot load finishes")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -125,6 +136,7 @@ do {
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
     try checkArchiveSessionBehavior()
+    try checkTimelineRevealWaitsForLatestSnapshot()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)
