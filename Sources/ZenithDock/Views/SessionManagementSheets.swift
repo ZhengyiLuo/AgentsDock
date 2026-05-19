@@ -104,7 +104,7 @@ struct HandoffDigestSheet: View {
     @State private var status = ""
 
     private var targets: [ZSession] {
-        store.sessions.filter { $0.id != sourceSession.id }
+        store.digestTargetSessions(excluding: sourceSession.id)
     }
 
     var body: some View {
@@ -200,6 +200,11 @@ struct HandoffDigestSheet: View {
         .frame(width: 640, height: 660)
         .onAppear {
             if targetSessionID.isEmpty {
+                targetSessionID = targets.first?.id ?? ""
+            }
+        }
+        .onChange(of: targets) {
+            if !targets.contains(where: { $0.id == targetSessionID }) {
                 targetSessionID = targets.first?.id ?? ""
             }
         }

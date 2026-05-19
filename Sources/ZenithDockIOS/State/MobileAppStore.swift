@@ -101,16 +101,28 @@ final class MobileAppStore: ObservableObject {
         sessions.first { $0.id == selectedSessionID }
     }
 
+    var activeSessions: [ZSession] {
+        sessions.filter { $0.archived != true }
+    }
+
+    var archivedSessions: [ZSession] {
+        sessions.filter { $0.archived == true }
+    }
+
     var pinnedSessions: [ZSession] {
-        sessions.filter { $0.pinned == true }
+        activeSessions.filter { $0.pinned == true }
     }
 
     var folders: [String: [ZSession]] {
-        Dictionary(grouping: sessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
+        Dictionary(grouping: activeSessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
     }
 
     var folderNames: [String] {
-        Array(Set(sessions.map { $0.folder ?? "General" })).sorted()
+        Array(Set(activeSessions.map { $0.folder ?? "General" })).sorted()
+    }
+
+    func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {
+        activeSessions.filter { $0.id != sourceSessionID }
     }
 
     var hiddenDisplayEventCount: Int {
@@ -375,12 +387,12 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
         guard let sid = selectedSessionID else { return }
-        await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned)
+        await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
     }
 
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil) async {
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -389,6 +401,7 @@ final class MobileAppStore: ObservableObject {
             var model: String?
             var effort: String?
             var pinned: Bool?
+            var archived: Bool?
         }
         do {
             struct Response: Codable { let session: ZSession }
@@ -399,7 +412,8 @@ final class MobileAppStore: ObservableObject {
                 backend: backend,
                 model: model,
                 effort: effort,
-                pinned: pinned
+                pinned: pinned,
+                archived: archived
             ))
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
@@ -411,6 +425,15 @@ final class MobileAppStore: ObservableObject {
 
     func togglePin(_ session: ZSession) async {
         await updateSession(session.id, pinned: !(session.pinned ?? false))
+    }
+
+    func toggleArchive(_ session: ZSession) async {
+        let shouldArchive = !(session.archived ?? false)
+        await updateSession(
+            session.id,
+            pinned: shouldArchive ? false : nil,
+            archived: shouldArchive
+        )
     }
 
     func moveSession(_ session: ZSession, to folder: String) async {

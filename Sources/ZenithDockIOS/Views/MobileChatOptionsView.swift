@@ -15,6 +15,7 @@ struct MobileChatOptionsView: View {
     @State private var model = ""
     @State private var effort = ""
     @State private var pinned = false
+    @State private var archived = false
     @State private var jobTitle = ""
     @State private var jobPrompt = ""
     @State private var intervalText = "3600"
@@ -52,6 +53,7 @@ struct MobileChatOptionsView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         Toggle("Pinned", isOn: $pinned)
+                        Toggle("Archived", isOn: $archived)
                         Button {
                             saveSession()
                         } label: {
@@ -81,6 +83,11 @@ struct MobileChatOptionsView: View {
                             handoffOpen = true
                         } label: {
                             Label("Create Digest", systemImage: "arrowshape.turn.up.right")
+                        }
+                        Button {
+                            Task { await store.toggleArchive(session) }
+                        } label: {
+                            Label(session.archived == true ? "Unarchive Chat" : "Archive Chat", systemImage: "archivebox")
                         }
                         Button(role: .destructive) {
                             confirmDelete = true
@@ -234,6 +241,7 @@ struct MobileChatOptionsView: View {
         model = session.model ?? ""
         effort = session.effort ?? ""
         pinned = session.pinned == true
+        archived = session.archived == true
     }
 
     private func saveSession() {
@@ -249,7 +257,8 @@ struct MobileChatOptionsView: View {
                 folder: cleanFolder.isEmpty ? "General" : cleanFolder,
                 title: cleanTitle,
                 cwd: cleanCwd.isEmpty ? store.defaultCwd : cleanCwd,
-                pinned: pinned
+                pinned: archived ? false : pinned,
+                archived: archived
             )
             syncDrafts()
         }
@@ -437,7 +446,7 @@ private struct MobileHandoffDigestView: View {
     @State private var status = ""
 
     private var targets: [ZSession] {
-        store.sessions.filter { $0.id != sourceSession.id }
+        store.digestTargetSessions(excluding: sourceSession.id)
     }
 
     var body: some View {
@@ -503,6 +512,11 @@ private struct MobileHandoffDigestView: View {
         }
         .onAppear {
             if targetSessionID.isEmpty {
+                targetSessionID = targets.first?.id ?? ""
+            }
+        }
+        .onChange(of: targets) {
+            if !targets.contains(where: { $0.id == targetSessionID }) {
                 targetSessionID = targets.first?.id ?? ""
             }
         }

@@ -99,16 +99,28 @@ final class AppStore: ObservableObject {
         return unreadAgentSessionIDs.contains(selectedSessionID)
     }
 
+    var activeSessions: [ZSession] {
+        sessions.filter { $0.archived != true }
+    }
+
+    var archivedSessions: [ZSession] {
+        sessions.filter { $0.archived == true }
+    }
+
     var pinnedSessions: [ZSession] {
-        sessions.filter { $0.pinned == true }
+        activeSessions.filter { $0.pinned == true }
     }
 
     var folders: [String: [ZSession]] {
-        Dictionary(grouping: sessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
+        Dictionary(grouping: activeSessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
     }
 
     var folderNames: [String] {
-        Array(Set(sessions.map { $0.folder ?? "General" })).sorted()
+        Array(Set(activeSessions.map { $0.folder ?? "General" })).sorted()
+    }
+
+    func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {
+        activeSessions.filter { $0.id != sourceSessionID }
     }
 
     var connectionTitle: String {
@@ -674,7 +686,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil) async {
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
         guard let sid = selectedSessionID else { return }
         struct Body: Codable {
             var title: String?
@@ -684,6 +696,7 @@ final class AppStore: ObservableObject {
             var model: String?
             var effort: String?
             var pinned: Bool?
+            var archived: Bool?
         }
         do {
             struct Response: Codable { let session: ZSession }
@@ -694,7 +707,8 @@ final class AppStore: ObservableObject {
                 backend: backend,
                 model: model,
                 effort: effort,
-                pinned: pinned
+                pinned: pinned,
+                archived: archived
             )
             let res: Response = try await api.patch("/api/sessions/\(sid)", body: body)
             if let idx = sessions.firstIndex(where: { $0.id == sid }) {
@@ -709,12 +723,21 @@ final class AppStore: ObservableObject {
         await updateSession(session.id, pinned: !(session.pinned ?? false))
     }
 
+    func toggleArchive(_ session: ZSession) async {
+        let shouldArchive = !(session.archived ?? false)
+        await updateSession(
+            session.id,
+            pinned: shouldArchive ? false : nil,
+            archived: shouldArchive
+        )
+    }
+
     func moveSession(_ session: ZSession, to folder: String) async {
         let cleanFolder = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         await updateSession(session.id, folder: cleanFolder.isEmpty ? "General" : cleanFolder)
     }
 
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil) async {
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -723,6 +746,7 @@ final class AppStore: ObservableObject {
             var model: String?
             var effort: String?
             var pinned: Bool?
+            var archived: Bool?
         }
         do {
             struct Response: Codable { let session: ZSession }
@@ -733,7 +757,8 @@ final class AppStore: ObservableObject {
                 backend: backend,
                 model: model,
                 effort: effort,
-                pinned: pinned
+                pinned: pinned,
+                archived: archived
             ))
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session

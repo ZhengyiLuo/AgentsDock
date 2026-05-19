@@ -100,6 +100,7 @@ struct InspectorView: View {
                         .tint(.blue)
                         .help("Save backend, model, and effort for this chat")
                         LabeledContent("Pinned", value: session.pinned == true ? "Yes" : "No")
+                        LabeledContent("Archived", value: session.archived == true ? "Yes" : "No")
                         LabeledContent("Claude", value: short(session.claude_session_id))
                         LabeledContent("Codex", value: short(session.codex_thread_id))
                         HStack {
@@ -158,6 +159,13 @@ struct InspectorView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .help(session.pinned == true ? "Remove this chat from Pinned" : "Keep this chat in Pinned")
+                        Button {
+                            Task { await store.toggleArchive(session) }
+                        } label: {
+                            Label(session.archived == true ? "Unarchive Chat" : "Archive Chat", systemImage: "archivebox")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(session.archived == true ? "Return this chat to the active list" : "Move this chat to Archived")
                         Button(role: .destructive) {
                             confirmDelete = true
                         } label: {

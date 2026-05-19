@@ -1806,3 +1806,21 @@ Verification:
 - Deployed the server update to the `sonic` endpoint and verified
   `/api/runtime/catalog` reports `default_model = gpt-5.5` and
   `default_effort = xhigh` for Codex.
+
+### Archived Chats And Digest Targets
+
+User issue:
+
+- Old or parked chats should be archivable instead of deleted.
+- Archived chats should not appear as target choices in the create-digest
+  window.
+
+Changes:
+
+- Added persisted `archived` / `archived_at` session state on the server and
+  in the shared Swift session model.
+- Moved archived chats out of normal Pinned/Folder lists and into an Archived
+  section where they can be restored or deleted.
+- Added Archive/Unarchive actions on macOS and iOS/iPadOS.
+- Filtered digest target pickers to active, non-archived chats.
+- Added a guardrail check so archive state and digest filtering do not regress.

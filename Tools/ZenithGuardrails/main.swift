@@ -97,6 +97,26 @@ func checkShellCopyNormalization() throws {
     )
 }
 
+func checkArchiveSessionBehavior() throws {
+    let sessionData = Data(#"{"id":"sess","title":"Archived","backend":"codex","archived":true}"#.utf8)
+    let session = try JSONDecoder().decode(ZSession.self, from: sessionData)
+    try assert(session.archived == true, "ZSession must decode archived session state")
+
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macDigest = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SessionManagementSheets.swift"), encoding: .utf8)
+    let mobileDigest = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+
+    try assert(macStore.contains("sessions.filter { $0.archived != true }"), "Mac active session lists must filter archived chats")
+    try assert(mobileStore.contains("sessions.filter { $0.archived != true }"), "iOS active session lists must filter archived chats")
+    try assert(macDigest.contains("store.digestTargetSessions(excluding: sourceSession.id)"), "Mac digest sheet must exclude archived target chats")
+    try assert(mobileDigest.contains("store.digestTargetSessions(excluding: sourceSession.id)"), "iOS digest sheet must exclude archived target chats")
+    try assert(server.contains("archived: bool | None = None"), "Server session update API must accept archived state")
+    try assert(server.contains("\"archived\", \"archived_at\""), "Server public sessions must expose archived state")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -104,6 +124,7 @@ do {
     try checkRuntimeDefaultLabels()
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
+    try checkArchiveSessionBehavior()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

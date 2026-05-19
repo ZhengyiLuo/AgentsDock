@@ -294,6 +294,7 @@ class UpdateSessionRequest(BaseModel):
     model: str | None = None
     effort: str | None = None
     pinned: bool | None = None
+    archived: bool | None = None
 
 
 class TurnRequest(BaseModel):
@@ -401,6 +402,8 @@ class SessionStore:
             "fork_from": None,
             "pinned": bool(req.pinned),
             "pinned_at": now if req.pinned else None,
+            "archived": False,
+            "archived_at": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -441,6 +444,16 @@ class SessionStore:
                 elif not pinned:
                     sess["pinned_at"] = None
                 sess["pinned"] = pinned
+            if "archived" in patch and patch["archived"] is not None:
+                archived = bool(patch["archived"])
+                if archived and not sess.get("archived"):
+                    sess["archived_at"] = now_iso()
+                elif not archived:
+                    sess["archived_at"] = None
+                sess["archived"] = archived
+                if archived:
+                    sess["pinned"] = False
+                    sess["pinned_at"] = None
             sess["updated_at"] = now_iso()
             await self.save()
             return sess
@@ -2136,7 +2149,7 @@ def public_session(sess: dict[str, Any]) -> dict[str, Any]:
             "id", "title", "folder", "cwd", "backend", "model", "effort",
             "session_id", "claude_session_id", "codex_thread_id",
             "parent_id", "fork_from", "memory_forked", "memory_seed_used",
-            "pinned", "pinned_at", "created_at", "updated_at",
+            "pinned", "pinned_at", "archived", "archived_at", "created_at", "updated_at",
         )
     }
 
@@ -3247,6 +3260,7 @@ async def list_sessions() -> dict[str, Any]:
     sessions = [public_session(s) for s in STORE.sessions.values()]
     sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
     sessions.sort(key=lambda s: not bool(s.get("pinned")))
+    sessions.sort(key=lambda s: bool(s.get("archived")))
     return {"sessions": sessions}
 
 

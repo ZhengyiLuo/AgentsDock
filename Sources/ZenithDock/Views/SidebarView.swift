@@ -67,6 +67,13 @@ struct SidebarView: View {
                         }
                     }
                 }
+                if !store.archivedSessions.isEmpty {
+                    Section("Archived") {
+                        ForEach(store.archivedSessions) { session in
+                            sessionRow(session)
+                        }
+                    }
+                }
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
@@ -117,16 +124,29 @@ struct SidebarView: View {
         SessionRow(session: session)
             .tag(session.id)
             .contextMenu {
-                Button {
-                    Task { await store.togglePin(session) }
-                } label: {
-                    Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
-                }
-                Menu("Move to Folder") {
-                    ForEach(store.folderNames, id: \.self) { folder in
-                        Button(folder) {
-                            Task { await store.moveSession(session, to: folder) }
+                if session.archived == true {
+                    Button {
+                        Task { await store.toggleArchive(session) }
+                    } label: {
+                        Label("Unarchive Chat", systemImage: "archivebox")
+                    }
+                } else {
+                    Button {
+                        Task { await store.togglePin(session) }
+                    } label: {
+                        Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                    }
+                    Menu("Move to Folder") {
+                        ForEach(store.folderNames, id: \.self) { folder in
+                            Button(folder) {
+                                Task { await store.moveSession(session, to: folder) }
+                            }
                         }
+                    }
+                    Button {
+                        Task { await store.toggleArchive(session) }
+                    } label: {
+                        Label("Archive Chat", systemImage: "archivebox")
                     }
                 }
                 Divider()
@@ -195,6 +215,12 @@ struct SessionRow: View {
                     Text(session.title)
                         .fontWeight(hasUnread ? .semibold : .regular)
                         .lineLimit(1)
+                    if session.archived == true {
+                        Image(systemName: "archivebox")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityLabel("Archived")
+                    }
                     if hasUnread {
                         Image(systemName: "circle.fill")
                             .font(.system(size: 6, weight: .bold))
@@ -218,6 +244,8 @@ struct SessionRow: View {
         ]
         if store.activeSessionIDs.contains(session.id) {
             pieces.append("running")
+        } else if session.archived == true {
+            pieces.append("archived")
         } else if store.unreadAgentSessionIDs.contains(session.id) {
             pieces.append("new agent message")
         } else if let effort = session.effort, !effort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

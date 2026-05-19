@@ -27,6 +27,13 @@ struct MobileSidebarView: View {
                     }
                 }
             }
+            if !store.archivedSessions.isEmpty {
+                Section("Archived") {
+                    ForEach(store.archivedSessions) { session in
+                        sessionRow(session)
+                    }
+                }
+            }
         }
         .navigationTitle("ZenithDock")
         .toolbar {
@@ -76,14 +83,31 @@ struct MobileSidebarView: View {
         MobileSessionRow(session: session)
             .tag(session.id)
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                Button {
-                    Task { await store.togglePin(session) }
-                } label: {
-                    Label(session.pinned == true ? "Unpin" : "Pin", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                if session.archived == true {
+                    Button {
+                        Task { await store.toggleArchive(session) }
+                    } label: {
+                        Label("Unarchive", systemImage: "archivebox")
+                    }
+                    .tint(.gray)
+                } else {
+                    Button {
+                        Task { await store.togglePin(session) }
+                    } label: {
+                        Label(session.pinned == true ? "Unpin" : "Pin", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                    }
+                    .tint(.blue)
                 }
-                .tint(.blue)
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if session.archived != true {
+                    Button {
+                        Task { await store.toggleArchive(session) }
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                    .tint(.gray)
+                }
                 Button(role: .destructive) {
                     deleteCandidate = session
                 } label: {
@@ -91,16 +115,29 @@ struct MobileSidebarView: View {
                 }
             }
             .contextMenu {
-                Button {
-                    Task { await store.togglePin(session) }
-                } label: {
-                    Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
-                }
-                Menu("Move to Folder") {
-                    ForEach(store.folderNames, id: \.self) { folder in
-                        Button(folder) {
-                            Task { await store.moveSession(session, to: folder) }
+                if session.archived == true {
+                    Button {
+                        Task { await store.toggleArchive(session) }
+                    } label: {
+                        Label("Unarchive Chat", systemImage: "archivebox")
+                    }
+                } else {
+                    Button {
+                        Task { await store.togglePin(session) }
+                    } label: {
+                        Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                    }
+                    Menu("Move to Folder") {
+                        ForEach(store.folderNames, id: \.self) { folder in
+                            Button(folder) {
+                                Task { await store.moveSession(session, to: folder) }
+                            }
                         }
+                    }
+                    Button {
+                        Task { await store.toggleArchive(session) }
+                    } label: {
+                        Label("Archive Chat", systemImage: "archivebox")
                     }
                 }
                 Button(role: .destructive) {
@@ -277,8 +314,16 @@ private struct MobileSessionRow: View {
                 }
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(session.title)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(session.title)
+                        .lineLimit(1)
+                    if session.archived == true {
+                        Image(systemName: "archivebox")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityLabel("Archived")
+                    }
+                }
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -295,6 +340,8 @@ private struct MobileSessionRow: View {
         ]
         if store.activeSessionIDs.contains(session.id) {
             pieces.append("running")
+        } else if session.archived == true {
+            pieces.append("archived")
         } else if let effort = session.effort, !effort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             pieces.append(store.runtimeCatalog.effortLabel(effort, backend: session.backend))
         }
