@@ -16,6 +16,31 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - Latest Tail Snapshot On Chat Open
+
+Problem:
+
+- The timeline could still visibly fly through text after the latest-message
+  spinner.
+
+Finding:
+
+- The previous masking fix hid most intermediate layout, but chat open still
+  used cached history as a base and requested `after=<cached seq>` with
+  `tail=false`.
+- For long chats, that returned a middle catch-up page instead of the latest
+  page. The app then published that intermediate text before landing.
+
+Change:
+
+- On Mac and iOS/iPadOS, chat open now always requests the latest tail page:
+  `limit=<initial page>` and `tail=true`.
+- Cached history remains a hidden warm start/fallback, but successful network
+  load replaces it with the latest snapshot instead of merging a catch-up
+  segment.
+- Added guardrails that fail if chat open reintroduces `requestAfter` or
+  `tail=false` catch-up behavior.
+
 ## 2026-05-19 Follow-Up - TestFlight Build 25 Uploaded
 
 Summary:

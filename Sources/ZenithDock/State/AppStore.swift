@@ -536,14 +536,9 @@ final class AppStore: ObservableObject {
             return
         }
         do {
-            let requestAfter = loadedFromCache ? lastSeq : 0
             let res: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
-                queryItems: loadedFromCache && requestAfter > 0 ? [
-                    URLQueryItem(name: "after", value: "\(requestAfter)"),
-                    URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
-                    URLQueryItem(name: "tail", value: "false")
-                ] : [
+                queryItems: [
                     URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
                     URLQueryItem(name: "tail", value: "true")
                 ]
@@ -555,14 +550,8 @@ final class AppStore: ObservableObject {
                 AppLogger.info("drop stale selection response session=\(sessionID)")
                 return
             }
-            if loadedFromCache {
-                let omittedAfter = res.events_omitted_after ?? 0
-                mergeEvents(res.events)
-                latestSeenSeq = events.map(\.seq).max() ?? latestSeenSeq
-                status = omittedAfter > 0 ? "Loaded recent chat page" : "Caught up to latest chat"
-            } else {
-                applySessionEventSnapshot(res, sessionID: sessionID)
-            }
+            applySessionEventSnapshot(res, sessionID: sessionID)
+            status = "Loaded latest chat"
             refreshSessionFilesFromLoadedEvents()
             loadedSessionID = sessionID
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")

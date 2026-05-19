@@ -588,11 +588,9 @@ final class MobileAppStore: ObservableObject {
         processSnapshot = nil
         processLogTail = nil
         status = serverReachable ? "Loading chat" : "Server offline"
-        var loadedFromCache = false
 
         if let cached = memoryCachedChat(sessionID) {
             applyCachedChat(cached)
-            loadedFromCache = true
             isLoading = false
             scrollRevision += 1
         } else {
@@ -606,14 +604,9 @@ final class MobileAppStore: ObservableObject {
         guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
 
         do {
-            let requestAfter = loadedFromCache ? lastSeq : 0
             let res: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
-                queryItems: loadedFromCache && requestAfter > 0 ? [
-                    URLQueryItem(name: "after", value: "\(requestAfter)"),
-                    URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
-                    URLQueryItem(name: "tail", value: "false")
-                ] : [
+                queryItems: [
                     URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
                     URLQueryItem(name: "tail", value: "true")
                 ]
@@ -622,12 +615,7 @@ final class MobileAppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
-            if loadedFromCache {
-                mergeEvents(res.events)
-                latestSeenSeq = events.map(\.seq).max() ?? latestSeenSeq
-            } else {
-                applySessionEventSnapshot(res, sessionID: sessionID)
-            }
+            applySessionEventSnapshot(res, sessionID: sessionID)
             refreshSessionFilesFromLoadedEvents()
             isLoading = false
             rememberSelectedChat()
