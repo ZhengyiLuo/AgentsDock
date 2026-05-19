@@ -16,6 +16,26 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - Folded Message Notice Styling
+
+Summary:
+
+- Removed the fold notice from the rendered Markdown body in
+  `Sources/ZenithDock/Views/EventViews.swift`.
+- Folded messages now show a tinted footer chip with:
+  - hidden character count
+  - note that copy/full text use the complete message
+  - `Open full text` action
+- The footer tint follows message type: user green, job orange, assistant accent.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-19 Follow-Up - Fork History Copy And Scroll Jitter
 
 Findings:

@@ -294,17 +294,7 @@ struct MessageBubble: View {
             MarkdownView(markdown: visibleText, alignment: isUser ? .trailing : .leading, linkContext: linkContext)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
             if shouldClip {
-                HStack(spacing: 8) {
-                    Text("\(hiddenCharacterCount) characters hidden")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Open full text") {
-                        fullTextOpen = true
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption.weight(.semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                foldNotice
             }
         }
         .padding(.horizontal, 14)
@@ -348,7 +338,50 @@ struct MessageBubble: View {
 
     private var visibleText: String {
         guard shouldClip else { return text }
-        return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\nMessage folded in UI. Copy and Full text use the complete message."
+        return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var foldNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.page")
+                .font(.caption.weight(.semibold))
+            Text("\(hiddenCharacterCount) characters hidden")
+                .font(.caption.weight(.semibold))
+            Text("Copy and Full text use the complete message.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Open full text") {
+                fullTextOpen = true
+            }
+            .buttonStyle(.borderless)
+            .font(.caption.weight(.semibold))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(foldNoticeBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(foldNoticeStroke))
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+
+    private var foldNoticeBackground: some ShapeStyle {
+        if isUser {
+            return AnyShapeStyle(Color.green.opacity(0.16))
+        }
+        if isJob {
+            return AnyShapeStyle(Color.orange.opacity(0.16))
+        }
+        return AnyShapeStyle(Color.accentColor.opacity(0.12))
+    }
+
+    private var foldNoticeStroke: some ShapeStyle {
+        if isUser {
+            return AnyShapeStyle(Color.green.opacity(0.35))
+        }
+        if isJob {
+            return AnyShapeStyle(Color.orange.opacity(0.35))
+        }
+        return AnyShapeStyle(Color.accentColor.opacity(0.28))
     }
 
     private var clippedBody: String {
