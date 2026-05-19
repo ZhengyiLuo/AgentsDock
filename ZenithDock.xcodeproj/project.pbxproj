@@ -34,6 +34,7 @@
 		B00000000000000000000018 /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* ComposerView.swift */; };
 		B00000000000000000000019 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* EmptyStateView.swift */; };
 		B0000000000000000000001A /* EventViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* EventViews.swift */; };
+		B00000000000000000000024 /* TraceChangeSetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* TraceChangeSetView.swift */; };
 		B0000000000000000000001B /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* InspectorView.swift */; };
 		B0000000000000000000001C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* RootView.swift */; };
 		B0000000000000000000001D /* SessionManagementSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* SessionManagementSheets.swift */; };
@@ -112,6 +113,7 @@
 		F00000000000000000000018 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		F00000000000000000000019 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001A /* EventViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventViews.swift; sourceTree = "<group>"; };
+		F00000000000000000000022 /* TraceChangeSetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TraceChangeSetView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001B /* InspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001D /* SessionManagementSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagementSheets.swift; sourceTree = "<group>"; };
@@ -324,6 +326,7 @@
 				F00000000000000000000018 /* ComposerView.swift */,
 				F00000000000000000000019 /* EmptyStateView.swift */,
 				F0000000000000000000001A /* EventViews.swift */,
+				F00000000000000000000022 /* TraceChangeSetView.swift */,
 				F0000000000000000000001B /* InspectorView.swift */,
 				F0000000000000000000001C /* RootView.swift */,
 				F0000000000000000000001D /* SessionManagementSheets.swift */,
@@ -502,6 +505,7 @@
 				B00000000000000000000018 /* ComposerView.swift in Sources */,
 				B00000000000000000000019 /* EmptyStateView.swift in Sources */,
 				B0000000000000000000001A /* EventViews.swift in Sources */,
+				B00000000000000000000024 /* TraceChangeSetView.swift in Sources */,
 				B0000000000000000000001B /* InspectorView.swift in Sources */,
 				B0000000000000000000001C /* RootView.swift in Sources */,
 				B0000000000000000000001D /* SessionManagementSheets.swift in Sources */,

@@ -339,7 +339,6 @@ struct MessageBubble: View {
     }
 
     private var shouldClip: Bool {
-        guard isContextDigest else { return false }
         return text.count > collapsedCharacterLimit || lineCount > collapsedLineLimit
     }
 
@@ -349,7 +348,7 @@ struct MessageBubble: View {
 
     private var visibleText: String {
         guard shouldClip else { return text }
-        return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[message folded in UI; copy and full text use the complete message]"
+        return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\nMessage folded in UI. Copy and Full text use the complete message."
     }
 
     private var clippedBody: String {
@@ -362,11 +361,11 @@ struct MessageBubble: View {
     }
 
     private var collapsedCharacterLimit: Int {
-        isContextDigest ? 1_200 : 1_600
+        isContextDigest ? 1_200 : 2_800
     }
 
     private var collapsedLineLimit: Int {
-        isContextDigest ? 12 : 16
+        isContextDigest ? 12 : 32
     }
 
     private var lineCount: Int {
@@ -719,6 +718,10 @@ struct TraceGroupCard: View, Equatable {
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 8) {
+                if let changeSummary {
+                    TraceChangeSetCard(summary: changeSummary)
+                        .padding(.bottom, 2)
+                }
                 TraceDisclosureHeader(title: summaryTitle, detail: summaryDetail, isExpanded: $expanded)
                 if expanded {
                     VStack(alignment: .leading, spacing: 12) {
@@ -727,6 +730,13 @@ struct TraceGroupCard: View, Equatable {
                         }
                     }
                     .padding(.top, 8)
+                } else if let previewText {
+                    Text(previewText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .padding(.leading, 20)
                 }
             }
             .padding(.horizontal, 12)
@@ -760,6 +770,38 @@ struct TraceGroupCard: View, Equatable {
             parts.append("\(other) system")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private var changeSummary: TraceChangeSummary? {
+        TraceChangeSummary.extract(from: events)
+    }
+
+    private var previewText: String? {
+        let pieces = events.compactMap { event -> String? in
+            switch event.type {
+            case "reasoning_summary":
+                return event.text?
+                    .split(separator: "\n")
+                    .first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            case "tool_started", "tool_finished":
+                return toolPreview(for: event)
+            default:
+                return nil
+            }
+        }
+        guard !pieces.isEmpty else { return nil }
+        return pieces.prefix(2).joined(separator: " · ")
+    }
+
+    private func toolPreview(for event: ZEvent) -> String? {
+        if let command = event.tool?.traceCommandText {
+            return command
+        }
+        if let name = event.tool?.name {
+            return name
+        }
+        return event.tool_id
     }
 
     private var toolEventCount: Int {

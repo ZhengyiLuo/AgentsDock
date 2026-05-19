@@ -15,6 +15,7 @@ struct TimelineView: View {
     @State private var visibleRowLimit = 100
     @State private var isFileDropTargeted = false
     @State private var historyLoadSuppressedUntil = Date.distantPast
+    @State private var lastObservedEventSeq = 0
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
     private let defaultVisibleRowLimit = 100
@@ -107,14 +108,21 @@ struct TimelineView: View {
                         Button {
                             scrollToBottom(proxy, animated: true)
                         } label: {
-                            Image(systemName: "arrow.down.to.line.compact")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(width: 24, height: 24)
+                            HStack(spacing: store.selectedSessionHasUnread ? 6 : 0) {
+                                Image(systemName: "arrow.down.to.line.compact")
+                                    .font(.system(size: 12, weight: .semibold))
+                                if store.selectedSessionHasUnread {
+                                    Text("New")
+                                        .font(.caption2.weight(.bold))
+                                }
+                            }
+                            .frame(minWidth: 24, minHeight: 24)
+                            .padding(.horizontal, store.selectedSessionHasUnread ? 7 : 0)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.mini)
                         .padding(12)
-                        .help("Jump to latest message")
+                        .help(store.selectedSessionHasUnread ? "Jump to unread agent message" : "Jump to latest message")
                         .accessibilityLabel("Jump to bottom")
                     }
                     if isFileDropTargeted {
@@ -141,9 +149,12 @@ struct TimelineView: View {
                     suppressScrollHistoryLoadUntilTopLeaves = false
                     historyLoadSuppressedUntil = Date.distantPast
                     visibleRowLimit = defaultVisibleRowLimit
+                    lastObservedEventSeq = maxEventSeq(displayEvents)
+                    store.markSelectedSessionRead()
                     scrollToBottom(proxy)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
+                    let previousObservedSeq = lastObservedEventSeq
                     let rowCount = TimelineRows.build(from: displayEvents).count
                     if newCount == 0 {
                         isAtBottom = true
@@ -154,6 +165,8 @@ struct TimelineView: View {
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
                     }
+                    updateUnreadState(after: previousObservedSeq)
+                    lastObservedEventSeq = maxEventSeq(displayEvents)
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
@@ -174,6 +187,12 @@ struct TimelineView: View {
                 Task { await store.upload(urls: urls) }
             }
         }
+        .onAppear {
+            lastObservedEventSeq = maxEventSeq(store.displayEvents)
+            if isAtBottom {
+                store.markSelectedSessionRead()
+            }
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
@@ -181,6 +200,7 @@ struct TimelineView: View {
         let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
+            store.markSelectedSessionRead()
         }
         if animated {
             withAnimation(.snappy) {
@@ -243,6 +263,9 @@ struct TimelineView: View {
         let next = !metrics.isScrollable || metrics.distanceFromBottom <= bottomButtonHideDistance
         if isAtBottom != next {
             isAtBottom = next
+        }
+        if next {
+            store.markSelectedSessionRead()
         }
     }
 
@@ -358,6 +381,23 @@ struct TimelineView: View {
             return .started
         }
         return .pending(position: event.position)
+    }
+
+    private func updateUnreadState(after previousSeq: Int) {
+        guard let sessionID = store.selectedSessionID else { return }
+        let hasNewAgentMessage = store.displayEvents.contains { event in
+            event.seq > previousSeq && store.isAgentVisibleMessage(event)
+        }
+        guard hasNewAgentMessage else { return }
+        if isAtBottom {
+            store.markSessionRead(sessionID)
+        } else {
+            store.markAgentUnread(sessionID: sessionID)
+        }
+    }
+
+    private func maxEventSeq(_ events: [ZEvent]) -> Int {
+        events.map(\.seq).max() ?? 0
     }
 
     private func acceptTimelineFileDrop(_ providers: [NSItemProvider]) -> Bool {

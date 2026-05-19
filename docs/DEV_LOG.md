@@ -16,6 +16,40 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Timeline Trace UI And Unread Agent Messages
+
+Summary:
+
+- Improved macOS timeline trace presentation in
+  `Sources/ZenithDock/Views/EventViews.swift` and
+  `Sources/ZenithDock/Views/TraceChangeSetView.swift`.
+- Trace groups now stay folded by default, show a quiet preview line, and can
+  surface a compact Codex-style edited-files card when tool output includes
+  patch/git/diff signals.
+- The edited-files card is intentionally cheap:
+  - parses existing tool commands/output only
+  - avoids live file-system diff work
+  - shows top changed files inline and opens a review sheet with the raw
+    diff/stat/patch snippets
+- `TraceChangeSetView.swift` must be present in the manual Xcode macOS target
+  source list; SwiftPM saw it automatically, but the first Xcode build caught
+  the missing project entry.
+- Long assistant/user messages now fold more generally, not only context
+  digests. Copy and Full text still use the complete message.
+- Added macOS unread agent-message state:
+  - `AppStore.unreadAgentSessionIDs`
+  - sidebar unread dot/title emphasis
+  - bottom jump button shows `New` when unread selected-chat output arrives
+  - jumping to bottom or being at bottom clears the unread mark
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `swift run ZenithGuardrails` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-18 Follow-Up - Stable 0.1.1 Marker
 
 Summary:

@@ -43,6 +43,7 @@ final class AppStore: ObservableObject {
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
+    @Published private(set) var unreadAgentSessionIDs: Set<String> = []
 
     private let initialSessionEventLimit = 160
     private let olderHistoryPageLimit = 160
@@ -91,6 +92,11 @@ final class AppStore: ObservableObject {
 
     var selectedSession: ZSession? {
         sessions.first { $0.id == selectedSessionID }
+    }
+
+    var selectedSessionHasUnread: Bool {
+        guard let selectedSessionID else { return false }
+        return unreadAgentSessionIDs.contains(selectedSessionID)
     }
 
     var pinnedSessions: [ZSession] {
@@ -201,6 +207,34 @@ final class AppStore: ObservableObject {
         ZenithTokenStore.save(accessToken)
     }
 
+    func markSelectedSessionRead() {
+        markSessionRead(selectedSessionID)
+    }
+
+    func markSessionRead(_ sessionID: String?) {
+        guard let sessionID else { return }
+        unreadAgentSessionIDs.remove(sessionID)
+    }
+
+    func markAgentUnread(sessionID: String) {
+        unreadAgentSessionIDs.insert(sessionID)
+    }
+
+    func isAgentVisibleMessage(_ event: ZEvent) -> Bool {
+        switch event.type {
+        case "assistant_text":
+            return event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        case "turn_finished":
+            return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        case "error", "artifact_created":
+            return true
+        case "job_ran":
+            return event.job != nil
+        default:
+            return false
+        }
+    }
+
     func applyServerSettings(serverURL: String, accessToken: String) async {
         let cleanURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanURL.isEmpty else { return }
@@ -237,6 +271,7 @@ final class AppStore: ObservableObject {
         omittedHistoryEventCount = 0
         memoryChatCache = [:]
         memoryChatCacheOrder = []
+        unreadAgentSessionIDs = []
     }
 
     func startLiveTracking() async {
@@ -422,6 +457,7 @@ final class AppStore: ObservableObject {
     func select(sessionID: String) async {
         if loadingSessionID == sessionID {
             selectedSessionID = sessionID
+            markSessionRead(sessionID)
             syncSelectedRunningState()
             return
         }
@@ -442,6 +478,7 @@ final class AppStore: ObservableObject {
         status = serverReachable ? "Loading chat" : "Server offline"
         processSnapshot = nil
         processLogTail = nil
+        markSessionRead(sessionID)
         AppLogger.info("select session=\(sessionID)")
         var loadedFromCache = false
         if let cached = memoryCachedChat(sessionID) {
@@ -1126,6 +1163,9 @@ final class AppStore: ObservableObject {
             omittedHistoryEventCount += overflow
         }
         rebuildDisplayEvents()
+        if event.session_id != selectedSessionID, isAgentVisibleMessage(event) {
+            markAgentUnread(sessionID: event.session_id)
+        }
         if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
             AppLogger.info("event session=\(event.session_id) seq=\(event.seq) type=\(event.type)")
         }
