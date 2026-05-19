@@ -16,6 +16,29 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - TestFlight Build 25 Uploaded
+
+Summary:
+
+- Build `25` includes the archive-chat support and latest-timeline reveal
+  gating fixes.
+- Bumped all project targets from build `24` to build `25`.
+- Committed the build bump:
+  `49bc592 Bump build number for TestFlight 25`.
+- Archived and uploaded iOS/iPadOS build `25` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `25` successfully:
+  `Uploaded ZenithDockMac`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-25.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-25.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-25 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-25.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-25.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-25 -quiet -allowProvisioningUpdates`
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-19 Follow-Up - Mask Initial Timeline Positioning
 
 Problem:
