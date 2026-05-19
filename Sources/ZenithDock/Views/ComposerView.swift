@@ -11,19 +11,21 @@ struct ComposerView: View {
     @State private var isAttachmentDropTargeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !store.uploads.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(store.uploads) { file in
-                            UploadChip(file: file, url: store.fileURL(file)) {
-                                store.removeUpload(file)
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 7) {
+                if !store.uploads.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(store.uploads) { file in
+                                UploadChip(file: file, url: store.fileURL(file)) {
+                                    store.removeUpload(file)
+                                }
                             }
                         }
+                        .padding(.horizontal, 2)
                     }
                 }
-            }
-            VStack(alignment: .leading, spacing: 6) {
+
                 StablePromptEditor(text: $draftPrompt, isEditable: store.selectedSession != nil, resetID: editorResetID) {
                     sendDraft($0)
                 } onDropFiles: { urls in
@@ -39,65 +41,28 @@ struct ComposerView: View {
                     if !editorHasVisibleText {
                         Text("Message")
                             .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                             .allowsHitTesting(false)
                     }
                 }
-                HStack(spacing: 8) {
-                    Button {
-                        importerOpen = true
-                    } label: {
-                        Image(systemName: "paperclip")
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(store.selectedSession == nil)
-                    .opacity(store.selectedSession == nil ? 0.45 : 1)
-                    .help("Attach files")
 
-                    if let session = store.selectedSession {
-                        HStack(spacing: 5) {
-                            Image(systemName: session.backend == "codex" ? "bolt.fill" : "sparkles")
-                                .font(.caption2.weight(.semibold))
-                            Text(runtimeLabel(for: session))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .help(store.runtimeCatalog.compactSummary(for: session))
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if store.isRunning {
-                        ComposerRunningStatus(backend: store.selectedSession?.backend ?? "agent")
-                    }
-
-                    Button {
-                        sendDraft()
-                    } label: {
-                        Image(systemName: store.isRunning ? "text.line.last.and.arrowtriangle.forward.circle.fill" : "arrow.up.circle.fill")
-                            .font(.title3)
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(store.selectedSession == nil || draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .help(store.isRunning ? "Queue message" : "Send message")
-                }
+                commandBar
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(Theme.card)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.card)
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(isAttachmentDropTargeted ? Color.accentColor.opacity(0.80) : Theme.line, lineWidth: isAttachmentDropTargeted ? 2 : 1)
             }
             .overlay {
                 if isAttachmentDropTargeted {
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Color.accentColor.opacity(0.85), style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
                         .allowsHitTesting(false)
                 }
@@ -107,7 +72,7 @@ struct ComposerView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 9)
         .background(Theme.panel)
         .onChange(of: store.selectedSessionID) {
             draftPrompt = ""
@@ -123,12 +88,203 @@ struct ComposerView: View {
         return CGFloat(visibleLines * 18 + 12)
     }
 
+    @ViewBuilder
+    private var commandBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                importerOpen = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 27, height: 27)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(store.selectedSession == nil ? .tertiary : .secondary)
+            .disabled(store.selectedSession == nil)
+            .help("Attach files")
+
+            if let session = store.selectedSession {
+                backendMenu(for: session)
+                runtimeMenu(for: session)
+            }
+
+            Spacer(minLength: 8)
+
+            if store.isRunning {
+                ComposerActivityIndicator(backend: store.selectedSession?.backend ?? "agent") {
+                    Task { await store.stop() }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+
+            Image(systemName: "mic")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 24, height: 24)
+                .help("Voice input is not enabled")
+
+            Button {
+                sendDraft()
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 29, height: 29)
+                    .background(canSend ? Color.accentColor : Color.secondary.opacity(0.18))
+                    .foregroundStyle(canSend ? Color.white : Color.secondary)
+                    .clipShape(Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .help(store.isRunning ? "Queue message" : "Send message")
+        }
+        .frame(minHeight: 31)
+    }
+
+    private var canSend: Bool {
+        store.selectedSession != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func backendMenu(for session: ZSession) -> some View {
+        Menu {
+            Button {
+                setBackend("claude")
+            } label: {
+                optionLabel("Claude", selected: session.backend == "claude")
+            }
+            Button {
+                setBackend("codex")
+            } label: {
+                optionLabel("Codex", selected: session.backend == "codex")
+            }
+        } label: {
+            composerChip(
+                icon: session.backend == "codex" ? "bolt.fill" : "sparkles",
+                text: session.backend.capitalized,
+                tint: session.backend == "codex" ? .orange : .blue
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Backend")
+    }
+
+    private func runtimeMenu(for session: ZSession) -> some View {
+        Menu {
+            Section("Model") {
+                ForEach(modelOptions(for: session)) { option in
+                    Button {
+                        setModel(option.value)
+                    } label: {
+                        optionLabel(option.label, selected: selected(session.model, matches: option.value))
+                    }
+                }
+            }
+
+            Section("Effort") {
+                ForEach(effortOptions(for: session)) { option in
+                    Button {
+                        setEffort(option.value)
+                    } label: {
+                        optionLabel(option.label, selected: selected(session.effort, matches: option.value))
+                    }
+                }
+            }
+        } label: {
+            composerChip(
+                icon: "gauge.with.dots.needle.67percent",
+                text: runtimeBarLabel(for: session),
+                tint: .primary,
+                trailingChevron: true
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: true, vertical: false)
+        .help(store.runtimeCatalog.compactSummary(for: session))
+    }
+
+    private func composerChip(icon: String, text: String, tint: Color, trailingChevron: Bool = false) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if trailingChevron {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .frame(height: 27)
+        .background(Color.primary.opacity(0.055))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+    }
+
+    private func optionLabel(_ text: String, selected: Bool) -> some View {
+        Label(text, systemImage: selected ? "checkmark" : "circle")
+    }
+
     private func runtimeLabel(for session: ZSession) -> String {
         let model = store.runtimeCatalog.modelLabel(session.model, backend: session.backend)
         let effort = store.runtimeCatalog.effortLabel(session.effort, backend: session.backend)
         let compactModel = model == "Server default" ? "Default" : model
         let compactEffort = effort == "Server default" ? "" : effort
         return [compactModel, compactEffort].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func runtimeBarLabel(for session: ZSession) -> String {
+        let label = runtimeLabel(for: session)
+        return label
+            .replacingOccurrences(of: "Server default (", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "Extra High", with: "XHigh")
+    }
+
+    private func modelOptions(for session: ZSession) -> [ZRuntimeOption] {
+        optionsWithCurrent(store.runtimeCatalog.models(for: session.backend), current: session.model)
+    }
+
+    private func effortOptions(for session: ZSession) -> [ZRuntimeOption] {
+        optionsWithCurrent(store.runtimeCatalog.efforts(for: session.backend), current: session.effort)
+    }
+
+    private func optionsWithCurrent(_ options: [ZRuntimeOption], current: String?) -> [ZRuntimeOption] {
+        let clean = current?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !clean.isEmpty, !options.contains(where: { $0.value == clean }) else {
+            return options
+        }
+        return options + [ZRuntimeOption(value: clean, label: clean)]
+    }
+
+    private func selected(_ current: String?, matches value: String) -> Bool {
+        (current?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") == value
+    }
+
+    private func setBackend(_ backend: String) {
+        guard store.selectedSession?.backend != backend else { return }
+        Task { await store.updateSelected(backend: backend, model: "", effort: "") }
+    }
+
+    private func setModel(_ model: String) {
+        guard store.selectedSession != nil else { return }
+        Task { await store.updateSelected(model: ZRuntimeCatalog.cleanForAPI(model)) }
+    }
+
+    private func setEffort(_ effort: String) {
+        guard store.selectedSession != nil else { return }
+        Task { await store.updateSelected(effort: ZRuntimeCatalog.cleanForAPI(effort)) }
     }
 
     private func sendDraft(_ explicitText: String? = nil) {
@@ -167,32 +323,29 @@ struct ComposerView: View {
     }
 }
 
-private struct ComposerRunningStatus: View {
-    @EnvironmentObject private var store: AppStore
+private struct ComposerActivityIndicator: View {
     var backend: String
+    var stop: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
-                .frame(width: 12, height: 12)
-            Text("Running")
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
+                .scaleEffect(0.68)
+                .frame(width: 13, height: 13)
             Button(role: .destructive) {
-                Task { await store.stop() }
+                stop()
             } label: {
-                Image(systemName: "stop.circle")
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 18, height: 18)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(Circle())
             }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
+            .buttonStyle(.plain)
             .help("Stop current turn")
         }
         .foregroundStyle(backend == "codex" ? .orange : .blue)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background((backend == "codex" ? Color.orange : Color.blue).opacity(0.12))
-        .clipShape(Capsule())
         .help("\(backend.capitalized) is running. New sends will queue.")
     }
 }

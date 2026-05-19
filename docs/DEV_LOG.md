@@ -16,6 +16,31 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Codex-Style Mac Composer
+
+Summary:
+
+- Reworked the macOS composer in
+  `Sources/ZenithDock/Views/ComposerView.swift` into a Codex-style command bar.
+- The editor remains the existing `StablePromptEditor` / `PromptTextView`
+  bridge, so the `ZTextPresenceGate` typing guardrail stays intact.
+- Attachments now live inside the composer surface when present.
+- The bottom strip includes:
+  - plus button for file attach/drop
+  - compact backend menu
+  - compact model/effort menu populated from `store.runtimeCatalog`
+  - subtle running spinner with a small stop button
+  - circular send/queue button
+- The old large running pill was removed from the composer.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-18 Follow-Up - Composer Typing Guardrail
 
 Why the regression happened:
