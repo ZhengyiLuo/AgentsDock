@@ -16,6 +16,30 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Mac TestFlight Build 24 Uploaded
+
+Summary:
+
+- Mac-focused UI build with:
+  - Codex-style trace/change-set presentation
+  - folded long messages
+  - unread agent-message indicators
+- Bumped all project targets from build `23` to build `24` for a macOS
+  TestFlight upload.
+- Committed the build bump:
+  `d3ac97f Bump build number for Mac TestFlight 24`.
+- Archived and uploaded macOS build `24` successfully:
+  `Uploaded ZenithDockMac`.
+- The package is processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-24.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-24.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-24 -quiet -allowProvisioningUpdates`
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-18 Follow-Up - Timeline Trace UI And Unread Agent Messages
 
 Summary:
