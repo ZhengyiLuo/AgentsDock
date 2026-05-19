@@ -16,6 +16,25 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-18 Follow-Up - Stable 0.1.1 Marker
+
+Summary:
+
+- Bumped Xcode `MARKETING_VERSION` from `0.1.0` to `0.1.1` for iOS, macOS,
+  and `ZenithCore` build configurations.
+- Stable tag target is the current Codex-style composer build.
+- Next UX direction from screenshots:
+  - show code edits as a compact changed-files card with per-file diff review
+  - keep reasoning/tool traces available but folded away from the main answer
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-18 Follow-Up - Codex-Style Mac Composer
 
 Summary:
