@@ -46,6 +46,13 @@ Verification:
 - `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
 - `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
 - Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+- Deployed `server/agent_server.py` to `sonic:/home/zen/Zenithbot/scripts/agent_server.py`
+  and restarted `zenithbot-agent.service`.
+  - First deploy attempt with the default `~/Zenithbot` path copied the file,
+    but remote `py_compile` failed because the script quotes `~`.
+  - Reran with `ZENITHDOCK_REMOTE_APP_DIR=/home/zen/Zenithbot`.
+  - Health check got `401` without a token, which means the service is back up
+    and enforcing auth.
 
 ## 2026-05-18 Follow-Up - Mac TestFlight Build 24 Uploaded
 
