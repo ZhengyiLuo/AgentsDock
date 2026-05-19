@@ -16,6 +16,34 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - Mask Initial Timeline Positioning
+
+Problem:
+
+- Switching/opening chats could briefly show a large wall of history moving
+  through the timeline before the app restored the latest-message position.
+- The root cause was visual, not data loading: rows rendered before the
+  `ScrollViewReader` bottom scroll settled.
+
+Change:
+
+- Added an initial-positioning mask in
+  `Sources/ZenithDock/Views/TimelineView.swift`.
+- During session restore, timeline rows still lay out invisibly so the bottom
+  anchor exists, then the app scrolls to bottom without animation and reveals
+  the timeline after a short settle delay.
+- Empty chats are handled by revealing once `loadedSessionID` matches the
+  selected session.
+- The bottom/new-message button stays hidden while the positioning mask is up.
+
+Verification:
+
+- `swift build --product ZenithDock` passed.
+- `swift run ZenithGuardrails` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-19 Follow-Up - Folded Message Notice Styling
 
 Summary:

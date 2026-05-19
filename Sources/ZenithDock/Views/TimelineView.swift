@@ -16,6 +16,9 @@ struct TimelineView: View {
     @State private var isFileDropTargeted = false
     @State private var historyLoadSuppressedUntil = Date.distantPast
     @State private var lastObservedEventSeq = 0
+    @State private var isInitialTimelineMasked = false
+    @State private var maskedSessionID: String?
+    @State private var initialTimelineRevealRevision = 0
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
     private let defaultVisibleRowLimit = 100
@@ -30,6 +33,7 @@ struct TimelineView: View {
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
+        let displaySignature = "\(displayEvents.count):\(displayEvents.last?.id ?? "")"
 
         VStack(spacing: 0) {
             HeaderView(
@@ -103,8 +107,14 @@ struct TimelineView: View {
                             }
                         )
                     }
+                    .opacity(isInitialTimelineMasked ? 0 : 1)
                     .coordinateSpace(name: coordinateSpaceName)
-                    if isTimelineScrollable && !isAtBottom && !displayEvents.isEmpty {
+                    if isInitialTimelineMasked, store.selectedSession != nil {
+                        TimelinePositioningOverlay()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(false)
+                    }
+                    if !isInitialTimelineMasked && isTimelineScrollable && !isAtBottom && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
                         } label: {
@@ -138,11 +148,13 @@ struct TimelineView: View {
                     if isAtBottom {
                         scrollToBottom(proxy)
                     }
+                    settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: store.scrollToEventRevision) {
                     scrollToRequestedEvent(proxy)
                 }
                 .onChange(of: store.selectedSessionID) {
+                    beginInitialTimelineMask()
                     isAtBottom = true
                     isTimelineScrollable = false
                     olderHistoryLoadArmed = true
@@ -152,6 +164,7 @@ struct TimelineView: View {
                     lastObservedEventSeq = maxEventSeq(displayEvents)
                     store.markSelectedSessionRead()
                     scrollToBottom(proxy)
+                    settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
                     let previousObservedSeq = lastObservedEventSeq
@@ -167,6 +180,13 @@ struct TimelineView: View {
                     }
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
+                    settleInitialTimelinePosition(proxy)
+                }
+                .onChange(of: displaySignature) {
+                    settleInitialTimelinePosition(proxy)
+                }
+                .onChange(of: store.loadedSessionID) {
+                    settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
@@ -192,7 +212,51 @@ struct TimelineView: View {
             if isAtBottom {
                 store.markSelectedSessionRead()
             }
+            if isInitialTimelineMasked {
+                isInitialTimelineMasked = false
+            }
         }
+    }
+
+    private func beginInitialTimelineMask() {
+        initialTimelineRevealRevision += 1
+        maskedSessionID = store.selectedSessionID
+        isInitialTimelineMasked = store.selectedSessionID != nil
+    }
+
+    private func settleInitialTimelinePosition(_ proxy: ScrollViewProxy) {
+        guard isInitialTimelineMasked,
+              let sessionID = maskedSessionID,
+              sessionID == store.selectedSessionID else {
+            return
+        }
+        let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
+        guard canSettle else { return }
+        initialTimelineRevealRevision += 1
+        let revision = initialTimelineRevealRevision
+        DispatchQueue.main.async {
+            guard initialTimelineMaskIsCurrent(revision: revision, sessionID: sessionID) else { return }
+            if !store.displayEvents.isEmpty {
+                withTransaction(noAnimationTransaction) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                    isAtBottom = true
+                    store.markSelectedSessionRead()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                guard initialTimelineMaskIsCurrent(revision: revision, sessionID: sessionID) else { return }
+                withTransaction(noAnimationTransaction) {
+                    isInitialTimelineMasked = false
+                }
+            }
+        }
+    }
+
+    private func initialTimelineMaskIsCurrent(revision: Int, sessionID: String) -> Bool {
+        isInitialTimelineMasked &&
+            initialTimelineRevealRevision == revision &&
+            maskedSessionID == sessionID &&
+            store.selectedSessionID == sessionID
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
@@ -427,6 +491,22 @@ private struct TimelineFileDropOverlay: View {
                     .background(.regularMaterial, in: Capsule())
             }
             .transition(.opacity.combined(with: .scale(scale: 0.98)))
+    }
+}
+
+private struct TimelinePositioningOverlay: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Opening latest messages")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.softLine))
     }
 }
 
