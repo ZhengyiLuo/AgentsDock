@@ -16,6 +16,37 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - Fork History Copy And Scroll Jitter
+
+Findings:
+
+- Codex memory-fork fallback already packs the latest window:
+  `build_fork_memory()` reads the newest `160` events with `tail=True`, clips
+  each message around `ZENITHBOT_FORK_MEMORY_ITEM_CHARS` / `1800` chars, and
+  caps the whole seed at `ZENITHBOT_FORK_MEMORY_CHARS` / `24000` chars.
+- The visible fork timeline copy was not latest:
+  `copy_fork_history()` called `read_events(parent_id, limit=10000)`, but
+  `read_events()` clamps every request to `ZENITHBOT_MAX_EVENT_RESPONSE_LIMIT`
+  / `1000` and, without `tail=True`, returns the first events.
+
+Changes:
+
+- `server/agent_server.py` now uses `iter_session_events(parent_id)` for the
+  internal fork history copy, so it is not capped by API pagination.
+- Made macOS unread state non-chatty:
+  - `markSessionRead` and `markAgentUnread` now no-op when state is unchanged.
+  - Timeline scroll metrics only clear unread state near bottom when the
+    selected chat actually has unread state.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-18 Follow-Up - Mac TestFlight Build 24 Uploaded
 
 Summary:

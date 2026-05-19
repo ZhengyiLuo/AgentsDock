@@ -264,7 +264,7 @@ struct TimelineView: View {
         if isAtBottom != next {
             isAtBottom = next
         }
-        if next {
+        if next, store.selectedSessionHasUnread {
             store.markSelectedSessionRead()
         }
     }

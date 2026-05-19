@@ -212,11 +212,12 @@ final class AppStore: ObservableObject {
     }
 
     func markSessionRead(_ sessionID: String?) {
-        guard let sessionID else { return }
+        guard let sessionID, unreadAgentSessionIDs.contains(sessionID) else { return }
         unreadAgentSessionIDs.remove(sessionID)
     }
 
     func markAgentUnread(sessionID: String) {
+        guard !unreadAgentSessionIDs.contains(sessionID) else { return }
         unreadAgentSessionIDs.insert(sessionID)
     }
 

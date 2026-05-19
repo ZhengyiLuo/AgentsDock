@@ -2038,7 +2038,9 @@ async def import_session_history(sess: dict[str, Any], *, force: bool = False, l
 
 
 async def copy_fork_history(parent_id: str, child_id: str) -> int:
-    parent_events = read_events(parent_id, limit=10000)
+    # Fork history copy is an internal clone operation, not an API page. Do not
+    # route it through read_events(), which clamps responses for UI pagination.
+    parent_events = list(iter_session_events(parent_id))
     assistant_runs = {
         event.get("run_id")
         for event in parent_events
