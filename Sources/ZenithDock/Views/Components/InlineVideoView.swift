@@ -9,6 +9,7 @@ import WebKit
 struct InlineVideoView: View {
     let url: URL
     @State private var isLoaded = false
+    @State private var autoplayOnLoad = false
     #if os(macOS)
     @State private var thumbnail: NSImage?
     @State private var thumbnailFailed = false
@@ -17,14 +18,14 @@ struct InlineVideoView: View {
     var body: some View {
         ZStack {
             if isLoaded {
-                InlineVideoPlayerView(url: url)
+                InlineVideoPlayerView(url: url, autoplay: autoplayOnLoad)
             } else {
                 #if os(macOS)
                 VideoPlaceholderView(
                     filename: url.lastPathComponent,
                     thumbnail: thumbnail,
                     thumbnailFailed: thumbnailFailed,
-                    play: { isLoaded = true },
+                    play: startInlinePlayback,
                     fullscreen: {
                         #if os(macOS)
                         VideoFullscreenPresenter.present(url: url)
@@ -34,7 +35,7 @@ struct InlineVideoView: View {
                 #else
                 VideoPlaceholderView(
                     filename: url.lastPathComponent,
-                    play: { isLoaded = true },
+                    play: startInlinePlayback,
                     fullscreen: {}
                 )
                 #endif
@@ -60,6 +61,11 @@ struct InlineVideoView: View {
                 await loadThumbnail()
             }
             #endif
+    }
+
+    private func startInlinePlayback() {
+        autoplayOnLoad = true
+        isLoaded = true
     }
 
     #if os(macOS)
@@ -169,6 +175,7 @@ private struct VideoOverlayButton: View {
 #if os(macOS)
 struct InlineVideoPlayerView: NSViewRepresentable {
     let url: URL
+    let autoplay: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -183,10 +190,16 @@ struct InlineVideoPlayerView: NSViewRepresentable {
     }
 
     func updateNSView(_ playerView: AVPlayerView, context: Context) {
-        guard context.coordinator.loadedURL != url else { return }
-        context.coordinator.loadedURL = url
-        playerView.player?.pause()
-        playerView.player = AVPlayer(url: videoSourceURL(url))
+        if context.coordinator.loadedURL != url {
+            context.coordinator.loadedURL = url
+            context.coordinator.autoplayedURL = nil
+            playerView.player?.pause()
+            playerView.player = AVPlayer(url: videoSourceURL(url))
+        }
+        if autoplay && context.coordinator.autoplayedURL != url {
+            context.coordinator.autoplayedURL = url
+            playerView.player?.play()
+        }
     }
 
     static func dismantleNSView(_ playerView: AVPlayerView, coordinator: Coordinator) {
@@ -197,6 +210,7 @@ struct InlineVideoPlayerView: NSViewRepresentable {
 #elseif os(iOS)
 struct InlineVideoPlayerView: UIViewRepresentable {
     let url: URL
+    let autoplay: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -207,13 +221,15 @@ struct InlineVideoPlayerView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        load(url, into: webView, coordinator: context.coordinator)
+        load(url, autoplay: autoplay, into: webView, coordinator: context.coordinator)
     }
 }
 #endif
 
 final class Coordinator {
     var loadedURL: URL?
+    var loadedAutoplay = false
+    var autoplayedURL: URL?
 }
 
 #if os(macOS)
@@ -313,15 +329,25 @@ private func makeWebView() -> WKWebView {
 }
 
 @MainActor
-private func load(_ url: URL, into webView: WKWebView, coordinator: Coordinator) {
-    guard coordinator.loadedURL != url else { return }
+private func load(_ url: URL, autoplay: Bool, into webView: WKWebView, coordinator: Coordinator) {
+    guard coordinator.loadedURL != url || coordinator.loadedAutoplay != autoplay else { return }
     coordinator.loadedURL = url
-    webView.loadHTMLString(videoHTML(for: url), baseURL: url.deletingLastPathComponent())
+    coordinator.loadedAutoplay = autoplay
+    webView.loadHTMLString(videoHTML(for: url, autoplay: autoplay), baseURL: url.deletingLastPathComponent())
 }
 #endif
 
-private func videoHTML(for url: URL) -> String {
+private func videoHTML(for url: URL, autoplay: Bool = false) -> String {
     let src = escapeHTML(videoSourceURL(url).absoluteString)
+    let autoplayAttribute = autoplay ? " autoplay" : ""
+    let autoplayScript = autoplay ? """
+      <script>
+        window.addEventListener('load', () => {
+          const video = document.querySelector('video');
+          if (video) { video.play().catch(() => {}); }
+        });
+      </script>
+    """ : ""
     return """
     <!doctype html>
     <html>
@@ -344,7 +370,8 @@ private func videoHTML(for url: URL) -> String {
       </style>
     </head>
     <body>
-      <video src="\(src)" controls playsinline preload="metadata"></video>
+      <video src="\(src)" controls playsinline preload="metadata"\(autoplayAttribute)></video>
+      \(autoplayScript)
     </body>
     </html>
     """

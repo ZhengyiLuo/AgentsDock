@@ -197,6 +197,17 @@ func checkTimelineCombinesRunTraces() throws {
     try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
 }
 
+func checkInlineVideoPlayAutoplays() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let inlineVideo = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/Components/InlineVideoView.swift"), encoding: .utf8)
+
+    try assert(inlineVideo.contains("@State private var autoplayOnLoad = false"), "Inline video should track autoplay intent from the placeholder")
+    try assert(inlineVideo.contains("InlineVideoPlayerView(url: url, autoplay: autoplayOnLoad)"), "Inline video must pass autoplay intent to the player")
+    try assert(inlineVideo.contains("playerView.player?.play()"), "Mac inline video player must start playback after the user presses Play")
+    try assert(inlineVideo.contains("videoHTML(for: url, autoplay: autoplay)"), "iOS inline video web player must receive autoplay intent")
+    try assert(inlineVideo.contains("video.play().catch"), "iOS inline video web player should attempt playback after loading")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -210,6 +221,7 @@ do {
     try checkVideoMetadataIsNotHiddenByMixedFilePaging()
     try checkRuntimeAutosavesAndBackendIcons()
     try checkTimelineCombinesRunTraces()
+    try checkInlineVideoPlayAutoplays()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

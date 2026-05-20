@@ -2067,3 +2067,20 @@ Changes:
 - Orphan trace events still group contiguously for debug/history cases.
 - Added a guardrail check so timeline projection keeps run-scoped trace
   grouping.
+
+### Inline Video Play Autoplay
+
+User issue:
+
+- Pressing Play on a timeline video only loaded the video controls. The user had
+  to press Play again inside the video timeline.
+
+Changes:
+
+- Inline timeline video placeholders now preserve the user's play intent.
+- macOS `AVPlayerView` starts playback immediately after the inline player is
+  created from the placeholder Play action.
+- iOS/iPadOS inline web video receives the same autoplay intent through the
+  generated HTML and attempts `video.play()` after load.
+- Added a guardrail check so the inline Play button keeps meaning play, not just
+  load.
