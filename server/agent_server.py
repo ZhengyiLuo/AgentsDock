@@ -3634,10 +3634,17 @@ async def list_session_files(
     session_id: str,
     limit: int | None = Query(default=None, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    content_prefix: str | None = Query(default=None),
 ) -> dict[str, Any]:
     if session_id not in STORE.sessions:
         raise HTTPException(status_code=404, detail="session not found")
     records = list_session_file_records(session_id)
+    if content_prefix:
+        prefix = content_prefix.strip().lower()
+        records = [
+            rec for rec in records
+            if str(rec.get("content_type") or "").lower().startswith(prefix)
+        ]
     total = len(records)
     if limit is None:
         return {

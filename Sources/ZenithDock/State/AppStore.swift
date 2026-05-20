@@ -14,9 +14,11 @@ final class AppStore: ObservableObject {
     @Published var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
     @Published var sessionFiles: [ZFile] = []
+    @Published var sessionVideoFiles: [ZFile] = []
     @Published var sessionFilesTotal: Int?
     @Published var sessionFilesHasMore = false
     @Published var isLoadingSessionFiles = false
+    @Published var isLoadingSessionVideos = false
     @Published var prompt = ""
     @Published var isRunning = false
     @Published var status = "Disconnected"
@@ -154,7 +156,8 @@ final class AppStore: ObservableObject {
     }
 
     var sessionVideos: [ZFile] {
-        sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") }
+        mergedFiles(sessionFiles + sessionVideoFiles)
+            .filter { ($0.content_type ?? "").hasPrefix("video/") }
     }
 
     var loadedHistoryLimitReached: Bool {
@@ -282,8 +285,10 @@ final class AppStore: ObservableObject {
         displayEvents = []
         uploads = []
         sessionFiles = []
+        sessionVideoFiles = []
         sessionFilesTotal = nil
         sessionFilesHasMore = false
+        sessionFilesNextOffset = 0
         jobs = []
         activeSessionIDs = []
         latestSeenSeq = 0
@@ -521,6 +526,7 @@ final class AppStore: ObservableObject {
             rebuildDisplayEvents()
             uploads = []
             sessionFiles = []
+            sessionVideoFiles = []
             sessionFilesTotal = nil
             sessionFilesHasMore = false
             sessionFilesNextOffset = 0
@@ -567,6 +573,7 @@ final class AppStore: ObservableObject {
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             saveSelectedChatCache()
             Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
+            Task { await loadSessionVideoFiles(sessionID: sessionID, generation: generation) }
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
             requestScrollToBottom(immediate: true)
@@ -629,6 +636,7 @@ final class AppStore: ObservableObject {
     func refreshSelectedFiles() async {
         guard let sid = selectedSessionID else { return }
         await loadSessionFiles(sessionID: sid, generation: selectionGeneration, reset: true)
+        await loadSessionVideoFiles(sessionID: sid, generation: selectionGeneration)
     }
 
     func loadMoreSelectedFiles() async {
@@ -793,6 +801,11 @@ final class AppStore: ObservableObject {
                 displayEvents = []
                 latestSeenSeq = 0
                 omittedHistoryEventCount = 0
+                sessionFiles = []
+                sessionVideoFiles = []
+                sessionFilesTotal = nil
+                sessionFilesHasMore = false
+                sessionFilesNextOffset = 0
                 syncSelectedRunningState()
                 requestScrollToBottom(immediate: true)
                 uploads = []
@@ -1318,6 +1331,7 @@ final class AppStore: ObservableObject {
         events = timelineEvents(from: cached.events)
         omittedHistoryEventCount = cached.omittedHistoryEventCount
         sessionFiles = mergedFiles((cached.sessionFiles ?? []) + files(from: events))
+        sessionVideoFiles = mergedFiles(sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") })
         sessionFilesTotal = sessionFiles.isEmpty ? nil : sessionFiles.count
         sessionFilesHasMore = false
         sessionFilesNextOffset = 0
@@ -1331,6 +1345,10 @@ final class AppStore: ObservableObject {
         let known = files(from: events)
         guard !known.isEmpty || sessionFiles.isEmpty else { return }
         sessionFiles = mergedFiles(sessionFiles + known)
+        let videos = known.filter { ($0.content_type ?? "").hasPrefix("video/") }
+        if !videos.isEmpty {
+            sessionVideoFiles = mergedFiles(sessionVideoFiles + videos)
+        }
     }
 
     private func files(from source: [ZEvent]) -> [ZFile] {
@@ -1341,6 +1359,9 @@ final class AppStore: ObservableObject {
 
     private func upsertSessionFile(_ file: ZFile) {
         sessionFiles = mergedFiles(sessionFiles + [file])
+        if (file.content_type ?? "").hasPrefix("video/") {
+            sessionVideoFiles = mergedFiles(sessionVideoFiles + [file])
+        }
         if let total = sessionFilesTotal {
             sessionFilesTotal = max(total, sessionFiles.count)
         }
@@ -1369,7 +1390,7 @@ final class AppStore: ObservableObject {
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
             let timelineFiles = files(from: events)
             if reset {
-                sessionFiles = mergedFiles(res.files + timelineFiles)
+                sessionFiles = mergedFiles(res.files + timelineFiles + sessionVideoFiles)
             } else {
                 sessionFiles = mergedFiles(sessionFiles + res.files + timelineFiles)
             }
@@ -1379,6 +1400,34 @@ final class AppStore: ObservableObject {
             saveSelectedChatCache()
         } catch {
             AppLogger.error("files failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
+        }
+    }
+
+    private func loadSessionVideoFiles(sessionID: String, generation: Int) async {
+        guard !isLoadingSessionVideos else { return }
+        isLoadingSessionVideos = true
+        defer { isLoadingSessionVideos = false }
+        do {
+            struct Response: Codable {
+                let files: [ZFile]
+                let total: Int?
+            }
+            let res: Response = try await api.get(
+                "/api/sessions/\(sessionID)/files",
+                queryItems: [
+                    URLQueryItem(name: "content_prefix", value: "video/")
+                ]
+            )
+            guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
+            let videos = mergedFiles(res.files + files(from: events).filter { ($0.content_type ?? "").hasPrefix("video/") })
+            sessionVideoFiles = videos
+            sessionFiles = mergedFiles(sessionFiles + videos)
+            if let total = res.total, total > videos.count {
+                AppLogger.info("video metadata partially loaded session=\(sessionID) loaded=\(videos.count) total=\(total)")
+            }
+            saveSelectedChatCache()
+        } catch {
+            AppLogger.error("videos failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
         }
     }
 

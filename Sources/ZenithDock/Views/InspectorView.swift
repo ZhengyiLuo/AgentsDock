@@ -1235,7 +1235,7 @@ private struct ChatFilesInspector: View {
     private let documentPageSize = 12
 
     private var videos: [ZFile] {
-        sortedLatestFirst(files.filter { ($0.content_type ?? "").hasPrefix("video/") })
+        sortedLatestFirst(store.sessionVideos)
     }
 
     private var documents: [ZFile] {
@@ -1254,14 +1254,14 @@ private struct ChatFilesInspector: View {
     }
 
     private var fileChangeToken: String {
-        "\(files.count):\(files.first?.id ?? ""):\(files.last?.id ?? "")"
+        "\(files.count):\(videos.count):\(files.first?.id ?? ""):\(files.last?.id ?? ""):\(videos.first?.id ?? "")"
     }
 
     var body: some View {
         GroupBox {
             DisclosureGroup(isExpanded: $isExpanded) {
                 VStack(alignment: .leading, spacing: 10) {
-                    if files.isEmpty {
+                    if files.isEmpty && videos.isEmpty {
                         Text("No files in this chat yet")
                             .font(.caption)
                             .foregroundStyle(.secondary)

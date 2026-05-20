@@ -1967,3 +1967,26 @@ Changes:
 - Retried the reveal when the latest snapshot load completes, then scrolled to
   bottom without animation before showing the timeline.
 - Added a guardrail check for this reveal contract.
+
+### Video Metadata Loading
+
+User issue:
+
+- Long-running chats with many files could show only a few videos in the Mac
+  Files & Videos panel.
+
+Finding:
+
+- The server had no saved-video count cap, but the Mac app loaded a mixed
+  newest-first file page. If the newest page was mostly logs/CSVs/images, older
+  videos were hidden until more mixed pages were loaded.
+- Artifacts written by an active run still appear after the run writes the
+  ZenithDock manifest and the server collects it.
+
+Changes:
+
+- Added a server `content_prefix` query on `/api/sessions/{session_id}/files`.
+- Mac now fetches `video/` metadata independently from the mixed file page and
+  renders that independent list in the video grid.
+- Added a guardrail check so video metadata cannot regress back to being
+  limited by mixed file pagination.

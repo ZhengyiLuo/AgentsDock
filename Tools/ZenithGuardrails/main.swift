@@ -148,6 +148,19 @@ func checkConnectionFailuresDoNotModal() throws {
     try assert(macStore.contains("} else {\n            return\n        }"), "Mac refresh should not keep loading sessions/jobs after health is offline")
 }
 
+func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+
+    try assert(server.contains("content_prefix: str | None = Query(default=None)"), "Server files API must support content-type prefix filtering")
+    try assert(server.contains("str(rec.get(\"content_type\") or \"\").lower().startswith(prefix)"), "Server files API must filter records before paging")
+    try assert(macStore.contains("@Published var sessionVideoFiles: [ZFile] = []"), "Mac store must keep video metadata separate from mixed file pages")
+    try assert(macStore.contains("URLQueryItem(name: \"content_prefix\", value: \"video/\")"), "Mac store must fetch videos independently of mixed file paging")
+    try assert(inspector.contains("sortedLatestFirst(store.sessionVideos)"), "Mac files inspector must render the independent video list")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -158,6 +171,7 @@ do {
     try checkArchiveSessionBehavior()
     try checkTimelineRevealWaitsForLatestSnapshot()
     try checkConnectionFailuresDoNotModal()
+    try checkVideoMetadataIsNotHiddenByMixedFilePaging()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)
