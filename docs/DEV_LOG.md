@@ -1990,3 +1990,28 @@ Changes:
   renders that independent list in the video grid.
 - Added a guardrail check so video metadata cannot regress back to being
   limited by mixed file pagination.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+- `swift build --product ZenithDock` passed.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
+  build and verified codesign.
+
+### TestFlight Build 27
+
+Changes:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `26` to `27`.
+- Uploaded iOS/iPadOS build 27 to App Store Connect.
+- Uploaded macOS build 27 to App Store Connect.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed before archiving.
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-27.xcarchive archive -quiet -allowProvisioningUpdates` passed.
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-27.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-27 -quiet -allowProvisioningUpdates` uploaded successfully.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-27.xcarchive archive -quiet -allowProvisioningUpdates` passed.
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-27.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-27 -quiet -allowProvisioningUpdates` uploaded successfully.
