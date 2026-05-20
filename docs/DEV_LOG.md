@@ -16,6 +16,32 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - Inline Mac Connection Failures
+
+Problem:
+
+- On the first Mac connection attempt, a normal server-unreachable state showed
+  as a blocking modal alert.
+
+Finding:
+
+- Mac startup/background refresh already passed `showErrors: false`, but
+  user-triggered reconnect and refresh paths still promoted `NSURLErrorDomain`
+  failures into global `errorText`.
+- `RootView` shows every `errorText` as a modal, so a missing server became an
+  app-stopping alert instead of an inline red/offline status.
+
+Change:
+
+- Added `connectionProblemText` to the Mac store for inline server reachability
+  failures.
+- Network connection failures now update the server status area and do not set
+  modal `errorText`.
+- Auth/token and real app/action errors still use the modal path.
+- `refresh()` now stops after health fails instead of continuing into sessions
+  and jobs requests against a known-offline server.
+- Added guardrails so Mac connection failures stay inline.
+
 ## 2026-05-19 Follow-Up - TestFlight Build 26 Uploaded
 
 Summary:

@@ -21,6 +21,7 @@ final class AppStore: ObservableObject {
     @Published var isRunning = false
     @Published var status = "Disconnected"
     @Published var errorText: String?
+    @Published var connectionProblemText: String?
     @Published var jobs: [ZJob] = []
     @Published var runtimeCatalog = ZRuntimeCatalogSnapshot.fallback
     @Published var showDebugEvents = false {
@@ -138,6 +139,9 @@ final class AppStore: ObservableObject {
         let loaded = sessions.isEmpty ? "no chats loaded" : "\(sessions.count) chats loaded"
         let active = activeSessionIDs.isEmpty ? "no active runs" : "\(activeSessionIDs.count) active"
         let stream = selectedSessionID == nil ? "no chat selected" : (socketLive ? "streaming selected chat" : "stream reconnecting")
+        if !serverReachable, let connectionProblemText, !connectionProblemText.isEmpty {
+            return connectionProblemText
+        }
         return "\(loaded) · \(active) · \(stream)"
     }
 
@@ -287,6 +291,7 @@ final class AppStore: ObservableObject {
         memoryChatCache = [:]
         memoryChatCacheOrder = []
         unreadAgentSessionIDs = []
+        connectionProblemText = nil
     }
 
     func startLiveTracking() async {
@@ -322,6 +327,8 @@ final class AppStore: ObservableObject {
         await refreshHealth(showErrors: showErrors)
         if serverReachable {
             await refreshRuntimeCatalog(showErrors: false)
+        } else {
+            return
         }
         await refreshSessions(showErrors: showErrors)
         await refreshJobs(showErrors: showErrors)
@@ -357,6 +364,7 @@ final class AppStore: ObservableObject {
             }
             activeSessionIDs = Set(res.active)
             lastHealthAt = Date()
+            connectionProblemText = nil
             syncSelectedRunningState()
             status = socketLive ? "Live" : "Server connected"
             if let sid = selectedSessionID, !activeSessionIDs.contains(sid), processSnapshot?.active == true {
@@ -369,7 +377,9 @@ final class AppStore: ObservableObject {
             activeSessionIDs = []
             syncSelectedRunningState()
             status = "Server offline"
-            AppLogger.warning("health failed \(serverErrorMessage(error) ?? "\(error)")")
+            let message = serverErrorMessage(error) ?? "\(error)"
+            connectionProblemText = message
+            AppLogger.warning("health failed \(message)")
             if showErrors {
                 reportServerError(error)
             }
@@ -1543,6 +1553,11 @@ final class AppStore: ObservableObject {
 
     private func reportServerError(_ error: Error) {
         guard let message = serverErrorMessage(error) else { return }
+        if isConnectionError(error) {
+            connectionProblemText = message
+            status = "Server offline"
+            return
+        }
         errorText = message
     }
 
@@ -1558,6 +1573,11 @@ final class AppStore: ObservableObject {
             return "Agent server rejected the access token. Check ZENITHDOCK_AGENT_TOKEN on the server and the token field in the app."
         }
         return error.localizedDescription
+    }
+
+    private func isConnectionError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && ns.code != NSURLErrorCancelled
     }
 
     private func cleanServerURL() {

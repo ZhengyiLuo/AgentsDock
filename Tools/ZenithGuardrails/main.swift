@@ -138,6 +138,16 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!mobileStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "iOS chat open must not request a non-tail catch-up page")
 }
 
+func checkConnectionFailuresDoNotModal() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("@Published var connectionProblemText: String?"), "Mac store must keep connection failures as inline state")
+    try assert(macStore.contains("if isConnectionError(error)"), "Mac network failures must be separated from blocking alerts")
+    try assert(macStore.contains("connectionProblemText = message"), "Mac connection failure should populate inline connection text")
+    try assert(macStore.contains("} else {\n            return\n        }"), "Mac refresh should not keep loading sessions/jobs after health is offline")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -147,6 +157,7 @@ do {
     try checkShellCopyNormalization()
     try checkArchiveSessionBehavior()
     try checkTimelineRevealWaitsForLatestSnapshot()
+    try checkConnectionFailuresDoNotModal()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)
