@@ -16,6 +16,29 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-19 Follow-Up - TestFlight Build 26 Uploaded
+
+Summary:
+
+- Build `26` includes the latest-tail chat open fix and structural timeline row
+  suspension to avoid text fly-by CPU spikes.
+- Bumped all project targets from build `25` to build `26`.
+- Committed the build bump:
+  `e012cad Bump build number for TestFlight 26`.
+- Archived and uploaded iOS/iPadOS build `26` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `26` successfully:
+  `Uploaded ZenithDockMac`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-26.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-26.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-26 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-26.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-26.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-26 -quiet -allowProvisioningUpdates`
+- Refreshed and verified `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
 ## 2026-05-19 Follow-Up - Suspend Timeline Rows While Opening
 
 Problem:
