@@ -13,4 +13,12 @@ enum Theme {
     static let queuedBubbleStroke = Color.yellow.opacity(0.48)
     static let jobBubble = Color.orange.opacity(0.08)
     static let jobBubbleStroke = Color.orange.opacity(0.34)
+
+    static func backendIconName(_ backend: String) -> String {
+        backend.lowercased() == "codex" ? "terminal" : "sparkles"
+    }
+
+    static func backendTint(_ backend: String) -> Color {
+        backend.lowercased() == "codex" ? .green : .orange
+    }
 }

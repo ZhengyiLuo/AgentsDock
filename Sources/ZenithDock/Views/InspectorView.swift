@@ -15,6 +15,10 @@ struct InspectorView: View {
     @State private var backend = "claude"
     @State private var model = ""
     @State private var effort = ""
+    @State private var runtimeSaveTask: Task<Void, Never>?
+    @State private var runtimeSaveMessage = ""
+    @State private var isRuntimeSaving = false
+    @State private var runtimeSaveFailed = false
     @State private var jobTitle = ""
     @State private var jobPrompt = ""
     @State private var intervalText = "3600"
@@ -72,6 +76,8 @@ struct InspectorView: View {
                         .pickerStyle(.segmented)
                         .onChange(of: backend) {
                             model = ""
+                            effort = ""
+                            scheduleRuntimeSave()
                         }
                         Picker("Model", selection: $model) {
                             ForEach(modelOptions(for: backend)) { option in
@@ -79,26 +85,24 @@ struct InspectorView: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .onChange(of: model) {
+                            scheduleRuntimeSave(debounceNanoseconds: 450_000_000)
+                        }
                         TextField("Custom model ID", text: $model)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
                             .autocorrectionDisabled()
+                            .onSubmit { scheduleRuntimeSave(debounceNanoseconds: 0) }
                         Picker("Effort", selection: $effort) {
                             ForEach(effortOptions) { option in
                                 Text(option.label).tag(option.value)
                             }
                         }
                         .pickerStyle(.menu)
-                        Button {
-                            saveRuntime()
-                        } label: {
-                            Label("Save Runtime", systemImage: "checkmark.circle.fill")
-                                .frame(maxWidth: .infinity)
+                        .onChange(of: effort) {
+                            scheduleRuntimeSave()
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .tint(.blue)
-                        .help("Save backend, model, and effort for this chat")
+                        runtimeSaveStatus
                         LabeledContent("Pinned", value: session.pinned == true ? "Yes" : "No")
                         LabeledContent("Archived", value: session.archived == true ? "Yes" : "No")
                         LabeledContent("Claude", value: short(session.claude_session_id))
@@ -224,10 +228,16 @@ struct InspectorView: View {
         .background(Theme.panel)
         .onAppear { syncDrafts() }
         .onAppear { syncServerDrafts() }
-        .onChange(of: store.selectedSessionID) { syncDrafts() }
+        .onChange(of: store.selectedSessionID) {
+            cancelRuntimeSave()
+            syncDrafts()
+        }
         .onChange(of: store.selectedSession?.title) { syncDrafts() }
         .onChange(of: store.selectedSession?.folder) { syncDrafts() }
         .onChange(of: store.selectedSession?.cwd) { syncDrafts() }
+        .onChange(of: store.selectedSession?.backend) { syncDrafts() }
+        .onChange(of: store.selectedSession?.model) { syncDrafts() }
+        .onChange(of: store.selectedSession?.effort) { syncDrafts() }
         .confirmationDialog("Delete chat?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) {
                 guard let session = store.selectedSession else { return }
@@ -302,15 +312,79 @@ struct InspectorView: View {
         Task { await store.updateSelected(title: clean) }
     }
 
-    func saveRuntime() {
-        Task {
-            await store.updateSelected(
-                backend: backend,
-                model: ZRuntimeCatalog.cleanForAPI(model),
-                effort: ZRuntimeCatalog.cleanForAPI(effort)
-            )
-            syncDrafts()
+    @ViewBuilder
+    var runtimeSaveStatus: some View {
+        if isRuntimeSaving || !runtimeSaveMessage.isEmpty {
+            HStack(spacing: 6) {
+                if isRuntimeSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: runtimeSaveFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(runtimeSaveFailed ? .orange : .green)
+                }
+                Text(runtimeSaveMessage)
+                    .font(.caption)
+                    .foregroundStyle(runtimeSaveFailed ? .orange : .secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 1)
         }
+    }
+
+    func scheduleRuntimeSave(debounceNanoseconds: UInt64 = 180_000_000) {
+        guard runtimeSelectionChanged else {
+            runtimeSaveTask?.cancel()
+            if !isRuntimeSaving {
+                runtimeSaveMessage = ""
+                runtimeSaveFailed = false
+            }
+            return
+        }
+        runtimeSaveTask?.cancel()
+        isRuntimeSaving = true
+        runtimeSaveFailed = false
+        runtimeSaveMessage = "Saving runtime..."
+        let selectedID = store.selectedSessionID
+        let backendValue = backend
+        let modelValue = ZRuntimeCatalog.cleanForAPI(model)
+        let effortValue = ZRuntimeCatalog.cleanForAPI(effort)
+        runtimeSaveTask = Task {
+            if debounceNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            }
+            guard !Task.isCancelled else { return }
+            let saved = await store.updateSelected(
+                backend: backendValue,
+                model: modelValue,
+                effort: effortValue
+            )
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard store.selectedSessionID == selectedID else { return }
+                isRuntimeSaving = false
+                runtimeSaveFailed = !saved
+                runtimeSaveMessage = saved ? "Runtime saved" : "Runtime save failed"
+                if saved {
+                    syncDrafts()
+                }
+            }
+        }
+    }
+
+    func cancelRuntimeSave() {
+        runtimeSaveTask?.cancel()
+        runtimeSaveTask = nil
+        isRuntimeSaving = false
+        runtimeSaveFailed = false
+        runtimeSaveMessage = ""
+    }
+
+    var runtimeSelectionChanged: Bool {
+        guard let session = store.selectedSession else { return false }
+        return backend != session.backend ||
+            (ZRuntimeCatalog.cleanForAPI(model) ?? "") != (session.model ?? "") ||
+            (ZRuntimeCatalog.cleanForAPI(effort) ?? "") != (session.effort ?? "")
     }
 
     func saveFolder() {

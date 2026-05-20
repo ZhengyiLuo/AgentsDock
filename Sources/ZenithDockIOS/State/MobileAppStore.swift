@@ -387,12 +387,14 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
-        guard let sid = selectedSessionID else { return }
-        await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+    @discardableResult
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
+        guard let sid = selectedSessionID else { return false }
+        return await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
     }
 
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
+    @discardableResult
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -418,8 +420,10 @@ final class MobileAppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
+            return true
         } catch {
             report(error)
+            return false
         }
     }
 

@@ -699,8 +699,9 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
-        guard let sid = selectedSessionID else { return }
+    @discardableResult
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
+        guard let sid = selectedSessionID else { return false }
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -727,8 +728,10 @@ final class AppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = res.session
             }
+            return true
         } catch {
             reportServerError(error)
+            return false
         }
     }
 
@@ -750,7 +753,8 @@ final class AppStore: ObservableObject {
         await updateSession(session.id, folder: cleanFolder.isEmpty ? "General" : cleanFolder)
     }
 
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async {
+    @discardableResult
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -776,8 +780,10 @@ final class AppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
+            return true
         } catch {
             reportServerError(error)
+            return false
         }
     }
 

@@ -69,8 +69,9 @@ struct MobileComposerView: View {
 
                     if let session = store.selectedSession {
                         HStack(spacing: 5) {
-                            Image(systemName: session.backend == "codex" ? "bolt.fill" : "sparkles")
+                            Image(systemName: MobileTheme.backendIconName(session.backend))
                                 .font(.caption2.weight(.semibold))
+                                .foregroundStyle(MobileTheme.backendTint(session.backend))
                             Text(runtimeLabel(for: session))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)

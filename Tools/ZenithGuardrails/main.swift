@@ -161,6 +161,28 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(inspector.contains("sortedLatestFirst(store.sessionVideos)"), "Mac files inspector must render the independent video list")
 }
 
+func checkRuntimeAutosavesAndBackendIcons() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macTheme = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Design/Theme.swift"), encoding: .utf8)
+    let mobileTheme = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Design/MobileTheme.swift"), encoding: .utf8)
+    let macInspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+    let macSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
+    let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
+
+    try assert(macTheme.contains("backendIconName"), "Mac theme must define backend icon names")
+    try assert(mobileTheme.contains("backendIconName"), "iOS theme must define backend icon names")
+    try assert(macSidebar.contains("Theme.backendIconName(session.backend)"), "Mac sidebar must use backend-specific icons")
+    try assert(mobileSidebar.contains("MobileTheme.backendIconName(session.backend)"), "iOS sidebar must use backend-specific icons")
+    try assert(!macSidebar.contains("sparkle.magnifyingglass"), "Codex sidebar icon must not be the search glyph")
+    try assert(!mobileSidebar.contains("sparkle.magnifyingglass"), "iOS Codex sidebar icon must not be the search glyph")
+    try assert(!macSidebar.contains("circle.hexagongrid"), "Claude sidebar icon must not be the old generic grid glyph")
+    try assert(macInspector.contains("scheduleRuntimeSave()"), "Mac inspector runtime changes must autosave")
+    try assert(!macInspector.contains("\"Save Runtime\""), "Mac inspector must not show a Save Runtime button")
+    try assert(mobileOptions.contains("scheduleRuntimeSave()"), "iOS chat options runtime changes must autosave")
+    try assert(!mobileOptions.contains("Save Runtime & Session"), "iOS options must not imply runtime requires a manual save")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -172,6 +194,7 @@ do {
     try checkTimelineRevealWaitsForLatestSnapshot()
     try checkConnectionFailuresDoNotModal()
     try checkVideoMetadataIsNotHiddenByMixedFilePaging()
+    try checkRuntimeAutosavesAndBackendIcons()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

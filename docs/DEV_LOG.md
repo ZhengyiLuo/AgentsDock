@@ -2015,3 +2015,36 @@ Verification:
 - `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-27.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-27 -quiet -allowProvisioningUpdates` uploaded successfully.
 - `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-27.xcarchive archive -quiet -allowProvisioningUpdates` passed.
 - `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-27.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-27 -quiet -allowProvisioningUpdates` uploaded successfully.
+
+### Runtime Autosave And Backend Icons
+
+User issue:
+
+- The Mac inspector's `Save Runtime` button added unnecessary friction.
+- Backend icons in the chat list looked generic or misleading; Codex used a
+  search glyph and Claude used a grid glyph.
+
+Changes:
+
+- Runtime picker changes now autosave on macOS and iOS/iPadOS.
+- Custom model text autosaves after a short debounce, and pressing return saves
+  immediately.
+- Removed the Mac `Save Runtime` button.
+- Renamed the iOS options save button to `Save Session Details` so runtime no
+  longer appears manual there.
+- Centralized backend icon/tint choices in app theme helpers:
+  - Claude uses `sparkles` with orange tint.
+  - Codex uses `terminal` with green tint.
+- Added guardrails for runtime autosave and backend icon regressions.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `swift build --product ZenithDock` passed.
+- `swift build --product ZenithDockIOS` still fails under SwiftPM because it
+  compiles the iOS target for macOS and cannot import UIKit; use Xcode for this
+  target.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet` passed.
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
+  build and verified codesign.

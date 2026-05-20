@@ -14,6 +14,10 @@ struct MobileChatOptionsView: View {
     @State private var backend = "claude"
     @State private var model = ""
     @State private var effort = ""
+    @State private var runtimeSaveTask: Task<Void, Never>?
+    @State private var runtimeSaveMessage = ""
+    @State private var isRuntimeSaving = false
+    @State private var runtimeSaveFailed = false
     @State private var pinned = false
     @State private var archived = false
     @State private var jobTitle = ""
@@ -35,19 +39,32 @@ struct MobileChatOptionsView: View {
                             Text("Codex").tag("codex")
                         }
                         .pickerStyle(.segmented)
+                        .onChange(of: backend) {
+                            model = ""
+                            effort = ""
+                            scheduleRuntimeSave()
+                        }
                         Picker("Model", selection: $model) {
                             ForEach(modelOptions(for: backend)) { option in
                                 Text(option.label).tag(option.value)
                             }
                         }
+                        .onChange(of: model) {
+                            scheduleRuntimeSave(debounceNanoseconds: 450_000_000)
+                        }
                         TextField("Custom model ID", text: $model)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .onSubmit { scheduleRuntimeSave(debounceNanoseconds: 0) }
                         Picker("Effort", selection: $effort) {
                             ForEach(effortOptions) { option in
                                 Text(option.label).tag(option.value)
                             }
                         }
+                        .onChange(of: effort) {
+                            scheduleRuntimeSave()
+                        }
+                        runtimeSaveStatus
                         TextField("Folder", text: $folder)
                         TextField("Working directory", text: $cwd)
                             .textInputAutocapitalization(.never)
@@ -57,7 +74,7 @@ struct MobileChatOptionsView: View {
                         Button {
                             saveSession()
                         } label: {
-                            Label("Save Runtime & Session", systemImage: "checkmark.circle.fill")
+                            Label("Save Session Details", systemImage: "checkmark.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -166,7 +183,13 @@ struct MobileChatOptionsView: View {
             }
         }
         .onAppear { syncDrafts() }
-        .onChange(of: store.selectedSessionID) { syncDrafts() }
+        .onChange(of: store.selectedSessionID) {
+            cancelRuntimeSave()
+            syncDrafts()
+        }
+        .onChange(of: store.selectedSession?.backend) { syncDrafts() }
+        .onChange(of: store.selectedSession?.model) { syncDrafts() }
+        .onChange(of: store.selectedSession?.effort) { syncDrafts() }
         .sheet(isPresented: $handoffOpen) {
             if let session = store.selectedSession {
                 MobileHandoffDigestView(isPresented: $handoffOpen, sourceSession: session)
@@ -242,6 +265,78 @@ struct MobileChatOptionsView: View {
         effort = session.effort ?? ""
         pinned = session.pinned == true
         archived = session.archived == true
+    }
+
+    @ViewBuilder
+    private var runtimeSaveStatus: some View {
+        if isRuntimeSaving || !runtimeSaveMessage.isEmpty {
+            HStack(spacing: 8) {
+                if isRuntimeSaving {
+                    ProgressView()
+                } else {
+                    Image(systemName: runtimeSaveFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(runtimeSaveFailed ? .orange : .green)
+                }
+                Text(runtimeSaveMessage)
+                    .foregroundStyle(runtimeSaveFailed ? .orange : .secondary)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func scheduleRuntimeSave(debounceNanoseconds: UInt64 = 180_000_000) {
+        guard runtimeSelectionChanged else {
+            runtimeSaveTask?.cancel()
+            if !isRuntimeSaving {
+                runtimeSaveMessage = ""
+                runtimeSaveFailed = false
+            }
+            return
+        }
+        runtimeSaveTask?.cancel()
+        isRuntimeSaving = true
+        runtimeSaveFailed = false
+        runtimeSaveMessage = "Saving runtime..."
+        let selectedID = store.selectedSessionID
+        let backendValue = backend
+        let modelValue = ZRuntimeCatalog.cleanForAPI(model)
+        let effortValue = ZRuntimeCatalog.cleanForAPI(effort)
+        runtimeSaveTask = Task {
+            if debounceNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            }
+            guard !Task.isCancelled else { return }
+            let saved = await store.updateSelected(
+                backend: backendValue,
+                model: modelValue,
+                effort: effortValue
+            )
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard store.selectedSessionID == selectedID else { return }
+                isRuntimeSaving = false
+                runtimeSaveFailed = !saved
+                runtimeSaveMessage = saved ? "Runtime saved" : "Runtime save failed"
+                if saved {
+                    syncDrafts()
+                }
+            }
+        }
+    }
+
+    private func cancelRuntimeSave() {
+        runtimeSaveTask?.cancel()
+        runtimeSaveTask = nil
+        isRuntimeSaving = false
+        runtimeSaveFailed = false
+        runtimeSaveMessage = ""
+    }
+
+    private var runtimeSelectionChanged: Bool {
+        guard let session = store.selectedSession else { return false }
+        return backend != session.backend ||
+            (ZRuntimeCatalog.cleanForAPI(model) ?? "") != (session.model ?? "") ||
+            (ZRuntimeCatalog.cleanForAPI(effort) ?? "") != (session.effort ?? "")
     }
 
     private func saveSession() {

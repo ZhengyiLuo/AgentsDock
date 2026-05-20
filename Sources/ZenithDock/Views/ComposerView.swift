@@ -160,9 +160,9 @@ struct ComposerView: View {
             }
         } label: {
             composerChip(
-                icon: session.backend == "codex" ? "bolt.fill" : "sparkles",
+                icon: Theme.backendIconName(session.backend),
                 text: session.backend.capitalized,
-                tint: session.backend == "codex" ? .orange : .blue
+                tint: Theme.backendTint(session.backend)
             )
         }
         .menuStyle(.borderlessButton)
