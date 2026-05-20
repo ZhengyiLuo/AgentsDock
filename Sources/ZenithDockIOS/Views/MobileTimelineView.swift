@@ -650,13 +650,42 @@ private enum MobileTimelineRows {
     private static func buildRows(from events: [ZEvent], jobRuns: [String: MobileJobRunRow]) -> [MobileTimelineRow] {
         let jobRunIDs = Set(jobRuns.keys)
         var rows: [MobileTimelineRow] = []
-        var trace: [ZEvent] = []
+        var orphanTrace: [ZEvent] = []
+        var activeRunID: String?
+        var activeAssistantEvents: [ZEvent] = []
+        var activeFinishedEvent: ZEvent?
+        var activeTrace: [ZEvent] = []
         var pendingJobRuns: [MobileJobRunRow] = []
 
-        func flushTrace() {
-            guard let first = trace.first, let last = trace.last else { return }
-            rows.append(.trace("trace-\(first.seq)-\(last.seq)", trace))
-            trace.removeAll(keepingCapacity: true)
+        func appendTrace(_ events: [ZEvent], prefix: String = "trace") {
+            guard let first = events.first, let last = events.last else { return }
+            rows.append(.trace("\(prefix)-\(first.seq)-\(last.seq)", events))
+        }
+
+        func flushOrphanTrace() {
+            appendTrace(orphanTrace)
+            orphanTrace.removeAll(keepingCapacity: true)
+        }
+
+        func mergedAssistantEvent() -> ZEvent? {
+            guard var merged = activeAssistantEvents.last else { return activeFinishedEvent }
+            let text = activeAssistantEvents
+                .compactMap { $0.text?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+            merged.text = text
+            return merged
+        }
+
+        func flushAgentRun() {
+            if let assistant = mergedAssistantEvent() {
+                rows.append(.event(assistant))
+            }
+            appendTrace(activeTrace, prefix: "trace-run-\(activeRunID ?? "unknown")")
+            activeRunID = nil
+            activeAssistantEvents.removeAll(keepingCapacity: true)
+            activeFinishedEvent = nil
+            activeTrace.removeAll(keepingCapacity: true)
         }
 
         func flushJobRuns() {
@@ -676,25 +705,76 @@ private enum MobileTimelineRows {
             pendingJobRuns.append(run)
         }
 
+        func beginAgentRunIfNeeded(for event: ZEvent) {
+            guard let runID = event.run_id else { return }
+            if activeRunID == nil {
+                activeRunID = runID
+            } else if activeRunID != runID {
+                flushAgentRun()
+                activeRunID = runID
+            }
+        }
+
         for event in events {
             if event.type == "job_ran", let runID = event.run_id, let jobRun = jobRuns[runID] {
-                flushTrace()
+                flushAgentRun()
+                flushOrphanTrace()
                 appendJobRun(jobRun)
                 continue
             }
             if shouldFoldIntoJobResponse(event, jobRunIDs: jobRunIDs) {
+                flushAgentRun()
+                flushOrphanTrace()
                 continue
             }
             flushJobRuns()
+
+            if event.type == "turn_started" {
+                flushAgentRun()
+                flushOrphanTrace()
+                rows.append(.event(event))
+                activeRunID = event.run_id
+                continue
+            }
+
+            if event.type == "assistant_text", event.run_id != nil {
+                beginAgentRunIfNeeded(for: event)
+                if event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                    activeAssistantEvents.append(event)
+                }
+                continue
+            }
+
+            if traceTypes.contains(event.type), event.run_id != nil {
+                beginAgentRunIfNeeded(for: event)
+                activeTrace.append(event)
+                continue
+            }
+
+            if event.type == "turn_finished", event.run_id != nil {
+                beginAgentRunIfNeeded(for: event)
+                if activeAssistantEvents.isEmpty,
+                   event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                    activeFinishedEvent = event
+                }
+                flushAgentRun()
+                continue
+            }
+
+            if event.run_id != nil {
+                flushAgentRun()
+            }
+
             if traceTypes.contains(event.type) {
-                trace.append(event)
+                orphanTrace.append(event)
             } else {
-                flushTrace()
+                flushOrphanTrace()
                 rows.append(.event(event))
             }
         }
         flushJobRuns()
-        flushTrace()
+        flushAgentRun()
+        flushOrphanTrace()
         return rows
     }
 

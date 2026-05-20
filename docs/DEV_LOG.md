@@ -2048,3 +2048,22 @@ Verification:
 - `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet` passed.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the Release
   build and verified codesign.
+
+### Run-Scoped Timeline Trace Grouping
+
+User issue:
+
+- Long runs still rendered as a tall alternating stack of `Assistant` and
+  `Trace` rows.
+- Trace cards were collapsed internally, but each assistant/tool/reasoning phase
+  still occupied a separate timeline row.
+
+Changes:
+
+- Mac and iOS timeline projection now collect assistant chunks by `run_id`.
+- Assistant chunks from the same run render as one combined assistant message.
+- Tool/reasoning/system trace events from the same run render as one combined
+  trace card.
+- Orphan trace events still group contiguously for debug/history cases.
+- Added a guardrail check so timeline projection keeps run-scoped trace
+  grouping.

@@ -183,6 +183,20 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
     try assert(!mobileOptions.contains("Save Runtime & Session"), "iOS options must not imply runtime requires a manual save")
 }
 
+func checkTimelineCombinesRunTraces() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+    let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+
+    try assert(macTimeline.contains("activeAssistantEvents: [ZEvent]"), "Mac timeline must collect assistant chunks per run")
+    try assert(macTimeline.contains("activeTrace: [ZEvent]"), "Mac timeline must collect trace events per run")
+    try assert(macTimeline.contains("trace-run-\\(activeRunID"), "Mac timeline trace rows must be run-scoped")
+    try assert(macTimeline.contains("joined(separator: \"\\n\\n\")"), "Mac timeline must merge assistant chunks into one message")
+    try assert(mobileTimeline.contains("activeAssistantEvents: [ZEvent]"), "iOS timeline must collect assistant chunks per run")
+    try assert(mobileTimeline.contains("activeTrace: [ZEvent]"), "iOS timeline must collect trace events per run")
+    try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -195,6 +209,7 @@ do {
     try checkConnectionFailuresDoNotModal()
     try checkVideoMetadataIsNotHiddenByMixedFilePaging()
     try checkRuntimeAutosavesAndBackendIcons()
+    try checkTimelineCombinesRunTraces()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)
