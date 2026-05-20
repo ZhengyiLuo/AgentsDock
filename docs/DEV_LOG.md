@@ -2084,3 +2084,27 @@ Changes:
   generated HTML and attempts `video.play()` after load.
 - Added a guardrail check so the inline Play button keeps meaning play, not just
   load.
+
+### Real Backend Logo Marks And Runtime Fallback
+
+User issue:
+
+- Claude/Codex icons still looked wrong after the previous pass because Codex
+  rendered as a terminal box and Claude rendered as a generic sparkle.
+- The runtime model menu could collapse to only `Server default` when the server
+  catalog was unavailable or returned no specific Codex models.
+
+Changes:
+
+- Replaced SF Symbol backend placeholders with small SwiftUI vector logo marks:
+  - Claude uses an orange radial/starburst mark.
+  - Codex uses a multicolor loop mark instead of the terminal glyph.
+- Updated macOS and iOS/iPadOS sidebar rows, composer chips, and running-agent
+  status to use the logo views.
+- Added a local Codex catalog fallback that includes GPT-5.5, GPT-5.4,
+  GPT-5.3 Codex, GPT-5.3 Codex Spark, GPT-5.2, and reasoning efforts while the
+  server catalog is empty or late.
+- Kept server/CLI catalog discovery as the primary source whenever it reports
+  concrete options.
+- Strengthened guardrails so Codex cannot silently regress to the terminal
+  symbol again.

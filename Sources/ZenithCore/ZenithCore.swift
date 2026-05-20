@@ -68,17 +68,20 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
         self.generated_at = generated_at
     }
 
-    public static let fallback = ZRuntimeCatalogSnapshot(backends: [
-        "claude": ZRuntimeBackendCatalog(),
-        "codex": ZRuntimeBackendCatalog()
-    ])
+    public static let fallback = ZRuntimeCatalogSnapshot(backends: ZRuntimeCatalog.fallbackBackends)
 
     public func models(for backend: String) -> [ZRuntimeOption] {
-        options(backends[backend.lowercased()]?.models)
+        mergedOptions(
+            primary: backends[backend.lowercased()]?.models,
+            fallback: ZRuntimeCatalog.fallbackBackends[backend.lowercased()]?.models
+        )
     }
 
     public func efforts(for backend: String) -> [ZRuntimeOption] {
-        options(backends[backend.lowercased()]?.efforts)
+        mergedOptions(
+            primary: backends[backend.lowercased()]?.efforts,
+            fallback: ZRuntimeCatalog.fallbackBackends[backend.lowercased()]?.efforts
+        )
     }
 
     public func modelLabel(_ value: String?, backend: String) -> String {
@@ -102,10 +105,13 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
         ].filter { !$0.isEmpty && $0 != "Server default" }.joined(separator: " · ")
     }
 
-    private func options(_ values: [ZRuntimeOption]?) -> [ZRuntimeOption] {
+    private func mergedOptions(primary: [ZRuntimeOption]?, fallback: [ZRuntimeOption]?) -> [ZRuntimeOption] {
+        let primaryHasSpecificOptions = primary?.contains { !ZRuntimeCatalog.cleaned($0.value).isEmpty } == true
+        let values = primaryHasSpecificOptions ? primary : fallback
+        let extras = primaryHasSpecificOptions ? [] : (primary ?? [])
         var seen = Set<String>()
         var out: [ZRuntimeOption] = []
-        for option in values ?? [] {
+        for option in (values ?? []) + extras {
             guard !seen.contains(option.value) else { continue }
             seen.insert(option.value)
             out.append(option)
@@ -117,15 +123,17 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
     }
 
     private func serverDefaultModelLabel(for backend: String) -> String {
-        serverDefaultLabel(
-            value: backends[backend.lowercased()]?.default_model,
+        let key = backend.lowercased()
+        return serverDefaultLabel(
+            value: backends[key]?.default_model ?? ZRuntimeCatalog.fallbackBackends[key]?.default_model,
             options: models(for: backend)
         )
     }
 
     private func serverDefaultEffortLabel(for backend: String) -> String {
-        serverDefaultLabel(
-            value: backends[backend.lowercased()]?.default_effort,
+        let key = backend.lowercased()
+        return serverDefaultLabel(
+            value: backends[key]?.default_effort ?? ZRuntimeCatalog.fallbackBackends[key]?.default_effort,
             options: efforts(for: backend)
         )
     }
@@ -141,6 +149,30 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
 public enum ZRuntimeCatalog {
     public static let defaultValue = ""
     public static let serverDefaultOption = ZRuntimeOption(value: "", label: "Server default")
+    public static let fallbackBackends: [String: ZRuntimeBackendCatalog] = [
+        "claude": ZRuntimeBackendCatalog(),
+        "codex": ZRuntimeBackendCatalog(
+            models: [
+                ZRuntimeOption(value: "", label: "Server default (GPT-5.5)"),
+                ZRuntimeOption(value: "gpt-5.5", label: "GPT-5.5"),
+                ZRuntimeOption(value: "gpt-5.4", label: "GPT-5.4"),
+                ZRuntimeOption(value: "gpt-5.3-codex", label: "GPT-5.3 Codex"),
+                ZRuntimeOption(value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark"),
+                ZRuntimeOption(value: "gpt-5.2", label: "GPT-5.2")
+            ],
+            efforts: [
+                ZRuntimeOption(value: "", label: "Server default (XHigh)"),
+                ZRuntimeOption(value: "low", label: "Low"),
+                ZRuntimeOption(value: "medium", label: "Medium"),
+                ZRuntimeOption(value: "high", label: "High"),
+                ZRuntimeOption(value: "xhigh", label: "XHigh")
+            ],
+            model_source: "local fallback",
+            effort_source: "local fallback",
+            default_model: "gpt-5.5",
+            default_effort: "xhigh"
+        )
+    ]
 
     public static let efforts: [ZRuntimeOption] = ZRuntimeCatalogSnapshot.fallback.efforts(for: "codex")
 

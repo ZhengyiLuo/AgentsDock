@@ -70,6 +70,10 @@ func checkRuntimeDefaultLabels() throws {
     try assert(catalog.modelLabel(nil, backend: "codex") == "Server default (GPT-5.5)", "model default label should show actual server default")
     try assert(catalog.effortLabel(nil, backend: "codex") == "Server default (XHigh)", "effort default label should show actual server default")
     try assert(catalog.compactSummary(for: session) == "Codex · Server default (GPT-5.5) · Server default (XHigh)", "runtime summary should include resolved defaults")
+
+    let fallbackCatalog = ZRuntimeCatalogSnapshot.fallback
+    try assert(fallbackCatalog.models(for: "codex").contains { $0.value == "gpt-5.5" }, "Codex fallback catalog must include GPT-5.5 while server discovery is unavailable")
+    try assert(fallbackCatalog.efforts(for: "codex").contains { $0.value == "xhigh" }, "Codex fallback catalog must include XHigh effort while server discovery is unavailable")
 }
 
 func checkServerURLNormalization() throws {
@@ -170,10 +174,12 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
     let macSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
     let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
 
-    try assert(macTheme.contains("backendIconName"), "Mac theme must define backend icon names")
-    try assert(mobileTheme.contains("backendIconName"), "iOS theme must define backend icon names")
-    try assert(macSidebar.contains("Theme.backendIconName(session.backend)"), "Mac sidebar must use backend-specific icons")
-    try assert(mobileSidebar.contains("MobileTheme.backendIconName(session.backend)"), "iOS sidebar must use backend-specific icons")
+    try assert(macTheme.contains("struct BackendLogo"), "Mac theme must define vector backend logos")
+    try assert(mobileTheme.contains("struct MobileBackendLogo"), "iOS theme must define vector backend logos")
+    try assert(macSidebar.contains("BackendLogo(backend: session.backend)"), "Mac sidebar must use backend-specific logo views")
+    try assert(mobileSidebar.contains("MobileBackendLogo(backend: session.backend)"), "iOS sidebar must use backend-specific logo views")
+    try assert(!macTheme.contains("\"terminal\""), "Codex must not fall back to the terminal SF Symbol")
+    try assert(!mobileTheme.contains("\"terminal\""), "iOS Codex must not fall back to the terminal SF Symbol")
     try assert(!macSidebar.contains("sparkle.magnifyingglass"), "Codex sidebar icon must not be the search glyph")
     try assert(!mobileSidebar.contains("sparkle.magnifyingglass"), "iOS Codex sidebar icon must not be the search glyph")
     try assert(!macSidebar.contains("circle.hexagongrid"), "Claude sidebar icon must not be the old generic grid glyph")

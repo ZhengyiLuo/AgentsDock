@@ -159,11 +159,7 @@ struct ComposerView: View {
                 optionLabel("Codex", selected: session.backend == "codex")
             }
         } label: {
-            composerChip(
-                icon: Theme.backendIconName(session.backend),
-                text: session.backend.capitalized,
-                tint: Theme.backendTint(session.backend)
-            )
+            composerBackendChip(session.backend)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -220,6 +216,26 @@ struct ComposerView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.tertiary)
             }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .frame(height: 27)
+        .background(Color.primary.opacity(0.055))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+    }
+
+    private func composerBackendChip(_ backend: String) -> some View {
+        HStack(spacing: 5) {
+            BackendLogo(backend: backend)
+                .frame(width: 13, height: 13)
+            Text(backend.capitalized)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 9)

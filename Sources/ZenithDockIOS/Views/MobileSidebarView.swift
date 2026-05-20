@@ -304,8 +304,7 @@ private struct MobileSessionRow: View {
     var body: some View {
         HStack(spacing: 10) {
             ZStack(alignment: .bottomTrailing) {
-                Image(systemName: MobileTheme.backendIconName(session.backend))
-                    .foregroundStyle(MobileTheme.backendTint(session.backend))
+                MobileBackendLogo(backend: session.backend)
                 if store.activeSessionIDs.contains(session.id) {
                     Circle()
                         .fill(.green)

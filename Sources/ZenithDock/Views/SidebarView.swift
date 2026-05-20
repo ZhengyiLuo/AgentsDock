@@ -193,9 +193,8 @@ struct SessionRow: View {
         let hasUnread = store.unreadAgentSessionIDs.contains(session.id)
         HStack(spacing: 10) {
             ZStack(alignment: .bottomTrailing) {
-                Image(systemName: Theme.backendIconName(session.backend))
-                    .foregroundStyle(Theme.backendTint(session.backend))
-                    .fontWeight(hasUnread ? .bold : .regular)
+                BackendLogo(backend: session.backend)
+                    .scaleEffect(hasUnread ? 1.08 : 1)
                 if store.activeSessionIDs.contains(session.id) {
                     Circle()
                         .fill(Color.green)
