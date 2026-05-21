@@ -16,6 +16,32 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-20 Follow-Up - Stable Sidebar Order
+
+Problem:
+
+- The server sorted chats by `updated_at`, so job output, archive toggles,
+  runtime saves, and metadata refreshes could make rows jump around.
+- Archive/unarchive changes made on another app instance could lag until the
+  user selected the chat, because session-list sync only ran every 30 seconds.
+
+Change:
+
+- Added server-side `sort_order` metadata and migrated existing sessions into
+  their current visible order once. The session list now sorts by archive/pin/
+  folder group and explicit `sort_order`, not recent activity.
+- New chats enter the top of their section. Moving between folder/pinned/
+  archived sections puts the chat at the top of the destination section; normal
+  activity does not reorder rows.
+- Added `/api/sessions/{session_id}/order` to move a chat up/down within its
+  current section by swapping `sort_order` with its neighbor.
+- Added Mac and iOS/iPadOS context-menu controls for `Move Up` / `Move Down`.
+- Mac and iOS/iPadOS now refresh the session list every live-tracking tick
+  after health succeeds, so archive/unarchive and unread metadata sync much
+  faster across app instances connected to the same server.
+- Added guardrails for `sort_order`, stable app ordering, manual reorder
+  controls, and the server reorder endpoint.
+
 ## 2026-05-20 Follow-Up - Scheduled Job Unread State
 
 Problem:

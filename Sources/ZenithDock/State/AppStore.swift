@@ -116,11 +116,11 @@ final class AppStore: ObservableObject {
     }
 
     var activeSessions: [ZSession] {
-        sessions.filter { $0.archived != true }
+        orderedSessions(sessions.filter { $0.archived != true })
     }
 
     var archivedSessions: [ZSession] {
-        sessions.filter { $0.archived == true }
+        orderedSessions(sessions.filter { $0.archived == true })
     }
 
     var pinnedSessions: [ZSession] {
@@ -137,6 +137,22 @@ final class AppStore: ObservableObject {
 
     func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {
         activeSessions.filter { $0.id != sourceSessionID }
+    }
+
+    private func orderedSessions(_ source: [ZSession]) -> [ZSession] {
+        source.sorted { lhs, rhs in
+            let leftOrder = lhs.sort_order ?? 0
+            let rightOrder = rhs.sort_order ?? 0
+            if leftOrder != rightOrder {
+                return leftOrder < rightOrder
+            }
+            let leftCreated = lhs.created_at ?? ""
+            let rightCreated = rhs.created_at ?? ""
+            if leftCreated != rightCreated {
+                return leftCreated < rightCreated
+            }
+            return lhs.id < rhs.id
+        }
     }
 
     var connectionTitle: String {
@@ -407,8 +423,10 @@ final class AppStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             tick += 1
             await refreshHealth(showErrors: false)
-            if tick % 6 == 0 {
+            if serverReachable {
                 await refreshSessions(showErrors: false)
+            }
+            if tick % 6 == 0 {
                 await refreshJobs(showErrors: false)
             }
             if let sid = selectedSessionID, serverReachable, !socketLive, loadingSessionID == nil {
@@ -844,6 +862,20 @@ final class AppStore: ObservableObject {
     func moveSession(_ session: ZSession, to folder: String) async {
         let cleanFolder = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         await updateSession(session.id, folder: cleanFolder.isEmpty ? "General" : cleanFolder)
+    }
+
+    func reorderSession(_ session: ZSession, direction: String) async {
+        struct Body: Codable {
+            let direction: String
+        }
+        do {
+            struct Response: Codable { let sessions: [ZSession] }
+            let res: Response = try await api.post("/api/sessions/\(session.id)/order", body: Body(direction: direction))
+            sessions = res.sessions
+            reconcileUnreadFromSessions()
+        } catch {
+            reportServerError(error)
+        }
     }
 
     @discardableResult

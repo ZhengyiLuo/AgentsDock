@@ -124,6 +124,17 @@ struct SidebarView: View {
         SessionRow(session: session)
             .tag(session.id)
             .contextMenu {
+                Button {
+                    Task { await store.reorderSession(session, direction: "up") }
+                } label: {
+                    Label("Move Up", systemImage: "arrow.up")
+                }
+                Button {
+                    Task { await store.reorderSession(session, direction: "down") }
+                } label: {
+                    Label("Move Down", systemImage: "arrow.down")
+                }
+                Divider()
                 if session.archived == true {
                     Button {
                         Task { await store.toggleArchive(session) }

@@ -82,6 +82,7 @@ MAX_HANDOFF_DIGEST_CHARS = int(os.environ.get("ZENITHBOT_HANDOFF_DIGEST_CHARS", 
 DEFAULT_SESSION_EVENT_LIMIT = int(os.environ.get("ZENITHBOT_SESSION_EVENT_LIMIT", "100"))
 MAX_EVENT_RESPONSE_LIMIT = int(os.environ.get("ZENITHBOT_MAX_EVENT_RESPONSE_LIMIT", "1000"))
 AGENT_TOKEN = os.environ.get("ZENITHDOCK_AGENT_TOKEN") or os.environ.get("ZENITHBOT_AGENT_TOKEN") or ""
+SESSION_ORDER_STEP = 1000.0
 
 SYSTEM_PROMPT = """\
 You are responding through Zenith Dock, a native Mac frontend for Zenithbot.
@@ -297,6 +298,10 @@ class UpdateSessionRequest(BaseModel):
     archived: bool | None = None
 
 
+class ReorderSessionRequest(BaseModel):
+    direction: str
+
+
 class TurnRequest(BaseModel):
     prompt: str
     file_ids: list[str] = Field(default_factory=list)
@@ -353,6 +358,49 @@ class UpdateJobRequest(BaseModel):
     backend: str | None = None
 
 
+def session_folder(sess: dict[str, Any]) -> str:
+    folder = str(sess.get("folder") or "General").strip()
+    return folder or "General"
+
+
+def session_order_value(sess: dict[str, Any]) -> float:
+    value = sess.get("sort_order")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def session_section_key(sess: dict[str, Any]) -> tuple[str, str]:
+    if bool(sess.get("archived")):
+        return ("archived", "")
+    if bool(sess.get("pinned")):
+        return ("pinned", "")
+    return ("folder", session_folder(sess))
+
+
+def legacy_session_sort_key(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = list(sessions)
+    ordered.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+    ordered.sort(key=lambda s: not bool(s.get("pinned")))
+    ordered.sort(key=lambda s: bool(s.get("archived")))
+    return ordered
+
+
+def sorted_sessions(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        sessions,
+        key=lambda s: (
+            bool(s.get("archived")),
+            not bool(s.get("pinned")) if not bool(s.get("archived")) else False,
+            "" if bool(s.get("archived")) or bool(s.get("pinned")) else session_folder(s).casefold(),
+            session_order_value(s),
+            str(s.get("created_at") or ""),
+            str(s.get("id") or ""),
+        ),
+    )
+
+
 class SessionStore:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -366,12 +414,34 @@ class SessionStore:
             except Exception as e:
                 logger.warning("failed to load sessions: %s", e)
                 self.sessions = {}
+        await self.ensure_sort_orders()
 
     async def save(self) -> None:
         ensure_dirs()
         tmp = SESSIONS_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.sessions, indent=2))
         tmp.replace(SESSIONS_FILE)
+
+    async def ensure_sort_orders(self) -> None:
+        changed = False
+        for index, sess in enumerate(legacy_session_sort_key(list(self.sessions.values()))):
+            if sess.get("sort_order") is None:
+                sess["sort_order"] = (index + 1) * SESSION_ORDER_STEP
+                changed = True
+        if changed:
+            await self.save()
+
+    def top_order_for_section(self, section: tuple[str, str], *, excluding_id: str | None = None) -> float:
+        section_orders = [
+            session_order_value(sess)
+            for sess in self.sessions.values()
+            if session_section_key(sess) == section
+            and sess.get("id") != excluding_id
+            and sess.get("sort_order") is not None
+        ]
+        if not section_orders:
+            return SESSION_ORDER_STEP
+        return min(section_orders) - SESSION_ORDER_STEP
 
     async def create(self, req: CreateSessionRequest, *, parent_id: str | None = None) -> dict[str, Any]:
         backend = (req.backend or DEFAULT_BACKEND).lower()
@@ -407,6 +477,7 @@ class SessionStore:
             "created_at": now,
             "updated_at": now,
         }
+        sess["sort_order"] = self.top_order_for_section(session_section_key(sess))
         async with self._lock:
             self.sessions[sid] = sess
             await self.save()
@@ -418,6 +489,7 @@ class SessionStore:
             sess = self.sessions.get(sid)
             if not sess:
                 raise HTTPException(status_code=404, detail="session not found")
+            old_section = session_section_key(sess)
             if "backend" in patch and patch["backend"] is not None:
                 backend = str(patch["backend"]).lower()
                 if backend not in VALID_BACKENDS:
@@ -459,9 +531,39 @@ class SessionStore:
                 if archived:
                     sess["pinned"] = False
                     sess["pinned_at"] = None
+            new_section = session_section_key(sess)
+            if new_section != old_section:
+                sess["sort_order"] = self.top_order_for_section(new_section, excluding_id=sid)
             sess["updated_at"] = now_iso()
             await self.save()
             return sess
+
+    async def reorder(self, sid: str, direction: str) -> list[dict[str, Any]]:
+        normalized = direction.strip().lower()
+        if normalized not in {"up", "down"}:
+            raise HTTPException(status_code=400, detail="direction must be up or down")
+        async with self._lock:
+            sess = self.sessions.get(sid)
+            if not sess:
+                raise HTTPException(status_code=404, detail="session not found")
+            section = session_section_key(sess)
+            peers = [
+                peer for peer in sorted_sessions(list(self.sessions.values()))
+                if session_section_key(peer) == section
+            ]
+            index = next((idx for idx, peer in enumerate(peers) if peer.get("id") == sid), None)
+            if index is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            target_index = index - 1 if normalized == "up" else index + 1
+            if 0 <= target_index < len(peers):
+                other = peers[target_index]
+                current_order = session_order_value(sess)
+                other_order = session_order_value(other)
+                sess["sort_order"] = other_order
+                other["sort_order"] = current_order
+                sess["updated_at"] = now_iso()
+                await self.save()
+            return sorted_sessions(list(self.sessions.values()))
 
     async def delete(self, sid: str) -> bool:
         async with self._lock:
@@ -2197,7 +2299,7 @@ def public_session(sess: dict[str, Any]) -> dict[str, Any]:
             "id", "title", "folder", "cwd", "backend", "model", "effort",
             "session_id", "claude_session_id", "codex_thread_id",
             "parent_id", "fork_from", "memory_forked", "memory_seed_used",
-            "pinned", "pinned_at", "archived", "archived_at", "created_at", "updated_at",
+            "pinned", "pinned_at", "archived", "archived_at", "sort_order", "created_at", "updated_at",
             "latest_event_seq", "latest_event_at", "latest_event_type",
             "latest_agent_event_seq", "latest_agent_event_at", "latest_agent_event_type",
         )
@@ -3311,10 +3413,8 @@ async def tail_session_process_log(session_id: str, path: str, lines: int = 200)
 
 @app.get("/api/sessions")
 async def list_sessions() -> dict[str, Any]:
-    sessions = [public_session(s) for s in STORE.sessions.values()]
-    sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
-    sessions.sort(key=lambda s: not bool(s.get("pinned")))
-    sessions.sort(key=lambda s: bool(s.get("archived")))
+    await STORE.ensure_sort_orders()
+    sessions = [public_session(s) for s in sorted_sessions(list(STORE.sessions.values()))]
     return {"sessions": sessions}
 
 
@@ -3380,6 +3480,12 @@ async def create_handoff_digest(session_id: str, req: HandoffDigestRequest) -> d
 async def update_session(session_id: str, req: UpdateSessionRequest) -> dict[str, Any]:
     sess = await STORE.update(session_id, req.model_dump(exclude_unset=True))
     return {"session": public_session(sess)}
+
+
+@app.post("/api/sessions/{session_id}/order")
+async def reorder_session(session_id: str, req: ReorderSessionRequest) -> dict[str, Any]:
+    sessions = await STORE.reorder(session_id, req.direction)
+    return {"sessions": [public_session(sess) for sess in sessions]}
 
 
 @app.delete("/api/sessions/{session_id}")

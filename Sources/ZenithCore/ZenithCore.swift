@@ -18,6 +18,7 @@ public struct ZSession: Codable, Identifiable, Hashable, Sendable {
     public var pinned_at: String?
     public var archived: Bool?
     public var archived_at: String?
+    public var sort_order: Double?
     public var created_at: String?
     public var updated_at: String?
     public var latest_event_seq: Int?

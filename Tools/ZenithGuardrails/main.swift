@@ -125,23 +125,34 @@ func checkShellCopyNormalization() throws {
 }
 
 func checkArchiveSessionBehavior() throws {
-    let sessionData = Data(#"{"id":"sess","title":"Archived","backend":"codex","archived":true}"#.utf8)
+    let sessionData = Data(#"{"id":"sess","title":"Archived","backend":"codex","archived":true,"sort_order":10}"#.utf8)
     let session = try JSONDecoder().decode(ZSession.self, from: sessionData)
     try assert(session.archived == true, "ZSession must decode archived session state")
+    try assert(session.sort_order == 10, "ZSession must decode stable manual sidebar order")
 
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
+    let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
     let macDigest = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SessionManagementSheets.swift"), encoding: .utf8)
     let mobileDigest = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macStore.contains("sessions.filter { $0.archived != true }"), "Mac active session lists must filter archived chats")
     try assert(mobileStore.contains("sessions.filter { $0.archived != true }"), "iOS active session lists must filter archived chats")
+    try assert(macStore.contains("orderedSessions("), "Mac session rows must use stable explicit ordering")
+    try assert(mobileStore.contains("orderedSessions("), "iOS session rows must use stable explicit ordering")
+    try assert(macStore.contains("func reorderSession("), "Mac app must expose manual session reorder")
+    try assert(mobileStore.contains("func reorderSession("), "iOS app must expose manual session reorder")
+    try assert(macSidebar.contains("Move Up"), "Mac sidebar must expose move-up reorder control")
+    try assert(mobileSidebar.contains("Move Up"), "iOS sidebar must expose move-up reorder control")
     try assert(macDigest.contains("store.digestTargetSessions(excluding: sourceSession.id)"), "Mac digest sheet must exclude archived target chats")
     try assert(mobileDigest.contains("store.digestTargetSessions(excluding: sourceSession.id)"), "iOS digest sheet must exclude archived target chats")
     try assert(server.contains("archived: bool | None = None"), "Server session update API must accept archived state")
-    try assert(server.contains("\"archived\", \"archived_at\""), "Server public sessions must expose archived state")
+    try assert(server.contains("\"archived\", \"archived_at\", \"sort_order\""), "Server public sessions must expose archived state and stable order")
+    try assert(server.contains("def sorted_sessions("), "Server session list must use explicit sort_order instead of updated_at recency")
+    try assert(server.contains("@app.post(\"/api/sessions/{session_id}/order\")"), "Server must expose manual session reorder endpoint")
 }
 
 func checkTimelineRevealWaitsForLatestSnapshot() throws {
