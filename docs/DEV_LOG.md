@@ -37,6 +37,31 @@ Change:
 - Added guardrails so server session metadata, scheduled-job visibility, Mac
   unread reconciliation, and iOS sidebar unread indicators do not regress.
 
+## 2026-05-20 Follow-Up - TestFlight Build 29 Uploaded
+
+Summary:
+
+- Build `29` includes server/app support for scheduled-job unread/read state.
+- Bumped all Xcode targets from build `28` to build `29`.
+- Committed the functional fix:
+  `4f4e7ff Fix scheduled job unread state`.
+- Committed the build bump:
+  `f9eb0e2 Bump build number for TestFlight 29`.
+- Archived and uploaded iOS/iPadOS build `29` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `29` successfully:
+  `Uploaded ZenithDockMac`.
+- Refreshed and codesign-verified
+  `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-29.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-29.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-29 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-29.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-29.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-29 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-20 Follow-Up - TestFlight Build 28 Uploaded
 
 Summary:
