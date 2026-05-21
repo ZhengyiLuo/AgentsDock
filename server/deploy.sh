@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_HOST="${ZENITHDOCK_REMOTE_HOST:-${1:-}}"
-REMOTE_APP_DIR="${ZENITHDOCK_REMOTE_APP_DIR:-~/Zenithbot}"
+REMOTE_APP_DIR="${ZENITHDOCK_REMOTE_APP_DIR:-Zenithbot}"
 REMOTE_SERVER_PATH="$REMOTE_APP_DIR/scripts/agent_server.py"
 SERVICE_NAME="${ZENITHDOCK_AGENT_SERVICE:-zenithbot-agent.service}"
 
