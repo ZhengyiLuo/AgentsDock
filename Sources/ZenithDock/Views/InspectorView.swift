@@ -953,7 +953,7 @@ private struct TmuxSubmitterInspector: View {
                         Toggle("All", isOn: $includeAll)
                             .font(.caption)
                             .toggleStyle(.checkbox)
-                            .help("Show all tmux panes, not just panes matching this chat or submitter keywords")
+                            .help("Show every tmux pane on the server, not just panes linked to this chat")
                         Button {
                             refresh()
                         } label: {
@@ -988,7 +988,7 @@ private struct TmuxSubmitterInspector: View {
                         .foregroundStyle(.secondary)
 
                         if snapshot.panes.isEmpty {
-                            Text(includeAll ? "No tmux panes are running." : "No tmux panes matched this chat yet.")
+                            Text(includeAll ? "No tmux panes are running." : "No tmux panes are linked to this chat yet. Use All for the machine-wide list.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -1011,7 +1011,7 @@ private struct TmuxSubmitterInspector: View {
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("List tmux panes that look like submitters or match this chat's working directory.")
+                        Text("List tmux panes linked to this chat. Use All after opening for the machine-wide list.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button {

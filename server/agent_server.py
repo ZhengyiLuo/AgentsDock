@@ -1428,6 +1428,15 @@ TMUX_SUBMITTER_KEYWORDS = (
     "submit", "submitter", "sbatch", "slurm", "osmo", "train", "training",
     "render", "rollout", "eval", "launch", "wandb", "ray", "torchrun",
 )
+TMUX_CHAT_MATCH_LABELS = {"chat tmux", "chat cwd", "chat context"}
+TMUX_CONTEXT_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{3,}")
+TMUX_TARGET_RE = re.compile(r"\btmux\b[^\n;&|]*(?:-s|-t)\s+['\"]?([A-Za-z0-9_.:@+-]{4,})")
+TMUX_NOISE_TOKENS = {
+    "bash", "chat", "codex", "claude", "default", "false", "general",
+    "home", "launch", "local", "login", "none", "null", "osmo", "python",
+    "python3", "script", "scripts", "server", "sleep", "submit", "submitter",
+    "tail", "this", "true", "wandb", "zenithbot", "zenithdock",
+}
 
 
 def path_is_within(path: str | None, root: str | None) -> bool:
@@ -1441,6 +1450,71 @@ def path_is_within(path: str | None, root: str | None) -> bool:
         clean_path = path.rstrip("/")
         clean_root = root.rstrip("/")
         return clean_path == clean_root or clean_path.startswith(clean_root + "/")
+
+
+def meaningful_chat_cwd(cwd: str | None) -> str | None:
+    """Return a cwd only when it is specific enough to link tmux panes to a chat."""
+    if not cwd:
+        return None
+    try:
+        path = Path(cwd).expanduser().resolve(strict=False)
+        broad_roots = {
+            Path("/").resolve(strict=False),
+            Path("/tmp").resolve(strict=False),
+            Path.home().resolve(strict=False),
+        }
+        if path in broad_roots:
+            return None
+        parts = path.parts
+        if len(parts) <= 3 and len(parts) >= 2 and parts[1] in {"home", "Users"}:
+            return None
+        return str(path)
+    except Exception:
+        clean = str(cwd).strip().rstrip("/")
+        if not clean or clean in {"/", "/tmp", str(Path.home())}:
+            return None
+        if re.fullmatch(r"/(?:home|Users)/[^/]+", clean):
+            return None
+        return clean
+
+
+def tmux_context_token_is_specific(token: str) -> str | None:
+    clean = token.strip(" \t\r\n\"'`.,;:()[]{}<>").lower()
+    if len(clean) < 4 or clean in TMUX_NOISE_TOKENS:
+        return None
+    if clean.isdigit():
+        return None
+    if "/" in clean:
+        clean = clean.rsplit("/", 1)[-1]
+    if len(clean) < 8 and not re.search(r"[_@:+.-]|\d", clean):
+        return None
+    return clean
+
+
+def tmux_chat_context_tokens(session_id: str, sess: dict[str, Any], chat_cwd: str | None) -> set[str]:
+    tokens: set[str] = set()
+
+    def add(value: Any) -> None:
+        if value is None:
+            return
+        if clean := tmux_context_token_is_specific(str(value)):
+            tokens.add(clean)
+
+    add(session_id)
+    for key in ("title", "session_id", "claude_session_id", "codex_thread_id"):
+        add(sess.get(key))
+    if chat_cwd:
+        add(Path(chat_cwd).name)
+
+    for event in read_events(session_id, limit=240, tail=True):
+        text = json.dumps(event, ensure_ascii=False)
+        for match in TMUX_TARGET_RE.finditer(text):
+            add(match.group(1))
+        for raw in TMUX_CONTEXT_TOKEN_RE.findall(text[:12000]):
+            add(raw)
+        if len(tokens) > 120:
+            break
+    return tokens
 
 
 def descendant_processes(root_pid: int | None, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1512,7 +1586,8 @@ def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[s
         raise HTTPException(status_code=500, detail=(result.stderr or result.stdout or "tmux list-panes failed").strip()[:1000])
 
     rows = ps_process_rows()
-    chat_cwd = sess.get("cwd") or DEFAULT_CWD
+    chat_cwd = meaningful_chat_cwd(sess.get("cwd") or DEFAULT_CWD)
+    chat_tokens = tmux_chat_context_tokens(session_id, sess, chat_cwd)
     owned_name = terminal_session_name(session_id)
     panes: list[dict[str, Any]] = []
     for line in result.stdout.splitlines():
@@ -1534,13 +1609,16 @@ def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[s
         matches: list[str] = []
         if parts[0] == owned_name:
             matches.append("chat tmux")
-        if path_is_within(parts[7], chat_cwd):
+        if chat_cwd and path_is_within(parts[7], chat_cwd):
             matches.append("chat cwd")
+        if chat_tokens and any(token in search_text for token in chat_tokens):
+            matches.append("chat context")
         if any(keyword in search_text for keyword in TMUX_SUBMITTER_KEYWORDS):
             matches.append("submitter")
         if any(float(proc.get("cpu_percent") or 0.0) > 2.0 for proc in processes):
             matches.append("active")
-        if not include_all and not matches:
+        chat_linked = any(match in TMUX_CHAT_MATCH_LABELS for match in matches)
+        if not include_all and not chat_linked:
             continue
         panes.append({
             "session_name": parts[0],
@@ -1560,7 +1638,10 @@ def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[s
         })
     panes.sort(key=lambda pane: (
         0 if "chat tmux" in pane.get("matches", []) else 1,
+        0 if "chat context" in pane.get("matches", []) else 1,
         0 if "chat cwd" in pane.get("matches", []) else 1,
+        0 if "submitter" in pane.get("matches", []) else 1,
+        0 if "active" in pane.get("matches", []) else 1,
         str(pane.get("session_name") or ""),
         int(pane.get("window_index") or 0),
         int(pane.get("pane_index") or 0),

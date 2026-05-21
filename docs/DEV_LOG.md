@@ -16,6 +16,36 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Narrow Tmux Submitter Inspector
+
+Problem:
+
+- The Mac `Tmux Submitters` inspector showed many unrelated panes because
+  `/home/zen` counted as a chat working directory and because submitter-like
+  keywords alone were enough to include a pane.
+
+Change:
+
+- Server tmux filtering now treats broad home/default roots as too generic to
+  count as a chat cwd.
+- Default tmux inspector results now require an actual chat link:
+  per-chat tmux session, meaningful chat cwd, or a token from the recent chat
+  context. Generic `osmo` / `train` / `submitter` keyword matches are still
+  shown as chips, but no longer pull unrelated panes into the default list.
+- The Mac inspector copy now says the `All` checkbox is the machine-wide view.
+- Added guardrails for the narrower default filter.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS -derivedDataPath build/DerivedData build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and verified
+  codesign.
+- Deployed to `sonic` with `./server/deploy.sh sonic`; service restarted and
+  responded to health with auth-required, which confirms the server is up.
+
 ## 2026-05-21 Follow-Up - Sidebar Single Dot Indicator
 
 Problem:

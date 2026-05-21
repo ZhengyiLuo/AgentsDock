@@ -391,10 +391,14 @@ func checkTmuxSubmitterVisualizer() throws {
     try assert(server.contains("@app.get(\"/api/sessions/{session_id}/tmux\")"), "Server must expose a tmux pane listing endpoint")
     try assert(server.contains("@app.get(\"/api/sessions/{session_id}/tmux/capture\")"), "Server must expose a tmux pane capture endpoint")
     try assert(server.contains("TMUX_SUBMITTER_KEYWORDS"), "Server tmux listing must identify likely submitter panes")
+    try assert(server.contains("meaningful_chat_cwd"), "Server tmux listing must ignore broad home/default cwd matches")
+    try assert(server.contains("TMUX_CHAT_MATCH_LABELS"), "Server tmux listing must distinguish chat-linked panes from machine-wide panes")
+    try assert(server.contains("if not include_all and not chat_linked"), "Default tmux listing must not include unrelated submitters")
     try assert(macStore.contains("refreshSelectedTmuxPanes"), "Mac store must load tmux panes on demand")
     try assert(macStore.contains("captureTmuxPane"), "Mac store must capture tmux pane output on demand")
     try assert(inspector.contains("TmuxSubmitterInspector"), "Mac inspector must render the tmux submitter visualizer")
     try assert(inspector.contains("Inspect Tmux Submitters"), "Mac inspector must keep tmux inspection explicit/on demand")
+    try assert(inspector.contains("not just panes linked to this chat"), "Mac tmux inspector must label the All toggle as machine-wide")
 }
 
 func checkExportCompliancePlists() throws {
