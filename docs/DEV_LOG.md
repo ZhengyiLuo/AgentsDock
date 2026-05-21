@@ -2184,3 +2184,22 @@ Follow-up:
 - The locked macOS composer backend display is now a normal read-only chip
   rather than a disabled menu. Disabling the menu dimmed the supplied backend
   icon and made it look dark/muddy even though the backend was merely locked.
+
+### New Message Marker Repair
+
+User issue:
+
+- The selected-chat new-message marker could disappear or never render when an
+  agent replied while the user was scrolled away from the bottom.
+
+Changes:
+
+- The macOS store now tracks the first unread agent event sequence per session,
+  not just a boolean unread session ID.
+- The timeline renders an inline `New messages` divider before the first row at
+  or after that unread sequence.
+- Split strict bottom detection from "near bottom" button hiding. Read clearing
+  now requires a strict bottom threshold, while the floating button can still
+  show `New` even if the user is near the bottom.
+- Added guardrails for unread sequence tracking, inline marker rendering, and
+  strict read-clearing behavior.

@@ -273,6 +273,20 @@ func checkCodeReviewSurfaceIsStructured() throws {
     try assert(review.contains("!path.hasPrefix(\"+\")"), "Code change extraction must reject diff body lines as fake paths")
 }
 
+func checkUnreadMessageMarker() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("firstUnreadAgentSeqBySessionID"), "Mac store must remember the first unread agent event seq")
+    try assert(macStore.contains("selectedSessionFirstUnreadSeq"), "Mac store must expose selected chat's first unread seq")
+    try assert(macStore.contains("markAgentUnread(sessionID: String, firstSeq: Int? = nil)"), "Unread marking must accept a first event seq")
+    try assert(timeline.contains("TimelineUnreadMarker"), "Mac timeline must render an inline new-message marker")
+    try assert(timeline.contains("firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)"), "Timeline must anchor the marker to the first unread row")
+    try assert(timeline.contains("(!isNearBottom || store.selectedSessionHasUnread)"), "Bottom button must still show when there are unread messages near the bottom")
+    try assert(timeline.contains("metrics.distanceFromBottom <= 28"), "Read clearing must use a strict bottom threshold")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -289,6 +303,7 @@ do {
     try checkTimelineCombinesRunTraces()
     try checkInlineVideoPlayAutoplays()
     try checkCodeReviewSurfaceIsStructured()
+    try checkUnreadMessageMarker()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

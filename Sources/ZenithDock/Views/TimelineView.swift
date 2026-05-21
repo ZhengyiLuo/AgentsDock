@@ -14,6 +14,7 @@ struct TimelineView: View {
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
     @State private var visibleRowLimit = 100
     @State private var isFileDropTargeted = false
+    @State private var isNearBottom = true
     @State private var historyLoadSuppressedUntil = Date.distantPast
     @State private var lastObservedEventSeq = 0
     @State private var isInitialTimelineMasked = false
@@ -36,6 +37,7 @@ struct TimelineView: View {
         let jobsByRunID = projection.jobsByRunID
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
+        let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
         let displaySignature = "\(displayEvents.count):\(displayEvents.last?.id ?? "")"
 
@@ -66,6 +68,10 @@ struct TimelineView: View {
                                     }
                                 }
                                 ForEach(rows) { row in
+                                    if row.id == firstUnreadRowID {
+                                        TimelineUnreadMarker()
+                                            .id("unread-marker-\(row.id)")
+                                    }
                                     switch row.kind {
                                     case .event(let event):
                                         EventCard(
@@ -118,7 +124,7 @@ struct TimelineView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(false)
                     }
-                    if !isInitialTimelineMasked && isTimelineScrollable && !isAtBottom && !displayEvents.isEmpty {
+                    if !isInitialTimelineMasked && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
                         } label: {
@@ -160,6 +166,7 @@ struct TimelineView: View {
                 .onChange(of: store.selectedSessionID) {
                     beginInitialTimelineMask()
                     isAtBottom = true
+                    isNearBottom = true
                     isTimelineScrollable = false
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
@@ -175,6 +182,7 @@ struct TimelineView: View {
                     let rowCount = TimelineRows.build(from: displayEvents).count
                     if newCount == 0 {
                         isAtBottom = true
+                        isNearBottom = true
                         isTimelineScrollable = false
                         setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
@@ -250,6 +258,7 @@ struct TimelineView: View {
                 withTransaction(noAnimationTransaction) {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                     isAtBottom = true
+                    isNearBottom = true
                     store.markSelectedSessionRead()
                 }
             }
@@ -274,6 +283,7 @@ struct TimelineView: View {
         let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
+            isNearBottom = true
             store.markSelectedSessionRead()
         }
         if animated {
@@ -298,6 +308,7 @@ struct TimelineView: View {
                 proxy.scrollTo(target.id, anchor: .center)
             }
             isAtBottom = false
+            isNearBottom = false
         }
     }
 
@@ -334,11 +345,15 @@ struct TimelineView: View {
         if isTimelineScrollable != metrics.isScrollable {
             isTimelineScrollable = metrics.isScrollable
         }
-        let next = !metrics.isScrollable || metrics.distanceFromBottom <= bottomButtonHideDistance
-        if isAtBottom != next {
-            isAtBottom = next
+        let nextAtBottom = !metrics.isScrollable || metrics.distanceFromBottom <= 28
+        let nextNearBottom = !metrics.isScrollable || metrics.distanceFromBottom <= bottomButtonHideDistance
+        if isAtBottom != nextAtBottom {
+            isAtBottom = nextAtBottom
         }
-        if next, store.selectedSessionHasUnread {
+        if isNearBottom != nextNearBottom {
+            isNearBottom = nextNearBottom
+        }
+        if nextAtBottom, store.selectedSessionHasUnread {
             store.markSelectedSessionRead()
         }
     }
@@ -421,12 +436,14 @@ struct TimelineView: View {
         withTransaction(noAnimationTransaction) {
             proxy.scrollTo(rowID, anchor: .top)
             isAtBottom = false
+            isNearBottom = false
         }
         DispatchQueue.main.async {
             withTransaction(noAnimationTransaction) {
                 proxy.scrollTo(rowID, anchor: .top)
             }
             isAtBottom = false
+            isNearBottom = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 olderHistoryLoadArmed = true
                 suppressScrollHistoryLoadUntilTopLeaves = false
@@ -466,8 +483,17 @@ struct TimelineView: View {
         if isAtBottom {
             store.markSessionRead(sessionID)
         } else {
-            store.markAgentUnread(sessionID: sessionID)
+            let firstSeq = store.displayEvents
+                .filter { $0.seq > previousSeq && store.isAgentVisibleMessage($0) }
+                .map(\.seq)
+                .min()
+            store.markAgentUnread(sessionID: sessionID, firstSeq: firstSeq)
         }
+    }
+
+    private func firstUnreadRowID(in rows: [TimelineRow], unreadSeq: Int?) -> String? {
+        guard store.selectedSessionHasUnread, let unreadSeq else { return nil }
+        return rows.first { $0.maxSeq >= unreadSeq }?.id
     }
 
     private func maxEventSeq(_ events: [ZEvent]) -> Int {
@@ -804,6 +830,38 @@ private final class TimelineRow: Identifiable {
     init(id: String, kind: Kind) {
         self.id = id
         self.kind = kind
+    }
+
+    var maxSeq: Int {
+        switch kind {
+        case .event(let event):
+            event.seq
+        case .job(let jobRun):
+            jobRun.lastSeq
+        case .jobGroup(let group):
+            group.runs.map(\.lastSeq).max() ?? 0
+        case .trace(let events):
+            events.map(\.seq).max() ?? 0
+        }
+    }
+}
+
+private struct TimelineUnreadMarker: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.75))
+                .frame(height: 1)
+            Text("New messages")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.accentColor)
+                .lineLimit(1)
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.75))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 2)
+        .accessibilityLabel("New messages")
     }
 }
 

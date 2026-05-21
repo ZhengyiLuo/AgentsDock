@@ -48,6 +48,7 @@ final class AppStore: ObservableObject {
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
+    @Published private(set) var firstUnreadAgentSeqBySessionID: [String: Int] = [:]
 
     private let initialSessionEventLimit = 160
     private let olderHistoryPageLimit = 160
@@ -101,6 +102,11 @@ final class AppStore: ObservableObject {
     var selectedSessionHasUnread: Bool {
         guard let selectedSessionID else { return false }
         return unreadAgentSessionIDs.contains(selectedSessionID)
+    }
+
+    var selectedSessionFirstUnreadSeq: Int? {
+        guard let selectedSessionID else { return nil }
+        return firstUnreadAgentSeqBySessionID[selectedSessionID]
     }
 
     var activeSessions: [ZSession] {
@@ -234,9 +240,14 @@ final class AppStore: ObservableObject {
     func markSessionRead(_ sessionID: String?) {
         guard let sessionID, unreadAgentSessionIDs.contains(sessionID) else { return }
         unreadAgentSessionIDs.remove(sessionID)
+        firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
     }
 
-    func markAgentUnread(sessionID: String) {
+    func markAgentUnread(sessionID: String, firstSeq: Int? = nil) {
+        if let firstSeq {
+            let existing = firstUnreadAgentSeqBySessionID[sessionID]
+            firstUnreadAgentSeqBySessionID[sessionID] = existing.map { min($0, firstSeq) } ?? firstSeq
+        }
         guard !unreadAgentSessionIDs.contains(sessionID) else { return }
         unreadAgentSessionIDs.insert(sessionID)
     }
@@ -296,6 +307,7 @@ final class AppStore: ObservableObject {
         memoryChatCache = [:]
         memoryChatCacheOrder = []
         unreadAgentSessionIDs = []
+        firstUnreadAgentSeqBySessionID = [:]
         connectionProblemText = nil
     }
 
@@ -1215,7 +1227,7 @@ final class AppStore: ObservableObject {
         }
         rebuildDisplayEvents()
         if event.session_id != selectedSessionID, isAgentVisibleMessage(event) {
-            markAgentUnread(sessionID: event.session_id)
+            markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
         }
         if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
             AppLogger.info("event session=\(event.session_id) seq=\(event.seq) type=\(event.type)")
