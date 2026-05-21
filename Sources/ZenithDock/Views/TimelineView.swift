@@ -161,7 +161,7 @@ struct TimelineView: View {
                     acceptTimelineFileDrop(providers)
                 }
                 .onChange(of: store.scrollToBottomRevision) {
-                    if isAtBottom {
+                    if shouldFollowBottomRequest {
                         scrollToBottom(proxy)
                     }
                     settleInitialTimelinePosition(proxy)
@@ -186,6 +186,7 @@ struct TimelineView: View {
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
                     let previousObservedSeq = lastObservedEventSeq
+                    let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
                     let rowCount = TimelineRows.build(from: displayEvents).count
                     if newCount == 0 {
                         isAtBottom = true
@@ -200,7 +201,12 @@ struct TimelineView: View {
                     }
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
-                    settleInitialTimelinePosition(proxy)
+                    if shouldFollowLiveEvent {
+                        scrollToBottom(proxy)
+                        store.markSelectedSessionRead(force: true)
+                    } else {
+                        settleInitialTimelinePosition(proxy)
+                    }
                 }
                 .onChange(of: displaySignature) {
                     settleInitialTimelinePosition(proxy)
@@ -301,6 +307,19 @@ struct TimelineView: View {
         } else {
             action()
         }
+    }
+
+    private var shouldFollowBottomRequest: Bool {
+        isAtBottom || isNearBottom || store.selectedTimelineAtBottom || store.isRunning
+    }
+
+    private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {
+        guard store.selectedSessionID != nil else { return false }
+        let hasNewerVisibleEvent = store.displayEvents.contains { event in
+            event.seq > previousSeq
+        }
+        guard hasNewerVisibleEvent else { return false }
+        return shouldFollowBottomRequest
     }
 
     private func scrollToRequestedEvent(_ proxy: ScrollViewProxy) {

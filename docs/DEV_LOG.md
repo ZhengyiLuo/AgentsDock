@@ -16,6 +16,38 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Live Timeline Auto-Follow
+
+Problem:
+
+- During selected-chat streaming, new event rows could push the timeline bottom
+  away before the scroll request landed. The Mac timeline then rejected the
+  request because its local `isAtBottom` flag had already flipped false, causing
+  visible stream jank and unread/bottom-button weirdness while the chat was in
+  front.
+
+Change:
+
+- Mac timeline now centralizes bottom-follow decisions with
+  `shouldFollowBottomRequest`.
+- Newer selected-chat events auto-scroll when the timeline was at/near bottom,
+  the store still considers it at bottom, or the selected chat is actively
+  running.
+- Auto-follow uses event sequence checks, so prepending older history still
+  preserves the user's scroll position instead of jumping to the bottom.
+- iOS/iPadOS timeline received the same sequence-aware live-follow behavior.
+- Added guardrails for live auto-follow so future scroll changes do not regress
+  this.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS -derivedDataPath build/DerivedData build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and verified
+  codesign.
+
 ## 2026-05-21 Follow-Up - Manual Mark Chat Unread
 
 Problem:

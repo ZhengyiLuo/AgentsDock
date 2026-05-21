@@ -363,6 +363,20 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("row(containingEventID: eventID, in: rows)"), "History paging must restore through the event-id fallback when row IDs change")
 }
 
+func checkLiveTimelineAutoFollow() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+    let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+
+    try assert(macTimeline.contains("shouldFollowBottomRequest"), "Mac timeline must centralize live-follow decisions")
+    try assert(macTimeline.contains("shouldAutoFollowLiveEvent(after:"), "Mac timeline must auto-follow newer selected-chat events")
+    try assert(macTimeline.contains("store.isRunning"), "Mac live-follow must keep active selected chats pinned to the newest stream")
+    try assert(macTimeline.contains("store.markSelectedSessionRead(force: true)"), "Mac auto-follow must clear selected unread state intentionally")
+    try assert(mobileTimeline.contains("shouldAutoFollowLiveEvent(after:"), "iOS timeline must auto-follow newer selected-chat events")
+    try assert(mobileTimeline.contains("isAtBottom || store.isRunning"), "iOS live-follow must keep active selected chats pinned to the newest stream")
+    try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
+}
+
 func checkTmuxSubmitterVisualizer() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
@@ -401,6 +415,7 @@ do {
     try checkCodeReviewSurfaceIsStructured()
     try checkUnreadMessageMarker()
     try checkTimelineHistoryPaging()
+    try checkLiveTimelineAutoFollow()
     try checkTmuxSubmitterVisualizer()
     print("ZenithGuardrails passed")
 } catch {

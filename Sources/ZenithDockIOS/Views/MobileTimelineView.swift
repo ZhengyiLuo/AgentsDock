@@ -17,6 +17,7 @@ struct MobileTimelineView: View {
     @State private var visibleRowLimit = 110
     @State private var isFileDropTargeted = false
     @State private var historyLoadSuppressedUntil = Date.distantPast
+    @State private var lastObservedEventSeq = 0
     private let bottomID = "mobile-timeline-bottom"
     private let defaultVisibleRowLimit = 110
     private let rowPageSize = 36
@@ -126,7 +127,7 @@ struct MobileTimelineView: View {
                     acceptTimelineFileDrop(providers)
                 }
                 .onChange(of: store.scrollRevision) {
-                    if isAtBottom {
+                    if isAtBottom || store.isRunning {
                         scrollToBottom(proxy)
                     }
                 }
@@ -136,9 +137,12 @@ struct MobileTimelineView: View {
                     suppressScrollHistoryLoadUntilTopLeaves = false
                     historyLoadSuppressedUntil = Date.distantPast
                     visibleRowLimit = defaultVisibleRowLimit
+                    lastObservedEventSeq = maxEventSeq(displayEvents)
                     scrollToBottom(proxy)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
+                    let previousObservedSeq = lastObservedEventSeq
+                    let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
                     let rowCount = MobileTimelineRows.build(from: displayEvents).count
                     if newCount == 0 {
                         setVisibleRowLimit(defaultVisibleRowLimit)
@@ -146,6 +150,10 @@ struct MobileTimelineView: View {
                         setVisibleRowLimit(min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit)))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
+                    }
+                    lastObservedEventSeq = maxEventSeq(displayEvents)
+                    if shouldFollowLiveEvent {
+                        scrollToBottom(proxy)
                     }
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
@@ -173,6 +181,15 @@ struct MobileTimelineView: View {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
         }
+    }
+
+    private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {
+        guard store.selectedSessionID != nil else { return false }
+        let hasNewerVisibleEvent = store.displayEvents.contains { event in
+            event.seq > previousSeq
+        }
+        guard hasNewerVisibleEvent else { return false }
+        return isAtBottom || store.isRunning
     }
 
     private func handleHistoryTopChange(_ topY: CGFloat?, proxy: ScrollViewProxy) {
@@ -301,6 +318,10 @@ struct MobileTimelineView: View {
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         return transaction
+    }
+
+    private func maxEventSeq(_ events: [ZEvent]) -> Int {
+        events.map(\.seq).max() ?? 0
     }
 
     private func acceptTimelineFileDrop(_ providers: [NSItemProvider]) -> Bool {
