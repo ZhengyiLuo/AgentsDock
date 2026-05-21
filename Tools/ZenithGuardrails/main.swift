@@ -124,6 +124,17 @@ func checkShellCopyNormalization() throws {
     )
 }
 
+func checkCodeBlockCopyUsesFullText() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let markdown = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/Components/MarkdownView.swift"), encoding: .utf8)
+
+    try assert(markdown.contains("private var visibleDisplayText"), "Mac code block should keep a separate visible display string")
+    try assert(markdown.contains("private var copyText"), "Mac code block should keep a separate full copy string")
+    try assert(markdown.contains("ZClipboardText.normalizedForCopy(text, language: language)"), "Mac code block copy must use the full backing text")
+    try assert(markdown.contains("copyToPasteboard(copyText)"), "Mac code block copy button/context menu must copy the full backing text")
+    try assert(markdown.contains("CodeHighlighter.highlight(visibleDisplayText"), "Mac code block rendering should still use the visible truncated display text")
+}
+
 func checkArchiveSessionBehavior() throws {
     let sessionData = Data(#"{"id":"sess","title":"Archived","backend":"codex","archived":true,"sort_order":10}"#.utf8)
     let session = try JSONDecoder().decode(ZSession.self, from: sessionData)
@@ -350,6 +361,7 @@ do {
     try checkBackendLocksAfterProviderStart()
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
+    try checkCodeBlockCopyUsesFullText()
     try checkArchiveSessionBehavior()
     try checkMobileDoesNotAutoSelectFirstChat()
     try checkTimelineRevealWaitsForLatestSnapshot()

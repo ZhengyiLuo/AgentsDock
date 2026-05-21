@@ -256,8 +256,12 @@ struct CodeBlock: View {
         return String(text.prefix(effectiveLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n..."
     }
 
-    private var displayText: String {
+    private var visibleDisplayText: String {
         ZClipboardText.normalizedForCopy(shown, language: language)
+    }
+
+    private var copyText: String {
+        ZClipboardText.normalizedForCopy(text, language: language)
     }
 
     private var languageLabel: String {
@@ -273,7 +277,7 @@ struct CodeBlock: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    copyToPasteboard(displayText)
+                    copyToPasteboard(copyText)
                     copied = true
                     Task {
                         try? await Task.sleep(for: .seconds(1.2))
@@ -283,7 +287,7 @@ struct CodeBlock: View {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
-                .help(copied ? "Copied" : "Copy code")
+                .help(copied ? "Copied" : "Copy full code")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
@@ -292,14 +296,14 @@ struct CodeBlock: View {
             Divider()
 
             ScrollView(.horizontal, showsIndicators: true) {
-                Text(CodeHighlighter.highlight(displayText, language: language, fontSize: max(12, chatFontSize - 1)))
+                Text(CodeHighlighter.highlight(visibleDisplayText, language: language, fontSize: max(12, chatFontSize - 1)))
                     .padding(12)
                     .fixedSize(horizontal: true, vertical: false)
                     .textSelection(.enabled)
                     .frame(minWidth: 0, alignment: .leading)
                     .contextMenu {
                         Button("Copy Code") {
-                            copyToPasteboard(displayText)
+                            copyToPasteboard(copyText)
                         }
                     }
             }
