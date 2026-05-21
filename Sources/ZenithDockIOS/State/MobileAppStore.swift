@@ -910,6 +910,8 @@ final class MobileAppStore: ObservableObject {
         }
         do {
             let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
+            events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+            rememberSelectedChat()
         } catch {
             report(error)
         }

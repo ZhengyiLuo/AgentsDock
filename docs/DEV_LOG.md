@@ -16,6 +16,25 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Restore Sidebar Provider Icons
+
+Problem:
+
+- The sidebar single-dot cleanup went too far and replaced the Claude/Codex
+  provider icons with plain status dots.
+
+Change:
+
+- Mac and iOS/iPadOS sidebar rows now show the provider logo again.
+- Running/unread status is a single optional tiny badge on the provider icon.
+- Idle and archived rows do not show an extra standalone status dot.
+- Updated guardrails so future sidebar cleanups keep backend icons while
+  avoiding duplicate dot clutter.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+
 ## 2026-05-21 Follow-Up - Strict Tmux Submitter Defaults
 
 Problem:
@@ -2603,3 +2622,22 @@ Changes:
   the row containing the same event instead of jumping to the new top.
 - Added guardrails for the larger initial window, larger cache, cache-preserving
   snapshot merge, and event-ID scroll anchor fallback.
+
+### Queue Removal Visibility
+
+User issue:
+
+- Removing a queued message could leave a normal-looking user bubble labeled
+  `Removed from queue`, which made it look like the message still existed in
+  the conversation.
+
+Changes:
+
+- The server already removes the queued turn from its in-memory queue and emits
+  a `turn_unqueued` audit event.
+- The macOS timeline now hides any `turn_queued` row that has a matching
+  `turn_unqueued` event.
+- macOS and iOS/iPadOS now also remove the queued row locally immediately after
+  a successful unqueue request, so the UI does not wait on the websocket echo.
+- Added guardrails so cancelled queued turns cannot regress into visible chat
+  bubbles again.

@@ -213,7 +213,11 @@ struct SessionRow: View {
     var body: some View {
         let hasUnread = store.unreadAgentSessionIDs.contains(session.id)
         HStack(spacing: 10) {
-            SessionRowStatusDot(color: statusDotColor, label: statusDotLabel)
+            SessionRowBackendIcon(
+                backend: session.backend,
+                badgeColor: statusBadgeColor,
+                badgeLabel: statusBadgeLabel
+            )
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(session.title)
@@ -235,28 +239,22 @@ struct SessionRow: View {
         .padding(.vertical, 2)
     }
 
-    private var statusDotColor: Color {
+    private var statusBadgeColor: Color? {
         if store.unreadAgentSessionIDs.contains(session.id) {
             return Color.accentColor
         }
         if store.activeSessionIDs.contains(session.id) {
             return .green
         }
-        if session.archived == true {
-            return .secondary.opacity(0.45)
-        }
-        return Theme.backendTint(session.backend)
+        return nil
     }
 
-    private var statusDotLabel: String {
+    private var statusBadgeLabel: String {
         if store.unreadAgentSessionIDs.contains(session.id) {
             return "Unread agent message"
         }
         if store.activeSessionIDs.contains(session.id) {
             return "Running"
-        }
-        if session.archived == true {
-            return "Archived"
         }
         return session.backend.capitalized
     }
@@ -279,14 +277,23 @@ struct SessionRow: View {
     }
 }
 
-private struct SessionRowStatusDot: View {
-    let color: Color
-    let label: String
+private struct SessionRowBackendIcon: View {
+    let backend: String
+    let badgeColor: Color?
+    let badgeLabel: String
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 8, height: 8)
-            .accessibilityLabel(label)
+        ZStack(alignment: .bottomTrailing) {
+            BackendLogo(backend: backend)
+            if let badgeColor {
+                Circle()
+                    .fill(badgeColor)
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(Theme.panel, lineWidth: 1.5))
+                    .offset(x: 2, y: 1)
+                    .accessibilityLabel(badgeLabel)
+            }
+        }
+        .accessibilityLabel(badgeLabel)
     }
 }

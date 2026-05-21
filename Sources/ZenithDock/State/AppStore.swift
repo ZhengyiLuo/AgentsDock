@@ -224,10 +224,16 @@ final class AppStore: ObservableObject {
         let queuedTurnIDs = Set(source.compactMap { event -> String? in
             event.type == "turn_queued" ? event.queued_id : nil
         })
+        let cancelledQueuedTurnIDs = Set(source.compactMap { event -> String? in
+            event.type == "turn_unqueued" ? event.queued_id : nil
+        })
         return source.filter { event in
             switch event.type {
             case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_unqueued":
                 return false
+            case "turn_queued":
+                guard let queuedID = event.queued_id else { return false }
+                return !cancelledQueuedTurnIDs.contains(queuedID)
             case "turn_started":
                 if let queuedID = event.queued_id, queuedTurnIDs.contains(queuedID) {
                     return false
@@ -1237,6 +1243,9 @@ final class AppStore: ObservableObject {
         }
         do {
             let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
+            events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+            rebuildDisplayEvents()
+            saveSelectedChatCache()
             AppLogger.info("unqueued session=\(event.session_id) queued=\(queuedID)")
         } catch {
             AppLogger.error("unqueue failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")

@@ -256,10 +256,12 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
         FileManager.default.fileExists(atPath: assets.appendingPathComponent("CodexBackendLogo.imageset/CodexBackendLogo@2x.png").path),
         "Codex backend image asset must include a 2x small rendition"
     )
-    try assert(macSidebar.contains("SessionRowStatusDot"), "Mac sidebar must keep chat row status to one compact dot")
-    try assert(mobileSidebar.contains("MobileSessionRowStatusDot"), "iOS sidebar must keep chat row status to one compact dot")
-    try assert(macSidebar.contains("Theme.backendTint(session.backend)"), "Mac sidebar idle status dot should still reflect backend")
-    try assert(mobileSidebar.contains("MobileTheme.backendTint(session.backend)"), "iOS sidebar idle status dot should still reflect backend")
+    try assert(macSidebar.contains("SessionRowBackendIcon"), "Mac sidebar must keep provider icons in chat rows")
+    try assert(mobileSidebar.contains("MobileSessionRowBackendIcon"), "iOS sidebar must keep provider icons in chat rows")
+    try assert(macSidebar.contains("BackendLogo(backend: backend)"), "Mac sidebar rows must show the backend logo")
+    try assert(mobileSidebar.contains("MobileBackendLogo(backend: backend)"), "iOS sidebar rows must show the backend logo")
+    try assert(macSidebar.contains("badgeColor: Color?"), "Mac sidebar row status must be a single optional badge on the icon")
+    try assert(mobileSidebar.contains("badgeColor: Color?"), "iOS sidebar row status must be a single optional badge on the icon")
     try assert(!macTheme.contains("\"terminal\""), "Codex must not fall back to the terminal SF Symbol")
     try assert(!mobileTheme.contains("\"terminal\""), "iOS Codex must not fall back to the terminal SF Symbol")
     try assert(!macSidebar.contains("sparkle.magnifyingglass"), "Codex sidebar icon must not be the search glyph")
@@ -379,6 +381,17 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
 }
 
+func checkQueuedRemovalDisappears() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("let cancelledQueuedTurnIDs"), "Mac timeline must track cancelled queued turns")
+    try assert(macStore.contains("return !cancelledQueuedTurnIDs.contains(queuedID)"), "Mac timeline must hide queued turns after they are removed")
+    try assert(macStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "Mac unqueue should remove the queued row locally after server success")
+    try assert(mobileStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "iOS unqueue should remove queued rows locally after server success")
+}
+
 func checkTmuxSubmitterVisualizer() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
@@ -438,6 +451,7 @@ do {
     try checkUnreadMessageMarker()
     try checkTimelineHistoryPaging()
     try checkLiveTimelineAutoFollow()
+    try checkQueuedRemovalDisappears()
     try checkTmuxSubmitterVisualizer()
     try checkExportCompliancePlists()
     print("ZenithGuardrails passed")
