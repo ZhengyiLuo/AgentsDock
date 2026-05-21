@@ -16,6 +16,31 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - TestFlight Build 31 Upload
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `30` to `31` for iOS/iPadOS, macOS,
+  and `ZenithCore`.
+- Uploaded build `31` for both TestFlight platforms after adding the export
+  compliance plist flag.
+- Refreshed the normal local macOS app at
+  `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the signed build `31`
+  macOS archive.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-31.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-31.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-31 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockIOS`.
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-31.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-31.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-31 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Verified both archives have `CFBundleVersion = 31` and
+  `ITSAppUsesNonExemptEncryption = false`.
+- Verified `dist/ZenithDock.app` codesign and plist values.
+
 ## 2026-05-21 Follow-Up - TestFlight Export Compliance Flag
 
 Problem:
