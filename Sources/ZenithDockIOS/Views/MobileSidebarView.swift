@@ -324,23 +324,7 @@ private struct MobileSessionRow: View {
     var body: some View {
         let hasUnread = store.unreadAgentSessionIDs.contains(session.id)
         HStack(spacing: 10) {
-            ZStack(alignment: .bottomTrailing) {
-                MobileBackendLogo(backend: session.backend)
-                    .scaleEffect(hasUnread ? 1.08 : 1)
-                if store.activeSessionIDs.contains(session.id) {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 7, height: 7)
-                        .offset(x: 3, y: 2)
-                }
-                if hasUnread {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(.background, lineWidth: 1.5))
-                        .offset(x: 4, y: -11)
-                }
-            }
+            MobileSessionRowStatusDot(color: statusDotColor, label: statusDotLabel)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(session.title)
@@ -352,12 +336,6 @@ private struct MobileSessionRow: View {
                             .foregroundStyle(.tertiary)
                             .accessibilityLabel("Archived")
                     }
-                    if hasUnread {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 6, weight: .bold))
-                            .foregroundStyle(Color.accentColor)
-                            .accessibilityLabel("Unread agent message")
-                    }
                 }
                 Text(subtitle)
                     .font(.caption)
@@ -366,6 +344,32 @@ private struct MobileSessionRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var statusDotColor: Color {
+        if store.unreadAgentSessionIDs.contains(session.id) {
+            return Color.accentColor
+        }
+        if store.activeSessionIDs.contains(session.id) {
+            return .green
+        }
+        if session.archived == true {
+            return .secondary.opacity(0.45)
+        }
+        return MobileTheme.backendTint(session.backend)
+    }
+
+    private var statusDotLabel: String {
+        if store.unreadAgentSessionIDs.contains(session.id) {
+            return "Unread agent message"
+        }
+        if store.activeSessionIDs.contains(session.id) {
+            return "Running"
+        }
+        if session.archived == true {
+            return "Archived"
+        }
+        return session.backend.capitalized
     }
 
     private var subtitle: String {
@@ -383,5 +387,17 @@ private struct MobileSessionRow: View {
             pieces.append(store.runtimeCatalog.effortLabel(effort, backend: session.backend))
         }
         return pieces.joined(separator: " · ")
+    }
+}
+
+private struct MobileSessionRowStatusDot: View {
+    let color: Color
+    let label: String
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .accessibilityLabel(label)
     }
 }

@@ -256,8 +256,10 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
         FileManager.default.fileExists(atPath: assets.appendingPathComponent("CodexBackendLogo.imageset/CodexBackendLogo@2x.png").path),
         "Codex backend image asset must include a 2x small rendition"
     )
-    try assert(macSidebar.contains("BackendLogo(backend: session.backend)"), "Mac sidebar must use backend-specific logo views")
-    try assert(mobileSidebar.contains("MobileBackendLogo(backend: session.backend)"), "iOS sidebar must use backend-specific logo views")
+    try assert(macSidebar.contains("SessionRowStatusDot"), "Mac sidebar must keep chat row status to one compact dot")
+    try assert(mobileSidebar.contains("MobileSessionRowStatusDot"), "iOS sidebar must keep chat row status to one compact dot")
+    try assert(macSidebar.contains("Theme.backendTint(session.backend)"), "Mac sidebar idle status dot should still reflect backend")
+    try assert(mobileSidebar.contains("MobileTheme.backendTint(session.backend)"), "iOS sidebar idle status dot should still reflect backend")
     try assert(!macTheme.contains("\"terminal\""), "Codex must not fall back to the terminal SF Symbol")
     try assert(!mobileTheme.contains("\"terminal\""), "iOS Codex must not fall back to the terminal SF Symbol")
     try assert(!macSidebar.contains("sparkle.magnifyingglass"), "Codex sidebar icon must not be the search glyph")

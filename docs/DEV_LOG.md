@@ -16,6 +16,25 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Sidebar Single Dot Indicator
+
+Problem:
+
+- Sidebar chat rows became visually busy after provider logos, running badges,
+  and unread badges all stacked around the same row.
+
+Change:
+
+- Mac and iOS/iPadOS sidebar rows now use one compact status dot total.
+- Dot priority is unread, running, archived, then backend-colored idle state.
+- Provider logo assets remain available in roomier surfaces like the composer
+  and running-agent banner.
+- Added guardrails so dense sidebar rows stay on the single-dot treatment.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+
 ## 2026-05-21 Follow-Up - TestFlight Build 31 Upload
 
 Change:
