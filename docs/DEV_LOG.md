@@ -2178,3 +2178,9 @@ Changes:
   timeline/options once the backend is locked.
 - Added guardrails for the shared lock property, server conflict response, and
   UI-disabled controls.
+
+Follow-up:
+
+- The locked macOS composer backend display is now a normal read-only chip
+  rather than a disabled menu. Disabling the menu dimmed the supplied backend
+  icon and made it look dark/muddy even though the backend was merely locked.

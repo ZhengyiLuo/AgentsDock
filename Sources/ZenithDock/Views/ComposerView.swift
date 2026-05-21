@@ -146,7 +146,17 @@ struct ComposerView: View {
         store.selectedSession != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    @ViewBuilder
     private func backendMenu(for session: ZSession) -> some View {
+        if session.isBackendLocked {
+            composerBackendChip(session.backend)
+                .help("Backend is locked after chat starts. Fork or create a new chat to use another backend.")
+        } else {
+            backendPickerMenu(for: session)
+        }
+    }
+
+    private func backendPickerMenu(for session: ZSession) -> some View {
         Menu {
             Button {
                 setBackend("claude")
@@ -164,8 +174,7 @@ struct ComposerView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .disabled(session.isBackendLocked)
-        .help(session.isBackendLocked ? "Backend is locked after chat starts. Fork or create a new chat to use another backend." : "Backend")
+        .help("Backend")
     }
 
     private func runtimeMenu(for session: ZSession) -> some View {
