@@ -1428,9 +1428,12 @@ TMUX_SUBMITTER_KEYWORDS = (
     "submit", "submitter", "sbatch", "slurm", "osmo", "train", "training",
     "render", "rollout", "eval", "launch", "wandb", "ray", "torchrun",
 )
-TMUX_CHAT_MATCH_LABELS = {"chat tmux", "chat cwd", "chat context"}
-TMUX_CONTEXT_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{3,}")
-TMUX_TARGET_RE = re.compile(r"\btmux\b[^\n;&|]*(?:-s|-t)\s+['\"]?([A-Za-z0-9_.:@+-]{4,})")
+TMUX_CHAT_MATCH_LABELS = {"chat tmux", "chat target"}
+TMUX_TARGET_RE = re.compile(
+    r"\btmux\b[^\n;&|]*"
+    r"(?:\s-[A-Za-z]*[st]\s+|\s--(?:session-name|target|target-pane|target-session)\s+)"
+    r"['\"]?([A-Za-z0-9_.:@+-]{4,})"
+)
 TMUX_NOISE_TOKENS = {
     "bash", "chat", "codex", "claude", "default", "false", "general",
     "home", "launch", "local", "login", "none", "null", "osmo", "python",
@@ -1478,7 +1481,7 @@ def meaningful_chat_cwd(cwd: str | None) -> str | None:
         return clean
 
 
-def tmux_context_token_is_specific(token: str) -> str | None:
+def tmux_target_token(token: str) -> str | None:
     clean = token.strip(" \t\r\n\"'`.,;:()[]{}<>").lower()
     if len(clean) < 4 or clean in TMUX_NOISE_TOKENS:
         return None
@@ -1491,28 +1494,24 @@ def tmux_context_token_is_specific(token: str) -> str | None:
     return clean
 
 
-def tmux_chat_context_tokens(session_id: str, sess: dict[str, Any], chat_cwd: str | None) -> set[str]:
+def tmux_explicit_chat_targets(session_id: str, sess: dict[str, Any]) -> set[str]:
     tokens: set[str] = set()
 
     def add(value: Any) -> None:
         if value is None:
             return
-        if clean := tmux_context_token_is_specific(str(value)):
+        if clean := tmux_target_token(str(value)):
             tokens.add(clean)
 
-    add(session_id)
-    for key in ("title", "session_id", "claude_session_id", "codex_thread_id"):
+    add(terminal_session_name(session_id))
+    for key in ("session_id", "claude_session_id", "codex_thread_id"):
         add(sess.get(key))
-    if chat_cwd:
-        add(Path(chat_cwd).name)
 
     for event in read_events(session_id, limit=240, tail=True):
         text = json.dumps(event, ensure_ascii=False)
         for match in TMUX_TARGET_RE.finditer(text):
             add(match.group(1))
-        for raw in TMUX_CONTEXT_TOKEN_RE.findall(text[:12000]):
-            add(raw)
-        if len(tokens) > 120:
+        if len(tokens) > 80:
             break
     return tokens
 
@@ -1587,7 +1586,7 @@ def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[s
 
     rows = ps_process_rows()
     chat_cwd = meaningful_chat_cwd(sess.get("cwd") or DEFAULT_CWD)
-    chat_tokens = tmux_chat_context_tokens(session_id, sess, chat_cwd)
+    chat_tokens = tmux_explicit_chat_targets(session_id, sess)
     owned_name = terminal_session_name(session_id)
     panes: list[dict[str, Any]] = []
     for line in result.stdout.splitlines():
@@ -1612,7 +1611,7 @@ def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[s
         if chat_cwd and path_is_within(parts[7], chat_cwd):
             matches.append("chat cwd")
         if chat_tokens and any(token in search_text for token in chat_tokens):
-            matches.append("chat context")
+            matches.append("chat target")
         if any(keyword in search_text for keyword in TMUX_SUBMITTER_KEYWORDS):
             matches.append("submitter")
         if any(float(proc.get("cpu_percent") or 0.0) > 2.0 for proc in processes):
@@ -1638,7 +1637,7 @@ def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[s
         })
     panes.sort(key=lambda pane: (
         0 if "chat tmux" in pane.get("matches", []) else 1,
-        0 if "chat context" in pane.get("matches", []) else 1,
+        0 if "chat target" in pane.get("matches", []) else 1,
         0 if "chat cwd" in pane.get("matches", []) else 1,
         0 if "submitter" in pane.get("matches", []) else 1,
         0 if "active" in pane.get("matches", []) else 1,

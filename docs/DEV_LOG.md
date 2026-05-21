@@ -16,6 +16,30 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Strict Tmux Submitter Defaults
+
+Problem:
+
+- The first tmux inspector narrowing still let unrelated panes into the default
+  view when many chats shared the same project cwd, or when broad tokens from
+  recent chat text overlapped with other submitter sessions.
+
+Change:
+
+- Default tmux inspector results now require a strict chat link:
+  the deterministic per-chat tmux session name or an explicit tmux target
+  mentioned in recent chat events.
+- Same-cwd and generic submitter keyword matches remain visible as chips, but
+  no longer qualify a pane for the default list. The `All` toggle remains the
+  machine-wide escape hatch.
+- Removed broad chat-text token mining from the server filter and added
+  guardrails so it does not come back.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- `swift run ZenithGuardrails`
+
 ## 2026-05-21 Follow-Up - Narrow Tmux Submitter Inspector
 
 Problem:
