@@ -30,9 +30,10 @@ enum MobileTheme {
 
 struct MobileBackendLogo: View {
     let backend: String
+    var size: CGFloat = 16
 
     var body: some View {
-        Group {
+        ZStack {
             if let assetName {
                 Image(assetName)
                     .resizable()
@@ -40,12 +41,15 @@ struct MobileBackendLogo: View {
                     .interpolation(.high)
                     .scaledToFit()
                     .padding(backend.lowercased() == "claude" ? 1 : 0)
+                    .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: backend.lowercased() == "codex" ? 4 : 0))
             } else {
                 MobileGenericBackendLogoMark(tint: MobileTheme.backendTint(backend))
+                    .frame(width: size, height: size)
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: size, height: size)
+        .clipped()
         .accessibilityLabel("\(backend.capitalized) logo")
     }
 

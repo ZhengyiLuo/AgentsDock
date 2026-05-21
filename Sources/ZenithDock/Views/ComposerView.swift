@@ -230,8 +230,7 @@ struct ComposerView: View {
 
     private func composerBackendChip(_ backend: String) -> some View {
         HStack(spacing: 5) {
-            BackendLogo(backend: backend)
-                .frame(width: 13, height: 13)
+            BackendLogo(backend: backend, size: 13)
             Text(backend.capitalized)
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
@@ -255,17 +254,18 @@ struct ComposerView: View {
     private func runtimeLabel(for session: ZSession) -> String {
         let model = store.runtimeCatalog.modelLabel(session.model, backend: session.backend)
         let effort = store.runtimeCatalog.effortLabel(session.effort, backend: session.backend)
-        let compactModel = model == "Server default" ? "Default" : model
-        let compactEffort = effort == "Server default" ? "" : effort
+        let compactModel = model == "Default" ? "" : model
+        let compactEffort = effort == "Default" ? "" : effort
         return [compactModel, compactEffort].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private func runtimeBarLabel(for session: ZSession) -> String {
         let label = runtimeLabel(for: session)
-        return label
+        let compact = label
             .replacingOccurrences(of: "Server default (", with: "")
             .replacingOccurrences(of: ")", with: "")
             .replacingOccurrences(of: "Extra High", with: "XHigh")
+        return compact.isEmpty ? "Runtime" : compact
     }
 
     private func modelOptions(for session: ZSession) -> [ZRuntimeOption] {

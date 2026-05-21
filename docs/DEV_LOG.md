@@ -2146,3 +2146,14 @@ Changes:
   while keeping the generic CPU fallback only for unknown backends.
 - Added guardrails so the app cannot regress to SF Symbol placeholders or
   generated backend marks without the asset files present.
+
+Follow-up:
+
+- Fixed the supplied asset logo views to size and clip the image inside the logo
+  view itself. A frame around the outer SwiftUI group could let the resizable
+  image visually escape its layout slot and balloon inside the composer.
+- Composer/running-status chips now pass a 13px icon size directly instead of
+  relying on an outer frame.
+- Runtime labels no longer say `Server default (...)` when the resolved
+  default is known; the UI shows the actual model/effort, such as `GPT-5.5` and
+  `XHigh`.

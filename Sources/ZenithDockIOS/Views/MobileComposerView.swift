@@ -69,8 +69,7 @@ struct MobileComposerView: View {
 
                     if let session = store.selectedSession {
                         HStack(spacing: 5) {
-                            MobileBackendLogo(backend: session.backend)
-                                .frame(width: 13, height: 13)
+                            MobileBackendLogo(backend: session.backend, size: 13)
                             Text(runtimeLabel(for: session))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
@@ -131,8 +130,8 @@ struct MobileComposerView: View {
     private func runtimeLabel(for session: ZSession) -> String {
         let model = store.runtimeCatalog.modelLabel(session.model, backend: session.backend)
         let effort = store.runtimeCatalog.effortLabel(session.effort, backend: session.backend)
-        let compactModel = model == "Server default" ? "Default" : model
-        let compactEffort = effort == "Server default" ? "" : effort
+        let compactModel = model == "Default" ? "" : model
+        let compactEffort = effort == "Default" ? "" : effort
         return [compactModel, compactEffort].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 

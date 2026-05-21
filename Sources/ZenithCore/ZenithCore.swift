@@ -102,7 +102,7 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
             session.backend.capitalized,
             modelLabel(session.model, backend: session.backend),
             effortLabel(session.effort, backend: session.backend)
-        ].filter { !$0.isEmpty && $0 != "Server default" }.joined(separator: " · ")
+        ].filter { !$0.isEmpty && $0 != "Default" }.joined(separator: " · ")
     }
 
     private func mergedOptions(primary: [ZRuntimeOption]?, fallback: [ZRuntimeOption]?) -> [ZRuntimeOption] {
@@ -114,7 +114,7 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
         for option in (values ?? []) + extras {
             guard !seen.contains(option.value) else { continue }
             seen.insert(option.value)
-            out.append(option)
+            out.append(displayOption(option))
         }
         if !seen.contains(ZRuntimeCatalog.defaultValue) {
             out.insert(ZRuntimeCatalog.serverDefaultOption, at: 0)
@@ -140,20 +140,38 @@ public struct ZRuntimeCatalogSnapshot: Codable, Hashable, Sendable {
 
     private func serverDefaultLabel(value: String?, options: [ZRuntimeOption]) -> String {
         let clean = ZRuntimeCatalog.cleaned(value)
-        guard !clean.isEmpty else { return "Server default" }
+        guard !clean.isEmpty else { return "Default" }
         let label = options.first { $0.value == clean }?.label ?? clean
-        return "Server default (\(label))"
+        return displayDefaultLabel(label)
+    }
+
+    private func displayOption(_ option: ZRuntimeOption) -> ZRuntimeOption {
+        guard option.value.isEmpty else { return option }
+        return ZRuntimeOption(value: option.value, label: displayDefaultLabel(option.label))
+    }
+
+    private func displayDefaultLabel(_ label: String) -> String {
+        let clean = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return "Default" }
+        if clean == "Server default" {
+            return "Default"
+        }
+        let prefix = "Server default ("
+        if clean.hasPrefix(prefix), clean.hasSuffix(")") {
+            return String(clean.dropFirst(prefix.count).dropLast())
+        }
+        return clean
     }
 }
 
 public enum ZRuntimeCatalog {
     public static let defaultValue = ""
-    public static let serverDefaultOption = ZRuntimeOption(value: "", label: "Server default")
+    public static let serverDefaultOption = ZRuntimeOption(value: "", label: "Default")
     public static let fallbackBackends: [String: ZRuntimeBackendCatalog] = [
         "claude": ZRuntimeBackendCatalog(),
         "codex": ZRuntimeBackendCatalog(
             models: [
-                ZRuntimeOption(value: "", label: "Server default (GPT-5.5)"),
+                ZRuntimeOption(value: "", label: "GPT-5.5"),
                 ZRuntimeOption(value: "gpt-5.5", label: "GPT-5.5"),
                 ZRuntimeOption(value: "gpt-5.4", label: "GPT-5.4"),
                 ZRuntimeOption(value: "gpt-5.3-codex", label: "GPT-5.3 Codex"),
@@ -161,7 +179,7 @@ public enum ZRuntimeCatalog {
                 ZRuntimeOption(value: "gpt-5.2", label: "GPT-5.2")
             ],
             efforts: [
-                ZRuntimeOption(value: "", label: "Server default (XHigh)"),
+                ZRuntimeOption(value: "", label: "XHigh"),
                 ZRuntimeOption(value: "low", label: "Low"),
                 ZRuntimeOption(value: "medium", label: "Medium"),
                 ZRuntimeOption(value: "high", label: "High"),
@@ -182,13 +200,13 @@ public enum ZRuntimeCatalog {
 
     public static func modelLabel(_ value: String?, backend: String) -> String {
         let clean = cleaned(value)
-        guard !clean.isEmpty else { return "Server default" }
+        guard !clean.isEmpty else { return "Default" }
         return models(for: backend).first { $0.value == clean }?.label ?? clean
     }
 
     public static func effortLabel(_ value: String?) -> String {
         let clean = cleaned(value)
-        guard !clean.isEmpty else { return "Server default" }
+        guard !clean.isEmpty else { return "Default" }
         return efforts.first { $0.value == clean }?.label ?? clean
     }
 

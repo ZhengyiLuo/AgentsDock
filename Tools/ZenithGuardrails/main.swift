@@ -67,9 +67,9 @@ func checkRuntimeDefaultLabels() throws {
     let sessionData = Data(#"{"id":"sess","title":"Chat","backend":"codex"}"#.utf8)
     let session = try JSONDecoder().decode(ZSession.self, from: sessionData)
 
-    try assert(catalog.modelLabel(nil, backend: "codex") == "Server default (GPT-5.5)", "model default label should show actual server default")
-    try assert(catalog.effortLabel(nil, backend: "codex") == "Server default (XHigh)", "effort default label should show actual server default")
-    try assert(catalog.compactSummary(for: session) == "Codex · Server default (GPT-5.5) · Server default (XHigh)", "runtime summary should include resolved defaults")
+    try assert(catalog.modelLabel(nil, backend: "codex") == "GPT-5.5", "model default label should show resolved model without server-default wording")
+    try assert(catalog.effortLabel(nil, backend: "codex") == "XHigh", "effort default label should show resolved effort without server-default wording")
+    try assert(catalog.compactSummary(for: session) == "Codex · GPT-5.5 · XHigh", "runtime summary should include resolved defaults without server-default wording")
 
     let fallbackCatalog = ZRuntimeCatalogSnapshot.fallback
     try assert(fallbackCatalog.models(for: "codex").contains { $0.value == "gpt-5.5" }, "Codex fallback catalog must include GPT-5.5 while server discovery is unavailable")
@@ -179,8 +179,12 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
     try assert(mobileTheme.contains("struct MobileBackendLogo"), "iOS theme must define backend logo views")
     try assert(macTheme.contains("\"ClaudeBackendLogo\""), "Mac backend logos must use the supplied Claude asset")
     try assert(macTheme.contains("\"CodexBackendLogo\""), "Mac backend logos must use the supplied Codex asset")
+    try assert(macTheme.contains("var size: CGFloat = 16"), "Mac backend logo view must own an explicit icon size")
+    try assert(macTheme.contains(".clipped()"), "Mac backend logo image must be clipped to its icon frame")
     try assert(mobileTheme.contains("\"ClaudeBackendLogo\""), "iOS backend logos must use the supplied Claude asset")
     try assert(mobileTheme.contains("\"CodexBackendLogo\""), "iOS backend logos must use the supplied Codex asset")
+    try assert(mobileTheme.contains("var size: CGFloat = 16"), "iOS backend logo view must own an explicit icon size")
+    try assert(mobileTheme.contains(".clipped()"), "iOS backend logo image must be clipped to its icon frame")
     try assert(
         FileManager.default.fileExists(atPath: assets.appendingPathComponent("ClaudeBackendLogo.imageset/ClaudeBackendLogo.png").path),
         "Claude backend image asset must exist"

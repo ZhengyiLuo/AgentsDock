@@ -37,8 +37,7 @@ struct RunningAgentIcon: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 12, height: 12)
-            BackendLogo(backend: backend)
-                .frame(width: 13, height: 13)
+            BackendLogo(backend: backend, size: 13)
         }
         .accessibilityLabel("\(backend.capitalized) running")
     }
