@@ -2157,3 +2157,24 @@ Follow-up:
 - Runtime labels no longer say `Server default (...)` when the resolved
   default is known; the UI shows the actual model/effort, such as `GPT-5.5` and
   `XHigh`.
+- Backend logo asset catalogs now ship 16/32/48 px renditions so even intrinsic
+  image sizing cannot balloon the composer icon to the original 225 px source
+  export.
+
+### Backend Lock After Chat Start
+
+User issue:
+
+- Changing backend after a Claude/Codex provider session exists can make one
+  ZenithDock chat represent two incompatible provider threads.
+
+Changes:
+
+- Added `ZSession.isBackendLocked`, true when `session_id`,
+  `claude_session_id`, or `codex_thread_id` is present.
+- Server session updates now return HTTP 409 if a backend change is attempted
+  after the chat has started.
+- Disabled backend controls in the macOS composer/inspector and iOS/iPadOS
+  timeline/options once the backend is locked.
+- Added guardrails for the shared lock property, server conflict response, and
+  UI-disabled controls.

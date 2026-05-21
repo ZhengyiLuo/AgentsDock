@@ -39,6 +39,7 @@ struct MobileChatOptionsView: View {
                             Text("Codex").tag("codex")
                         }
                         .pickerStyle(.segmented)
+                        .disabled(session.isBackendLocked)
                         .onChange(of: backend) {
                             model = ""
                             effort = ""

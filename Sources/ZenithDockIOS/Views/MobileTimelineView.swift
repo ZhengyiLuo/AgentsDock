@@ -433,14 +433,15 @@ private struct MobileChatHeader: View {
                 } label: {
                     Label("Chat Options", systemImage: "slider.horizontal.3")
                 }
-                Picker("Backend", selection: Binding(
-                    get: { store.selectedSession?.backend ?? "claude" },
-                    set: { newValue in Task { await store.updateSelected(backend: newValue, model: "") } }
-                )) {
-                    Text("Claude").tag("claude")
-                    Text("Codex").tag("codex")
-                }
                 if let session = store.selectedSession {
+                    Picker("Backend", selection: Binding(
+                        get: { session.backend },
+                        set: { newValue in Task { await store.updateSelected(backend: newValue, model: "") } }
+                    )) {
+                        Text("Claude").tag("claude")
+                        Text("Codex").tag("codex")
+                    }
+                    .disabled(session.isBackendLocked)
                     Picker("Model", selection: Binding(
                         get: { normalized(session.model) },
                         set: { newValue in Task { await store.updateSelected(model: newValue) } }

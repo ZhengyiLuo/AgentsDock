@@ -74,6 +74,8 @@ struct InspectorView: View {
                             Text("Codex").tag("codex")
                         }
                         .pickerStyle(.segmented)
+                        .disabled(session.isBackendLocked)
+                        .help(session.isBackendLocked ? "Backend is locked after chat starts. Fork or create a new chat to use another backend." : "Backend")
                         .onChange(of: backend) {
                             model = ""
                             effort = ""

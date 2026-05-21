@@ -164,7 +164,8 @@ struct ComposerView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Backend")
+        .disabled(session.isBackendLocked)
+        .help(session.isBackendLocked ? "Backend is locked after chat starts. Fork or create a new chat to use another backend." : "Backend")
     }
 
     private func runtimeMenu(for session: ZSession) -> some View {

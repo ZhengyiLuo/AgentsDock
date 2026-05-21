@@ -424,6 +424,11 @@ class SessionStore:
                     raise HTTPException(status_code=400, detail=f"backend must be one of {sorted(VALID_BACKENDS)}")
                 old = sess.get("backend") or DEFAULT_BACKEND
                 if old != backend:
+                    if session_backend_locked(sess):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="backend is locked after the chat starts; fork or create a new chat to use another backend",
+                        )
                     if sess.get("session_id"):
                         sess["claude_session_id" if old == BACKEND_CLAUDE else "codex_thread_id"] = sess["session_id"]
                     sess["session_id"] = sess.get("claude_session_id" if backend == BACKEND_CLAUDE else "codex_thread_id")
@@ -2323,6 +2328,10 @@ def runtime_priority(model: dict[str, Any]) -> int:
         return int(model["priority"])
     except Exception:
         return 9999
+
+
+def session_backend_locked(sess: dict[str, Any]) -> bool:
+    return any(str(sess.get(key) or "").strip() for key in ("session_id", "claude_session_id", "codex_thread_id"))
 
 
 def discover_codex_catalog() -> dict[str, Any]:

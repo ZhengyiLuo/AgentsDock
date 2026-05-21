@@ -20,6 +20,13 @@ public struct ZSession: Codable, Identifiable, Hashable, Sendable {
     public var archived_at: String?
     public var created_at: String?
     public var updated_at: String?
+
+    public var isBackendLocked: Bool {
+        [session_id, claude_session_id, codex_thread_id]
+            .contains { value in
+                !(value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            }
+    }
 }
 
 public struct ZRuntimeOption: Codable, Identifiable, Hashable, Sendable {

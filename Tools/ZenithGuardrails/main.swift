@@ -76,6 +76,28 @@ func checkRuntimeDefaultLabels() throws {
     try assert(fallbackCatalog.efforts(for: "codex").contains { $0.value == "xhigh" }, "Codex fallback catalog must include XHigh effort while server discovery is unavailable")
 }
 
+func checkBackendLocksAfterProviderStart() throws {
+    let activeSessionData = Data(#"{"id":"sess","title":"Chat","backend":"codex","codex_thread_id":"019e"}"#.utf8)
+    let activeSession = try JSONDecoder().decode(ZSession.self, from: activeSessionData)
+    let emptySessionData = Data(#"{"id":"new","title":"Chat","backend":"codex"}"#.utf8)
+    let emptySession = try JSONDecoder().decode(ZSession.self, from: emptySessionData)
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    let composer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/ComposerView.swift"), encoding: .utf8)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+    let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+
+    try assert(activeSession.isBackendLocked, "Provider-backed sessions must lock backend switching")
+    try assert(!emptySession.isBackendLocked, "New sessions without provider IDs must allow backend selection")
+    try assert(server.contains("session_backend_locked(sess)"), "Server must enforce backend lock")
+    try assert(server.contains("status_code=409"), "Backend lock violation should return a conflict")
+    try assert(composer.contains(".disabled(session.isBackendLocked)"), "Mac composer backend picker must disable after chat starts")
+    try assert(inspector.contains(".disabled(session.isBackendLocked)"), "Mac inspector backend picker must disable after chat starts")
+    try assert(mobileOptions.contains(".disabled(session.isBackendLocked)"), "iOS options backend picker must disable after chat starts")
+    try assert(mobileTimeline.contains(".disabled(session.isBackendLocked)"), "iOS timeline backend picker must disable after chat starts")
+}
+
 func checkServerURLNormalization() throws {
     let fallback = "http://127.0.0.1:7850"
 
@@ -190,8 +212,16 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
         "Claude backend image asset must exist"
     )
     try assert(
+        FileManager.default.fileExists(atPath: assets.appendingPathComponent("ClaudeBackendLogo.imageset/ClaudeBackendLogo@2x.png").path),
+        "Claude backend image asset must include a 2x small rendition"
+    )
+    try assert(
         FileManager.default.fileExists(atPath: assets.appendingPathComponent("CodexBackendLogo.imageset/CodexBackendLogo.png").path),
         "Codex backend image asset must exist"
+    )
+    try assert(
+        FileManager.default.fileExists(atPath: assets.appendingPathComponent("CodexBackendLogo.imageset/CodexBackendLogo@2x.png").path),
+        "Codex backend image asset must include a 2x small rendition"
     )
     try assert(macSidebar.contains("BackendLogo(backend: session.backend)"), "Mac sidebar must use backend-specific logo views")
     try assert(mobileSidebar.contains("MobileBackendLogo(backend: session.backend)"), "iOS sidebar must use backend-specific logo views")
@@ -247,6 +277,7 @@ do {
     try checkComposerUsesPresenceGate()
     try checkEndpointCacheKeysAreServerScoped()
     try checkRuntimeDefaultLabels()
+    try checkBackendLocksAfterProviderStart()
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
     try checkArchiveSessionBehavior()
