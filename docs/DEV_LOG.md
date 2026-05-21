@@ -2128,3 +2128,21 @@ Changes:
   not become fake file rows.
 - Added a guardrail to keep the review sheet structured instead of regressing
   to one giant code block.
+
+### Supplied Backend Icon Assets
+
+User issue:
+
+- The generated backend marks still did not match the actual Claude/Codex icons
+  the user wanted.
+
+Changes:
+
+- Added the user-supplied Claude and Codex images to the shared asset catalog so
+  both macOS and iOS/iPadOS use the same backend marks.
+- Processed the Claude icon to remove the white background and the Codex icon to
+  remove the black JPG corner matte.
+- Updated the macOS and iOS backend logo views to render the supplied assets,
+  while keeping the generic CPU fallback only for unknown backends.
+- Added guardrails so the app cannot regress to SF Symbol placeholders or
+  generated backend marks without the asset files present.

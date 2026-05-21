@@ -173,9 +173,22 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
     let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
     let macSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
     let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
+    let assets = cwd.appendingPathComponent("Sources/ZenithDockIOS/Resources/Assets.xcassets")
 
-    try assert(macTheme.contains("struct BackendLogo"), "Mac theme must define vector backend logos")
-    try assert(mobileTheme.contains("struct MobileBackendLogo"), "iOS theme must define vector backend logos")
+    try assert(macTheme.contains("struct BackendLogo"), "Mac theme must define backend logo views")
+    try assert(mobileTheme.contains("struct MobileBackendLogo"), "iOS theme must define backend logo views")
+    try assert(macTheme.contains("\"ClaudeBackendLogo\""), "Mac backend logos must use the supplied Claude asset")
+    try assert(macTheme.contains("\"CodexBackendLogo\""), "Mac backend logos must use the supplied Codex asset")
+    try assert(mobileTheme.contains("\"ClaudeBackendLogo\""), "iOS backend logos must use the supplied Claude asset")
+    try assert(mobileTheme.contains("\"CodexBackendLogo\""), "iOS backend logos must use the supplied Codex asset")
+    try assert(
+        FileManager.default.fileExists(atPath: assets.appendingPathComponent("ClaudeBackendLogo.imageset/ClaudeBackendLogo.png").path),
+        "Claude backend image asset must exist"
+    )
+    try assert(
+        FileManager.default.fileExists(atPath: assets.appendingPathComponent("CodexBackendLogo.imageset/CodexBackendLogo.png").path),
+        "Codex backend image asset must exist"
+    )
     try assert(macSidebar.contains("BackendLogo(backend: session.backend)"), "Mac sidebar must use backend-specific logo views")
     try assert(mobileSidebar.contains("MobileBackendLogo(backend: session.backend)"), "iOS sidebar must use backend-specific logo views")
     try assert(!macTheme.contains("\"terminal\""), "Codex must not fall back to the terminal SF Symbol")
