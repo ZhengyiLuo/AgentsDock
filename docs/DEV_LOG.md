@@ -42,6 +42,42 @@ Change:
 - Added guardrails for `sort_order`, stable app ordering, manual reorder
   controls, and the server reorder endpoint.
 
+Deploy:
+
+- Deployed `server/agent_server.py` to `sonic` and restarted
+  `zenithbot-agent.service`.
+- Fixed `server/deploy.sh` so the default remote app path is `Zenithbot`
+  relative to the SSH home. The old `~/Zenithbot` default stayed literal inside
+  the remote compile command.
+
+## 2026-05-20 Follow-Up - TestFlight Build 30 Uploaded
+
+Summary:
+
+- Build `30` includes stable sidebar ordering, manual chat move up/down, and
+  faster session-list sync for archive/unarchive changes.
+- Bumped all Xcode targets from build `29` to build `30`.
+- Committed the ordering fix:
+  `e4196a4 Keep sidebar session order stable`.
+- Committed the deploy-script fix:
+  `18d8074 Fix default server deploy path`.
+- Committed the build bump:
+  `c960d8b Bump build number for TestFlight 30`.
+- Archived and uploaded iOS/iPadOS build `30` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `30` successfully:
+  `Uploaded ZenithDockMac`.
+- Refreshed and codesign-verified
+  `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-30.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-30.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-30 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-30.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-30.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-30 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-20 Follow-Up - Scheduled Job Unread State
 
 Problem:
