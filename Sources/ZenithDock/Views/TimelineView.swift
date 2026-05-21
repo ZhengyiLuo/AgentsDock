@@ -26,6 +26,11 @@ struct TimelineView: View {
     private let rowPageSize = 40
     private let bottomButtonHideDistance: CGFloat = 180
 
+    private struct TimelineScrollAnchor {
+        let rowID: String
+        let eventID: String?
+    }
+
     var body: some View {
         let timelineRowsSuspended = isInitialTimelineMasked && (
             store.isSelectingSession ||
@@ -167,6 +172,7 @@ struct TimelineView: View {
                     beginInitialTimelineMask()
                     isAtBottom = true
                     isNearBottom = true
+                    store.setSelectedTimelineAtBottom(true)
                     isTimelineScrollable = false
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
@@ -183,6 +189,7 @@ struct TimelineView: View {
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
+                        store.setSelectedTimelineAtBottom(true)
                         isTimelineScrollable = false
                         setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
@@ -259,7 +266,7 @@ struct TimelineView: View {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                     isAtBottom = true
                     isNearBottom = true
-                    store.markSelectedSessionRead()
+                    store.setSelectedTimelineAtBottom(true)
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
@@ -284,7 +291,7 @@ struct TimelineView: View {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
             isNearBottom = true
-            store.markSelectedSessionRead()
+            store.setSelectedTimelineAtBottom(true)
         }
         if animated {
             withAnimation(.snappy) {
@@ -309,6 +316,7 @@ struct TimelineView: View {
             }
             isAtBottom = false
             isNearBottom = false
+            store.setSelectedTimelineAtBottom(false)
         }
     }
 
@@ -339,6 +347,7 @@ struct TimelineView: View {
     private func updateBottomVisibility(_ metrics: TimelineScrollMetrics) {
         guard metrics.viewportHeight > 1, !store.displayEvents.isEmpty else {
             if !isAtBottom { isAtBottom = true }
+            store.setSelectedTimelineAtBottom(true)
             if isTimelineScrollable { isTimelineScrollable = false }
             return
         }
@@ -350,11 +359,9 @@ struct TimelineView: View {
         if isAtBottom != nextAtBottom {
             isAtBottom = nextAtBottom
         }
+        store.setSelectedTimelineAtBottom(nextAtBottom)
         if isNearBottom != nextNearBottom {
             isNearBottom = nextNearBottom
-        }
-        if nextAtBottom, store.selectedSessionHasUnread {
-            store.markSelectedSessionRead()
         }
     }
 
@@ -401,16 +408,16 @@ struct TimelineView: View {
 
     @discardableResult
     private func revealOlderRows(preservingPositionWith proxy: ScrollViewProxy) -> Bool {
-        let anchorID = firstRenderedRowID()
+        let anchor = firstRenderedAnchor()
         let rowCount = TimelineRows.build(from: store.displayEvents).count
         guard visibleRowLimit < rowCount else { return false }
         setVisibleRowLimit(min(rowCount, visibleRowLimit + rowPageSize))
-        restoreScrollPosition(to: anchorID, proxy: proxy)
+        restoreScrollPosition(to: anchor, proxy: proxy)
         return true
     }
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
-        let anchorID = firstRenderedRowID()
+        let anchor = firstRenderedAnchor()
         let beforeRowCount = TimelineRows.build(from: store.displayEvents).count
         Task {
             let addedEvents = await store.loadOlderHistory()
@@ -421,22 +428,25 @@ struct TimelineView: View {
                     setVisibleRowLimit(min(afterRowCount, visibleRowLimit + min(rowPageSize, addedRows)))
                 }
             }
-            restoreScrollPosition(to: anchorID, proxy: proxy)
+            restoreScrollPosition(to: anchor, proxy: proxy)
         }
     }
 
-    private func firstRenderedRowID() -> String? {
+    private func firstRenderedAnchor() -> TimelineScrollAnchor? {
         let rows = TimelineRows.build(from: store.displayEvents)
-        return Array(rows.suffix(visibleRowLimit)).first?.id
+        guard let row = Array(rows.suffix(visibleRowLimit)).first else { return nil }
+        return TimelineScrollAnchor(rowID: row.id, eventID: row.anchorEventID)
     }
 
-    private func restoreScrollPosition(to rowID: String?, proxy: ScrollViewProxy) {
-        guard let rowID else { return }
+    private func restoreScrollPosition(to anchor: TimelineScrollAnchor?, proxy: ScrollViewProxy) {
+        guard let anchor else { return }
+        let rowID = restoredRowID(for: anchor)
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
         withTransaction(noAnimationTransaction) {
             proxy.scrollTo(rowID, anchor: .top)
             isAtBottom = false
             isNearBottom = false
+            store.setSelectedTimelineAtBottom(false)
         }
         DispatchQueue.main.async {
             withTransaction(noAnimationTransaction) {
@@ -444,11 +454,24 @@ struct TimelineView: View {
             }
             isAtBottom = false
             isNearBottom = false
+            store.setSelectedTimelineAtBottom(false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 olderHistoryLoadArmed = true
                 suppressScrollHistoryLoadUntilTopLeaves = false
             }
         }
+    }
+
+    private func restoredRowID(for anchor: TimelineScrollAnchor) -> String {
+        let rows = TimelineRows.build(from: store.displayEvents)
+        if rows.contains(where: { $0.id == anchor.rowID }) {
+            return anchor.rowID
+        }
+        if let eventID = anchor.eventID,
+           let row = row(containingEventID: eventID, in: rows) {
+            return row.id
+        }
+        return anchor.rowID
     }
 
     private func setVisibleRowLimit(_ nextLimit: Int) {
@@ -481,7 +504,7 @@ struct TimelineView: View {
         }
         guard hasNewAgentMessage else { return }
         if isAtBottom {
-            store.markSessionRead(sessionID)
+            store.setSelectedTimelineAtBottom(true)
         } else {
             let firstSeq = store.displayEvents
                 .filter { $0.seq > previousSeq && store.isAgentVisibleMessage($0) }
@@ -676,6 +699,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
         private var lastReportTime: TimeInterval = 0
         private var attachScheduled = false
         private var reportScheduled = false
+        private var trailingReportWorkItem: DispatchWorkItem?
         private var deliveryScheduled = false
         private var pendingDelivery: TimelineScrollMetrics?
         private var boundsObserver: NSObjectProtocol?
@@ -691,6 +715,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             if let boundsObserver { center.removeObserver(boundsObserver) }
             if let documentFrameObserver { center.removeObserver(documentFrameObserver) }
             if let scrollFrameObserver { center.removeObserver(scrollFrameObserver) }
+            trailingReportWorkItem?.cancel()
         }
 
         func scheduleAttach(from view: NSView) {
@@ -765,11 +790,31 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             documentView = nil
             lastMetrics = nil
             lastReportTime = 0
+            trailingReportWorkItem?.cancel()
+            trailingReportWorkItem = nil
         }
 
         private func scheduleReport() {
             let now = Date().timeIntervalSinceReferenceDate
-            guard now - lastReportTime >= 0.15 else { return }
+            let minimumInterval = 0.08
+            let elapsed = now - lastReportTime
+            if elapsed < minimumInterval {
+                trailingReportWorkItem?.cancel()
+                let delay = minimumInterval - elapsed
+                let item = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    MainActor.assumeIsolated {
+                        self.trailingReportWorkItem = nil
+                        self.lastReportTime = Date().timeIntervalSinceReferenceDate
+                        self.report()
+                    }
+                }
+                trailingReportWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+                return
+            }
+            trailingReportWorkItem?.cancel()
+            trailingReportWorkItem = nil
             lastReportTime = now
             guard !reportScheduled else { return }
             reportScheduled = true
@@ -842,6 +887,19 @@ private final class TimelineRow: Identifiable {
             group.runs.map(\.lastSeq).max() ?? 0
         case .trace(let events):
             events.map(\.seq).max() ?? 0
+        }
+    }
+
+    var anchorEventID: String? {
+        switch kind {
+        case .event(let event):
+            event.id
+        case .job(let jobRun):
+            jobRun.runEvent.id
+        case .jobGroup(let group):
+            group.runs.first?.runEvent.id
+        case .trace(let events):
+            events.first?.id ?? events.last?.id
         }
     }
 }

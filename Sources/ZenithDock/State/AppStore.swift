@@ -49,11 +49,12 @@ final class AppStore: ObservableObject {
     @Published var isLoadingProcesses = false
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
     @Published private(set) var firstUnreadAgentSeqBySessionID: [String: Int] = [:]
+    @Published private(set) var selectedTimelineAtBottom = true
 
-    private let initialSessionEventLimit = 160
+    private let initialSessionEventLimit = 480
     private let olderHistoryPageLimit = 160
     private let maxLoadedTimelineEvents = 2_000
-    private let maxCachedTimelineEvents = 520
+    private let maxCachedTimelineEvents = 1_440
     private let maxCachedStringCharacters = 12_000
     private let sessionFilesPageLimit = 48
     private var webSocket: URLSessionWebSocketTask?
@@ -237,6 +238,19 @@ final class AppStore: ObservableObject {
         markSessionRead(selectedSessionID)
     }
 
+    func setSelectedTimelineAtBottom(_ atBottom: Bool) {
+        guard selectedTimelineAtBottom != atBottom else {
+            if atBottom {
+                markSelectedSessionRead()
+            }
+            return
+        }
+        selectedTimelineAtBottom = atBottom
+        if atBottom {
+            markSelectedSessionRead()
+        }
+    }
+
     func markSessionRead(_ sessionID: String?) {
         guard let sessionID, unreadAgentSessionIDs.contains(sessionID) else { return }
         unreadAgentSessionIDs.remove(sessionID)
@@ -308,6 +322,7 @@ final class AppStore: ObservableObject {
         memoryChatCacheOrder = []
         unreadAgentSessionIDs = []
         firstUnreadAgentSeqBySessionID = [:]
+        selectedTimelineAtBottom = true
         connectionProblemText = nil
     }
 
@@ -1226,8 +1241,12 @@ final class AppStore: ObservableObject {
             omittedHistoryEventCount += overflow
         }
         rebuildDisplayEvents()
-        if event.session_id != selectedSessionID, isAgentVisibleMessage(event) {
-            markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
+        if isAgentVisibleMessage(event) {
+            if event.session_id != selectedSessionID {
+                markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
+            } else if !selectedTimelineAtBottom {
+                markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
+            }
         }
         if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
             AppLogger.info("event session=\(event.session_id) seq=\(event.seq) type=\(event.type)")
@@ -1325,8 +1344,33 @@ final class AppStore: ObservableObject {
         if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
             sessions[idx] = response.session
         }
-        events = timelineEvents(from: response.events)
-        omittedHistoryEventCount = response.events_omitted_before ?? 0
+        let snapshotEvents = timelineEvents(from: response.events)
+        let preservedEvents = events.filter { $0.session_id == sessionID }
+        if preservedEvents.isEmpty {
+            events = snapshotEvents
+            omittedHistoryEventCount = response.events_omitted_before ?? 0
+        } else {
+            var byID: [String: ZEvent] = [:]
+            for event in preservedEvents {
+                byID[event.id] = event
+            }
+            for event in snapshotEvents {
+                byID[event.id] = event
+            }
+            var mergedEvents = byID.values.sorted { $0.seq < $1.seq }
+            let firstSnapshotSeq = snapshotEvents.map(\.seq).min()
+            let preservedBeforeSnapshot = firstSnapshotSeq.map { seq in
+                mergedEvents.filter { $0.seq < seq }.count
+            } ?? 0
+            var omittedBefore = max(0, (response.events_omitted_before ?? 0) - preservedBeforeSnapshot)
+            if mergedEvents.count > maxLoadedTimelineEvents {
+                let overflow = mergedEvents.count - maxLoadedTimelineEvents
+                mergedEvents.removeFirst(overflow)
+                omittedBefore += overflow
+            }
+            events = mergedEvents
+            omittedHistoryEventCount = omittedBefore
+        }
         latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
         rebuildDisplayEvents()

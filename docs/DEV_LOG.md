@@ -2203,3 +2203,37 @@ Changes:
   show `New` even if the user is near the bottom.
 - Added guardrails for unread sequence tracking, inline marker rendering, and
   strict read-clearing behavior.
+
+Follow-up:
+
+- Scheduled-job responses (`job_ran`) are visible agent output and now count for
+  unread/new-message state.
+- The store now tracks whether the selected timeline is actually at bottom, so
+  live selected-chat agent/job output can mark unread immediately when the user
+  is scrolled away.
+- Fixed the macOS scroll observer to deliver a trailing scroll-position report
+  after throttling. Without that, a quick scroll away from bottom could leave
+  stale `at bottom` state and immediately clear the marker.
+
+### History Window And Scroll Preservation
+
+User issue:
+
+- Huge chats could reopen with only a very small latest window, even when the
+  local cache had more history. Loading older messages could also jump because
+  trace/job grouping changes row IDs as older events arrive.
+
+Changes:
+
+- Mac chat selection now requests 480 latest events, which is three of the
+  existing 160-event history pages.
+- The local chat cache now keeps 1,440 events so a warmed chat retains several
+  recent pages instead of immediately shrinking back to one tail page.
+- Fresh server snapshots merge with same-chat cached events instead of replacing
+  them wholesale. The hidden-older count is reduced by the preserved local
+  events so the `Load Older` count stays honest.
+- Older-history paging now stores both the rendered row ID and a representative
+  event ID. If trace/job folding changes the row ID, the timeline restores to
+  the row containing the same event instead of jumping to the new top.
+- Added guardrails for the larger initial window, larger cache, cache-preserving
+  snapshot merge, and event-ID scroll anchor fallback.

@@ -279,12 +279,31 @@ func checkUnreadMessageMarker() throws {
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
 
     try assert(macStore.contains("firstUnreadAgentSeqBySessionID"), "Mac store must remember the first unread agent event seq")
+    try assert(macStore.contains("selectedTimelineAtBottom"), "Mac store must track whether the selected timeline is actually at bottom")
     try assert(macStore.contains("selectedSessionFirstUnreadSeq"), "Mac store must expose selected chat's first unread seq")
     try assert(macStore.contains("markAgentUnread(sessionID: String, firstSeq: Int? = nil)"), "Unread marking must accept a first event seq")
+    try assert(macStore.contains("case \"job_ran\""), "Scheduled job responses must count as visible agent messages")
+    try assert(macStore.contains("else if !selectedTimelineAtBottom"), "Selected-chat live agent messages must mark unread when the user is away from bottom")
     try assert(timeline.contains("TimelineUnreadMarker"), "Mac timeline must render an inline new-message marker")
     try assert(timeline.contains("firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)"), "Timeline must anchor the marker to the first unread row")
     try assert(timeline.contains("(!isNearBottom || store.selectedSessionHasUnread)"), "Bottom button must still show when there are unread messages near the bottom")
     try assert(timeline.contains("metrics.distanceFromBottom <= 28"), "Read clearing must use a strict bottom threshold")
+    try assert(timeline.contains("trailingReportWorkItem"), "Scroll observer must deliver a trailing scroll-position report")
+    try assert(timeline.contains("store.setSelectedTimelineAtBottom(nextAtBottom)"), "Timeline must publish strict bottom state to the store")
+}
+
+func checkTimelineHistoryPaging() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("private let initialSessionEventLimit = 480"), "Mac chat selection must load a three-page recent window")
+    try assert(macStore.contains("private let maxCachedTimelineEvents = 1_440"), "Mac chat cache must retain more than the initial recent window")
+    try assert(macStore.contains("preservedEvents = events.filter { $0.session_id == sessionID }"), "Fresh session snapshots must preserve cached pages for the same chat")
+    try assert(macStore.contains("preservedBeforeSnapshot"), "Merged snapshots must reduce the older-hidden count by locally preserved events")
+    try assert(timeline.contains("TimelineScrollAnchor"), "History paging must capture a stable scroll anchor")
+    try assert(timeline.contains("anchorEventID"), "History paging must keep an event-id fallback for regrouped rows")
+    try assert(timeline.contains("row(containingEventID: eventID, in: rows)"), "History paging must restore through the event-id fallback when row IDs change")
 }
 
 do {
@@ -304,6 +323,7 @@ do {
     try checkInlineVideoPlayAutoplays()
     try checkCodeReviewSurfaceIsStructured()
     try checkUnreadMessageMarker()
+    try checkTimelineHistoryPaging()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)
