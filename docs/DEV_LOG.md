@@ -16,6 +16,30 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-20 Follow-Up - TestFlight Build 28 Uploaded
+
+Summary:
+
+- Build `28` includes the unread marker repair and the large-chat history
+  paging/cache fixes.
+- Bumped all Xcode targets from build `27` to build `28`.
+- Committed the build bump:
+  `c9152f7 Bump build number for TestFlight 28`.
+- Archived and uploaded iOS/iPadOS build `28` successfully:
+  `Uploaded ZenithDockIOS`.
+- Archived and uploaded macOS build `28` successfully:
+  `Uploaded ZenithDockMac`.
+- Refreshed and codesign-verified
+  `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+- Both packages are processing in App Store Connect/TestFlight.
+
+Commands:
+
+- `xcodebuild -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-28.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-28.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-28 -quiet -allowProvisioningUpdates`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-28.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-28.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-28 -quiet -allowProvisioningUpdates`
+
 ## 2026-05-19 Follow-Up - Inline Mac Connection Failures
 
 Problem:
