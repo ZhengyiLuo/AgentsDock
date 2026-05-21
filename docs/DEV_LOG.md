@@ -16,6 +16,32 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - TestFlight Export Compliance Flag
+
+Problem:
+
+- TestFlight builds can show `Missing Compliance` when the app bundle does not
+  declare its encryption/export-compliance status.
+
+Change:
+
+- Added `ITSAppUsesNonExemptEncryption = false` to both app plists:
+  `Apps/ZenithDockIOS/Info.plist` and `Apps/ZenithDockMac/Info.plist`.
+- Added a guardrail so future plist edits do not drop the flag.
+
+Verification:
+
+- `plutil -lint Apps/ZenithDockIOS/Info.plist Apps/ZenithDockMac/Info.plist`
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOS build -quiet`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS -derivedDataPath build/DerivedData build -quiet`
+- Verified both built app plists print `false` for
+  `ITSAppUsesNonExemptEncryption`.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and verified
+  codesign.
+
 ## 2026-05-21 Follow-Up - Live Timeline Auto-Follow
 
 Problem:

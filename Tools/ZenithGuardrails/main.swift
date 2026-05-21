@@ -395,6 +395,19 @@ func checkTmuxSubmitterVisualizer() throws {
     try assert(inspector.contains("Inspect Tmux Submitters"), "Mac inspector must keep tmux inspection explicit/on demand")
 }
 
+func checkExportCompliancePlists() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let iosPlist = try String(contentsOf: cwd.appendingPathComponent("Apps/ZenithDockIOS/Info.plist"), encoding: .utf8)
+    let macPlist = try String(contentsOf: cwd.appendingPathComponent("Apps/ZenithDockMac/Info.plist"), encoding: .utf8)
+    let key = "<key>ITSAppUsesNonExemptEncryption</key>"
+    let value = "<false/>"
+
+    try assert(iosPlist.contains(key), "iOS Info.plist must declare TestFlight encryption compliance")
+    try assert(iosPlist.contains(value), "iOS Info.plist must mark non-exempt encryption as false")
+    try assert(macPlist.contains(key), "macOS Info.plist must declare TestFlight encryption compliance")
+    try assert(macPlist.contains(value), "macOS Info.plist must mark non-exempt encryption as false")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -417,6 +430,7 @@ do {
     try checkTimelineHistoryPaging()
     try checkLiveTimelineAutoFollow()
     try checkTmuxSubmitterVisualizer()
+    try checkExportCompliancePlists()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)
