@@ -1424,6 +1424,177 @@ def kill_terminal_session(session_id: str) -> dict[str, Any]:
     }
 
 
+TMUX_SUBMITTER_KEYWORDS = (
+    "submit", "submitter", "sbatch", "slurm", "osmo", "train", "training",
+    "render", "rollout", "eval", "launch", "wandb", "ray", "torchrun",
+)
+
+
+def path_is_within(path: str | None, root: str | None) -> bool:
+    if not path or not root:
+        return False
+    try:
+        candidate = Path(path).expanduser().resolve(strict=False)
+        base = Path(root).expanduser().resolve(strict=False)
+        return candidate == base or base in candidate.parents
+    except Exception:
+        clean_path = path.rstrip("/")
+        clean_root = root.rstrip("/")
+        return clean_path == clean_root or clean_path.startswith(clean_root + "/")
+
+
+def descendant_processes(root_pid: int | None, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not root_pid:
+        return []
+    rows_by_pid = {int(row["pid"]): row for row in rows}
+    selected: set[int] = set()
+    if root_pid in rows_by_pid:
+        selected.add(root_pid)
+    changed = True
+    while changed:
+        changed = False
+        for row in rows:
+            row_pid = int(row["pid"])
+            if row_pid in selected:
+                continue
+            if int(row.get("ppid") or -1) in selected:
+                selected.add(row_pid)
+                changed = True
+    ordered = ordered_process_tree(root_pid, selected, rows_by_pid)
+    out: list[dict[str, Any]] = []
+    for row in ordered[:12]:
+        pid = int(row["pid"])
+        cwd = proc_cwd(pid)
+        args = str(row.get("args") or "")
+        out.append({
+            **row,
+            "cwd": cwd,
+            "depth": process_depth(pid, rows_by_pid, selected),
+            "log_hints": unique_log_hints(fd_log_hints(pid) + command_log_hints(args, cwd)),
+        })
+    return out
+
+
+def best_process_label(processes: list[dict[str, Any]], fallback: str | None) -> str:
+    shell_names = {"bash", "sh", "zsh", "fish", "tmux", "login"}
+    for proc in reversed(processes):
+        command = str(proc.get("command") or "").split("/")[-1]
+        args = str(proc.get("args") or "").strip()
+        if command and command not in shell_names and args:
+            return compact_memory_text(args, 240)
+    for proc in processes:
+        args = str(proc.get("args") or "").strip()
+        if args:
+            return compact_memory_text(args, 240)
+    return fallback or "tmux pane"
+
+
+def tmux_panes_snapshot(session_id: str, *, include_all: bool = False) -> dict[str, Any]:
+    sess = STORE.sessions.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = run_tmux([
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_name}\t#{window_index}\t#{window_name}\t#{pane_index}\t#{pane_id}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_active}\t#{session_attached}\t#{pane_title}",
+    ], check=False)
+    if result.returncode != 0:
+        stderr = (result.stderr or result.stdout or "").strip().lower()
+        if "no server running" in stderr:
+            return {
+                "session_id": session_id,
+                "panes": [],
+                "total_panes": 0,
+                "filtered": not include_all,
+                "generated_at": now_iso(),
+            }
+        raise HTTPException(status_code=500, detail=(result.stderr or result.stdout or "tmux list-panes failed").strip()[:1000])
+
+    rows = ps_process_rows()
+    chat_cwd = sess.get("cwd") or DEFAULT_CWD
+    owned_name = terminal_session_name(session_id)
+    panes: list[dict[str, Any]] = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        while len(parts) < 11:
+            parts.append("")
+        pane_pid = int(parts[5]) if parts[5].isdigit() else None
+        processes = descendant_processes(pane_pid, rows)
+        search_text = "\n".join([
+            parts[0],
+            parts[2],
+            parts[6],
+            parts[7],
+            parts[10],
+            *[str(proc.get("args") or "") for proc in processes],
+        ]).lower()
+        matches: list[str] = []
+        if parts[0] == owned_name:
+            matches.append("chat tmux")
+        if path_is_within(parts[7], chat_cwd):
+            matches.append("chat cwd")
+        if any(keyword in search_text for keyword in TMUX_SUBMITTER_KEYWORDS):
+            matches.append("submitter")
+        if any(float(proc.get("cpu_percent") or 0.0) > 2.0 for proc in processes):
+            matches.append("active")
+        if not include_all and not matches:
+            continue
+        panes.append({
+            "session_name": parts[0],
+            "window_index": int(parts[1]) if parts[1].isdigit() else None,
+            "window_name": parts[2] or None,
+            "pane_index": int(parts[3]) if parts[3].isdigit() else None,
+            "pane_id": parts[4],
+            "pane_pid": pane_pid,
+            "command": parts[6] or None,
+            "cwd": parts[7] or None,
+            "active": parts[8] == "1",
+            "attached": int(parts[9]) if parts[9].isdigit() else None,
+            "title": parts[10] or None,
+            "matches": matches,
+            "display": best_process_label(processes, parts[6] or parts[0]),
+            "processes": processes,
+        })
+    panes.sort(key=lambda pane: (
+        0 if "chat tmux" in pane.get("matches", []) else 1,
+        0 if "chat cwd" in pane.get("matches", []) else 1,
+        str(pane.get("session_name") or ""),
+        int(pane.get("window_index") or 0),
+        int(pane.get("pane_index") or 0),
+    ))
+    return {
+        "session_id": session_id,
+        "panes": panes,
+        "total_panes": len(result.stdout.splitlines()),
+        "filtered": not include_all,
+        "generated_at": now_iso(),
+    }
+
+
+def capture_tmux_pane(session_id: str, pane_id: str, *, lines: int = 500) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    clean = str(pane_id or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="pane_id is required")
+    line_count = max(20, min(int(lines or 500), TMUX_CAPTURE_MAX_LINES))
+    # Validate that the target is one of tmux's pane IDs before using it.
+    known = tmux_panes_snapshot(session_id, include_all=True)
+    if clean not in {pane.get("pane_id") for pane in known.get("panes", [])}:
+        raise HTTPException(status_code=404, detail="tmux pane not found")
+    text = run_tmux(["capture-pane", "-t", clean, "-p", "-J", "-S", f"-{line_count}"]).stdout
+    return {
+        "session_id": session_id,
+        "pane_id": clean,
+        "lines": line_count,
+        "text": text,
+        "generated_at": now_iso(),
+    }
+
+
 def process_depth(pid: int, rows_by_pid: dict[int, dict[str, Any]], selected: set[int]) -> int:
     depth = 0
     seen: set[int] = set()
@@ -3370,6 +3541,16 @@ async def resize_session_terminal(session_id: str, req: TerminalResizeRequest) -
 @app.delete("/api/sessions/{session_id}/terminal")
 async def delete_session_terminal(session_id: str) -> dict[str, Any]:
     return await asyncio.to_thread(kill_terminal_session, session_id)
+
+
+@app.get("/api/sessions/{session_id}/tmux")
+async def get_session_tmux_panes(session_id: str, include_all: bool = False) -> dict[str, Any]:
+    return await asyncio.to_thread(tmux_panes_snapshot, session_id, include_all=include_all)
+
+
+@app.get("/api/sessions/{session_id}/tmux/capture")
+async def capture_session_tmux_pane(session_id: str, pane_id: str, lines: int = 500) -> dict[str, Any]:
+    return await asyncio.to_thread(capture_tmux_pane, session_id, pane_id, lines=lines)
 
 
 @app.get("/api/sessions/{session_id}/processes")

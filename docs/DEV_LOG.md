@@ -16,6 +16,38 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Tmux Submitter Visualizer
+
+Problem:
+
+- Agents often launch long-running work inside tmux, but the app could only show
+  the currently running Claude/Codex process tree. If a submitter lived in tmux,
+  the user had no lightweight way to discover it or inspect recent pane output.
+
+Change:
+
+- Added server endpoints:
+  `/api/sessions/{session_id}/tmux` and
+  `/api/sessions/{session_id}/tmux/capture`.
+- The tmux list is on demand. It filters panes that match the chat working
+  directory, the app-owned `zd_<session>` tmux session, or submitter-like
+  keywords such as `submit`, `sbatch`, `osmo`, `train`, `render`, `ray`.
+- Added shared Swift models and a Mac inspector card named `Tmux Submitters`.
+  The UI loads only when clicked, can show all tmux panes, and captures a pane's
+  latest output on demand.
+- Added guardrails for the server endpoints, shared models, store methods, and
+  inspector UI.
+- Deployed the updated server to `sonic` with `./server/deploy.sh sonic`.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS -derivedDataPath build/DerivedData build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and verified
+  codesign.
+
 ## 2026-05-21 Follow-Up - iOS No Auto-Open First Chat
 
 Problem:

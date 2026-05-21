@@ -353,6 +353,24 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("row(containingEventID: eventID, in: rows)"), "History paging must restore through the event-id fallback when row IDs change")
 }
 
+func checkTmuxSubmitterVisualizer() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+
+    try assert(core.contains("struct ZTmuxPane"), "Core must model tmux pane rows")
+    try assert(core.contains("struct ZTmuxCapture"), "Core must model captured tmux pane output")
+    try assert(server.contains("@app.get(\"/api/sessions/{session_id}/tmux\")"), "Server must expose a tmux pane listing endpoint")
+    try assert(server.contains("@app.get(\"/api/sessions/{session_id}/tmux/capture\")"), "Server must expose a tmux pane capture endpoint")
+    try assert(server.contains("TMUX_SUBMITTER_KEYWORDS"), "Server tmux listing must identify likely submitter panes")
+    try assert(macStore.contains("refreshSelectedTmuxPanes"), "Mac store must load tmux panes on demand")
+    try assert(macStore.contains("captureTmuxPane"), "Mac store must capture tmux pane output on demand")
+    try assert(inspector.contains("TmuxSubmitterInspector"), "Mac inspector must render the tmux submitter visualizer")
+    try assert(inspector.contains("Inspect Tmux Submitters"), "Mac inspector must keep tmux inspection explicit/on demand")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -373,6 +391,7 @@ do {
     try checkCodeReviewSurfaceIsStructured()
     try checkUnreadMessageMarker()
     try checkTimelineHistoryPaging()
+    try checkTmuxSubmitterVisualizer()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

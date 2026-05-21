@@ -47,6 +47,9 @@ final class AppStore: ObservableObject {
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
+    @Published var tmuxSnapshot: ZTmuxSnapshot?
+    @Published var tmuxCapture: ZTmuxCapture?
+    @Published var isLoadingTmux = false
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
     @Published private(set) var firstUnreadAgentSeqBySessionID: [String: Int] = [:]
     @Published private(set) var selectedTimelineAtBottom = true
@@ -622,6 +625,8 @@ final class AppStore: ObservableObject {
         status = serverReachable ? "Loading chat" : "Server offline"
         processSnapshot = nil
         processLogTail = nil
+        tmuxSnapshot = nil
+        tmuxCapture = nil
         markSessionRead(sessionID)
         AppLogger.info("select session=\(sessionID)")
         var loadedFromCache = false
@@ -788,6 +793,48 @@ final class AppStore: ObservableObject {
             processLogTail = res
         } catch {
             AppLogger.warning("process log tail failed \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
+        }
+    }
+
+    func refreshSelectedTmuxPanes(includeAll: Bool = false, showErrors: Bool = true) async {
+        guard let sid = selectedSessionID else { return }
+        isLoadingTmux = true
+        defer { isLoadingTmux = false }
+        do {
+            let res: ZTmuxSnapshot = try await api.get(
+                "/api/sessions/\(sid)/tmux",
+                queryItems: [URLQueryItem(name: "include_all", value: includeAll ? "true" : "false")]
+            )
+            guard selectedSessionID == sid else { return }
+            tmuxSnapshot = res
+            if let capture = tmuxCapture, !res.panes.contains(where: { $0.pane_id == capture.pane_id }) {
+                tmuxCapture = nil
+            }
+        } catch {
+            AppLogger.warning("tmux refresh failed \(serverErrorMessage(error) ?? "\(error)")")
+            if showErrors {
+                reportServerError(error)
+            }
+        }
+    }
+
+    func captureTmuxPane(_ pane: ZTmuxPane) async {
+        guard let sid = selectedSessionID else { return }
+        isLoadingTmux = true
+        defer { isLoadingTmux = false }
+        do {
+            let res: ZTmuxCapture = try await api.get(
+                "/api/sessions/\(sid)/tmux/capture",
+                queryItems: [
+                    URLQueryItem(name: "pane_id", value: pane.pane_id),
+                    URLQueryItem(name: "lines", value: "500")
+                ]
+            )
+            guard selectedSessionID == sid else { return }
+            tmuxCapture = res
+        } catch {
+            AppLogger.warning("tmux capture failed \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
         }
     }

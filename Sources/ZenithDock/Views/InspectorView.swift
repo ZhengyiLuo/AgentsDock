@@ -184,6 +184,8 @@ struct InspectorView: View {
 
                 LiveProcessesInspector()
 
+                TmuxSubmitterInspector()
+
                 ChatFilesInspector(files: store.sessionFiles)
 
                 GroupBox("Jobs") {
@@ -928,6 +930,250 @@ private struct LiveProcessesInspector: View {
                     .truncationMode(.middle)
             }
         }
+    }
+}
+
+private struct TmuxSubmitterInspector: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var isOpen = false
+    @State private var includeAll = false
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Tmux Submitters", systemImage: "rectangle.connected.to.line.below")
+                        .font(.headline)
+                    Spacer()
+                    if store.isLoadingTmux {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    if isOpen {
+                        Toggle("All", isOn: $includeAll)
+                            .font(.caption)
+                            .toggleStyle(.checkbox)
+                            .help("Show all tmux panes, not just panes matching this chat or submitter keywords")
+                        Button {
+                            refresh()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Refresh tmux panes")
+                        Button {
+                            isOpen = false
+                            store.tmuxSnapshot = nil
+                            store.tmuxCapture = nil
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Hide tmux submitters")
+                    }
+                }
+
+                if isOpen {
+                    if let snapshot = store.tmuxSnapshot {
+                        HStack(spacing: 8) {
+                            Text("\(snapshot.panes.count) shown")
+                            if let total = snapshot.total_panes {
+                                Text("of \(total)")
+                            }
+                            if snapshot.filtered == true {
+                                Text("filtered")
+                            }
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+
+                        if snapshot.panes.isEmpty {
+                            Text(includeAll ? "No tmux panes are running." : "No tmux panes matched this chat yet.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(snapshot.panes) { pane in
+                                    TmuxPaneRow(pane: pane)
+                                        .environmentObject(store)
+                                }
+                            }
+                        }
+
+                        if let capture = store.tmuxCapture {
+                            TmuxCaptureView(capture: capture)
+                                .environmentObject(store)
+                        }
+                    } else {
+                        Text("Tmux inspection is available on request.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("List tmux panes that look like submitters or match this chat's working directory.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            isOpen = true
+                            refresh()
+                        } label: {
+                            Label("Inspect Tmux Submitters", systemImage: "rectangle.connected.to.line.below")
+                        }
+                        .controlSize(.small)
+                        .disabled(store.selectedSessionID == nil || store.isLoadingTmux)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .onChange(of: includeAll) {
+            guard isOpen else { return }
+            refresh()
+        }
+        .onChange(of: store.selectedSessionID) {
+            isOpen = false
+            includeAll = false
+            store.tmuxSnapshot = nil
+            store.tmuxCapture = nil
+        }
+    }
+
+    private func refresh() {
+        Task { await store.refreshSelectedTmuxPanes(includeAll: includeAll) }
+    }
+}
+
+private struct TmuxPaneRow: View {
+    @EnvironmentObject private var store: AppStore
+    let pane: ZTmuxPane
+
+    private var isSelected: Bool {
+        store.tmuxCapture?.pane_id == pane.pane_id
+    }
+
+    private var targetLabel: String {
+        let window = pane.window_index.map { "\($0)" } ?? "?"
+        let paneIndex = pane.pane_index.map { "\($0)" } ?? "?"
+        return "\(pane.session_name):\(window).\(paneIndex)"
+    }
+
+    var body: some View {
+        Button {
+            Task { await store.captureTmuxPane(pane) }
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(pane.active == true ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: 7, height: 7)
+                    Text(targetLabel)
+                        .font(.caption.weight(.semibold).monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    if let pid = pane.pane_pid {
+                        Text("pid \(pid)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "text.page")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                }
+                Text(pane.display ?? pane.command ?? "tmux pane")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                if let cwd = pane.cwd, !cwd.isEmpty {
+                    Text(cwd)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if let matches = pane.matches, !matches.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(matches, id: \.self) { match in
+                            Text(match)
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.14))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.16) : Color.black.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? Color.accentColor.opacity(0.45) : Theme.softLine))
+        }
+        .buttonStyle(.plain)
+        .help("Capture this tmux pane")
+    }
+}
+
+private struct TmuxCaptureView: View {
+    @EnvironmentObject private var store: AppStore
+    let capture: ZTmuxCapture
+    @State private var copied = false
+
+    private var bodyText: String {
+        capture.text.isEmpty ? "(pane has no captured output)" : capture.text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Pane Output", systemImage: "terminal")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("\(capture.lines ?? 0) lines")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(capture.text, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 900_000_000)
+                        await MainActor.run { copied = false }
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help("Copy tmux pane output")
+                .disabled(capture.text.isEmpty)
+                Button {
+                    store.tmuxCapture = nil
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Close pane output")
+            }
+            Text(capture.pane_id)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            ScrollView {
+                Text(bodyText)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(capture.text.isEmpty ? .secondary : .primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+            .frame(minHeight: 120, maxHeight: 260)
+            .background(Color.black.opacity(0.18))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.softLine))
+        }
+        .padding(.top, 4)
     }
 }
 

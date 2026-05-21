@@ -477,6 +477,41 @@ public struct ZTerminalSnapshot: Codable, Hashable, Sendable {
     public var updated_at: String?
 }
 
+public struct ZTmuxPane: Codable, Identifiable, Hashable, Sendable {
+    public var session_name: String
+    public var window_index: Int?
+    public var window_name: String?
+    public var pane_index: Int?
+    public var pane_id: String
+    public var pane_pid: Int?
+    public var command: String?
+    public var cwd: String?
+    public var active: Bool?
+    public var attached: Int?
+    public var title: String?
+    public var matches: [String]?
+    public var display: String?
+    public var processes: [ZProcessInfo]?
+
+    public var id: String { pane_id }
+}
+
+public struct ZTmuxSnapshot: Codable, Hashable, Sendable {
+    public var session_id: String
+    public var panes: [ZTmuxPane]
+    public var total_panes: Int?
+    public var filtered: Bool?
+    public var generated_at: String?
+}
+
+public struct ZTmuxCapture: Codable, Hashable, Sendable {
+    public var session_id: String
+    public var pane_id: String
+    public var lines: Int?
+    public var text: String
+    public var generated_at: String?
+}
+
 public struct ZTool: Codable, Hashable, Sendable {
     public var id: String?
     public var name: String
