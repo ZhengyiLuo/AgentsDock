@@ -418,11 +418,8 @@ final class MobileAppStore: ObservableObject {
                 sessions = res.sessions
             }
             reconcileUnreadFromSessions()
-            if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
-                selectedSessionID = sessions.first?.id
-                if let selectedSessionID {
-                    await select(sessionID: selectedSessionID)
-                }
+            if let selectedSessionID, !sessions.contains(where: { $0.id == selectedSessionID }) {
+                clearSelection()
             }
         } catch {
             guard !isCancelledNetworkError(error) else { return }
@@ -571,18 +568,7 @@ final class MobileAppStore: ObservableObject {
             activeSessionIDs.remove(session.id)
             forgetMemoryChatCache(session.id)
             if selectedSessionID == session.id {
-                webSocket?.cancel(with: .goingAway, reason: nil)
-                webSocket = nil
-                selectedSessionID = nil
-                events = []
-                uploads = []
-                omittedHistoryEventCount = 0
-                latestSeenSeq = 0
-                socketLive = false
-                syncSelectedRunningState()
-                if let next = sessions.first {
-                    await select(sessionID: next.id)
-                }
+                clearSelection()
             }
         } catch {
             report(error)
@@ -1132,6 +1118,21 @@ final class MobileAppStore: ObservableObject {
                 processLogTail = nil
             }
         }
+        syncSelectedRunningState()
+    }
+
+    private func clearSelection() {
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        selectedSessionID = nil
+        events = []
+        uploads = []
+        sessionFiles = []
+        omittedHistoryEventCount = 0
+        latestSeenSeq = 0
+        socketLive = false
+        processSnapshot = nil
+        processLogTail = nil
         syncSelectedRunningState()
     }
 

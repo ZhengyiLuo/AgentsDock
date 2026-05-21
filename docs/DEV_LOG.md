@@ -16,6 +16,24 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - iOS No Auto-Open First Chat
+
+Problem:
+
+- iOS/iPadOS could jump into the first chat automatically whenever the session
+  list refreshed with no selected chat, or after deleting the selected chat.
+
+Change:
+
+- Removed the mobile `sessions.first` auto-selection fallback from session
+  refresh. Refresh now only clears selection if the currently selected chat no
+  longer exists.
+- Deleting the selected chat now returns to the empty `No Chat Selected` state
+  instead of opening the next chat.
+- Create, resume, and fork still explicitly open the newly created chat.
+- Added guardrails so iOS refresh/delete cannot regress to first-chat
+  auto-selection.
+
 ## 2026-05-20 Follow-Up - Stable Sidebar Order
 
 Problem:

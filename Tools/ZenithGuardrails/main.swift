@@ -155,6 +155,16 @@ func checkArchiveSessionBehavior() throws {
     try assert(server.contains("@app.post(\"/api/sessions/{session_id}/order\")"), "Server must expose manual session reorder endpoint")
 }
 
+func checkMobileDoesNotAutoSelectFirstChat() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+
+    try assert(!mobileStore.contains("selectedSessionID = sessions.first?.id"), "iOS refresh must not auto-open the first chat")
+    try assert(!mobileStore.contains("if let next = sessions.first"), "iOS delete flow must not auto-open the next first chat")
+    try assert(mobileStore.contains("private func clearSelection()"), "iOS store must have an explicit clear-selection path")
+    try assert(mobileStore.contains("if let selectedSessionID, !sessions.contains"), "iOS refresh should only clear a stale selection")
+}
+
 func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
@@ -341,6 +351,7 @@ do {
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
     try checkArchiveSessionBehavior()
+    try checkMobileDoesNotAutoSelectFirstChat()
     try checkTimelineRevealWaitsForLatestSnapshot()
     try checkConnectionFailuresDoNotModal()
     try checkVideoMetadataIsNotHiddenByMixedFilePaging()
