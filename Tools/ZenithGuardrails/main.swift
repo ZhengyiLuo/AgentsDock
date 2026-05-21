@@ -392,6 +392,27 @@ func checkQueuedRemovalDisappears() throws {
     try assert(mobileStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "iOS unqueue should remove queued rows locally after server success")
 }
 
+func checkPromptImageAttachments() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+    let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
+    let composer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/ComposerView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("func promptFiles(for event: ZEvent)"), "Mac store must resolve turn file_ids into prompt attachments")
+    try assert(mobileStore.contains("func promptFiles(for event: ZEvent)"), "iOS store must resolve turn file_ids into prompt attachments")
+    try assert(macTimeline.contains("MessageAttachment(file: $0, url: store.fileURL($0))"), "Mac timeline must pass prompt attachments into user bubbles")
+    try assert(macEvents.contains("MessageAttachmentStrip"), "Mac user bubbles must render prompt attachments")
+    try assert(macEvents.contains("attachment.file.content_type?.hasPrefix(\"image/\") == true"), "Mac prompt attachments must render image thumbnails")
+    try assert(mobileEvents.contains("MobileMessageAttachmentStrip"), "iOS user bubbles must render prompt attachments")
+    try assert(mobileEvents.contains("attachment.file.content_type?.hasPrefix(\"image/\") == true"), "iOS prompt attachments must render image thumbnails")
+    try assert(composer.contains("override func paste"), "Mac composer must intercept pasteboard images")
+    try assert(composer.contains("NSImage(pasteboard: pasteboard)"), "Mac composer must read raw image data from the pasteboard")
+    try assert(composer.contains("ZenithDockPasteboardImages"), "Mac composer must persist pasted images before upload")
+}
+
 func checkTmuxSubmitterVisualizer() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
@@ -452,6 +473,7 @@ do {
     try checkTimelineHistoryPaging()
     try checkLiveTimelineAutoFollow()
     try checkQueuedRemovalDisappears()
+    try checkPromptImageAttachments()
     try checkTmuxSubmitterVisualizer()
     try checkExportCompliancePlists()
     print("ZenithGuardrails passed")

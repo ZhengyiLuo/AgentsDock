@@ -2641,3 +2641,22 @@ Changes:
   a successful unqueue request, so the UI does not wait on the websocket echo.
 - Added guardrails so cancelled queued turns cannot regress into visible chat
   bubbles again.
+
+### Prompt Image Attachments
+
+User issue:
+
+- Images sent with a prompt were uploaded, but the later chat history only
+  showed the prompt text. The picture was not rendered with the user turn.
+- Pasting a copied image directly into the macOS chat box did not attach it.
+
+Changes:
+
+- macOS and iOS/iPadOS stores now resolve `turn_started` / `turn_queued`
+  `file_ids` back into known session file metadata.
+- User message bubbles render those prompt attachments, including inline image
+  thumbnails and compact fallback chips for non-image files.
+- The macOS text editor now intercepts pasteboard file URLs and raw image data.
+  Raw images are written to a temporary PNG under `ZenithDockPasteboardImages`
+  and passed through the normal upload queue.
+- Added guardrails for prompt attachment rendering and pasteboard image import.

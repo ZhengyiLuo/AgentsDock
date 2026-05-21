@@ -83,6 +83,9 @@ struct TimelineView: View {
                                             event: event,
                                             showDebugEvents: store.showDebugEvents,
                                             queueStatus: queueStatus(for: event),
+                                            attachments: store.promptFiles(for: event).map {
+                                                MessageAttachment(file: $0, url: store.fileURL($0))
+                                            },
                                             artifactURL: event.artifact.map { store.fileURL($0) },
                                             fileURL: event.file.map { store.fileURL($0) },
                                             linkContext: linkContext,

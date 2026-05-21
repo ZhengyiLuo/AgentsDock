@@ -15,10 +15,16 @@ enum QueuedEventStatus: Equatable {
     case cancelled
 }
 
+struct MessageAttachment: Hashable {
+    let file: ZFile
+    let url: URL?
+}
+
 struct EventCard: View, Equatable {
     let event: ZEvent
     let showDebugEvents: Bool
     let queueStatus: QueuedEventStatus
+    let attachments: [MessageAttachment]
     let artifactURL: URL?
     let fileURL: URL?
     let linkContext: ZMarkdownLinkContext?
@@ -33,6 +39,7 @@ struct EventCard: View, Equatable {
             lhs.event.type == rhs.event.type &&
             lhs.showDebugEvents == rhs.showDebugEvents &&
             lhs.queueStatus == rhs.queueStatus &&
+            lhs.attachments == rhs.attachments &&
             lhs.artifactURL == rhs.artifactURL &&
             lhs.fileURL == rhs.fileURL &&
             lhs.linkContext == rhs.linkContext &&
@@ -43,7 +50,13 @@ struct EventCard: View, Equatable {
         if event.type == "turn_started" {
             HStack {
                 Spacer(minLength: 80)
-                MessageBubble(label: "You", text: event.prompt ?? "", isUser: true, linkContext: linkContext)
+                MessageBubble(
+                    label: "You",
+                    text: event.prompt ?? "",
+                    isUser: true,
+                    attachments: attachments,
+                    linkContext: linkContext
+                )
             }
         } else if event.type == "turn_queued" {
             HStack {
@@ -53,6 +66,7 @@ struct EventCard: View, Equatable {
                     text: event.prompt ?? "",
                     isUser: true,
                     isQueued: queueStatus.isPending,
+                    attachments: attachments,
                     actionTitle: queueStatus.isPending ? "Unqueue" : nil,
                     actionSystemImage: queueStatus.isPending ? "xmark.circle" : nil,
                     linkContext: linkContext,
@@ -247,6 +261,7 @@ struct MessageBubble: View {
     let isUser: Bool
     var isQueued = false
     var isJob = false
+    var attachments: [MessageAttachment] = []
     var actionTitle: String?
     var actionSystemImage: String?
     var linkContext: ZMarkdownLinkContext?
@@ -293,6 +308,9 @@ struct MessageBubble: View {
             .frame(maxWidth: .infinity)
             MarkdownView(markdown: visibleText, alignment: isUser ? .trailing : .leading, linkContext: linkContext)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            if !attachments.isEmpty {
+                MessageAttachmentStrip(attachments: attachments, isUser: isUser)
+            }
             if shouldClip {
                 foldNotice
             }
@@ -626,6 +644,74 @@ private func jobRunDurationString(_ seconds: Int) -> String {
     let hours = seconds / 3600
     let minutes = (seconds % 3600) / 60
     return minutes == 0 ? "\(hours)h" : "\(hours)h \(minutes)m"
+}
+
+private struct MessageAttachmentStrip: View {
+    let attachments: [MessageAttachment]
+    let isUser: Bool
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments, id: \.file.id) { attachment in
+                    MessageAttachmentPreview(attachment: attachment)
+                }
+            }
+            .padding(.vertical, 1)
+        }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+}
+
+private struct MessageAttachmentPreview: View {
+    let attachment: MessageAttachment
+
+    var body: some View {
+        Group {
+            if let url = attachment.url,
+               attachment.file.content_type?.hasPrefix("image/") == true {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.black.opacity(0.08))
+                        ProgressView()
+                    }
+                }
+                .frame(width: 180, height: 124)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                HStack(spacing: 7) {
+                    Image(systemName: icon)
+                    Text(attachment.file.filename)
+                        .lineLimit(1)
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+        .contentShape(Rectangle())
+        .onDrag {
+            if let url = attachment.url {
+                return ArtifactDragItemProvider.provider(for: attachment.file, url: url)
+            }
+            return NSItemProvider(object: attachment.file.filename as NSString)
+        }
+        .help(attachment.file.filename)
+    }
+
+    private var icon: String {
+        if attachment.file.content_type?.hasPrefix("video/") == true { return "film" }
+        if attachment.file.content_type?.hasPrefix("image/") == true { return "photo" }
+        return "doc"
+    }
 }
 
 private struct FullMessageSheet: View {

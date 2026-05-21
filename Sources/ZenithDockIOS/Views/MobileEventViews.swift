@@ -11,6 +11,11 @@ import UIKit
 import AppKit
 #endif
 
+struct MobileMessageAttachment: Hashable {
+    let file: ZFile
+    let url: URL?
+}
+
 struct MobileEventCard: View {
     @EnvironmentObject private var store: MobileAppStore
     let event: ZEvent
@@ -19,13 +24,14 @@ struct MobileEventCard: View {
     var body: some View {
         switch event.type {
         case "turn_started":
-            userBubble(label: "You", text: event.prompt ?? "")
+            userBubble(label: "You", text: event.prompt ?? "", attachments: promptAttachments)
         case "turn_queued":
             let isPending = store.isQueuedEventPending(event)
             userBubble(
                 label: queuedLabel,
                 text: event.prompt ?? "",
                 queued: isPending,
+                attachments: promptAttachments,
                 actionTitle: isPending ? "Unqueue" : nil,
                 actionSystemImage: isPending ? "xmark.circle" : nil,
                 action: isPending ? { Task { await store.unqueue(event) } } : nil
@@ -70,6 +76,10 @@ struct MobileEventCard: View {
         store.markdownLinkContext(sessionID: event.session_id)
     }
 
+    private var promptAttachments: [MobileMessageAttachment] {
+        store.promptFiles(for: event).map { MobileMessageAttachment(file: $0, url: store.fileURL($0)) }
+    }
+
     private var queuedLabel: String {
         if store.hasCancelledQueuedEvent(event) {
             return "Removed from queue"
@@ -87,6 +97,7 @@ struct MobileEventCard: View {
         label: String,
         text: String,
         queued: Bool = false,
+        attachments: [MobileMessageAttachment] = [],
         actionTitle: String? = nil,
         actionSystemImage: String? = nil,
         action: (() -> Void)? = nil
@@ -98,6 +109,7 @@ struct MobileEventCard: View {
                 text: text,
                 isUser: true,
                 queued: queued,
+                attachments: attachments,
                 actionTitle: actionTitle,
                 actionSystemImage: actionSystemImage,
                 linkContext: linkContext,
@@ -149,6 +161,7 @@ struct MobileMessageBubble: View {
     let isUser: Bool
     var queued = false
     var isJob = false
+    var attachments: [MobileMessageAttachment] = []
     var actionTitle: String?
     var actionSystemImage: String?
     var linkContext: ZMarkdownLinkContext?
@@ -188,6 +201,9 @@ struct MobileMessageBubble: View {
             }
             MobileMarkdownView(markdown: visibleText, linkContext: linkContext)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            if !attachments.isEmpty {
+                MobileMessageAttachmentStrip(attachments: attachments, isUser: isUser)
+            }
             if shouldClip {
                 HStack(spacing: 8) {
                     Text("\(hiddenCharacterCount) hidden")
@@ -485,6 +501,67 @@ private func mobileJobRunDurationString(_ seconds: Int) -> String {
     let hours = seconds / 3600
     let minutes = (seconds % 3600) / 60
     return minutes == 0 ? "\(hours)h" : "\(hours)h \(minutes)m"
+}
+
+private struct MobileMessageAttachmentStrip: View {
+    let attachments: [MobileMessageAttachment]
+    let isUser: Bool
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments, id: \.file.id) { attachment in
+                    MobileMessageAttachmentPreview(attachment: attachment)
+                }
+            }
+            .padding(.vertical, 1)
+        }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+}
+
+private struct MobileMessageAttachmentPreview: View {
+    let attachment: MobileMessageAttachment
+
+    var body: some View {
+        Group {
+            if let url = attachment.url,
+               attachment.file.content_type?.hasPrefix("image/") == true {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(.black.opacity(0.08))
+                        ProgressView()
+                    }
+                }
+                .frame(width: 170, height: 118)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                HStack(spacing: 7) {
+                    Image(systemName: icon)
+                    Text(attachment.file.filename)
+                        .lineLimit(1)
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
+        .accessibilityLabel(attachment.file.filename)
+    }
+
+    private var icon: String {
+        if attachment.file.content_type?.hasPrefix("video/") == true { return "film" }
+        if attachment.file.content_type?.hasPrefix("image/") == true { return "photo" }
+        return "doc"
+    }
 }
 
 private struct MobileFullMessageSheet: View {

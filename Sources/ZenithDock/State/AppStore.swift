@@ -1347,6 +1347,13 @@ final class AppStore: ObservableObject {
         api.authenticatedURL("/api/files/\(file.id)")
     }
 
+    func promptFiles(for event: ZEvent) -> [ZFile] {
+        guard let fileIDs = event.file_ids, !fileIDs.isEmpty else { return [] }
+        let knownFiles = mergedFiles(sessionFiles + sessionVideoFiles + uploads + files(from: events))
+        let filesByID = Dictionary(uniqueKeysWithValues: knownFiles.map { ($0.id, $0) })
+        return fileIDs.compactMap { filesByID[$0] }
+    }
+
     func markdownLinkContext(sessionID: String) -> ZMarkdownLinkContext {
         ZMarkdownLinkContext(sessionID: sessionID, baseURL: api.baseURL, accessToken: accessToken)
     }

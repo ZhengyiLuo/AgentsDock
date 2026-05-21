@@ -539,6 +539,19 @@ struct PromptTextView: NSViewRepresentable {
             super.keyDown(with: event)
         }
 
+        override func paste(_ sender: Any?) {
+            let pasteboard = NSPasteboard.general
+            if let urls = Self.fileURLs(from: pasteboard), !urls.isEmpty {
+                onDropFiles?(urls)
+                return
+            }
+            if let imageURL = Self.writeImageFromPasteboard(pasteboard) {
+                onDropFiles?([imageURL])
+                return
+            }
+            super.paste(sender)
+        }
+
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
             draggedFileURLs(from: sender).isEmpty ? super.draggingEntered(sender) : .copy
         }
@@ -553,21 +566,47 @@ struct PromptTextView: NSViewRepresentable {
         }
 
         private func draggedFileURLs(from sender: NSDraggingInfo) -> [URL] {
-            let pasteboard = sender.draggingPasteboard
+            Self.fileURLs(from: sender.draggingPasteboard) ?? []
+        }
+
+        private static func fileURLs(from pasteboard: NSPasteboard) -> [URL]? {
             if let urls = pasteboard.readObjects(
                 forClasses: [NSURL.self],
                 options: [.urlReadingFileURLsOnly: true]
             ) as? [URL] {
-                return urls.filter(\.isFileURL)
+                let fileURLs = urls.filter(\.isFileURL)
+                if !fileURLs.isEmpty {
+                    return fileURLs
+                }
             }
 
-            return (pasteboard.pasteboardItems ?? []).compactMap { item in
+            let itemURLs = (pasteboard.pasteboardItems ?? []).compactMap { item in
                 if let string = item.string(forType: .fileURL), let url = URL(string: string), url.isFileURL {
                     return url
                 }
                 if let string = item.string(forType: .URL), let url = URL(string: string), url.isFileURL {
                     return url
                 }
+                return nil
+            }
+            return itemURLs.isEmpty ? nil : itemURLs
+        }
+
+        private static func writeImageFromPasteboard(_ pasteboard: NSPasteboard) -> URL? {
+            guard let image = NSImage(pasteboard: pasteboard),
+                  let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let data = rep.representation(using: .png, properties: [:]) else {
+                return nil
+            }
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ZenithDockPasteboardImages", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let url = directory.appendingPathComponent("clipboard-image-\(UUID().uuidString).png")
+                try data.write(to: url, options: .atomic)
+                return url
+            } catch {
                 return nil
             }
         }
