@@ -2108,3 +2108,23 @@ Changes:
   concrete options.
 - Strengthened guardrails so Codex cannot silently regress to the terminal
   symbol again.
+
+### Structured Code Review Sheet
+
+User issue:
+
+- The existing `Code Changes` modal looked like a debug dump compared with
+  Codex's review panel.
+- The file list could also pick up diff body fragments as fake changed files.
+
+Changes:
+
+- Reworked the macOS code-change review sheet into a two-pane review surface:
+  file navigator on the left and selected-file diff rows on the right.
+- Added colored add/delete rows, old/new line numbers, hunk metadata rows, and a
+  copy-diff button.
+- Added per-file section parsing for unified diffs and `apply_patch` payloads.
+- Tightened changed-file extraction so raw `+...` and `---` diff body lines do
+  not become fake file rows.
+- Added a guardrail to keep the review sheet structured instead of regressing
+  to one giant code block.

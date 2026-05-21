@@ -214,6 +214,17 @@ func checkInlineVideoPlayAutoplays() throws {
     try assert(inlineVideo.contains("video.play().catch"), "iOS inline video web player should attempt playback after loading")
 }
 
+func checkCodeReviewSurfaceIsStructured() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let review = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TraceChangeSetView.swift"), encoding: .utf8)
+
+    try assert(review.contains("@State private var selectedFileID"), "Code review sheet must keep a selected file")
+    try assert(review.contains("TraceReviewDiffPane"), "Code review sheet must render a structured diff pane")
+    try assert(review.contains("TraceDiffLineView"), "Code review sheet must render per-line diff rows")
+    try assert(review.contains("oldNumber"), "Code review diff rows should include old/new line numbers")
+    try assert(review.contains("!path.hasPrefix(\"+\")"), "Code change extraction must reject diff body lines as fake paths")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -228,6 +239,7 @@ do {
     try checkRuntimeAutosavesAndBackendIcons()
     try checkTimelineCombinesRunTraces()
     try checkInlineVideoPlayAutoplays()
+    try checkCodeReviewSurfaceIsStructured()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

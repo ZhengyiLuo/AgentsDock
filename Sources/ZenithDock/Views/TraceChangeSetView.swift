@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import ZenithCore
 
@@ -64,16 +65,44 @@ struct TraceChangeSetCard: View {
 private struct TraceChangeReviewSheet: View {
     let summary: TraceChangeSummary
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedFileID: String?
+    @State private var copied = false
+
+    private var sections: [TraceReviewFileSection] {
+        TraceReviewFileSection.build(from: summary)
+    }
+
+    private var selectedSection: TraceReviewFileSection {
+        let selected = selectedFileID ?? sections.first?.id
+        return sections.first { $0.id == selected } ?? sections.first ?? TraceReviewFileSection.empty(summary: summary)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
+                Image(systemName: "document.badge.gearshape")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.16))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 Text("Code Changes")
                     .font(.headline)
                 Text(summary.deltaLabel)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button {
+                    copyText(summary.reviewText)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        copied = false
+                    }
+                } label: {
+                    Label(copied ? "Copied" : "Copy Diff", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 Button("Done") {
                     dismiss()
                 }
@@ -82,37 +111,347 @@ private struct TraceChangeReviewSheet: View {
             .padding(14)
             Divider()
             HStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(summary.files) { file in
-                            HStack(spacing: 8) {
-                                Text(file.status.shortLabel)
-                                    .font(.caption2.weight(.bold).monospaced())
-                                    .foregroundStyle(file.status.color)
-                                    .frame(width: 18, alignment: .leading)
-                                Text(file.path)
-                                    .font(.caption.monospaced())
-                                    .lineLimit(2)
-                                    .truncationMode(.middle)
-                                Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(sections) { section in
+                                TraceReviewFileRow(
+                                    section: section,
+                                    isSelected: selectedSection.id == section.id
+                                ) {
+                                    selectedFileID = section.id
+                                }
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(.secondary.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
                         }
+                        .padding(10)
                     }
-                    .padding(12)
                 }
-                .frame(width: 320)
+                .frame(width: 315)
+                .background(Color.primary.opacity(0.025))
                 Divider()
-                ScrollView {
-                    CodeBlock(text: summary.reviewText, language: "diff", limit: 28_000)
-                        .padding(14)
-                }
+                TraceReviewDiffPane(section: selectedSection)
             }
         }
-        .frame(minWidth: 900, idealWidth: 1080, minHeight: 560, idealHeight: 720)
+        .background(Theme.window)
+        .frame(minWidth: 980, idealWidth: 1180, minHeight: 650, idealHeight: 780)
+    }
+
+    private func copyText(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+}
+
+private struct TraceReviewFileRow: View {
+    let section: TraceReviewFileSection
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(section.status.shortLabel)
+                        .font(.caption2.weight(.bold).monospaced())
+                        .foregroundStyle(section.status.color)
+                        .frame(width: 18, alignment: .leading)
+                    Text(section.path)
+                        .font(.caption.weight(.semibold).monospaced())
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    if section.insertions > 0 {
+                        Text("+\(section.insertions)")
+                            .foregroundStyle(.green)
+                    }
+                    if section.deletions > 0 {
+                        Text("-\(section.deletions)")
+                            .foregroundStyle(.red)
+                    }
+                    if section.insertions == 0 && section.deletions == 0 {
+                        Text("\(section.lines.count) lines")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption2.monospacedDigit())
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct TraceReviewDiffPane: View {
+    let section: TraceReviewFileSection
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(section.path)
+                    .font(.subheadline.weight(.semibold).monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if section.insertions > 0 {
+                    Text("+\(section.insertions)")
+                        .foregroundStyle(.green)
+                }
+                if section.deletions > 0 {
+                    Text("-\(section.deletions)")
+                        .foregroundStyle(.red)
+                }
+            }
+            .font(.caption.monospacedDigit())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.primary.opacity(0.045))
+            Divider()
+
+            ScrollView([.vertical, .horizontal]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(section.lines) { line in
+                        TraceDiffLineView(line: line)
+                    }
+                }
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct TraceDiffLineView: View {
+    let line: TraceReviewLine
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(line.oldNumber.map(String.init) ?? " ")
+                .frame(width: 42, alignment: .trailing)
+            Text(line.newNumber.map(String.init) ?? " ")
+                .frame(width: 42, alignment: .trailing)
+            Text(line.prefix)
+                .frame(width: 20, alignment: .center)
+            Text(line.text)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 0, alignment: .leading)
+        }
+        .font(.system(size: 12.5, weight: .regular, design: .monospaced))
+        .foregroundStyle(line.foreground)
+        .padding(.horizontal, 10)
+        .padding(.vertical, line.kind == .hunk ? 5 : 2)
+        .background(line.background)
+    }
+}
+
+private struct TraceReviewFileSection: Identifiable, Equatable {
+    let id: String
+    let path: String
+    let status: TraceChangeStatus
+    let lines: [TraceReviewLine]
+
+    var insertions: Int {
+        lines.filter { $0.kind == .added }.count
+    }
+
+    var deletions: Int {
+        lines.filter { $0.kind == .removed }.count
+    }
+
+    static func empty(summary: TraceChangeSummary) -> TraceReviewFileSection {
+        TraceReviewFileSection(
+            id: "changes",
+            path: "Changes",
+            status: .unknown,
+            lines: TraceReviewLine.parse(summary.reviewText)
+        )
+    }
+
+    static func build(from summary: TraceChangeSummary) -> [TraceReviewFileSection] {
+        let parsed = parseSections(from: summary.reviewText, knownFiles: summary.files)
+        if !parsed.isEmpty {
+            return parsed
+        }
+        return summary.files.map { file in
+            TraceReviewFileSection(
+                id: file.path,
+                path: file.path,
+                status: file.status,
+                lines: TraceReviewLine.parse(summary.reviewText)
+            )
+        }
+    }
+
+    private static func parseSections(from text: String, knownFiles: [TraceChangedFile]) -> [TraceReviewFileSection] {
+        let knownByPath = Dictionary(uniqueKeysWithValues: knownFiles.map { ($0.path, $0.status) })
+        var sections: [TraceReviewFileSection] = []
+        var currentPath: String?
+        var currentStatus: TraceChangeStatus = .modified
+        var currentLines: [String] = []
+
+        func flush() {
+            guard let path = currentPath else { return }
+            sections.append(TraceReviewFileSection(
+                id: path,
+                path: path,
+                status: knownByPath[path] ?? currentStatus,
+                lines: TraceReviewLine.parse(currentLines.joined(separator: "\n"))
+            ))
+            currentLines.removeAll(keepingCapacity: true)
+        }
+
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if let header = fileHeader(from: line) {
+                flush()
+                currentPath = header.path
+                currentStatus = header.status
+                currentLines = [line]
+            } else if currentPath != nil {
+                currentLines.append(line)
+            }
+        }
+        flush()
+        return sections
+    }
+
+    private static func fileHeader(from line: String) -> (path: String, status: TraceChangeStatus)? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("*** update file:") {
+            return (TraceChangeSummary.cleanPathForReview(String(trimmed.dropFirst("*** Update File:".count))), .modified)
+        }
+        if lower.hasPrefix("*** add file:") {
+            return (TraceChangeSummary.cleanPathForReview(String(trimmed.dropFirst("*** Add File:".count))), .added)
+        }
+        if lower.hasPrefix("*** delete file:") {
+            return (TraceChangeSummary.cleanPathForReview(String(trimmed.dropFirst("*** Delete File:".count))), .deleted)
+        }
+        if lower.hasPrefix("diff --git "), let path = trimmed.components(separatedBy: " b/").last {
+            return (TraceChangeSummary.cleanPathForReview(path), .modified)
+        }
+        return nil
+    }
+}
+
+private struct TraceReviewLine: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case context
+        case added
+        case removed
+        case hunk
+        case metadata
+    }
+
+    let id: Int
+    let kind: Kind
+    let oldNumber: Int?
+    let newNumber: Int?
+    let text: String
+
+    var prefix: String {
+        switch kind {
+        case .added: "+"
+        case .removed: "-"
+        default: " "
+        }
+    }
+
+    var foreground: Color {
+        switch kind {
+        case .hunk, .metadata: .secondary
+        default: .primary
+        }
+    }
+
+    var background: Color {
+        switch kind {
+        case .added: Color.green.opacity(0.16)
+        case .removed: Color.red.opacity(0.16)
+        case .hunk: Color.primary.opacity(0.08)
+        case .metadata: Color.primary.opacity(0.035)
+        case .context: Color.clear
+        }
+    }
+
+    static func parse(_ text: String) -> [TraceReviewLine] {
+        var oldLine: Int?
+        var newLine: Int?
+        var output: [TraceReviewLine] = []
+
+        for (index, rawLine) in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).enumerated() {
+            let kind: Kind
+            let oldNumber: Int?
+            let newNumber: Int?
+            let displayText: String
+
+            if rawLine.hasPrefix("@@") {
+                let parsed = parseHunkHeader(rawLine)
+                oldLine = parsed.old
+                newLine = parsed.new
+                kind = .hunk
+                oldNumber = nil
+                newNumber = nil
+                displayText = rawLine
+            } else if rawLine.hasPrefix("+"), !rawLine.hasPrefix("+++") {
+                kind = .added
+                oldNumber = nil
+                newNumber = newLine
+                newLine = newLine.map { $0 + 1 }
+                displayText = String(rawLine.dropFirst())
+            } else if rawLine.hasPrefix("-"), !rawLine.hasPrefix("---") {
+                kind = .removed
+                oldNumber = oldLine
+                newNumber = nil
+                oldLine = oldLine.map { $0 + 1 }
+                displayText = String(rawLine.dropFirst())
+            } else if rawLine.hasPrefix("***") || rawLine.hasPrefix("diff --git") || rawLine.hasPrefix("index ") || rawLine.hasPrefix("+++") || rawLine.hasPrefix("---") {
+                kind = .metadata
+                oldNumber = nil
+                newNumber = nil
+                displayText = rawLine
+            } else {
+                kind = .context
+                oldNumber = oldLine
+                newNumber = newLine
+                oldLine = oldLine.map { $0 + 1 }
+                newLine = newLine.map { $0 + 1 }
+                displayText = rawLine.hasPrefix(" ") ? String(rawLine.dropFirst()) : rawLine
+            }
+
+            output.append(TraceReviewLine(
+                id: index,
+                kind: kind,
+                oldNumber: oldNumber,
+                newNumber: newNumber,
+                text: displayText.isEmpty ? " " : displayText
+            ))
+        }
+
+        return output
+    }
+
+    private static func parseHunkHeader(_ line: String) -> (old: Int?, new: Int?) {
+        let parts = line.split(separator: " ")
+        var oldStart: Int?
+        var newStart: Int?
+        for part in parts {
+            if part.hasPrefix("-") {
+                oldStart = part.dropFirst().split(separator: ",").first.flatMap { Int($0) }
+            } else if part.hasPrefix("+") {
+                newStart = part.dropFirst().split(separator: ",").first.flatMap { Int($0) }
+            }
+        }
+        return (oldStart, newStart)
     }
 }
 
@@ -190,7 +529,7 @@ struct TraceChangeSummary: Equatable {
 
         func remember(path rawPath: String, status: TraceChangeStatus) {
             let path = cleanPath(rawPath)
-            guard !path.isEmpty, path != "/dev/null" else { return }
+            guard isLikelyChangedPath(path) else { return }
             if var existing = filesByPath[path] {
                 if status.priority > existing.status.priority {
                     existing.status = status
@@ -328,12 +667,23 @@ struct TraceChangeSummary: Equatable {
             .flatMap { Int($0) } ?? 0
     }
 
+    static func cleanPathForReview(_ raw: String) -> String {
+        cleanPath(raw)
+    }
+
     private static func cleanPath(_ raw: String) -> String {
         var path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if path.hasPrefix("a/") || path.hasPrefix("b/") {
             path.removeFirst(2)
         }
         return path.trimmingCharacters(in: CharacterSet(charactersIn: "\"'` "))
+    }
+
+    private static func isLikelyChangedPath(_ path: String) -> Bool {
+        guard !path.isEmpty, path != "/dev/null", path != "---", path != "+++" else { return false }
+        guard !path.hasPrefix("+"), !path.hasPrefix("-") else { return false }
+        guard !(path.contains(" ") && !path.contains("/")) else { return false }
+        return true
     }
 }
 
