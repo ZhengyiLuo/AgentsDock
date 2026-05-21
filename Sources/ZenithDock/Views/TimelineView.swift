@@ -132,6 +132,7 @@ struct TimelineView: View {
                     if !isInitialTimelineMasked && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
+                            store.markSelectedSessionRead(force: true)
                         } label: {
                             HStack(spacing: store.selectedSessionHasUnread ? 6 : 0) {
                                 Image(systemName: "arrow.down.to.line.compact")

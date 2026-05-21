@@ -125,6 +125,16 @@ struct SidebarView: View {
             .tag(session.id)
             .contextMenu {
                 Button {
+                    store.toggleSessionUnread(session)
+                } label: {
+                    Label(
+                        store.unreadAgentSessionIDs.contains(session.id) ? "Mark as Read" : "Mark as Unread",
+                        systemImage: store.unreadAgentSessionIDs.contains(session.id) ? "envelope.open" : "envelope.badge"
+                    )
+                }
+                .disabled(!store.unreadAgentSessionIDs.contains(session.id) && !store.canMarkSessionUnread(session))
+                Divider()
+                Button {
                     Task { await store.reorderSession(session, direction: "up") }
                 } label: {
                     Label("Move Up", systemImage: "arrow.up")

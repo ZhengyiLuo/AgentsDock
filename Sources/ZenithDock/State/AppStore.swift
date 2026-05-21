@@ -71,6 +71,7 @@ final class AppStore: ObservableObject {
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
+    private var manuallyUnreadSessionIDs: Set<String> = []
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
@@ -258,7 +259,10 @@ final class AppStore: ObservableObject {
         ZenithTokenStore.save(accessToken)
     }
 
-    func markSelectedSessionRead() {
+    func markSelectedSessionRead(force: Bool = false) {
+        if !force, let selectedSessionID, manuallyUnreadSessionIDs.contains(selectedSessionID) {
+            return
+        }
         markSessionRead(selectedSessionID)
     }
 
@@ -282,6 +286,30 @@ final class AppStore: ObservableObject {
         }
         unreadAgentSessionIDs.remove(sessionID)
         firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
+        manuallyUnreadSessionIDs.remove(sessionID)
+    }
+
+    func markSessionUnread(_ sessionID: String?) {
+        guard let sessionID, let latestSeq = latestAgentEventSeq(for: sessionID) else { return }
+        setLastReadAgentSeq(max(0, latestSeq - 1), for: sessionID, allowDecrease: true)
+        firstUnreadAgentSeqBySessionID[sessionID] = latestSeq
+        unreadAgentSessionIDs.insert(sessionID)
+        manuallyUnreadSessionIDs.insert(sessionID)
+        if selectedSessionID == sessionID {
+            selectedTimelineAtBottom = false
+        }
+    }
+
+    func toggleSessionUnread(_ session: ZSession) {
+        if unreadAgentSessionIDs.contains(session.id) {
+            markSessionRead(session.id)
+        } else {
+            markSessionUnread(session.id)
+        }
+    }
+
+    func canMarkSessionUnread(_ session: ZSession) -> Bool {
+        latestAgentEventSeq(for: session.id) != nil
     }
 
     func markAgentUnread(sessionID: String, firstSeq: Int? = nil) {
@@ -310,8 +338,8 @@ final class AppStore: ObservableObject {
         UserDefaults.standard.set(data, forKey: readStateDefaultsKey)
     }
 
-    private func setLastReadAgentSeq(_ seq: Int, for sessionID: String) {
-        guard seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
+    private func setLastReadAgentSeq(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
+        guard allowDecrease || seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
         lastReadAgentSeqBySessionID[sessionID] = seq
         saveReadState()
     }
@@ -334,7 +362,7 @@ final class AppStore: ObservableObject {
 
         for session in sessions {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
-            if session.id == selectedSessionID, selectedTimelineAtBottom {
+            if session.id == selectedSessionID, selectedTimelineAtBottom, !manuallyUnreadSessionIDs.contains(session.id) {
                 markSessionRead(session.id)
                 continue
             }
@@ -405,6 +433,7 @@ final class AppStore: ObservableObject {
         lastReadAgentSeqBySessionID = loadReadState()
         unreadAgentSessionIDs = []
         firstUnreadAgentSeqBySessionID = [:]
+        manuallyUnreadSessionIDs = []
         selectedTimelineAtBottom = true
         connectionProblemText = nil
     }

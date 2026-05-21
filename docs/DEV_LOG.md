@@ -16,6 +16,34 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Manual Mark Chat Unread
+
+Problem:
+
+- The app only marked chats unread automatically when new visible agent output
+  arrived while the chat was not read. There was no way to manually revisit a
+  chat later by marking it unread.
+
+Change:
+
+- Added `Mark as Unread` / `Mark as Read` actions to Mac and iOS/iPadOS chat
+  row context menus.
+- Manual unread moves the local server-scoped read cursor to just before the
+  latest visible agent event, so the unread state persists across refreshes.
+- Mac keeps a manual-unread override while the selected chat is open so the
+  bottom observer does not immediately clear the badge. Pressing the bottom/new
+  button clears the manual unread mark intentionally.
+- Added guardrails for the manual unread actions and cursor behavior.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS build -quiet`
+- `xcodebuild -scheme ZenithDockMac -configuration Release -destination platform=macOS -derivedDataPath build/DerivedData build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and verified
+  codesign.
+
 ## 2026-05-21 Follow-Up - Tmux Submitter Visualizer
 
 Problem:

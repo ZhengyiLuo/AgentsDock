@@ -49,6 +49,7 @@ final class MobileAppStore: ObservableObject {
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
+    private var manuallyUnreadSessionIDs: Set<String> = []
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
     private struct CachedChat {
@@ -249,6 +250,26 @@ final class MobileAppStore: ObservableObject {
             setLastReadAgentSeq(latestSeq, for: sessionID)
         }
         unreadAgentSessionIDs.remove(sessionID)
+        manuallyUnreadSessionIDs.remove(sessionID)
+    }
+
+    func markSessionUnread(_ sessionID: String?) {
+        guard let sessionID, let latestSeq = latestAgentEventSeq(for: sessionID) else { return }
+        setLastReadAgentSeq(max(0, latestSeq - 1), for: sessionID, allowDecrease: true)
+        unreadAgentSessionIDs.insert(sessionID)
+        manuallyUnreadSessionIDs.insert(sessionID)
+    }
+
+    func toggleSessionUnread(_ session: ZSession) {
+        if unreadAgentSessionIDs.contains(session.id) {
+            markSessionRead(session.id)
+        } else {
+            markSessionUnread(session.id)
+        }
+    }
+
+    func canMarkSessionUnread(_ session: ZSession) -> Bool {
+        latestAgentEventSeq(for: session.id) != nil
     }
 
     private var readStateDefaultsKey: String {
@@ -268,8 +289,8 @@ final class MobileAppStore: ObservableObject {
         UserDefaults.standard.set(data, forKey: readStateDefaultsKey)
     }
 
-    private func setLastReadAgentSeq(_ seq: Int, for sessionID: String) {
-        guard seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
+    private func setLastReadAgentSeq(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
+        guard allowDecrease || seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
         lastReadAgentSeqBySessionID[sessionID] = seq
         saveReadState()
     }
@@ -290,7 +311,7 @@ final class MobileAppStore: ObservableObject {
 
         for session in sessions {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
-            if session.id == selectedSessionID {
+            if session.id == selectedSessionID, !manuallyUnreadSessionIDs.contains(session.id) {
                 markSessionRead(session.id)
                 continue
             }
@@ -336,6 +357,7 @@ final class MobileAppStore: ObservableObject {
         memoryChatCacheOrder = []
         lastReadAgentSeqBySessionID = loadReadState()
         unreadAgentSessionIDs = []
+        manuallyUnreadSessionIDs = []
         await refresh(showErrors: true)
     }
 
