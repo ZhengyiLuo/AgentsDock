@@ -734,18 +734,61 @@ async def append_event(session_id: str, event_type: str, payload: dict[str, Any]
     ensure_dirs(session_id)
     path = events_path(session_id)
     seq = await next_event_seq(session_id, path)
+    ts = now_iso()
     event = {
         "seq": seq,
         "id": f"evt_{uuid.uuid4().hex[:16]}",
         "session_id": session_id,
         "type": event_type,
-        "ts": now_iso(),
+        "ts": ts,
         **(payload or {}),
     }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, separators=(",", ":")) + "\n")
+    await update_session_event_metadata(session_id, event)
     await HUB.broadcast(session_id, event)
     return event
+
+
+def is_agent_visible_event(event_type: str, event: dict[str, Any]) -> bool:
+    if event_type == "assistant_text":
+        return bool(str(event.get("text") or "").strip())
+    if event_type == "turn_finished":
+        return bool(str(event.get("result_text") or "").strip())
+    return event_type in {"error", "artifact_created", "job_ran", "job_error"}
+
+
+def should_bump_session_updated_at(event_type: str, event: dict[str, Any]) -> bool:
+    if is_agent_visible_event(event_type, event):
+        return True
+    return event_type in {
+        "turn_started",
+        "turn_queued",
+        "turn_unqueued",
+        "file_uploaded",
+        "job_created",
+        "job_deferred",
+        "backend_changed",
+        "history_imported",
+        "session_forked",
+    }
+
+
+async def update_session_event_metadata(session_id: str, event: dict[str, Any]) -> None:
+    sess = STORE.sessions.get(session_id)
+    if not sess:
+        return
+    event_type = str(event.get("type") or "")
+    sess["latest_event_seq"] = int(event.get("seq") or 0)
+    sess["latest_event_at"] = event.get("ts")
+    sess["latest_event_type"] = event_type
+    if is_agent_visible_event(event_type, event):
+        sess["latest_agent_event_seq"] = int(event.get("seq") or 0)
+        sess["latest_agent_event_at"] = event.get("ts")
+        sess["latest_agent_event_type"] = event_type
+    if should_bump_session_updated_at(event_type, event):
+        sess["updated_at"] = event.get("ts") or now_iso()
+        await STORE.save()
 
 
 async def enqueue_turn(session_id: str, req: TurnRequest, sess: dict[str, Any]) -> dict[str, Any]:
@@ -2155,6 +2198,8 @@ def public_session(sess: dict[str, Any]) -> dict[str, Any]:
             "session_id", "claude_session_id", "codex_thread_id",
             "parent_id", "fork_from", "memory_forked", "memory_seed_used",
             "pinned", "pinned_at", "archived", "archived_at", "created_at", "updated_at",
+            "latest_event_seq", "latest_event_at", "latest_event_type",
+            "latest_agent_event_seq", "latest_agent_event_at", "latest_agent_event_type",
         )
     }
 

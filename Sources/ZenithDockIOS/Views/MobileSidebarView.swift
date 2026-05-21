@@ -302,19 +302,29 @@ private struct MobileSessionRow: View {
     let session: ZSession
 
     var body: some View {
+        let hasUnread = store.unreadAgentSessionIDs.contains(session.id)
         HStack(spacing: 10) {
             ZStack(alignment: .bottomTrailing) {
                 MobileBackendLogo(backend: session.backend)
+                    .scaleEffect(hasUnread ? 1.08 : 1)
                 if store.activeSessionIDs.contains(session.id) {
                     Circle()
                         .fill(.green)
                         .frame(width: 7, height: 7)
                         .offset(x: 3, y: 2)
                 }
+                if hasUnread {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().stroke(.background, lineWidth: 1.5))
+                        .offset(x: 4, y: -11)
+                }
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(session.title)
+                        .fontWeight(hasUnread ? .semibold : .regular)
                         .lineLimit(1)
                     if session.archived == true {
                         Image(systemName: "archivebox")
@@ -322,10 +332,16 @@ private struct MobileSessionRow: View {
                             .foregroundStyle(.tertiary)
                             .accessibilityLabel("Archived")
                     }
+                    if hasUnread {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 6, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityLabel("Unread agent message")
+                    }
                 }
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(hasUnread ? Color.accentColor : .secondary)
                     .lineLimit(1)
             }
         }
@@ -341,6 +357,8 @@ private struct MobileSessionRow: View {
             pieces.append("running")
         } else if session.archived == true {
             pieces.append("archived")
+        } else if store.unreadAgentSessionIDs.contains(session.id) {
+            pieces.append("new agent message")
         } else if let effort = session.effort, !effort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             pieces.append(store.runtimeCatalog.effortLabel(effort, backend: session.backend))
         }

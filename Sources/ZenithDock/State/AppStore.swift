@@ -67,6 +67,7 @@ final class AppStore: ObservableObject {
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
+    private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
@@ -87,6 +88,10 @@ final class AppStore: ObservableObject {
         let events_omitted_after: Int?
         let latest_seq: Int?
         let event_count: Int?
+    }
+
+    init() {
+        lastReadAgentSeqBySessionID = loadReadState()
     }
 
     var api: APIClient {
@@ -252,7 +257,10 @@ final class AppStore: ObservableObject {
     }
 
     func markSessionRead(_ sessionID: String?) {
-        guard let sessionID, unreadAgentSessionIDs.contains(sessionID) else { return }
+        guard let sessionID else { return }
+        if let latestSeq = latestAgentEventSeq(for: sessionID) {
+            setLastReadAgentSeq(latestSeq, for: sessionID)
+        }
         unreadAgentSessionIDs.remove(sessionID)
         firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
     }
@@ -266,6 +274,61 @@ final class AppStore: ObservableObject {
         unreadAgentSessionIDs.insert(sessionID)
     }
 
+    private var readStateDefaultsKey: String {
+        "ZenithDock.lastReadAgentSeq.\(serverCacheNamespace)"
+    }
+
+    private func loadReadState() -> [String: Int] {
+        guard let data = UserDefaults.standard.data(forKey: readStateDefaultsKey),
+              let decoded = try? JSONDecoder().decode([String: Int].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func saveReadState() {
+        guard let data = try? JSONEncoder().encode(lastReadAgentSeqBySessionID) else { return }
+        UserDefaults.standard.set(data, forKey: readStateDefaultsKey)
+    }
+
+    private func setLastReadAgentSeq(_ seq: Int, for sessionID: String) {
+        guard seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
+        lastReadAgentSeqBySessionID[sessionID] = seq
+        saveReadState()
+    }
+
+    private func latestAgentEventSeq(for sessionID: String) -> Int? {
+        if let sessionSeq = sessions.first(where: { $0.id == sessionID })?.latest_agent_event_seq {
+            return sessionSeq
+        }
+        let eventSeq = events
+            .filter { $0.session_id == sessionID && isAgentVisibleMessage($0) }
+            .map(\.seq)
+            .max()
+        return eventSeq
+    }
+
+    private func reconcileUnreadFromSessions() {
+        let knownSessionIDs = Set(sessions.map(\.id))
+        unreadAgentSessionIDs = unreadAgentSessionIDs.intersection(knownSessionIDs)
+        firstUnreadAgentSeqBySessionID = firstUnreadAgentSeqBySessionID.filter { knownSessionIDs.contains($0.key) }
+
+        for session in sessions {
+            guard let latestSeq = session.latest_agent_event_seq else { continue }
+            if session.id == selectedSessionID, selectedTimelineAtBottom {
+                markSessionRead(session.id)
+                continue
+            }
+            let lastReadSeq = lastReadAgentSeqBySessionID[session.id] ?? 0
+            if latestSeq > lastReadSeq {
+                markAgentUnread(sessionID: session.id, firstSeq: lastReadSeq + 1)
+            } else {
+                unreadAgentSessionIDs.remove(session.id)
+                firstUnreadAgentSeqBySessionID.removeValue(forKey: session.id)
+            }
+        }
+    }
+
     func isAgentVisibleMessage(_ event: ZEvent) -> Bool {
         switch event.type {
         case "assistant_text":
@@ -274,7 +337,7 @@ final class AppStore: ObservableObject {
             return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         case "error", "artifact_created":
             return true
-        case "job_ran":
+        case "job_ran", "job_error":
             return event.job != nil
         default:
             return false
@@ -320,6 +383,7 @@ final class AppStore: ObservableObject {
         omittedHistoryEventCount = 0
         memoryChatCache = [:]
         memoryChatCacheOrder = []
+        lastReadAgentSeqBySessionID = loadReadState()
         unreadAgentSessionIDs = []
         firstUnreadAgentSeqBySessionID = [:]
         selectedTimelineAtBottom = true
@@ -430,6 +494,7 @@ final class AppStore: ObservableObject {
                 sessions = res.sessions
                 AppLogger.info("loaded sessions count=\(sessions.count)")
             }
+            reconcileUnreadFromSessions()
             lastLoadedAt = Date()
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
                 selectedSessionID = sessions.first?.id
@@ -594,6 +659,7 @@ final class AppStore: ObservableObject {
                 return
             }
             applySessionEventSnapshot(res, sessionID: sessionID)
+            markSessionRead(sessionID)
             status = "Loaded latest chat"
             refreshSessionFilesFromLoadedEvents()
             loadedSessionID = sessionID
@@ -1246,6 +1312,8 @@ final class AppStore: ObservableObject {
                 markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
             } else if !selectedTimelineAtBottom {
                 markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
+            } else {
+                setLastReadAgentSeq(event.seq, for: event.session_id)
             }
         }
         if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {

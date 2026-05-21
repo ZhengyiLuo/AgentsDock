@@ -16,6 +16,27 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-20 Follow-Up - Scheduled Job Unread State
+
+Problem:
+
+- Unread state worked only for events arriving through the currently selected
+  chat websocket. Scheduled jobs can append output while another chat is open,
+  so those chats never became unread from the sidebar session-list refresh.
+
+Change:
+
+- Server sessions now track `latest_event_seq` and
+  `latest_agent_event_seq` metadata as events are appended.
+- Agent-visible events include normal assistant text/results, errors,
+  artifacts, and scheduled-job `job_ran` / `job_error` events.
+- The Mac and iOS/iPadOS apps now keep a server-scoped local
+  `lastReadAgentSeq` map and reconcile unread rows from `/api/sessions`.
+- Selecting/reading a chat updates the local last-read seq; scheduled-job output
+  in non-selected chats now shows as unread after the next session refresh.
+- Added guardrails so server session metadata, scheduled-job visibility, Mac
+  unread reconciliation, and iOS sidebar unread indicators do not regress.
+
 ## 2026-05-20 Follow-Up - TestFlight Build 28 Uploaded
 
 Summary:

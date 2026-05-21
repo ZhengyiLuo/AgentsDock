@@ -20,6 +20,12 @@ public struct ZSession: Codable, Identifiable, Hashable, Sendable {
     public var archived_at: String?
     public var created_at: String?
     public var updated_at: String?
+    public var latest_event_seq: Int?
+    public var latest_event_at: String?
+    public var latest_event_type: String?
+    public var latest_agent_event_seq: Int?
+    public var latest_agent_event_at: String?
+    public var latest_agent_event_type: String?
 
     public var isBackendLocked: Bool {
         [session_id, claude_session_id, codex_thread_id]
