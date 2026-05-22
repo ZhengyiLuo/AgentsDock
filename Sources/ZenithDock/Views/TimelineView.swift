@@ -175,8 +175,10 @@ struct TimelineView: View {
                     acceptTimelineFileDrop(providers)
                 }
                 .onChange(of: store.scrollToBottomRevision) {
+                    let sessionID = store.selectedSessionID
                     if shouldFollowBottomRequest {
                         scrollToBottom(proxy)
+                        settleBottomAfterLayout(proxy, sessionID: sessionID)
                     }
                     settleInitialTimelinePosition(proxy)
                 }
@@ -196,6 +198,7 @@ struct TimelineView: View {
                     lastObservedEventSeq = maxEventSeq(displayEvents)
                     store.markSelectedSessionRead()
                     scrollToBottom(proxy)
+                    settleBottomAfterLayout(proxy, sessionID: store.selectedSessionID)
                     settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
@@ -217,6 +220,7 @@ struct TimelineView: View {
                     lastObservedEventSeq = maxEventSeq(displayEvents)
                     if shouldFollowLiveEvent {
                         scrollToBottom(proxy)
+                        settleBottomAfterLayout(proxy, sessionID: store.selectedSessionID)
                         store.markSelectedSessionRead(force: true)
                     } else {
                         settleInitialTimelinePosition(proxy)
@@ -330,6 +334,18 @@ struct TimelineView: View {
             }
         } else {
             action()
+        }
+    }
+
+    private func settleBottomAfterLayout(_ proxy: ScrollViewProxy, sessionID: String?) {
+        guard let sessionID else { return }
+        for delay in [0.04, 0.16, 0.36] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard store.selectedSessionID == sessionID else { return }
+                withTransaction(noAnimationTransaction) {
+                    scrollToBottom(proxy)
+                }
+            }
         }
     }
 

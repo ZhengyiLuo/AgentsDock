@@ -231,6 +231,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!sidebar.contains("List(selection: $store.selectedSessionID)"), "Mac sidebar must not publish selectedSessionID directly before warm cache is applied")
     try assert(!root.contains(".onChange(of: store.selectedSessionID)"), "Mac root must not run a second store.select after sidebar/store selection already started")
     try assert(timeline.contains(".onChange(of: store.isSelectingSession)"), "Timeline must retry reveal when the latest snapshot load finishes")
+    try assert(timeline.contains("settleBottomAfterLayout(proxy, sessionID: store.selectedSessionID)"), "Timeline thread switches must settle bottom position after SwiftUI lays out new rows")
+    try assert(timeline.contains("guard store.selectedSessionID == sessionID else { return }"), "Delayed timeline bottom settles must be scoped to the selected session")
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should only structurally suspend rows when no selected-chat cache can be rendered")
     try assert(timeline.contains("let shouldMaskTimeline = timelineRowsSuspended || store.isRefreshingCachedDelta"), "Mac timeline should show the opening mask while a cached chat refreshes its latest tail")
     try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must structurally suspend row rendering only for cold opens")

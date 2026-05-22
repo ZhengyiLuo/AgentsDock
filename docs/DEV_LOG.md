@@ -16,6 +16,33 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Settle Timeline Position After Thread Switch
+
+Problem:
+
+- Switching between chats/threads could land at an incorrect timeline position.
+  The app was requesting bottom immediately, but SwiftUI could still be laying
+  out the old/new row set, so the first scroll sometimes targeted stale
+  geometry.
+
+Change:
+
+- Bottom jumps now settle over the next few layout passes after thread switches,
+  explicit bottom requests, and live auto-follow.
+- Delayed settles are guarded by the selected session ID, so a late scroll from
+  one thread cannot affect another thread after a quick switch.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  default DerivedData Release product:
+  `/Users/zen/Library/Developer/Xcode/DerivedData/ZenithDock-goqrrfavgklzurgabmpxjsmlicso/Build/Products/Release/ZenithDock.app`.
+- Verified `dist/ZenithDock.app` has `CFBundleVersion = 36`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - Stable Sidebar During Cached Switches
 
 Problem:
