@@ -340,6 +340,31 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
     try assert(!mobileOptions.contains("Save Runtime & Session"), "iOS options must not imply runtime requires a manual save")
 }
 
+func checkJobIntervalPresets() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+
+    try assert(inspector.contains("private struct JobIntervalControl"), "Mac job scheduling must use the reusable interval preset control")
+    try assert(inspector.contains("private let jobIntervalPresets"), "Mac job scheduling must define interval presets")
+    try assert(inspector.contains("JobIntervalPreset(seconds: 30"), "Job interval presets must include short status-check timing")
+    try assert(inspector.contains("JobIntervalPreset(seconds: 86_400"), "Job interval presets must include daily timing")
+    try assert(inspector.contains("Text(\"Custom\").tag(customJobIntervalTag)"), "Job interval picker must keep a custom option")
+    try assert(inspector.contains("JobIntervalControl(intervalText: $intervalText)"), "Both new and edit job sheets should use the preset interval control")
+    try assert(inspector.contains("private struct JobStartControl"), "Mac job scheduling must expose first-run/next-run timing")
+    try assert(inspector.contains("DatePicker("), "Mac custom job start time must use a DatePicker")
+    try assert(inspector.contains("firstRunAt: jobFirstRunAt"), "New jobs must pass the requested first-run time")
+    try assert(inspector.contains("nextRunAt: nextRunAt"), "Edited jobs must pass the requested next-run time")
+    try assert(macStore.contains("first_run_at: String?"), "Mac job create payload must support first_run_at")
+    try assert(macStore.contains("next_run_at: String?"), "Mac job update payload must support next_run_at")
+    try assert(mobileStore.contains("first_run_at: String?"), "iOS job create payload must stay compatible with first_run_at")
+    try assert(server.contains("first_run_at: str | None = None"), "Server job create model must accept first_run_at")
+    try assert(server.contains("next_run_at: str | None = None"), "Server job update model must accept next_run_at")
+    try assert(server.contains("parse_job_timestamp"), "Server must parse explicit job timestamps")
+}
+
 func checkTimelineCombinesRunTraces() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
@@ -542,6 +567,7 @@ do {
     try checkConnectionFailuresDoNotModal()
     try checkVideoMetadataIsNotHiddenByMixedFilePaging()
     try checkRuntimeAutosavesAndBackendIcons()
+    try checkJobIntervalPresets()
     try checkTimelineCombinesRunTraces()
     try checkInlineVideoPlayAutoplays()
     try checkCodeReviewSurfaceIsStructured()

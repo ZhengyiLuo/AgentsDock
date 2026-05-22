@@ -16,6 +16,43 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Job Interval And Start-Time Controls
+
+Problem:
+
+- Scheduled jobs only exposed a raw seconds field. That made common intervals
+  annoying to pick and did not let the user choose when the first/next run
+  should fire.
+- Editing an existing job could also reset the next run time indirectly because
+  the interval was always patched back to the server.
+
+Change:
+
+- Added a reusable Mac job interval control with presets from 30 seconds through
+  24 hours plus a custom seconds field.
+- Added first-run controls for new jobs and next-run controls for existing
+  jobs. New jobs can start after the interval, now, in 5/15/60 minutes, or at a
+  custom date/time. Existing jobs can keep the current next run or explicitly
+  reschedule it.
+- Extended the server job API with optional `first_run_at` on create and
+  `next_run_at` on update. Timestamps accept ISO-8601 strings or epoch seconds.
+- Kept the iOS job API payload compatible with the new optional fields, even
+  though the richer UI was added on Mac first.
+- Existing job edits now only patch the interval/loop/enabled/backend values
+  when they actually changed, so prompt/title edits do not reschedule by
+  accident.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `python3 -m py_compile server/agent_server.py`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  default DerivedData Release product.
+- Verified `dist/ZenithDock.app` has `CFBundleVersion = 37`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-22 Follow-Up - macOS TestFlight Build 37 Upload
 
 Change:

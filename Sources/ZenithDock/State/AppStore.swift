@@ -1347,7 +1347,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool) async {
+    func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, firstRunAt: Date? = nil) async {
         guard let sid = selectedSessionID else { return }
         let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanPrompt.isEmpty else { return }
@@ -1356,6 +1356,7 @@ final class AppStore: ObservableObject {
             let title: String
             let prompt: String
             let interval_seconds: Int
+            let first_run_at: String?
             let loop: Bool
             let enabled: Bool
             let backend: String?
@@ -1368,6 +1369,7 @@ final class AppStore: ObservableObject {
                 title: cleanTitle.isEmpty ? "\(loop ? "Loop" : "Job"): \(selectedSession?.title ?? "Chat")" : cleanTitle,
                 prompt: cleanPrompt,
                 interval_seconds: intervalSeconds,
+                first_run_at: firstRunAt.map(serverTimestamp),
                 loop: loop,
                 enabled: true,
                 backend: selectedSession?.backend
@@ -1386,13 +1388,15 @@ final class AppStore: ObservableObject {
         intervalSeconds: Int? = nil,
         loop: Bool? = nil,
         enabled: Bool? = nil,
-        backend: String? = nil
+        backend: String? = nil,
+        nextRunAt: Date? = nil
     ) async {
         struct Body: Codable {
             var title: String?
             var prompt: String?
             var enabled: Bool?
             var interval_seconds: Int?
+            var next_run_at: String?
             var loop: Bool?
             var backend: String?
         }
@@ -1403,6 +1407,7 @@ final class AppStore: ObservableObject {
                 prompt: prompt,
                 enabled: enabled,
                 interval_seconds: intervalSeconds.map { max(10, $0) },
+                next_run_at: nextRunAt.map(serverTimestamp),
                 loop: loop,
                 backend: backend
             ))
@@ -1412,6 +1417,13 @@ final class AppStore: ObservableObject {
         } catch {
             reportServerError(error)
         }
+    }
+
+    private func serverTimestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
     }
 
     func runJobNow(_ job: ZJob) async {

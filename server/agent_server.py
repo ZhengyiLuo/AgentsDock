@@ -173,6 +173,24 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def parse_job_timestamp(value: str | None) -> float | None:
+    if value is None:
+        return None
+    clean = str(value).strip()
+    if not clean:
+        return None
+    with suppress(ValueError):
+        return float(clean)
+    normalized = clean[:-1] + "+00:00" if clean.endswith("Z") else clean
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid job timestamp") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
 def safe_name(name: str) -> str:
     cleaned = "".join(c if c.isalnum() or c in ("-", "_", ".", " ") else "_" for c in name)
     return cleaned.strip(" .") or "file"
@@ -376,6 +394,7 @@ class CreateJobRequest(BaseModel):
     title: str
     prompt: str
     interval_seconds: int | None = None
+    first_run_at: str | None = None
     loop: bool = False
     enabled: bool = True
     backend: str | None = None
@@ -385,6 +404,7 @@ class UpdateJobRequest(BaseModel):
     title: str | None = None
     prompt: str | None = None
     interval_seconds: int | None = None
+    next_run_at: str | None = None
     loop: bool | None = None
     enabled: bool | None = None
     backend: str | None = None
@@ -651,6 +671,7 @@ class JobStore:
             raise HTTPException(status_code=400, detail=f"backend must be one of {sorted(VALID_BACKENDS)}")
         jid = f"job_{uuid.uuid4().hex[:16]}"
         now = now_iso()
+        first_run_at = parse_job_timestamp(req.first_run_at)
         job = {
             "id": jid,
             "session_id": req.session_id,
@@ -663,7 +684,7 @@ class JobStore:
             "created_at": now,
             "updated_at": now,
             "last_run_at": None,
-            "next_run_at": time.time() + req.interval_seconds if req.enabled and req.interval_seconds else None,
+            "next_run_at": first_run_at if req.enabled and first_run_at is not None else time.time() + req.interval_seconds if req.enabled and req.interval_seconds else None,
             "run_count": 0,
         }
         async with self._lock:
@@ -683,11 +704,15 @@ class JobStore:
                 raise HTTPException(status_code=404, detail="job not found")
             if "backend" in patch and patch["backend"] is not None and patch["backend"] not in VALID_BACKENDS:
                 raise HTTPException(status_code=400, detail=f"backend must be one of {sorted(VALID_BACKENDS)}")
+            has_next_run_patch = "next_run_at" in patch and patch["next_run_at"] is not None
+            next_run_at = parse_job_timestamp(patch.get("next_run_at")) if has_next_run_patch else None
             should_reschedule = any(key in patch for key in ("interval_seconds", "loop", "enabled"))
             for key in ("title", "prompt", "interval_seconds", "loop", "enabled", "backend"):
                 if key in patch and patch[key] is not None:
                     job[key] = patch[key]
-            if job.get("enabled") and job.get("interval_seconds") and (should_reschedule or not job.get("next_run_at")):
+            if job.get("enabled") and has_next_run_patch:
+                job["next_run_at"] = next_run_at
+            elif job.get("enabled") and job.get("interval_seconds") and (should_reschedule or not job.get("next_run_at")):
                 job["next_run_at"] = time.time() + int(job["interval_seconds"])
             if not job.get("enabled"):
                 job["next_run_at"] = None
