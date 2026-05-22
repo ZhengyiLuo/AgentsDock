@@ -31,6 +31,10 @@ Problem:
   `store.select`, `RootView` still had its old `selectedSessionID` observer and
   could start a second selection on the same click. That felt like a freeze when
   switching chats.
+- Follow-up: cached chat switches still hit the server immediately and kicked
+  off file/video metadata refreshes. Switching away also sanitized/copied up to
+  1,440 events into memory cache, and timeline projection allocated trimmed
+  copies of large assistant/job strings just to test whether they were empty.
 
 Change:
 
@@ -46,6 +50,14 @@ Change:
   chat data can be applied before the visible selection flips.
 - Removed the duplicate `RootView` selected-session observer. Selection now has
   one owner on Mac: explicit UI/store calls into `AppStore.select`.
+- Warm-cache chat switches now show cache, connect the websocket after cached
+  `lastSeq` for catch-up, and delay the heavier tail reconciliation. That
+  delayed refresh does not load file/video metadata.
+- Memory chat snapshots no longer sanitize/clip large text on the click path;
+  disk cache sanitization still happens in the delayed cache write.
+- Timeline rendering now projects a bounded recent event window in `body`, and
+  assistant/job grouping uses non-allocating visible-text checks instead of
+  `trimmingCharacters` copies on large strings.
 - Added guardrails for bounded line-count work and explicit warm-cache sidebar
   selection, plus a guardrail against duplicate RootView selection.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.

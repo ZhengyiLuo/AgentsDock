@@ -67,6 +67,7 @@ final class AppStore: ObservableObject {
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
     private var pendingScrollRequest: Task<Void, Never>?
+    private var pendingSelectionTailRefresh: Task<Void, Never>?
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
@@ -216,7 +217,7 @@ final class AppStore: ObservableObject {
         }
         let assistantRuns = Set(source.compactMap { event -> String? in
             guard event.type == "assistant_text",
-                  event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+                  hasVisibleText(event.text) else {
                 return nil
             }
             return event.run_id
@@ -240,7 +241,7 @@ final class AppStore: ObservableObject {
                 }
                 return true
             case "turn_finished":
-                guard event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+                guard hasVisibleText(event.result_text) else {
                     return false
                 }
                 if let runID = event.run_id, assistantRuns.contains(runID) {
@@ -385,15 +386,22 @@ final class AppStore: ObservableObject {
     func isAgentVisibleMessage(_ event: ZEvent) -> Bool {
         switch event.type {
         case "assistant_text":
-            return event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            return hasVisibleText(event.text)
         case "turn_finished":
-            return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            return hasVisibleText(event.result_text)
         case "error", "artifact_created":
             return true
         case "job_ran", "job_error":
             return event.job != nil
         default:
             return false
+        }
+    }
+
+    private func hasVisibleText(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return value.unicodeScalars.contains { scalar in
+            !CharacterSet.whitespacesAndNewlines.contains(scalar)
         }
     }
 
@@ -708,6 +716,48 @@ final class AppStore: ObservableObject {
                 requestScrollToBottom(immediate: true)
             }
         }
+        if loadedFromCache {
+            connectEvents(sessionID: sessionID, after: lastSeq)
+            syncSelectedRunningState()
+            scheduleSelectionTailRefresh(sessionID: sessionID, generation: generation)
+            return
+        }
+        await refreshLatestSessionSnapshot(
+            sessionID: sessionID,
+            generation: generation,
+            reportErrors: true,
+            refreshFiles: true,
+            connectStream: true
+        )
+    }
+
+    private func scheduleSelectionTailRefresh(sessionID: String, generation: Int) {
+        pendingSelectionTailRefresh?.cancel()
+        pendingSelectionTailRefresh = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self,
+                  !Task.isCancelled,
+                  self.selectedSessionID == sessionID,
+                  self.selectionGeneration == generation else {
+                return
+            }
+            await self.refreshLatestSessionSnapshot(
+                sessionID: sessionID,
+                generation: generation,
+                reportErrors: false,
+                refreshFiles: false,
+                connectStream: false
+            )
+        }
+    }
+
+    private func refreshLatestSessionSnapshot(
+        sessionID: String,
+        generation: Int,
+        reportErrors: Bool,
+        refreshFiles: Bool,
+        connectStream: Bool
+    ) async {
         guard selectedSessionID == sessionID, selectionGeneration == generation else {
             AppLogger.info("drop stale selection before network session=\(sessionID)")
             return
@@ -734,14 +784,18 @@ final class AppStore: ObservableObject {
             loadedSessionID = sessionID
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             saveSelectedChatCache()
-            Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
-            Task { await loadSessionVideoFiles(sessionID: sessionID, generation: generation) }
-            connectEvents(sessionID: sessionID, after: lastSeq)
+            if refreshFiles {
+                Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
+                Task { await loadSessionVideoFiles(sessionID: sessionID, generation: generation) }
+            }
+            if connectStream {
+                connectEvents(sessionID: sessionID, after: lastSeq)
+            }
             syncSelectedRunningState()
             requestScrollToBottom(immediate: true)
         } catch {
             AppLogger.error("select failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
-            if !loadedFromCache {
+            if reportErrors {
                 reportServerError(error)
             }
         }
@@ -1756,14 +1810,13 @@ final class AppStore: ObservableObject {
 
     private func rememberSelectedChatInMemory() {
         guard let session = selectedSession, !events.isEmpty else { return }
-        let eventsToCache = events
+        let eventsToCache = Array(events
             .filter { $0.type != "raw_event" }
-            .suffix(maxCachedTimelineEvents)
-            .map(sanitizedForCache)
+            .suffix(maxCachedTimelineEvents))
         guard !eventsToCache.isEmpty else { return }
         let cached = CachedChat(
             session: session,
-            events: Array(eventsToCache),
+            events: eventsToCache,
             sessionFiles: sessionFiles.isEmpty ? files(from: events) : sessionFiles,
             omittedHistoryEventCount: omittedHistoryEventCount,
             cachedAt: ISO8601DateFormatter().string(from: Date())

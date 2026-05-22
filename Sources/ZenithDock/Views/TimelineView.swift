@@ -39,10 +39,15 @@ struct TimelineView: View {
         )
         let shouldMaskTimeline = timelineRowsSuspended
         let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
-        let projection = TimelineRows.project(from: displayEvents)
+        let projectionEventLimit = max(defaultVisibleRowLimit * 8, visibleRowLimit * 8)
+        let projectedEvents = displayEvents.count > projectionEventLimit
+            ? Array(displayEvents.suffix(projectionEventLimit))
+            : displayEvents
+        let projection = TimelineRows.project(from: projectedEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
-        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
+        let hiddenProjectedEventCount = max(0, displayEvents.count - projectedEvents.count)
+        let hiddenRenderedRowCount = hiddenProjectedEventCount + max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
@@ -196,7 +201,7 @@ struct TimelineView: View {
                 .onChange(of: displayEvents.count) { oldCount, newCount in
                     let previousObservedSeq = lastObservedEventSeq
                     let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
-                    let rowCount = TimelineRows.build(from: displayEvents).count
+                    let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
@@ -1046,8 +1051,7 @@ private enum TimelineRows {
         func mergedAssistantEvent() -> ZEvent? {
             guard var merged = activeAssistantEvents.last else { return activeFinishedEvent }
             let text = activeAssistantEvents
-                .compactMap { $0.text?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+                .compactMap { visibleText($0.text) }
                 .joined(separator: "\n\n")
             merged.text = text
             return merged
@@ -1116,7 +1120,7 @@ private enum TimelineRows {
 
             if event.type == "assistant_text", event.run_id != nil {
                 beginAgentRunIfNeeded(for: event)
-                if event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                if hasVisibleText(event.text) {
                     activeAssistantEvents.append(event)
                 }
                 continue
@@ -1131,7 +1135,7 @@ private enum TimelineRows {
             if event.type == "turn_finished", event.run_id != nil {
                 beginAgentRunIfNeeded(for: event)
                 if activeAssistantEvents.isEmpty,
-                   event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                   hasVisibleText(event.result_text) {
                     activeFinishedEvent = event
                 }
                 flushAgentRun()
@@ -1193,14 +1197,14 @@ private enum TimelineRows {
                     )
                 }
             case "assistant_text":
-                if let text = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                if let text = visibleText(event.text) {
                     assistantText[runID, default: []].append(text)
                 }
             case "turn_finished":
                 finishedAt[runID] = event.ts
                 if var existing = rows[runID] {
-                    let result = event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    existing.resultText = result?.isEmpty == false ? result : assistantText[runID]?.joined(separator: "\n\n")
+                    let result = visibleText(event.result_text)
+                    existing.resultText = result ?? assistantText[runID]?.joined(separator: "\n\n")
                     existing.isFinished = true
                     existing.finishedAt = event.ts
                     existing.lastEventAt = event.ts
@@ -1208,8 +1212,7 @@ private enum TimelineRows {
                     rows[runID] = existing
                 }
             case "error":
-                let message = (event.message ?? event.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !message.isEmpty {
+                if let message = visibleText(event.message ?? event.error) {
                     errors[runID, default: []].append(message)
                 }
             default:
@@ -1219,8 +1222,8 @@ private enum TimelineRows {
 
         for (runID, textParts) in assistantText {
             guard var row = rows[runID], row.resultText?.isEmpty != false else { continue }
-            let text = textParts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
+            let text = textParts.joined(separator: "\n\n")
+            if hasVisibleText(text) {
                 row.resultText = text
                 rows[runID] = row
             }
@@ -1241,6 +1244,22 @@ private enum TimelineRows {
         }
 
         return rows
+    }
+
+    private static func visibleText(_ value: String?) -> String? {
+        guard let value, hasVisibleText(value) else { return nil }
+        return value
+    }
+
+    private static func hasVisibleText(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return hasVisibleText(value)
+    }
+
+    private static func hasVisibleText(_ value: String) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            !CharacterSet.whitespacesAndNewlines.contains(scalar)
+        }
     }
 
     private static func shouldFoldIntoJobResponse(_ event: ZEvent, jobRunIDs: Set<String>) -> Bool {
