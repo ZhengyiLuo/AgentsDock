@@ -235,6 +235,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("let shouldMaskTimeline = timelineRowsSuspended || store.isRefreshingCachedDelta"), "Mac timeline should show the opening mask while a cached chat refreshes its latest tail")
     try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must structurally suspend row rendering only for cold opens")
     try assert(timeline.contains("projectionEventLimit"), "Mac timeline must project only a bounded event window during normal rendering")
+    try assert(macStore.contains("private let maxWarmCachedTimelineEvents = 480"), "Mac warm-cache chat switches must render only the recent tail")
     try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
     try assert(!macStore.contains("connectEvents(sessionID: sessionID, after: cachedLastSeq)"), "Mac warm-cache chat switches must not replay the whole websocket gap before refreshing the latest tail")
     try assert(macStore.contains("refreshCachedSessionLatestTail"), "Mac warm-cache chat switches must refresh the server latest tail")
@@ -248,6 +249,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
         throw GuardrailFailure.failed("Mac store must keep memory and disk chat-cache paths separate")
     }
     try assert(!macStore[memorySnapshotRange.lowerBound..<diskSnapshotRange.lowerBound].contains("sanitizedForCache"), "Mac memory cache snapshot must not sanitize/copy large text while switching chats")
+    try assert(macStore.contains("Task.detached(priority: .utility)"), "Mac disk cache sanitization must run off the main actor")
+    try assert(macStore.contains("Self.sanitizedForCache($0, maxCharacters: maxCharacters)"), "Mac disk cache writes must sanitize large text inside the detached task")
     try assert(mobileTimeline.contains("store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty"), "iOS timeline must reveal cached selected-chat rows while refreshing")
     try assert(mobileTimeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "iOS timeline must structurally suspend row rendering only for cold opens")
     try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")
@@ -421,6 +424,7 @@ func checkTimelineHistoryPaging() throws {
 
     try assert(macStore.contains("private let initialSessionEventLimit = 480"), "Mac chat selection must load a three-page recent window")
     try assert(macStore.contains("private let maxCachedTimelineEvents = 1_440"), "Mac chat cache must retain more than the initial recent window")
+    try assert(macStore.contains(".suffix(maxWarmCachedTimelineEvents)"), "Mac warm cache should only render/cache the latest tail window during chat switches")
     try assert(macStore.contains("preserveExisting ? events.filter { $0.session_id == sessionID } : []"), "Fresh session snapshots must support preserving cached pages for same-chat full refreshes")
     try assert(macStore.contains("preservedBeforeSnapshot"), "Merged snapshots must reduce the older-hidden count by locally preserved events")
     try assert(timeline.contains("TimelineScrollAnchor"), "History paging must capture a stable scroll anchor")

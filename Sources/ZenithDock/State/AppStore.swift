@@ -59,6 +59,7 @@ final class AppStore: ObservableObject {
     private let olderHistoryPageLimit = 160
     private let maxLoadedTimelineEvents = 2_000
     private let maxCachedTimelineEvents = 1_440
+    private let maxWarmCachedTimelineEvents = 480
     private let maxCachedStringCharacters = 12_000
     private let sessionFilesPageLimit = 48
     private var webSocket: URLSessionWebSocketTask?
@@ -1684,8 +1685,9 @@ final class AppStore: ObservableObject {
         if let idx = sessions.firstIndex(where: { $0.id == cached.session.id }) {
             sessions[idx] = cached.session
         }
-        events = timelineEvents(from: cached.events)
-        omittedHistoryEventCount = cached.omittedHistoryEventCount
+        let cachedEvents = timelineEvents(from: cached.events)
+        events = Array(cachedEvents.suffix(maxWarmCachedTimelineEvents))
+        omittedHistoryEventCount = cached.omittedHistoryEventCount + max(0, cachedEvents.count - events.count)
         sessionFiles = mergedFiles((cached.sessionFiles ?? []) + files(from: events))
         sessionVideoFiles = mergedFiles(sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") })
         sessionFilesTotal = sessionFiles.isEmpty ? nil : sessionFiles.count
@@ -1849,7 +1851,7 @@ final class AppStore: ObservableObject {
         guard let session = selectedSession, !events.isEmpty else { return }
         let eventsToCache = Array(events
             .filter { $0.type != "raw_event" }
-            .suffix(maxCachedTimelineEvents))
+            .suffix(maxWarmCachedTimelineEvents))
         guard !eventsToCache.isEmpty else { return }
         let cached = CachedChat(
             session: session,
@@ -1888,19 +1890,29 @@ final class AppStore: ObservableObject {
         guard let session = selectedSession else { return }
         let directory = chatCacheDirectory
         let url = chatCacheURL(session.id)
-        let eventsToCache = events
+        let eventsToCache = Array(events
             .filter { $0.type != "raw_event" }
-            .suffix(maxCachedTimelineEvents)
-            .map(sanitizedForCache)
-        let cached = CachedChat(
+            .suffix(maxCachedTimelineEvents))
+        let warmEvents = Array(eventsToCache.suffix(maxWarmCachedTimelineEvents))
+        let cachedAt = ISO8601DateFormatter().string(from: Date())
+        let cachedFiles = sessionFiles.isEmpty ? files(from: events) : sessionFiles
+        let warmCached = CachedChat(
             session: session,
-            events: Array(eventsToCache),
-            sessionFiles: sessionFiles.isEmpty ? files(from: events) : sessionFiles,
+            events: warmEvents,
+            sessionFiles: cachedFiles,
             omittedHistoryEventCount: omittedHistoryEventCount,
-            cachedAt: ISO8601DateFormatter().string(from: Date())
+            cachedAt: cachedAt
         )
-        rememberChatCache(cached)
+        rememberChatCache(warmCached)
+        let maxCharacters = maxCachedStringCharacters
         Task.detached(priority: .utility) {
+            let cached = CachedChat(
+                session: session,
+                events: eventsToCache.map { Self.sanitizedForCache($0, maxCharacters: maxCharacters) },
+                sessionFiles: cachedFiles,
+                omittedHistoryEventCount: warmCached.omittedHistoryEventCount,
+                cachedAt: cachedAt
+            )
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 let data = try JSONEncoder().encode(cached)
@@ -1923,35 +1935,35 @@ final class AppStore: ObservableObject {
         showDebugEvents ? source : source.filter { $0.type != "raw_event" }
     }
 
-    private func sanitizedForCache(_ event: ZEvent) -> ZEvent {
+    nonisolated private static func sanitizedForCache(_ event: ZEvent, maxCharacters: Int) -> ZEvent {
         var copy = event
         copy.raw = nil
-        copy.output = trimmedForCache(copy.output)
-        copy.text = trimmedForCache(copy.text)
-        copy.result_text = trimmedForCache(copy.result_text)
-        copy.message = trimmedForCache(copy.message)
-        copy.prompt = trimmedForCache(copy.prompt)
+        copy.output = trimmedForCache(copy.output, maxCharacters: maxCharacters)
+        copy.text = trimmedForCache(copy.text, maxCharacters: maxCharacters)
+        copy.result_text = trimmedForCache(copy.result_text, maxCharacters: maxCharacters)
+        copy.message = trimmedForCache(copy.message, maxCharacters: maxCharacters)
+        copy.prompt = trimmedForCache(copy.prompt, maxCharacters: maxCharacters)
         if var tool = copy.tool {
-            tool.input = trimmedJSONForCache(tool.input)
+            tool.input = trimmedJSONForCache(tool.input, maxCharacters: maxCharacters)
             copy.tool = tool
         }
         return copy
     }
 
-    private func trimmedForCache(_ value: String?) -> String? {
-        guard let value, value.count > maxCachedStringCharacters else { return value }
-        return String(value.prefix(maxCachedStringCharacters)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[trimmed in local cache]"
+    nonisolated private static func trimmedForCache(_ value: String?, maxCharacters: Int) -> String? {
+        guard let value, value.count > maxCharacters else { return value }
+        return String(value.prefix(maxCharacters)).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[trimmed in local cache]"
     }
 
-    private func trimmedJSONForCache(_ value: JSONValue?) -> JSONValue? {
+    nonisolated private static func trimmedJSONForCache(_ value: JSONValue?, maxCharacters: Int) -> JSONValue? {
         guard let value else { return nil }
         switch value {
         case .string(let string):
-            return .string(trimmedForCache(string) ?? string)
+            return .string(trimmedForCache(string, maxCharacters: maxCharacters) ?? string)
         case .array(let array):
-            return .array(array.prefix(40).map { trimmedJSONForCache($0) ?? .null })
+            return .array(array.prefix(40).map { trimmedJSONForCache($0, maxCharacters: maxCharacters) ?? .null })
         case .object(let object):
-            return .object(object.mapValues { trimmedJSONForCache($0) ?? .null })
+            return .object(object.mapValues { trimmedJSONForCache($0, maxCharacters: maxCharacters) ?? .null })
         case .number, .bool, .null:
             return value
         }

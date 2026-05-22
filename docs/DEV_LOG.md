@@ -16,6 +16,38 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Lighter Chat Switch Cache Path
+
+Problem:
+
+- After build 36, chat switching correctness improved but still had short
+  frozen intervals. The remaining hot path was local: warm-cache switches could
+  rebuild up to 1,440 cached events before the authoritative latest tail
+  replaced them, and the delayed disk-cache writer sanitized/truncated large
+  event text on the main actor.
+
+Change:
+
+- Warm-cache render snapshots now keep only the latest 480 events. Disk cache
+  can still retain 1,440 events, but opening/switching a chat renders only the
+  recent tail before the server latest-tail refresh lands.
+- Applying a disk or memory cache now adjusts `omittedHistoryEventCount` for
+  cached events hidden by the warm tail cap.
+- Disk-cache sanitization and JSON encoding now run in a detached utility task.
+  The main actor only captures the current snapshots and installs a small warm
+  memory cache.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  default DerivedData Release product:
+  `/Users/zen/Library/Developer/Xcode/DerivedData/ZenithDock-goqrrfavgklzurgabmpxjsmlicso/Build/Products/Release/ZenithDock.app`.
+- Verified `dist/ZenithDock.app` has `CFBundleVersion = 36`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - macOS TestFlight Build 36 Upload
 
 Change:
