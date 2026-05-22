@@ -23,7 +23,7 @@ struct MobileTimelineView: View {
     private let rowPageSize = 36
 
     var body: some View {
-        let timelineRowsSuspended = store.isLoading && store.selectedSessionID != nil
+        let timelineRowsSuspended = store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty
         let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
         let projection = MobileTimelineRows.project(from: displayEvents)
         let allRows = projection.rows
@@ -42,7 +42,7 @@ struct MobileTimelineView: View {
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
-                            if store.isLoading {
+                            if store.isLoading && store.displayEvents.isEmpty {
                                 ProgressView()
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 40)

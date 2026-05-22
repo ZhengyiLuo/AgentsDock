@@ -7,7 +7,9 @@ struct ComposerView: View {
     @Binding var importerOpen: Bool
     @State private var draftPrompt = ""
     @State private var editorResetID = 0
+    @State private var editorSubmitRevision = 0
     @State private var editorHasVisibleText = false
+    @State private var editorVisibleLineCount = 1
     @State private var isAttachmentDropTargeted = false
 
     var body: some View {
@@ -26,13 +28,22 @@ struct ComposerView: View {
                     }
                 }
 
-                StablePromptEditor(text: $draftPrompt, isEditable: store.selectedSession != nil, resetID: editorResetID) {
+                StablePromptEditor(
+                    text: $draftPrompt,
+                    isEditable: store.selectedSession != nil,
+                    resetID: editorResetID,
+                    submitRevision: editorSubmitRevision
+                ) {
                     sendDraft($0)
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
                 } onTextPresenceChange: { hasText in
                     if editorHasVisibleText != hasText {
                         editorHasVisibleText = hasText
+                    }
+                } onVisibleLineCountChange: { lineCount in
+                    if editorVisibleLineCount != lineCount {
+                        editorVisibleLineCount = lineCount
                     }
                 }
                 .equatable()
@@ -77,14 +88,13 @@ struct ComposerView: View {
         .onChange(of: store.selectedSessionID) {
             draftPrompt = ""
             editorHasVisibleText = false
+            editorVisibleLineCount = 1
             editorResetID += 1
         }
     }
 
     private var promptHeight: CGFloat {
-        let hardLines = draftPrompt.split(separator: "\n", omittingEmptySubsequences: false).count
-        let softLines = max(1, Int(ceil(Double(draftPrompt.count) / 110.0)))
-        let visibleLines = min(max(hardLines, softLines), 5)
+        let visibleLines = min(max(editorVisibleLineCount, 1), 5)
         return CGFloat(visibleLines * 18 + 12)
     }
 
@@ -125,7 +135,7 @@ struct ComposerView: View {
                 .help("Voice input is not enabled")
 
             Button {
-                sendDraft()
+                editorSubmitRevision += 1
             } label: {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 15, weight: .bold))
@@ -143,7 +153,7 @@ struct ComposerView: View {
     }
 
     private var canSend: Bool {
-        store.selectedSession != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        store.selectedSession != nil && editorHasVisibleText
     }
 
     @ViewBuilder
@@ -313,11 +323,11 @@ struct ComposerView: View {
         Task { await store.updateSelected(effort: ZRuntimeCatalog.cleanForAPI(effort)) }
     }
 
-    private func sendDraft(_ explicitText: String? = nil) {
-        let submitted = explicitText ?? draftPrompt
+    private func sendDraft(_ submitted: String) {
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draftPrompt = ""
         editorHasVisibleText = false
+        editorVisibleLineCount = 1
         editorResetID += 1
         Task {
             let accepted = await store.sendPrompt(submitted)
@@ -326,6 +336,7 @@ struct ComposerView: View {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
                         editorHasVisibleText = true
+                        editorVisibleLineCount = visibleLineCount(for: submitted)
                         editorResetID += 1
                     }
                 }
@@ -346,6 +357,12 @@ struct ComposerView: View {
     private func uploadDroppedFiles(_ urls: [URL]) {
         guard store.selectedSessionID != nil, !urls.isEmpty else { return }
         Task { await store.upload(urls: urls) }
+    }
+
+    private func visibleLineCount(for value: String) -> Int {
+        let hardLines = value.split(separator: "\n", omittingEmptySubsequences: false).count
+        let softLines = max(1, Int(ceil(Double(value.count) / 110.0)))
+        return min(max(hardLines, softLines), 5)
     }
 }
 
@@ -380,12 +397,16 @@ private struct StablePromptEditor: View, Equatable {
     @Binding var text: String
     var isEditable: Bool
     var resetID: Int
+    var submitRevision: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void
     var onTextPresenceChange: (Bool) -> Void
+    var onVisibleLineCountChange: (Int) -> Void
 
     nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
-        lhs.isEditable == rhs.isEditable && lhs.resetID == rhs.resetID
+        lhs.isEditable == rhs.isEditable &&
+            lhs.resetID == rhs.resetID &&
+            lhs.submitRevision == rhs.submitRevision
     }
 
     var body: some View {
@@ -393,9 +414,11 @@ private struct StablePromptEditor: View, Equatable {
             text: $text,
             isEditable: isEditable,
             resetID: resetID,
+            submitRevision: submitRevision,
             onSubmit: onSubmit,
             onDropFiles: onDropFiles,
-            onTextPresenceChange: onTextPresenceChange
+            onTextPresenceChange: onTextPresenceChange,
+            onVisibleLineCountChange: onVisibleLineCountChange
         )
     }
 }
@@ -404,9 +427,11 @@ struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool
     var resetID: Int
+    var submitRevision: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
     var onTextPresenceChange: (Bool) -> Void = { _ in }
+    var onVisibleLineCountChange: (Int) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -451,11 +476,15 @@ struct PromptTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? SubmitTextView else { return }
-        if context.coordinator.lastAppliedResetID != resetID || (textView.string != text && (!context.coordinator.hasPendingLocalEdit || text.isEmpty)) {
-            context.coordinator.cancelPendingSync()
+        if context.coordinator.lastAppliedResetID != resetID {
             textView.string = text
             context.coordinator.lastAppliedResetID = resetID
             context.coordinator.publishPresence(textView.string)
+            context.coordinator.publishVisibleLineCount(textView.string)
+        }
+        if context.coordinator.lastHandledSubmitRevision != submitRevision {
+            context.coordinator.lastHandledSubmitRevision = submitRevision
+            context.coordinator.submit(textView: textView)
         }
         textView.isEditable = isEditable
         textView.onSubmitText = { context.coordinator.submit(textView: textView) }
@@ -465,11 +494,10 @@ struct PromptTextView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: PromptTextView
-        private var pendingSync: DispatchWorkItem?
-        private var pendingText = ""
         private var presenceGate = ZTextPresenceGate()
         var lastAppliedResetID = 0
-        private(set) var hasPendingLocalEdit = false
+        var lastHandledSubmitRevision = 0
+        private var lastPublishedVisibleLineCount = 1
 
         init(_ parent: PromptTextView) {
             self.parent = parent
@@ -478,49 +506,29 @@ struct PromptTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             publishPresence(textView.string)
-            scheduleSync(textView.string)
+            publishVisibleLineCount(textView.string)
         }
 
         func submit(textView: NSTextView) {
-            let submitted = flush(textView.string)
-            parent.onSubmit(submitted)
-        }
-
-        func cancelPendingSync() {
-            pendingSync?.cancel()
-            pendingSync = nil
-            hasPendingLocalEdit = false
+            parent.onSubmit(textView.string)
         }
 
         func publishPresence(_ value: String) {
             // Guardrail: publishing on every keystroke reintroduces SwiftUI
             // invalidation while typing. Only cross the bridge when the
             // placeholder state actually changes.
-            guard presenceGate.shouldPublish(value) else { return }
-            parent.onTextPresenceChange(!value.isEmpty)
+            let sendableText = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard presenceGate.shouldPublish(sendableText) else { return }
+            parent.onTextPresenceChange(!sendableText.isEmpty)
         }
 
-        private func scheduleSync(_ value: String) {
-            pendingText = value
-            hasPendingLocalEdit = true
-            pendingSync?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.parent.text = self.pendingText
-                self.hasPendingLocalEdit = false
-                self.pendingSync = nil
-            }
-            pendingSync = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
-        }
-
-        private func flush(_ value: String) -> String {
-            pendingSync?.cancel()
-            pendingSync = nil
-            pendingText = value
-            parent.text = value
-            hasPendingLocalEdit = false
-            return value
+        func publishVisibleLineCount(_ value: String) {
+            let hardLines = value.split(separator: "\n", omittingEmptySubsequences: false).count
+            let softLines = max(1, Int(ceil(Double(value.count) / 110.0)))
+            let lineCount = min(max(hardLines, softLines), 5)
+            guard lineCount != lastPublishedVisibleLineCount else { return }
+            lastPublishedVisibleLineCount = lineCount
+            parent.onVisibleLineCountChange(lineCount)
         }
     }
 

@@ -37,11 +37,14 @@ func checkComposerUsesPresenceGate() throws {
     let source = try String(contentsOf: composerURL, encoding: .utf8)
 
     try assert(source.contains("private var presenceGate = ZTextPresenceGate()"), "Composer coordinator must keep a ZTextPresenceGate")
-    guard let guardRange = source.range(of: "guard presenceGate.shouldPublish(value) else { return }"),
-          let callbackRange = source.range(of: "parent.onTextPresenceChange(!value.isEmpty)") else {
+    guard let guardRange = source.range(of: "guard presenceGate.shouldPublish(sendableText) else { return }"),
+          let callbackRange = source.range(of: "parent.onTextPresenceChange(!sendableText.isEmpty)") else {
         throw GuardrailFailure.failed("Composer publishPresence must gate SwiftUI callbacks")
     }
     try assert(guardRange.lowerBound < callbackRange.lowerBound, "Composer must gate text presence before calling SwiftUI")
+    try assert(source.contains("submitRevision"), "Composer send button must submit native text without syncing draft text per keystroke")
+    try assert(!source.contains("scheduleSync"), "Composer must not schedule recurring full-draft SwiftUI sync while typing")
+    try assert(!source.contains("parent.text ="), "Composer must not publish the full draft binding during normal typing")
 }
 
 func checkEndpointCacheKeysAreServerScoped() throws {
@@ -185,12 +188,13 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
 
     try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
     try assert(macStore.contains("isSelectingSession = true"), "Mac session select must mark the latest snapshot as loading")
-    try assert(timeline.contains("guard !store.isSelectingSession else { return }"), "Timeline must not reveal cached/intermediate history while latest snapshot is still loading")
+    try assert(timeline.contains("hasWarmSelectedTimeline"), "Mac timeline must reveal warm selected-chat cache while the latest snapshot refreshes")
+    try assert(timeline.contains("guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }"), "Mac timeline must not keep the opening mask up when selected-chat cache is already renderable")
     try assert(timeline.contains(".onChange(of: store.isSelectingSession)"), "Timeline must retry reveal when the latest snapshot load finishes")
-    try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked"), "Mac timeline must structurally suspend row rendering while opening a chat")
-    try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must not project/render cached rows while opening")
-    try assert(mobileTimeline.contains("let timelineRowsSuspended = store.isLoading"), "iOS timeline must structurally suspend row rendering while loading a chat")
-    try assert(mobileTimeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "iOS timeline must not project/render cached rows while loading")
+    try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should only mask when no selected-chat cache can be rendered")
+    try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must structurally suspend row rendering only for cold opens")
+    try assert(mobileTimeline.contains("store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty"), "iOS timeline must reveal cached selected-chat rows while refreshing")
+    try assert(mobileTimeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "iOS timeline must structurally suspend row rendering only for cold opens")
     try assert(!macStore.contains("requestAfter"), "Mac chat open must not stream forward from cached history; it must fetch the latest tail snapshot")
     try assert(!mobileStore.contains("requestAfter"), "iOS chat open must not stream forward from cached history; it must fetch the latest tail snapshot")
     try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")

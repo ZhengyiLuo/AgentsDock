@@ -2705,3 +2705,49 @@ Changes:
 - The recovery rule now explicitly says non-intrusive fixes should be attempted
   directly, while destructive removals, broad overwrites, missing credentials,
   or approval-sensitive actions remain stop-and-ask boundaries.
+
+### Warm-Cache Chat Opens
+
+User issue:
+
+- Opening a previously loaded chat could show `Opening latest messages` for a
+  while even when there were no new messages and the local cache was warm.
+
+Root cause:
+
+- The earlier stale-history fix masked the timeline for the entire latest-tail
+  fetch whenever `isSelectingSession` was true.
+- That prevented stale flashes, but it also hid valid selected-chat cache while
+  the server refresh was still in flight.
+
+Changes:
+
+- macOS now reveals cached selected-chat rows immediately when `loadedSessionID`
+  already matches the selected chat, while the latest snapshot refreshes in the
+  background.
+- iOS/iPadOS now only suspends the timeline while loading if there are no cached
+  display events to show.
+- Updated guardrails so cold opens still mask, but warm selected-chat cache is
+  allowed to render.
+
+### Native-Only Mac Composer Typing
+
+User issue:
+
+- Mac composer typing still felt noticeably slower than the Codex app.
+
+Root cause:
+
+- The composer no longer published text presence every keystroke, but it still
+  synced the full draft into SwiftUI every 180 ms. That was enough to re-render
+  composer chrome, height logic, menus, and parent layout during active typing.
+
+Changes:
+
+- Removed recurring full-draft SwiftUI sync during normal typing.
+- The native `NSTextView` now owns the full draft until Enter/send. SwiftUI only
+  receives empty/non-empty state and visible line-count changes.
+- The send button triggers a `submitRevision` that asks the native text view for
+  its current text instead of relying on a live SwiftUI draft binding.
+- Updated guardrails to forbid reintroducing scheduled full-draft sync from the
+  composer.

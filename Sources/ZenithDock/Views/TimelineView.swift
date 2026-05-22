@@ -32,10 +32,12 @@ struct TimelineView: View {
     }
 
     var body: some View {
-        let timelineRowsSuspended = isInitialTimelineMasked && (
+        let hasWarmSelectedTimeline = store.loadedSessionID == store.selectedSessionID && !store.displayEvents.isEmpty
+        let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline && (
             store.isSelectingSession ||
             store.loadedSessionID != store.selectedSessionID
         )
+        let shouldMaskTimeline = timelineRowsSuspended
         let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
         let projection = TimelineRows.project(from: displayEvents)
         let allRows = projection.rows
@@ -125,14 +127,14 @@ struct TimelineView: View {
                             }
                         )
                     }
-                    .opacity(isInitialTimelineMasked ? 0 : 1)
+                    .opacity(shouldMaskTimeline ? 0 : 1)
                     .coordinateSpace(name: coordinateSpaceName)
-                    if isInitialTimelineMasked, store.selectedSession != nil {
+                    if shouldMaskTimeline, store.selectedSession != nil {
                         TimelinePositioningOverlay()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(false)
                     }
-                    if !isInitialTimelineMasked && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
+                    if !shouldMaskTimeline && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
                             store.markSelectedSessionRead(force: true)
@@ -264,7 +266,8 @@ struct TimelineView: View {
               sessionID == store.selectedSessionID else {
             return
         }
-        guard !store.isSelectingSession else { return }
+        let hasWarmSelectedTimeline = store.loadedSessionID == sessionID && !store.displayEvents.isEmpty
+        guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }
         let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
         guard canSettle else { return }
         initialTimelineRevealRevision += 1
