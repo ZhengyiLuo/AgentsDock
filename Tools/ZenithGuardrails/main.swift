@@ -529,6 +529,10 @@ func checkMobileVideoDownloads() throws {
     try assert(mobileEvents.contains("MobileArtifactDragFileCache.shared.localFile"), "iOS download must cache remote videos/files locally before sharing")
     try assert(mobileEvents.contains("struct MobileActivityView: UIViewControllerRepresentable"), "iOS download must use UIActivityViewController")
     try assert(mobileOptions.contains("MobileArtifactShareButton(file: file, url: url"), "iOS files/videos panel must expose download/share controls")
+    try assert(mobileEvents.contains(".aspectRatio(16.0 / 9.0, contentMode: .fit)"), "iOS timeline videos must use a stable letterboxed wide-video frame")
+    try assert(mobileOptions.contains(".aspectRatio(16.0 / 9.0, contentMode: .fit)"), "iOS video grid thumbnails must use a stable letterboxed wide-video frame")
+    try assert(mobileEvents.contains(".scaledToFit()"), "iOS timeline video thumbnails must not crop ultra-wide videos")
+    try assert(mobileOptions.contains(".scaledToFit()"), "iOS video grid thumbnails must not crop ultra-wide videos")
 }
 
 func checkTmuxSubmitterVisualizer() throws {

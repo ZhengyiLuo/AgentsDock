@@ -937,7 +937,8 @@ private struct MobileVideoGridCell: View {
                 fullscreenVideo = true
             } label: {
                 MobileVideoThumbnailPreview(image: thumbnail, failed: thumbnailFailed)
-                .frame(height: 76)
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
             }
             .buttonStyle(.plain)
             .task(id: url.absoluteString) {
@@ -1004,7 +1005,7 @@ private struct MobileVideoThumbnailPreview: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
             } else {
                 Image(systemName: failed ? "film" : "photo.on.rectangle")
                     .font(.title2.weight(.semibold))

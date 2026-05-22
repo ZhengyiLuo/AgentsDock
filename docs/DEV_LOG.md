@@ -16,6 +16,26 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - iOS Ultra-Wide Video Layout
+
+Problem:
+
+- Videos with very wide/lateral aspect ratios looked awkward on iOS because the
+  poster views used fixed heights with `scaledToFill`, which cropped or visually
+  stretched the preview.
+
+Change:
+
+- Timeline video posters and Files & Videos grid thumbnails now use a stable
+  16:9 frame with `aspectRatio(..., contentMode: .fit)`.
+- Thumbnail images use `scaledToFit()` so ultra-wide videos letterbox cleanly
+  instead of being cropped.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+
 ## 2026-05-22 Follow-Up - iOS Video Download / Save
 
 Problem:

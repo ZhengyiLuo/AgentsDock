@@ -889,7 +889,8 @@ struct MobileArtifactView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 } else if file.content_type?.hasPrefix("video/") == true {
                     MobileTimelineVideoPoster(image: videoThumbnail, failed: videoThumbnailFailed)
-                        .frame(height: 240)
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
                         .onTapGesture {
                             fullscreenVideo = true
                         }
@@ -959,7 +960,7 @@ private struct MobileTimelineVideoPoster: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
             } else {
                 Image(systemName: failed ? "film" : "photo.on.rectangle")
                     .font(.title.weight(.semibold))
