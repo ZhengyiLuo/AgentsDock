@@ -16,6 +16,38 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Latest Tail Wins on Cached Open
+
+Problem:
+
+- Build 35 still let machines diverge when one Mac had a stale cached chat.
+  The cached-open logic tried to be clever with a probe/delta path, and earlier
+  versions connected the websocket before the authoritative refresh. On a long
+  gap, that could replay a large unbounded backlog and still leave the local
+  timeline short of the server's latest page.
+
+Decision:
+
+- Keep the rule simple: whenever a cached chat is selected/opened, show the
+  cached UI immediately, then always request the server's latest tail window
+  (`limit=480&tail=true`) and rebuild the selected chat cache from that.
+- Do not websocket-replay from the stale cached seq. Connect live streaming
+  only after the latest tail has been applied, using the new `lastSeq`.
+- Replace the selected timeline with the latest tail window for this refresh
+  instead of merging old local history forward. Older history can still be
+  requested explicitly from the top.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  default DerivedData Release product:
+  `/Users/zen/Library/Developer/Xcode/DerivedData/ZenithDock-goqrrfavgklzurgabmpxjsmlicso/Build/Products/Release/ZenithDock.app`.
+- Verified `dist/ZenithDock.app` has `CFBundleVersion = 35`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - TestFlight Build 35 Upload
 
 Change:
