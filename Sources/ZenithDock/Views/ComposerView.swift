@@ -498,6 +498,8 @@ struct PromptTextView: NSViewRepresentable {
         var lastAppliedResetID = 0
         var lastHandledSubmitRevision = 0
         private var lastPublishedVisibleLineCount = 1
+        private weak var pendingLineCountTextView: NSTextView?
+        private var pendingLineCountWorkItem: DispatchWorkItem?
 
         init(_ parent: PromptTextView) {
             self.parent = parent
@@ -506,7 +508,7 @@ struct PromptTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             publishPresence(textView.string)
-            publishVisibleLineCount(textView.string)
+            scheduleVisibleLineCount(textView)
         }
 
         func submit(textView: NSTextView) {
@@ -517,9 +519,28 @@ struct PromptTextView: NSViewRepresentable {
             // Guardrail: publishing on every keystroke reintroduces SwiftUI
             // invalidation while typing. Only cross the bridge when the
             // placeholder state actually changes.
-            let sendableText = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard presenceGate.shouldPublish(sendableText) else { return }
-            parent.onTextPresenceChange(!sendableText.isEmpty)
+            let hasText = hasSendableText(value)
+            guard presenceGate.shouldPublish(hasText: hasText) else { return }
+            parent.onTextPresenceChange(hasText)
+        }
+
+        private func hasSendableText(_ value: String) -> Bool {
+            value.unicodeScalars.contains { !CharacterSet.whitespacesAndNewlines.contains($0) }
+        }
+
+        func scheduleVisibleLineCount(_ textView: NSTextView) {
+            pendingLineCountTextView = textView
+            guard pendingLineCountWorkItem == nil else { return }
+            let item = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                let textView = self.pendingLineCountTextView
+                self.pendingLineCountTextView = nil
+                self.pendingLineCountWorkItem = nil
+                guard let textView else { return }
+                self.publishVisibleLineCount(textView.string)
+            }
+            pendingLineCountWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: item)
         }
 
         func publishVisibleLineCount(_ value: String) {

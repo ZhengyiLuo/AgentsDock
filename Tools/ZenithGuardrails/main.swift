@@ -37,11 +37,13 @@ func checkComposerUsesPresenceGate() throws {
     let source = try String(contentsOf: composerURL, encoding: .utf8)
 
     try assert(source.contains("private var presenceGate = ZTextPresenceGate()"), "Composer coordinator must keep a ZTextPresenceGate")
-    guard let guardRange = source.range(of: "guard presenceGate.shouldPublish(sendableText) else { return }"),
-          let callbackRange = source.range(of: "parent.onTextPresenceChange(!sendableText.isEmpty)") else {
+    guard let guardRange = source.range(of: "guard presenceGate.shouldPublish(hasText: hasText) else { return }"),
+          let callbackRange = source.range(of: "parent.onTextPresenceChange(hasText)") else {
         throw GuardrailFailure.failed("Composer publishPresence must gate SwiftUI callbacks")
     }
     try assert(guardRange.lowerBound < callbackRange.lowerBound, "Composer must gate text presence before calling SwiftUI")
+    try assert(source.contains("scheduleVisibleLineCount"), "Composer line-count updates must be deferred off the keystroke hot path")
+    try assert(!source.contains("let sendableText = value.trimmingCharacters"), "Composer must not trim the whole draft on every keystroke")
     try assert(source.contains("submitRevision"), "Composer send button must submit native text without syncing draft text per keystroke")
     try assert(!source.contains("scheduleSync"), "Composer must not schedule recurring full-draft SwiftUI sync while typing")
     try assert(!source.contains("parent.text ="), "Composer must not publish the full draft binding during normal typing")
@@ -147,6 +149,12 @@ func checkMessageFoldingThresholds() throws {
     try assert(macEvents.contains("isContextDigest ? 18 : 48"), "Mac message folding line limits should allow 1.5x more lines before folding")
     try assert(mobileEvents.contains("isContextDigest ? 1_350 : 1_800"), "iOS message folding character limits should allow 1.5x more text before folding")
     try assert(mobileEvents.contains("isContextDigest ? 15 : 18"), "iOS message folding line limits should allow 1.5x more lines before folding")
+    try assert(macEvents.contains("@State private var fullTextExpanded"), "Mac folded messages must expand full text inline")
+    try assert(mobileEvents.contains("@State private var fullTextExpanded"), "iOS folded messages must expand full text inline")
+    try assert(macEvents.contains("Button(fullTextExpanded ? \"Collapse\" : \"Open full text\")"), "Mac Open full text action must toggle inline expansion")
+    try assert(mobileEvents.contains("Button(fullTextExpanded ? \"Collapse\" : \"Full text\")"), "iOS Full text action must toggle inline expansion")
+    try assert(!macEvents.contains("@State private var fullTextOpen"), "Mac folded messages must not open full text in a sheet")
+    try assert(!mobileEvents.contains("@State private var fullTextOpen"), "iOS folded messages must not open full text in a sheet")
 }
 
 func checkArchiveSessionBehavior() throws {
@@ -201,6 +209,11 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("isSelectingSession = true"), "Mac session select must mark the latest snapshot as loading")
     try assert(macStore.contains("private let maxMemoryCachedChats = 32"), "Mac store must keep enough warm chats to avoid recent-chat spinner regressions")
     try assert(macStore.contains("rememberSelectedChatInMemory()"), "Mac store must snapshot the current chat before switching away")
+    guard let warmCacheRange = macStore.range(of: "let warmCachedChat = memoryCachedChat(sessionID)"),
+          let selectedRange = macStore.range(of: "selectedSessionID = sessionID", range: warmCacheRange.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Mac session select must prepare warm cache before publishing selectedSessionID")
+    }
+    try assert(warmCacheRange.lowerBound < selectedRange.lowerBound, "Mac session select must apply warm cache before publishing selectedSessionID")
     try assert(timeline.contains("hasWarmSelectedTimeline"), "Mac timeline must reveal warm selected-chat cache while the latest snapshot refreshes")
     try assert(timeline.contains("isInitialTimelineMasked = store.selectedSessionID != nil && !hasWarmSelectedTimeline"), "Mac timeline must not show the opening mask for warm selected-chat cache")
     try assert(timeline.contains("if hasWarmSelectedTimeline {"), "Mac timeline must drop the opening mask immediately when warm cache becomes available")

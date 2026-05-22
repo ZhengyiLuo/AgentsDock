@@ -634,12 +634,12 @@ final class AppStore: ObservableObject {
 
     func select(sessionID: String) async {
         if loadingSessionID == sessionID {
-            selectedSessionID = sessionID
             if loadedSessionID != sessionID, let cached = memoryCachedChat(sessionID) {
                 applyCachedChat(cached)
                 status = "Loaded memory chat"
-                requestScrollToBottom(immediate: true)
             }
+            selectedSessionID = sessionID
+            requestScrollToBottom(immediate: true)
             markSessionRead(sessionID)
             syncSelectedRunningState()
             return
@@ -647,6 +647,7 @@ final class AppStore: ObservableObject {
         if selectedSessionID != sessionID {
             rememberSelectedChatInMemory()
         }
+        let warmCachedChat = memoryCachedChat(sessionID)
         selectionGeneration += 1
         let generation = selectionGeneration
         loadingSessionID = sessionID
@@ -659,25 +660,27 @@ final class AppStore: ObservableObject {
                 isSelectingSession = false
             }
         }
+        var loadedFromCache = false
+        if let warmCachedChat {
+            applyCachedChat(warmCachedChat)
+            loadedFromCache = true
+            status = "Loaded memory chat"
+            AppLogger.info("loaded memory cache before selection session=\(sessionID) events=\(warmCachedChat.events.count) omitted_before=\(warmCachedChat.omittedHistoryEventCount)")
+        }
         selectedSessionID = sessionID
         syncSelectedRunningState()
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         webSocketSessionID = nil
         socketLive = false
-        status = serverReachable ? "Loading chat" : "Server offline"
+        status = loadedFromCache ? "Refreshing latest chat" : (serverReachable ? "Loading chat" : "Server offline")
         processSnapshot = nil
         processLogTail = nil
         tmuxSnapshot = nil
         tmuxCapture = nil
         markSessionRead(sessionID)
         AppLogger.info("select session=\(sessionID)")
-        var loadedFromCache = false
-        if let cached = memoryCachedChat(sessionID) {
-            applyCachedChat(cached)
-            loadedFromCache = true
-            status = "Loaded memory chat"
-            AppLogger.info("loaded memory cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
+        if loadedFromCache {
             requestScrollToBottom(immediate: true)
         } else {
             events = []

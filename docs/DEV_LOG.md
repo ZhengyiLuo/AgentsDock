@@ -2819,3 +2819,58 @@ Changes:
   already has warm display events, and it drops the mask immediately if warm
   cache becomes available during the selection refresh.
 - Added guardrails for warm-cache selection behavior.
+
+### Quick-Switch Warm Cache Ordering
+
+User issue:
+
+- Quickly switching between chats could still show `Opening latest messages`
+  for too long.
+
+Root cause:
+
+- Selection changed before warm memory cache was applied. That gave the timeline
+  a moment to treat the destination chat as a cold open and arm the opening
+  mask, even when the cache was available.
+
+Changes:
+
+- Mac now fetches and applies warm memory cache before publishing the selected
+  chat ID during normal selection.
+- Re-selecting a chat whose network load is already in flight now also applies
+  memory cache before publishing the selection.
+
+### Inline Full Text Expansion
+
+User issue:
+
+- `Open full text` opened a separate window/sheet instead of expanding inside
+  the chat timeline.
+
+Changes:
+
+- Mac and iOS folded message bubbles now toggle full text inline.
+- The fold footer switches between `Open full text` and `Collapse`.
+- Copy still uses the complete backing message.
+- Added guardrails so folded message full text does not regress to a sheet.
+
+### Lighter Composer Keystroke Hot Path
+
+User issue:
+
+- Mac composer typing still felt very slow.
+
+Root cause:
+
+- The native editor no longer synced the full draft into SwiftUI, but
+  `textDidChange` still trimmed the whole draft and recomputed line counts on
+  every keystroke.
+
+Changes:
+
+- Presence detection now uses an early-exit whitespace scan and publishes only
+  when empty/non-empty state changes.
+- Visible line-count updates are deferred briefly and coalesced, so normal
+  typing does not split/count the full draft for every keypress.
+- Added guardrails against reintroducing whole-draft trimming on the keystroke
+  path.

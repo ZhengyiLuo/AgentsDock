@@ -267,7 +267,7 @@ struct MessageBubble: View {
     var linkContext: ZMarkdownLinkContext?
     var action: (() -> Void)?
 
-    @State private var fullTextOpen = false
+    @State private var fullTextExpanded = false
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
@@ -287,13 +287,13 @@ struct MessageBubble: View {
                 }
                 if shouldClip {
                     Button {
-                        fullTextOpen = true
+                        fullTextExpanded.toggle()
                     } label: {
-                        Label("Full text", systemImage: "text.page")
+                        Label(fullTextExpanded ? "Collapse" : "Full text", systemImage: fullTextExpanded ? "chevron.up" : "text.page")
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help("Open full message")
+                    .help(fullTextExpanded ? "Collapse message" : "Expand full message inline")
                 }
                 Button {
                     copyToPasteboard(ZClipboardText.normalizedForCopy(text))
@@ -321,9 +321,6 @@ struct MessageBubble: View {
         .background(bubbleBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(bubbleStroke))
-        .sheet(isPresented: $fullTextOpen) {
-            FullMessageSheet(label: label, text: text)
-        }
     }
 
     private var bubbleBackground: some ShapeStyle {
@@ -355,7 +352,7 @@ struct MessageBubble: View {
     }
 
     private var visibleText: String {
-        guard shouldClip else { return text }
+        guard shouldClip, !fullTextExpanded else { return text }
         return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -363,13 +360,13 @@ struct MessageBubble: View {
         HStack(spacing: 8) {
             Image(systemName: "text.page")
                 .font(.caption.weight(.semibold))
-            Text("\(hiddenCharacterCount) characters hidden")
+            Text(fullTextExpanded ? "Full text shown inline" : "\(hiddenCharacterCount) characters hidden")
                 .font(.caption.weight(.semibold))
-            Text("Copy and Full text use the complete message.")
+            Text(fullTextExpanded ? "Copy uses the complete message." : "Copy and Full text use the complete message.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Button("Open full text") {
-                fullTextOpen = true
+            Button(fullTextExpanded ? "Collapse" : "Open full text") {
+                fullTextExpanded.toggle()
             }
             .buttonStyle(.borderless)
             .font(.caption.weight(.semibold))

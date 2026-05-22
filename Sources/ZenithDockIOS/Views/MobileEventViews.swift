@@ -166,7 +166,7 @@ struct MobileMessageBubble: View {
     var actionSystemImage: String?
     var linkContext: ZMarkdownLinkContext?
     var action: (() -> Void)?
-    @State private var fullTextOpen = false
+    @State private var fullTextExpanded = false
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 7) {
@@ -184,12 +184,12 @@ struct MobileMessageBubble: View {
                 }
                 if shouldClip {
                     Button {
-                        fullTextOpen = true
+                        fullTextExpanded.toggle()
                     } label: {
-                        Image(systemName: "text.page")
+                        Image(systemName: fullTextExpanded ? "chevron.up" : "text.page")
                     }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Open full message")
+                    .accessibilityLabel(fullTextExpanded ? "Collapse message" : "Expand full message")
                 }
                 Button {
                     copyToPasteboard(ZClipboardText.normalizedForCopy(text))
@@ -206,11 +206,11 @@ struct MobileMessageBubble: View {
             }
             if shouldClip {
                 HStack(spacing: 8) {
-                    Text("\(hiddenCharacterCount) hidden")
+                    Text(fullTextExpanded ? "Full text shown" : "\(hiddenCharacterCount) hidden")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Full text") {
-                        fullTextOpen = true
+                    Button(fullTextExpanded ? "Collapse" : "Full text") {
+                        fullTextExpanded.toggle()
                     }
                     .font(.caption.weight(.semibold))
                     .buttonStyle(.borderless)
@@ -224,9 +224,6 @@ struct MobileMessageBubble: View {
         .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor))
-        .sheet(isPresented: $fullTextOpen) {
-            MobileFullMessageSheet(label: label, text: text)
-        }
     }
 
     private var background: some ShapeStyle {
@@ -262,7 +259,7 @@ struct MobileMessageBubble: View {
     }
 
     private var visibleText: String {
-        guard shouldClip else { return text }
+        guard shouldClip, !fullTextExpanded else { return text }
         return clippedBody.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n[message folded in UI; copy and full text use the complete message]"
     }
 
