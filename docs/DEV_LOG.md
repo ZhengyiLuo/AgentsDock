@@ -16,6 +16,34 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Folder Move And Collapse Controls
+
+Problem:
+
+- Folders were only implicit labels derived from chat metadata. Chats could move
+  between folders, but folder sections themselves could not be moved up/down or
+  folded.
+
+Change:
+
+- Added client-side folder order and collapsed-folder state on Mac and iOS.
+- Mac sidebar folder headers now expose collapse/expand plus move up/down
+  controls and a context menu.
+- iOS/iPadOS sidebar folder headers now expose collapse/expand and a menu for
+  move up/down.
+- Folder order/collapse is stored in `UserDefaults`; chat folder names still
+  persist on the server as before.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  Release build.
+- Local `dist/ZenithDock.app` `CFBundleVersion = 38`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-22 Follow-Up - iOS Ultra-Wide Video Layout
 
 Problem:

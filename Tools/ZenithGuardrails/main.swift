@@ -194,6 +194,27 @@ func checkArchiveSessionBehavior() throws {
     try assert(server.contains("@app.post(\"/api/sessions/{session_id}/order\")"), "Server must expose manual session reorder endpoint")
 }
 
+func checkFolderSectionControls() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
+    let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("folderOrder"), "Mac store must persist manual folder order")
+    try assert(macStore.contains("collapsedFolders"), "Mac store must persist collapsed folder state")
+    try assert(macStore.contains("func moveFolder("), "Mac store must expose folder move controls")
+    try assert(macStore.contains("func toggleFolderCollapsed"), "Mac store must expose folder collapse controls")
+    try assert(mobileStore.contains("folderOrder"), "iOS store must persist manual folder order")
+    try assert(mobileStore.contains("collapsedFolders"), "iOS store must persist collapsed folder state")
+    try assert(mobileStore.contains("func moveFolder("), "iOS store must expose folder move controls")
+    try assert(macSidebar.contains("FolderSectionHeader"), "Mac sidebar must render custom folder section headers")
+    try assert(macSidebar.contains("Move Folder Up"), "Mac folder header must expose move-up")
+    try assert(macSidebar.contains("Collapse Folder"), "Mac folder header must expose collapse")
+    try assert(mobileSidebar.contains("MobileFolderSectionHeader"), "iOS sidebar must render custom folder section headers")
+    try assert(mobileSidebar.contains("Move Folder Down"), "iOS folder header must expose move-down")
+}
+
 func checkMobileDoesNotAutoSelectFirstChat() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
@@ -584,6 +605,7 @@ do {
     try checkCodeBlockCopyUsesFullText()
     try checkMessageFoldingThresholds()
     try checkArchiveSessionBehavior()
+    try checkFolderSectionControls()
     try checkMobileDoesNotAutoSelectFirstChat()
     try checkTimelineRevealWaitsForLatestSnapshot()
     try checkConnectionFailuresDoNotModal()

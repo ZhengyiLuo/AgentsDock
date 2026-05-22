@@ -54,6 +54,8 @@ final class AppStore: ObservableObject {
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
     @Published private(set) var firstUnreadAgentSeqBySessionID: [String: Int] = [:]
     @Published private(set) var selectedTimelineAtBottom = true
+    @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "folderOrder") ?? []
+    @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
 
     private let initialSessionEventLimit = 480
     private let olderHistoryPageLimit = 160
@@ -138,7 +140,50 @@ final class AppStore: ObservableObject {
     }
 
     var folderNames: [String] {
-        Array(Set(activeSessions.map { $0.folder ?? "General" })).sorted()
+        orderedFolderNames(Array(Set(activeSessions.map { $0.folder ?? "General" })))
+    }
+
+    func isFolderCollapsed(_ folder: String) -> Bool {
+        collapsedFolders.contains(folder)
+    }
+
+    func toggleFolderCollapsed(_ folder: String) {
+        let clean = normalizedFolderName(folder)
+        if collapsedFolders.contains(clean) {
+            collapsedFolders.remove(clean)
+        } else {
+            collapsedFolders.insert(clean)
+        }
+        UserDefaults.standard.set(Array(collapsedFolders).sorted(), forKey: "collapsedFolders")
+    }
+
+    func moveFolder(_ folder: String, direction: String) {
+        let clean = normalizedFolderName(folder)
+        var names = orderedFolderNames(Array(Set(activeSessions.map { $0.folder ?? "General" })))
+        guard let index = names.firstIndex(of: clean) else { return }
+        let target = direction == "up" ? index - 1 : index + 1
+        guard names.indices.contains(target) else { return }
+        names.swapAt(index, target)
+        folderOrder = names
+        UserDefaults.standard.set(folderOrder, forKey: "folderOrder")
+    }
+
+    private func orderedFolderNames(_ names: [String]) -> [String] {
+        let normalized = Array(Set(names.map(normalizedFolderName)))
+        let orderIndex = Dictionary(uniqueKeysWithValues: folderOrder.enumerated().map { ($0.element, $0.offset) })
+        return normalized.sorted { lhs, rhs in
+            let left = orderIndex[lhs] ?? Int.max
+            let right = orderIndex[rhs] ?? Int.max
+            if left != right {
+                return left < right
+            }
+            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private func normalizedFolderName(_ folder: String) -> String {
+        let clean = folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? "General" : clean
     }
 
     func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {

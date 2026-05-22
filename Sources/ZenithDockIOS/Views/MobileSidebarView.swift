@@ -20,11 +20,15 @@ struct MobileSidebarView: View {
                 }
             }
 
-            ForEach(store.folders.keys.sorted(), id: \.self) { folder in
-                Section(folder) {
-                    ForEach(store.folders[folder] ?? []) { session in
-                        sessionRow(session)
+            ForEach(store.folderNames, id: \.self) { folder in
+                Section {
+                    if !store.isFolderCollapsed(folder) {
+                        ForEach(store.folders[folder] ?? []) { session in
+                            sessionRow(session)
+                        }
                     }
+                } header: {
+                    MobileFolderSectionHeader(folder: folder)
                 }
             }
             if !store.archivedSessions.isEmpty {
@@ -166,6 +170,48 @@ struct MobileSidebarView: View {
                     Label("Delete Chat", systemImage: "trash")
                 }
             }
+    }
+}
+
+private struct MobileFolderSectionHeader: View {
+    @EnvironmentObject private var store: MobileAppStore
+    let folder: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                store.toggleFolderCollapsed(folder)
+            } label: {
+                Image(systemName: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+            }
+            .buttonStyle(.plain)
+
+            Text(folder)
+                .font(.caption.weight(.semibold))
+            Spacer()
+            Menu {
+                Button {
+                    store.moveFolder(folder, direction: "up")
+                } label: {
+                    Label("Move Folder Up", systemImage: "arrow.up")
+                }
+                Button {
+                    store.moveFolder(folder, direction: "down")
+                } label: {
+                    Label("Move Folder Down", systemImage: "arrow.down")
+                }
+                Divider()
+                Button {
+                    store.toggleFolderCollapsed(folder)
+                } label: {
+                    Label(store.isFolderCollapsed(folder) ? "Expand Folder" : "Collapse Folder", systemImage: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .buttonStyle(.plain)
+        }
+        .textCase(nil)
     }
 }
 

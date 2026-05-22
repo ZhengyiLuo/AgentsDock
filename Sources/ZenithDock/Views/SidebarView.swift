@@ -60,11 +60,15 @@ struct SidebarView: View {
                         }
                     }
                 }
-                ForEach(store.folders.keys.sorted(), id: \.self) { folder in
-                    Section(folder) {
-                        ForEach(store.folders[folder] ?? []) { session in
-                            sessionRow(session)
+                ForEach(store.folderNames, id: \.self) { folder in
+                    Section {
+                        if !store.isFolderCollapsed(folder) {
+                            ForEach(store.folders[folder] ?? []) { session in
+                                sessionRow(session)
+                            }
                         }
+                    } header: {
+                        FolderSectionHeader(folder: folder)
                     }
                 }
                 if !store.archivedSessions.isEmpty {
@@ -190,6 +194,61 @@ struct SidebarView: View {
                     Label("Delete Chat", systemImage: "trash")
                 }
             }
+    }
+}
+
+private struct FolderSectionHeader: View {
+    @EnvironmentObject private var store: AppStore
+    let folder: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                store.toggleFolderCollapsed(folder)
+            } label: {
+                Image(systemName: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+                    .frame(width: 12)
+            }
+            .buttonStyle(.plain)
+            .help(store.isFolderCollapsed(folder) ? "Expand folder" : "Collapse folder")
+
+            Text(folder)
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 4)
+            Button {
+                store.moveFolder(folder, direction: "up")
+            } label: {
+                Image(systemName: "arrow.up")
+            }
+            .buttonStyle(.plain)
+            .help("Move folder up")
+            Button {
+                store.moveFolder(folder, direction: "down")
+            } label: {
+                Image(systemName: "arrow.down")
+            }
+            .buttonStyle(.plain)
+            .help("Move folder down")
+        }
+        .textCase(nil)
+        .contextMenu {
+            Button {
+                store.toggleFolderCollapsed(folder)
+            } label: {
+                Label(store.isFolderCollapsed(folder) ? "Expand Folder" : "Collapse Folder", systemImage: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+            }
+            Divider()
+            Button {
+                store.moveFolder(folder, direction: "up")
+            } label: {
+                Label("Move Folder Up", systemImage: "arrow.up")
+            }
+            Button {
+                store.moveFolder(folder, direction: "down")
+            } label: {
+                Label("Move Folder Down", systemImage: "arrow.down")
+            }
+        }
     }
 }
 
