@@ -24,6 +24,10 @@ Problem:
 - Quick chat switching could still show the “Opening latest messages” overlay
   because the sidebar published `selectedSessionID` before `AppStore.select`
   had applied the warm cache.
+- Regression during the first pass: after moving sidebar selection to explicit
+  `store.select`, `RootView` still had its old `selectedSessionID` observer and
+  could start a second selection on the same click. That felt like a freeze when
+  switching chats.
 
 Change:
 
@@ -33,8 +37,10 @@ Change:
 - Sidebar selection now routes through an explicit `store.select(sessionID:)`
   binding instead of directly mutating `store.selectedSessionID`, so warm cached
   chat data can be applied before the visible selection flips.
+- Removed the duplicate `RootView` selected-session observer. Selection now has
+  one owner on Mac: explicit UI/store calls into `AppStore.select`.
 - Added guardrails for bounded line-count work and explicit warm-cache sidebar
-  selection.
+  selection, plus a guardrail against duplicate RootView selection.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
 
 Verification:

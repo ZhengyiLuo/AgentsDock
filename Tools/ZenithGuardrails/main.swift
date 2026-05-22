@@ -207,6 +207,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
+    let root = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/RootView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
 
     try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
@@ -224,6 +225,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }"), "Mac timeline must not keep the opening mask up when selected-chat cache is already renderable")
     try assert(sidebar.contains("List(selection: sessionSelection)"), "Mac sidebar selection must route through store.select so warm cache can apply before publishing selection")
     try assert(!sidebar.contains("List(selection: $store.selectedSessionID)"), "Mac sidebar must not publish selectedSessionID directly before warm cache is applied")
+    try assert(!root.contains(".onChange(of: store.selectedSessionID)"), "Mac root must not run a second store.select after sidebar/store selection already started")
     try assert(timeline.contains(".onChange(of: store.isSelectingSession)"), "Timeline must retry reveal when the latest snapshot load finishes")
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should only mask when no selected-chat cache can be rendered")
     try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must structurally suspend row rendering only for cold opens")

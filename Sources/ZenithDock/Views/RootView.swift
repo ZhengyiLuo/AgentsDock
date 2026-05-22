@@ -31,10 +31,6 @@ struct RootView: View {
             ServerSettingsSheet(isPresented: $serverSettingsOpen)
                 .environmentObject(store)
         }
-        .onChange(of: store.selectedSessionID) {
-            guard let sessionID = store.selectedSessionID, sessionID != store.loadedSessionID else { return }
-            Task { await store.select(sessionID: sessionID) }
-        }
         .alert("Zenith Dock", isPresented: Binding(
             get: { store.errorText != nil },
             set: { if !$0 { store.errorText = nil } }
