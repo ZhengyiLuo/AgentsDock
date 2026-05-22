@@ -16,6 +16,28 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - TestFlight Build 32 Upload
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `31` to `32` for iOS/iPadOS, macOS,
+  and `ZenithCore`.
+- Uploaded build `32` for both TestFlight platforms. This build includes the
+  inline full-text expansion, warmer chat switching cache, and lighter composer
+  keystroke path.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-32.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-32.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-32 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockIOS`.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-32.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-32.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-32 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Verified both archives have `CFBundleVersion = 32` and
+  `ITSAppUsesNonExemptEncryption = false`.
+
 ## 2026-05-21 Follow-Up - Restore Sidebar Provider Icons
 
 Problem:
