@@ -198,7 +198,7 @@ struct TimelineView: View {
                         isTimelineScrollable = false
                         setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
-                        setVisibleRowLimit(min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit)))
+                        setVisibleRowLimit(cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
                     }
@@ -297,6 +297,7 @@ struct TimelineView: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         guard !store.displayEvents.isEmpty else { return }
+        historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)
         let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
@@ -323,6 +324,15 @@ struct TimelineView: View {
         }
         guard hasNewerVisibleEvent else { return false }
         return shouldFollowBottomRequest
+    }
+
+    private func cappedLiveVisibleRowLimit(rowCount: Int, oldCount: Int, newCount: Int) -> Int {
+        let incomingCount = max(0, newCount - oldCount)
+        let currentLimit = max(visibleRowLimit, defaultVisibleRowLimit)
+        guard incomingCount > 0 else {
+            return min(rowCount, currentLimit)
+        }
+        return min(rowCount, currentLimit + min(rowPageSize, incomingCount))
     }
 
     private func scrollToRequestedEvent(_ proxy: ScrollViewProxy) {

@@ -375,10 +375,13 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(macTimeline.contains("shouldFollowBottomRequest"), "Mac timeline must centralize live-follow decisions")
     try assert(macTimeline.contains("shouldAutoFollowLiveEvent(after:"), "Mac timeline must auto-follow newer selected-chat events")
     try assert(macTimeline.contains("store.isRunning"), "Mac live-follow must keep active selected chats pinned to the newest stream")
+    try assert(macTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "Mac live-follow must not expand the rendered window to the full chat history")
+    try assert(macTimeline.contains("historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)"), "Mac programmatic bottom scrolls must suppress older-history autoload")
     try assert(macTimeline.contains("store.markSelectedSessionRead(force: true)"), "Mac auto-follow must clear selected unread state intentionally")
     try assert(mobileTimeline.contains("shouldAutoFollowLiveEvent(after:"), "iOS timeline must auto-follow newer selected-chat events")
     try assert(mobileTimeline.contains("isAtBottom || store.isRunning"), "iOS live-follow must keep active selected chats pinned to the newest stream")
     try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
+    try assert(mobileTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "iOS live-follow must not expand the rendered window to the full chat history")
 }
 
 func checkQueuedRemovalDisappears() throws {

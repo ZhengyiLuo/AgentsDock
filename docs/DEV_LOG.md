@@ -2660,3 +2660,20 @@ Changes:
   Raw images are written to a temporary PNG under `ZenithDockPasteboardImages`
   and passed through the normal upload queue.
 - Added guardrails for prompt attachment rendering and pasteboard image import.
+
+### Timeline Live Scroll Jump
+
+User issue:
+
+- During live updates, the chat could briefly jump up toward older history and
+  then snap back to the bottom.
+
+Changes:
+
+- Fixed macOS and iOS/iPadOS live-follow row limiting. Being at the bottom no
+  longer expands the rendered row window to the full chat history.
+- Programmatic bottom scrolls now briefly suppress older-history auto-load, so
+  a transient top-reader geometry update cannot request older pages while the
+  app is following a live stream.
+- Added guardrails for capped live-follow row growth and bottom-scroll history
+  suppression.

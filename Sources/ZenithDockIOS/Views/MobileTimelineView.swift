@@ -147,7 +147,7 @@ struct MobileTimelineView: View {
                     if newCount == 0 {
                         setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
-                        setVisibleRowLimit(min(max(visibleRowLimit, defaultVisibleRowLimit), max(rowCount, defaultVisibleRowLimit)))
+                        setVisibleRowLimit(cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
                     }
@@ -177,6 +177,7 @@ struct MobileTimelineView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)
         withAnimation(.snappy) {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
@@ -190,6 +191,15 @@ struct MobileTimelineView: View {
         }
         guard hasNewerVisibleEvent else { return false }
         return isAtBottom || store.isRunning
+    }
+
+    private func cappedLiveVisibleRowLimit(rowCount: Int, oldCount: Int, newCount: Int) -> Int {
+        let incomingCount = max(0, newCount - oldCount)
+        let currentLimit = max(visibleRowLimit, defaultVisibleRowLimit)
+        guard incomingCount > 0 else {
+            return min(rowCount, currentLimit)
+        }
+        return min(rowCount, currentLimit + min(rowPageSize, incomingCount))
     }
 
     private func handleHistoryTopChange(_ topY: CGFloat?, proxy: ScrollViewProxy) {
