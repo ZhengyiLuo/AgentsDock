@@ -16,6 +16,24 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Deploy Custom Job Timing Server
+
+Problem:
+
+- Custom job start/next times did not take effect if the Mac/iOS app was updated
+  but the live agent server was still on the older scheduler API. Older Pydantic
+  request models ignored `first_run_at` and `next_run_at`, so the scheduler fell
+  back to `now + interval`.
+
+Action:
+
+- Deployed the current `server/agent_server.py` to `sonic` with
+  `./server/deploy.sh sonic`.
+- The deploy helper compiled the remote server, restarted
+  `zenithbot-agent.service`, and confirmed the health endpoint was responding.
+- Verified the remote server file contains `first_run_at`, `next_run_at`, and
+  `parse_job_timestamp`.
+
 ## 2026-05-22 Follow-Up - Job Interval And Start-Time Controls
 
 Problem:
