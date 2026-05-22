@@ -214,6 +214,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
 
     try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
+    try assert(macStore.contains("@Published var isRefreshingCachedDelta = false"), "Mac store must publish warm-cache delta refresh state")
     try assert(macStore.contains("isSelectingSession = true"), "Mac session select must mark the latest snapshot as loading")
     try assert(macStore.contains("private let maxMemoryCachedChats = 32"), "Mac store must keep enough warm chats to avoid recent-chat spinner regressions")
     try assert(macStore.contains("rememberSelectedChatInMemory()"), "Mac store must snapshot the current chat before switching away")
@@ -230,13 +231,17 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!sidebar.contains("List(selection: $store.selectedSessionID)"), "Mac sidebar must not publish selectedSessionID directly before warm cache is applied")
     try assert(!root.contains(".onChange(of: store.selectedSessionID)"), "Mac root must not run a second store.select after sidebar/store selection already started")
     try assert(timeline.contains(".onChange(of: store.isSelectingSession)"), "Timeline must retry reveal when the latest snapshot load finishes")
-    try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should only mask when no selected-chat cache can be rendered")
+    try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should only structurally suspend rows when no selected-chat cache can be rendered")
+    try assert(timeline.contains("let shouldMaskTimeline = timelineRowsSuspended || store.isRefreshingCachedDelta"), "Mac timeline should show the opening mask only after the server proves cached chat has newer data")
     try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must structurally suspend row rendering only for cold opens")
     try assert(timeline.contains("projectionEventLimit"), "Mac timeline must project only a bounded event window during normal rendering")
     try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
     try assert(macStore.contains("connectEvents(sessionID: sessionID, after: cachedLastSeq)"), "Mac warm-cache chat switches must use websocket catch-up from cached lastSeq")
-    try assert(macStore.contains("refreshCachedSessionDelta"), "Mac warm-cache chat switches must sync only events after cached lastSeq")
+    try assert(macStore.contains("refreshCachedSessionDeltaIfNeeded"), "Mac warm-cache chat switches must probe before syncing events after cached lastSeq")
     try assert(macStore.contains("URLQueryItem(name: \"after\", value: \"\\(after)\")"), "Mac cached chat refresh must request only events after the cached seq")
+    try assert(macStore.contains("URLQueryItem(name: \"limit\", value: \"1\")"), "Mac cached chat refresh must use a cheap one-event probe before showing loading UI")
+    try assert(macStore.contains("guard latestSeq > currentSeq else"), "Mac cached chat refresh must skip spinner and timeline mutation when the cached chat is current")
+    try assert(macStore.contains("isRefreshingCachedDelta = true"), "Mac cached chat refresh must show loading UI only after new server data is detected")
     try assert(macStore.contains("guard !newEvents.isEmpty else"), "Mac event merge must skip timeline rebuilds when catch-up returns duplicate/no-op events")
     guard let memorySnapshotRange = macStore.range(of: "private func rememberSelectedChatInMemory()"),
           let diskSnapshotRange = macStore.range(of: "private func saveSelectedChatCache()", range: memorySnapshotRange.upperBound..<macStore.endIndex) else {

@@ -37,7 +37,7 @@ struct TimelineView: View {
             store.isSelectingSession ||
             store.loadedSessionID != store.selectedSessionID
         )
-        let shouldMaskTimeline = timelineRowsSuspended
+        let shouldMaskTimeline = timelineRowsSuspended || store.isRefreshingCachedDelta
         let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
         let projectionEventLimit = max(defaultVisibleRowLimit * 8, visibleRowLimit * 8)
         let projectedEvents = displayEvents.count > projectionEventLimit
@@ -230,6 +230,11 @@ struct TimelineView: View {
                 }
                 .onChange(of: store.isSelectingSession) {
                     if !store.isSelectingSession {
+                        settleInitialTimelinePosition(proxy)
+                    }
+                }
+                .onChange(of: store.isRefreshingCachedDelta) {
+                    if !store.isRefreshingCachedDelta {
                         settleInitialTimelinePosition(proxy)
                     }
                 }

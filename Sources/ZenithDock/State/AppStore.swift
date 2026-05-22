@@ -32,6 +32,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var displayEvents: [ZEvent] = []
     @Published var loadedSessionID: String?
     @Published var isSelectingSession = false
+    @Published var isRefreshingCachedDelta = false
     @Published var serverReachable = false
     @Published var socketLive = false
     @Published var activeSessionIDs: Set<String> = []
@@ -659,6 +660,7 @@ final class AppStore: ObservableObject {
         let generation = selectionGeneration
         loadingSessionID = sessionID
         isSelectingSession = true
+        isRefreshingCachedDelta = false
         defer {
             if loadingSessionID == sessionID {
                 loadingSessionID = nil
@@ -720,7 +722,7 @@ final class AppStore: ObservableObject {
             connectEvents(sessionID: sessionID, after: cachedLastSeq)
             syncSelectedRunningState()
             Task {
-                await refreshCachedSessionDelta(
+                await refreshCachedSessionDeltaIfNeeded(
                     sessionID: sessionID,
                     generation: generation,
                     after: cachedLastSeq
@@ -737,17 +739,46 @@ final class AppStore: ObservableObject {
         )
     }
 
-    private func refreshCachedSessionDelta(sessionID: String, generation: Int, after: Int) async {
+    private func refreshCachedSessionDeltaIfNeeded(sessionID: String, generation: Int, after: Int) async {
         guard after > 0,
               selectedSessionID == sessionID,
               selectionGeneration == generation else {
             return
         }
         do {
-            let res: SessionEventsResponse = try await api.get(
+            let probe: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: [
                     URLQueryItem(name: "after", value: "\(after)"),
+                    URLQueryItem(name: "limit", value: "1")
+                ]
+            )
+            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = probe.session
+            }
+            guard selectedSessionID == sessionID, selectionGeneration == generation else {
+                AppLogger.info("drop stale cached delta probe session=\(sessionID)")
+                return
+            }
+            let latestSeq = probe.latest_seq ?? probe.events.map(\.seq).max() ?? after
+            let currentSeq = lastSeq
+            guard latestSeq > currentSeq else {
+                status = socketLive ? "Live" : "Server connected"
+                AppLogger.info("cached delta current session=\(sessionID) current=\(currentSeq) latest=\(latestSeq)")
+                return
+            }
+            isRefreshingCachedDelta = true
+            status = "Opening latest messages"
+            defer {
+                if selectedSessionID == sessionID, selectionGeneration == generation {
+                    isRefreshingCachedDelta = false
+                    status = socketLive ? "Live" : "Server connected"
+                }
+            }
+            let res: SessionEventsResponse = try await api.get(
+                "/api/sessions/\(sessionID)",
+                queryItems: [
+                    URLQueryItem(name: "after", value: "\(currentSeq)"),
                     URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)")
                 ]
             )
@@ -763,14 +794,18 @@ final class AppStore: ObservableObject {
             if events.count > previousCount {
                 if selectedTimelineAtBottom {
                     markSessionRead(sessionID)
-                    requestScrollToBottom()
+                    requestScrollToBottom(immediate: true)
                 }
                 saveSelectedChatCache()
-                AppLogger.info("loaded cached delta session=\(sessionID) added=\(events.count - previousCount) after=\(after)")
+                AppLogger.info("loaded cached delta session=\(sessionID) added=\(events.count - previousCount) after=\(currentSeq) latest=\(latestSeq)")
             } else {
-                AppLogger.info("cached delta current session=\(sessionID) after=\(after)")
+                AppLogger.info("cached delta had no visible additions session=\(sessionID) after=\(currentSeq) latest=\(latestSeq)")
             }
         } catch {
+            if selectedSessionID == sessionID, selectionGeneration == generation {
+                isRefreshingCachedDelta = false
+                status = socketLive ? "Live" : "Server connected"
+            }
             AppLogger.warning("cached delta failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
         }
     }

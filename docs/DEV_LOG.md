@@ -16,6 +16,36 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Build 34 Cached Open Probe
+
+Problem:
+
+- Build 34 made cached chat opens fast, but too quiet: warm cached chats could
+  connect the websocket and run a background delta without an obvious loading
+  path. If new server events existed, the user could interpret the no-spinner
+  path as "new messages are not showing."
+- Reverting to a full tail snapshot on every open would bring back the old
+  text fly-by and high CPU path for huge chats.
+
+Change:
+
+- Warm cached chat opens now do a one-event probe:
+  `/api/sessions/{id}?after=<cachedLastSeq>&limit=1`.
+- If the probe says the cached seq is current, the app leaves the timeline
+  completely alone: no spinner, no row rebuild, no scroll jump.
+- If the probe sees a newer server seq, the app shows the existing "Opening
+  latest messages" overlay, fetches only the delta after the current seq, merges
+  it, saves cache, and scrolls to bottom if the user was already at bottom.
+- Cold/no-cache opens still use the old full latest-tail loading path.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` with `ditto`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - TestFlight Build 34 Upload
 
 Change:
