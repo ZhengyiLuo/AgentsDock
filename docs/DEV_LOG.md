@@ -16,6 +16,29 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - macOS TestFlight Build 36 Upload
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `35` to `36` for iOS/iPadOS, macOS,
+  and `ZenithCore`.
+- Uploaded macOS TestFlight build `36`. This build includes the latest-tail
+  cached-open rule so stale Macs refresh from the server's newest tail page
+  instead of websocket-replaying from old cache state.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the verified
+  build-36 macOS archive.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-36.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-36.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-36 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Verified archive has `CFBundleVersion = 36` and
+  `ITSAppUsesNonExemptEncryption = false`.
+- Verified `dist/ZenithDock.app` has `CFBundleVersion = 36`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - Latest Tail Wins on Cached Open
 
 Problem:
