@@ -21,6 +21,9 @@ painful to rediscover later.
 Problem:
 
 - Typing in the Mac composer was still sluggish with long pasted prompts.
+- Follow-up: the bounded line-count pass still left AppKit/SwiftUI negotiating
+  editor height while typing. Even if the scan was small, resizing/layout
+  feedback was the wrong shape for a chat composer.
 - Quick chat switching could still show the “Opening latest messages” overlay
   because the sidebar published `selectedSessionID` before `AppStore.select`
   had applied the warm cache.
@@ -34,6 +37,10 @@ Change:
 - The composer no longer scans for non-whitespace or splits the full draft on
   the keystroke path. Placeholder presence now uses the native text storage
   length, and composer height uses a bounded first-440-character scan.
+- Follow-up simplification: removed auto-growing height entirely. The Mac
+  composer is now a fixed-height native `NSTextView` inside its own scroll view,
+  with no line-count callbacks/tasks into SwiftUI while typing. The text layout
+  manager allows non-contiguous/background layout for long drafts.
 - Sidebar selection now routes through an explicit `store.select(sessionID:)`
   binding instead of directly mutating `store.selectedSessionID`, so warm cached
   chat data can be applied before the visible selection flips.

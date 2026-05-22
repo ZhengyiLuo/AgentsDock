@@ -42,14 +42,17 @@ func checkComposerUsesPresenceGate() throws {
         throw GuardrailFailure.failed("Composer publishPresence must gate SwiftUI callbacks")
     }
     try assert(guardRange.lowerBound < callbackRange.lowerBound, "Composer must gate text presence before calling SwiftUI")
-    try assert(source.contains("scheduleVisibleLineCount"), "Composer line-count updates must be deferred off the keystroke hot path")
-    try assert(source.contains("boundedVisibleLineCount"), "Composer line-count checks must be bounded for long drafts")
+    try assert(source.contains("private var promptHeight: CGFloat {\n        78\n    }"), "Mac composer must use a fixed editor height instead of resizing while typing")
     try assert(!source.contains("let sendableText = value.trimmingCharacters"), "Composer must not trim the whole draft on every keystroke")
     try assert(!source.contains("hasSendableText(value)"), "Composer must not scan the whole draft for sendable text on every keystroke")
     try assert(!source.contains("value.split(separator: \"\\n\""), "Composer must not split the whole draft on every line-count update")
+    try assert(!source.contains("scheduleVisibleLineCount"), "Composer must not schedule line-count work while typing")
+    try assert(!source.contains("onVisibleLineCountChange"), "Composer must not publish line-count changes into SwiftUI while typing")
+    try assert(!source.contains("pendingLineCount"), "Composer must not keep deferred line-count tasks")
     try assert(source.contains("submitRevision"), "Composer send button must submit native text without syncing draft text per keystroke")
     try assert(!source.contains("scheduleSync"), "Composer must not schedule recurring full-draft SwiftUI sync while typing")
     try assert(!source.contains("parent.text ="), "Composer must not publish the full draft binding during normal typing")
+    try assert(source.contains("allowsNonContiguousLayout = true"), "Composer text view should allow non-contiguous layout for long drafts")
 }
 
 func checkEndpointCacheKeysAreServerScoped() throws {

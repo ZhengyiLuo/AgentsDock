@@ -9,7 +9,6 @@ struct ComposerView: View {
     @State private var editorResetID = 0
     @State private var editorSubmitRevision = 0
     @State private var editorHasVisibleText = false
-    @State private var editorVisibleLineCount = 1
     @State private var isAttachmentDropTargeted = false
 
     var body: some View {
@@ -40,10 +39,6 @@ struct ComposerView: View {
                 } onTextPresenceChange: { hasText in
                     if editorHasVisibleText != hasText {
                         editorHasVisibleText = hasText
-                    }
-                } onVisibleLineCountChange: { lineCount in
-                    if editorVisibleLineCount != lineCount {
-                        editorVisibleLineCount = lineCount
                     }
                 }
                 .equatable()
@@ -88,14 +83,12 @@ struct ComposerView: View {
         .onChange(of: store.selectedSessionID) {
             draftPrompt = ""
             editorHasVisibleText = false
-            editorVisibleLineCount = 1
             editorResetID += 1
         }
     }
 
     private var promptHeight: CGFloat {
-        let visibleLines = min(max(editorVisibleLineCount, 1), 5)
-        return CGFloat(visibleLines * 18 + 12)
+        78
     }
 
     @ViewBuilder
@@ -327,7 +320,6 @@ struct ComposerView: View {
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draftPrompt = ""
         editorHasVisibleText = false
-        editorVisibleLineCount = 1
         editorResetID += 1
         Task {
             let accepted = await store.sendPrompt(submitted)
@@ -336,7 +328,6 @@ struct ComposerView: View {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
                         editorHasVisibleText = true
-                        editorVisibleLineCount = visibleLineCount(for: submitted)
                         editorResetID += 1
                     }
                 }
@@ -357,31 +348,6 @@ struct ComposerView: View {
     private func uploadDroppedFiles(_ urls: [URL]) {
         guard store.selectedSessionID != nil, !urls.isEmpty else { return }
         Task { await store.upload(urls: urls) }
-    }
-
-    private func visibleLineCount(for value: String) -> Int {
-        Self.boundedVisibleLineCount(for: value)
-    }
-
-    fileprivate static func boundedVisibleLineCount(for value: String) -> Int {
-        let nsValue = value as NSString
-        return boundedVisibleLineCount(length: nsValue.length) { index in
-            nsValue.character(at: index)
-        }
-    }
-
-    fileprivate static func boundedVisibleLineCount(length: Int, characterAt: (Int) -> unichar) -> Int {
-        guard length > 0 else { return 1 }
-        let softLines = min(5, max(1, Int(ceil(Double(length) / 110.0))))
-        if softLines >= 5 { return 5 }
-
-        let scanLimit = min(length, 440)
-        var hardLines = 1
-        for index in 0..<scanLimit where characterAt(index) == 10 {
-            hardLines += 1
-            if hardLines >= 5 { return 5 }
-        }
-        return min(5, max(hardLines, softLines))
     }
 }
 
@@ -420,7 +386,6 @@ private struct StablePromptEditor: View, Equatable {
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void
     var onTextPresenceChange: (Bool) -> Void
-    var onVisibleLineCountChange: (Int) -> Void
 
     nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
         lhs.isEditable == rhs.isEditable &&
@@ -436,8 +401,7 @@ private struct StablePromptEditor: View, Equatable {
             submitRevision: submitRevision,
             onSubmit: onSubmit,
             onDropFiles: onDropFiles,
-            onTextPresenceChange: onTextPresenceChange,
-            onVisibleLineCountChange: onVisibleLineCountChange
+            onTextPresenceChange: onTextPresenceChange
         )
     }
 }
@@ -450,7 +414,6 @@ struct PromptTextView: NSViewRepresentable {
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
     var onTextPresenceChange: (Bool) -> Void = { _ in }
-    var onVisibleLineCountChange: (Int) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -462,6 +425,7 @@ struct PromptTextView: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = .allowed
 
         let textView = SubmitTextView()
         textView.delegate = context.coordinator
@@ -482,6 +446,8 @@ struct PromptTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.autoresizingMask = [.width]
+        textView.layoutManager?.allowsNonContiguousLayout = true
+        textView.layoutManager?.backgroundLayoutEnabled = true
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
         textView.onSubmitText = { context.coordinator.submit(textView: textView) }
@@ -499,7 +465,6 @@ struct PromptTextView: NSViewRepresentable {
             textView.string = text
             context.coordinator.lastAppliedResetID = resetID
             context.coordinator.publishPresence(textView)
-            context.coordinator.publishVisibleLineCount(textView)
         }
         if context.coordinator.lastHandledSubmitRevision != submitRevision {
             context.coordinator.lastHandledSubmitRevision = submitRevision
@@ -516,9 +481,6 @@ struct PromptTextView: NSViewRepresentable {
         private var presenceGate = ZTextPresenceGate()
         var lastAppliedResetID = 0
         var lastHandledSubmitRevision = 0
-        private var lastPublishedVisibleLineCount = 1
-        private weak var pendingLineCountTextView: NSTextView?
-        private var pendingLineCountWorkItem: DispatchWorkItem?
 
         init(_ parent: PromptTextView) {
             self.parent = parent
@@ -527,7 +489,6 @@ struct PromptTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             publishPresence(textView)
-            scheduleVisibleLineCount(textView)
         }
 
         func submit(textView: NSTextView) {
@@ -541,31 +502,6 @@ struct PromptTextView: NSViewRepresentable {
             let hasText = (textView.textStorage?.length ?? textView.string.utf16.count) > 0
             guard presenceGate.shouldPublish(hasText: hasText) else { return }
             parent.onTextPresenceChange(hasText)
-        }
-
-        func scheduleVisibleLineCount(_ textView: NSTextView) {
-            pendingLineCountTextView = textView
-            guard pendingLineCountWorkItem == nil else { return }
-            let item = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                let textView = self.pendingLineCountTextView
-                self.pendingLineCountTextView = nil
-                self.pendingLineCountWorkItem = nil
-                guard let textView else { return }
-                self.publishVisibleLineCount(textView)
-            }
-            pendingLineCountWorkItem = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: item)
-        }
-
-        func publishVisibleLineCount(_ textView: NSTextView) {
-            let storage = textView.textStorage?.string as NSString? ?? textView.string as NSString
-            let lineCount = ComposerView.boundedVisibleLineCount(length: storage.length) { index in
-                storage.character(at: index)
-            }
-            guard lineCount != lastPublishedVisibleLineCount else { return }
-            lastPublishedVisibleLineCount = lineCount
-            parent.onVisibleLineCountChange(lineCount)
         }
     }
 
