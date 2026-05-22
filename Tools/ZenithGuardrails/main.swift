@@ -366,6 +366,10 @@ func checkUnreadMessageMarker() throws {
     try assert(timeline.contains("metrics.distanceFromBottom <= 28"), "Read clearing must use a strict bottom threshold")
     try assert(timeline.contains("trailingReportWorkItem"), "Scroll observer must deliver a trailing scroll-position report")
     try assert(timeline.contains("store.setSelectedTimelineAtBottom(nextAtBottom)"), "Timeline must publish strict bottom state to the store")
+    try assert(!timeline.contains("TimelineHistoryTopReader"), "Mac timeline must not use a SwiftUI geometry preference reader during normal scrolling")
+    try assert(timeline.contains("distanceFromTop"), "Mac scroll observer must report top distance for older-history loading")
+    try assert(timeline.contains("bottomBucket(lhs.distanceFromBottom) == bottomBucket(rhs.distanceFromBottom)"), "Mac scroll observer must bucket bottom distance instead of publishing every pixel")
+    try assert(timeline.contains("topBucket(lhs.distanceFromTop) == topBucket(rhs.distanceFromTop)"), "Mac scroll observer must bucket top distance instead of publishing every pixel")
 }
 
 func checkTimelineHistoryPaging() throws {

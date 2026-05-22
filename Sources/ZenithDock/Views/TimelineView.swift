@@ -68,7 +68,6 @@ struct TimelineView: View {
                                     } onLoadOlder: {
                                         loadOlderHistoryFromIntent(proxy)
                                     }
-                                    .background(TimelineHistoryTopReader(coordinateSpaceName: coordinateSpaceName))
                                     .onDisappear {
                                         olderHistoryLoadArmed = true
                                         suppressScrollHistoryLoadUntilTopLeaves = false
@@ -124,6 +123,11 @@ struct TimelineView: View {
                         .background(
                             TimelineScrollObserver { metrics in
                                 updateBottomVisibility(metrics)
+                                handleHistoryTopDistance(
+                                    metrics.distanceFromTop,
+                                    hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
+                                    proxy: proxy
+                                )
                             }
                         )
                     }
@@ -229,9 +233,6 @@ struct TimelineView: View {
                         olderHistoryLoadArmed = false
                         suppressScrollHistoryLoadUntilTopLeaves = false
                     }
-                }
-                .onPreferenceChange(TimelineHistoryTopPreferenceKey.self) { topY in
-                    handleHistoryTopChange(topY, proxy: proxy)
                 }
             }
             Divider()
@@ -401,10 +402,14 @@ struct TimelineView: View {
         }
     }
 
-    private func handleHistoryTopChange(_ topY: CGFloat?, proxy: ScrollViewProxy) {
-        guard let topY else { return }
-        let topIsVisible = topY >= -24 && topY <= 96
-        let topHasLeftViewport = topY < -64 || topY > 160
+    private func handleHistoryTopDistance(_ distanceFromTop: CGFloat, hasHiddenRenderedRows: Bool, proxy: ScrollViewProxy) {
+        guard store.hiddenDisplayEventCount > 0 || hasHiddenRenderedRows else {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = false
+            return
+        }
+        let topIsVisible = distanceFromTop <= 96
+        let topHasLeftViewport = distanceFromTop > 160
 
         if topHasLeftViewport {
             olderHistoryLoadArmed = true
@@ -671,31 +676,11 @@ enum TimelineFileDrop {
     }
 }
 
-private struct TimelineHistoryTopReader: View {
-    let coordinateSpaceName: String
-
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: TimelineHistoryTopPreferenceKey.self,
-                value: proxy.frame(in: .named(coordinateSpaceName)).minY
-            )
-        }
-    }
-}
-
-private struct TimelineHistoryTopPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat? = nil
-
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        value = nextValue() ?? value
-    }
-}
-
 private struct TimelineScrollMetrics: Equatable {
     var viewportHeight: CGFloat
     var contentHeight: CGFloat
     var distanceFromBottom: CGFloat
+    var distanceFromTop: CGFloat
 
     var isScrollable: Bool {
         contentHeight > viewportHeight + 8
@@ -704,7 +689,20 @@ private struct TimelineScrollMetrics: Equatable {
     static func == (lhs: TimelineScrollMetrics, rhs: TimelineScrollMetrics) -> Bool {
         abs(lhs.viewportHeight - rhs.viewportHeight) < 0.5 &&
             abs(lhs.contentHeight - rhs.contentHeight) < 0.5 &&
-            abs(lhs.distanceFromBottom - rhs.distanceFromBottom) < 0.5
+            bottomBucket(lhs.distanceFromBottom) == bottomBucket(rhs.distanceFromBottom) &&
+            topBucket(lhs.distanceFromTop) == topBucket(rhs.distanceFromTop)
+    }
+
+    private static func bottomBucket(_ distance: CGFloat) -> Int {
+        if distance <= 28 { return 0 }
+        if distance <= 180 { return 1 }
+        return 2
+    }
+
+    private static func topBucket(_ distance: CGFloat) -> Int {
+        if distance <= 96 { return 0 }
+        if distance <= 160 { return 1 }
+        return 2
     }
 }
 
@@ -868,15 +866,19 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             let viewportHeight = max(scrollView.contentView.bounds.height, 0)
             let contentHeight = max(documentBounds.height, 0)
             let rawDistance: CGFloat
+            let rawDistanceFromTop: CGFloat
             if documentView.isFlipped {
                 rawDistance = documentBounds.maxY - visibleRect.maxY
+                rawDistanceFromTop = visibleRect.minY - documentBounds.minY
             } else {
                 rawDistance = visibleRect.minY - documentBounds.minY
+                rawDistanceFromTop = documentBounds.maxY - visibleRect.maxY
             }
             let metrics = TimelineScrollMetrics(
                 viewportHeight: viewportHeight,
                 contentHeight: contentHeight,
-                distanceFromBottom: max(rawDistance, 0)
+                distanceFromBottom: max(rawDistance, 0),
+                distanceFromTop: max(rawDistanceFromTop, 0)
             )
             guard metrics != lastMetrics else { return }
             lastMetrics = metrics

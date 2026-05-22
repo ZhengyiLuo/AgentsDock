@@ -2768,3 +2768,28 @@ Changes:
   - context digests: 900 -> 1,350 characters and 10 -> 15 lines
   - normal messages: 1,200 -> 1,800 characters and 12 -> 18 lines
 - Added a guardrail so these thresholds do not quietly regress.
+
+### Threshold-Based Timeline Scroll Reporting
+
+User issue:
+
+- Mac chat timeline scrolling still felt heavier than it should.
+
+Root cause:
+
+- The timeline used a hidden SwiftUI `GeometryReader` preference at the top of
+  the scroll content to detect older-history loading.
+- The AppKit scroll observer also reported continuous pixel-distance changes,
+  even though the UI only needs to know when the viewport crosses top/bottom
+  thresholds.
+
+Changes:
+
+- Removed the top SwiftUI geometry preference reader from the Mac timeline.
+- The AppKit scroll observer now reports both distance from top and distance
+  from bottom.
+- Scroll metrics are equality-bucketed around the thresholds that matter:
+  strict bottom, near bottom, top visible, and top left viewport. Middle-of-chat
+  scrolling no longer publishes every pixel into SwiftUI.
+- Added a guardrail so the timeline does not regress to geometry-preference
+  scroll tracking.
