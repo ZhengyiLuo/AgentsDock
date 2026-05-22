@@ -52,7 +52,7 @@ struct SidebarView: View {
             }
             .padding(14)
 
-            List(selection: $store.selectedSessionID) {
+            List(selection: sessionSelection) {
                 if !store.pinnedSessions.isEmpty {
                     Section("Pinned") {
                         ForEach(store.pinnedSessions) { session in
@@ -117,6 +117,19 @@ struct SidebarView: View {
         } message: {
             Text(deleteCandidate?.title ?? "This chat will be removed from Zenith Dock.")
         }
+    }
+
+    private var sessionSelection: Binding<String?> {
+        Binding(
+            get: { store.selectedSessionID },
+            set: { newValue in
+                guard let sessionID = newValue,
+                      sessionID != store.selectedSessionID else {
+                    return
+                }
+                Task { await store.select(sessionID: sessionID) }
+            }
+        )
     }
 
     @ViewBuilder

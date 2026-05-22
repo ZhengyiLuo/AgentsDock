@@ -16,6 +16,34 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Composer and Warm-Selection Hot Path
+
+Problem:
+
+- Typing in the Mac composer was still sluggish with long pasted prompts.
+- Quick chat switching could still show the “Opening latest messages” overlay
+  because the sidebar published `selectedSessionID` before `AppStore.select`
+  had applied the warm cache.
+
+Change:
+
+- The composer no longer scans for non-whitespace or splits the full draft on
+  the keystroke path. Placeholder presence now uses the native text storage
+  length, and composer height uses a bounded first-440-character scan.
+- Sidebar selection now routes through an explicit `store.select(sessionID:)`
+  binding instead of directly mutating `store.selectedSessionID`, so warm cached
+  chat data can be applied before the visible selection flips.
+- Added guardrails for bounded line-count work and explicit warm-cache sidebar
+  selection.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
+Verification:
+
+- `swift build --product ZenithDock`
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - TestFlight Build 32 Upload
 
 Change:

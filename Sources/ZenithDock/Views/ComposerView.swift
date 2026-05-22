@@ -360,9 +360,28 @@ struct ComposerView: View {
     }
 
     private func visibleLineCount(for value: String) -> Int {
-        let hardLines = value.split(separator: "\n", omittingEmptySubsequences: false).count
-        let softLines = max(1, Int(ceil(Double(value.count) / 110.0)))
-        return min(max(hardLines, softLines), 5)
+        Self.boundedVisibleLineCount(for: value)
+    }
+
+    fileprivate static func boundedVisibleLineCount(for value: String) -> Int {
+        let nsValue = value as NSString
+        return boundedVisibleLineCount(length: nsValue.length) { index in
+            nsValue.character(at: index)
+        }
+    }
+
+    fileprivate static func boundedVisibleLineCount(length: Int, characterAt: (Int) -> unichar) -> Int {
+        guard length > 0 else { return 1 }
+        let softLines = min(5, max(1, Int(ceil(Double(length) / 110.0))))
+        if softLines >= 5 { return 5 }
+
+        let scanLimit = min(length, 440)
+        var hardLines = 1
+        for index in 0..<scanLimit where characterAt(index) == 10 {
+            hardLines += 1
+            if hardLines >= 5 { return 5 }
+        }
+        return min(5, max(hardLines, softLines))
     }
 }
 
@@ -479,8 +498,8 @@ struct PromptTextView: NSViewRepresentable {
         if context.coordinator.lastAppliedResetID != resetID {
             textView.string = text
             context.coordinator.lastAppliedResetID = resetID
-            context.coordinator.publishPresence(textView.string)
-            context.coordinator.publishVisibleLineCount(textView.string)
+            context.coordinator.publishPresence(textView)
+            context.coordinator.publishVisibleLineCount(textView)
         }
         if context.coordinator.lastHandledSubmitRevision != submitRevision {
             context.coordinator.lastHandledSubmitRevision = submitRevision
@@ -507,7 +526,7 @@ struct PromptTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            publishPresence(textView.string)
+            publishPresence(textView)
             scheduleVisibleLineCount(textView)
         }
 
@@ -515,17 +534,13 @@ struct PromptTextView: NSViewRepresentable {
             parent.onSubmit(textView.string)
         }
 
-        func publishPresence(_ value: String) {
+        func publishPresence(_ textView: NSTextView) {
             // Guardrail: publishing on every keystroke reintroduces SwiftUI
             // invalidation while typing. Only cross the bridge when the
             // placeholder state actually changes.
-            let hasText = hasSendableText(value)
+            let hasText = (textView.textStorage?.length ?? textView.string.utf16.count) > 0
             guard presenceGate.shouldPublish(hasText: hasText) else { return }
             parent.onTextPresenceChange(hasText)
-        }
-
-        private func hasSendableText(_ value: String) -> Bool {
-            value.unicodeScalars.contains { !CharacterSet.whitespacesAndNewlines.contains($0) }
         }
 
         func scheduleVisibleLineCount(_ textView: NSTextView) {
@@ -537,16 +552,17 @@ struct PromptTextView: NSViewRepresentable {
                 self.pendingLineCountTextView = nil
                 self.pendingLineCountWorkItem = nil
                 guard let textView else { return }
-                self.publishVisibleLineCount(textView.string)
+                self.publishVisibleLineCount(textView)
             }
             pendingLineCountWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: item)
         }
 
-        func publishVisibleLineCount(_ value: String) {
-            let hardLines = value.split(separator: "\n", omittingEmptySubsequences: false).count
-            let softLines = max(1, Int(ceil(Double(value.count) / 110.0)))
-            let lineCount = min(max(hardLines, softLines), 5)
+        func publishVisibleLineCount(_ textView: NSTextView) {
+            let storage = textView.textStorage?.string as NSString? ?? textView.string as NSString
+            let lineCount = ComposerView.boundedVisibleLineCount(length: storage.length) { index in
+                storage.character(at: index)
+            }
             guard lineCount != lastPublishedVisibleLineCount else { return }
             lastPublishedVisibleLineCount = lineCount
             parent.onVisibleLineCountChange(lineCount)
