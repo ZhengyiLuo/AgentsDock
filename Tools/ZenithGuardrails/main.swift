@@ -251,6 +251,11 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!macStore[memorySnapshotRange.lowerBound..<diskSnapshotRange.lowerBound].contains("sanitizedForCache"), "Mac memory cache snapshot must not sanitize/copy large text while switching chats")
     try assert(macStore.contains("Task.detached(priority: .utility)"), "Mac disk cache sanitization must run off the main actor")
     try assert(macStore.contains("Self.sanitizedForCache($0, maxCharacters: maxCharacters)"), "Mac disk cache writes must sanitize large text inside the detached task")
+    guard let applyCacheRange = macStore.range(of: "private func applyCachedChat"),
+          let refreshFilesRange = macStore.range(of: "private func refreshSessionFilesFromLoadedEvents", range: applyCacheRange.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Mac store must keep applyCachedChat isolated for sidebar-order checks")
+    }
+    try assert(!macStore[applyCacheRange.lowerBound..<refreshFilesRange.lowerBound].contains("sessions[idx] = cached.session"), "Mac cached chat application must not replace existing sidebar metadata")
     try assert(mobileTimeline.contains("store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty"), "iOS timeline must reveal cached selected-chat rows while refreshing")
     try assert(mobileTimeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "iOS timeline must structurally suspend row rendering only for cold opens")
     try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")

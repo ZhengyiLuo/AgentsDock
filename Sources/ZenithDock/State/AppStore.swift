@@ -1682,8 +1682,8 @@ final class AppStore: ObservableObject {
     }
 
     private func applyCachedChat(_ cached: CachedChat) {
-        if let idx = sessions.firstIndex(where: { $0.id == cached.session.id }) {
-            sessions[idx] = cached.session
+        if !sessions.contains(where: { $0.id == cached.session.id }) {
+            sessions.append(cached.session)
         }
         let cachedEvents = timelineEvents(from: cached.events)
         events = Array(cachedEvents.suffix(maxWarmCachedTimelineEvents))

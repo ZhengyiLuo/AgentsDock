@@ -16,6 +16,36 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - Stable Sidebar During Cached Switches
+
+Problem:
+
+- Chats could appear to jump in the sidebar during selection. The likely cause
+  was stale cached `ZSession` metadata being applied before the server latest
+  tail arrived. If cached `folder`, `pinned`, `archived`, or `sort_order` did
+  not match the current server list, the clicked row could temporarily move
+  sections/order, then move again when server metadata arrived.
+
+Change:
+
+- Cached chat application is now timeline-only for existing sessions. It can
+  populate events/files instantly, but it no longer replaces existing sidebar
+  session metadata. Cached session metadata is only appended if the session is
+  missing from the list.
+- Added a guardrail so `applyCachedChat` cannot regress to assigning
+  `sessions[idx] = cached.session`.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  default DerivedData Release product:
+  `/Users/zen/Library/Developer/Xcode/DerivedData/ZenithDock-goqrrfavgklzurgabmpxjsmlicso/Build/Products/Release/ZenithDock.app`.
+- Verified `dist/ZenithDock.app` has `CFBundleVersion = 36`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - Lighter Chat Switch Cache Path
 
 Problem:
