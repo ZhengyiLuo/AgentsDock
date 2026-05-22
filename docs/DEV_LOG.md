@@ -16,6 +16,29 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - macOS TestFlight Build 37 Upload
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from 36 to 37 for the shared Xcode project
+  build settings.
+- Uploaded macOS TestFlight build 37. This build includes the timeline position
+  settle fix after switching chats/threads.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the verified
+  macOS archive at
+  `/Users/zen/agi/ZenithDock/build/archives/ZenithDockMac-37.xcarchive`.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-37.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-37.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-37 -quiet -allowProvisioningUpdates`
+- Export output ended with `Uploaded ZenithDockMac`.
+- Archive `CFBundleVersion = 37`.
+- Archive `ITSAppUsesNonExemptEncryption = false`.
+- Local `dist/ZenithDock.app` `CFBundleVersion = 37`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-22 Follow-Up - Settle Timeline Position After Thread Switch
 
 Problem:
