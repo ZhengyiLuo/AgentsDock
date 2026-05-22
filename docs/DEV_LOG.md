@@ -16,6 +16,31 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - TestFlight Build 38
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from 37 to 38 for the shared Xcode project
+  build settings.
+- Prepared build 38 for TestFlight with the job interval presets, first-run /
+  next-run custom time scheduling, and the matching server scheduler API.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `python3 -m py_compile server/agent_server.py`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-38.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-38.xcarchive archive -quiet -allowProvisioningUpdates`
+- Uploaded macOS build 38. Export output ended with `Uploaded ZenithDockMac`.
+- Uploaded iOS/iPadOS build 38. Export output ended with
+  `Uploaded ZenithDockIOS`.
+- Archive `CFBundleVersion = 38` for both macOS and iOS/iPadOS.
+- Archive `ITSAppUsesNonExemptEncryption = false` for both macOS and iOS/iPadOS.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the verified
+  build-38 macOS archive.
+- Local `dist/ZenithDock.app` `CFBundleVersion = 38`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-22 Follow-Up - Deploy Custom Job Timing Server
 
 Problem:
