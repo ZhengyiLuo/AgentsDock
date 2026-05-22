@@ -36,8 +36,8 @@ Change:
   reschedule it.
 - Extended the server job API with optional `first_run_at` on create and
   `next_run_at` on update. Timestamps accept ISO-8601 strings or epoch seconds.
-- Kept the iOS job API payload compatible with the new optional fields, even
-  though the richer UI was added on Mac first.
+- Added matching iOS/iPadOS interval presets and first-run/next-run controls so
+  mobile job scheduling does not fall back to raw seconds only.
 - Existing job edits now only patch the interval/loop/enabled/backend values
   when they actually changed, so prompt/title edits do not reschedule by
   accident.
@@ -48,6 +48,9 @@ Verification:
 - `python3 -m py_compile server/agent_server.py`
 - `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
 - `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+- Re-ran `swift run ZenithGuardrails`, `python3 -m py_compile
+  server/agent_server.py`, and the iOS simulator build after adding the mobile
+  scheduling UI.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
   default DerivedData Release product.
 - Verified `dist/ZenithDock.app` has `CFBundleVersion = 37`.

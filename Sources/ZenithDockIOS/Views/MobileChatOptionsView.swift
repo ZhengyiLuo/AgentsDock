@@ -23,6 +23,8 @@ struct MobileChatOptionsView: View {
     @State private var jobTitle = ""
     @State private var jobPrompt = ""
     @State private var intervalText = "3600"
+    @State private var jobStartOption: MobileJobStartOption = .afterInterval
+    @State private var jobStartDate = Date().addingTimeInterval(3_600)
     @State private var loopJob = true
     @State private var newJobDetailsOpen = false
     @State private var confirmDelete = false
@@ -205,6 +207,8 @@ struct MobileChatOptionsView: View {
                     title: $jobTitle,
                     prompt: $jobPrompt,
                     intervalText: $intervalText,
+                    startOption: $jobStartOption,
+                    startDate: $jobStartDate,
                     loop: $loopJob,
                     isPresented: $newJobDetailsOpen,
                     canSchedule: canCreateJob,
@@ -392,10 +396,13 @@ struct MobileChatOptionsView: View {
                 title: cleanTitle.isEmpty ? "\(loopJob ? "Loop" : "Job"): \(session.title)" : cleanTitle,
                 prompt: effectiveJobPrompt,
                 intervalSeconds: interval,
-                loop: loopJob
+                loop: loopJob,
+                firstRunAt: jobFirstRunAt
             )
             jobTitle = ""
             jobPrompt = ""
+            jobStartOption = .afterInterval
+            jobStartDate = Date().addingTimeInterval(TimeInterval(interval))
         }
     }
 
@@ -418,24 +425,272 @@ struct MobileChatOptionsView: View {
         !effectiveJobPrompt.isEmpty && parsedJobInterval != nil
     }
 
-    private var jobDraftSummary: String {
-        let promptSource = cleanJobPrompt.isEmpty ? "composer prompt" : "custom prompt"
-        let interval = parsedJobInterval.map(formatInterval) ?? "invalid interval"
-        return "\(loopJob ? "Loop" : "One shot") · \(interval) · \(promptSource)"
+    private var jobFirstRunAt: Date? {
+        mobileJobScheduledDate(
+            for: jobStartOption,
+            customDate: jobStartDate,
+            intervalSeconds: parsedJobInterval,
+            afterIntervalUsesDate: false
+        )
     }
 
-    private func formatInterval(_ seconds: Int) -> String {
-        if seconds < 60 {
-            return "every \(seconds)s"
-        }
-        if seconds < 3600 {
-            return "every \(seconds / 60)m \(seconds % 60)s"
-        }
-        if seconds.isMultiple(of: 3600) {
-            return "every \(seconds / 3600)h"
-        }
-        return "every \(seconds / 3600)h \((seconds % 3600) / 60)m"
+    private var jobDraftSummary: String {
+        let promptSource = cleanJobPrompt.isEmpty ? "composer prompt" : "custom prompt"
+        let interval = parsedJobInterval.map(mobileJobIntervalDescription) ?? "invalid interval"
+        let start = mobileJobStartSummary(
+            for: jobStartOption,
+            customDate: jobStartDate,
+            intervalSeconds: parsedJobInterval,
+            currentNextRun: nil,
+            afterIntervalMeansKeep: false
+        )
+        return "\(loopJob ? "Loop" : "One shot") · \(interval) · \(start) · \(promptSource)"
     }
+}
+
+private struct MobileJobIntervalPreset: Identifiable {
+    let seconds: Int
+    let label: String
+
+    var id: Int { seconds }
+    var tag: String { "\(seconds)" }
+}
+
+private enum MobileJobStartOption: String, CaseIterable, Identifiable {
+    case keepCurrent
+    case afterInterval
+    case now
+    case inFiveMinutes
+    case inFifteenMinutes
+    case inOneHour
+    case custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .keepCurrent: "Keep current"
+        case .afterInterval: "After interval"
+        case .now: "Now"
+        case .inFiveMinutes: "In 5 min"
+        case .inFifteenMinutes: "In 15 min"
+        case .inOneHour: "In 1 hour"
+        case .custom: "Custom time"
+        }
+    }
+}
+
+private let mobileCustomJobIntervalTag = "custom"
+
+private let mobileJobIntervalPresets: [MobileJobIntervalPreset] = [
+    MobileJobIntervalPreset(seconds: 30, label: "30 sec"),
+    MobileJobIntervalPreset(seconds: 60, label: "1 min"),
+    MobileJobIntervalPreset(seconds: 120, label: "2 min"),
+    MobileJobIntervalPreset(seconds: 300, label: "5 min"),
+    MobileJobIntervalPreset(seconds: 600, label: "10 min"),
+    MobileJobIntervalPreset(seconds: 900, label: "15 min"),
+    MobileJobIntervalPreset(seconds: 1_800, label: "30 min"),
+    MobileJobIntervalPreset(seconds: 3_600, label: "1 hour"),
+    MobileJobIntervalPreset(seconds: 7_200, label: "2 hours"),
+    MobileJobIntervalPreset(seconds: 14_400, label: "4 hours"),
+    MobileJobIntervalPreset(seconds: 21_600, label: "6 hours"),
+    MobileJobIntervalPreset(seconds: 43_200, label: "12 hours"),
+    MobileJobIntervalPreset(seconds: 86_400, label: "24 hours")
+]
+
+private func mobileJobStartOptions(includeKeepCurrent: Bool) -> [MobileJobStartOption] {
+    let options: [MobileJobStartOption] = [.afterInterval, .now, .inFiveMinutes, .inFifteenMinutes, .inOneHour, .custom]
+    return includeKeepCurrent ? [.keepCurrent] + options : options
+}
+
+private struct MobileJobIntervalControl: View {
+    @Binding var intervalText: String
+
+    var body: some View {
+        Picker("Interval", selection: presetSelection) {
+            ForEach(mobileJobIntervalPresets) { preset in
+                Text(preset.label).tag(preset.tag)
+            }
+            Text("Custom").tag(mobileCustomJobIntervalTag)
+        }
+
+        TextField("Custom seconds", text: $intervalText)
+            .keyboardType(.numberPad)
+            .font(.body.monospacedDigit())
+    }
+
+    private var presetSelection: Binding<String> {
+        Binding {
+            let clean = intervalText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let value = Int(clean),
+                  let preset = mobileJobIntervalPresets.first(where: { $0.seconds == value }) else {
+                return mobileCustomJobIntervalTag
+            }
+            return preset.tag
+        } set: { tag in
+            guard tag != mobileCustomJobIntervalTag,
+                  let preset = mobileJobIntervalPresets.first(where: { $0.tag == tag }) else {
+                return
+            }
+            intervalText = "\(preset.seconds)"
+        }
+    }
+}
+
+private struct MobileJobStartControl: View {
+    @Binding var option: MobileJobStartOption
+    @Binding var customDate: Date
+    let intervalSeconds: Int?
+    let includeKeepCurrent: Bool
+    let currentNextRun: String?
+
+    var body: some View {
+        Picker("Start", selection: $option) {
+            ForEach(mobileJobStartOptions(includeKeepCurrent: includeKeepCurrent)) { option in
+                Text(option.label).tag(option)
+            }
+        }
+
+        if option == .custom {
+            DatePicker("Start time", selection: $customDate, displayedComponents: [.date, .hourAndMinute])
+        }
+
+        Text(summary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var summary: String {
+        mobileJobStartSummary(
+            for: option,
+            customDate: customDate,
+            intervalSeconds: intervalSeconds,
+            currentNextRun: currentNextRun,
+            afterIntervalMeansKeep: includeKeepCurrent
+        )
+    }
+}
+
+private func mobileJobIntervalDescription(_ seconds: Int) -> String {
+    if seconds < 60 {
+        return "every \(seconds)s"
+    }
+    if seconds < 3_600 {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "every \(minutes)m" : "every \(minutes)m \(remainder)s"
+    }
+    if seconds.isMultiple(of: 3_600) {
+        return "every \(seconds / 3_600)h"
+    }
+    return "every \(seconds / 3_600)h \((seconds % 3_600) / 60)m"
+}
+
+private func mobileJobScheduledDate(
+    for option: MobileJobStartOption,
+    customDate: Date,
+    intervalSeconds: Int?,
+    afterIntervalUsesDate: Bool
+) -> Date? {
+    switch option {
+    case .keepCurrent:
+        return nil
+    case .afterInterval:
+        guard afterIntervalUsesDate, let intervalSeconds else { return nil }
+        return Date().addingTimeInterval(TimeInterval(intervalSeconds))
+    case .now:
+        return Date()
+    case .inFiveMinutes:
+        return Date().addingTimeInterval(300)
+    case .inFifteenMinutes:
+        return Date().addingTimeInterval(900)
+    case .inOneHour:
+        return Date().addingTimeInterval(3_600)
+    case .custom:
+        return customDate
+    }
+}
+
+private func mobileJobStartSummary(
+    for option: MobileJobStartOption,
+    customDate: Date,
+    intervalSeconds: Int?,
+    currentNextRun: String?,
+    afterIntervalMeansKeep: Bool
+) -> String {
+    switch option {
+    case .keepCurrent:
+        return currentNextRun.map { "Keeps next run at \($0)" } ?? "Keeps current next run"
+    case .afterInterval:
+        if afterIntervalMeansKeep, let currentNextRun {
+            return "Reschedules after interval when interval/mode changes. Current next: \(currentNextRun)"
+        }
+        return intervalSeconds.map { "First run \(mobileJobIntervalDescription($0))" } ?? "First run after interval"
+    case .now:
+        return "First run immediately"
+    case .inFiveMinutes:
+        return "First run in 5 minutes"
+    case .inFifteenMinutes:
+        return "First run in 15 minutes"
+    case .inOneHour:
+        return "First run in 1 hour"
+    case .custom:
+        return "First run \(mobileLocalJobDateString(customDate))"
+    }
+}
+
+private func mobileLocalJobDateString(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
+    return formatter.string(from: date)
+}
+
+private func mobileParseServerDate(_ value: String?) -> Date? {
+    guard let value, !value.isEmpty else { return nil }
+
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) {
+        return date
+    }
+
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    return plain.date(from: value)
+}
+
+private func mobileLocalTimestampString(_ value: String?) -> String? {
+    guard let date = mobileParseServerDate(value) else { return value }
+
+    let calendar = Calendar.autoupdatingCurrent
+    let timeFormatter = DateFormatter()
+    timeFormatter.locale = .autoupdatingCurrent
+    timeFormatter.timeZone = .autoupdatingCurrent
+    timeFormatter.timeStyle = .short
+    timeFormatter.dateStyle = .none
+
+    if calendar.isDateInToday(date) {
+        return "\(timeFormatter.string(from: date)) today"
+    }
+
+    if calendar.isDateInTomorrow(date) {
+        return "\(timeFormatter.string(from: date)) tomorrow"
+    }
+
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+
+    if calendar.component(.year, from: date) == calendar.component(.year, from: Date()) {
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, h:mm a")
+    } else {
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+    }
+    return formatter.string(from: date)
 }
 
 private struct MobileNewJobDetailsView: View {
@@ -444,6 +699,8 @@ private struct MobileNewJobDetailsView: View {
     @Binding var title: String
     @Binding var prompt: String
     @Binding var intervalText: String
+    @Binding var startOption: MobileJobStartOption
+    @Binding var startDate: Date
     @Binding var loop: Bool
     @Binding var isPresented: Bool
     let canSchedule: Bool
@@ -462,8 +719,14 @@ private struct MobileNewJobDetailsView: View {
                 }
 
                 Section("Schedule") {
-                    TextField("Interval seconds", text: $intervalText)
-                        .keyboardType(.numberPad)
+                    MobileJobIntervalControl(intervalText: $intervalText)
+                    MobileJobStartControl(
+                        option: $startOption,
+                        customDate: $startDate,
+                        intervalSeconds: parsedInterval,
+                        includeKeepCurrent: false,
+                        currentNextRun: nil
+                    )
                     if !intervalIsValid {
                         Text("Interval must be at least 10 seconds.")
                             .font(.caption)
@@ -525,7 +788,14 @@ private struct MobileNewJobDetailsView: View {
     }
 
     private var intervalIsValid: Bool {
-        Int(intervalText.trimmingCharacters(in: .whitespacesAndNewlines)).map { $0 >= 10 } ?? false
+        parsedInterval != nil
+    }
+
+    private var parsedInterval: Int? {
+        guard let value = Int(intervalText.trimmingCharacters(in: .whitespacesAndNewlines)), value >= 10 else {
+            return nil
+        }
+        return value
     }
 }
 
@@ -1317,21 +1587,11 @@ private struct MobileJobRow: View {
     private var subtitle: String {
         let runs = "\(job.run_count ?? 0) run\(job.run_count == 1 ? "" : "s")"
         let mode = job.loop == true ? "loop" : "one shot"
-        let interval = job.interval_seconds.map { "every \(everyString($0))" } ?? "manual"
-        if let next = job.next_run_at_iso {
+        let interval = job.interval_seconds.map(mobileJobIntervalDescription) ?? "manual"
+        if let next = mobileLocalTimestampString(job.next_run_at_iso) {
             return "\(mode) · \(interval) · \(runs) · next \(next)"
         }
         return "\(mode) · \(interval) · \(runs) · \(job.enabled ? "manual" : "paused")"
-    }
-
-    private func everyString(_ seconds: Int) -> String {
-        if seconds < 60 {
-            return "\(seconds)s"
-        }
-        if seconds < 3600 {
-            return "\(seconds / 60)m \(seconds % 60)s"
-        }
-        return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
     }
 }
 
@@ -1342,6 +1602,8 @@ private struct MobileJobEditorView: View {
     @State private var title = ""
     @State private var prompt = ""
     @State private var intervalText = "3600"
+    @State private var startOption: MobileJobStartOption = .keepCurrent
+    @State private var startDate = Date().addingTimeInterval(3_600)
     @State private var loop = true
     @State private var enabled = true
     @State private var backend = "claude"
@@ -1356,10 +1618,24 @@ private struct MobileJobEditorView: View {
                         Text("Claude").tag("claude")
                         Text("Codex").tag("codex")
                     }
-                    TextField("Interval seconds", text: $intervalText)
-                        .keyboardType(.numberPad)
                     Toggle("Loop", isOn: $loop)
                     Toggle("Enabled", isOn: $enabled)
+                }
+
+                Section("Schedule") {
+                    MobileJobIntervalControl(intervalText: $intervalText)
+                    MobileJobStartControl(
+                        option: $startOption,
+                        customDate: $startDate,
+                        intervalSeconds: parsedInterval,
+                        includeKeepCurrent: true,
+                        currentNextRun: mobileLocalTimestampString(job.next_run_at_iso)
+                    )
+                    if !intervalIsValid {
+                        Text("Interval must be at least 10 seconds.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 Section {
@@ -1421,6 +1697,8 @@ private struct MobileJobEditorView: View {
         title = job.title
         prompt = job.prompt
         intervalText = "\(job.interval_seconds ?? 3600)"
+        startOption = .keepCurrent
+        startDate = mobileParseServerDate(job.next_run_at_iso) ?? Date().addingTimeInterval(TimeInterval(job.interval_seconds ?? 3_600))
         loop = job.loop == true
         enabled = job.enabled
         backend = job.backend ?? store.selectedSession?.backend ?? "claude"
@@ -1428,16 +1706,27 @@ private struct MobileJobEditorView: View {
 
     private func save() {
         guard let parsedInterval, canSave else { return }
+        let nextRunAt = mobileJobScheduledDate(
+            for: startOption,
+            customDate: startDate,
+            intervalSeconds: parsedInterval,
+            afterIntervalUsesDate: true
+        )
+        let intervalPatch = parsedInterval == job.interval_seconds ? nil : parsedInterval
+        let loopPatch = loop == (job.loop == true) ? nil : loop
+        let enabledPatch = enabled == job.enabled ? nil : enabled
+        let backendPatch = backend == (job.backend ?? store.selectedSession?.backend ?? "claude") ? nil : backend
         isSaving = true
         Task {
             await store.updateJob(
                 job,
                 title: cleanTitle,
                 prompt: cleanPrompt,
-                intervalSeconds: parsedInterval,
-                loop: loop,
-                enabled: enabled,
-                backend: backend
+                intervalSeconds: intervalPatch,
+                loop: loopPatch,
+                enabled: enabledPatch,
+                backend: backendPatch,
+                nextRunAt: nextRunAt
             )
             await MainActor.run {
                 isSaving = false
