@@ -16,6 +16,28 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - TestFlight Build 34 Upload
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `33` to `34` for iOS/iPadOS, macOS,
+  and `ZenithCore`.
+- Uploaded build `34` for both TestFlight platforms. This includes the fixed
+  Mac composer, duplicate-selection fix, cached chat lazy switch work, and
+  cached-chat delta sync.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-34.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-34.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-34 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockIOS`.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-34.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-34.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-34 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Verified both archives have `CFBundleVersion = 34` and
+  `ITSAppUsesNonExemptEncryption = false`.
+
 ## 2026-05-21 Follow-Up - Composer and Warm-Selection Hot Path
 
 Problem:
