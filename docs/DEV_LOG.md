@@ -35,6 +35,9 @@ Problem:
   off file/video metadata refreshes. Switching away also sanitized/copied up to
   1,440 events into memory cache, and timeline projection allocated trimmed
   copies of large assistant/job strings just to test whether they were empty.
+- Follow-up: delaying a full tail refresh still caused a visible “fly-by” when
+  the cached timeline was replaced by the server tail. The right behavior is to
+  load on open, but only load the delta after the cached seq.
 
 Change:
 
@@ -51,8 +54,9 @@ Change:
 - Removed the duplicate `RootView` selected-session observer. Selection now has
   one owner on Mac: explicit UI/store calls into `AppStore.select`.
 - Warm-cache chat switches now show cache, connect the websocket after cached
-  `lastSeq` for catch-up, and delay the heavier tail reconciliation. That
-  delayed refresh does not load file/video metadata.
+  `lastSeq`, and issue a lightweight HTTP delta request with `after=<lastSeq>`.
+  Cached opens no longer replace the timeline with a fresh tail snapshot and do
+  not refresh the file/video side panel unless the user clicks refresh/load more.
 - Memory chat snapshots no longer sanitize/clip large text on the click path;
   disk cache sanitization still happens in the delayed cache write.
 - Timeline rendering now projects a bounded recent event window in `body`, and

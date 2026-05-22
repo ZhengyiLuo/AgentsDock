@@ -233,9 +233,11 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should only mask when no selected-chat cache can be rendered")
     try assert(timeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "Mac timeline must structurally suspend row rendering only for cold opens")
     try assert(timeline.contains("projectionEventLimit"), "Mac timeline must project only a bounded event window during normal rendering")
-    try assert(macStore.contains("pendingSelectionTailRefresh"), "Mac warm-cache chat switches must delay tail refresh instead of blocking selection")
-    try assert(macStore.contains("connectEvents(sessionID: sessionID, after: lastSeq)"), "Mac warm-cache chat switches must use websocket catch-up from cached lastSeq")
-    try assert(macStore.contains("refreshFiles: false"), "Mac warm-cache tail refresh must not eagerly refresh file/video metadata on every switch")
+    try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
+    try assert(macStore.contains("connectEvents(sessionID: sessionID, after: cachedLastSeq)"), "Mac warm-cache chat switches must use websocket catch-up from cached lastSeq")
+    try assert(macStore.contains("refreshCachedSessionDelta"), "Mac warm-cache chat switches must sync only events after cached lastSeq")
+    try assert(macStore.contains("URLQueryItem(name: \"after\", value: \"\\(after)\")"), "Mac cached chat refresh must request only events after the cached seq")
+    try assert(macStore.contains("guard !newEvents.isEmpty else"), "Mac event merge must skip timeline rebuilds when catch-up returns duplicate/no-op events")
     guard let memorySnapshotRange = macStore.range(of: "private func rememberSelectedChatInMemory()"),
           let diskSnapshotRange = macStore.range(of: "private func saveSelectedChatCache()", range: memorySnapshotRange.upperBound..<macStore.endIndex) else {
         throw GuardrailFailure.failed("Mac store must keep memory and disk chat-cache paths separate")

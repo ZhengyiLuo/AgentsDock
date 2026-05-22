@@ -67,7 +67,6 @@ final class AppStore: ObservableObject {
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
     private var pendingScrollRequest: Task<Void, Never>?
-    private var pendingSelectionTailRefresh: Task<Void, Never>?
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
@@ -717,9 +716,16 @@ final class AppStore: ObservableObject {
             }
         }
         if loadedFromCache {
-            connectEvents(sessionID: sessionID, after: lastSeq)
+            let cachedLastSeq = lastSeq
+            connectEvents(sessionID: sessionID, after: cachedLastSeq)
             syncSelectedRunningState()
-            scheduleSelectionTailRefresh(sessionID: sessionID, generation: generation)
+            Task {
+                await refreshCachedSessionDelta(
+                    sessionID: sessionID,
+                    generation: generation,
+                    after: cachedLastSeq
+                )
+            }
             return
         }
         await refreshLatestSessionSnapshot(
@@ -731,23 +737,41 @@ final class AppStore: ObservableObject {
         )
     }
 
-    private func scheduleSelectionTailRefresh(sessionID: String, generation: Int) {
-        pendingSelectionTailRefresh?.cancel()
-        pendingSelectionTailRefresh = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard let self,
-                  !Task.isCancelled,
-                  self.selectedSessionID == sessionID,
-                  self.selectionGeneration == generation else {
+    private func refreshCachedSessionDelta(sessionID: String, generation: Int, after: Int) async {
+        guard after > 0,
+              selectedSessionID == sessionID,
+              selectionGeneration == generation else {
+            return
+        }
+        do {
+            let res: SessionEventsResponse = try await api.get(
+                "/api/sessions/\(sessionID)",
+                queryItems: [
+                    URLQueryItem(name: "after", value: "\(after)"),
+                    URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)")
+                ]
+            )
+            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = res.session
+            }
+            guard selectedSessionID == sessionID, selectionGeneration == generation else {
+                AppLogger.info("drop stale cached delta session=\(sessionID)")
                 return
             }
-            await self.refreshLatestSessionSnapshot(
-                sessionID: sessionID,
-                generation: generation,
-                reportErrors: false,
-                refreshFiles: false,
-                connectStream: false
-            )
+            let previousCount = events.count
+            mergeEvents(res.events)
+            if events.count > previousCount {
+                if selectedTimelineAtBottom {
+                    markSessionRead(sessionID)
+                    requestScrollToBottom()
+                }
+                saveSelectedChatCache()
+                AppLogger.info("loaded cached delta session=\(sessionID) added=\(events.count - previousCount) after=\(after)")
+            } else {
+                AppLogger.info("cached delta current session=\(sessionID) after=\(after)")
+            }
+        } catch {
+            AppLogger.warning("cached delta failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
         }
     }
 
@@ -1556,7 +1580,12 @@ final class AppStore: ObservableObject {
         guard !incoming.isEmpty else { return }
         let existingIDs = Set(events.map(\.id))
         let incomingEvents = timelineEvents(from: incoming)
-        events.append(contentsOf: incomingEvents.filter { !existingIDs.contains($0.id) })
+        let newEvents = incomingEvents.filter { !existingIDs.contains($0.id) }
+        guard !newEvents.isEmpty else {
+            latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
+            return
+        }
+        events.append(contentsOf: newEvents)
         events.sort { $0.seq < $1.seq }
         if events.count > maxLoadedTimelineEvents {
             let overflow = events.count - maxLoadedTimelineEvents
