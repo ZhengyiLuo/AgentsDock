@@ -258,7 +258,7 @@ struct TimelineView: View {
     private func beginInitialTimelineMask() {
         initialTimelineRevealRevision += 1
         maskedSessionID = store.selectedSessionID
-        isInitialTimelineMasked = store.selectedSessionID != nil
+        isInitialTimelineMasked = store.selectedSessionID != nil && !hasWarmSelectedTimeline
     }
 
     private func settleInitialTimelinePosition(_ proxy: ScrollViewProxy) {
@@ -268,6 +268,12 @@ struct TimelineView: View {
             return
         }
         let hasWarmSelectedTimeline = store.loadedSessionID == sessionID && !store.displayEvents.isEmpty
+        if hasWarmSelectedTimeline {
+            withTransaction(noAnimationTransaction) {
+                isInitialTimelineMasked = false
+            }
+            return
+        }
         guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }
         let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
         guard canSettle else { return }
@@ -319,6 +325,10 @@ struct TimelineView: View {
 
     private var shouldFollowBottomRequest: Bool {
         isAtBottom || isNearBottom || store.selectedTimelineAtBottom || store.isRunning
+    }
+
+    private var hasWarmSelectedTimeline: Bool {
+        store.loadedSessionID == store.selectedSessionID && !store.displayEvents.isEmpty
     }
 
     private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {

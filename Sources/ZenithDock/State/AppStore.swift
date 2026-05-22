@@ -75,7 +75,7 @@ final class AppStore: ObservableObject {
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
-    private let maxMemoryCachedChats = 8
+    private let maxMemoryCachedChats = 32
 
     private struct CachedChat: Codable, Sendable {
         var session: ZSession
@@ -635,9 +635,17 @@ final class AppStore: ObservableObject {
     func select(sessionID: String) async {
         if loadingSessionID == sessionID {
             selectedSessionID = sessionID
+            if loadedSessionID != sessionID, let cached = memoryCachedChat(sessionID) {
+                applyCachedChat(cached)
+                status = "Loaded memory chat"
+                requestScrollToBottom(immediate: true)
+            }
             markSessionRead(sessionID)
             syncSelectedRunningState()
             return
+        }
+        if selectedSessionID != sessionID {
+            rememberSelectedChatInMemory()
         }
         selectionGeneration += 1
         let generation = selectionGeneration
@@ -1741,6 +1749,23 @@ final class AppStore: ObservableObject {
     private func touchMemoryChatCache(_ key: String) {
         memoryChatCacheOrder.removeAll { $0 == key }
         memoryChatCacheOrder.append(key)
+    }
+
+    private func rememberSelectedChatInMemory() {
+        guard let session = selectedSession, !events.isEmpty else { return }
+        let eventsToCache = events
+            .filter { $0.type != "raw_event" }
+            .suffix(maxCachedTimelineEvents)
+            .map(sanitizedForCache)
+        guard !eventsToCache.isEmpty else { return }
+        let cached = CachedChat(
+            session: session,
+            events: Array(eventsToCache),
+            sessionFiles: sessionFiles.isEmpty ? files(from: events) : sessionFiles,
+            omittedHistoryEventCount: omittedHistoryEventCount,
+            cachedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        rememberChatCache(cached)
     }
 
     nonisolated private static func loadCachedChat(from url: URL) async -> CachedChat? {

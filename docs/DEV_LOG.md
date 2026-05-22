@@ -2793,3 +2793,29 @@ Changes:
   scrolling no longer publishes every pixel into SwiftUI.
 - Added a guardrail so the timeline does not regress to geometry-preference
   scroll tracking.
+
+### Warm Chat Opens Without Spinner
+
+User issue:
+
+- Re-opening a chat that had been opened a few minutes earlier could still show
+  `Opening latest messages` for a long time, even when there were no new
+  messages.
+
+Root cause:
+
+- The Mac memory chat cache was only eight chats and depended on the delayed
+  disk-cache write path. A recently viewed chat could miss the warm-memory path
+  if the delayed write was canceled or the tiny cache was churned.
+- The timeline also always armed the opening mask on selection changes, then
+  waited for later settle logic to remove it.
+
+Changes:
+
+- Mac now snapshots the currently selected chat into memory before switching
+  away, independent of the delayed disk-cache writer.
+- Increased Mac warm chat cache capacity from 8 to 32 chats.
+- The Mac timeline no longer arms the opening mask when the selected chat
+  already has warm display events, and it drops the mask immediately if warm
+  cache becomes available during the selection refresh.
+- Added guardrails for warm-cache selection behavior.
