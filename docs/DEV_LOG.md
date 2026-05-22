@@ -2677,3 +2677,31 @@ Changes:
   app is following a live stream.
 - Added guardrails for capped live-follow row growth and bottom-scroll history
   suppression.
+
+### Agent Tool Error Recovery Prompt
+
+User issue:
+
+- Agents were often stopping after an inspection command failed, especially
+  malformed JSON reads or using the wrong command for a file.
+
+Investigation:
+
+- The deployed `supersonic00` server did not contain an explicit "stop on
+  error" system prompt.
+- The injected Claude/Codex prompt also did not tell agents how to recover from
+  ordinary tool failures, so provider defaults could treat a failed inspection
+  as enough reason to answer early.
+
+Changes:
+
+- Added explicit recovery instructions to both the Claude system prompt and the
+  Codex prompt prelude.
+- Failed commands, JSON parse mistakes, missing files, and missing Python
+  aliases are now described as debugging signals, not stopping conditions.
+- Agents are told to retry with safer alternatives such as `python3`, `jq`,
+  `python3 -m json.tool`, `rg`, `sed`, `head`, `tail`, or a small script before
+  declaring a real blocker.
+- The recovery rule now explicitly says non-intrusive fixes should be attempted
+  directly, while destructive removals, broad overwrites, missing credentials,
+  or approval-sensitive actions remain stop-and-ask boundaries.
