@@ -2751,3 +2751,20 @@ Changes:
   its current text instead of relying on a live SwiftUI draft binding.
 - Updated guardrails to forbid reintroducing scheduled full-draft sync from the
   composer.
+
+### Less Aggressive Message Folding
+
+User issue:
+
+- Normal long messages were folding a little too early, making the timeline feel
+  over-compressed.
+
+Changes:
+
+- Increased Mac folding limits by 1.5x:
+  - context digests: 1,200 -> 1,800 characters and 12 -> 18 lines
+  - normal messages: 2,800 -> 4,200 characters and 32 -> 48 lines
+- Increased iOS/iPadOS folding limits by 1.5x:
+  - context digests: 900 -> 1,350 characters and 10 -> 15 lines
+  - normal messages: 1,200 -> 1,800 characters and 12 -> 18 lines
+- Added a guardrail so these thresholds do not quietly regress.

@@ -276,11 +276,11 @@ struct MobileMessageBubble: View {
     }
 
     private var collapsedCharacterLimit: Int {
-        isContextDigest ? 900 : 1_200
+        isContextDigest ? 1_350 : 1_800
     }
 
     private var collapsedLineLimit: Int {
-        isContextDigest ? 10 : 12
+        isContextDigest ? 15 : 18
     }
 
     private var lineCount: Int {

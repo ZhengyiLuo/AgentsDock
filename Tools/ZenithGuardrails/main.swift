@@ -138,6 +138,17 @@ func checkCodeBlockCopyUsesFullText() throws {
     try assert(markdown.contains("CodeHighlighter.highlight(visibleDisplayText"), "Mac code block rendering should still use the visible truncated display text")
 }
 
+func checkMessageFoldingThresholds() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
+
+    try assert(macEvents.contains("isContextDigest ? 1_800 : 4_200"), "Mac message folding character limits should allow 1.5x more text before folding")
+    try assert(macEvents.contains("isContextDigest ? 18 : 48"), "Mac message folding line limits should allow 1.5x more lines before folding")
+    try assert(mobileEvents.contains("isContextDigest ? 1_350 : 1_800"), "iOS message folding character limits should allow 1.5x more text before folding")
+    try assert(mobileEvents.contains("isContextDigest ? 15 : 18"), "iOS message folding line limits should allow 1.5x more lines before folding")
+}
+
 func checkArchiveSessionBehavior() throws {
     let sessionData = Data(#"{"id":"sess","title":"Archived","backend":"codex","archived":true,"sort_order":10}"#.utf8)
     let session = try JSONDecoder().decode(ZSession.self, from: sessionData)
@@ -467,6 +478,7 @@ do {
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
     try checkCodeBlockCopyUsesFullText()
+    try checkMessageFoldingThresholds()
     try checkArchiveSessionBehavior()
     try checkMobileDoesNotAutoSelectFirstChat()
     try checkTimelineRevealWaitsForLatestSnapshot()

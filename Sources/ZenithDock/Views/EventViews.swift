@@ -412,11 +412,11 @@ struct MessageBubble: View {
     }
 
     private var collapsedCharacterLimit: Int {
-        isContextDigest ? 1_200 : 2_800
+        isContextDigest ? 1_800 : 4_200
     }
 
     private var collapsedLineLimit: Int {
-        isContextDigest ? 12 : 32
+        isContextDigest ? 18 : 48
     }
 
     private var lineCount: Int {
