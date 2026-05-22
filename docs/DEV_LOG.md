@@ -16,6 +16,32 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-21 Follow-Up - TestFlight Build 35 Upload
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `34` to `35` for iOS/iPadOS, macOS,
+  and `ZenithCore`.
+- Uploaded build `35` for both TestFlight platforms. This build includes the
+  cached-open probe fix: cached chats only show the "Opening latest messages"
+  overlay when the server proves there are newer events.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the verified
+  build-35 macOS archive because the normal Release product cache still showed
+  an old local `CFBundleVersion`.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-35.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-35.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-35 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockIOS`.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-35.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-35.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-35 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Verified both archives have `CFBundleVersion = 35` and
+  `ITSAppUsesNonExemptEncryption = false`.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-21 Follow-Up - Build 34 Cached Open Probe
 
 Problem:
