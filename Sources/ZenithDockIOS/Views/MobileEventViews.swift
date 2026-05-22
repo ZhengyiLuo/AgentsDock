@@ -897,6 +897,7 @@ struct MobileArtifactView: View {
                         Label(file.size.map(mobileByteString) ?? "Video", systemImage: "film")
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 8)
+                        MobileArtifactShareButton(file: file, url: url)
                         Button {
                             fullscreenVideo = true
                         } label: {
@@ -912,6 +913,8 @@ struct MobileArtifactView: View {
                     Label("Open file", systemImage: "arrow.up.right.square")
                 }
                 .font(.caption.weight(.semibold))
+                MobileArtifactShareButton(file: file, url: url)
+                    .font(.caption.weight(.semibold))
             }
         }
         .mobileVideoFullscreen(isPresented: $fullscreenVideo, url: url, title: file.title ?? file.filename)
@@ -1032,6 +1035,72 @@ private func makeMobileTimelineVideoThumbnailData(from url: URL) throws -> Data 
     return data
 }
 
+struct MobileArtifactShareButton: View {
+    let file: ZFile
+    let url: URL
+    var title: String = "Save"
+
+    @State private var isPreparing = false
+    @State private var shareURL: MobileShareFile?
+    @State private var errorText: String?
+
+    var body: some View {
+        Button {
+            Task { await prepareShare() }
+        } label: {
+            Label(isPreparing ? "Preparing" : title, systemImage: "square.and.arrow.down")
+        }
+        .disabled(isPreparing)
+        .sheet(item: $shareURL) { item in
+            MobileActivityView(activityItems: [item.url])
+        }
+        .alert("Download Failed", isPresented: errorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorText ?? "Could not prepare this file for sharing.")
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding {
+            errorText != nil
+        } set: { newValue in
+            if !newValue {
+                errorText = nil
+            }
+        }
+    }
+
+    @MainActor
+    private func prepareShare() async {
+        isPreparing = true
+        defer { isPreparing = false }
+        do {
+            let localURL = try await MobileArtifactDragFileCache.shared.localFile(for: file, remoteURL: url)
+            shareURL = MobileShareFile(url: localURL)
+        } catch {
+            errorText = "Could not download \(file.filename)."
+        }
+    }
+}
+
+struct MobileShareFile: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
+
+#if canImport(UIKit)
+struct MobileActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
+
 private struct MobileUploadedFileLabel: View {
     let file: ZFile
     let url: URL
@@ -1086,7 +1155,7 @@ enum MobileArtifactDragItemProvider {
     }
 }
 
-private actor MobileArtifactDragFileCache {
+actor MobileArtifactDragFileCache {
     static let shared = MobileArtifactDragFileCache()
 
     private var cached: [String: URL] = [:]

@@ -16,6 +16,28 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - iOS Video Download / Save
+
+Problem:
+
+- iOS video artifacts only had open/play links. Opening the authenticated video
+  URL did not reliably give the user a native "Save Video" / file download path.
+
+Change:
+
+- Added `MobileArtifactShareButton`, which downloads the remote artifact URL to a
+  local cached file first, then opens `UIActivityViewController` with that local
+  file.
+- Added save/share controls to timeline artifact videos and the iOS/iPadOS
+  Files & Videos panel.
+- Reused the existing artifact download cache so drag-out and save/share use the
+  same local-file preparation path.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+
 ## 2026-05-22 Follow-Up - TestFlight Build 38
 
 Change:

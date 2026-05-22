@@ -519,6 +519,18 @@ func checkPromptImageAttachments() throws {
     try assert(composer.contains("ZenithDockPasteboardImages"), "Mac composer must persist pasted images before upload")
 }
 
+func checkMobileVideoDownloads() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
+    let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+
+    try assert(mobileEvents.contains("struct MobileArtifactShareButton"), "iOS must expose a native artifact download/share button")
+    try assert(mobileEvents.contains("MobileActivityView(activityItems: [item.url])"), "iOS download button must open the native activity sheet with a local file")
+    try assert(mobileEvents.contains("MobileArtifactDragFileCache.shared.localFile"), "iOS download must cache remote videos/files locally before sharing")
+    try assert(mobileEvents.contains("struct MobileActivityView: UIViewControllerRepresentable"), "iOS download must use UIActivityViewController")
+    try assert(mobileOptions.contains("MobileArtifactShareButton(file: file, url: url"), "iOS files/videos panel must expose download/share controls")
+}
+
 func checkTmuxSubmitterVisualizer() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
@@ -582,6 +594,7 @@ do {
     try checkLiveTimelineAutoFollow()
     try checkQueuedRemovalDisappears()
     try checkPromptImageAttachments()
+    try checkMobileVideoDownloads()
     try checkTmuxSubmitterVisualizer()
     try checkExportCompliancePlists()
     print("ZenithGuardrails passed")

@@ -953,6 +953,9 @@ private struct MobileVideoGridCell: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
+                MobileArtifactShareButton(file: file, url: url, title: "")
+                    .labelStyle(.iconOnly)
+                    .font(.caption)
                 Link(destination: url) {
                     Image(systemName: "arrow.up.right.square")
                 }
@@ -1098,6 +1101,9 @@ private struct MobileChatFileRow: View {
             }
             Spacer(minLength: 8)
             if isVideo {
+                MobileArtifactShareButton(file: file, url: url, title: "")
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("Download file")
                 Button {
                     fullscreenVideo = true
                 } label: {
@@ -1105,6 +1111,11 @@ private struct MobileChatFileRow: View {
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Open video fullscreen")
+            }
+            if !isVideo {
+                MobileArtifactShareButton(file: file, url: url, title: "")
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("Download file")
             }
             Link(destination: url) {
                 Image(systemName: "arrow.up.right.square")
