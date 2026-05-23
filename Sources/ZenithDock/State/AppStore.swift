@@ -72,6 +72,9 @@ final class AppStore: ObservableObject {
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
     private var pendingScrollRequest: Task<Void, Never>?
+    private var pendingStreamEvents: [ZEvent] = []
+    private var pendingStreamSessionID: String?
+    private var pendingStreamFlushTask: Task<Void, Never>?
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
@@ -81,6 +84,7 @@ final class AppStore: ObservableObject {
     private var sessionFilesNextOffset = 0
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
     private let maxMemoryCachedChats = 32
+    private let streamBackfillMaskThreshold = 18
 
     private struct CachedChat: Codable, Sendable {
         var session: ZSession
@@ -760,6 +764,10 @@ final class AppStore: ObservableObject {
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         webSocketSessionID = nil
+        pendingStreamFlushTask?.cancel()
+        pendingStreamFlushTask = nil
+        pendingStreamEvents.removeAll()
+        pendingStreamSessionID = nil
         socketLive = false
         status = loadedFromCache ? "Refreshing latest chat" : (serverReachable ? "Loading chat" : "Server offline")
         processSnapshot = nil
@@ -1645,11 +1653,11 @@ final class AppStore: ObservableObject {
                     }
                     if case .string(let text) = message, let data = text.data(using: .utf8) {
                         if let event = try? JSONDecoder().decode(ZEvent.self, from: data) {
-                            self.ingest(event)
+                            self.enqueueStreamEvent(event, sessionID: sessionID)
                         }
                     } else if case .data(let data) = message {
                         if let event = try? JSONDecoder().decode(ZEvent.self, from: data) {
-                            self.ingest(event)
+                            self.enqueueStreamEvent(event, sessionID: sessionID)
                         }
                     }
                     self.receiveNext(task: task, sessionID: sessionID)
@@ -1664,6 +1672,121 @@ final class AppStore: ObservableObject {
                     self.scheduleReconnect(sessionID: sessionID, failedTask: task)
                 }
             }
+        }
+    }
+
+    private func enqueueStreamEvent(_ event: ZEvent, sessionID: String) {
+        guard selectedSessionID == sessionID else { return }
+        if event.type == "raw_event", !showDebugEvents {
+            latestSeenSeq = max(latestSeenSeq, event.seq)
+            return
+        }
+        if events.contains(where: { $0.id == event.id }) ||
+            pendingStreamEvents.contains(where: { $0.id == event.id }) {
+            latestSeenSeq = max(latestSeenSeq, event.seq)
+            return
+        }
+        if pendingStreamSessionID != sessionID {
+            pendingStreamEvents.removeAll()
+            pendingStreamSessionID = sessionID
+            pendingStreamFlushTask?.cancel()
+            pendingStreamFlushTask = nil
+        }
+        pendingStreamEvents.append(event)
+        latestSeenSeq = max(latestSeenSeq, event.seq)
+        if pendingStreamEvents.count >= streamBackfillMaskThreshold {
+            isRefreshingCachedDelta = true
+            status = "Opening latest messages"
+        }
+        guard pendingStreamFlushTask == nil else { return }
+        pendingStreamFlushTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            self.flushPendingStreamEvents(sessionID: sessionID)
+        }
+    }
+
+    private func flushPendingStreamEvents(sessionID: String) {
+        pendingStreamFlushTask = nil
+        guard pendingStreamSessionID == sessionID,
+              !pendingStreamEvents.isEmpty else {
+            if isRefreshingCachedDelta {
+                isRefreshingCachedDelta = false
+                status = socketLive ? "Live" : "Server connected"
+            }
+            return
+        }
+        let buffered = pendingStreamEvents.sorted { $0.seq < $1.seq }
+        pendingStreamEvents.removeAll()
+        pendingStreamSessionID = nil
+        applyStreamEvents(buffered)
+        if isRefreshingCachedDelta {
+            isRefreshingCachedDelta = false
+            status = socketLive ? "Live" : "Server connected"
+        }
+    }
+
+    private func applyStreamEvents(_ incoming: [ZEvent]) {
+        guard !incoming.isEmpty else { return }
+        let existingIDs = Set(events.map(\.id))
+        let newEvents = incoming.filter { !existingIDs.contains($0.id) }
+        guard !newEvents.isEmpty else {
+            latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
+            return
+        }
+        events.append(contentsOf: newEvents)
+        events.sort { $0.seq < $1.seq }
+        if events.count > maxLoadedTimelineEvents {
+            let overflow = events.count - maxLoadedTimelineEvents
+            events.removeFirst(overflow)
+            omittedHistoryEventCount += overflow
+        }
+        latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
+        var shouldSaveCache = false
+        var shouldScrollToBottom = false
+        for event in newEvents {
+            if isAgentVisibleMessage(event) {
+                if event.session_id != selectedSessionID {
+                    markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
+                } else if !selectedTimelineAtBottom {
+                    markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
+                } else {
+                    setLastReadAgentSeq(event.seq, for: event.session_id)
+                }
+            }
+            if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
+                AppLogger.info("event session=\(event.session_id) seq=\(event.seq) type=\(event.type)")
+            }
+            if event.type == "turn_started" {
+                activeSessionIDs.insert(event.session_id)
+                syncSelectedRunningState()
+            }
+            if event.type == "turn_finished" || event.type == "error" || event.type == "turn_stopped" {
+                activeSessionIDs.remove(event.session_id)
+                syncSelectedRunningState()
+                if event.session_id == selectedSessionID {
+                    processSnapshot = nil
+                    processLogTail = nil
+                }
+            }
+            if let file = event.file {
+                addPendingUpload(file)
+                upsertSessionFile(file)
+            }
+            if let artifact = event.artifact {
+                upsertSessionFile(artifact)
+            }
+            if event.type != "raw_event" {
+                shouldSaveCache = true
+            }
+            shouldScrollToBottom = true
+        }
+        rebuildDisplayEvents()
+        if shouldSaveCache {
+            saveSelectedChatCache()
+        }
+        if shouldScrollToBottom {
+            requestScrollToBottom()
         }
     }
 

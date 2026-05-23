@@ -3521,3 +3521,23 @@ Changes:
 - Replaced the plain Archived `Section` headers with custom chevron headers.
 - Added guardrails so Archived cannot regress to a permanently expanded
   section.
+
+### Batched Stream Catch-Up
+
+User issue:
+
+- Opening a stale chat could visibly “fly through” many websocket catch-up
+  events, with the inspector event count climbing one event at a time.
+
+Root cause:
+
+- Websocket catch-up events were applied immediately as individual mutations.
+  That is fine for live typing, but terrible for a large missed-history burst.
+
+Changes:
+
+- Mac now buffers a short websocket burst and applies it as one event batch.
+- Large catch-up bursts turn on the existing opening mask until the batch is
+  applied, so real backfill looks like loading instead of visible timeline
+  churn.
+- Added guardrails for the buffered catch-up path.

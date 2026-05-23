@@ -499,6 +499,7 @@ func checkTimelineHistoryPaging() throws {
 
 func checkLiveTimelineAutoFollow() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
 
@@ -508,6 +509,9 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(macTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "Mac live-follow must not expand the rendered window to the full chat history")
     try assert(macTimeline.contains("historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)"), "Mac programmatic bottom scrolls must suppress older-history autoload")
     try assert(macTimeline.contains("store.markSelectedSessionRead(force: true)"), "Mac auto-follow must clear selected unread state intentionally")
+    try assert(macStore.contains("pendingStreamEvents"), "Mac streaming catch-up must buffer burst events instead of publishing one-by-one flyby")
+    try assert(macStore.contains("streamBackfillMaskThreshold"), "Mac streaming catch-up must mask large event bursts")
+    try assert(macStore.contains("applyStreamEvents(buffered)"), "Mac streaming catch-up must apply buffered events as one batch")
     try assert(mobileTimeline.contains("shouldAutoFollowLiveEvent(after:"), "iOS timeline must auto-follow newer selected-chat events")
     try assert(mobileTimeline.contains("isAtBottom || store.isRunning"), "iOS live-follow must keep active selected chats pinned to the newest stream")
     try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
