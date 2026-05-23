@@ -19,6 +19,24 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-22 Follow-Up - TestFlight Build 41
+
+Release checklist:
+
+- Synced `server/agent_server.py` into `/Users/zen/agi/ZenithbotServer`.
+- Committed and pushed `ZhengyiLuo/ZenithBotServer`:
+  `8a3492a Update server contract for TestFlight 41`.
+- Deployed/restarted the active server with `./server/deploy.sh sonic`.
+- Confirmed `zenithbot-agent.service` was active and authenticated health
+  requests returned `200`.
+- Bumped `CURRENT_PROJECT_VERSION` from `40` to `41`.
+- `swift run ZenithGuardrails` passed.
+- `python3 -m py_compile server/agent_server.py` passed.
+- Uploaded iOS/iPadOS build 41 successfully: `Uploaded ZenithDockIOS`.
+- Uploaded macOS build 41 successfully: `Uploaded ZenithDockMac`.
+- Refreshed local Mac app at `dist/ZenithDock.app`; verified codesign and
+  `CFBundleVersion = 41`.
+
 ## 2026-05-22 Follow-Up - Server/App Compatibility Gate
 
 Problem:
