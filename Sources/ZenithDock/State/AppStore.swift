@@ -2163,6 +2163,9 @@ final class AppStore: ObservableObject {
             return nil
         }
         if ns.domain == NSURLErrorDomain {
+            if isLocalNetworkPrivacyError(ns) {
+                return "macOS blocked ZenithDock from accessing the local network. Open System Settings > Privacy & Security > Local Network and enable ZenithDock, or use a reachable Tailscale endpoint."
+            }
             return "Cannot reach the ZenithDock agent server at \(serverURLString). The Mac internet may be fine; this means the app cannot reach the configured host or port 7850 right now."
         }
         if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
@@ -2174,6 +2177,24 @@ final class AppStore: ObservableObject {
     private func isConnectionError(_ error: Error) -> Bool {
         let ns = error as NSError
         return ns.domain == NSURLErrorDomain && ns.code != NSURLErrorCancelled
+    }
+
+    private func isLocalNetworkPrivacyError(_ error: NSError) -> Bool {
+        guard error.code == NSURLErrorNotConnectedToInternet else { return false }
+        if let streamCode = error.userInfo["_kCFStreamErrorCodeKey"] as? Int, streamCode == 50 {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            if let streamCode = underlying.userInfo["_kCFStreamErrorCodeKey"] as? Int, streamCode == 50 {
+                return true
+            }
+            if let nested = underlying.userInfo[NSUnderlyingErrorKey] as? NSError,
+               let streamCode = nested.userInfo["_kCFStreamErrorCodeKey"] as? Int,
+               streamCode == 50 {
+                return true
+            }
+        }
+        return false
     }
 
     private func cleanServerURL() {

@@ -1485,12 +1485,33 @@ final class MobileAppStore: ObservableObject {
             if ns.code == NSURLErrorAppTransportSecurityRequiresSecureConnection {
                 return "iOS App Transport Security blocked HTTP to \(resolvedServerURLString) (-1022). Install the latest build with the ZenithDock ATS exception."
             }
+            if isLocalNetworkPrivacyError(ns) {
+                return "iOS blocked ZenithDock from accessing the local network. Enable ZenithDock in Settings > Privacy & Security > Local Network, or use a reachable Tailscale endpoint."
+            }
             return "Cannot reach \(resolvedServerURLString). \(ns.localizedDescription) (\(ns.code))"
         }
         if ns.domain == "ZenithDock.API" {
             return "Server replied \(ns.code) from \(resolvedServerURLString): \(ns.localizedDescription)"
         }
         return error.localizedDescription
+    }
+
+    private func isLocalNetworkPrivacyError(_ error: NSError) -> Bool {
+        guard error.code == NSURLErrorNotConnectedToInternet else { return false }
+        if let streamCode = error.userInfo["_kCFStreamErrorCodeKey"] as? Int, streamCode == 50 {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            if let streamCode = underlying.userInfo["_kCFStreamErrorCodeKey"] as? Int, streamCode == 50 {
+                return true
+            }
+            if let nested = underlying.userInfo[NSUnderlyingErrorKey] as? NSError,
+               let streamCode = nested.userInfo["_kCFStreamErrorCodeKey"] as? Int,
+               streamCode == 50 {
+                return true
+            }
+        }
+        return false
     }
 
     private static func serverParts(from value: String) -> (host: String, port: String) {

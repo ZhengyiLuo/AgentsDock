@@ -16,6 +16,32 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Local Network Permission Diagnosis
+
+Problem:
+
+- A Mac app instance showed the server as offline for `http://10.112.213.92:7850`
+  while Terminal could reach the server and the server process was listening.
+- macOS logs showed `Local network prohibited` with `NSURLErrorDomain -1009`
+  and CFStream code `50`, meaning the app was blocked by Local Network privacy.
+
+Change:
+
+- Added explicit Local Network privacy diagnostics on Mac and iOS for `-1009`
+  plus stream code `50`.
+- Confirmed the app bundles already include `NSLocalNetworkUsageDescription`,
+  `NSAllowsLocalNetworking`, and the network client entitlement.
+
+Verification:
+
+- `curl -i http://10.112.213.92:7850/api/health` reached the server and got
+  expected `401` without a token.
+- `nc -vz -w 5 10.112.213.92 7850`
+- `ssh sonic 'ss -ltnp | grep 7850'`
+- `swift run ZenithGuardrails`
+- Mac Release build and iOS simulator build.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; codesign passed.
+
 ## 2026-05-22 Follow-Up - Composer Queue Shelf And Queue Actions
 
 Problem:
