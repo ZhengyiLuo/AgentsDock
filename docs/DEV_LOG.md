@@ -33,6 +33,16 @@ Change:
   of loading sessions/jobs.
 - Added guardrails so the health contract check does not regress.
 
+Deploy/TestFlight:
+
+- Deployed the v2 server contract to `sonic` with `./server/deploy.sh sonic`;
+  service restarted and app health checks returned `200`.
+- Bumped `CURRENT_PROJECT_VERSION` from `39` to `40`.
+- Uploaded iOS/iPadOS build 40 successfully: `Uploaded ZenithDockIOS`.
+- Uploaded macOS build 40 successfully: `Uploaded ZenithDockMac`.
+- Refreshed local Mac app at `dist/ZenithDock.app`; verified codesign and
+  `CFBundleVersion = 40`.
+
 ## 2026-05-22 Follow-Up - TestFlight Build 39 Upload Blocked
 
 Changes:
