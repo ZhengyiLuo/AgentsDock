@@ -15,6 +15,9 @@ painful to rediscover later.
   `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
+- Every TestFlight release must also update the server side: deploy/restart the
+  active server and push the latest server repository/code to GitHub so app and
+  server contract versions do not drift.
 
 ## 2026-05-22 Follow-Up - Server/App Compatibility Gate
 
