@@ -46,6 +46,14 @@ Upload status:
   re-authentication or an API-key upload setup before TestFlight upload can
   complete.
 
+Follow-up:
+
+- Redeployed the current server to `sonic` with `./server/deploy.sh sonic` and
+  confirmed `zenithbot-agent.service` was active.
+- Retried TestFlight exports after Xcode credentials were restored.
+- Uploaded iOS/iPadOS build 39 successfully: `Uploaded ZenithDockIOS`.
+- Uploaded macOS build 39 successfully: `Uploaded ZenithDockMac`.
+
 ## 2026-05-22 Follow-Up - Claude Runtime Default Label
 
 Problem:
