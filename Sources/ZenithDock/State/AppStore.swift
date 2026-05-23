@@ -4,6 +4,7 @@ import ZenithCore
 
 private let defaultAgentServerURLString = "http://127.0.0.1:7850"
 private let fallbackServerCwd = "~"
+private let minimumAgentAPIContractVersion = 2
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -642,12 +643,17 @@ final class AppStore: ObservableObject {
         do {
             struct Response: Codable {
                 let ok: Bool
+                let api_contract_version: Int?
                 let server_identity: String?
                 let default_cwd: String?
                 let active: [String]
                 let jobs: Int?
             }
             let res: Response = try await api.get("/api/health")
+            guard isCompatibleAgentAPIContract(res.api_contract_version) else {
+                markServerUpgradeRequired(version: res.api_contract_version)
+                return
+            }
             serverReachable = res.ok
             adoptServerIdentity(res.server_identity)
             if let cleanCwd = res.default_cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cleanCwd.isEmpty {
@@ -675,6 +681,20 @@ final class AppStore: ObservableObject {
                 reportServerError(error)
             }
         }
+    }
+
+    private func isCompatibleAgentAPIContract(_ version: Int?) -> Bool {
+        (version ?? 0) >= minimumAgentAPIContractVersion
+    }
+
+    private func markServerUpgradeRequired(version: Int?) {
+        serverReachable = false
+        socketLive = false
+        activeSessionIDs = []
+        syncSelectedRunningState()
+        status = "Server upgrade required"
+        connectionProblemText = "Server upgrade required: app build needs agent API v\(minimumAgentAPIContractVersion), but this server reports v\(version ?? 0). Redeploy/restart the ZenithDock server."
+        AppLogger.warning("server upgrade required contract=\(version ?? 0) required=\(minimumAgentAPIContractVersion)")
     }
 
     func refreshSessions(showErrors: Bool = true) async {

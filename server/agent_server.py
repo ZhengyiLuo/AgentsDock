@@ -83,6 +83,7 @@ MAX_HANDOFF_DIGEST_CHARS = int(os.environ.get("ZENITHBOT_HANDOFF_DIGEST_CHARS", 
 DEFAULT_SESSION_EVENT_LIMIT = int(os.environ.get("ZENITHBOT_SESSION_EVENT_LIMIT", "100"))
 MAX_EVENT_RESPONSE_LIMIT = int(os.environ.get("ZENITHBOT_MAX_EVENT_RESPONSE_LIMIT", "1000"))
 AGENT_TOKEN = os.environ.get("ZENITHDOCK_AGENT_TOKEN") or os.environ.get("ZENITHBOT_AGENT_TOKEN") or ""
+API_CONTRACT_VERSION = 2
 SESSION_ORDER_STEP = 1000.0
 
 SYSTEM_PROMPT = """\
@@ -3863,6 +3864,7 @@ async def health() -> dict[str, Any]:
     pressure = host_pressure_snapshot()
     return {
         "ok": True,
+        "api_contract_version": API_CONTRACT_VERSION,
         "server_identity": server_identity(),
         "state_dir": str(STATE_DIR),
         "default_backend": DEFAULT_BACKEND,

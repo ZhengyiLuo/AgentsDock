@@ -16,6 +16,23 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Server/App Compatibility Gate
+
+Problem:
+
+- The app and server now share behavior contracts such as `server_identity`.
+  If the app connects to an older server, it can look online while read-state
+  and cache behavior are subtly wrong.
+
+Change:
+
+- Server `/api/health` now reports `api_contract_version`.
+- Mac and iOS/iPadOS require agent API contract v2.
+- If the server omits the version or reports an older value, the app marks the
+  server offline and shows an inline `Server upgrade required` message instead
+  of loading sessions/jobs.
+- Added guardrails so the health contract check does not regress.
+
 ## 2026-05-22 Follow-Up - TestFlight Build 39 Upload Blocked
 
 Changes:

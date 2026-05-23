@@ -304,12 +304,19 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
 
 func checkConnectionFailuresDoNotModal() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
 
     try assert(macStore.contains("@Published var connectionProblemText: String?"), "Mac store must keep connection failures as inline state")
     try assert(macStore.contains("if isConnectionError(error)"), "Mac network failures must be separated from blocking alerts")
     try assert(macStore.contains("connectionProblemText = message"), "Mac connection failure should populate inline connection text")
     try assert(macStore.contains("} else {\n            return\n        }"), "Mac refresh should not keep loading sessions/jobs after health is offline")
+    try assert(server.contains("\"api_contract_version\": API_CONTRACT_VERSION"), "Server health must expose API contract version")
+    try assert(macStore.contains("minimumAgentAPIContractVersion"), "Mac app must define a minimum server API contract")
+    try assert(macStore.contains("markServerUpgradeRequired(version:"), "Mac app must show server-upgrade-required state")
+    try assert(mobileStore.contains("minimumAgentAPIContractVersion"), "iOS app must define a minimum server API contract")
+    try assert(mobileStore.contains("markServerUpgradeRequired(version:"), "iOS app must show server-upgrade-required state")
 }
 
 func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
