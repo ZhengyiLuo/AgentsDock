@@ -3565,3 +3565,12 @@ Changes:
 - Mac migrates existing URL-scoped read state and disk chat cache into the
   server-identity namespace the first time the identity is learned.
 - Added guardrails for the identity-based namespace path.
+
+Follow-up deployment:
+
+- Deployed the updated `server/agent_server.py` to `sonic` with
+  `./server/deploy.sh sonic`.
+- Restarted `zenithbot-agent.service`; `systemctl --user is-active` reported
+  `active`.
+- Unauthenticated local health now returns `401`, and service logs show
+  authenticated app health/session requests returning `200`.
