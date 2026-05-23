@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
@@ -221,6 +222,19 @@ def existing_cwd(requested: str | None) -> str:
         if path.is_dir():
             return str(path)
     return "/tmp"
+
+
+def server_identity() -> str:
+    machine = ""
+    for path in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
+        with suppress(Exception):
+            machine = path.read_text(encoding="utf-8").strip()
+            if machine:
+                break
+    if not machine:
+        machine = os.uname().nodename
+    payload = f"{machine}|{STATE_DIR.resolve()}".encode("utf-8", errors="ignore")
+    return hashlib.sha256(payload).hexdigest()[:24]
 
 
 def ensure_dirs(session_id: str | None = None) -> None:
@@ -3849,6 +3863,7 @@ async def health() -> dict[str, Any]:
     pressure = host_pressure_snapshot()
     return {
         "ok": True,
+        "server_identity": server_identity(),
         "state_dir": str(STATE_DIR),
         "default_backend": DEFAULT_BACKEND,
         "default_cwd": existing_cwd(DEFAULT_CWD),

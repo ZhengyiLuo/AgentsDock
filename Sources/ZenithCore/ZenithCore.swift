@@ -281,6 +281,10 @@ public enum ZEndpointCache {
         safeComponent(ZenithServerURL.normalized(serverURL, default: defaultValue))
     }
 
+    public static func namespace(serverIdentity: String) -> String {
+        "server_\(safeComponent(serverIdentity))"
+    }
+
     public static func key(serverURL: String, sessionID: String, default defaultValue: String) -> String {
         "\(namespace(serverURL: serverURL, default: defaultValue))|\(sessionID)"
     }

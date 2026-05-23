@@ -3541,3 +3541,27 @@ Changes:
   applied, so real backfill looks like loading instead of visible timeline
   churn.
 - Added guardrails for the buffered catch-up path.
+
+### Server Identity For Local State
+
+User issue:
+
+- The unread/new-agent-message tag could misfire when the same agent server was
+  reached through different URLs.
+
+Root cause:
+
+- Local read state and chat cache were persisted locally, but the namespace was
+  the normalized URL. That prevented cloned servers from colliding, but treated
+  one server reached through LAN/Tailscale/hostname URLs as separate local
+  histories.
+
+Changes:
+
+- The server health response now includes an opaque `server_identity` derived
+  from machine identity and agent state directory.
+- Mac and iOS/iPadOS adopt that identity after health succeeds and use it for
+  read-state/cache namespaces. URL namespace remains the pre-health fallback.
+- Mac migrates existing URL-scoped read state and disk chat cache into the
+  server-identity namespace the first time the identity is learned.
+- Added guardrails for the identity-based namespace path.

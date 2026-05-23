@@ -60,10 +60,21 @@ func checkEndpointCacheKeysAreServerScoped() throws {
     let fallback = "http://127.0.0.1:7850"
     let first = ZEndpointCache.key(serverURL: "http://100.88.206.6:7850", sessionID: sessionID, default: fallback)
     let second = ZEndpointCache.key(serverURL: "100.73.184.23:7850/api/health", sessionID: sessionID, default: fallback)
+    let identity = ZEndpointCache.namespace(serverIdentity: "abc123")
 
     try assert(first != second, "cloned servers with the same session ID must not share chat cache keys")
     try assert(first.hasSuffix("|\(sessionID)"), "cache key should preserve session ID suffix")
     try assert(second == "http___100_73_184_23_7850|\(sessionID)", "cache key should normalize host and strip health path")
+    try assert(identity == "server_abc123", "server identity namespaces must be stable and URL independent")
+
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    try assert(server.contains("\"server_identity\": server_identity()"), "Health endpoint must expose a stable opaque server identity")
+    try assert(macStore.contains("adoptServerIdentity(res.server_identity)"), "Mac app must adopt server identity from health")
+    try assert(macStore.contains("migrateLocalServerState(from: oldNamespace, to: newNamespace)"), "Mac app must migrate URL-scoped local state to server-identity scoped state")
+    try assert(mobileStore.contains("adoptServerIdentity(res.server_identity)"), "iOS app must adopt server identity from health")
 }
 
 func checkRuntimeDefaultLabels() throws {

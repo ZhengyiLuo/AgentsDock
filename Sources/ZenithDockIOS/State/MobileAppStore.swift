@@ -53,6 +53,7 @@ final class MobileAppStore: ObservableObject {
     private var memoryChatCacheOrder: [String] = []
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
+    private var serverIdentity: String?
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
     private struct CachedChat {
@@ -82,6 +83,7 @@ final class MobileAppStore: ObservableObject {
             serverPort = parts.port
         }
         serverURLString = effectiveServerAddress
+        serverIdentity = Self.loadServerIdentity(for: serverURLString)
         lastReadAgentSeqBySessionID = loadReadState()
     }
 
@@ -355,7 +357,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private var readStateDefaultsKey: String {
-        "ZenithDock.lastReadAgentSeq.\(ZEndpointCache.namespace(serverURL: effectiveServerAddress, default: defaultAgentServerURLString))"
+        "ZenithDock.lastReadAgentSeq.\(serverCacheNamespace)"
     }
 
     private func loadReadState() -> [String: Int] {
@@ -437,10 +439,41 @@ final class MobileAppStore: ObservableObject {
         latestSeenSeq = 0
         memoryChatCache = [:]
         memoryChatCacheOrder = []
+        serverIdentity = Self.loadServerIdentity(for: effectiveServerAddress)
         lastReadAgentSeqBySessionID = loadReadState()
         unreadAgentSessionIDs = []
         manuallyUnreadSessionIDs = []
         await refresh(showErrors: true)
+    }
+
+    private func adoptServerIdentity(_ value: String?) {
+        guard let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !clean.isEmpty else { return }
+        let oldNamespace = serverCacheNamespace
+        guard serverIdentity != clean else {
+            saveServerIdentity(clean, for: effectiveServerAddress)
+            return
+        }
+        serverIdentity = clean
+        saveServerIdentity(clean, for: effectiveServerAddress)
+        let newNamespace = serverCacheNamespace
+        guard oldNamespace != newNamespace else { return }
+        migrateReadState(from: oldNamespace, to: newNamespace)
+        memoryChatCache = [:]
+        memoryChatCacheOrder = []
+        lastReadAgentSeqBySessionID = loadReadState()
+        unreadAgentSessionIDs = []
+        manuallyUnreadSessionIDs = []
+    }
+
+    private func migrateReadState(from oldNamespace: String, to newNamespace: String) {
+        guard oldNamespace != newNamespace else { return }
+        let oldKey = "ZenithDock.lastReadAgentSeq.\(oldNamespace)"
+        let newKey = "ZenithDock.lastReadAgentSeq.\(newNamespace)"
+        if UserDefaults.standard.data(forKey: newKey) == nil,
+           let oldData = UserDefaults.standard.data(forKey: oldKey) {
+            UserDefaults.standard.set(oldData, forKey: newKey)
+        }
     }
 
     func refresh(showErrors: Bool = true) async {
@@ -475,6 +508,7 @@ final class MobileAppStore: ObservableObject {
         do {
             struct Response: Codable {
                 let ok: Bool
+                let server_identity: String?
                 let default_cwd: String?
                 let active: [String]
             }
@@ -482,6 +516,7 @@ final class MobileAppStore: ObservableObject {
             if serverReachable != res.ok {
                 serverReachable = res.ok
             }
+            adoptServerIdentity(res.server_identity)
             if let cleanCwd = res.default_cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cleanCwd.isEmpty {
                 defaultCwd = cleanCwd
             }
@@ -1451,8 +1486,29 @@ final class MobileAppStore: ObservableObject {
         memoryChatCacheOrder.removeAll { $0 == key }
     }
 
+    private var serverCacheNamespace: String {
+        if let serverIdentity {
+            return ZEndpointCache.namespace(serverIdentity: serverIdentity)
+        }
+        return ZEndpointCache.namespace(serverURL: effectiveServerAddress, default: defaultAgentServerURLString)
+    }
+
     private func chatCacheKey(_ sessionID: String) -> String {
-        ZEndpointCache.key(serverURL: resolvedServerURLString, sessionID: sessionID, default: defaultAgentServerURLString)
+        "\(serverCacheNamespace)|\(sessionID)"
+    }
+
+    private static func loadServerIdentity(for serverURL: String) -> String? {
+        let namespace = ZEndpointCache.namespace(serverURL: serverURL, default: defaultAgentServerURLString)
+        return UserDefaults.standard.string(forKey: serverIdentityDefaultsKey(namespace: namespace))
+    }
+
+    private func saveServerIdentity(_ identity: String, for serverURL: String) {
+        let namespace = ZEndpointCache.namespace(serverURL: serverURL, default: defaultAgentServerURLString)
+        UserDefaults.standard.set(identity, forKey: Self.serverIdentityDefaultsKey(namespace: namespace))
+    }
+
+    private static func serverIdentityDefaultsKey(namespace: String) -> String {
+        "ZenithDock.serverIdentity.\(namespace)"
     }
 
     private func syncSelectedRunningState() {
