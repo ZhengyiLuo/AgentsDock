@@ -225,7 +225,7 @@ final class MobileAppStore: ObservableObject {
         })
         return events.filter { event in
             switch event.type {
-            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now":
+            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now", "turn_stopped":
                 return false
             case "turn_started":
                 return true

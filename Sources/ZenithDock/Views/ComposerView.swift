@@ -80,10 +80,12 @@ struct ComposerView: View {
             .onDrop(of: TimelineFileDrop.supportedTypes, isTargeted: $isAttachmentDropTargeted) { providers in
                 acceptAttachmentDrop(providers)
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(Theme.panel)
+        .fixedSize(horizontal: false, vertical: true)
         .onChange(of: store.selectedSessionID) {
             draftPrompt = ""
             editorHasVisibleText = false

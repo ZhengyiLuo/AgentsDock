@@ -512,10 +512,13 @@ func checkQueuedRemovalDisappears() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macStore.contains("var pendingQueuedEvents: [ZEvent]"), "Mac store must expose pending queued turns outside the timeline")
     try assert(macStore.contains("case \"turn_queued\":\n                return false"), "Mac timeline must keep pending queued turns out of the timeline")
     try assert(macStore.contains("\"turn_queue_updated\""), "Mac timeline must hide queue metadata events")
+    try assert(macStore.contains("\"turn_stopped\""), "Mac timeline must hide stop events from Send Now interruptions")
+    try assert(!macStore.contains("queuedTurnIDs.contains(queuedID)"), "Mac timeline must render queued turn_started prompts as user messages")
     try assert(macStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "Mac unqueue should remove the queued row locally after server success")
     try assert(macStore.contains("func runQueuedNow"), "Mac store must support interrupting the current run for a queued turn")
     try assert(macStore.contains("func moveQueued"), "Mac store must support queue reordering")
@@ -524,6 +527,8 @@ func checkQueuedRemovalDisappears() throws {
     try assert(mobileStore.contains("func runQueuedNow"), "iOS store must support interrupting the current run for a queued turn")
     try assert(mobileStore.contains("func moveQueued"), "iOS store must support queue reordering")
     try assert(mobileStore.contains("func updateQueued"), "iOS store must support editing queued prompts")
+    try assert(server.contains("RUN_NOW_TURNS"), "Server Send Now must reserve the exact queued item instead of relying on queue order")
+    try assert(server.contains("stop_turn(session_id, emit_event=False, schedule_queue=False)"), "Server Send Now must silently interrupt without appending visible stop cards")
 }
 
 func checkPromptImageAttachments() throws {

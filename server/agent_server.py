@@ -887,6 +887,7 @@ STOP_REQUESTS: set[str] = set()
 STOPPED_RUNS: set[str] = set()
 ACTIVE_LOCK = asyncio.Lock()
 QUEUED_TURNS: dict[str, deque[dict[str, Any]]] = {}
+RUN_NOW_TURNS: dict[str, dict[str, Any]] = {}
 QUEUE_LOCK = asyncio.Lock()
 
 LOG_PATH_SUFFIXES = {
@@ -1126,8 +1127,6 @@ async def run_queued_turn_now(session_id: str, queued_id: str) -> dict[str, Any]
                     selected = item
                     continue
                 kept.append(item)
-            if selected:
-                kept.appendleft(selected)
             if kept:
                 QUEUED_TURNS[session_id] = kept
                 remaining = len(kept)
@@ -1136,6 +1135,8 @@ async def run_queued_turn_now(session_id: str, queued_id: str) -> dict[str, Any]
                 remaining = 0
         else:
             remaining = 0
+        if selected is not None:
+            RUN_NOW_TURNS[session_id] = selected
 
     if selected is None:
         raise HTTPException(status_code=404, detail="queued turn not found")
@@ -1148,8 +1149,8 @@ async def run_queued_turn_now(session_id: str, queued_id: str) -> dict[str, Any]
         "message": "Queued message moved to the front and current turn interrupted.",
         "remaining": remaining,
     })
-    stop_result = await stop_turn(session_id)
-    if not stop_result.get("stopped"):
+    stop_result = await stop_turn(session_id, emit_event=False, schedule_queue=False)
+    if not stop_result.get("stopped") and not stop_result.get("pending"):
         schedule_next_queued_turn(session_id)
     return {"ok": True, "queued_id": queued_id, "interrupted": bool(stop_result.get("stopped"))}
 
@@ -1167,10 +1168,12 @@ async def retry_next_queued_turn_later(session_id: str, delay_seconds: int | Non
 
 async def start_next_queued_turn(session_id: str) -> None:
     async with QUEUE_LOCK:
-        queue = QUEUED_TURNS.get(session_id)
-        item = queue.popleft() if queue else None
-        if queue is not None and not queue:
-            QUEUED_TURNS.pop(session_id, None)
+        item = RUN_NOW_TURNS.pop(session_id, None)
+        if item is None:
+            queue = QUEUED_TURNS.get(session_id)
+            item = queue.popleft() if queue else None
+            if queue is not None and not queue:
+                QUEUED_TURNS.pop(session_id, None)
     if not item:
         return
 
@@ -4125,7 +4128,11 @@ async def post_run_queued_turn_now(session_id: str, queued_id: str) -> dict[str,
 
 
 @app.post("/api/sessions/{session_id}/stop")
-async def stop_turn(session_id: str) -> dict[str, Any]:
+async def stop_turn_endpoint(session_id: str) -> dict[str, Any]:
+    return await stop_turn(session_id)
+
+
+async def stop_turn(session_id: str, *, emit_event: bool = True, schedule_queue: bool = True) -> dict[str, Any]:
     async with ACTIVE_LOCK:
         active = ACTIVE.get(session_id)
         busy = session_id in BUSY_SESSIONS
@@ -4137,19 +4144,23 @@ async def stop_turn(session_id: str) -> dict[str, Any]:
             STOP_REQUESTS.add(session_id)
     if not active:
         if busy:
-            await append_event(session_id, "turn_stopped", {
-                "run_id": None,
-                "message": "Stop requested before the agent process was ready.",
-            })
+            if emit_event:
+                await append_event(session_id, "turn_stopped", {
+                    "run_id": None,
+                    "message": "Stop requested before the agent process was ready.",
+                })
             return {"ok": True, "stopped": True, "pending": True}
+        if schedule_queue:
+            schedule_next_queued_turn(session_id)
         return {"ok": True, "stopped": False}
     proc = active.get("proc") if active else None
     if proc:
         await terminate_process_tree(proc)
-    await append_event(session_id, "turn_stopped", {
-        "run_id": active.get("run_id") if active else None,
-        "backend": active.get("backend") if active else None,
-    })
+    if emit_event:
+        await append_event(session_id, "turn_stopped", {
+            "run_id": active.get("run_id") if active else None,
+            "backend": active.get("backend") if active else None,
+        })
     return {"ok": True, "stopped": True}
 
 

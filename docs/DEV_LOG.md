@@ -16,6 +16,43 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Atomic Send Now Queue Fix
+
+Problem:
+
+- `Send Now` appended a visible `turn_stopped` card, then relied on the generic
+  queue runner to pick the front queued item.
+- That made the user prompt disappear or show late because Mac filtered
+  queued `turn_started` events.
+- It could also run the wrong queued prompt if queue ordering/recovery changed
+  between the interrupt and the next queue drain.
+- The Mac composer was still vertically stretching, leaving a huge empty queue
+  area even after the rows were compact.
+
+Change:
+
+- Added a server-side `RUN_NOW_TURNS` slot so `Send Now` reserves the exact
+  queued item before interrupting the active run.
+- `Send Now` now calls the stop helper with `emit_event=False` and
+  `schedule_queue=False`; the normal run-finally path releases the active slot
+  and starts the reserved queued item first.
+- Mac and iOS hide `turn_stopped` from normal timelines.
+- Mac no longer filters queued `turn_started` prompts, so the actual sent
+  message appears as the user turn.
+- Pinned the Mac composer/card to intrinsic vertical size so the queue shelf
+  grows only with queued rows.
+- Added guardrails for exact run-now reservation, silent interrupt, hidden stop
+  events, and visible queued user prompts.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- Deployed `/home/zen/Zenithbot/scripts/agent_server.py` to Sonic and restarted
+  `zenithbot-agent`.
+- `swift run ZenithGuardrails`
+- Mac Release build and iOS simulator build.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; codesign passed.
+
 ## 2026-05-22 Follow-Up - Queue Send Now Deploy And Compact Shelf
 
 Problem:

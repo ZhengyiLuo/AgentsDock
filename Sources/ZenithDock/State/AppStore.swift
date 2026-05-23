@@ -281,19 +281,13 @@ final class AppStore: ObservableObject {
             }
             return event.run_id
         })
-        let queuedTurnIDs = Set(source.compactMap { event -> String? in
-            event.type == "turn_queued" ? event.queued_id : nil
-        })
         return source.filter { event in
             switch event.type {
-            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now":
+            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now", "turn_stopped":
                 return false
             case "turn_queued":
                 return false
             case "turn_started":
-                if let queuedID = event.queued_id, queuedTurnIDs.contains(queuedID) {
-                    return false
-                }
                 return true
             case "turn_finished":
                 guard hasVisibleText(event.result_text) else {
