@@ -203,15 +203,21 @@ func checkFolderSectionControls() throws {
 
     try assert(macStore.contains("folderOrder"), "Mac store must persist manual folder order")
     try assert(macStore.contains("collapsedFolders"), "Mac store must persist collapsed folder state")
+    try assert(macStore.contains("archivedSectionCollapsed"), "Mac store must persist archived section collapse state")
     try assert(macStore.contains("func moveFolder("), "Mac store must expose folder move controls")
     try assert(macStore.contains("func toggleFolderCollapsed"), "Mac store must expose folder collapse controls")
+    try assert(macStore.contains("func toggleArchivedSectionCollapsed"), "Mac store must expose archived section collapse controls")
     try assert(mobileStore.contains("folderOrder"), "iOS store must persist manual folder order")
     try assert(mobileStore.contains("collapsedFolders"), "iOS store must persist collapsed folder state")
+    try assert(mobileStore.contains("archivedSectionCollapsed"), "iOS store must persist archived section collapse state")
     try assert(mobileStore.contains("func moveFolder("), "iOS store must expose folder move controls")
+    try assert(mobileStore.contains("func toggleArchivedSectionCollapsed"), "iOS store must expose archived section collapse controls")
     try assert(macSidebar.contains("FolderSectionHeader"), "Mac sidebar must render custom folder section headers")
+    try assert(macSidebar.contains("ArchivedSectionHeader"), "Mac sidebar must render a collapsible archived section header")
     try assert(macSidebar.contains("Move Folder Up"), "Mac folder header must expose move-up")
     try assert(macSidebar.contains("Collapse Folder"), "Mac folder header must expose collapse")
     try assert(mobileSidebar.contains("MobileFolderSectionHeader"), "iOS sidebar must render custom folder section headers")
+    try assert(mobileSidebar.contains("MobileArchivedSectionHeader"), "iOS sidebar must render a collapsible archived section header")
     try assert(mobileSidebar.contains("Move Folder Down"), "iOS folder header must expose move-down")
 }
 

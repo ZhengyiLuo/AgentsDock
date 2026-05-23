@@ -3507,3 +3507,17 @@ Changes:
   typing does not split/count the full draft for every keypress.
 - Added guardrails against reintroducing whole-draft trimming on the keystroke
   path.
+
+### Archived Section Folding
+
+User issue:
+
+- The Archived sidebar section could not be folded even though custom folders
+  had collapse controls.
+
+Changes:
+
+- Added a persisted Archived-section collapsed state on Mac and iOS/iPadOS.
+- Replaced the plain Archived `Section` headers with custom chevron headers.
+- Added guardrails so Archived cannot regress to a permanently expanded
+  section.

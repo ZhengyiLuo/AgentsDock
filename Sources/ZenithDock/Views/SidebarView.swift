@@ -72,10 +72,14 @@ struct SidebarView: View {
                     }
                 }
                 if !store.archivedSessions.isEmpty {
-                    Section("Archived") {
-                        ForEach(store.archivedSessions) { session in
-                            sessionRow(session)
+                    Section {
+                        if !store.archivedSectionCollapsed {
+                            ForEach(store.archivedSessions) { session in
+                                sessionRow(session)
+                            }
                         }
+                    } header: {
+                        ArchivedSectionHeader()
                     }
                 }
             }
@@ -194,6 +198,38 @@ struct SidebarView: View {
                     Label("Delete Chat", systemImage: "trash")
                 }
             }
+    }
+}
+
+private struct ArchivedSectionHeader: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                store.toggleArchivedSectionCollapsed()
+            } label: {
+                Image(systemName: store.archivedSectionCollapsed ? "chevron.right" : "chevron.down")
+                    .frame(width: 12)
+            }
+            .buttonStyle(.plain)
+            .help(store.archivedSectionCollapsed ? "Expand archived chats" : "Collapse archived chats")
+
+            Text("Archived")
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 4)
+        }
+        .textCase(nil)
+        .contextMenu {
+            Button {
+                store.toggleArchivedSectionCollapsed()
+            } label: {
+                Label(
+                    store.archivedSectionCollapsed ? "Expand Archived" : "Collapse Archived",
+                    systemImage: store.archivedSectionCollapsed ? "chevron.right" : "chevron.down"
+                )
+            }
+        }
     }
 }
 

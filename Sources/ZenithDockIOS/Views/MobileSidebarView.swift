@@ -32,10 +32,14 @@ struct MobileSidebarView: View {
                 }
             }
             if !store.archivedSessions.isEmpty {
-                Section("Archived") {
-                    ForEach(store.archivedSessions) { session in
-                        sessionRow(session)
+                Section {
+                    if !store.archivedSectionCollapsed {
+                        ForEach(store.archivedSessions) { session in
+                            sessionRow(session)
+                        }
                     }
+                } header: {
+                    MobileArchivedSectionHeader()
                 }
             }
         }
@@ -170,6 +174,36 @@ struct MobileSidebarView: View {
                     Label("Delete Chat", systemImage: "trash")
                 }
             }
+    }
+}
+
+private struct MobileArchivedSectionHeader: View {
+    @EnvironmentObject private var store: MobileAppStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                store.toggleArchivedSectionCollapsed()
+            } label: {
+                Image(systemName: store.archivedSectionCollapsed ? "chevron.right" : "chevron.down")
+            }
+            .buttonStyle(.plain)
+
+            Text("Archived")
+                .font(.caption.weight(.semibold))
+            Spacer()
+        }
+        .textCase(nil)
+        .contextMenu {
+            Button {
+                store.toggleArchivedSectionCollapsed()
+            } label: {
+                Label(
+                    store.archivedSectionCollapsed ? "Expand Archived" : "Collapse Archived",
+                    systemImage: store.archivedSectionCollapsed ? "chevron.right" : "chevron.down"
+                )
+            }
+        }
     }
 }
 

@@ -56,6 +56,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var selectedTimelineAtBottom = true
     @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "folderOrder") ?? []
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
+    @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "archivedSectionCollapsed")
 
     private let initialSessionEventLimit = 480
     private let olderHistoryPageLimit = 160
@@ -155,6 +156,11 @@ final class AppStore: ObservableObject {
             collapsedFolders.insert(clean)
         }
         UserDefaults.standard.set(Array(collapsedFolders).sorted(), forKey: "collapsedFolders")
+    }
+
+    func toggleArchivedSectionCollapsed() {
+        archivedSectionCollapsed.toggle()
+        UserDefaults.standard.set(archivedSectionCollapsed, forKey: "archivedSectionCollapsed")
     }
 
     func moveFolder(_ folder: String, direction: String) {

@@ -38,6 +38,7 @@ final class MobileAppStore: ObservableObject {
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
     @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "mobileFolderOrder") ?? []
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "mobileCollapsedFolders") ?? [])
+    @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "mobileArchivedSectionCollapsed")
 
     private let initialEventLimit = 160
     private let olderHistoryPageLimit = 160
@@ -139,6 +140,11 @@ final class MobileAppStore: ObservableObject {
             collapsedFolders.insert(clean)
         }
         UserDefaults.standard.set(Array(collapsedFolders).sorted(), forKey: "mobileCollapsedFolders")
+    }
+
+    func toggleArchivedSectionCollapsed() {
+        archivedSectionCollapsed.toggle()
+        UserDefaults.standard.set(archivedSectionCollapsed, forKey: "mobileArchivedSectionCollapsed")
     }
 
     func moveFolder(_ folder: String, direction: String) {
