@@ -16,6 +16,36 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - TestFlight Build 39 Upload Blocked
+
+Changes:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `38` to `39` for the shared Xcode
+  project.
+- Prepared build 39 with the server-identity local-state namespace changes,
+  archived-section folding, and batched websocket catch-up behavior.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `python3 -m py_compile server/agent_server.py`
+- Archived iOS/iPadOS build 39:
+  `build/archives/ZenithDockIOS-39.xcarchive`
+- Archived macOS build 39:
+  `build/archives/ZenithDockMac-39.xcarchive`
+- Refreshed local Mac app at `dist/ZenithDock.app`; verified codesign and
+  `CFBundleVersion = 39`.
+
+Upload status:
+
+- iOS/iPadOS export/upload failed with Xcode account credentials error:
+  `missing Xcode-Token`.
+- macOS export/upload failed with the same Xcode account credentials error.
+- No App Store Connect API key was present under the repo or
+  `~/.appstoreconnect/private_keys`, so this machine needs Xcode account
+  re-authentication or an API-key upload setup before TestFlight upload can
+  complete.
+
 ## 2026-05-22 Follow-Up - Claude Runtime Default Label
 
 Problem:
