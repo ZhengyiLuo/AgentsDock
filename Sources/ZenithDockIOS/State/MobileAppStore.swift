@@ -205,7 +205,14 @@ final class MobileAppStore: ObservableObject {
     var pendingQueuedEvents: [ZEvent] {
         events
             .filter { isQueuedEventPending($0) }
-            .sorted { $0.seq < $1.seq }
+            .sorted {
+                let left = queuedPosition($0) ?? $0.position ?? $0.seq
+                let right = queuedPosition($1) ?? $1.position ?? $1.seq
+                if left != right {
+                    return left < right
+                }
+                return $0.seq < $1.seq
+            }
     }
 
     var displayEvents: [ZEvent] {
@@ -218,7 +225,7 @@ final class MobileAppStore: ObservableObject {
         })
         return events.filter { event in
             switch event.type {
-            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued":
+            case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now":
                 return false
             case "turn_started":
                 return true
@@ -234,6 +241,30 @@ final class MobileAppStore: ObservableObject {
                 return true
             }
         }
+    }
+
+    func queuedPrompt(for event: ZEvent) -> String {
+        guard let queuedID = event.queued_id else {
+            return event.prompt ?? "Queued message"
+        }
+        return events
+            .filter { $0.queued_id == queuedID && ($0.type == "turn_queue_updated" || $0.type == "turn_queue_run_now" || $0.type == "turn_queued") }
+            .sorted { $0.seq < $1.seq }
+            .last?.prompt ?? event.prompt ?? "Queued message"
+    }
+
+    func queuedPosition(_ event: ZEvent) -> Int? {
+        guard let queuedID = event.queued_id else { return event.position }
+        var position = event.position
+        for item in events where item.seq >= event.seq {
+            if item.queued_id == queuedID, let updated = item.position {
+                position = updated
+            }
+            if let found = item.positions?.first(where: { $0.queued_id == queuedID }) {
+                position = found.position
+            }
+        }
+        return position
     }
 
     func startLiveTracking() async {
@@ -957,6 +988,73 @@ final class MobileAppStore: ObservableObject {
             let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
             events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
             rememberSelectedChat()
+        } catch {
+            report(error)
+        }
+    }
+
+    func updateQueued(_ event: ZEvent, prompt: String) async {
+        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPrompt.isEmpty else { return }
+        struct Body: Codable {
+            let prompt: String
+        }
+        struct Response: Codable {
+            let ok: Bool
+            let queued_id: String
+        }
+        do {
+            let _: Response = try await api.patch("/api/sessions/\(event.session_id)/queue/\(queuedID)", body: Body(prompt: cleanPrompt))
+            if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == queuedID }) {
+                events[idx].prompt = cleanPrompt
+            }
+            rememberSelectedChat()
+        } catch {
+            report(error)
+        }
+    }
+
+    func moveQueued(_ event: ZEvent, direction: String) async {
+        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        struct Body: Codable {
+            let direction: String
+        }
+        struct Response: Codable {
+            let ok: Bool
+            let queued_id: String
+            let positions: [ZQueuePosition]?
+        }
+        do {
+            let res: Response = try await api.post("/api/sessions/\(event.session_id)/queue/\(queuedID)/move", body: Body(direction: direction))
+            if let positions = res.positions {
+                for position in positions {
+                    if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == position.queued_id }) {
+                        events[idx].position = position.position
+                    }
+                }
+            }
+            rememberSelectedChat()
+        } catch {
+            report(error)
+        }
+    }
+
+    func runQueuedNow(_ event: ZEvent) async {
+        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        struct Empty: Codable {}
+        struct Response: Codable {
+            let ok: Bool
+            let queued_id: String
+            let interrupted: Bool?
+        }
+        do {
+            let _: Response = try await api.post("/api/sessions/\(event.session_id)/queue/\(queuedID)/run-now", body: Empty())
+            if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == queuedID }) {
+                events[idx].position = 1
+            }
+            activeSessionIDs.insert(event.session_id)
+            syncSelectedRunningState()
         } catch {
             report(error)
         }

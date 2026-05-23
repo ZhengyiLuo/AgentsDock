@@ -546,6 +546,15 @@ public struct ZEvent: Codable, Identifiable, Hashable, Sendable {
     public var artifact: ZFile?
     public var job: ZJob?
     public var job_id: String?
+    public var direction: String?
+    public var positions: [ZQueuePosition]?
+}
+
+public struct ZQueuePosition: Codable, Identifiable, Hashable, Sendable {
+    public var queued_id: String
+    public var position: Int
+
+    public var id: String { queued_id }
 }
 
 public struct ZMarkdownLinkContext: Hashable, Sendable {

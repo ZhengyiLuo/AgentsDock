@@ -27,6 +27,10 @@ struct ComposerView: View {
                     }
                 }
 
+                if !store.pendingQueuedEvents.isEmpty {
+                    QueuedTurnShelf()
+                }
+
                 StablePromptEditor(
                     text: $draftPrompt,
                     isEditable: store.selectedSession != nil,
@@ -375,6 +379,161 @@ private struct ComposerActivityIndicator: View {
         }
         .foregroundStyle(backend == "codex" ? .orange : .blue)
         .help("\(backend.capitalized) is running. New sends will queue.")
+    }
+}
+
+private struct QueuedTurnShelf: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                Text("Queued \(store.pendingQueuedEvents.count)")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(alignment: .trailing, spacing: 6) {
+                    ForEach(store.pendingQueuedEvents) { event in
+                        QueuedTurnRow(event: event)
+                    }
+                }
+            }
+            .frame(maxHeight: 132)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+private struct QueuedTurnRow: View {
+    @EnvironmentObject private var store: AppStore
+    let event: ZEvent
+    @State private var editOpen = false
+    @State private var draft = ""
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.yellow)
+            Text(store.queuedPrompt(for: event))
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: 420, alignment: .leading)
+
+            Button {
+                Task { await store.runQueuedNow(event) }
+            } label: {
+                Label("Send Now", systemImage: "arrow.turn.down.right")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.borderless)
+            .help("Interrupt the current turn and send this queued message now")
+
+            Button {
+                Task { await store.moveQueued(event, direction: "up") }
+            } label: {
+                Image(systemName: "arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .help("Move queued message up")
+
+            Button {
+                Task { await store.moveQueued(event, direction: "down") }
+            } label: {
+                Image(systemName: "arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .help("Move queued message down")
+
+            Button {
+                Task { await store.unqueue(event) }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Remove from queue")
+
+            Menu {
+                Button("Edit Message") {
+                    draft = store.queuedPrompt(for: event)
+                    editOpen = true
+                }
+                Button("Send Now") {
+                    Task { await store.runQueuedNow(event) }
+                }
+                Divider()
+                Button("Move Up") {
+                    Task { await store.moveQueued(event, direction: "up") }
+                }
+                Button("Move Down") {
+                    Task { await store.moveQueued(event, direction: "down") }
+                }
+                Divider()
+                Button("Remove", role: .destructive) {
+                    Task { await store.unqueue(event) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.yellow.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.yellow.opacity(0.28), lineWidth: 1)
+        }
+        .popover(isPresented: $editOpen) {
+            QueuedTurnEditor(
+                draft: $draft,
+                onCancel: { editOpen = false },
+                onSave: {
+                    let next = draft
+                    editOpen = false
+                    Task { await store.updateQueued(event, prompt: next) }
+                }
+            )
+        }
+    }
+}
+
+private struct QueuedTurnEditor: View {
+    @Binding var draft: String
+    var onCancel: () -> Void
+    var onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Edit Queued Message")
+                .font(.headline)
+            TextEditor(text: $draft)
+                .font(.body)
+                .frame(width: 420, height: 160)
+                .scrollContentBackground(.hidden)
+                .background(Theme.window)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Theme.line, lineWidth: 1)
+                }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save", action: onSave)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(14)
     }
 }
 

@@ -360,6 +360,15 @@ class TurnRequest(BaseModel):
     effort: str | None = None
 
 
+class UpdateQueuedTurnRequest(BaseModel):
+    prompt: str | None = None
+    file_ids: list[str] | None = None
+
+
+class MoveQueuedTurnRequest(BaseModel):
+    direction: str
+
+
 class ForkSessionRequest(BaseModel):
     title: str | None = None
 
@@ -924,6 +933,9 @@ def should_bump_session_updated_at(event_type: str, event: dict[str, Any]) -> bo
         "turn_started",
         "turn_queued",
         "turn_unqueued",
+        "turn_queue_updated",
+        "turn_queue_reordered",
+        "turn_queue_run_now",
         "file_uploaded",
         "job_created",
         "job_deferred",
@@ -1020,6 +1032,126 @@ async def unqueue_turn(session_id: str, queued_id: str) -> dict[str, Any]:
         "queued_id": queued_id,
         "remaining": remaining,
     }
+
+
+def queue_positions(queue: deque[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {"queued_id": str(item.get("queued_id") or ""), "position": idx + 1}
+        for idx, item in enumerate(queue)
+    ]
+
+
+async def update_queued_turn(session_id: str, queued_id: str, req: UpdateQueuedTurnRequest) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    updated: dict[str, Any] | None = None
+    async with QUEUE_LOCK:
+        queue = QUEUED_TURNS.get(session_id)
+        if queue:
+            for idx, item in enumerate(queue):
+                if item.get("queued_id") == queued_id:
+                    if req.prompt is not None:
+                        prompt = req.prompt.strip()
+                        if not prompt:
+                            raise HTTPException(status_code=400, detail="prompt is empty")
+                        item["prompt"] = prompt
+                    if req.file_ids is not None:
+                        item["file_ids"] = list(req.file_ids)
+                    updated = dict(item)
+                    updated["position"] = idx + 1
+                    break
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail="queued turn not found")
+
+    await append_event(session_id, "turn_queue_updated", {
+        "queued_id": queued_id,
+        "backend": updated.get("backend") or STORE.sessions[session_id].get("backend") or DEFAULT_BACKEND,
+        "prompt": updated.get("prompt") or "",
+        "file_ids": list(updated.get("file_ids") or []),
+        "position": updated.get("position"),
+    })
+    return {"ok": True, "queued_id": queued_id, "item": updated}
+
+
+async def move_queued_turn(session_id: str, queued_id: str, req: MoveQueuedTurnRequest) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    direction = req.direction.strip().lower()
+    if direction not in {"up", "down"}:
+        raise HTTPException(status_code=400, detail="direction must be up or down")
+
+    moved: dict[str, Any] | None = None
+    positions: list[dict[str, Any]] = []
+    async with QUEUE_LOCK:
+        queue = QUEUED_TURNS.get(session_id)
+        if queue:
+            items = list(queue)
+            idx = next((i for i, item in enumerate(items) if item.get("queued_id") == queued_id), None)
+            if idx is not None:
+                new_idx = idx - 1 if direction == "up" else idx + 1
+                new_idx = max(0, min(len(items) - 1, new_idx))
+                if new_idx != idx:
+                    items[idx], items[new_idx] = items[new_idx], items[idx]
+                    QUEUED_TURNS[session_id] = deque(items)
+                    moved = dict(items[new_idx])
+                else:
+                    moved = dict(items[idx])
+                positions = queue_positions(QUEUED_TURNS[session_id])
+
+    if moved is None:
+        raise HTTPException(status_code=404, detail="queued turn not found")
+
+    await append_event(session_id, "turn_queue_reordered", {
+        "queued_id": queued_id,
+        "direction": direction,
+        "positions": positions,
+    })
+    return {"ok": True, "queued_id": queued_id, "positions": positions}
+
+
+async def run_queued_turn_now(session_id: str, queued_id: str) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    selected: dict[str, Any] | None = None
+    remaining: int
+    async with QUEUE_LOCK:
+        queue = QUEUED_TURNS.get(session_id)
+        if queue:
+            kept: deque[dict[str, Any]] = deque()
+            for item in queue:
+                if selected is None and item.get("queued_id") == queued_id:
+                    selected = item
+                    continue
+                kept.append(item)
+            if selected:
+                kept.appendleft(selected)
+            if kept:
+                QUEUED_TURNS[session_id] = kept
+                remaining = len(kept)
+            else:
+                QUEUED_TURNS.pop(session_id, None)
+                remaining = 0
+        else:
+            remaining = 0
+
+    if selected is None:
+        raise HTTPException(status_code=404, detail="queued turn not found")
+
+    await append_event(session_id, "turn_queue_run_now", {
+        "queued_id": queued_id,
+        "backend": selected.get("backend") or STORE.sessions[session_id].get("backend") or DEFAULT_BACKEND,
+        "prompt": selected.get("prompt") or "",
+        "file_ids": list(selected.get("file_ids") or []),
+        "message": "Queued message moved to the front and current turn interrupted.",
+        "remaining": remaining,
+    })
+    stop_result = await stop_turn(session_id)
+    if not stop_result.get("stopped"):
+        schedule_next_queued_turn(session_id)
+    return {"ok": True, "queued_id": queued_id, "interrupted": bool(stop_result.get("stopped"))}
 
 
 async def requeue_turn_front(session_id: str, item: dict[str, Any]) -> None:
@@ -3914,6 +4046,21 @@ async def post_turn(session_id: str, req: TurnRequest) -> dict[str, Any]:
 @app.delete("/api/sessions/{session_id}/queue/{queued_id}")
 async def delete_queued_turn(session_id: str, queued_id: str) -> dict[str, Any]:
     return await unqueue_turn(session_id, queued_id)
+
+
+@app.patch("/api/sessions/{session_id}/queue/{queued_id}")
+async def patch_queued_turn(session_id: str, queued_id: str, req: UpdateQueuedTurnRequest) -> dict[str, Any]:
+    return await update_queued_turn(session_id, queued_id, req)
+
+
+@app.post("/api/sessions/{session_id}/queue/{queued_id}/move")
+async def post_move_queued_turn(session_id: str, queued_id: str, req: MoveQueuedTurnRequest) -> dict[str, Any]:
+    return await move_queued_turn(session_id, queued_id, req)
+
+
+@app.post("/api/sessions/{session_id}/queue/{queued_id}/run-now")
+async def post_run_queued_turn_now(session_id: str, queued_id: str) -> dict[str, Any]:
+    return await run_queued_turn_now(session_id, queued_id)
 
 
 @app.post("/api/sessions/{session_id}/stop")

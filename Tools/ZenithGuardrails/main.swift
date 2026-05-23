@@ -513,10 +513,17 @@ func checkQueuedRemovalDisappears() throws {
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
 
-    try assert(macStore.contains("let cancelledQueuedTurnIDs"), "Mac timeline must track cancelled queued turns")
-    try assert(macStore.contains("return !cancelledQueuedTurnIDs.contains(queuedID)"), "Mac timeline must hide queued turns after they are removed")
+    try assert(macStore.contains("var pendingQueuedEvents: [ZEvent]"), "Mac store must expose pending queued turns outside the timeline")
+    try assert(macStore.contains("case \"turn_queued\":\n                return false"), "Mac timeline must keep pending queued turns out of the timeline")
+    try assert(macStore.contains("\"turn_queue_updated\""), "Mac timeline must hide queue metadata events")
     try assert(macStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "Mac unqueue should remove the queued row locally after server success")
+    try assert(macStore.contains("func runQueuedNow"), "Mac store must support interrupting the current run for a queued turn")
+    try assert(macStore.contains("func moveQueued"), "Mac store must support queue reordering")
+    try assert(macStore.contains("func updateQueued"), "Mac store must support editing queued prompts")
     try assert(mobileStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "iOS unqueue should remove queued rows locally after server success")
+    try assert(mobileStore.contains("func runQueuedNow"), "iOS store must support interrupting the current run for a queued turn")
+    try assert(mobileStore.contains("func moveQueued"), "iOS store must support queue reordering")
+    try assert(mobileStore.contains("func updateQueued"), "iOS store must support editing queued prompts")
 }
 
 func checkPromptImageAttachments() throws {

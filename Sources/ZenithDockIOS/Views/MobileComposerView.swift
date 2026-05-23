@@ -387,21 +387,49 @@ private struct MobileQueuedShelf: View {
 private struct MobileQueuedChip: View {
     @EnvironmentObject private var store: MobileAppStore
     let event: ZEvent
+    @State private var editOpen = false
+    @State private var draft = ""
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(event.prompt ?? "Queued message")
+            Text(store.queuedPrompt(for: event))
                 .font(.caption)
                 .lineLimit(2)
                 .multilineTextAlignment(.trailing)
-            Button {
-                Task { await store.unqueue(event) }
+            Menu {
+                Button {
+                    Task { await store.runQueuedNow(event) }
+                } label: {
+                    Label("Send Now", systemImage: "arrow.turn.down.right")
+                }
+                Button {
+                    draft = store.queuedPrompt(for: event)
+                    editOpen = true
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                Button {
+                    Task { await store.moveQueued(event, direction: "up") }
+                } label: {
+                    Label("Move Up", systemImage: "arrow.up")
+                }
+                Button {
+                    Task { await store.moveQueued(event, direction: "down") }
+                } label: {
+                    Label("Move Down", systemImage: "arrow.down")
+                }
+                Divider()
+                Button(role: .destructive) {
+                    Task { await store.unqueue(event) }
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
             } label: {
-                Image(systemName: "xmark.circle.fill")
+                Image(systemName: "ellipsis.circle.fill")
                     .imageScale(.medium)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Unqueue message")
+            .accessibilityLabel("Queued message actions")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -409,6 +437,27 @@ private struct MobileQueuedChip: View {
         .background(.secondary.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(.secondary.opacity(0.18)))
+        .sheet(isPresented: $editOpen) {
+            NavigationStack {
+                TextEditor(text: $draft)
+                    .padding()
+                    .navigationTitle("Edit Queue")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { editOpen = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                let next = draft
+                                editOpen = false
+                                Task { await store.updateQueued(event, prompt: next) }
+                            }
+                            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+        }
     }
 }
 

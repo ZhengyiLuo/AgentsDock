@@ -16,6 +16,39 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Composer Queue Shelf And Queue Actions
+
+Problem:
+
+- Pending queued messages were still represented as timeline cards on Mac,
+  which made them feel like sent history instead of editable follow-up work.
+- The queue only supported removal. There was no way to edit, reorder, or force
+  one queued message to run next by interrupting the current turn.
+
+Change:
+
+- Added server queue APIs for editing queued prompts, moving queued turns
+  up/down, and "run now" behavior that moves a queued turn to the front and
+  stops the current run so the queue runner can start it next.
+- Added hidden queue metadata events (`turn_queue_updated`,
+  `turn_queue_reordered`, `turn_queue_run_now`) so queue state survives reloads
+  without polluting the chat timeline.
+- Mac queued messages now render in a bottom composer shelf with Send Now, move
+  up/down, edit, and remove controls.
+- iOS/iPadOS queued messages use the same server actions through the queued item
+  menu.
+- Updated guardrails so pending queued turns stay out of the Mac timeline.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` from the fresh
+  Release build.
+- `codesign --verify --deep --strict --verbose=2 dist/ZenithDock.app`
+
 ## 2026-05-22 Follow-Up - Folder Move And Collapse Controls
 
 Problem:
