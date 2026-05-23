@@ -16,6 +16,38 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Queue Send Now Deploy And Compact Shelf
+
+Problem:
+
+- `Send Now` returned `{"detail":"Not Found"}` because the app had the new
+  button but the deployed Sonic server had not yet loaded the new queue routes.
+- Restarting the server would previously lose in-memory queued turns because the
+  queue was only reconstructed from runtime memory.
+- The Mac queued-message shelf reserved too much vertical space for one queued
+  message.
+
+Change:
+
+- Added server startup recovery for pending queued turns by replaying persisted
+  queue events (`turn_queued`, update/reorder/run-now, start/unqueue).
+- Deployed `/home/zen/Zenithbot/scripts/agent_server.py` on Sonic and restarted
+  `zenithbot-agent`; startup recovered `queued=2`.
+- Made the Mac queue shelf use a fixed compact height based on queued message
+  count, capped at 128 px.
+- Reduced the Mac composer editor fixed height when queued messages are visible.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- Remote `python3 -m py_compile /home/zen/Zenithbot/scripts/agent_server.py.new`
+- `systemctl --user restart zenithbot-agent`
+- Sonic service active with `queued=2` and route `/queue/{queued_id}/run-now`
+  present.
+- `swift run ZenithGuardrails`
+- Mac Release build.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; codesign passed.
+
 ## 2026-05-22 Follow-Up - Local Network Permission Diagnosis
 
 Problem:

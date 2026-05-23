@@ -92,7 +92,7 @@ struct ComposerView: View {
     }
 
     private var promptHeight: CGFloat {
-        78
+        store.pendingQueuedEvents.isEmpty ? 58 : 44
     }
 
     @ViewBuilder
@@ -401,9 +401,14 @@ private struct QueuedTurnShelf: View {
                     }
                 }
             }
-            .frame(maxHeight: 132)
+            .frame(height: shelfHeight)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var shelfHeight: CGFloat {
+        min(CGFloat(store.pendingQueuedEvents.count) * 38, 128)
     }
 }
 
@@ -485,7 +490,8 @@ private struct QueuedTurnRow: View {
             .fixedSize()
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
+        .frame(minHeight: 32)
         .background(Color.yellow.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {

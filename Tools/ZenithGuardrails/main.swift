@@ -42,7 +42,7 @@ func checkComposerUsesPresenceGate() throws {
         throw GuardrailFailure.failed("Composer publishPresence must gate SwiftUI callbacks")
     }
     try assert(guardRange.lowerBound < callbackRange.lowerBound, "Composer must gate text presence before calling SwiftUI")
-    try assert(source.contains("private var promptHeight: CGFloat {\n        78\n    }"), "Mac composer must use a fixed editor height instead of resizing while typing")
+    try assert(source.contains("private var promptHeight: CGFloat {\n        store.pendingQueuedEvents.isEmpty ? 58 : 44\n    }"), "Mac composer must use fixed editor heights instead of resizing while typing")
     try assert(!source.contains("let sendableText = value.trimmingCharacters"), "Composer must not trim the whole draft on every keystroke")
     try assert(!source.contains("hasSendableText(value)"), "Composer must not scan the whole draft for sendable text on every keystroke")
     try assert(!source.contains("value.split(separator: \"\\n\""), "Composer must not split the whole draft on every line-count update")

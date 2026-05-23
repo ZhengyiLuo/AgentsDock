@@ -1209,6 +1209,66 @@ def schedule_next_queued_turn(session_id: str) -> None:
     asyncio.create_task(start_next_queued_turn(session_id))
 
 
+def rebuild_queued_turns_from_events() -> int:
+    rebuilt = 0
+    for session_id, sess in STORE.sessions.items():
+        path = events_path(session_id)
+        if not path.exists():
+            continue
+        pending: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for line in path.open("r", encoding="utf-8", errors="ignore"):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            queued_id = str(event.get("queued_id") or "")
+            event_type = str(event.get("type") or "")
+            if event_type == "turn_queued" and queued_id:
+                pending[queued_id] = {
+                    "queued_id": queued_id,
+                    "prompt": event.get("prompt") or "",
+                    "file_ids": list(event.get("file_ids") or []),
+                    "backend": event.get("backend") or sess.get("backend"),
+                    "model": sess.get("model"),
+                    "effort": sess.get("effort"),
+                    "created_at": event.get("ts") or now_iso(),
+                    "position": int(event.get("position") or (len(order) + 1)),
+                }
+                if queued_id not in order:
+                    order.append(queued_id)
+            elif event_type in {"turn_queue_updated", "turn_queue_run_now"} and queued_id in pending:
+                if event.get("prompt") is not None:
+                    pending[queued_id]["prompt"] = event.get("prompt") or ""
+                if event.get("file_ids") is not None:
+                    pending[queued_id]["file_ids"] = list(event.get("file_ids") or [])
+                if event_type == "turn_queue_run_now" and queued_id in order:
+                    order.remove(queued_id)
+                    order.insert(0, queued_id)
+            elif event_type == "turn_queue_reordered":
+                positions = event.get("positions") or []
+                try:
+                    ordered = sorted(
+                        [item for item in positions if item.get("queued_id") in pending],
+                        key=lambda item: int(item.get("position") or 0),
+                    )
+                    seen = [str(item.get("queued_id")) for item in ordered]
+                    order = seen + [qid for qid in order if qid not in seen]
+                except Exception:
+                    pass
+            elif event_type in {"turn_started", "turn_unqueued"} and queued_id:
+                pending.pop(queued_id, None)
+                if queued_id in order:
+                    order.remove(queued_id)
+        items = [pending[qid] for qid in order if qid in pending and str(pending[qid].get("prompt") or "").strip()]
+        if items:
+            QUEUED_TURNS[session_id] = deque(items)
+            rebuilt += len(items)
+    return rebuilt
+
+
 async def terminate_process_tree(proc: asyncio.subprocess.Process, *, grace: float = STOP_GRACE_SECONDS) -> bool:
     if proc.returncode is not None:
         return False
@@ -3719,9 +3779,10 @@ async def lifespan(app: FastAPI):
     await STORE.load()
     await JOBS.load()
     ensure_dirs()
+    rebuilt_queue_count = rebuild_queued_turns_from_events()
     JOBS.start_scheduler()
     host_monitor_task = asyncio.create_task(host_monitor_loop())
-    logger.info("agent server ready state=%s sessions=%d jobs=%d", STATE_DIR, len(STORE.sessions), len(JOBS.jobs))
+    logger.info("agent server ready state=%s sessions=%d jobs=%d queued=%d", STATE_DIR, len(STORE.sessions), len(JOBS.jobs), rebuilt_queue_count)
     try:
         yield
     finally:
