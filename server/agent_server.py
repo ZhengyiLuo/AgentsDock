@@ -3044,15 +3044,40 @@ def parse_claude_help_catalog() -> dict[str, Any]:
     effort_options: list[dict[str, str]] = []
     model_source = "claude --help"
     effort_source = "claude --help"
+    default_model = (
+        os.environ.get("CLAUDE_MODEL")
+        or os.environ.get("ANTHROPIC_MODEL")
+        or os.environ.get("ZENITHBOT_CLAUDE_MODEL")
+        or "sonnet"
+    )
+    default_effort = os.environ.get("CLAUDE_EFFORT") or os.environ.get("ZENITHBOT_CLAUDE_EFFORT") or ""
     try:
         help_text = run_catalog_command(["claude", "--help"])
     except Exception as exc:
         logger.warning("claude model discovery failed: %s", exc)
         return {
-            "models": [server_default_runtime_option()],
-            "efforts": [server_default_runtime_option()],
+            "models": unique_runtime_options(
+                [
+                    runtime_option("sonnet", "Sonnet"),
+                    runtime_option("opus", "Opus"),
+                    runtime_option("haiku", "Haiku"),
+                ],
+                title_model_label(default_model),
+            ),
+            "efforts": unique_runtime_options(
+                [
+                    runtime_option("low", "Low"),
+                    runtime_option("medium", "Medium"),
+                    runtime_option("high", "High"),
+                    runtime_option("xhigh", "XHigh"),
+                    runtime_option("max", "Max"),
+                ],
+                title_effort_label(default_effort) if default_effort else "",
+            ),
             "model_source": f"{model_source} failed",
             "effort_source": f"{effort_source} failed",
+            "default_model": default_model,
+            "default_effort": default_effort or None,
         }
 
     model_match = re.search(r"--model <model>.*?\((?:e\.g\.\s*)?([^)]+)\)", help_text, re.IGNORECASE | re.DOTALL)
@@ -3060,6 +3085,8 @@ def parse_claude_help_catalog() -> dict[str, Any]:
         aliases = re.findall(r"'([^']+)'", model_match.group(1))
         for alias in aliases:
             model_options.append(runtime_option(alias, title_model_label(alias)))
+    for alias in ("sonnet", "opus", "haiku"):
+        model_options.append(runtime_option(alias, title_model_label(alias)))
 
     effort_match = re.search(r"--effort <level>.*?\(([^)]+)\)", help_text, re.IGNORECASE)
     if effort_match:
@@ -3069,12 +3096,12 @@ def parse_claude_help_catalog() -> dict[str, Any]:
                 effort_options.append(runtime_option(clean, title_effort_label(clean)))
 
     return {
-        "models": unique_runtime_options(model_options),
-        "efforts": unique_runtime_options(effort_options),
+        "models": unique_runtime_options(model_options, title_model_label(default_model)),
+        "efforts": unique_runtime_options(effort_options, title_effort_label(default_effort) if default_effort else ""),
         "model_source": model_source,
         "effort_source": effort_source,
-        "default_model": os.environ.get("CLAUDE_MODEL") or os.environ.get("ANTHROPIC_MODEL") or None,
-        "default_effort": os.environ.get("CLAUDE_EFFORT") or None,
+        "default_model": default_model,
+        "default_effort": default_effort or None,
     }
 
 

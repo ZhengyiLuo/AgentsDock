@@ -16,6 +16,34 @@ painful to rediscover later.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 
+## 2026-05-22 Follow-Up - Claude Runtime Default Label
+
+Problem:
+
+- Claude chats showed `Default` for runtime because the server only surfaced a
+  concrete Claude default when `CLAUDE_MODEL`/`ANTHROPIC_MODEL` was set.
+- Claude CLI `--help` exposes model aliases and effort values, but not the full
+  resolved default model ID.
+
+Change:
+
+- Server Claude runtime catalog now reports `sonnet` as the default alias unless
+  `CLAUDE_MODEL`, `ANTHROPIC_MODEL`, or `ZENITHBOT_CLAUDE_MODEL` overrides it.
+- Claude catalog includes selectable `sonnet`, `opus`, and `haiku` aliases plus
+  effort levels `low`, `medium`, `high`, `xhigh`, and `max`.
+- App-side fallback catalog now also labels Claude default as `Sonnet`, so the
+  UI no longer degrades to bare `Default` if catalog refresh fails.
+- Deployed the server change to Sonic and restarted `zenithbot-agent`.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py`
+- `swift run ZenithGuardrails`
+- Mac Release build and iOS simulator build.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; codesign passed.
+- Live `/api/runtime/catalog` on Sonic reports Claude default model `sonnet`
+  with label `Sonnet`.
+
 ## 2026-05-22 Follow-Up - Atomic Send Now Queue Fix
 
 Problem:

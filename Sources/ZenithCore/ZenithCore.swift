@@ -182,7 +182,25 @@ public enum ZRuntimeCatalog {
     public static let defaultValue = ""
     public static let serverDefaultOption = ZRuntimeOption(value: "", label: "Default")
     public static let fallbackBackends: [String: ZRuntimeBackendCatalog] = [
-        "claude": ZRuntimeBackendCatalog(),
+        "claude": ZRuntimeBackendCatalog(
+            models: [
+                ZRuntimeOption(value: "", label: "Sonnet"),
+                ZRuntimeOption(value: "sonnet", label: "Sonnet"),
+                ZRuntimeOption(value: "opus", label: "Opus"),
+                ZRuntimeOption(value: "haiku", label: "Haiku")
+            ],
+            efforts: [
+                ZRuntimeOption(value: "", label: "Default"),
+                ZRuntimeOption(value: "low", label: "Low"),
+                ZRuntimeOption(value: "medium", label: "Medium"),
+                ZRuntimeOption(value: "high", label: "High"),
+                ZRuntimeOption(value: "xhigh", label: "XHigh"),
+                ZRuntimeOption(value: "max", label: "Max")
+            ],
+            model_source: "local fallback",
+            effort_source: "local fallback",
+            default_model: "sonnet"
+        ),
         "codex": ZRuntimeBackendCatalog(
             models: [
                 ZRuntimeOption(value: "", label: "GPT-5.5"),
