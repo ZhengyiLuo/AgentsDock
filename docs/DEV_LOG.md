@@ -19,6 +19,27 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-26 Follow-Up - Large Timeline Sync Flyby Mask
+
+Problem:
+
+- During chat sync/open-latest-message refreshes, large timeline snapshots could
+  still visibly fly through the Mac timeline. The previous cached-refresh mask
+  hid some paint, but SwiftUI could still build/reveal a large replacement row
+  set in the same update window.
+
+Change:
+
+- Mac `AppStore` now publishes `isApplyingLargeTimelineBatch`.
+- Large session snapshots and buffered websocket catch-up bursts set that mask
+  before mutating `events`/`displayEvents`, then reveal after a short layout
+  settle delay.
+- `TimelineView` now structurally suspends row construction for those large
+  batches, not just cold opens. Normal low-volume live streaming still renders
+  immediately.
+- Added `ZenithGuardrails` checks so future timeline tuning cannot silently
+  remove the large-batch mask.
+
 ## 2026-05-22 Follow-Up - TestFlight Build 41
 
 Release checklist:

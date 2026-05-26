@@ -34,6 +34,7 @@ final class AppStore: ObservableObject {
     @Published var loadedSessionID: String?
     @Published var isSelectingSession = false
     @Published var isRefreshingCachedDelta = false
+    @Published var isApplyingLargeTimelineBatch = false
     @Published var serverReachable = false
     @Published var socketLive = false
     @Published var activeSessionIDs: Set<String> = []
@@ -76,6 +77,7 @@ final class AppStore: ObservableObject {
     private var pendingStreamEvents: [ZEvent] = []
     private var pendingStreamSessionID: String?
     private var pendingStreamFlushTask: Task<Void, Never>?
+    private var timelineBatchRevealTask: Task<Void, Never>?
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
@@ -87,6 +89,7 @@ final class AppStore: ObservableObject {
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
     private let maxMemoryCachedChats = 32
     private let streamBackfillMaskThreshold = 18
+    private let largeTimelineBatchEventThreshold = 80
 
     private struct CachedChat: Codable, Sendable {
         var session: ZSession
@@ -320,6 +323,32 @@ final class AppStore: ObservableObject {
         displayEvents = makeDisplayEvents(from: events)
     }
 
+    private func shouldMaskTimelineBatch(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
+        incomingCount >= largeTimelineBatchEventThreshold ||
+            abs(newCount - oldCount) >= largeTimelineBatchEventThreshold
+    }
+
+    private func beginLargeTimelineBatchMask() {
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = nil
+        if !isApplyingLargeTimelineBatch {
+            isApplyingLargeTimelineBatch = true
+        }
+        status = "Opening latest messages"
+    }
+
+    private func scheduleLargeTimelineBatchReveal() {
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            guard !Task.isCancelled else { return }
+            self.isApplyingLargeTimelineBatch = false
+            if !self.isRefreshingCachedDelta {
+                self.status = self.socketLive ? "Live" : "Server connected"
+            }
+        }
+    }
+
     func queuedPrompt(for event: ZEvent) -> String {
         guard let queuedID = event.queued_id else {
             return event.prompt ?? "Queued message"
@@ -513,6 +542,8 @@ final class AppStore: ObservableObject {
 
     private func resetEndpointState() {
         pendingCacheWrite?.cancel()
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         webSocketSessionID = nil
@@ -523,6 +554,7 @@ final class AppStore: ObservableObject {
         sessions = []
         events = []
         displayEvents = []
+        isApplyingLargeTimelineBatch = false
         uploads = []
         sessionFiles = []
         sessionVideoFiles = []
@@ -792,6 +824,9 @@ final class AppStore: ObservableObject {
     }
 
     func select(sessionID: String) async {
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = nil
+        isApplyingLargeTimelineBatch = false
         if loadingSessionID == sessionID {
             if loadedSessionID != sessionID, let cached = memoryCachedChat(sessionID) {
                 applyCachedChat(cached)
@@ -1787,10 +1822,22 @@ final class AppStore: ObservableObject {
         let buffered = pendingStreamEvents.sorted { $0.seq < $1.seq }
         pendingStreamEvents.removeAll()
         pendingStreamSessionID = nil
+        if buffered.count >= streamBackfillMaskThreshold {
+            beginLargeTimelineBatchMask()
+        }
         applyStreamEvents(buffered)
+        if isApplyingLargeTimelineBatch {
+            scheduleLargeTimelineBatchReveal()
+        }
         if isRefreshingCachedDelta {
-            isRefreshingCachedDelta = false
-            status = socketLive ? "Live" : "Server connected"
+            timelineBatchRevealTask?.cancel()
+            timelineBatchRevealTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 320_000_000)
+                guard !Task.isCancelled else { return }
+                self.isApplyingLargeTimelineBatch = false
+                self.isRefreshingCachedDelta = false
+                self.status = self.socketLive ? "Live" : "Server connected"
+            }
         }
     }
 
@@ -1994,7 +2041,19 @@ final class AppStore: ObservableObject {
             sessions[idx] = response.session
         }
         let snapshotEvents = timelineEvents(from: response.events)
+        let oldCount = events.count
         let preservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []
+        let projectedCount = preservedEvents.isEmpty
+            ? snapshotEvents.count
+            : Set((preservedEvents + snapshotEvents).map(\.id)).count
+        let shouldMaskLargeBatch = shouldMaskTimelineBatch(
+            oldCount: oldCount,
+            newCount: projectedCount,
+            incomingCount: snapshotEvents.count
+        )
+        if shouldMaskLargeBatch {
+            beginLargeTimelineBatchMask()
+        }
         if preservedEvents.isEmpty {
             events = snapshotEvents
             omittedHistoryEventCount = response.events_omitted_before ?? 0
@@ -2023,6 +2082,9 @@ final class AppStore: ObservableObject {
         latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
         rebuildDisplayEvents()
+        if shouldMaskLargeBatch {
+            scheduleLargeTimelineBatchReveal()
+        }
     }
 
     private func requestScrollToEvent(_ eventID: String) {

@@ -37,8 +37,9 @@ struct TimelineView: View {
             store.isSelectingSession ||
             store.loadedSessionID != store.selectedSessionID
         )
-        let shouldMaskTimeline = timelineRowsSuspended || store.isRefreshingCachedDelta
-        let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
+        let timelineRowsStructurallySuspended = timelineRowsSuspended || store.isApplyingLargeTimelineBatch
+        let shouldMaskTimeline = timelineRowsStructurallySuspended || store.isRefreshingCachedDelta
+        let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
         let projectionEventLimit = max(defaultVisibleRowLimit * 8, visibleRowLimit * 8)
         let projectedEvents = displayEvents.count > projectionEventLimit
             ? Array(displayEvents.suffix(projectionEventLimit))
@@ -67,7 +68,7 @@ struct TimelineView: View {
                             if store.selectedSession == nil {
                                 EmptyStateView()
                             } else {
-                                if !timelineRowsSuspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
+                                if !timelineRowsStructurallySuspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
                                     TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
                                         revealOlderRows(preservingPositionWith: proxy)
                                     } onLoadOlder: {
