@@ -52,21 +52,35 @@ struct MobileEventCard: View {
             }
         case "file_uploaded":
             if let file = event.file {
-                MobileSystemCard(icon: "tray.and.arrow.up", title: "Upload") {
+                MobileSystemCard(icon: "tray.and.arrow.up", title: "Upload", timestamp: messageTimestamp) {
                     MobileUploadedFileLabel(file: file, url: store.fileURL(file))
                 }
             }
         case "job_created", "job_ran":
-            MobileSystemCard(icon: "clock.badge.checkmark", title: event.type == "job_created" ? "Job Created" : "Job Ran", tint: .orange) {
+            MobileSystemCard(
+                icon: "clock.badge.checkmark",
+                title: event.type == "job_created" ? "Job Created" : "Job Ran",
+                timestamp: messageTimestamp,
+                tint: .orange
+            ) {
                 MobileJobEventSummary(event: event)
             }
         case "error", "job_error", "artifact_error":
-            MobileSystemCard(icon: "exclamationmark.triangle", title: event.type == "job_error" ? "Job Error" : "Error", tint: .red) {
+            MobileSystemCard(
+                icon: "exclamationmark.triangle",
+                title: event.type == "job_error" ? "Job Error" : "Error",
+                timestamp: messageTimestamp,
+                tint: .red
+            ) {
                 Text(event.message ?? event.error ?? "Unknown error")
                     .foregroundStyle(.red)
             }
         default:
-            MobileSystemCard(icon: "circle", title: event.type.replacingOccurrences(of: "_", with: " ").capitalized) {
+            MobileSystemCard(
+                icon: "circle",
+                title: event.type.replacingOccurrences(of: "_", with: " ").capitalized,
+                timestamp: messageTimestamp
+            ) {
                 MobileMarkdownView(markdown: event.message ?? event.text ?? event.type, linkContext: linkContext)
             }
         }
@@ -108,6 +122,7 @@ struct MobileEventCard: View {
                 label: label,
                 text: text,
                 isUser: true,
+                timestamp: messageTimestamp,
                 queued: queued,
                 attachments: attachments,
                 actionTitle: actionTitle,
@@ -120,9 +135,13 @@ struct MobileEventCard: View {
 
     private func assistantBubble(label: String = "Assistant", text: String, isJob: Bool = false) -> some View {
         HStack {
-            MobileMessageBubble(label: label, text: text, isUser: false, isJob: isJob, linkContext: linkContext)
+            MobileMessageBubble(label: label, text: text, isUser: false, isJob: isJob, timestamp: messageTimestamp, linkContext: linkContext)
             Spacer(minLength: 44)
         }
+    }
+
+    private var messageTimestamp: String? {
+        mobileMessageTimestampString(event.ts)
     }
 }
 
@@ -161,6 +180,7 @@ struct MobileMessageBubble: View {
     let isUser: Bool
     var queued = false
     var isJob = false
+    var timestamp: String?
     var attachments: [MobileMessageAttachment] = []
     var actionTitle: String?
     var actionSystemImage: String?
@@ -175,6 +195,11 @@ struct MobileMessageBubble: View {
                 Text(label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if let timestamp {
+                    Text(timestamp)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
                 if let action {
                     Button(action: action) {
                         Label(actionTitle ?? "Action", systemImage: actionSystemImage ?? "circle")
@@ -300,6 +325,7 @@ struct MobileJobRunBubble: View {
                 text: bodyText,
                 isUser: false,
                 isJob: true,
+                timestamp: timestamp,
                 linkContext: linkContext
             )
             Spacer(minLength: 44)
@@ -312,6 +338,10 @@ struct MobileJobRunBubble: View {
 
     private var bodyText: String {
         mobileJobRunBodyText(jobRun)
+    }
+
+    private var timestamp: String? {
+        mobileMessageTimestampString(jobRun.finishedAt ?? jobRun.lastEventAt ?? jobRun.runEvent.ts)
     }
 }
 
@@ -333,6 +363,11 @@ struct MobileJobRunGroupBubble: View {
                     if let runtime = mobileJobRunRuntimeText(group.latest) {
                         Text("· \(runtime)")
                             .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let timestamp {
+                        Text("· \(timestamp)")
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
@@ -389,6 +424,10 @@ struct MobileJobRunGroupBubble: View {
 
     private var latestText: String {
         mobileJobRunBodyText(group.latest)
+    }
+
+    private var timestamp: String? {
+        mobileMessageTimestampString(group.latest.finishedAt ?? group.latest.lastEventAt ?? group.latest.runEvent.ts)
     }
 }
 
@@ -604,6 +643,7 @@ private struct MobileFullMessageSheet: View {
 struct MobileSystemCard<Content: View>: View {
     let icon: String
     let title: String
+    var timestamp: String?
     var tint: Color = .secondary
     @ViewBuilder var content: Content
 
@@ -613,9 +653,17 @@ struct MobileSystemCard<Content: View>: View {
                 .foregroundStyle(tint)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                    if let timestamp {
+                        Text(timestamp)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
                 content
             }
             .padding(12)
@@ -624,6 +672,48 @@ struct MobileSystemCard<Content: View>: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(MobileTheme.softLine))
         }
     }
+}
+
+private func mobileMessageTimestampString(_ value: String?) -> String? {
+    guard let date = mobileMessageDate(value) else { return value }
+
+    let calendar = Calendar.autoupdatingCurrent
+    let timeFormatter = DateFormatter()
+    timeFormatter.locale = .autoupdatingCurrent
+    timeFormatter.timeZone = .autoupdatingCurrent
+    timeFormatter.timeStyle = .short
+    timeFormatter.dateStyle = .none
+
+    if calendar.isDateInToday(date) {
+        return "\(timeFormatter.string(from: date)) today"
+    }
+
+    if calendar.isDateInTomorrow(date) {
+        return "\(timeFormatter.string(from: date)) tomorrow"
+    }
+
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+    if calendar.component(.year, from: date) == calendar.component(.year, from: Date()) {
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, h:mm a")
+    } else {
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+    }
+    return formatter.string(from: date)
+}
+
+private func mobileMessageDate(_ value: String?) -> Date? {
+    guard let value, !value.isEmpty else { return nil }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) {
+        return date
+    }
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    return plain.date(from: value)
 }
 
 struct MobileTraceCard: View {

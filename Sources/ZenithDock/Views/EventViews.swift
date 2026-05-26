@@ -37,6 +37,7 @@ struct EventCard: View, Equatable {
         lhs.event.id == rhs.event.id &&
             lhs.event.seq == rhs.event.seq &&
             lhs.event.type == rhs.event.type &&
+            lhs.event.ts == rhs.event.ts &&
             lhs.showDebugEvents == rhs.showDebugEvents &&
             lhs.queueStatus == rhs.queueStatus &&
             lhs.attachments == rhs.attachments &&
@@ -54,6 +55,7 @@ struct EventCard: View, Equatable {
                     label: "You",
                     text: event.prompt ?? "",
                     isUser: true,
+                    timestamp: messageTimestamp,
                     attachments: attachments,
                     linkContext: linkContext
                 )
@@ -66,6 +68,7 @@ struct EventCard: View, Equatable {
                     text: event.prompt ?? "",
                     isUser: true,
                     isQueued: queueStatus.isPending,
+                    timestamp: messageTimestamp,
                     attachments: attachments,
                     actionTitle: queueStatus.isPending ? "Unqueue" : nil,
                     actionSystemImage: queueStatus.isPending ? "xmark.circle" : nil,
@@ -75,7 +78,7 @@ struct EventCard: View, Equatable {
             }
         } else if event.type == "assistant_text" {
             HStack {
-                MessageBubble(label: "Assistant", text: event.text ?? "", isUser: false, linkContext: linkContext)
+                MessageBubble(label: "Assistant", text: event.text ?? "", isUser: false, timestamp: messageTimestamp, linkContext: linkContext)
                 Spacer(minLength: 80)
             }
         } else if event.type == "turn_finished", let text = event.result_text, !text.isEmpty {
@@ -85,6 +88,7 @@ struct EventCard: View, Equatable {
                     text: text,
                     isUser: false,
                     isJob: job != nil,
+                    timestamp: messageTimestamp,
                     linkContext: linkContext
                 )
                 Spacer(minLength: 80)
@@ -103,6 +107,11 @@ struct EventCard: View, Equatable {
                 HStack {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
+                    if let messageTimestamp {
+                        Text(messageTimestamp)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer()
                     if showDebugEvents {
                         Text("#\(event.seq)")
@@ -246,6 +255,10 @@ struct EventCard: View, Equatable {
             return "Queued"
         }
     }
+
+    private var messageTimestamp: String? {
+        localTimestampString(event.ts)
+    }
 }
 
 private extension QueuedEventStatus {
@@ -261,6 +274,7 @@ struct MessageBubble: View {
     let isUser: Bool
     var isQueued = false
     var isJob = false
+    var timestamp: String?
     var attachments: [MessageAttachment] = []
     var actionTitle: String?
     var actionSystemImage: String?
@@ -276,6 +290,11 @@ struct MessageBubble: View {
                 Text(label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if let timestamp {
+                    Text(timestamp)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
                 if let action {
                     Button(action: action) {
                         Label(actionTitle ?? "Action", systemImage: actionSystemImage ?? "circle")
@@ -445,6 +464,7 @@ struct JobRunBubble: View {
                 text: bodyText,
                 isUser: false,
                 isJob: true,
+                timestamp: timestamp,
                 linkContext: linkContext
             )
             Spacer(minLength: 80)
@@ -457,6 +477,10 @@ struct JobRunBubble: View {
 
     private var bodyText: String {
         jobRunBodyText(jobRun)
+    }
+
+    private var timestamp: String? {
+        localTimestampString(jobRun.finishedAt ?? jobRun.lastEventAt ?? jobRun.runEvent.ts)
     }
 }
 
@@ -482,6 +506,11 @@ struct JobRunGroupBubble: View {
                     if let runtime = jobRunRuntimeText(group.latest) {
                         Text("· \(runtime)")
                             .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let timestamp {
+                        Text("· \(timestamp)")
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
@@ -535,6 +564,10 @@ struct JobRunGroupBubble: View {
 
     private var latestText: String {
         jobRunBodyText(group.latest)
+    }
+
+    private var timestamp: String? {
+        localTimestampString(group.latest.finishedAt ?? group.latest.lastEventAt ?? group.latest.runEvent.ts)
     }
 
     private func copyToPasteboard(_ string: String) {

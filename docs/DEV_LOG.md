@@ -19,6 +19,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-26 Follow-Up - Timeline Message Timestamps
+
+Change:
+
+- Mac and iOS timeline message bubbles now show each event's local update time
+  in the header next to `You`, `Assistant`, or job labels.
+- System/job cards also display the event time; grouped job status rows use the
+  latest known job event time.
+- The timestamp comes from existing server event metadata (`event.ts`), so this
+  does not require a server contract change.
+- Added `ZenithGuardrails` coverage to keep timestamps attached to future
+  message-row refactors.
+
 ## 2026-05-26 Follow-Up - Large Timeline Sync Flyby Mask
 
 Problem:

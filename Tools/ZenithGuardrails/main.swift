@@ -174,6 +174,24 @@ func checkMessageFoldingThresholds() throws {
     try assert(!mobileEvents.contains("@State private var fullTextOpen"), "iOS folded messages must not open full text in a sheet")
 }
 
+func checkTimelineMessageTimestamps() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
+
+    try assert(macEvents.contains("lhs.event.ts == rhs.event.ts"), "Mac event card equality must include timestamp updates")
+    try assert(macEvents.contains("private var messageTimestamp: String?"), "Mac event cards must derive a message timestamp")
+    try assert(macEvents.contains("localTimestampString(event.ts)"), "Mac event timestamps must use local time formatting")
+    try assert(macEvents.contains("var timestamp: String?"), "Mac message bubbles must accept a timestamp")
+    try assert(macEvents.contains("Text(timestamp)\n                        .font(.caption.monospacedDigit())"), "Mac message bubbles must render timestamps in the header")
+    try assert(macEvents.contains("localTimestampString(jobRun.finishedAt ?? jobRun.lastEventAt ?? jobRun.runEvent.ts)"), "Mac job run bubbles must show the latest update time")
+    try assert(mobileEvents.contains("private var messageTimestamp: String?"), "iOS event cards must derive a message timestamp")
+    try assert(mobileEvents.contains("mobileMessageTimestampString(event.ts)"), "iOS event timestamps must use local time formatting")
+    try assert(mobileEvents.contains("var timestamp: String?"), "iOS message bubbles must accept a timestamp")
+    try assert(mobileEvents.contains("MobileSystemCard(\n                icon: \"clock.badge.checkmark\""), "iOS job system cards must pass timestamps through")
+    try assert(mobileEvents.contains("mobileMessageTimestampString(jobRun.finishedAt ?? jobRun.lastEventAt ?? jobRun.runEvent.ts)"), "iOS job run bubbles must show the latest update time")
+}
+
 func checkArchiveSessionBehavior() throws {
     let sessionData = Data(#"{"id":"sess","title":"Archived","backend":"codex","archived":true,"sort_order":10}"#.utf8)
     let session = try JSONDecoder().decode(ZSession.self, from: sessionData)
@@ -649,6 +667,7 @@ do {
     try checkShellCopyNormalization()
     try checkCodeBlockCopyUsesFullText()
     try checkMessageFoldingThresholds()
+    try checkTimelineMessageTimestamps()
     try checkArchiveSessionBehavior()
     try checkFolderSectionControls()
     try checkMobileDoesNotAutoSelectFirstChat()
