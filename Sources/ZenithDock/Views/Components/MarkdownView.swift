@@ -12,10 +12,11 @@ struct MarkdownView: View {
     let markdown: String
     var alignment: HorizontalAlignment = .leading
     var compact = false
+    var allowTruncation = true
     var linkContext: ZMarkdownLinkContext?
 
     private var blocks: [MarkdownBlock] {
-        MarkdownRenderCache.blocks(for: Self.renderable(markdown))
+        MarkdownRenderCache.blocks(for: Self.renderable(markdown, allowTruncation: allowTruncation))
     }
 
     private var frameAlignment: Alignment {
@@ -41,8 +42,9 @@ struct MarkdownView: View {
         .frame(maxWidth: .infinity, alignment: frameAlignment)
     }
 
-    private static func renderable(_ text: String) -> String {
+    private static func renderable(_ text: String, allowTruncation: Bool) -> String {
         let text = EmojiShortcodes.stripDecorativePrefixes(text)
+        guard allowTruncation else { return text }
         let max = 32_000
         guard text.count > max else { return text }
         return String(text.prefix(max)) + "\n\n[message trimmed for UI]"

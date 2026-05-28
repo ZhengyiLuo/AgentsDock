@@ -160,6 +160,7 @@ func checkCodeBlockCopyUsesFullText() throws {
 func checkMessageFoldingThresholds() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let macMarkdown = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/Components/MarkdownView.swift"), encoding: .utf8)
     let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
 
     try assert(macEvents.contains("isContextDigest ? 1_800 : 4_200"), "Mac message folding character limits should allow 1.5x more text before folding")
@@ -170,6 +171,9 @@ func checkMessageFoldingThresholds() throws {
     try assert(mobileEvents.contains("@State private var fullTextExpanded"), "iOS folded messages must expand full text inline")
     try assert(macEvents.contains("Button(fullTextExpanded ? \"Collapse\" : \"Open full text\")"), "Mac Open full text action must toggle inline expansion")
     try assert(mobileEvents.contains("Button(fullTextExpanded ? \"Collapse\" : \"Full text\")"), "iOS Full text action must toggle inline expansion")
+    try assert(macEvents.contains("allowTruncation: !fullTextExpanded"), "Mac expanded messages must bypass MarkdownView UI truncation")
+    try assert(macMarkdown.contains("var allowTruncation = true"), "Mac MarkdownView must expose an explicit truncation toggle")
+    try assert(macMarkdown.contains("guard allowTruncation else { return text }"), "Mac MarkdownView must render complete expanded text without the trim marker")
     try assert(!macEvents.contains("@State private var fullTextOpen"), "Mac folded messages must not open full text in a sheet")
     try assert(!mobileEvents.contains("@State private var fullTextOpen"), "iOS folded messages must not open full text in a sheet")
 }

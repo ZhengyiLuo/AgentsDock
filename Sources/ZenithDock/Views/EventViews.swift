@@ -325,7 +325,12 @@ struct MessageBubble: View {
                 if !isUser { Spacer(minLength: 0) }
             }
             .frame(maxWidth: .infinity)
-            MarkdownView(markdown: visibleText, alignment: isUser ? .trailing : .leading, linkContext: linkContext)
+            MarkdownView(
+                markdown: visibleText,
+                alignment: isUser ? .trailing : .leading,
+                allowTruncation: !fullTextExpanded,
+                linkContext: linkContext
+            )
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
             if !attachments.isEmpty {
                 MessageAttachmentStrip(attachments: attachments, isUser: isUser)

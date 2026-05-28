@@ -3890,3 +3890,27 @@ Changes:
 - The attempted manual sync in this session could not complete because both
   `zens-macbook-air` and the last known Tailscale IP `100.98.6.43` timed out on
   SSH.
+
+### Expanded Message Markdown Cap
+
+User issue:
+
+- A folded message could say `Full text shown inline` while the body still
+  displayed `[message trimmed for UI]`.
+
+Root cause:
+
+- `MessageBubble` correctly passed the complete text when expanded, but
+  `MarkdownView` had its own unconditional 32k-character UI cap and appended
+  the trim marker.
+
+Changes:
+
+- Added `allowTruncation` to Mac `MarkdownView`.
+- Expanded message bubbles pass `allowTruncation: false`, so full inline text
+  really renders full inline text.
+- Collapsed previews still keep the Markdown renderer cap as a last-resort
+  safety valve.
+- Added guardrails so expanded Mac messages bypass MarkdownView truncation.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; MBA sync was
+  attempted and skipped because `zens-macbook-air` was unreachable over SSH.
