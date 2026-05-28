@@ -19,6 +19,23 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-27 Follow-Up - Sidebar Reorder Mode
+
+Problem:
+
+- Reordering chats/folders depended on tiny up/down controls and context menus.
+  That did not feel like a real draggable reorder UI.
+
+Change:
+
+- Mac and iOS/iPadOS sidebars now expose an explicit `Reorder` / `Done` mode.
+- While reorder mode is enabled, folders and visible chat rows use native list
+  drag reordering.
+- Folder headers hide the noisy arrow controls during normal browsing and keep
+  collapse behavior available.
+- Added store-level `reorderFolders` helpers and guardrails for drag reorder
+  mode.
+
 ## 2026-05-27 Follow-Up - Code Review Diff Surface
 
 Problem:

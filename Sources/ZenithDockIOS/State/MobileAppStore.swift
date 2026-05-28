@@ -162,6 +162,13 @@ final class MobileAppStore: ObservableObject {
         UserDefaults.standard.set(folderOrder, forKey: "mobileFolderOrder")
     }
 
+    func reorderFolders(from source: IndexSet, to destination: Int) {
+        var names = orderedFolderNames(Array(Set(activeSessions.map { $0.folder ?? "General" })))
+        names.move(fromOffsets: source, toOffset: destination)
+        folderOrder = names
+        UserDefaults.standard.set(folderOrder, forKey: "mobileFolderOrder")
+    }
+
     private func orderedFolderNames(_ names: [String]) -> [String] {
         let normalized = Array(Set(names.map(normalizedFolderName)))
         let orderIndex = Dictionary(uniqueKeysWithValues: folderOrder.enumerated().map { ($0.element, $0.offset) })

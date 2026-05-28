@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import ZenithCore
 
 struct SidebarView: View {
@@ -6,6 +7,7 @@ struct SidebarView: View {
     @State private var newFolderOpen = false
     @State private var resumeOpen = false
     @State private var deleteCandidate: ZSession?
+    @State private var reorderMode = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +49,17 @@ struct SidebarView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .help("Create a folder")
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) {
+                            reorderMode.toggle()
+                        }
+                    } label: {
+                        Label(reorderMode ? "Done" : "Reorder", systemImage: reorderMode ? "checkmark.circle.fill" : "line.3.horizontal")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(reorderMode ? .accentColor : .secondary)
+                    .help(reorderMode ? "Finish reordering chats and folders" : "Drag chats and folders to reorder")
                 }
                 ConnectionStatusCard()
             }
@@ -58,6 +71,9 @@ struct SidebarView: View {
                         ForEach(store.pinnedSessions) { session in
                             sessionRow(session)
                         }
+                        .onMove { source, destination in
+                            moveSessions(store.pinnedSessions, from: source, to: destination)
+                        }
                     }
                 }
                 ForEach(store.folderNames, id: \.self) { folder in
@@ -66,16 +82,32 @@ struct SidebarView: View {
                             ForEach(store.folders[folder] ?? []) { session in
                                 sessionRow(session)
                             }
+                            .onMove { source, destination in
+                                moveSessions(store.folders[folder] ?? [], from: source, to: destination)
+                            }
                         }
                     } header: {
-                        FolderSectionHeader(folder: folder)
+                        FolderSectionHeader(
+                            folder: folder,
+                            reorderMode: reorderMode,
+                            dragProvider: dragProvider,
+                            onDropFolder: { providers, target in
+                                handleFolderDrop(providers, targetFolder: target)
+                            }
+                        )
                     }
+                }
+                .onMove { source, destination in
+                    store.reorderFolders(from: source, to: destination)
                 }
                 if !store.archivedSessions.isEmpty {
                     Section {
                         if !store.archivedSectionCollapsed {
                             ForEach(store.archivedSessions) { session in
                                 sessionRow(session)
+                            }
+                            .onMove { source, destination in
+                                moveSessions(store.archivedSessions, from: source, to: destination)
                             }
                         }
                     } header: {
@@ -144,6 +176,13 @@ struct SidebarView: View {
     private func sessionRow(_ session: ZSession) -> some View {
         SessionRow(session: session)
             .tag(session.id)
+            .opacity(reorderMode ? 0.94 : 1)
+            .onDrag {
+                dragProvider("session:\(session.id)")
+            }
+            .onDrop(of: [.text], isTargeted: nil) { providers in
+                handleSessionDrop(providers, target: session)
+            }
             .contextMenu {
                 Button {
                     store.toggleSessionUnread(session)
@@ -199,6 +238,93 @@ struct SidebarView: View {
                 }
             }
     }
+
+    private func dragProvider(_ payload: String) -> NSItemProvider {
+        NSItemProvider(object: payload as NSString)
+    }
+
+    private func handleSessionDrop(_ providers: [NSItemProvider], target: ZSession) -> Bool {
+        guard reorderMode, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+            return false
+        }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let string = object as? String, string.hasPrefix("session:") else { return }
+            let sourceID = String(string.dropFirst("session:".count))
+            Task { @MainActor in
+                await moveSession(sourceID: sourceID, toward: target.id)
+            }
+        }
+        return true
+    }
+
+    private func handleFolderDrop(_ providers: [NSItemProvider], targetFolder: String) -> Bool {
+        guard reorderMode, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+            return false
+        }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let string = object as? String, string.hasPrefix("folder:") else { return }
+            let sourceFolder = String(string.dropFirst("folder:".count))
+            Task { @MainActor in
+                moveFolder(sourceFolder, toward: targetFolder)
+            }
+        }
+        return true
+    }
+
+    private func moveFolder(_ source: String, toward target: String) {
+        let names = store.folderNames
+        guard let sourceIndex = names.firstIndex(of: source),
+              let targetIndex = names.firstIndex(of: target),
+              sourceIndex != targetIndex else {
+            return
+        }
+        let direction = targetIndex < sourceIndex ? "up" : "down"
+        for _ in 0..<abs(targetIndex - sourceIndex) {
+            store.moveFolder(source, direction: direction)
+        }
+    }
+
+    private func moveSession(sourceID: String, toward targetID: String) async {
+        guard sourceID != targetID,
+              let group = sessionGroup(containing: sourceID, and: targetID),
+              let sourceIndex = group.firstIndex(where: { $0.id == sourceID }),
+              let targetIndex = group.firstIndex(where: { $0.id == targetID }) else {
+            return
+        }
+        let moving = group[sourceIndex]
+        let direction = targetIndex < sourceIndex ? "up" : "down"
+        for _ in 0..<abs(targetIndex - sourceIndex) {
+            await store.reorderSession(moving, direction: direction)
+        }
+    }
+
+    private func sessionGroup(containing sourceID: String, and targetID: String) -> [ZSession]? {
+        let groups = [store.pinnedSessions, store.archivedSessions] + store.folderNames.map { store.folders[$0] ?? [] }
+        return groups.first { group in
+            group.contains { $0.id == sourceID } && group.contains { $0.id == targetID }
+        }
+    }
+
+    private func moveSessions(_ visibleSessions: [ZSession], from source: IndexSet, to destination: Int) {
+        guard reorderMode,
+              let sourceIndex = source.first,
+              source.count == 1,
+              visibleSessions.indices.contains(sourceIndex) else {
+            return
+        }
+        let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
+        guard visibleSessions.indices.contains(adjustedDestination), adjustedDestination != sourceIndex else {
+            return
+        }
+        let moving = visibleSessions[sourceIndex]
+        let direction = adjustedDestination < sourceIndex ? "up" : "down"
+        let steps = abs(adjustedDestination - sourceIndex)
+        Task {
+            for _ in 0..<steps {
+                await store.reorderSession(moving, direction: direction)
+            }
+        }
+    }
 }
 
 private struct ArchivedSectionHeader: View {
@@ -236,9 +362,17 @@ private struct ArchivedSectionHeader: View {
 private struct FolderSectionHeader: View {
     @EnvironmentObject private var store: AppStore
     let folder: String
+    let reorderMode: Bool
+    let dragProvider: (String) -> NSItemProvider
+    let onDropFolder: ([NSItemProvider], String) -> Bool
 
     var body: some View {
         HStack(spacing: 6) {
+            if reorderMode {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+            }
             Button {
                 store.toggleFolderCollapsed(folder)
             } label: {
@@ -251,22 +385,18 @@ private struct FolderSectionHeader: View {
             Text(folder)
                 .font(.caption.weight(.semibold))
             Spacer(minLength: 4)
-            Button {
-                store.moveFolder(folder, direction: "up")
-            } label: {
-                Image(systemName: "arrow.up")
+            if !reorderMode {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.tertiary)
             }
-            .buttonStyle(.plain)
-            .help("Move folder up")
-            Button {
-                store.moveFolder(folder, direction: "down")
-            } label: {
-                Image(systemName: "arrow.down")
-            }
-            .buttonStyle(.plain)
-            .help("Move folder down")
         }
         .textCase(nil)
+        .onDrag {
+            dragProvider("folder:\(folder)")
+        }
+        .onDrop(of: [.text], isTargeted: nil) { providers in
+            onDropFolder(providers, folder)
+        }
         .contextMenu {
             Button {
                 store.toggleFolderCollapsed(folder)

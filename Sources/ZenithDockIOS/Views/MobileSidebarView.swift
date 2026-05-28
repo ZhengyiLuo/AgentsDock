@@ -5,6 +5,7 @@ struct MobileSidebarView: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var resumeOpen: Bool
     @State private var deleteCandidate: ZSession?
+    @State private var reorderMode = false
 
     var body: some View {
         List(selection: $store.selectedSessionID) {
@@ -17,6 +18,9 @@ struct MobileSidebarView: View {
                     ForEach(store.pinnedSessions) { session in
                         sessionRow(session)
                     }
+                    .onMove { source, destination in
+                        moveSessions(store.pinnedSessions, from: source, to: destination)
+                    }
                 }
             }
 
@@ -26,10 +30,16 @@ struct MobileSidebarView: View {
                         ForEach(store.folders[folder] ?? []) { session in
                             sessionRow(session)
                         }
+                        .onMove { source, destination in
+                            moveSessions(store.folders[folder] ?? [], from: source, to: destination)
+                        }
                     }
                 } header: {
-                    MobileFolderSectionHeader(folder: folder)
+                    MobileFolderSectionHeader(folder: folder, reorderMode: reorderMode)
                 }
+            }
+            .onMove { source, destination in
+                store.reorderFolders(from: source, to: destination)
             }
             if !store.archivedSessions.isEmpty {
                 Section {
@@ -37,14 +47,25 @@ struct MobileSidebarView: View {
                         ForEach(store.archivedSessions) { session in
                             sessionRow(session)
                         }
+                        .onMove { source, destination in
+                            moveSessions(store.archivedSessions, from: source, to: destination)
+                        }
                     }
                 } header: {
                     MobileArchivedSectionHeader()
                 }
             }
         }
+        .environment(\.editMode, .constant(reorderMode ? .active : .inactive))
         .navigationTitle("ZenithDock")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(reorderMode ? "Done" : "Reorder") {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        reorderMode.toggle()
+                    }
+                }
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     Task { await store.refresh() }
@@ -77,6 +98,27 @@ struct MobileSidebarView: View {
             }
         } message: {
             Text(deleteMessage)
+        }
+    }
+
+    private func moveSessions(_ visibleSessions: [ZSession], from source: IndexSet, to destination: Int) {
+        guard reorderMode,
+              let sourceIndex = source.first,
+              source.count == 1,
+              visibleSessions.indices.contains(sourceIndex) else {
+            return
+        }
+        let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
+        guard visibleSessions.indices.contains(adjustedDestination), adjustedDestination != sourceIndex else {
+            return
+        }
+        let moving = visibleSessions[sourceIndex]
+        let direction = adjustedDestination < sourceIndex ? "up" : "down"
+        let steps = abs(adjustedDestination - sourceIndex)
+        Task {
+            for _ in 0..<steps {
+                await store.reorderSession(moving, direction: direction)
+            }
         }
     }
 
@@ -210,9 +252,14 @@ private struct MobileArchivedSectionHeader: View {
 private struct MobileFolderSectionHeader: View {
     @EnvironmentObject private var store: MobileAppStore
     let folder: String
+    let reorderMode: Bool
 
     var body: some View {
         HStack(spacing: 8) {
+            if reorderMode {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
+            }
             Button {
                 store.toggleFolderCollapsed(folder)
             } label: {
@@ -223,27 +270,29 @@ private struct MobileFolderSectionHeader: View {
             Text(folder)
                 .font(.caption.weight(.semibold))
             Spacer()
-            Menu {
-                Button {
-                    store.moveFolder(folder, direction: "up")
+            if !reorderMode {
+                Menu {
+                    Button {
+                        store.moveFolder(folder, direction: "up")
+                    } label: {
+                        Label("Move Folder Up", systemImage: "arrow.up")
+                    }
+                    Button {
+                        store.moveFolder(folder, direction: "down")
+                    } label: {
+                        Label("Move Folder Down", systemImage: "arrow.down")
+                    }
+                    Divider()
+                    Button {
+                        store.toggleFolderCollapsed(folder)
+                    } label: {
+                        Label(store.isFolderCollapsed(folder) ? "Expand Folder" : "Collapse Folder", systemImage: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+                    }
                 } label: {
-                    Label("Move Folder Up", systemImage: "arrow.up")
+                    Image(systemName: "ellipsis.circle")
                 }
-                Button {
-                    store.moveFolder(folder, direction: "down")
-                } label: {
-                    Label("Move Folder Down", systemImage: "arrow.down")
-                }
-                Divider()
-                Button {
-                    store.toggleFolderCollapsed(folder)
-                } label: {
-                    Label(store.isFolderCollapsed(folder) ? "Expand Folder" : "Collapse Folder", systemImage: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .textCase(nil)
     }
