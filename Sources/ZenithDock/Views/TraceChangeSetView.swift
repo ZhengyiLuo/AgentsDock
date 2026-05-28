@@ -65,16 +65,10 @@ struct TraceChangeSetCard: View {
 private struct TraceChangeReviewSheet: View {
     let summary: TraceChangeSummary
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedFileID: String?
     @State private var copied = false
 
     private var sections: [TraceReviewFileSection] {
         TraceReviewFileSection.build(from: summary)
-    }
-
-    private var selectedSection: TraceReviewFileSection {
-        let selected = selectedFileID ?? sections.first?.id
-        return sections.first { $0.id == selected } ?? sections.first ?? TraceReviewFileSection.empty(summary: summary)
     }
 
     var body: some View {
@@ -115,12 +109,7 @@ private struct TraceChangeReviewSheet: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(sections) { section in
-                                TraceReviewFileRow(
-                                    section: section,
-                                    isSelected: selectedSection.id == section.id
-                                ) {
-                                    selectedFileID = section.id
-                                }
+                                TraceReviewFileRow(section: section)
                             }
                         }
                         .padding(10)
@@ -129,7 +118,7 @@ private struct TraceChangeReviewSheet: View {
                 .frame(width: 315)
                 .background(Color.primary.opacity(0.025))
                 Divider()
-                TraceReviewDiffPane(section: selectedSection)
+                TraceReviewDiffPane(sections: sections)
             }
         }
         .background(Theme.window)
@@ -144,64 +133,21 @@ private struct TraceChangeReviewSheet: View {
 
 private struct TraceReviewFileRow: View {
     let section: TraceReviewFileSection
-    let isSelected: Bool
-    let select: () -> Void
 
     var body: some View {
-        Button(action: select) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(section.status.shortLabel)
-                        .font(.caption2.weight(.bold).monospaced())
-                        .foregroundStyle(section.status.color)
-                        .frame(width: 18, alignment: .leading)
-                    Text(section.path)
-                        .font(.caption.weight(.semibold).monospaced())
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 0)
-                }
-                HStack(spacing: 8) {
-                    if section.insertions > 0 {
-                        Text("+\(section.insertions)")
-                            .foregroundStyle(.green)
-                    }
-                    if section.deletions > 0 {
-                        Text("-\(section.deletions)")
-                            .foregroundStyle(.red)
-                    }
-                    if section.insertions == 0 && section.deletions == 0 {
-                        Text("\(section.lines.count) lines")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .font(.caption2.monospacedDigit())
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.045))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct TraceReviewDiffPane: View {
-    let section: TraceReviewFileSection
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(section.status.shortLabel)
+                    .font(.caption2.weight(.bold).monospaced())
+                    .foregroundStyle(section.status.color)
+                    .frame(width: 18, alignment: .leading)
                 Text(section.path)
-                    .font(.subheadline.weight(.semibold).monospaced())
-                    .lineLimit(1)
+                    .font(.caption.weight(.semibold).monospaced())
+                    .lineLimit(2)
                     .truncationMode(.middle)
-                Spacer()
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
                 if section.insertions > 0 {
                     Text("+\(section.insertions)")
                         .foregroundStyle(.green)
@@ -210,23 +156,68 @@ private struct TraceReviewDiffPane: View {
                     Text("-\(section.deletions)")
                         .foregroundStyle(.red)
                 }
-            }
-            .font(.caption.monospacedDigit())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.primary.opacity(0.045))
-            Divider()
-
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(section.lines) { line in
-                        TraceDiffLineView(line: line)
-                    }
+                if section.insertions == 0 && section.deletions == 0 {
+                    Text("No hunk captured")
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption2.monospacedDigit())
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct TraceReviewDiffPane: View {
+    let sections: [TraceReviewFileSection]
+
+    var body: some View {
+        ScrollView([.vertical, .horizontal]) {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: 0) {
+                        TraceReviewSectionHeader(section: section)
+                        ForEach(section.lines) { line in
+                            TraceDiffLineView(line: line)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct TraceReviewSectionHeader: View {
+    let section: TraceReviewFileSection
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(section.path)
+                .font(.subheadline.weight(.semibold).monospaced())
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 16)
+            if section.insertions > 0 {
+                Text("+\(section.insertions)")
+                    .foregroundStyle(.green)
+            }
+            if section.deletions > 0 {
+                Text("-\(section.deletions)")
+                    .foregroundStyle(.red)
             }
         }
+        .font(.caption.monospacedDigit())
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.primary.opacity(0.06))
+        .frame(minWidth: 720, alignment: .leading)
     }
 }
 
@@ -273,7 +264,7 @@ private struct TraceReviewFileSection: Identifiable, Equatable {
             id: "changes",
             path: "Changes",
             status: .unknown,
-            lines: TraceReviewLine.parse(summary.reviewText)
+            lines: TraceReviewLine.placeholder("No captured diff hunk for this change.")
         )
     }
 
@@ -287,7 +278,7 @@ private struct TraceReviewFileSection: Identifiable, Equatable {
                 id: file.path,
                 path: file.path,
                 status: file.status,
-                lines: TraceReviewLine.parse(summary.reviewText)
+                lines: TraceReviewLine.placeholder("No captured diff hunk for \(file.path).")
             )
         }
     }
@@ -295,18 +286,31 @@ private struct TraceReviewFileSection: Identifiable, Equatable {
     private static func parseSections(from text: String, knownFiles: [TraceChangedFile]) -> [TraceReviewFileSection] {
         let knownByPath = Dictionary(uniqueKeysWithValues: knownFiles.map { ($0.path, $0.status) })
         var sections: [TraceReviewFileSection] = []
+        var sectionIndexByPath: [String: Int] = [:]
         var currentPath: String?
         var currentStatus: TraceChangeStatus = .modified
         var currentLines: [String] = []
 
         func flush() {
             guard let path = currentPath else { return }
-            sections.append(TraceReviewFileSection(
-                id: path,
-                path: path,
-                status: knownByPath[path] ?? currentStatus,
-                lines: TraceReviewLine.parse(currentLines.joined(separator: "\n"))
-            ))
+            let parsedLines = TraceReviewLine.parse(currentLines.joined(separator: "\n"))
+            if let existingIndex = sectionIndexByPath[path] {
+                let existing = sections[existingIndex]
+                sections[existingIndex] = TraceReviewFileSection(
+                    id: existing.id,
+                    path: existing.path,
+                    status: existing.status.priority >= currentStatus.priority ? existing.status : currentStatus,
+                    lines: existing.lines + parsedLines
+                )
+            } else {
+                sectionIndexByPath[path] = sections.count
+                sections.append(TraceReviewFileSection(
+                    id: path,
+                    path: path,
+                    status: knownByPath[path] ?? currentStatus,
+                    lines: parsedLines
+                ))
+            }
             currentLines.removeAll(keepingCapacity: true)
         }
 
@@ -440,6 +444,18 @@ private struct TraceReviewLine: Identifiable, Equatable {
         return output
     }
 
+    static func placeholder(_ text: String) -> [TraceReviewLine] {
+        [
+            TraceReviewLine(
+                id: 0,
+                kind: .metadata,
+                oldNumber: nil,
+                newNumber: nil,
+                text: text
+            )
+        ]
+    }
+
     private static func parseHunkHeader(_ line: String) -> (old: Int?, new: Int?) {
         let parts = line.split(separator: " ")
         var oldStart: Int?
@@ -543,13 +559,15 @@ struct TraceChangeSummary: Equatable {
 
         for event in events.prefix(80) where event.type == "tool_started" || event.type == "tool_finished" {
             for text in candidateTexts(for: event) where hasChangeSignal(text) {
-                reviewSnippets.append(String(text.prefix(24_000)))
                 let parsed = parse(text)
                 for file in parsed.files {
                     remember(path: file.path, status: file.status)
                 }
                 insertions += parsed.insertions
                 deletions += parsed.deletions
+                if hasReviewHunks(text) {
+                    reviewSnippets.append(String(text.prefix(48_000)))
+                }
             }
         }
 
@@ -568,7 +586,6 @@ struct TraceChangeSummary: Equatable {
 
     private static func candidateTexts(for event: ZEvent) -> [String] {
         [
-            event.tool?.traceCommandText,
             event.tool?.input?.pretty,
             event.output
         ]
@@ -581,11 +598,20 @@ struct TraceChangeSummary: Equatable {
         return lower.contains("*** update file:") ||
             lower.contains("*** add file:") ||
             lower.contains("*** delete file:") ||
+            lower.contains("*** begin patch") ||
             lower.contains("files changed") ||
-            lower.contains("git diff") ||
-            lower.contains("git status") ||
             lower.contains("diff --git") ||
             lower.contains("success. updated the following files:")
+    }
+
+    private static func hasReviewHunks(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("@@ ") ||
+            lower.contains("*** begin patch") ||
+            lower.contains("*** update file:") ||
+            lower.contains("*** add file:") ||
+            lower.contains("*** delete file:") ||
+            lower.contains("diff --git")
     }
 
     private static func parse(_ text: String) -> (files: [TraceChangedFile], insertions: Int, deletions: Int) {

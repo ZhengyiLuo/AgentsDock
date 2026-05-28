@@ -19,6 +19,28 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-27 Follow-Up - Code Review Diff Surface
+
+Problem:
+
+- The trace code-review sheet could treat command text, `git status`, or grep
+  output as if it were a diff. That produced fake file rows and huge unreadable
+  text blobs instead of real code changes.
+- The review modal only showed one selected file at a time, which felt unlike
+  Codex's continuous review pane.
+
+Change:
+
+- The review sheet now renders all captured file hunks in one continuous right
+  pane, closer to Codex's review surface.
+- Diff extraction no longer uses shell command text as review content and no
+  longer treats `git status` as a hunk source.
+- File discovery can still use structured patch/diff/stat output, but the
+  detailed pane only shows real patch/unified-diff hunks. If no hunk was
+  captured for a file, the row says so instead of dumping unrelated text.
+- Added guardrails so broad command/status text cannot regress into fake code
+  review content.
+
 ## 2026-05-27 Follow-Up - Fixed-Run Scheduled Jobs
 
 Problem:

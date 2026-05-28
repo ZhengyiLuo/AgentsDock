@@ -496,11 +496,13 @@ func checkCodeReviewSurfaceIsStructured() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let review = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TraceChangeSetView.swift"), encoding: .utf8)
 
-    try assert(review.contains("@State private var selectedFileID"), "Code review sheet must keep a selected file")
     try assert(review.contains("TraceReviewDiffPane"), "Code review sheet must render a structured diff pane")
+    try assert(review.contains("TraceReviewDiffPane(sections: sections)"), "Code review sheet should render all file hunks together like Codex review")
     try assert(review.contains("TraceDiffLineView"), "Code review sheet must render per-line diff rows")
     try assert(review.contains("oldNumber"), "Code review diff rows should include old/new line numbers")
     try assert(review.contains("!path.hasPrefix(\"+\")"), "Code change extraction must reject diff body lines as fake paths")
+    try assert(!review.contains("event.tool?.traceCommandText,\n            event.tool?.input?.pretty"), "Code review extraction must not treat command text as diff content")
+    try assert(!review.contains("lower.contains(\"git status\")"), "Code review extraction must not treat git status commands as review hunks")
 }
 
 func checkUnreadMessageMarker() throws {
