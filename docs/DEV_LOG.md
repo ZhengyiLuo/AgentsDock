@@ -3832,3 +3832,21 @@ Changes:
   reorder mode is active, so folder collapse cannot fire accidentally.
 - Updated guardrails so Mac reorder mode keeps this split behavior.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
+### Mac Sidebar Drop Indicator
+
+User issue:
+
+- Dragging in reorder mode had no clear visual indication of where the item
+  would land.
+
+Changes:
+
+- Replaced plain row/header `.onDrop` closures with `DropDelegate`
+  implementations for sessions and folders.
+- Hovering over the top half of a row/header shows an insertion rule above it;
+  hovering over the bottom half shows the rule below it.
+- Drop placement now preserves before/after intent instead of only moving
+  toward the hovered item.
+- Added guardrails for the insertion rule and before/after placement model.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.

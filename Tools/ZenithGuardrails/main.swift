@@ -220,6 +220,8 @@ func checkArchiveSessionBehavior() throws {
     try assert(macSidebar.contains(".onDrop"), "Mac sidebar reorder mode must expose drop targets")
     try assert(macSidebar.contains("handleSessionDrop"), "Mac sidebar must reorder chats by drag/drop in reorder mode")
     try assert(macSidebar.contains("handleFolderDrop"), "Mac sidebar must reorder folders by drag/drop in reorder mode")
+    try assert(macSidebar.contains("SidebarInsertionRule"), "Mac sidebar drag reorder must show an insertion indicator")
+    try assert(macSidebar.contains("SidebarDropPlacement"), "Mac sidebar drag reorder must distinguish before/after placement")
     try assert(mobileSidebar.contains(".onMove"), "iOS sidebar must support drag reorder")
     try assert(macDigest.contains("store.digestTargetSessions(excluding: sourceSession.id)"), "Mac digest sheet must exclude archived target chats")
     try assert(mobileDigest.contains("store.digestTargetSessions(excluding: sourceSession.id)"), "iOS digest sheet must exclude archived target chats")

@@ -8,6 +8,7 @@ struct SidebarView: View {
     @State private var resumeOpen = false
     @State private var deleteCandidate: ZSession?
     @State private var reorderMode = false
+    @State private var sidebarDropTarget: SidebarDropTarget?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,9 +85,10 @@ struct SidebarView: View {
                         FolderSectionHeader(
                             folder: folder,
                             reorderMode: reorderMode,
+                            dropTarget: $sidebarDropTarget,
                             dragProvider: dragProvider,
-                            onDropFolder: { providers, target in
-                                handleFolderDrop(providers, targetFolder: target)
+                            onDropFolder: { providers, target, placement in
+                                handleFolderDrop(providers, targetFolder: target, placement: placement)
                             }
                         )
                     }
@@ -166,15 +168,28 @@ struct SidebarView: View {
         let row = SessionRow(session: session, reorderMode: reorderMode)
             .tag(session.id)
             .opacity(reorderMode ? 0.9 : 1)
+            .overlay(alignment: .top) {
+                SidebarInsertionRule(isVisible: sidebarDropTarget == .session(session.id, .before))
+            }
+            .overlay(alignment: .bottom) {
+                SidebarInsertionRule(isVisible: sidebarDropTarget == .session(session.id, .after))
+            }
 
         if reorderMode {
             row
                 .onDrag {
                     dragProvider("session:\(session.id)")
                 }
-                .onDrop(of: [.text], isTargeted: nil) { providers in
-                    handleSessionDrop(providers, target: session)
-                }
+                .onDrop(
+                    of: [.text],
+                    delegate: SidebarSessionDropDelegate(
+                        targetSessionID: session.id,
+                        dropTarget: $sidebarDropTarget,
+                        performMove: { providers, placement in
+                            handleSessionDrop(providers, target: session, placement: placement)
+                        }
+                    )
+                )
         } else {
             row.contextMenu {
                 Button {
@@ -237,7 +252,7 @@ struct SidebarView: View {
         NSItemProvider(object: payload as NSString)
     }
 
-    private func handleSessionDrop(_ providers: [NSItemProvider], target: ZSession) -> Bool {
+    private func handleSessionDrop(_ providers: [NSItemProvider], target: ZSession, placement: SidebarDropPlacement) -> Bool {
         guard reorderMode, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
             return false
         }
@@ -245,13 +260,13 @@ struct SidebarView: View {
             guard let string = object as? String, string.hasPrefix("session:") else { return }
             let sourceID = String(string.dropFirst("session:".count))
             Task { @MainActor in
-                await moveSession(sourceID: sourceID, toward: target.id)
+                await moveSession(sourceID: sourceID, relativeTo: target.id, placement: placement)
             }
         }
         return true
     }
 
-    private func handleFolderDrop(_ providers: [NSItemProvider], targetFolder: String) -> Bool {
+    private func handleFolderDrop(_ providers: [NSItemProvider], targetFolder: String, placement: SidebarDropPlacement) -> Bool {
         guard reorderMode, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
             return false
         }
@@ -259,13 +274,13 @@ struct SidebarView: View {
             guard let string = object as? String, string.hasPrefix("folder:") else { return }
             let sourceFolder = String(string.dropFirst("folder:".count))
             Task { @MainActor in
-                moveFolder(sourceFolder, toward: targetFolder)
+                moveFolder(sourceFolder, relativeTo: targetFolder, placement: placement)
             }
         }
         return true
     }
 
-    private func moveFolder(_ source: String, toward target: String) {
+    private func moveFolder(_ source: String, relativeTo target: String, placement: SidebarDropPlacement) {
         let names = store.folderNames
         guard let sourceIndex = names.firstIndex(of: source),
               let targetIndex = names.firstIndex(of: target),
@@ -273,12 +288,14 @@ struct SidebarView: View {
             return
         }
         let direction = targetIndex < sourceIndex ? "up" : "down"
-        for _ in 0..<abs(targetIndex - sourceIndex) {
+        let steps = sidebarReorderSteps(sourceIndex: sourceIndex, targetIndex: targetIndex, placement: placement)
+        guard steps > 0 else { return }
+        for _ in 0..<steps {
             store.moveFolder(source, direction: direction)
         }
     }
 
-    private func moveSession(sourceID: String, toward targetID: String) async {
+    private func moveSession(sourceID: String, relativeTo targetID: String, placement: SidebarDropPlacement) async {
         guard sourceID != targetID,
               let group = sessionGroup(containing: sourceID, and: targetID),
               let sourceIndex = group.firstIndex(where: { $0.id == sourceID }),
@@ -287,7 +304,9 @@ struct SidebarView: View {
         }
         let moving = group[sourceIndex]
         let direction = targetIndex < sourceIndex ? "up" : "down"
-        for _ in 0..<abs(targetIndex - sourceIndex) {
+        let steps = sidebarReorderSteps(sourceIndex: sourceIndex, targetIndex: targetIndex, placement: placement)
+        guard steps > 0 else { return }
+        for _ in 0..<steps {
             await store.reorderSession(moving, direction: direction)
         }
     }
@@ -297,6 +316,108 @@ struct SidebarView: View {
         return groups.first { group in
             group.contains { $0.id == sourceID } && group.contains { $0.id == targetID }
         }
+    }
+}
+
+private enum SidebarDropPlacement: Equatable {
+    case before
+    case after
+}
+
+private enum SidebarDropTarget: Equatable {
+    case session(String, SidebarDropPlacement)
+    case folder(String, SidebarDropPlacement)
+}
+
+private func sidebarPlacement(for info: DropInfo) -> SidebarDropPlacement {
+    info.location.y < 15 ? .before : .after
+}
+
+private func sidebarReorderSteps(sourceIndex: Int, targetIndex: Int, placement: SidebarDropPlacement) -> Int {
+    if sourceIndex < targetIndex {
+        switch placement {
+        case .before:
+            return max(targetIndex - sourceIndex - 1, 0)
+        case .after:
+            return targetIndex - sourceIndex
+        }
+    } else {
+        switch placement {
+        case .before:
+            return sourceIndex - targetIndex
+        case .after:
+            return max(sourceIndex - targetIndex - 1, 0)
+        }
+    }
+}
+
+private struct SidebarInsertionRule: View {
+    let isVisible: Bool
+
+    var body: some View {
+        Capsule()
+            .fill(Color.accentColor)
+            .frame(height: 3)
+            .padding(.horizontal, 8)
+            .opacity(isVisible ? 1 : 0)
+            .shadow(color: Color.accentColor.opacity(isVisible ? 0.35 : 0), radius: 4)
+            .allowsHitTesting(false)
+    }
+}
+
+private struct SidebarSessionDropDelegate: DropDelegate {
+    let targetSessionID: String
+    @Binding var dropTarget: SidebarDropTarget?
+    let performMove: ([NSItemProvider], SidebarDropPlacement) -> Bool
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let placement = sidebarPlacement(for: info)
+        if dropTarget != .session(targetSessionID, placement) {
+            dropTarget = .session(targetSessionID, placement)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        dropTarget = .session(targetSessionID, sidebarPlacement(for: info))
+    }
+
+    func dropExited(info: DropInfo) {
+        dropTarget = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let placement = sidebarPlacement(for: info)
+        dropTarget = nil
+        return performMove(info.itemProviders(for: [.text]), placement)
+    }
+}
+
+private struct SidebarFolderDropDelegate: DropDelegate {
+    let targetFolder: String
+    @Binding var dropTarget: SidebarDropTarget?
+    let performMove: ([NSItemProvider], SidebarDropPlacement) -> Bool
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let placement = sidebarPlacement(for: info)
+        if dropTarget != .folder(targetFolder, placement) {
+            dropTarget = .folder(targetFolder, placement)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        dropTarget = .folder(targetFolder, sidebarPlacement(for: info))
+    }
+
+    func dropExited(info: DropInfo) {
+        dropTarget = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let placement = sidebarPlacement(for: info)
+        dropTarget = nil
+        return performMove(info.itemProviders(for: [.text]), placement)
     }
 }
 
@@ -336,8 +457,9 @@ private struct FolderSectionHeader: View {
     @EnvironmentObject private var store: AppStore
     let folder: String
     let reorderMode: Bool
+    @Binding var dropTarget: SidebarDropTarget?
     let dragProvider: (String) -> NSItemProvider
-    let onDropFolder: ([NSItemProvider], String) -> Bool
+    let onDropFolder: ([NSItemProvider], String, SidebarDropPlacement) -> Bool
 
     @ViewBuilder
     var body: some View {
@@ -366,6 +488,12 @@ private struct FolderSectionHeader: View {
             }
         }
         .textCase(nil)
+        .overlay(alignment: .top) {
+            SidebarInsertionRule(isVisible: dropTarget == .folder(folder, .before))
+        }
+        .overlay(alignment: .bottom) {
+            SidebarInsertionRule(isVisible: dropTarget == .folder(folder, .after))
+        }
         .contextMenu {
             Button {
                 store.toggleFolderCollapsed(folder)
@@ -390,9 +518,16 @@ private struct FolderSectionHeader: View {
                 .onDrag {
                     dragProvider("folder:\(folder)")
                 }
-                .onDrop(of: [.text], isTargeted: nil) { providers in
-                    onDropFolder(providers, folder)
-                }
+                .onDrop(
+                    of: [.text],
+                    delegate: SidebarFolderDropDelegate(
+                        targetFolder: folder,
+                        dropTarget: $dropTarget,
+                        performMove: { providers, placement in
+                            onDropFolder(providers, folder, placement)
+                        }
+                    )
+                )
         } else {
             header
         }
