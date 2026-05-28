@@ -1624,7 +1624,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, firstRunAt: Date? = nil) async {
+    func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, maxRuns: Int? = nil, firstRunAt: Date? = nil) async {
         guard let sid = selectedSessionID else { return }
         let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanPrompt.isEmpty else { return }
@@ -1635,6 +1635,7 @@ final class AppStore: ObservableObject {
             let interval_seconds: Int
             let first_run_at: String?
             let loop: Bool
+            let max_runs: Int?
             let enabled: Bool
             let backend: String?
         }
@@ -1648,6 +1649,7 @@ final class AppStore: ObservableObject {
                 interval_seconds: intervalSeconds,
                 first_run_at: firstRunAt.map(serverTimestamp),
                 loop: loop,
+                max_runs: loop ? nil : max(1, maxRuns ?? 1),
                 enabled: true,
                 backend: selectedSession?.backend
             )
@@ -1664,6 +1666,7 @@ final class AppStore: ObservableObject {
         prompt: String? = nil,
         intervalSeconds: Int? = nil,
         loop: Bool? = nil,
+        maxRuns: Int? = nil,
         enabled: Bool? = nil,
         backend: String? = nil,
         nextRunAt: Date? = nil
@@ -1675,6 +1678,7 @@ final class AppStore: ObservableObject {
             var interval_seconds: Int?
             var next_run_at: String?
             var loop: Bool?
+            var max_runs: Int?
             var backend: String?
         }
         do {
@@ -1686,6 +1690,7 @@ final class AppStore: ObservableObject {
                 interval_seconds: intervalSeconds.map { max(10, $0) },
                 next_run_at: nextRunAt.map(serverTimestamp),
                 loop: loop,
+                max_runs: maxRuns.map { max(1, $0) },
                 backend: backend
             ))
             if let idx = jobs.firstIndex(where: { $0.id == job.id }) {

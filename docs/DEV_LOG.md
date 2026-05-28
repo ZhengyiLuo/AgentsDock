@@ -19,6 +19,25 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-27 Follow-Up - Fixed-Run Scheduled Jobs
+
+Problem:
+
+- Scheduled jobs only exposed a binary loop/no-loop mode. No-loop jobs were
+  always one-shot, but some workflows need a bounded repeated status/check run
+  such as 5 total runs without leaving a forever loop enabled.
+
+Change:
+
+- Added `max_runs` to the shared job model and server job API.
+- Loop jobs still run forever until paused/deleted. Non-loop jobs now default to
+  one run, but can be configured to run a fixed number of times at the chosen
+  interval.
+- Mac and iOS/iPadOS job creation/edit sheets expose a mode picker plus run
+  count controls for fixed-run jobs.
+- Job rows now label finite jobs as `Run once` / `Run N times`.
+- Added guardrails for the app/server fixed-run job contract.
+
 ## 2026-05-27 Follow-Up - Queued Send Draft Clearing
 
 Problem:

@@ -416,6 +416,7 @@ public struct ZJob: Codable, Identifiable, Hashable, Sendable {
     public var last_run_at: String?
     public var next_run_at_iso: String?
     public var run_count: Int?
+    public var max_runs: Int?
 }
 
 public struct ZProcessLogHint: Codable, Identifiable, Hashable, Sendable {

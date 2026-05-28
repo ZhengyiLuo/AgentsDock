@@ -26,6 +26,7 @@ struct MobileChatOptionsView: View {
     @State private var jobStartOption: MobileJobStartOption = .afterInterval
     @State private var jobStartDate = Date().addingTimeInterval(3_600)
     @State private var loopJob = true
+    @State private var fixedJobRunsText = "1"
     @State private var newJobDetailsOpen = false
     @State private var confirmDelete = false
     @State private var handoffOpen = false
@@ -210,6 +211,7 @@ struct MobileChatOptionsView: View {
                     startOption: $jobStartOption,
                     startDate: $jobStartDate,
                     loop: $loopJob,
+                    maxRunsText: $fixedJobRunsText,
                     isPresented: $newJobDetailsOpen,
                     canSchedule: canCreateJob,
                     scheduleSummary: jobDraftSummary,
@@ -397,12 +399,14 @@ struct MobileChatOptionsView: View {
                 prompt: effectiveJobPrompt,
                 intervalSeconds: interval,
                 loop: loopJob,
+                maxRuns: parsedJobMaxRuns,
                 firstRunAt: jobFirstRunAt
             )
             jobTitle = ""
             jobPrompt = ""
             jobStartOption = .afterInterval
             jobStartDate = Date().addingTimeInterval(TimeInterval(interval))
+            fixedJobRunsText = "1"
         }
     }
 
@@ -423,6 +427,7 @@ struct MobileChatOptionsView: View {
 
     private var canCreateJob: Bool {
         !effectiveJobPrompt.isEmpty && parsedJobInterval != nil
+            && (loopJob || parsedJobMaxRuns != nil)
     }
 
     private var jobFirstRunAt: Date? {
@@ -444,7 +449,12 @@ struct MobileChatOptionsView: View {
             currentNextRun: nil,
             afterIntervalMeansKeep: false
         )
-        return "\(loopJob ? "Loop" : "One shot") · \(interval) · \(start) · \(promptSource)"
+        return "\(mobileJobRunModeDescription(loop: loopJob, maxRuns: parsedJobMaxRuns)) · \(interval) · \(start) · \(promptSource)"
+    }
+
+    private var parsedJobMaxRuns: Int? {
+        guard !loopJob else { return nil }
+        return Int(fixedJobRunsText.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0 >= 1 ? $0 : nil }
     }
 }
 
@@ -586,6 +596,12 @@ private func mobileJobIntervalDescription(_ seconds: Int) -> String {
     return "every \(seconds / 3_600)h \((seconds % 3_600) / 60)m"
 }
 
+private func mobileJobRunModeDescription(loop: Bool, maxRuns: Int?) -> String {
+    if loop { return "Loop forever" }
+    let runs = max(1, maxRuns ?? 1)
+    return runs == 1 ? "Run once" : "Run \(runs) times"
+}
+
 private func mobileJobScheduledDate(
     for option: MobileJobStartOption,
     customDate: Date,
@@ -702,6 +718,7 @@ private struct MobileNewJobDetailsView: View {
     @Binding var startOption: MobileJobStartOption
     @Binding var startDate: Date
     @Binding var loop: Bool
+    @Binding var maxRunsText: String
     @Binding var isPresented: Bool
     let canSchedule: Bool
     let scheduleSummary: String
@@ -715,7 +732,17 @@ private struct MobileNewJobDetailsView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                     TextField("Job title", text: $title)
-                    Toggle("Loop", isOn: $loop)
+                    Picker("Mode", selection: $loop) {
+                        Text("Fixed").tag(false)
+                        Text("Loop").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if !loop {
+                        Stepper(value: fixedRunsBinding, in: 1...999) {
+                            TextField("Run count", text: $maxRunsText)
+                                .keyboardType(.numberPad)
+                        }
+                    }
                 }
 
                 Section("Schedule") {
@@ -796,6 +823,18 @@ private struct MobileNewJobDetailsView: View {
             return nil
         }
         return value
+    }
+
+    private var parsedMaxRuns: Int? {
+        guard !loop else { return nil }
+        return Int(maxRunsText.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0 >= 1 ? $0 : nil }
+    }
+
+    private var fixedRunsBinding: Binding<Int> {
+        Binding(
+            get: { parsedMaxRuns ?? 1 },
+            set: { maxRunsText = "\($0)" }
+        )
     }
 }
 
@@ -1598,7 +1637,7 @@ private struct MobileJobRow: View {
 
     private var subtitle: String {
         let runs = "\(job.run_count ?? 0) run\(job.run_count == 1 ? "" : "s")"
-        let mode = job.loop == true ? "loop" : "one shot"
+        let mode = mobileJobRunModeDescription(loop: job.loop == true, maxRuns: job.max_runs).lowercased()
         let interval = job.interval_seconds.map(mobileJobIntervalDescription) ?? "manual"
         if let next = mobileLocalTimestampString(job.next_run_at_iso) {
             return "\(mode) · \(interval) · \(runs) · next \(next)"
@@ -1617,6 +1656,7 @@ private struct MobileJobEditorView: View {
     @State private var startOption: MobileJobStartOption = .keepCurrent
     @State private var startDate = Date().addingTimeInterval(3_600)
     @State private var loop = true
+    @State private var maxRunsText = "1"
     @State private var enabled = true
     @State private var backend = "claude"
     @State private var isSaving = false
@@ -1630,7 +1670,17 @@ private struct MobileJobEditorView: View {
                         Text("Claude").tag("claude")
                         Text("Codex").tag("codex")
                     }
-                    Toggle("Loop", isOn: $loop)
+                    Picker("Mode", selection: $loop) {
+                        Text("Fixed").tag(false)
+                        Text("Loop").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if !loop {
+                        Stepper(value: fixedRunsBinding, in: 1...999) {
+                            TextField("Run count", text: $maxRunsText)
+                                .keyboardType(.numberPad)
+                        }
+                    }
                     Toggle("Enabled", isOn: $enabled)
                 }
 
@@ -1702,7 +1752,7 @@ private struct MobileJobEditorView: View {
     }
 
     private var canSave: Bool {
-        !cleanTitle.isEmpty && !cleanPrompt.isEmpty && intervalIsValid
+        !cleanTitle.isEmpty && !cleanPrompt.isEmpty && intervalIsValid && maxRunsIsValid
     }
 
     private func syncDrafts() {
@@ -1712,6 +1762,7 @@ private struct MobileJobEditorView: View {
         startOption = .keepCurrent
         startDate = mobileParseServerDate(job.next_run_at_iso) ?? Date().addingTimeInterval(TimeInterval(job.interval_seconds ?? 3_600))
         loop = job.loop == true
+        maxRunsText = "\(max(1, job.max_runs ?? 1))"
         enabled = job.enabled
         backend = job.backend ?? store.selectedSession?.backend ?? "claude"
     }
@@ -1726,6 +1777,8 @@ private struct MobileJobEditorView: View {
         )
         let intervalPatch = parsedInterval == job.interval_seconds ? nil : parsedInterval
         let loopPatch = loop == (job.loop == true) ? nil : loop
+        let currentMaxRuns = job.loop == true ? nil : max(1, job.max_runs ?? 1)
+        let maxRunsPatch = parsedMaxRuns == currentMaxRuns ? nil : parsedMaxRuns
         let enabledPatch = enabled == job.enabled ? nil : enabled
         let backendPatch = backend == (job.backend ?? store.selectedSession?.backend ?? "claude") ? nil : backend
         isSaving = true
@@ -1736,6 +1789,7 @@ private struct MobileJobEditorView: View {
                 prompt: cleanPrompt,
                 intervalSeconds: intervalPatch,
                 loop: loopPatch,
+                maxRuns: maxRunsPatch,
                 enabled: enabledPatch,
                 backend: backendPatch,
                 nextRunAt: nextRunAt
@@ -1745,5 +1799,21 @@ private struct MobileJobEditorView: View {
                 isPresented = false
             }
         }
+    }
+
+    private var maxRunsIsValid: Bool {
+        loop || parsedMaxRuns != nil
+    }
+
+    private var parsedMaxRuns: Int? {
+        guard !loop else { return nil }
+        return Int(maxRunsText.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0 >= 1 ? $0 : nil }
+    }
+
+    private var fixedRunsBinding: Binding<Int> {
+        Binding(
+            get: { parsedMaxRuns ?? 1 },
+            set: { maxRunsText = "\($0)" }
+        )
     }
 }

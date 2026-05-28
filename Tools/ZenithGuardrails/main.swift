@@ -454,9 +454,16 @@ func checkJobIntervalPresets() throws {
     try assert(mobileOptions.contains("nextRunAt: nextRunAt"), "iOS edited jobs must pass the requested next-run time")
     try assert(macStore.contains("first_run_at: String?"), "Mac job create payload must support first_run_at")
     try assert(macStore.contains("next_run_at: String?"), "Mac job update payload must support next_run_at")
+    try assert(macStore.contains("max_runs: Int?"), "Mac job payloads must support fixed run counts")
+    try assert(inspector.contains("maxRunsText"), "Mac job sheets must expose fixed run-count controls")
+    try assert(inspector.contains("jobRunModeDescription(loop:"), "Mac job rows must describe finite run counts")
     try assert(mobileStore.contains("first_run_at: String?"), "iOS job create payload must stay compatible with first_run_at")
+    try assert(mobileStore.contains("max_runs: Int?"), "iOS job payloads must support fixed run counts")
+    try assert(mobileOptions.contains("maxRunsText"), "iOS job sheets must expose fixed run-count controls")
     try assert(server.contains("first_run_at: str | None = None"), "Server job create model must accept first_run_at")
     try assert(server.contains("next_run_at: str | None = None"), "Server job update model must accept next_run_at")
+    try assert(server.contains("max_runs: int | None = None"), "Server job models must accept max_runs")
+    try assert(server.contains("finite_has_more"), "Server scheduler must keep finite jobs running until max_runs is reached")
     try assert(server.contains("parse_job_timestamp"), "Server must parse explicit job timestamps")
 }
 
