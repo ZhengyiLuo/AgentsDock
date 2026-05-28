@@ -25,6 +25,7 @@ final class AppStore: ObservableObject {
     @Published var status = "Disconnected"
     @Published var errorText: String?
     @Published var connectionProblemText: String?
+    @Published var launchDeferredText: String?
     @Published var jobs: [ZJob] = []
     @Published var runtimeCatalog = ZRuntimeCatalogSnapshot.fallback
     @Published var showDebugEvents = false {
@@ -555,6 +556,7 @@ final class AppStore: ObservableObject {
         events = []
         displayEvents = []
         isApplyingLargeTimelineBatch = false
+        launchDeferredText = nil
         uploads = []
         sessionFiles = []
         sessionVideoFiles = []
@@ -1392,6 +1394,7 @@ final class AppStore: ObservableObject {
             } else {
                 AppLogger.info("turn started session=\(sessionID) run=\(res.run_id ?? "-")")
             }
+            launchDeferredText = nil
             syncSelectedRunningState()
             return true
         } catch {
@@ -1484,6 +1487,7 @@ final class AppStore: ObservableObject {
             } else {
                 AppLogger.info("turn started session=\(sid) run=\(res.run_id ?? "-")")
             }
+            launchDeferredText = nil
             uploads = []
             return true
         } catch {
@@ -2423,6 +2427,11 @@ final class AppStore: ObservableObject {
 
     private func reportServerError(_ error: Error) {
         guard let message = serverErrorMessage(error) else { return }
+        if isAgentLaunchDeferred(error, message: message) {
+            launchDeferredText = message
+            status = "Launch deferred"
+            return
+        }
         if isConnectionError(error) {
             connectionProblemText = message
             status = "Server offline"
@@ -2445,7 +2454,31 @@ final class AppStore: ObservableObject {
         if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
             return "Agent server rejected the access token. Check ZENITHDOCK_AGENT_TOKEN on the server and the token field in the app."
         }
+        if let detail = apiErrorDetail(error) {
+            return detail
+        }
         return error.localizedDescription
+    }
+
+    private func apiErrorDetail(_ error: Error) -> String? {
+        let ns = error as NSError
+        guard ns.domain == "ZenithDock.API" else { return nil }
+        let raw = ns.localizedDescription
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = object["detail"] as? String,
+              !detail.isEmpty
+        else {
+            return raw
+        }
+        return detail
+    }
+
+    private func isAgentLaunchDeferred(_ error: Error, message: String) -> Bool {
+        let ns = error as NSError
+        return ns.domain == "ZenithDock.API" &&
+            ns.code == 503 &&
+            message.localizedCaseInsensitiveContains("agent launch deferred")
     }
 
     private func isConnectionError(_ error: Error) -> Bool {

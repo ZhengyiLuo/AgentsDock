@@ -442,69 +442,83 @@ private struct MobileChatHeader: View {
     @Binding var optionsOpen: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(store.selectedSession?.title ?? "Chat")
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(store.selectedSession?.title ?? "Chat")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Menu {
+                    Button {
+                        resumeOpen = true
+                    } label: {
+                        Label("Resume Chat", systemImage: "arrow.uturn.forward.circle")
+                    }
+                    Button {
+                        optionsOpen = true
+                    } label: {
+                        Label("Chat Options", systemImage: "slider.horizontal.3")
+                    }
+                    if let session = store.selectedSession {
+                        Picker("Backend", selection: Binding(
+                            get: { session.backend },
+                            set: { newValue in Task { await store.updateSelected(backend: newValue, model: "") } }
+                        )) {
+                            Text("Claude").tag("claude")
+                            Text("Codex").tag("codex")
+                        }
+                        .disabled(session.isBackendLocked)
+                        Picker("Model", selection: Binding(
+                            get: { normalized(session.model) },
+                            set: { newValue in Task { await store.updateSelected(model: newValue) } }
+                        )) {
+                            ForEach(modelOptions(for: session)) { option in
+                                Text(option.label).tag(option.value)
+                            }
+                        }
+                        Picker("Effort", selection: Binding(
+                            get: { normalized(session.effort) },
+                            set: { newValue in Task { await store.updateSelected(effort: newValue) } }
+                        )) {
+                            ForEach(effortOptions(for: session)) { option in
+                                Text(option.label).tag(option.value)
+                            }
+                        }
+                    }
+                    if let session = store.selectedSession {
+                        Button {
+                            Task { await store.togglePin(session) }
+                        } label: {
+                            Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
+                        }
+                        Button {
+                            Task { await store.forkSelected() }
+                        } label: {
+                            Label("Fork Chat", systemImage: "arrow.triangle.branch")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                }
             }
-            Spacer()
-            Menu {
-                Button {
-                    resumeOpen = true
-                } label: {
-                    Label("Resume Chat", systemImage: "arrow.uturn.forward.circle")
-                }
-                Button {
-                    optionsOpen = true
-                } label: {
-                    Label("Chat Options", systemImage: "slider.horizontal.3")
-                }
-                if let session = store.selectedSession {
-                    Picker("Backend", selection: Binding(
-                        get: { session.backend },
-                        set: { newValue in Task { await store.updateSelected(backend: newValue, model: "") } }
-                    )) {
-                        Text("Claude").tag("claude")
-                        Text("Codex").tag("codex")
-                    }
-                    .disabled(session.isBackendLocked)
-                    Picker("Model", selection: Binding(
-                        get: { normalized(session.model) },
-                        set: { newValue in Task { await store.updateSelected(model: newValue) } }
-                    )) {
-                        ForEach(modelOptions(for: session)) { option in
-                            Text(option.label).tag(option.value)
-                        }
-                    }
-                    Picker("Effort", selection: Binding(
-                        get: { normalized(session.effort) },
-                        set: { newValue in Task { await store.updateSelected(effort: newValue) } }
-                    )) {
-                        ForEach(effortOptions(for: session)) { option in
-                            Text(option.label).tag(option.value)
-                        }
-                    }
-                }
-                if let session = store.selectedSession {
-                    Button {
-                        Task { await store.togglePin(session) }
-                    } label: {
-                        Label(session.pinned == true ? "Unpin Chat" : "Pin Chat", systemImage: session.pinned == true ? "pin.slash" : "pin")
-                    }
-                    Button {
-                        Task { await store.forkSelected() }
-                    } label: {
-                        Label("Fork Chat", systemImage: "arrow.triangle.branch")
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title3)
+            if let launchDeferredText = store.launchDeferredText {
+                Label(cleanLaunchDeferredText(launchDeferredText), systemImage: "hourglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.35)))
             }
         }
         .padding(.horizontal, 16)
@@ -518,6 +532,10 @@ private struct MobileChatHeader: View {
             return "\(store.runtimeCatalog.compactSummary(for: session)) · session \(provider)"
         }
         return "\(store.runtimeCatalog.compactSummary(for: session)) · \(session.folder ?? "General")"
+    }
+
+    private func cleanLaunchDeferredText(_ text: String) -> String {
+        text.replacingOccurrences(of: "agent launch deferred: ", with: "Launch deferred: ")
     }
 
     private func modelOptions(for session: ZSession) -> [ZRuntimeOption] {

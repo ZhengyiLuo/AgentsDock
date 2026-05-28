@@ -28,6 +28,7 @@ final class MobileAppStore: ObservableObject {
     @Published var socketLive = false
     @Published var status = "Disconnected"
     @Published var connectionDetail = "No connection test yet"
+    @Published var launchDeferredText: String?
     @Published var activeSessionIDs: Set<String> = []
     @Published var defaultCwd = fallbackServerCwd
     @Published var errorText: String?
@@ -434,6 +435,7 @@ final class MobileAppStore: ObservableObject {
         selectedSessionID = nil
         events = []
         uploads = []
+        launchDeferredText = nil
         sessions = []
         jobs = []
         omittedHistoryEventCount = 0
@@ -804,6 +806,7 @@ final class MobileAppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
             }
+            launchDeferredText = nil
             syncSelectedRunningState()
             return true
         } catch {
@@ -1015,6 +1018,7 @@ final class MobileAppStore: ObservableObject {
             if let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = res.session
             }
+            launchDeferredText = nil
             uploads = []
             return true
         } catch {
@@ -1550,13 +1554,39 @@ final class MobileAppStore: ObservableObject {
     private func report(_ error: Error) {
         guard !isCancelledNetworkError(error) else { return }
         let ns = error as NSError
-        if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
+        let message = apiErrorDetail(error) ?? error.localizedDescription
+        if isAgentLaunchDeferred(error, message: message) {
+            launchDeferredText = message
+            setStatus("Launch deferred")
+            setConnectionDetail(message)
+        } else if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
             errorText = "Agent server rejected the access token for \(resolvedServerURLString). Check the token on the server and in this app."
         } else if ns.domain == NSURLErrorDomain {
             errorText = "\(connectionFailureSummary(error)). If Safari works but server logs do not show an app request, enable Local Network for ZenithDock in iOS Settings and make sure Tailscale is active."
         } else {
-            errorText = error.localizedDescription
+            errorText = message
         }
+    }
+
+    private func isAgentLaunchDeferred(_ error: Error, message: String) -> Bool {
+        let ns = error as NSError
+        return ns.domain == "ZenithDock.API" &&
+            ns.code == 503 &&
+            message.localizedCaseInsensitiveContains("agent launch deferred")
+    }
+
+    private func apiErrorDetail(_ error: Error) -> String? {
+        let ns = error as NSError
+        guard ns.domain == "ZenithDock.API" else { return nil }
+        let raw = ns.localizedDescription
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = object["detail"] as? String,
+              !detail.isEmpty
+        else {
+            return raw
+        }
+        return detail
     }
 
     private func isCancelledNetworkError(_ error: Error) -> Bool {

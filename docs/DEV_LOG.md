@@ -19,6 +19,24 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-27 Follow-Up - Agent Launch Deferred UX And Concurrency
+
+Problem:
+
+- The server correctly deferred new manual agent launches when the global active
+  run cap was reached, but the Mac app surfaced the HTTP 503 as a modal alert
+  with raw JSON (`agent launch deferred: server already has ...`).
+- The active server has moved to a stronger machine, so the old manual cap of 4
+  was too conservative.
+
+Change:
+
+- Raised the default `ZENITHBOT_MAX_ACTIVE_AGENT_RUNS` from 4 to 10.
+- Mac and iOS now classify `agent launch deferred` API responses as inline
+  launch status (`Launch deferred`) instead of modal errors.
+- API JSON `detail` payloads are unwrapped before display.
+- Added guardrails for the cap and non-modal deferred-launch behavior.
+
 ## 2026-05-26 Follow-Up - Timeline Message Timestamps
 
 Change:

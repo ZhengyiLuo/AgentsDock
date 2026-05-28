@@ -342,6 +342,27 @@ func checkConnectionFailuresDoNotModal() throws {
     try assert(mobileStore.contains("markServerUpgradeRequired(version:"), "iOS app must show server-upgrade-required state")
 }
 
+func checkLaunchDeferredIsInline() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+    let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+
+    try assert(server.contains("ZENITHBOT_MAX_ACTIVE_AGENT_RUNS\", \"10\""), "Server default manual-agent concurrency cap should be 10")
+    try assert(macStore.contains("@Published var launchDeferredText: String?"), "Mac store must keep launch-deferred state separate from modal errors")
+    try assert(macStore.contains("isAgentLaunchDeferred(error, message: message)"), "Mac store must classify launch-deferred API responses")
+    try assert(macStore.contains("launchDeferredText = message"), "Mac launch-deferred responses must become inline status")
+    try assert(macStore.contains("status = \"Launch deferred\""), "Mac launch-deferred responses must update run status")
+    try assert(macStore.contains("apiErrorDetail"), "Mac API errors should unwrap JSON detail strings")
+    try assert(macTimeline.contains("store.launchDeferredText"), "Mac timeline header must render launch-deferred state inline")
+    try assert(mobileStore.contains("@Published var launchDeferredText: String?"), "iOS store must keep launch-deferred state separate from modal errors")
+    try assert(mobileStore.contains("isAgentLaunchDeferred(error, message: message)"), "iOS store must classify launch-deferred API responses")
+    try assert(mobileStore.contains("setStatus(\"Launch deferred\")"), "iOS launch-deferred responses must update run status")
+    try assert(mobileTimeline.contains("store.launchDeferredText"), "iOS timeline header must render launch-deferred state inline")
+}
+
 func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
@@ -673,6 +694,7 @@ do {
     try checkMobileDoesNotAutoSelectFirstChat()
     try checkTimelineRevealWaitsForLatestSnapshot()
     try checkConnectionFailuresDoNotModal()
+    try checkLaunchDeferredIsInline()
     try checkVideoMetadataIsNotHiddenByMixedFilePaging()
     try checkRuntimeAutosavesAndBackendIcons()
     try checkJobIntervalPresets()

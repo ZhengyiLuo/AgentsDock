@@ -1428,6 +1428,19 @@ struct HeaderView: View {
                 .layoutPriority(2)
                 Spacer(minLength: 0)
             }
+
+            if let launchDeferredText = store.launchDeferredText {
+                Label(cleanLaunchDeferredText(launchDeferredText), systemImage: "hourglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.orange.opacity(0.35)))
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -1604,6 +1617,13 @@ struct HeaderView: View {
             return "\(store.runtimeCatalog.compactSummary(for: session)) · session \(String(provider.prefix(12)))"
         }
         return "\(store.runtimeCatalog.compactSummary(for: session)) · \(session.folder ?? "General") · \(session.cwd ?? store.defaultCwd)"
+    }
+
+    private func cleanLaunchDeferredText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"{"detail":""#, with: "")
+            .replacingOccurrences(of: #""}"#, with: "")
+            .replacingOccurrences(of: "agent launch deferred: ", with: "Launch deferred: ")
     }
 
     private func syncTitle() {
