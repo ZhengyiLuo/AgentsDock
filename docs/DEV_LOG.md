@@ -3786,3 +3786,30 @@ Follow-up deployment:
   `active`.
 - Unauthenticated local health now returns `401`, and service logs show
   authenticated app health/session requests returning `200`.
+
+### Local Mac Bundle Signing
+
+User issue:
+
+- Launching `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` crashed before the
+  app started. The macOS crash report showed a dyld abort loading
+  `ZenithCore.framework` because the mapped framework and process had different
+  signing team identities.
+
+Root cause:
+
+- The local dist refresh path could overwrite or re-sign the app bundle after
+  Xcode had already embedded matching Apple Development signatures. Re-signing
+  the app/framework ad-hoc under hardened runtime caused dyld library
+  validation to reject the embedded `ZenithCore.framework`.
+
+Changes:
+
+- Added `scripts/build_local_mac.sh` as the blessed local Mac build path.
+- The script builds `ZenithDockMac` with Xcode, clean-removes the old dist app,
+  copies the fresh app, preserves Xcode's matching app/framework signatures,
+  and runs strict deep codesign verification.
+- Verified the rebuilt dist app has matching `KRR35MWWHD` team signatures on
+  the app and `ZenithCore.framework`.
+- Smoke-launched `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; the process
+  stayed running and no newer crash report was created.

@@ -62,6 +62,15 @@ swift run
 
 Edit the server URL in the app toolbar or inspector.
 
+To refresh the local distributable app used during development:
+
+```bash
+./scripts/build_local_mac.sh
+```
+
+This clean-copies the Xcode-built app to `dist/ZenithDock.app` and preserves
+the matching app/framework signing identities.
+
 ## Build The iOS/iPadOS App
 
 The mobile SwiftUI target is `ZenithDockIOS` and reuses `ZenithCore`.
