@@ -3850,3 +3850,24 @@ Changes:
   toward the hovered item.
 - Added guardrails for the insertion rule and before/after placement model.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
+### Mac Sidebar Reorder State Machine
+
+User issue:
+
+- The blue insertion rule could remain visible after a drop, which exposed that
+  the reorder indicator was only tracking the last hovered target instead of the
+  full drag lifecycle.
+
+Changes:
+
+- Added explicit `sidebarDragPayload` state alongside the hover target.
+- Drag indicators now render only when both an active drag payload and a valid
+  non-self target are present.
+- Drop delegates validate payload type and self-drops before showing an
+  insertion target.
+- Drop, exit, and reorder-mode exit all clear the drag payload and hover target.
+- Reorder moves now use the local payload state instead of asynchronously
+  reading `NSItemProvider`, reducing stale-state races.
+- Added guardrails for active drag payload tracking and explicit cleanup.
+- Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
