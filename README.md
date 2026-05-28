@@ -69,7 +69,10 @@ To refresh the local distributable app used during development:
 ```
 
 This clean-copies the Xcode-built app to `dist/ZenithDock.app` and preserves
-the matching app/framework signing identities.
+the matching app/framework signing identities. The script also tries to sync
+the app directly to the MacBook Air at `/Users/zen/agi/ZenithDock.app` when
+`zens-macbook-air` is reachable over SSH. Override with `ZENITHDOCK_MBA_HOST`
+or `ZENITHDOCK_MBA_DEST` if needed.
 
 ## Build The iOS/iPadOS App
 

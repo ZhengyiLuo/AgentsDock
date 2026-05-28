@@ -3871,3 +3871,22 @@ Changes:
   reading `NSItemProvider`, reducing stale-state races.
 - Added guardrails for active drag payload tracking and explicit cleanup.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+
+### MacBook Air App Sync
+
+User rule:
+
+- After local Mac builds, also send the built app directly to the MacBook Air.
+
+Changes:
+
+- `scripts/build_local_mac.sh` now attempts to sync
+  `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` directly to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+- The sync uses `rsync -a --delete` so the `.app` bundle is copied directly,
+  not zipped.
+- If the MacBook Air is asleep/offline or SSH is unavailable, the script logs a
+  clear `Skipped MBA sync` message while leaving the local build successful.
+- The attempted manual sync in this session could not complete because both
+  `zens-macbook-air` and the last known Tailscale IP `100.98.6.43` timed out on
+  SSH.

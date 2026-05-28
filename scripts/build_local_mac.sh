@@ -23,4 +23,13 @@ ditto "${BUILT_APP}" "${DIST_APP}"
 
 codesign --verify --deep --strict --verbose=2 "${DIST_APP}"
 
+MBA_HOST="${ZENITHDOCK_MBA_HOST:-zens-macbook-air}"
+MBA_DEST="${ZENITHDOCK_MBA_DEST:-/Users/zen/agi}"
+if ssh -o BatchMode=yes -o ConnectTimeout=5 "${MBA_HOST}" "mkdir -p '${MBA_DEST}'" >/dev/null 2>&1; then
+  rsync -a --delete "${DIST_APP}" "${MBA_HOST}:${MBA_DEST}/"
+  echo "Synced MBA: ${MBA_HOST}:${MBA_DEST}/ZenithDock.app"
+else
+  echo "Skipped MBA sync: ${MBA_HOST} is not reachable over SSH" >&2
+fi
+
 echo "${DIST_APP}"
