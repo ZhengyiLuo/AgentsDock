@@ -1489,6 +1489,7 @@ final class AppStore: ObservableObject {
             }
             launchDeferredText = nil
             uploads = []
+            clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)
             return true
         } catch {
             if submittedPrompt == nil && prompt.isEmpty {
@@ -1503,6 +1504,16 @@ final class AppStore: ObservableObject {
             AppLogger.error("send failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
             return false
+        }
+    }
+
+    private func clearSubmittedPromptIfCurrent(submittedPrompt: String?, trimmed: String) {
+        guard submittedPrompt != nil else {
+            prompt = ""
+            return
+        }
+        if prompt.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed {
+            prompt = ""
         }
     }
 

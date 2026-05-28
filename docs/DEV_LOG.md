@@ -19,6 +19,22 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-27 Follow-Up - Queued Send Draft Clearing
+
+Problem:
+
+- Some queued sends cleared the visible editor immediately but left the backing
+  `prompt` string intact. Later SwiftUI refreshes could repopulate the composer
+  with the already-submitted message, making it look like queue submit failed.
+
+Change:
+
+- Mac and iOS now clear the backing prompt after any successful selected-chat
+  send, including explicit submitted snapshots from the native editors.
+- The clear only fires if the backing prompt still matches the submitted text,
+  so a newer draft typed while the request is in flight is preserved.
+- Added guardrails for the queued-send draft clearing rule.
+
 ## 2026-05-27 Follow-Up - Agent Launch Deferred UX And Concurrency
 
 Problem:

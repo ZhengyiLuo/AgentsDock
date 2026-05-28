@@ -1020,6 +1020,7 @@ final class MobileAppStore: ObservableObject {
             }
             launchDeferredText = nil
             uploads = []
+            clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)
             return true
         } catch {
             if submittedPrompt == nil {
@@ -1029,6 +1030,16 @@ final class MobileAppStore: ObservableObject {
             syncSelectedRunningState()
             report(error)
             return false
+        }
+    }
+
+    private func clearSubmittedPromptIfCurrent(submittedPrompt: String?, trimmed: String) {
+        guard submittedPrompt != nil else {
+            prompt = ""
+            return
+        }
+        if prompt.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed {
+            prompt = ""
         }
     }
 

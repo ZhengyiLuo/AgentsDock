@@ -595,10 +595,13 @@ func checkQueuedRemovalDisappears() throws {
     try assert(macStore.contains("func runQueuedNow"), "Mac store must support interrupting the current run for a queued turn")
     try assert(macStore.contains("func moveQueued"), "Mac store must support queue reordering")
     try assert(macStore.contains("func updateQueued"), "Mac store must support editing queued prompts")
+    try assert(macStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "Mac send success must clear a stale submitted draft after queued sends")
+    try assert(macStore.contains("prompt.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed"), "Mac draft clearing must not wipe a newer prompt typed during submit")
     try assert(mobileStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "iOS unqueue should remove queued rows locally after server success")
     try assert(mobileStore.contains("func runQueuedNow"), "iOS store must support interrupting the current run for a queued turn")
     try assert(mobileStore.contains("func moveQueued"), "iOS store must support queue reordering")
     try assert(mobileStore.contains("func updateQueued"), "iOS store must support editing queued prompts")
+    try assert(mobileStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "iOS send success must clear a stale submitted draft after queued sends")
     try assert(server.contains("RUN_NOW_TURNS"), "Server Send Now must reserve the exact queued item instead of relying on queue order")
     try assert(server.contains("stop_turn(session_id, emit_event=False, schedule_queue=False)"), "Server Send Now must silently interrupt without appending visible stop cards")
 }
