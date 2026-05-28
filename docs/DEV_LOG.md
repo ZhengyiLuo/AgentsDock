@@ -3814,18 +3814,21 @@ Changes:
 - Smoke-launched `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; the process
   stayed running and no newer crash report was created.
 
-### Mac Sidebar Reorder Controls
+### Mac Sidebar Reorder Mode
 
 User issue:
 
-- Making whole chat rows draggable was too easy to trigger accidentally.
-- Dragging folder headers was also a bad sidebar interaction.
+- Chat rows and folders should not be draggable during normal use.
+- After pressing `Reorder`, the sidebar should switch into a dedicated reorder
+  mode where rows/folders are draggable and no longer behave as normal click
+  targets.
 
 Changes:
 
-- Removed Mac sidebar drag/drop reorder hooks for chats and folders.
-- Reorder mode now shows explicit inline up/down controls for chats and folders.
-- Normal chat rows and folder headers remain plain click targets.
-- Updated guardrails so Mac sidebar reorder cannot regress back to draggable
-  rows/headers.
+- Normal mode has no drag/drop hooks on chats or folders.
+- Reorder mode enables drag/drop for chat rows and folder headers.
+- Chat selection is ignored while reorder mode is active.
+- Folder headers show a drag affordance instead of a collapse button while
+  reorder mode is active, so folder collapse cannot fire accidentally.
+- Updated guardrails so Mac reorder mode keeps this split behavior.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.

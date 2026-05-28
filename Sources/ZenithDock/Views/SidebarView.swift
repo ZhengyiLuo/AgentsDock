@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import ZenithCore
 
 struct SidebarView: View {
@@ -58,7 +59,7 @@ struct SidebarView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(reorderMode ? .accentColor : .secondary)
-                    .help(reorderMode ? "Finish reordering chats and folders" : "Show inline reorder controls")
+                    .help(reorderMode ? "Finish reordering chats and folders" : "Drag chats and folders to reorder")
                 }
                 ConnectionStatusCard()
             }
@@ -82,7 +83,11 @@ struct SidebarView: View {
                     } header: {
                         FolderSectionHeader(
                             folder: folder,
-                            reorderMode: reorderMode
+                            reorderMode: reorderMode,
+                            dragProvider: dragProvider,
+                            onDropFolder: { providers, target in
+                                handleFolderDrop(providers, targetFolder: target)
+                            }
                         )
                     }
                 }
@@ -146,6 +151,7 @@ struct SidebarView: View {
         Binding(
             get: { store.selectedSessionID },
             set: { newValue in
+                guard !reorderMode else { return }
                 guard let sessionID = newValue,
                       sessionID != store.selectedSessionID else {
                     return
@@ -157,10 +163,20 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func sessionRow(_ session: ZSession) -> some View {
-        SessionRow(session: session, reorderMode: reorderMode)
+        let row = SessionRow(session: session, reorderMode: reorderMode)
             .tag(session.id)
-            .opacity(reorderMode ? 0.94 : 1)
-            .contextMenu {
+            .opacity(reorderMode ? 0.9 : 1)
+
+        if reorderMode {
+            row
+                .onDrag {
+                    dragProvider("session:\(session.id)")
+                }
+                .onDrop(of: [.text], isTargeted: nil) { providers in
+                    handleSessionDrop(providers, target: session)
+                }
+        } else {
+            row.contextMenu {
                 Button {
                     store.toggleSessionUnread(session)
                 } label: {
@@ -214,6 +230,73 @@ struct SidebarView: View {
                     Label("Delete Chat", systemImage: "trash")
                 }
             }
+        }
+    }
+
+    private func dragProvider(_ payload: String) -> NSItemProvider {
+        NSItemProvider(object: payload as NSString)
+    }
+
+    private func handleSessionDrop(_ providers: [NSItemProvider], target: ZSession) -> Bool {
+        guard reorderMode, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+            return false
+        }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let string = object as? String, string.hasPrefix("session:") else { return }
+            let sourceID = String(string.dropFirst("session:".count))
+            Task { @MainActor in
+                await moveSession(sourceID: sourceID, toward: target.id)
+            }
+        }
+        return true
+    }
+
+    private func handleFolderDrop(_ providers: [NSItemProvider], targetFolder: String) -> Bool {
+        guard reorderMode, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+            return false
+        }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let string = object as? String, string.hasPrefix("folder:") else { return }
+            let sourceFolder = String(string.dropFirst("folder:".count))
+            Task { @MainActor in
+                moveFolder(sourceFolder, toward: targetFolder)
+            }
+        }
+        return true
+    }
+
+    private func moveFolder(_ source: String, toward target: String) {
+        let names = store.folderNames
+        guard let sourceIndex = names.firstIndex(of: source),
+              let targetIndex = names.firstIndex(of: target),
+              sourceIndex != targetIndex else {
+            return
+        }
+        let direction = targetIndex < sourceIndex ? "up" : "down"
+        for _ in 0..<abs(targetIndex - sourceIndex) {
+            store.moveFolder(source, direction: direction)
+        }
+    }
+
+    private func moveSession(sourceID: String, toward targetID: String) async {
+        guard sourceID != targetID,
+              let group = sessionGroup(containing: sourceID, and: targetID),
+              let sourceIndex = group.firstIndex(where: { $0.id == sourceID }),
+              let targetIndex = group.firstIndex(where: { $0.id == targetID }) else {
+            return
+        }
+        let moving = group[sourceIndex]
+        let direction = targetIndex < sourceIndex ? "up" : "down"
+        for _ in 0..<abs(targetIndex - sourceIndex) {
+            await store.reorderSession(moving, direction: direction)
+        }
+    }
+
+    private func sessionGroup(containing sourceID: String, and targetID: String) -> [ZSession]? {
+        let groups = [store.pinnedSessions, store.archivedSessions] + store.folderNames.map { store.folders[$0] ?? [] }
+        return groups.first { group in
+            group.contains { $0.id == sourceID } && group.contains { $0.id == targetID }
+        }
     }
 }
 
@@ -253,40 +336,31 @@ private struct FolderSectionHeader: View {
     @EnvironmentObject private var store: AppStore
     let folder: String
     let reorderMode: Bool
+    let dragProvider: (String) -> NSItemProvider
+    let onDropFolder: ([NSItemProvider], String) -> Bool
 
+    @ViewBuilder
     var body: some View {
-        HStack(spacing: 6) {
-            Button {
-                store.toggleFolderCollapsed(folder)
-            } label: {
-                Image(systemName: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+        let header = HStack(spacing: 6) {
+            if reorderMode {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
                     .frame(width: 12)
+            } else {
+                Button {
+                    store.toggleFolderCollapsed(folder)
+                } label: {
+                    Image(systemName: store.isFolderCollapsed(folder) ? "chevron.right" : "chevron.down")
+                        .frame(width: 12)
+                }
+                .buttonStyle(.plain)
+                .help(store.isFolderCollapsed(folder) ? "Expand folder" : "Collapse folder")
             }
-            .buttonStyle(.plain)
-            .help(store.isFolderCollapsed(folder) ? "Expand folder" : "Collapse folder")
 
             Text(folder)
                 .font(.caption.weight(.semibold))
             Spacer(minLength: 4)
-            if reorderMode {
-                Button {
-                    store.moveFolder(folder, direction: "up")
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.plain)
-                .help("Move folder up")
-
-                Button {
-                    store.moveFolder(folder, direction: "down")
-                } label: {
-                    Image(systemName: "arrow.down")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.plain)
-                .help("Move folder down")
-            } else {
+            if !reorderMode {
                 Image(systemName: "line.3.horizontal")
                     .foregroundStyle(.tertiary)
             }
@@ -309,6 +383,18 @@ private struct FolderSectionHeader: View {
             } label: {
                 Label("Move Folder Down", systemImage: "arrow.down")
             }
+        }
+
+        if reorderMode {
+            header
+                .onDrag {
+                    dragProvider("folder:\(folder)")
+                }
+                .onDrop(of: [.text], isTargeted: nil) { providers in
+                    onDropFolder(providers, folder)
+                }
+        } else {
+            header
         }
     }
 }
@@ -371,23 +457,10 @@ struct SessionRow: View {
             }
             if reorderMode {
                 Spacer(minLength: 4)
-                Button {
-                    Task { await store.reorderSession(session, direction: "up") }
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.plain)
-                .help("Move chat up")
-
-                Button {
-                    Task { await store.reorderSession(session, direction: "down") }
-                } label: {
-                    Image(systemName: "arrow.down")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.plain)
-                .help("Move chat down")
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
             }
         }
         .padding(.vertical, 2)
