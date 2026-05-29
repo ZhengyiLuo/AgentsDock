@@ -3914,3 +3914,29 @@ Changes:
 - Added guardrails so expanded Mac messages bypass MarkdownView truncation.
 - Refreshed `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; MBA sync was
   attempted and skipped because `zens-macbook-air` was unreachable over SSH.
+
+### Mac Older-History Paging Window
+
+User issue:
+
+- A long chat such as `CMA-ES Render to LeRobot` could not load older history,
+  and loading history still failed to preserve the visible timeline position.
+
+Root cause:
+
+- The Mac store refused to call the server once the local timeline reached the
+  2,000-event render window, even when the server still reported hidden older
+  events.
+
+Changes:
+
+- Older-history loading now uses a fixed server page size and keeps paging even
+  when the local window is full.
+- When an older page overflows the local window, the app slides the window by
+  dropping newest overflow rows instead of blocking the older load.
+- The history banner no longer replaces `Load Older` with a dead-end local
+  window-limit label while the server still has older pages.
+- Timeline anchor restoration now repeats across a few layout passes, which is
+  less brittle when SwiftUI regroups trace/job rows after prepending history.
+- Added guardrails so future changes do not reintroduce a local-cap gate on
+  older-history paging.

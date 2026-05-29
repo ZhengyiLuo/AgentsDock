@@ -526,17 +526,19 @@ struct TimelineView: View {
             isNearBottom = false
             store.setSelectedTimelineAtBottom(false)
         }
-        DispatchQueue.main.async {
-            withTransaction(noAnimationTransaction) {
-                proxy.scrollTo(rowID, anchor: .top)
+        for delay in [0.0, 0.06, 0.18] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withTransaction(noAnimationTransaction) {
+                    proxy.scrollTo(rowID, anchor: .top)
+                }
+                isAtBottom = false
+                isNearBottom = false
+                store.setSelectedTimelineAtBottom(false)
             }
-            isAtBottom = false
-            isNearBottom = false
-            store.setSelectedTimelineAtBottom(false)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                olderHistoryLoadArmed = true
-                suppressScrollHistoryLoadUntilTopLeaves = false
-            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            olderHistoryLoadArmed = true
+            suppressScrollHistoryLoadUntilTopLeaves = false
         }
     }
 
@@ -1368,9 +1370,6 @@ private struct TimelineHistoryLoader: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Show the previous rendered page")
-            } else if store.loadedHistoryLimitReached {
-                Text("Loaded window limit")
-                    .foregroundStyle(.secondary)
             } else if store.isLoadingOlderHistory {
                 ProgressView()
                     .controlSize(.small)

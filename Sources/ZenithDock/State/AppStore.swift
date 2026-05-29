@@ -255,7 +255,7 @@ final class AppStore: ObservableObject {
     }
 
     var canLoadOlderHistory: Bool {
-        omittedHistoryEventCount > 0 && !isLoadingOlderHistory && events.count < maxLoadedTimelineEvents
+        omittedHistoryEventCount > 0 && !isLoadingOlderHistory
     }
 
     var sessionVideos: [ZFile] {
@@ -274,10 +274,6 @@ final class AppStore: ObservableObject {
                 }
                 return $0.seq < $1.seq
             }
-    }
-
-    var loadedHistoryLimitReached: Bool {
-        omittedHistoryEventCount > 0 && events.count >= maxLoadedTimelineEvents
     }
 
     func hasStartedQueuedEvent(_ event: ZEvent) -> Bool {
@@ -1033,8 +1029,7 @@ final class AppStore: ObservableObject {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
-              let before = events.map(\.seq).min(),
-              events.count < maxLoadedTimelineEvents else {
+              let before = events.map(\.seq).min() else {
             return 0
         }
 
@@ -1047,12 +1042,11 @@ final class AppStore: ObservableObject {
                 let events: [ZEvent]
                 let events_omitted_before: Int?
             }
-            let capacity = max(1, min(olderHistoryPageLimit, maxLoadedTimelineEvents - events.count))
             let res: Response = try await api.get(
                 "/api/sessions/\(sid)",
                 queryItems: [
                     URLQueryItem(name: "before", value: "\(before)"),
-                    URLQueryItem(name: "limit", value: "\(capacity)"),
+                    URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
                     URLQueryItem(name: "tail", value: "true")
                 ]
             )
@@ -1061,7 +1055,12 @@ final class AppStore: ObservableObject {
             }
             let existingIDs = Set(events.map(\.id))
             let older = timelineEvents(from: res.events).filter { !existingIDs.contains($0.id) }
-            events = (older + events).sorted { $0.seq < $1.seq }
+            var mergedEvents = (older + events).sorted { $0.seq < $1.seq }
+            if mergedEvents.count > maxLoadedTimelineEvents {
+                let overflow = mergedEvents.count - maxLoadedTimelineEvents
+                mergedEvents.removeLast(overflow)
+            }
+            events = mergedEvents
             omittedHistoryEventCount = res.events_omitted_before ?? 0
             refreshSessionFilesFromLoadedEvents()
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)

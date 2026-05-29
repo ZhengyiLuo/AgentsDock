@@ -580,9 +580,14 @@ func checkTimelineHistoryPaging() throws {
     try assert(macStore.contains(".suffix(maxWarmCachedTimelineEvents)"), "Mac warm cache should only render/cache the latest tail window during chat switches")
     try assert(macStore.contains("preserveExisting ? events.filter { $0.session_id == sessionID } : []"), "Fresh session snapshots must support preserving cached pages for same-chat full refreshes")
     try assert(macStore.contains("preservedBeforeSnapshot"), "Merged snapshots must reduce the older-hidden count by locally preserved events")
+    try assert(macStore.contains("omittedHistoryEventCount > 0 && !isLoadingOlderHistory"), "Older-history loading must not stop just because the local timeline window is full")
+    try assert(macStore.contains("URLQueryItem(name: \"limit\", value: \"\\(olderHistoryPageLimit)\")"), "Older-history paging must request a fixed page instead of remaining local capacity")
+    try assert(macStore.contains("mergedEvents.removeLast(overflow)"), "Older-history paging must slide the local window by dropping the newest overflow")
     try assert(timeline.contains("TimelineScrollAnchor"), "History paging must capture a stable scroll anchor")
     try assert(timeline.contains("anchorEventID"), "History paging must keep an event-id fallback for regrouped rows")
     try assert(timeline.contains("row(containingEventID: eventID, in: rows)"), "History paging must restore through the event-id fallback when row IDs change")
+    try assert(timeline.contains("for delay in [0.0, 0.06, 0.18]"), "History paging must restore the scroll anchor across multiple layout passes")
+    try assert(!timeline.contains("Loaded window limit"), "Mac history banner must keep offering Load Older while the server has older events")
 }
 
 func checkLiveTimelineAutoFollow() throws {
