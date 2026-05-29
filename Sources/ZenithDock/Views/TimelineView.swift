@@ -1061,12 +1061,26 @@ private struct TimelineScrollObserver: NSViewRepresentable {
         }
 
         private func configureScrollView(_ scrollView: NSScrollView) {
+            installClampingClipViewIfNeeded(scrollView)
             let zeroInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
             scrollView.automaticallyAdjustsContentInsets = false
             scrollView.contentInsets = zeroInsets
             scrollView.scrollerInsets = zeroInsets
             scrollView.verticalScrollElasticity = .none
             scrollView.horizontalScrollElasticity = .none
+        }
+
+        private func installClampingClipViewIfNeeded(_ scrollView: NSScrollView) {
+            guard !(scrollView.contentView is TimelineClampingClipView) else { return }
+            let oldClipView = scrollView.contentView
+            let clampingClipView = TimelineClampingClipView(frame: oldClipView.frame)
+            clampingClipView.autoresizingMask = oldClipView.autoresizingMask
+            clampingClipView.translatesAutoresizingMaskIntoConstraints = oldClipView.translatesAutoresizingMaskIntoConstraints
+            clampingClipView.postsBoundsChangedNotifications = oldClipView.postsBoundsChangedNotifications
+            clampingClipView.drawsBackground = oldClipView.drawsBackground
+            clampingClipView.backgroundColor = oldClipView.backgroundColor
+            clampingClipView.documentView = oldClipView.documentView
+            scrollView.contentView = clampingClipView
         }
 
         private func observe(_ scrollView: NSScrollView, documentView: NSView?) {
@@ -1281,6 +1295,24 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 self.onChange(metrics)
             }
         }
+    }
+}
+
+private final class TimelineClampingClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var bounds = super.constrainBoundsRect(proposedBounds)
+        guard let documentView else {
+            return bounds
+        }
+
+        let documentBounds = documentView.bounds
+        let minX = documentBounds.minX
+        let minY = documentBounds.minY
+        let maxX = max(minX, documentBounds.maxX - bounds.width)
+        let maxY = max(minY, documentBounds.maxY - bounds.height)
+        bounds.origin.x = min(max(bounds.origin.x, minX), maxX)
+        bounds.origin.y = min(max(bounds.origin.y, minY), maxY)
+        return bounds
     }
 }
 

@@ -4288,3 +4288,7 @@ Follow-up:
 
 - Mac chat opens now call the bottom scroll before revealing masked timeline rows, preventing a visible top-then-bottom jump during selection.
 - Removed late `0.75s` / `1.25s` SwiftUI bottom-settle passes and kept only short stabilization passes; the AppKit scroll observer remains responsible for geometry-based forced-bottom settling.
+
+Second follow-up:
+
+- Added a timeline-specific `NSClipView` that overrides `constrainBoundsRect` and clamps proposed scroll origins to the document bounds. This closes the remaining rubber-band/overscroll path when SwiftUI still allowed the scroll view to drift past the last message despite disabled elasticity.
