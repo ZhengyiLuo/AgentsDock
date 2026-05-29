@@ -4020,6 +4020,14 @@ Changes:
 - Older-history logs now include the server `before` cursor, received event
   count, added event count, loaded window size, and remaining omitted count.
 
+Follow-up:
+
+- Some long chats can have older server pages that contain only timeline-hidden
+  events such as `raw_event`. The app now advances through a bounded number of
+  invisible pages in one `Load Older` action until it finds visible rows.
+- The log now reports `skipped_invisible_pages` so this class of failure is
+  diagnosable.
+
 ### Thread Open Latest Position
 
 User issue:

@@ -1042,31 +1042,60 @@ final class AppStore: ObservableObject {
                 let events: [ZEvent]
                 let events_omitted_before: Int?
             }
-            let res: Response = try await api.get(
-                "/api/sessions/\(sid)",
-                queryItems: [
-                    URLQueryItem(name: "before", value: "\(before)"),
-                    URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
-                    URLQueryItem(name: "tail", value: "true")
-                ]
-            )
-            if let idx = sessions.firstIndex(where: { $0.id == sid }) {
-                sessions[idx] = res.session
+            var cursorBefore = before
+            var remainingOmitted = omittedHistoryEventCount
+            var latestSession: ZSession?
+            var receivedCount = 0
+            var skippedInvisiblePages = 0
+            var knownIDs = Set(events.map(\.id))
+            var older: [ZEvent] = []
+
+            for _ in 0..<8 {
+                let res: Response = try await api.get(
+                    "/api/sessions/\(sid)",
+                    queryItems: [
+                        URLQueryItem(name: "before", value: "\(cursorBefore)"),
+                        URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
+                        URLQueryItem(name: "tail", value: "true")
+                    ]
+                )
+                latestSession = res.session
+                receivedCount += res.events.count
+                remainingOmitted = res.events_omitted_before ?? 0
+
+                let visibleOlder = timelineEvents(from: res.events).filter { event in
+                    guard !knownIDs.contains(event.id) else { return false }
+                    knownIDs.insert(event.id)
+                    return true
+                }
+                older.append(contentsOf: visibleOlder)
+                if !visibleOlder.isEmpty || res.events.isEmpty || remainingOmitted <= 0 {
+                    break
+                }
+
+                guard let nextBefore = res.events.map(\.seq).min(),
+                      nextBefore < cursorBefore else {
+                    break
+                }
+                skippedInvisiblePages += 1
+                cursorBefore = nextBefore
             }
-            let existingIDs = Set(events.map(\.id))
-            let older = timelineEvents(from: res.events).filter { !existingIDs.contains($0.id) }
+
+            if let latestSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
+                sessions[idx] = latestSession
+            }
             var mergedEvents = (older + events).sorted { $0.seq < $1.seq }
             if mergedEvents.count > maxLoadedTimelineEvents {
                 let overflow = mergedEvents.count - maxLoadedTimelineEvents
                 mergedEvents.removeLast(overflow)
             }
             events = mergedEvents
-            omittedHistoryEventCount = res.events_omitted_before ?? 0
+            omittedHistoryEventCount = remainingOmitted
             refreshSessionFilesFromLoadedEvents()
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(res.events.count) added=\(older.count) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) added=\(older.count) skipped_invisible_pages=\(skippedInvisiblePages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             return older.count
         } catch {
             AppLogger.error("load older failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")

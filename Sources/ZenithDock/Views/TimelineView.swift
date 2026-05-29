@@ -208,8 +208,7 @@ struct TimelineView: View {
                     visibleRowLimit = defaultVisibleRowLimit
                     lastObservedEventSeq = maxEventSeq(displayEvents)
                     store.markSelectedSessionRead()
-                    scrollToBottom(proxy)
-                    settleBottomAfterLayout(proxy, sessionID: store.selectedSessionID)
+                    settleOpenThreadAtLatest(proxy)
                     settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
@@ -229,7 +228,9 @@ struct TimelineView: View {
                     }
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
-                    if shouldFollowLiveEvent {
+                    if settleOpenThreadAtLatest(proxy) {
+                        return
+                    } else if shouldFollowLiveEvent {
                         scrollToBottom(proxy)
                         settleBottomAfterLayout(proxy, sessionID: store.selectedSessionID)
                         store.markSelectedSessionRead(force: true)
@@ -238,18 +239,22 @@ struct TimelineView: View {
                     }
                 }
                 .onChange(of: displaySignature) {
+                    _ = settleOpenThreadAtLatest(proxy)
                     settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: store.loadedSessionID) {
+                    _ = settleOpenThreadAtLatest(proxy)
                     settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: store.isSelectingSession) {
                     if !store.isSelectingSession {
+                        _ = settleOpenThreadAtLatest(proxy)
                         settleInitialTimelinePosition(proxy)
                     }
                 }
                 .onChange(of: store.isRefreshingCachedDelta) {
                     if !store.isRefreshingCachedDelta {
+                        _ = settleOpenThreadAtLatest(proxy)
                         settleInitialTimelinePosition(proxy)
                     }
                 }
@@ -287,21 +292,6 @@ struct TimelineView: View {
     }
 
     private func settleInitialTimelinePosition(_ proxy: ScrollViewProxy) {
-        if let pendingSessionID = pendingOpenBottomSessionID,
-           pendingSessionID == store.selectedSessionID,
-           !store.displayEvents.isEmpty,
-           store.loadedSessionID == pendingSessionID {
-            pendingOpenBottomSessionID = nil
-            scrollToBottom(proxy)
-            settleBottomAfterLayout(proxy, sessionID: pendingSessionID)
-            if isInitialTimelineMasked {
-                withTransaction(noAnimationTransaction) {
-                    isInitialTimelineMasked = false
-                }
-            }
-            return
-        }
-
         guard isInitialTimelineMasked,
               let sessionID = maskedSessionID,
               sessionID == store.selectedSessionID else {
@@ -338,6 +328,35 @@ struct TimelineView: View {
                 }
             }
         }
+    }
+
+    @discardableResult
+    private func settleOpenThreadAtLatest(_ proxy: ScrollViewProxy) -> Bool {
+        guard let pendingSessionID = pendingOpenBottomSessionID,
+              pendingSessionID == store.selectedSessionID,
+              !store.displayEvents.isEmpty else {
+            return false
+        }
+        pendingOpenBottomSessionID = nil
+        historyLoadSuppressedUntil = Date().addingTimeInterval(0.8)
+        store.markSelectedSessionRead(force: true)
+        if isInitialTimelineMasked {
+            withTransaction(noAnimationTransaction) {
+                isInitialTimelineMasked = false
+            }
+        }
+        for delay in [0.0, 0.05, 0.16, 0.36, 0.72] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard store.selectedSessionID == pendingSessionID else { return }
+                withTransaction(noAnimationTransaction) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                    isAtBottom = true
+                    isNearBottom = true
+                    store.setSelectedTimelineAtBottom(true)
+                }
+            }
+        }
+        return true
     }
 
     private func initialTimelineMaskIsCurrent(revision: Int, sessionID: String) -> Bool {
@@ -544,7 +563,7 @@ struct TimelineView: View {
             guard !afterRows.isEmpty else { return }
             if addedEvents > 0 {
                 let addedRows = max(0, afterRows.count - beforeRowCount)
-                let revealCount = addedRows > 0 ? min(rowPageSize, addedRows) : rowPageSize
+                let revealCount = max(rowPageSize, addedRows)
                 setVisibleRowLimit(min(afterRows.count, visibleRowLimit + revealCount))
             }
             let rows = TimelineRows.build(from: store.displayEvents)
@@ -632,6 +651,7 @@ struct TimelineView: View {
 
     private func updateUnreadState(after previousSeq: Int) {
         guard let sessionID = store.selectedSessionID else { return }
+        guard pendingOpenBottomSessionID == nil else { return }
         let hasNewAgentMessage = store.displayEvents.contains { event in
             event.seq > previousSeq && store.isAgentVisibleMessage(event)
         }
