@@ -783,9 +783,20 @@ struct ArtifactGridCard: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                    ForEach(visibleArtifacts) { artifact in
-                        ArtifactGridTile(file: artifact.file, url: artifact.url, linkContext: linkContext)
+                let mediaArtifacts = visibleArtifacts.filter { $0.file.isPreviewableArtifact }
+                let fileArtifacts = visibleArtifacts.filter { !$0.file.isPreviewableArtifact }
+                if !mediaArtifacts.isEmpty {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                        ForEach(mediaArtifacts) { artifact in
+                            ArtifactGridTile(file: artifact.file, url: artifact.url, linkContext: linkContext)
+                        }
+                    }
+                }
+                if !fileArtifacts.isEmpty {
+                    VStack(spacing: 6) {
+                        ForEach(fileArtifacts) { artifact in
+                            ArtifactFileRow(file: artifact.file, url: artifact.url)
+                        }
                     }
                 }
                 if artifacts.count > initialArtifactLimit {
@@ -829,17 +840,7 @@ private struct ArtifactGridTile: View {
             media
                 .frame(height: 112)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                Text(file.title ?? file.filename)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Link(destination: url) {
-                    Image(systemName: "arrow.up.right.square")
-                }
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
+            fileFooter
         }
         .padding(8)
         .background(Color.black.opacity(0.07))
@@ -850,6 +851,21 @@ private struct ArtifactGridTile: View {
             ArtifactDragItemProvider.provider(for: file, url: url)
         }
         .help(file.filename)
+    }
+
+    private var fileFooter: some View {
+        HStack(spacing: 6) {
+            Image(systemName: file.artifactIcon)
+                .font(.caption2.weight(.semibold))
+            Text(file.title ?? file.filename)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Link(destination: url) {
+                Image(systemName: "arrow.up.right.square")
+            }
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -863,20 +879,75 @@ private struct ArtifactGridTile: View {
             }
         } else if file.content_type?.hasPrefix("video/") == true {
             InlineVideoView(url: url)
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.08))
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
+}
 
-    private var icon: String {
-        if file.content_type?.hasPrefix("video/") == true { return "film" }
-        if file.content_type?.hasPrefix("image/") == true { return "photo" }
+private struct ArtifactFileRow: View {
+    let file: ZFile
+    let url: URL
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: file.artifactIcon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.title ?? file.filename)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !metadata.isEmpty {
+                    Text(metadata)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            Link(destination: url) {
+                Image(systemName: "arrow.up.right.square")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+        .contentShape(Rectangle())
+        .onDrag {
+            ArtifactDragItemProvider.provider(for: file, url: url)
+        }
+        .help(file.filename)
+    }
+
+    private var metadata: String {
+        var parts: [String] = []
+        if let contentType = file.content_type, !contentType.isEmpty {
+            parts.append(contentType)
+        }
+        if let size = file.size {
+            parts.append(byteString(size))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+}
+
+private extension ZFile {
+    var isPreviewableArtifact: Bool {
+        content_type?.hasPrefix("image/") == true ||
+            content_type?.hasPrefix("video/") == true
+    }
+
+    var artifactIcon: String {
+        if content_type?.hasPrefix("video/") == true { return "film" }
+        if content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
     }
 }

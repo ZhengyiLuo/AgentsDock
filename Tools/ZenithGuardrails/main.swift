@@ -359,7 +359,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("clampDocumentOriginIfNeeded(scrollView, documentView: documentView)"), "Mac timeline must clamp scroll origins before reporting metrics")
     try assert(timeline.contains("forceBottomUntil = Date().addingTimeInterval"), "Forced open/reopen bottom positioning must persist only during layout settling")
     try assert(inspector.contains("private struct JobFormLabel"), "Mac job sheets must use fixed-width one-line labels")
-    try assert(inspector.contains("JobFormLabel(title: \"Mode\")"), "Mac job mode label must not wrap vertically")
+    try assert(inspector.contains("private struct JobFormRow"), "Mac job sheets must use fixed-label form rows instead of compressible grids")
+    try assert(inspector.contains("JobFormRow(title: \"Mode\")"), "Mac job mode label must not wrap vertically")
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should structurally suspend cold opens when no selected-chat cache can be rendered")
     try assert(macStore.contains("@Published var isApplyingLargeTimelineBatch = false"), "Mac store must publish a large-batch timeline mask")
     try assert(macStore.contains("private let largeTimelineBatchEventThreshold = 80"), "Mac store must define a threshold for large timeline batch masking")
@@ -461,7 +462,10 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(inspector.contains("@State private var visibleVideoCount = 4"), "Mac files inspector must start video grids at four previews")
     try assert(inspector.contains("private let videoPageSize = 4"), "Mac files inspector must page video grids four at a time")
     try assert(eventViews.contains("private let initialArtifactLimit = 4"), "Mac timeline artifact grids must start at four previews")
-    try assert(eventViews.contains("ForEach(visibleArtifacts)"), "Mac timeline artifact grids must render the capped preview set by default")
+    try assert(eventViews.contains("let mediaArtifacts = visibleArtifacts.filter"), "Mac timeline artifact cards must derive media/files from the capped preview set")
+    try assert(eventViews.contains("visibleArtifacts.filter { $0.file.isPreviewableArtifact }"), "Mac timeline artifact cards must split media previews from plain files")
+    try assert(eventViews.contains("private struct ArtifactFileRow"), "Mac timeline plain files must render as compact rows instead of large preview tiles")
+    try assert(eventViews.contains("private extension ZFile"), "Mac timeline artifact preview classification should live with artifact rendering")
 }
 
 func checkRuntimeAutosavesAndBackendIcons() throws {

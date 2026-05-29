@@ -737,7 +737,21 @@ private struct JobFormLabel: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
-            .frame(width: 70, alignment: .leading)
+            .frame(minWidth: 88, idealWidth: 88, maxWidth: 88, alignment: .leading)
+    }
+}
+
+private struct JobFormRow<Content: View>: View {
+    let title: String
+    var alignment: VerticalAlignment = .center
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: alignment, spacing: 12) {
+            JobFormLabel(title: title)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -782,18 +796,15 @@ private struct NewJobDetailsSheet: View {
                 .keyboardShortcut(.defaultAction)
             }
 
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    JobFormLabel(title: "Title")
+            VStack(alignment: .leading, spacing: 10) {
+                JobFormRow(title: "Title") {
                     TextField("Job title", text: $title)
                         .textFieldStyle(.roundedBorder)
                 }
-                GridRow {
-                    JobFormLabel(title: "Interval")
+                JobFormRow(title: "Interval") {
                     JobIntervalControl(intervalText: $intervalText)
                 }
-                GridRow {
-                    JobFormLabel(title: "Start")
+                JobFormRow(title: "Start") {
                     JobStartControl(
                         option: $startOption,
                         customDate: $startDate,
@@ -802,8 +813,7 @@ private struct NewJobDetailsSheet: View {
                         currentNextRun: nil
                     )
                 }
-                GridRow {
-                    JobFormLabel(title: "Mode")
+                JobFormRow(title: "Mode") {
                     HStack(spacing: 10) {
                         Picker("Mode", selection: $loop) {
                             Text("Run fixed times").tag(false)
@@ -1023,14 +1033,12 @@ private struct JobEditorSheet: View {
                 .keyboardShortcut(.defaultAction)
             }
 
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    JobFormLabel(title: "Title")
+            VStack(alignment: .leading, spacing: 10) {
+                JobFormRow(title: "Title") {
                     TextField("Job title", text: $title)
                         .textFieldStyle(.roundedBorder)
                 }
-                GridRow {
-                    JobFormLabel(title: "Backend")
+                JobFormRow(title: "Backend") {
                     Picker("Backend", selection: $backend) {
                         Text("Claude").tag("claude")
                         Text("Codex").tag("codex")
@@ -1038,12 +1046,10 @@ private struct JobEditorSheet: View {
                     .pickerStyle(.segmented)
                     .frame(width: 180)
                 }
-                GridRow {
-                    JobFormLabel(title: "Interval")
+                JobFormRow(title: "Interval") {
                     JobIntervalControl(intervalText: $intervalText)
                 }
-                GridRow {
-                    JobFormLabel(title: "Next Run")
+                JobFormRow(title: "Next Run") {
                     JobStartControl(
                         option: $startOption,
                         customDate: $startDate,
@@ -1052,8 +1058,7 @@ private struct JobEditorSheet: View {
                         currentNextRun: localTimestampString(job.next_run_at_iso)
                     )
                 }
-                GridRow {
-                    JobFormLabel(title: "Options")
+                JobFormRow(title: "Options") {
                     HStack(spacing: 16) {
                         Picker("Mode", selection: $loop) {
                             Text("Run fixed times").tag(false)

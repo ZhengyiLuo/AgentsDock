@@ -4296,3 +4296,8 @@ Second follow-up:
 Third follow-up:
 
 - Removed the remaining symmetric timeline content padding. The timeline now keeps horizontal/top padding only, so the bottom sentinel can sit flush against the scroll view bottom instead of leaving a real 20 pt blank scrollable gutter above the composer.
+
+## 2026-05-29 - Compact File Artifacts And Job Sheet Labels
+
+- Timeline artifact cards now split previewable media from regular files. Images and videos keep preview tiles; plain files render as compact rows with a small icon, metadata, open action, and drag-out support.
+- Replaced the Mac job sheet's grid-based form rows with fixed-label `JobFormRow` rows so labels like `Mode` and `Options` cannot squeeze vertically beside segmented controls.
