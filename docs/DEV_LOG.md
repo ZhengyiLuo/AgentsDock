@@ -4188,3 +4188,20 @@ Fifth follow-up:
 - Oversized assistant and trace groups are split into bounded chunks. Older
   history pages now create real visible scroll targets instead of disappearing
   inside one giant grouped row.
+
+Sixth follow-up:
+
+- Fresh Air logs exposed a more serious stale-response path: an older-history
+  request could finish after the user switched chats and still mutate the
+  current timeline.
+- `loadOlderHistory()` now captures the selection generation and drops stale
+  responses before applying events.
+- Restored cached chats now keep the expanded `maxCachedTimelineEvents` window
+  instead of shrinking back to the warm tail on every chat switch.
+
+Seventh follow-up:
+
+- The latest logs showed older pages were loading and row counts were growing,
+  but reveal could still scroll to a row outside SwiftUI's rendered suffix.
+- Older-page reveal now calculates how many rows are required to include the
+  target, expands the visible suffix to cover it, and logs the exact target row.

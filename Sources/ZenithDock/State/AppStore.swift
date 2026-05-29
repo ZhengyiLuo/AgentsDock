@@ -1119,6 +1119,7 @@ final class AppStore: ObservableObject {
               let before = events.map(\.seq).min() else {
             return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
+        let generation = selectionGeneration
 
         isLoadingOlderHistory = true
         defer { isLoadingOlderHistory = false }
@@ -1172,6 +1173,10 @@ final class AppStore: ObservableObject {
                 cursorBefore = nextBefore
             }
 
+            guard selectedSessionID == sid, selectionGeneration == generation else {
+                AppLogger.info("drop stale older history session=\(sid)")
+                return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
+            }
             if let latestSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = latestSession
             }
@@ -2252,7 +2257,7 @@ final class AppStore: ObservableObject {
             sessions.append(cached.session)
         }
         let cachedEvents = timelineEvents(from: cached.events)
-        events = Array(cachedEvents.suffix(maxWarmCachedTimelineEvents))
+        events = Array(cachedEvents.suffix(maxCachedTimelineEvents))
         omittedHistoryEventCount = cached.omittedHistoryEventCount + max(0, cachedEvents.count - events.count)
         sessionFiles = mergedFiles((cached.sessionFiles ?? []) + files(from: events))
         sessionVideoFiles = mergedFiles(sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") })
@@ -2424,7 +2429,7 @@ final class AppStore: ObservableObject {
         guard let session = selectedSession, !events.isEmpty else { return }
         let eventsToCache = Array(events
             .filter { $0.type != "raw_event" }
-            .suffix(maxWarmCachedTimelineEvents))
+            .suffix(maxCachedTimelineEvents))
         guard !eventsToCache.isEmpty else { return }
         let cached = CachedChat(
             session: session,
@@ -2466,12 +2471,11 @@ final class AppStore: ObservableObject {
         let eventsToCache = Array(events
             .filter { $0.type != "raw_event" }
             .suffix(maxCachedTimelineEvents))
-        let warmEvents = Array(eventsToCache.suffix(maxWarmCachedTimelineEvents))
         let cachedAt = ISO8601DateFormatter().string(from: Date())
         let cachedFiles = sessionFiles.isEmpty ? files(from: events) : sessionFiles
         let warmCached = CachedChat(
             session: session,
-            events: warmEvents,
+            events: eventsToCache,
             sessionFiles: cachedFiles,
             omittedHistoryEventCount: omittedHistoryEventCount,
             cachedAt: cachedAt
