@@ -345,7 +345,9 @@ final class AppStore: ObservableObject {
         if !isApplyingLargeTimelineBatch {
             isApplyingLargeTimelineBatch = true
         }
-        status = "Opening latest messages"
+        if !hasRenderableSelectedTimeline {
+            status = "Opening latest messages"
+        }
     }
 
     private func scheduleLargeTimelineBatchReveal() {
@@ -964,7 +966,7 @@ final class AppStore: ObservableObject {
         pendingStreamEvents.removeAll()
         pendingStreamSessionID = nil
         socketLive = false
-        status = loadedFromCache ? "Refreshing latest chat" : (serverReachable ? "Loading chat" : "Server offline")
+        status = loadedFromCache ? (serverReachable ? "Server connected" : "Server offline") : (serverReachable ? "Loading chat" : "Server offline")
         processSnapshot = nil
         processLogTail = nil
         tmuxSnapshot = nil
@@ -1026,11 +1028,9 @@ final class AppStore: ObservableObject {
             return
         }
         isRefreshingCachedDelta = true
-        status = "Opening latest messages"
         defer {
             if selectedSessionID == sessionID, selectionGeneration == generation {
                 isRefreshingCachedDelta = false
-                status = socketLive ? "Live" : "Server connected"
             }
         }
         do {
@@ -1950,7 +1950,6 @@ final class AppStore: ObservableObject {
         latestSeenSeq = max(latestSeenSeq, event.seq)
         if pendingStreamEvents.count >= streamBackfillMaskThreshold {
             isRefreshingCachedDelta = true
-            status = "Opening latest messages"
         }
         guard pendingStreamFlushTask == nil else { return }
         pendingStreamFlushTask = Task { @MainActor in
@@ -2198,13 +2197,17 @@ final class AppStore: ObservableObject {
         let snapshotEvents = timelineEvents(from: response.events)
         let oldCount = events.count
         let preservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []
+        let preservedIDs = Set(preservedEvents.map(\.id))
+        let newSnapshotEventCount = preserveExisting
+            ? snapshotEvents.filter { !preservedIDs.contains($0.id) }.count
+            : snapshotEvents.count
         let projectedCount = preservedEvents.isEmpty
             ? snapshotEvents.count
             : Set((preservedEvents + snapshotEvents).map(\.id)).count
         let shouldMaskLargeBatch = shouldMaskTimelineBatch(
             oldCount: oldCount,
             newCount: projectedCount,
-            incomingCount: snapshotEvents.count
+            incomingCount: newSnapshotEventCount
         )
         if shouldMaskLargeBatch {
             beginLargeTimelineBatchMask()
@@ -2268,6 +2271,11 @@ final class AppStore: ObservableObject {
         loadedSessionID = cached.session.id
         latestSeenSeq = events.map(\.seq).max() ?? 0
         rebuildDisplayEvents()
+    }
+
+    private var hasRenderableSelectedTimeline: Bool {
+        guard let selectedSessionID else { return false }
+        return loadedSessionID == selectedSessionID && !displayEvents.isEmpty
     }
 
     private func refreshSessionFilesFromLoadedEvents() {

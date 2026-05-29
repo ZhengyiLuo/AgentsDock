@@ -38,8 +38,9 @@ struct TimelineView: View {
             store.isSelectingSession ||
             store.loadedSessionID != store.selectedSessionID
         )
-        let timelineRowsStructurallySuspended = timelineRowsSuspended || store.isApplyingLargeTimelineBatch
-        let shouldMaskTimeline = timelineRowsStructurallySuspended || store.isRefreshingCachedDelta
+        let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch && !(store.isRefreshingCachedDelta && hasWarmSelectedTimeline)
+        let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
+        let shouldMaskTimeline = timelineRowsStructurallySuspended
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
         let projection = TimelineRows.project(from: displayEvents)
         let allRows = projection.rows

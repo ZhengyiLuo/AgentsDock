@@ -4233,3 +4233,11 @@ Eleventh follow-up:
 
 - A second Air-log edge showed latest-tail refreshes could fire a forced-bottom revision while the large-batch mask was active, then return before recording a pending latest-position request.
 - `forceOpenThreadToLatest` now records the pending session and suppression window before checking renderability, so the mask-clear retry can finish the open-to-latest scroll.
+
+Twelfth follow-up:
+
+- Cached chat opens could still blink twice because the timeline hid rows whenever `isRefreshingCachedDelta` flipped true, then hid them again if the latest-tail response tripped the large-batch mask.
+- Warm cached timelines now stay visible during background latest-tail refreshes; only cold opens without renderable rows show the positioning overlay.
+- Large-batch masking for preserved cached chats now counts only newly added snapshot events, so a no-op latest-tail response no longer masks the timeline just because the server returned a large tail window.
+
+- Warm-cache chat selection now reports the normal connected state instead of `Refreshing latest chat`, because the tail refresh is background work once cached rows are already visible.
