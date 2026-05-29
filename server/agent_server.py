@@ -3128,6 +3128,7 @@ def parse_claude_help_catalog() -> dict[str, Any]:
                 [
                     runtime_option("sonnet", "Sonnet"),
                     runtime_option("opus", "Opus"),
+                    runtime_option("claude-opus-4-8", "Opus 4.8"),
                     runtime_option("haiku", "Haiku"),
                 ],
                 title_model_label(default_model),
@@ -3153,8 +3154,13 @@ def parse_claude_help_catalog() -> dict[str, Any]:
         aliases = re.findall(r"'([^']+)'", model_match.group(1))
         for alias in aliases:
             model_options.append(runtime_option(alias, title_model_label(alias)))
-    for alias in ("sonnet", "opus", "haiku"):
-        model_options.append(runtime_option(alias, title_model_label(alias)))
+    for alias, label in (
+        ("sonnet", "Sonnet"),
+        ("opus", "Opus"),
+        ("claude-opus-4-8", "Opus 4.8"),
+        ("haiku", "Haiku"),
+    ):
+        model_options.append(runtime_option(alias, label))
 
     effort_match = re.search(r"--effort <level>.*?\(([^)]+)\)", help_text, re.IGNORECASE)
     if effort_match:

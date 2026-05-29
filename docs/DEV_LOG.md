@@ -4247,3 +4247,10 @@ Twelfth follow-up:
 - Compacted adjacent collapsed trace rows after timeline projection so history pages do not land inside a wall of one-card-per-run reasoning traces. Trace event IDs are still retained on the compacted row for deterministic older-history scroll targets.
 - Timeline file/video artifact cards now show the first four previews by default with an explicit show-more control.
 - The Mac files/videos inspector now starts video previews at four items and pages four at a time, newest first via the existing `sessionVideos` ordering.
+
+## 2026-05-29 - Queue Reconciliation And Claude Opus 4.8
+
+- Added Claude Opus 4.8 to both the shared fallback runtime catalog and the server runtime discovery fallback. Selecting it sends the existing Claude launch path through `--model claude-opus-4-8`.
+- Mac and iOS queue actions now treat `queued turn not found` as a stale local queue row instead of a user-facing modal. The client removes the stale queued message from local state and lets websocket/history reconciliation fill in the true server state.
+- Added guardrails for Opus 4.8 catalog coverage and stale queued-turn reconciliation.
+- Deployed the updated server to `sonic`; `zenithbot-agent.service` is active and the deployed `agent_server.py` compiles.

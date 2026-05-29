@@ -190,6 +190,7 @@ public enum ZRuntimeCatalog {
                 ZRuntimeOption(value: "", label: "Sonnet"),
                 ZRuntimeOption(value: "sonnet", label: "Sonnet"),
                 ZRuntimeOption(value: "opus", label: "Opus"),
+                ZRuntimeOption(value: "claude-opus-4-8", label: "Opus 4.8"),
                 ZRuntimeOption(value: "haiku", label: "Haiku")
             ],
             efforts: [

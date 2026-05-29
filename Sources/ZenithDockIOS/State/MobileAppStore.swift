@@ -1153,6 +1153,7 @@ final class MobileAppStore: ObservableObject {
             events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
             rememberSelectedChat()
         } catch {
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             report(error)
         }
     }
@@ -1175,6 +1176,7 @@ final class MobileAppStore: ObservableObject {
             }
             rememberSelectedChat()
         } catch {
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             report(error)
         }
     }
@@ -1200,6 +1202,7 @@ final class MobileAppStore: ObservableObject {
             }
             rememberSelectedChat()
         } catch {
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             report(error)
         }
     }
@@ -1220,8 +1223,20 @@ final class MobileAppStore: ObservableObject {
             activeSessionIDs.insert(event.session_id)
             syncSelectedRunningState()
         } catch {
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             report(error)
         }
+    }
+
+    private func handleStaleQueuedTurn(_ queuedID: String, error: Error) -> Bool {
+        guard isQueuedTurnNotFound(error) else { return false }
+        events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+        rememberSelectedChat()
+        return true
+    }
+
+    private func isQueuedTurnNotFound(_ error: Error) -> Bool {
+        (apiErrorDetail(error) ?? error.localizedDescription).localizedCaseInsensitiveContains("queued turn not found")
     }
 
     func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, maxRuns: Int? = nil, firstRunAt: Date? = nil) async {

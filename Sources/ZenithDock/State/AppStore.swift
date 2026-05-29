@@ -1678,6 +1678,7 @@ final class AppStore: ObservableObject {
             AppLogger.info("unqueued session=\(event.session_id) queued=\(queuedID)")
         } catch {
             AppLogger.error("unqueue failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
     }
@@ -1703,6 +1704,7 @@ final class AppStore: ObservableObject {
             AppLogger.info("queued prompt updated session=\(event.session_id) queued=\(queuedID)")
         } catch {
             AppLogger.error("queued update failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
     }
@@ -1731,6 +1733,7 @@ final class AppStore: ObservableObject {
             AppLogger.info("queued moved session=\(event.session_id) queued=\(queuedID) direction=\(direction)")
         } catch {
             AppLogger.error("queued move failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
     }
@@ -1751,8 +1754,22 @@ final class AppStore: ObservableObject {
             AppLogger.info("queued run-now session=\(event.session_id) queued=\(queuedID)")
         } catch {
             AppLogger.error("queued run-now failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
+    }
+
+    private func handleStaleQueuedTurn(_ queuedID: String, error: Error) -> Bool {
+        guard isQueuedTurnNotFound(error) else { return false }
+        events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+        rebuildDisplayEvents()
+        saveSelectedChatCache()
+        AppLogger.warning("removed stale queued turn queued=\(queuedID)")
+        return true
+    }
+
+    private func isQueuedTurnNotFound(_ error: Error) -> Bool {
+        (serverErrorMessage(error) ?? "").localizedCaseInsensitiveContains("queued turn not found")
     }
 
     func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, maxRuns: Int? = nil, firstRunAt: Date? = nil) async {

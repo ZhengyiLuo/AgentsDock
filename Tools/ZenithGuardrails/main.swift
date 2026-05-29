@@ -96,6 +96,12 @@ func checkRuntimeDefaultLabels() throws {
     let fallbackCatalog = ZRuntimeCatalogSnapshot.fallback
     try assert(fallbackCatalog.models(for: "codex").contains { $0.value == "gpt-5.5" }, "Codex fallback catalog must include GPT-5.5 while server discovery is unavailable")
     try assert(fallbackCatalog.efforts(for: "codex").contains { $0.value == "xhigh" }, "Codex fallback catalog must include XHigh effort while server discovery is unavailable")
+    try assert(fallbackCatalog.models(for: "claude").contains { $0.value == "claude-opus-4-8" && $0.label == "Opus 4.8" }, "Claude fallback catalog must include Opus 4.8")
+
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    try assert(server.contains("runtime_option(\"claude-opus-4-8\", \"Opus 4.8\")"), "Server runtime catalog must advertise Claude Opus 4.8")
+    try assert(server.contains("cmd.extend([\"--model\", str(sess[\"model\"])])"), "Claude launcher must pass selected models with --model")
 }
 
 func checkBackendLocksAfterProviderStart() throws {
@@ -699,12 +705,16 @@ func checkQueuedRemovalDisappears() throws {
     try assert(macStore.contains("func runQueuedNow"), "Mac store must support interrupting the current run for a queued turn")
     try assert(macStore.contains("func moveQueued"), "Mac store must support queue reordering")
     try assert(macStore.contains("func updateQueued"), "Mac store must support editing queued prompts")
+    try assert(macStore.contains("func handleStaleQueuedTurn"), "Mac store must silently reconcile stale queued rows")
+    try assert(macStore.contains("isQueuedTurnNotFound(error)"), "Mac stale queued rows must be detected without showing a modal")
     try assert(macStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "Mac send success must clear a stale submitted draft after queued sends")
     try assert(macStore.contains("prompt.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed"), "Mac draft clearing must not wipe a newer prompt typed during submit")
     try assert(mobileStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "iOS unqueue should remove queued rows locally after server success")
     try assert(mobileStore.contains("func runQueuedNow"), "iOS store must support interrupting the current run for a queued turn")
     try assert(mobileStore.contains("func moveQueued"), "iOS store must support queue reordering")
     try assert(mobileStore.contains("func updateQueued"), "iOS store must support editing queued prompts")
+    try assert(mobileStore.contains("func handleStaleQueuedTurn"), "iOS store must silently reconcile stale queued rows")
+    try assert(mobileStore.contains("isQueuedTurnNotFound(error)"), "iOS stale queued rows must be detected without showing an alert")
     try assert(mobileStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "iOS send success must clear a stale submitted draft after queued sends")
     try assert(server.contains("RUN_NOW_TURNS"), "Server Send Now must reserve the exact queued item instead of relying on queue order")
     try assert(server.contains("stop_turn(session_id, emit_event=False, schedule_queue=False)"), "Server Send Now must silently interrupt without appending visible stop cards")
