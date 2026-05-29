@@ -136,7 +136,9 @@ struct TimelineView: View {
                         .padding(.bottom, 56)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            TimelineScrollObserver { metrics in
+                            TimelineScrollObserver(
+                                forceBottomRevision: store.forcedScrollToBottomRevision
+                            ) { metrics in
                                 updateBottomVisibility(metrics)
                                 handleHistoryTopDistance(
                                     metrics.distanceFromTop,
@@ -348,7 +350,7 @@ struct TimelineView: View {
                 isInitialTimelineMasked = false
             }
         }
-        scheduleForcedBottomSettle(proxy, sessionID: pendingSessionID)
+        scrollToBottom(proxy)
         return true
     }
 
@@ -366,21 +368,7 @@ struct TimelineView: View {
                 isInitialTimelineMasked = false
             }
         }
-        scheduleForcedBottomSettle(proxy, sessionID: sessionID)
-    }
-
-    private func scheduleForcedBottomSettle(_ proxy: ScrollViewProxy, sessionID: String) {
-        for delay in [0.0, 0.05, 0.16, 0.36, 0.72, 1.15] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard store.selectedSessionID == sessionID else { return }
-                withTransaction(noAnimationTransaction) {
-                    proxy.scrollTo(bottomID, anchor: .bottom)
-                    isAtBottom = true
-                    isNearBottom = true
-                    store.setSelectedTimelineAtBottom(true)
-                }
-            }
-        }
+        scrollToBottom(proxy)
     }
 
     private func initialTimelineMaskIsCurrent(revision: Int, sessionID: String) -> Bool {
@@ -839,6 +827,7 @@ private struct TimelineScrollMetrics: Equatable {
 }
 
 private struct TimelineScrollObserver: NSViewRepresentable {
+    var forceBottomRevision: Int
     var onChange: (TimelineScrollMetrics) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -854,6 +843,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.onChange = onChange
         context.coordinator.scheduleAttach(from: view)
+        context.coordinator.handleForceBottomRevision(forceBottomRevision)
     }
 
     @MainActor
@@ -868,6 +858,10 @@ private struct TimelineScrollObserver: NSViewRepresentable {
         private var trailingReportWorkItem: DispatchWorkItem?
         private var deliveryScheduled = false
         private var pendingDelivery: TimelineScrollMetrics?
+        private var lastForceBottomRevision = 0
+        private var forceBottomUntil: Date?
+        private var forceBottomScrollScheduled = false
+        private var lastForceBottomScrollAt: TimeInterval = 0
         private var boundsObserver: NSObjectProtocol?
         private var documentFrameObserver: NSObjectProtocol?
         private var scrollFrameObserver: NSObjectProtocol?
@@ -958,9 +952,22 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             lastReportTime = 0
             trailingReportWorkItem?.cancel()
             trailingReportWorkItem = nil
+            forceBottomUntil = nil
+            forceBottomScrollScheduled = false
+            lastForceBottomScrollAt = 0
+        }
+
+        func handleForceBottomRevision(_ revision: Int) {
+            guard revision != lastForceBottomRevision else { return }
+            lastForceBottomRevision = revision
+            forceBottomUntil = Date().addingTimeInterval(2.0)
+            scheduleDocumentBottomScroll()
         }
 
         private func scheduleReport() {
+            if shouldForceBottom {
+                scheduleDocumentBottomScroll()
+            }
             let now = Date().timeIntervalSinceReferenceDate
             let minimumInterval = 0.08
             let elapsed = now - lastReportTime
@@ -1012,9 +1019,56 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 distanceFromBottom: max(rawDistance, 0),
                 distanceFromTop: max(rawDistanceFromTop, 0)
             )
+            if metrics.distanceFromBottom <= 28 {
+                forceBottomUntil = nil
+            } else if shouldForceBottom {
+                scheduleDocumentBottomScroll()
+            }
             guard metrics != lastMetrics else { return }
             lastMetrics = metrics
             deliver(metrics)
+        }
+
+        private var shouldForceBottom: Bool {
+            guard let forceBottomUntil else { return false }
+            return Date() < forceBottomUntil
+        }
+
+        private func scheduleDocumentBottomScroll() {
+            guard !forceBottomScrollScheduled else { return }
+            forceBottomScrollScheduled = true
+            let now = Date().timeIntervalSinceReferenceDate
+            let delay = max(0, 0.08 - (now - lastForceBottomScrollAt))
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                self.forceBottomScrollScheduled = false
+                guard self.shouldForceBottom else { return }
+                self.lastForceBottomScrollAt = Date().timeIntervalSinceReferenceDate
+                self.scrollDocumentToBottom()
+            }
+        }
+
+        private func scrollDocumentToBottom() {
+            guard let scrollView,
+                  let documentView = scrollView.documentView else {
+                return
+            }
+            documentView.layoutSubtreeIfNeeded()
+            scrollView.layoutSubtreeIfNeeded()
+
+            let clipView = scrollView.contentView
+            let documentBounds = documentView.bounds
+            let viewportHeight = clipView.bounds.height
+            let targetY: CGFloat
+            if documentView.isFlipped {
+                targetY = max(documentBounds.minY, documentBounds.maxY - viewportHeight)
+            } else {
+                targetY = documentBounds.minY
+            }
+            let target = NSPoint(x: clipView.bounds.minX, y: targetY)
+            clipView.scroll(to: target)
+            scrollView.reflectScrolledClipView(clipView)
+            scheduleReport()
         }
 
         private func deliver(_ metrics: TimelineScrollMetrics) {
