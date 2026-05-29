@@ -598,6 +598,10 @@ struct TimelineView: View {
                     setVisibleRowLimit(nextLimit)
                 }
                 AppLogger.info("auto older loaded added_events=\(addedEvents) old_limit=\(oldLimit) new_limit=\(nextLimit) old_rows=\(beforeRowCount) rendered_rows=\(afterRowCount) anchor=\(anchor?.rowID ?? "-") hidden_before=\(store.hiddenDisplayEventCount)")
+                let rows = renderedRows(visibleLimit: nextLimit)
+                let target = firstNewOlderRow(before: anchor, in: rows) ?? Array(rows.suffix(nextLimit)).first
+                scrollToOlderPageTarget(target?.id, proxy: proxy)
+                return
             }
             restoreScrollPosition(to: anchor, proxy: proxy)
         }
@@ -627,6 +631,21 @@ struct TimelineView: View {
         let rows = renderedRows()
         guard let row = Array(rows.suffix(visibleRowLimit)).first else { return nil }
         return TimelineScrollAnchor(rowID: row.id, eventID: row.anchorEventID)
+    }
+
+    private func firstNewOlderRow(before anchor: TimelineScrollAnchor?, in rows: [TimelineRow]) -> TimelineRow? {
+        guard let anchor else { return rows.first }
+        let anchorIndex: Int?
+        if let index = rows.firstIndex(where: { $0.id == anchor.rowID }) {
+            anchorIndex = index
+        } else if let eventID = anchor.eventID,
+                  let row = row(containingEventID: eventID, in: rows) {
+            anchorIndex = row.index
+        } else {
+            anchorIndex = nil
+        }
+        guard let anchorIndex, anchorIndex > 0 else { return rows.first }
+        return rows[max(0, anchorIndex - rowPageSize)]
     }
 
     private func restoreScrollPosition(to anchor: TimelineScrollAnchor?, proxy: ScrollViewProxy) {

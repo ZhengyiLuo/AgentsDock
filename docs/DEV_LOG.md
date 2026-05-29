@@ -4159,3 +4159,13 @@ Second follow-up:
 - The Mac timeline now projects the full bounded local event window. The store
   already caps loaded timeline events, so older history remains bounded while
   actually being visible.
+
+Third follow-up:
+
+- Logs after the full-window projection showed older pages were loaded and
+  renderable, but automatic top-edge loading still preserved the old top row.
+  That meant the new older page landed above the viewport and the user saw no
+  obvious change.
+- Automatic older-history loading now reveals the newly loaded older page by
+  scrolling to the row just before the previous top anchor.
+- Manual explicit loading still uses the same older-page scroll helper.
