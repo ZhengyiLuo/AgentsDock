@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import ZenithCore
 
 struct ComposerView: View {
@@ -741,10 +742,7 @@ struct PromptTextView: NSViewRepresentable {
         }
 
         private static func writeImageFromPasteboard(_ pasteboard: NSPasteboard) -> URL? {
-            guard let image = NSImage(pasteboard: pasteboard),
-                  let tiff = image.tiffRepresentation,
-                  let rep = NSBitmapImageRep(data: tiff),
-                  let data = rep.representation(using: .png, properties: [:]) else {
+            guard let data = imagePNGData(from: pasteboard) else {
                 return nil
             }
             let directory = FileManager.default.temporaryDirectory
@@ -757,6 +755,55 @@ struct PromptTextView: NSViewRepresentable {
             } catch {
                 return nil
             }
+        }
+
+        private static func imagePNGData(from pasteboard: NSPasteboard) -> Data? {
+            for type in imagePasteboardTypes(in: pasteboard) {
+                guard let data = pasteboard.data(forType: type),
+                      let png = pngData(fromImageData: data) else { continue }
+                return png
+            }
+
+            for item in pasteboard.pasteboardItems ?? [] {
+                for type in imagePasteboardTypes(in: item) {
+                    guard let data = item.data(forType: type),
+                          let png = pngData(fromImageData: data) else { continue }
+                    return png
+                }
+            }
+
+            guard let image = NSImage(pasteboard: pasteboard),
+                  let tiff = image.tiffRepresentation else {
+                return nil
+            }
+            return pngData(fromImageData: tiff)
+        }
+
+        private static func imagePasteboardTypes(in pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
+            (pasteboard.types ?? []).filter(isImagePasteboardType)
+        }
+
+        private static func imagePasteboardTypes(in item: NSPasteboardItem) -> [NSPasteboard.PasteboardType] {
+            item.types.filter(isImagePasteboardType)
+        }
+
+        private static func isImagePasteboardType(_ type: NSPasteboard.PasteboardType) -> Bool {
+            if [.png, .tiff].contains(type) {
+                return true
+            }
+            guard let utType = UTType(type.rawValue) else {
+                return false
+            }
+            return utType.conforms(to: .image)
+        }
+
+        private static func pngData(fromImageData data: Data) -> Data? {
+            guard let image = NSImage(data: data),
+                  let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff) else {
+                return nil
+            }
+            return rep.representation(using: .png, properties: [:])
         }
     }
 }

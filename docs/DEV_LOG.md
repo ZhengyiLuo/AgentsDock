@@ -3980,6 +3980,22 @@ Changes:
 - New selected-chat agent output no longer auto-scrolls the timeline; it marks
   the chat unread and leaves movement to the explicit bottom/latest control.
 
+### Mac Clipboard Image Paste
+
+User issue:
+
+- Pasting an image from the clipboard into the Mac composer did not attach it.
+
+Changes:
+
+- Kept the existing `Cmd-V` interception in the native text view, but expanded
+  clipboard image detection beyond `NSImage(pasteboard:)`.
+- The composer now scans top-level and per-item pasteboard types that conform
+  to `UTType.image`, converts the image data to a temporary PNG, and sends it
+  through the normal upload/attachment path.
+- Added guardrails for typed pasteboard image data so this does not regress
+  back to only one clipboard representation.
+
 ### Run Artifact Ordering
 
 User issue:

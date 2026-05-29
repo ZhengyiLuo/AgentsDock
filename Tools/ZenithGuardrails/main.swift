@@ -658,6 +658,9 @@ func checkPromptImageAttachments() throws {
     try assert(mobileEvents.contains("attachment.file.content_type?.hasPrefix(\"image/\") == true"), "iOS prompt attachments must render image thumbnails")
     try assert(composer.contains("override func paste"), "Mac composer must intercept pasteboard images")
     try assert(composer.contains("NSImage(pasteboard: pasteboard)"), "Mac composer must read raw image data from the pasteboard")
+    try assert(composer.contains("UTType(type.rawValue)"), "Mac composer must accept typed image pasteboard data, not only NSImage pasteboard decoding")
+    try assert(composer.contains("utType.conforms(to: .image)"), "Mac composer must detect PNG/JPEG/TIFF/HEIC-style clipboard images")
+    try assert(composer.contains("item.data(forType: type)"), "Mac composer must inspect per-item pasteboard image data")
     try assert(composer.contains("ZenithDockPasteboardImages"), "Mac composer must persist pasted images before upload")
 }
 
