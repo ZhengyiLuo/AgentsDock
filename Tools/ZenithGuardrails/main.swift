@@ -350,6 +350,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("let zeroInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)"), "Mac timeline must define explicit zero AppKit insets")
     try assert(timeline.contains("scrollView.contentInsets = zeroInsets"), "Mac timeline must not allow AppKit content insets to create bottom overscroll slack")
     try assert(!timeline.contains(".padding(.bottom, 56)"), "Mac timeline content must not add artificial bottom scroll slack")
+    try assert(!timeline.contains(".padding(20)"), "Mac timeline content must not apply symmetric padding that creates bottom scroll slack")
+    try assert(timeline.contains(".padding(.horizontal, 20)\n                        .padding(.top, 20)"), "Mac timeline content should keep side/top padding without bottom padding")
     try assert(timeline.contains("clampAttachedScrollViewIfNeeded()"), "Mac timeline must clamp the underlying NSScrollView immediately on attach and bounds changes")
     try assert(timeline.contains("installClampingClipViewIfNeeded"), "Mac timeline must install an NSClipView that rejects overscroll bounds")
     try assert(timeline.contains("private final class TimelineClampingClipView: NSClipView"), "Mac timeline must use a custom clamping clip view")

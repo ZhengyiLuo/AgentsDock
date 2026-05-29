@@ -132,7 +132,8 @@ struct TimelineView: View {
                                     .id(bottomID)
                             }
                         }
-                        .padding(20)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             TimelineScrollObserver(

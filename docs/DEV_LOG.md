@@ -4292,3 +4292,7 @@ Follow-up:
 Second follow-up:
 
 - Added a timeline-specific `NSClipView` that overrides `constrainBoundsRect` and clamps proposed scroll origins to the document bounds. This closes the remaining rubber-band/overscroll path when SwiftUI still allowed the scroll view to drift past the last message despite disabled elasticity.
+
+Third follow-up:
+
+- Removed the remaining symmetric timeline content padding. The timeline now keeps horizontal/top padding only, so the bottom sentinel can sit flush against the scroll view bottom instead of leaving a real 20 pt blank scrollable gutter above the composer.
