@@ -4,7 +4,7 @@ import ZenithCore
 
 private let defaultAgentServerURLString = "http://127.0.0.1:7850"
 private let fallbackServerCwd = "~"
-private let minimumAgentAPIContractVersion = 2
+private let minimumAgentAPIContractVersion = 3
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -84,6 +84,7 @@ final class AppStore: ObservableObject {
     private var memoryChatCacheOrder: [String] = []
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
+    private var pendingReadSyncBySessionID: [String: Int] = [:]
     private var serverIdentity: String?
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
@@ -409,6 +410,7 @@ final class AppStore: ObservableObject {
         guard let sessionID else { return }
         if let latestSeq = latestAgentEventSeq(for: sessionID) {
             setLastReadAgentSeq(latestSeq, for: sessionID)
+            syncServerReadState(sessionID: sessionID, seq: latestSeq)
         }
         unreadAgentSessionIDs.remove(sessionID)
         firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
@@ -418,6 +420,7 @@ final class AppStore: ObservableObject {
     func markSessionUnread(_ sessionID: String?) {
         guard let sessionID, let latestSeq = latestAgentEventSeq(for: sessionID) else { return }
         setLastReadAgentSeq(max(0, latestSeq - 1), for: sessionID, allowDecrease: true)
+        syncServerUnreadState(sessionID: sessionID)
         firstUnreadAgentSeqBySessionID[sessionID] = latestSeq
         unreadAgentSessionIDs.insert(sessionID)
         manuallyUnreadSessionIDs.insert(sessionID)
@@ -474,6 +477,77 @@ final class AppStore: ObservableObject {
         saveReadState()
     }
 
+    private struct ReadSessionResponse: Codable {
+        let session: ZSession
+    }
+
+    private struct ReadSessionBody: Codable {
+        let last_read_agent_event_seq: Int
+    }
+
+    private struct EmptyReadSessionBody: Codable {}
+
+    private func syncServerReadState(sessionID: String, seq: Int) {
+        guard serverReachable else { return }
+        if let serverSeq = sessions.first(where: { $0.id == sessionID })?.last_read_agent_event_seq,
+           serverSeq >= seq {
+            return
+        }
+        if let pending = pendingReadSyncBySessionID[sessionID], pending >= seq { return }
+        pendingReadSyncBySessionID[sessionID] = seq
+        Task {
+            do {
+                let response: ReadSessionResponse = try await api.post(
+                    "/api/sessions/\(sessionID)/read",
+                    body: ReadSessionBody(last_read_agent_event_seq: seq)
+                )
+                await MainActor.run {
+                    self.pendingReadSyncBySessionID.removeValue(forKey: sessionID)
+                    self.applyServerReadSession(response.session)
+                }
+            } catch {
+                await MainActor.run {
+                    self.pendingReadSyncBySessionID.removeValue(forKey: sessionID)
+                    AppLogger.warning("sync read failed session=\(sessionID) \(self.serverErrorMessage(error) ?? "\(error)")")
+                }
+            }
+        }
+    }
+
+    private func syncServerUnreadState(sessionID: String) {
+        guard serverReachable else { return }
+        Task {
+            do {
+                let response: ReadSessionResponse = try await api.post(
+                    "/api/sessions/\(sessionID)/unread",
+                    body: EmptyReadSessionBody()
+                )
+                await MainActor.run {
+                    self.applyServerReadSession(response.session)
+                }
+            } catch {
+                await MainActor.run {
+                    AppLogger.warning("sync unread failed session=\(sessionID) \(self.serverErrorMessage(error) ?? "\(error)")")
+                }
+            }
+        }
+    }
+
+    private func applyServerReadSession(_ session: ZSession) {
+        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[idx] = session
+        }
+        if let readSeq = session.last_read_agent_event_seq {
+            setLastReadAgentSeq(readSeq, for: session.id, allowDecrease: true)
+            if let latestSeq = session.latest_agent_event_seq, readSeq >= latestSeq {
+                manuallyUnreadSessionIDs.remove(session.id)
+                unreadAgentSessionIDs.remove(session.id)
+                firstUnreadAgentSeqBySessionID.removeValue(forKey: session.id)
+            }
+        }
+        reconcileUnreadFromSessions()
+    }
+
     private func latestAgentEventSeq(for sessionID: String) -> Int? {
         if let sessionSeq = sessions.first(where: { $0.id == sessionID })?.latest_agent_event_seq {
             return sessionSeq
@@ -492,6 +566,10 @@ final class AppStore: ObservableObject {
 
         for session in sessions {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
+            if let serverReadSeq = session.last_read_agent_event_seq,
+               serverReadSeq > (lastReadAgentSeqBySessionID[session.id] ?? 0) {
+                setLastReadAgentSeq(serverReadSeq, for: session.id)
+            }
             if session.id == selectedSessionID, selectedTimelineAtBottom, !manuallyUnreadSessionIDs.contains(session.id) {
                 markSessionRead(session.id)
                 continue
@@ -502,6 +580,7 @@ final class AppStore: ObservableObject {
             } else {
                 unreadAgentSessionIDs.remove(session.id)
                 firstUnreadAgentSeqBySessionID.removeValue(forKey: session.id)
+                manuallyUnreadSessionIDs.remove(session.id)
             }
         }
     }
@@ -1922,6 +2001,7 @@ final class AppStore: ObservableObject {
                     markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
                 } else {
                     setLastReadAgentSeq(event.seq, for: event.session_id)
+                    syncServerReadState(sessionID: event.session_id, seq: event.seq)
                 }
             }
             if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
