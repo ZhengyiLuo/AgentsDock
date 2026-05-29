@@ -29,6 +29,7 @@ public struct ZSession: Codable, Identifiable, Hashable, Sendable {
     public var latest_agent_event_type: String?
     public var last_read_agent_event_seq: Int?
     public var last_read_agent_event_at: String?
+    public var manual_unread: Bool?
 
     public var isBackendLocked: Bool {
         [session_id, claude_session_id, codex_thread_id]

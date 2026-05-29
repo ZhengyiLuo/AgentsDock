@@ -503,7 +503,7 @@ final class AppStore: ObservableObject {
                 )
                 await MainActor.run {
                     self.pendingReadSyncBySessionID.removeValue(forKey: sessionID)
-                    self.applyServerReadSession(response.session)
+                    self.applyServerReadSession(response.session, allowReadCursorDecrease: false)
                 }
             } catch {
                 await MainActor.run {
@@ -523,7 +523,7 @@ final class AppStore: ObservableObject {
                     body: EmptyReadSessionBody()
                 )
                 await MainActor.run {
-                    self.applyServerReadSession(response.session)
+                    self.applyServerReadSession(response.session, allowReadCursorDecrease: true)
                 }
             } catch {
                 await MainActor.run {
@@ -533,12 +533,12 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func applyServerReadSession(_ session: ZSession) {
+    private func applyServerReadSession(_ session: ZSession, allowReadCursorDecrease: Bool) {
         if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[idx] = session
         }
         if let readSeq = session.last_read_agent_event_seq {
-            setLastReadAgentSeq(readSeq, for: session.id, allowDecrease: true)
+            setLastReadAgentSeq(readSeq, for: session.id, allowDecrease: allowReadCursorDecrease)
             if let latestSeq = session.latest_agent_event_seq, readSeq >= latestSeq {
                 manuallyUnreadSessionIDs.remove(session.id)
                 unreadAgentSessionIDs.remove(session.id)
@@ -549,14 +549,12 @@ final class AppStore: ObservableObject {
     }
 
     private func latestAgentEventSeq(for sessionID: String) -> Int? {
-        if let sessionSeq = sessions.first(where: { $0.id == sessionID })?.latest_agent_event_seq {
-            return sessionSeq
-        }
+        let sessionSeq = sessions.first(where: { $0.id == sessionID })?.latest_agent_event_seq
         let eventSeq = events
             .filter { $0.session_id == sessionID && isAgentVisibleMessage($0) }
             .map(\.seq)
             .max()
-        return eventSeq
+        return [sessionSeq, eventSeq].compactMap { $0 }.max()
     }
 
     private func reconcileUnreadFromSessions() {
@@ -566,16 +564,20 @@ final class AppStore: ObservableObject {
 
         for session in sessions {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
+            let serverManualUnread = session.manual_unread == true
             if let serverReadSeq = session.last_read_agent_event_seq,
                serverReadSeq > (lastReadAgentSeqBySessionID[session.id] ?? 0) {
                 setLastReadAgentSeq(serverReadSeq, for: session.id)
             }
-            if session.id == selectedSessionID, selectedTimelineAtBottom, !manuallyUnreadSessionIDs.contains(session.id) {
+            if serverManualUnread, session.id != selectedSessionID {
+                manuallyUnreadSessionIDs.insert(session.id)
+            }
+            if session.id == selectedSessionID, selectedTimelineAtBottom {
                 markSessionRead(session.id)
                 continue
             }
             let lastReadSeq = lastReadAgentSeqBySessionID[session.id] ?? 0
-            if latestSeq > lastReadSeq {
+            if serverManualUnread || latestSeq > lastReadSeq {
                 markAgentUnread(sessionID: session.id, firstSeq: lastReadSeq + 1)
             } else {
                 unreadAgentSessionIDs.remove(session.id)
