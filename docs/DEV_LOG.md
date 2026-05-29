@@ -4169,3 +4169,12 @@ Third follow-up:
 - Automatic older-history loading now reveals the newly loaded older page by
   scrolling to the row just before the previous top anchor.
 - Manual explicit loading still uses the same older-page scroll helper.
+
+Fourth follow-up:
+
+- The anchor-based reveal still left too much room for SwiftUI grouping to pick
+  an unhelpful row.
+- `loadOlderHistory()` now returns `firstAddedEventID` alongside the count.
+- Automatic and explicit older-page navigation now scroll directly to the row
+  containing the first newly loaded event. This makes the scroll target
+  deterministic instead of inferred from the previous viewport.

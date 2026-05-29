@@ -623,6 +623,8 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("private func renderedRows(visibleLimit:"), "Older-page navigation must use the same rows the UI actually renders")
     try assert(timeline.contains("AppLogger.info(\"auto older loaded"), "Automatic older-history loading must log rendered row expansion diagnostics")
     try assert(timeline.contains("firstNewOlderRow(before:"), "Automatic older-history loading must reveal the newly loaded page instead of pinning the old top row")
+    try assert(macStore.contains("firstAddedEventID"), "Older-history loading must return the first newly loaded event for deterministic scroll targeting")
+    try assert(timeline.contains("row(containingEventID: $0, in: rows)"), "Older-history navigation must scroll to the row containing the first newly loaded event")
     try assert(timeline.contains("AppLogger.info(\"show older rows"), "Show Older must log target rows for paging diagnostics")
     try assert(timeline.contains("AppLogger.info(\"load older intent"), "Load Older must log target rows for paging diagnostics")
     try assert(timeline.contains("private func disarmAutomaticOlderHistoryLoad()"), "Timeline must centralize the guard that prevents open-bottom from accidentally auto-loading older history")

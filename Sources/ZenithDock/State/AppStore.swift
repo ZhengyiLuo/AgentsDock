@@ -111,6 +111,11 @@ final class AppStore: ObservableObject {
         let event_count: Int?
     }
 
+    struct OlderHistoryLoadResult: Sendable {
+        let addedCount: Int
+        let firstAddedEventID: String?
+    }
+
     init() {
         serverIdentity = Self.loadServerIdentity(for: serverURLString)
         lastReadAgentSeqBySessionID = loadReadState()
@@ -1107,12 +1112,12 @@ final class AppStore: ObservableObject {
     }
 
     @discardableResult
-    func loadOlderHistory() async -> Int {
+    func loadOlderHistory() async -> OlderHistoryLoadResult {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
               let before = events.map(\.seq).min() else {
-            return 0
+            return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
 
         isLoadingOlderHistory = true
@@ -1131,6 +1136,7 @@ final class AppStore: ObservableObject {
             var skippedInvisiblePages = 0
             var knownIDs = Set(events.map(\.id))
             var older: [ZEvent] = []
+            var firstAddedEventID: String?
 
             for _ in 0..<8 {
                 let res: Response = try await api.get(
@@ -1149,6 +1155,9 @@ final class AppStore: ObservableObject {
                     guard !knownIDs.contains(event.id) else { return false }
                     knownIDs.insert(event.id)
                     return true
+                }
+                if firstAddedEventID == nil {
+                    firstAddedEventID = visibleOlder.first?.id
                 }
                 older.append(contentsOf: visibleOlder)
                 if !visibleOlder.isEmpty || res.events.isEmpty || remainingOmitted <= 0 {
@@ -1177,12 +1186,12 @@ final class AppStore: ObservableObject {
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) added=\(older.count) skipped_invisible_pages=\(skippedInvisiblePages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
-            return older.count
+            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) added=\(older.count) first_added=\(firstAddedEventID ?? "-") skipped_invisible_pages=\(skippedInvisiblePages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            return OlderHistoryLoadResult(addedCount: older.count, firstAddedEventID: firstAddedEventID)
         } catch {
             AppLogger.error("load older failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
-            return 0
+            return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
     }
 
