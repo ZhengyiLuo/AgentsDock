@@ -46,6 +46,7 @@ final class AppStore: ObservableObject {
     @Published var omittedHistoryEventCount = 0
     @Published var isLoadingOlderHistory = false
     @Published var scrollToBottomRevision = 0
+    @Published var forcedScrollToBottomRevision = 0
     @Published var scrollToEventID: String?
     @Published var scrollToEventRevision = 0
     @Published var processSnapshot: ZProcessSnapshot?
@@ -2107,6 +2108,9 @@ final class AppStore: ObservableObject {
             pendingScrollRequest = nil
             lastScrollRequestAt = now
             scrollToBottomRevision += 1
+            if immediate {
+                forcedScrollToBottomRevision += 1
+            }
             return
         }
 

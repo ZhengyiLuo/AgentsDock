@@ -192,6 +192,9 @@ struct TimelineView: View {
                     }
                     settleInitialTimelinePosition(proxy)
                 }
+                .onChange(of: store.forcedScrollToBottomRevision) {
+                    forceOpenThreadToLatest(proxy)
+                }
                 .onChange(of: store.scrollToEventRevision) {
                     scrollToRequestedEvent(proxy)
                 }
@@ -345,9 +348,31 @@ struct TimelineView: View {
                 isInitialTimelineMasked = false
             }
         }
-        for delay in [0.0, 0.05, 0.16, 0.36, 0.72] {
+        scheduleForcedBottomSettle(proxy, sessionID: pendingSessionID)
+        return true
+    }
+
+    private func forceOpenThreadToLatest(_ proxy: ScrollViewProxy) {
+        guard let sessionID = store.selectedSessionID,
+              !store.displayEvents.isEmpty else {
+            return
+        }
+        pendingOpenBottomSessionID = sessionID
+        historyLoadSuppressedUntil = Date().addingTimeInterval(0.8)
+        visibleRowLimit = defaultVisibleRowLimit
+        store.markSelectedSessionRead(force: true)
+        if isInitialTimelineMasked {
+            withTransaction(noAnimationTransaction) {
+                isInitialTimelineMasked = false
+            }
+        }
+        scheduleForcedBottomSettle(proxy, sessionID: sessionID)
+    }
+
+    private func scheduleForcedBottomSettle(_ proxy: ScrollViewProxy, sessionID: String) {
+        for delay in [0.0, 0.05, 0.16, 0.36, 0.72, 1.15] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard store.selectedSessionID == pendingSessionID else { return }
+                guard store.selectedSessionID == sessionID else { return }
                 withTransaction(noAnimationTransaction) {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                     isAtBottom = true
@@ -356,7 +381,6 @@ struct TimelineView: View {
                 }
             }
         }
-        return true
     }
 
     private func initialTimelineMaskIsCurrent(revision: Int, sessionID: String) -> Bool {
