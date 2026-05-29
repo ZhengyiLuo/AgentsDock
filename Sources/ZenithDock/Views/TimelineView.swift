@@ -1324,6 +1324,7 @@ private enum TimelineRows {
     ]
     private static let assistantRowChunkSize = 8
     private static let traceRowChunkSize = 16
+    private static let compactedTraceEventLimit = 96
 
     static func project(from events: [ZEvent]) -> TimelineProjection {
         let key = cacheKey(for: events)
@@ -1332,7 +1333,7 @@ private enum TimelineRows {
         }
 
         let jobRuns = jobRunsByRunID(events)
-        let rows = buildRows(from: events, jobRuns: jobRuns)
+        let rows = compactAdjacentTraceRows(buildRows(from: events, jobRuns: jobRuns))
         let projection = TimelineProjection(rows: rows, jobsByRunID: jobRuns.mapValues(\.job))
         cache.setObject(Entry(projection), forKey: key)
         return projection
@@ -1521,6 +1522,44 @@ private enum TimelineRows {
         flushAgentRun()
         flushOrphanTrace()
         return rows
+    }
+
+    private static func compactAdjacentTraceRows(_ rows: [TimelineRow]) -> [TimelineRow] {
+        var compacted: [TimelineRow] = []
+        var pendingEvents: [ZEvent] = []
+        var pendingEventIDs: [String] = []
+
+        func flushPendingTrace() {
+            guard !pendingEvents.isEmpty else { return }
+            var start = pendingEvents.startIndex
+            while start < pendingEvents.endIndex {
+                let end = min(pendingEvents.endIndex, start + compactedTraceEventLimit)
+                let chunk = Array(pendingEvents[start..<end])
+                let chunkIDs = Array(pendingEventIDs[start..<end])
+                if let first = chunk.first, let last = chunk.last {
+                    compacted.append(TimelineRow(
+                        id: "trace-compact-\(first.seq)-\(last.seq)",
+                        kind: .trace(chunk),
+                        eventIDs: chunkIDs
+                    ))
+                }
+                start = end
+            }
+            pendingEvents.removeAll(keepingCapacity: true)
+            pendingEventIDs.removeAll(keepingCapacity: true)
+        }
+
+        for row in rows {
+            if case .trace(let events) = row.kind {
+                pendingEvents.append(contentsOf: events)
+                pendingEventIDs.append(contentsOf: row.eventIDs.isEmpty ? events.map(\.id) : row.eventIDs)
+            } else {
+                flushPendingTrace()
+                compacted.append(row)
+            }
+        }
+        flushPendingTrace()
+        return compacted
     }
 
     static func jobsByRunID(_ events: [ZEvent]) -> [String: ZJob] {

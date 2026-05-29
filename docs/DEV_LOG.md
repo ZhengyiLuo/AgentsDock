@@ -4241,3 +4241,9 @@ Twelfth follow-up:
 - Large-batch masking for preserved cached chats now counts only newly added snapshot events, so a no-op latest-tail response no longer masks the timeline just because the server returned a large tail window.
 
 - Warm-cache chat selection now reports the normal connected state instead of `Refreshing latest chat`, because the tail refresh is background work once cached rows are already visible.
+
+## 2026-05-29 - Trace Density And Video Preview Paging
+
+- Compacted adjacent collapsed trace rows after timeline projection so history pages do not land inside a wall of one-card-per-run reasoning traces. Trace event IDs are still retained on the compacted row for deterministic older-history scroll targets.
+- Timeline file/video artifact cards now show the first four previews by default with an explicit show-more control.
+- The Mac files/videos inspector now starts video previews at four items and pages four at a time, newest first via the existing `sessionVideos` ordering.

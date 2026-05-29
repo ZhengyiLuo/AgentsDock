@@ -402,6 +402,7 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(server.contains("content_prefix: str | None = Query(default=None)"), "Server files API must support content-type prefix filtering")
@@ -409,6 +410,10 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(macStore.contains("@Published var sessionVideoFiles: [ZFile] = []"), "Mac store must keep video metadata separate from mixed file pages")
     try assert(macStore.contains("URLQueryItem(name: \"content_prefix\", value: \"video/\")"), "Mac store must fetch videos independently of mixed file paging")
     try assert(inspector.contains("sortedLatestFirst(store.sessionVideos)"), "Mac files inspector must render the independent video list")
+    try assert(inspector.contains("@State private var visibleVideoCount = 4"), "Mac files inspector must start video grids at four previews")
+    try assert(inspector.contains("private let videoPageSize = 4"), "Mac files inspector must page video grids four at a time")
+    try assert(eventViews.contains("private let initialArtifactLimit = 4"), "Mac timeline artifact grids must start at four previews")
+    try assert(eventViews.contains("ForEach(visibleArtifacts)"), "Mac timeline artifact grids must render the capped preview set by default")
 }
 
 func checkRuntimeAutosavesAndBackendIcons() throws {
@@ -640,6 +645,9 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("func containsEventID(_ eventID: String)"), "Grouped timeline rows must retain source event IDs for deterministic scroll targeting")
     try assert(timeline.contains("private static let assistantRowChunkSize"), "Assistant runs must be split into bounded rows so older pages create visible targets")
     try assert(timeline.contains("private static let traceRowChunkSize"), "Trace runs must be split into bounded rows so older pages create visible targets")
+    try assert(timeline.contains("private static let compactedTraceEventLimit"), "Adjacent trace-only rows must be compacted so history pages do not become trace walls")
+    try assert(timeline.contains("compactAdjacentTraceRows(buildRows"), "Mac timeline projection must compact adjacent trace cards after preserving row targets")
+    try assert(timeline.contains("trace-compact-"), "Compacted trace rows must retain deterministic scroll IDs")
     try assert(timeline.contains("eventIDs: chunk.map(\\.id)"), "Chunked timeline rows must preserve the source event IDs they represent")
     try assert(timeline.contains("AppLogger.info(\"show older rows"), "Show Older must log target rows for paging diagnostics")
     try assert(timeline.contains("AppLogger.info(\"load older intent"), "Load Older must log target rows for paging diagnostics")

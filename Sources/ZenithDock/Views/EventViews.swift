@@ -760,8 +760,14 @@ struct ArtifactGridItem: Identifiable, Hashable {
 struct ArtifactGridCard: View {
     let artifacts: [ArtifactGridItem]
     var linkContext: ZMarkdownLinkContext?
+    @State private var isExpanded = false
 
     private let columns = Array(repeating: GridItem(.flexible(minimum: 150, maximum: 210), spacing: 10), count: 4)
+    private let initialArtifactLimit = 4
+
+    private var visibleArtifacts: [ArtifactGridItem] {
+        isExpanded ? artifacts : Array(artifacts.prefix(initialArtifactLimit))
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -778,9 +784,22 @@ struct ArtifactGridCard: View {
                     Spacer()
                 }
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                    ForEach(artifacts) { artifact in
+                    ForEach(visibleArtifacts) { artifact in
                         ArtifactGridTile(file: artifact.file, url: artifact.url, linkContext: linkContext)
                     }
+                }
+                if artifacts.count > initialArtifactLimit {
+                    Button {
+                        isExpanded.toggle()
+                    } label: {
+                        Label(
+                            isExpanded ? "Show fewer" : "Show \(artifacts.count - initialArtifactLimit) more",
+                            systemImage: isExpanded ? "chevron.up" : "chevron.down"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help(isExpanded ? "Collapse files and videos" : "Show all files and videos from this turn")
                 }
             }
             .padding(14)
@@ -788,6 +807,9 @@ struct ArtifactGridCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator.opacity(0.35)))
             .frame(maxWidth: 900, alignment: .leading)
+        }
+        .onChange(of: artifacts.map(\.id).joined(separator: ":")) {
+            isExpanded = false
         }
     }
 }
