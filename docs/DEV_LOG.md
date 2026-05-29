@@ -4178,3 +4178,13 @@ Fourth follow-up:
 - Automatic and explicit older-page navigation now scroll directly to the row
   containing the first newly loaded event. This makes the scroll target
   deterministic instead of inferred from the previous viewport.
+
+Fifth follow-up:
+
+- Air logs then showed the server pages were loading, but some long sessions
+  had hundreds of loaded events collapsed into only a few rendered rows.
+- Timeline rows now retain the source event IDs they represent, so scroll
+  targeting works even when assistant text is merged for display.
+- Oversized assistant and trace groups are split into bounded chunks. Older
+  history pages now create real visible scroll targets instead of disappearing
+  inside one giant grouped row.

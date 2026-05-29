@@ -446,27 +446,8 @@ struct TimelineView: View {
 
     private func row(containingEventID eventID: String, in rows: [TimelineRow]) -> (id: String, index: Int)? {
         for (index, row) in rows.enumerated() {
-            switch row.kind {
-            case .event(let event):
-                if event.id == eventID {
-                    return (row.id, index)
-                }
-            case .artifacts(let events):
-                if events.contains(where: { $0.id == eventID }) {
-                    return (row.id, index)
-                }
-            case .job(let jobRun):
-                if jobRun.runEvent.id == eventID {
-                    return (row.id, index)
-                }
-            case .jobGroup(let group):
-                if group.runs.contains(where: { $0.runEvent.id == eventID }) {
-                    return (row.id, index)
-                }
-            case .trace(let events):
-                if events.contains(where: { $0.id == eventID }) {
-                    return (row.id, index)
-                }
+            if row.containsEventID(eventID) {
+                return (row.id, index)
             }
         }
         return nil
@@ -1151,10 +1132,12 @@ private final class TimelineRow: Identifiable {
 
     let id: String
     let kind: Kind
+    let eventIDs: [String]
 
-    init(id: String, kind: Kind) {
+    init(id: String, kind: Kind, eventIDs: [String] = []) {
         self.id = id
         self.kind = kind
+        self.eventIDs = eventIDs
     }
 
     var maxSeq: Int {
@@ -1173,7 +1156,10 @@ private final class TimelineRow: Identifiable {
     }
 
     var anchorEventID: String? {
-        switch kind {
+        if let eventID = eventIDs.first {
+            return eventID
+        }
+        return switch kind {
         case .event(let event):
             event.id
         case .artifacts(let events):
@@ -1184,6 +1170,24 @@ private final class TimelineRow: Identifiable {
             group.runs.first?.runEvent.id
         case .trace(let events):
             events.first?.id ?? events.last?.id
+        }
+    }
+
+    func containsEventID(_ eventID: String) -> Bool {
+        if eventIDs.contains(eventID) {
+            return true
+        }
+        switch kind {
+        case .event(let event):
+            return event.id == eventID
+        case .artifacts(let events):
+            return events.contains(where: { $0.id == eventID })
+        case .job(let jobRun):
+            return jobRun.runEvent.id == eventID
+        case .jobGroup(let group):
+            return group.runs.contains(where: { $0.runEvent.id == eventID })
+        case .trace(let events):
+            return events.contains(where: { $0.id == eventID })
         }
     }
 }
@@ -1241,6 +1245,8 @@ private enum TimelineRows {
         "artifact_error",
         "session_created"
     ]
+    private static let assistantRowChunkSize = 8
+    private static let traceRowChunkSize = 16
 
     static func project(from events: [ZEvent]) -> TimelineProjection {
         let key = cacheKey(for: events)
@@ -1271,8 +1277,19 @@ private enum TimelineRows {
         var pendingJobRuns: [JobRunRow] = []
 
         func appendTrace(_ events: [ZEvent], prefix: String = "trace") {
-            guard let first = events.first, let last = events.last else { return }
-            rows.append(TimelineRow(id: "\(prefix)-\(first.seq)-\(last.seq)", kind: .trace(events)))
+            var start = events.startIndex
+            while start < events.endIndex {
+                let end = min(events.endIndex, start + traceRowChunkSize)
+                let chunk = Array(events[start..<end])
+                if let first = chunk.first, let last = chunk.last {
+                    rows.append(TimelineRow(
+                        id: "\(prefix)-\(first.seq)-\(last.seq)",
+                        kind: .trace(chunk),
+                        eventIDs: chunk.map(\.id)
+                    ))
+                }
+                start = end
+            }
         }
 
         func flushOrphanTrace() {
@@ -1280,24 +1297,48 @@ private enum TimelineRows {
             orphanTrace.removeAll(keepingCapacity: true)
         }
 
-        func mergedAssistantEvent() -> ZEvent? {
-            guard var merged = activeAssistantEvents.last else { return activeFinishedEvent }
-            let text = activeAssistantEvents
+        func mergedAssistantEvent(from events: [ZEvent]) -> ZEvent? {
+            guard var merged = events.last else { return nil }
+            let text = events
                 .compactMap { visibleText($0.text) }
                 .joined(separator: "\n\n")
             merged.text = text
             return merged
         }
 
-        func flushAgentRun() {
-            if let assistant = mergedAssistantEvent() {
-                rows.append(TimelineRow(id: "assistant-run-\(activeRunID ?? assistant.id)-\(assistant.seq)", kind: .event(assistant)))
+        func appendAssistantRows() {
+            var start = activeAssistantEvents.startIndex
+            while start < activeAssistantEvents.endIndex {
+                let end = min(activeAssistantEvents.endIndex, start + assistantRowChunkSize)
+                let chunk = Array(activeAssistantEvents[start..<end])
+                if let assistant = mergedAssistantEvent(from: chunk),
+                   let first = chunk.first,
+                   let last = chunk.last {
+                    rows.append(TimelineRow(
+                        id: "assistant-run-\(activeRunID ?? assistant.id)-\(first.seq)-\(last.seq)",
+                        kind: .event(assistant),
+                        eventIDs: chunk.map(\.id)
+                    ))
+                }
+                start = end
             }
+            if activeAssistantEvents.isEmpty, let finished = activeFinishedEvent {
+                rows.append(TimelineRow(
+                    id: "assistant-run-\(activeRunID ?? finished.id)-\(finished.seq)",
+                    kind: .event(finished),
+                    eventIDs: [finished.id]
+                ))
+            }
+        }
+
+        func flushAgentRun() {
+            appendAssistantRows()
             if let firstArtifact = activeArtifactEvents.first,
                let lastArtifact = activeArtifactEvents.last {
                 rows.append(TimelineRow(
                     id: "artifacts-run-\(activeRunID ?? "unknown")-\(firstArtifact.seq)-\(lastArtifact.seq)",
-                    kind: .artifacts(activeArtifactEvents)
+                    kind: .artifacts(activeArtifactEvents),
+                    eventIDs: activeArtifactEvents.map(\.id)
                 ))
             }
             appendTrace(activeTrace, prefix: "trace-run-\(activeRunID ?? "unknown")")
