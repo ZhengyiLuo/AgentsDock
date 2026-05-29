@@ -21,11 +21,15 @@ struct TimelineView: View {
     @State private var maskedSessionID: String?
     @State private var pendingOpenBottomSessionID: String?
     @State private var initialTimelineRevealRevision = 0
+    @State private var showTimelinePositioningOverlay = false
+    @State private var timelinePositioningOverlayRevision = 0
+    @State private var timelinePositioningOverlayTask: Task<Void, Never>?
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
     private let defaultVisibleRowLimit = 100
     private let rowPageSize = 40
     private let bottomButtonHideDistance: CGFloat = 180
+    private let timelinePositioningOverlayDelayNanos: UInt64 = 180_000_000
 
     private struct TimelineScrollAnchor {
         let rowID: String
@@ -146,7 +150,7 @@ struct TimelineView: View {
                     }
                     .opacity(shouldMaskTimeline ? 0 : 1)
                     .coordinateSpace(name: coordinateSpaceName)
-                    if shouldMaskTimeline, store.selectedSession != nil {
+                    if shouldMaskTimeline, store.selectedSession != nil, showTimelinePositioningOverlay {
                         TimelinePositioningOverlay()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(false)
@@ -210,6 +214,9 @@ struct TimelineView: View {
                     store.markSelectedSessionRead()
                     settleOpenThreadAtLatest(proxy)
                     settleInitialTimelinePosition(proxy)
+                }
+                .onChange(of: shouldMaskTimeline) { _, masked in
+                    updateTimelinePositioningOverlay(masked: masked)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
                     let previousObservedSeq = lastObservedEventSeq
@@ -288,13 +295,20 @@ struct TimelineView: View {
             if isInitialTimelineMasked && !store.isSelectingSession {
                 isInitialTimelineMasked = false
             }
+            updateTimelinePositioningOverlay(masked: shouldMaskTimeline)
+        }
+        .onDisappear {
+            timelinePositioningOverlayTask?.cancel()
+            timelinePositioningOverlayTask = nil
         }
     }
 
     private func beginInitialTimelineMask() {
         initialTimelineRevealRevision += 1
         maskedSessionID = store.selectedSessionID
+        hideTimelinePositioningOverlay()
         isInitialTimelineMasked = store.selectedSessionID != nil && !hasWarmSelectedTimeline
+        updateTimelinePositioningOverlay(masked: isInitialTimelineMasked)
     }
 
     private func settleInitialTimelinePosition(_ proxy: ScrollViewProxy) {
@@ -761,6 +775,38 @@ struct TimelineView: View {
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         return transaction
+    }
+
+    private func updateTimelinePositioningOverlay(masked: Bool) {
+        timelinePositioningOverlayRevision += 1
+        let revision = timelinePositioningOverlayRevision
+        timelinePositioningOverlayTask?.cancel()
+        guard masked else {
+            timelinePositioningOverlayTask = nil
+            hideTimelinePositioningOverlay()
+            return
+        }
+        guard !showTimelinePositioningOverlay else { return }
+        let delay = timelinePositioningOverlayDelayNanos
+        timelinePositioningOverlayTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled,
+                  revision == timelinePositioningOverlayRevision else {
+                return
+            }
+            withTransaction(noAnimationTransaction) {
+                showTimelinePositioningOverlay = true
+            }
+        }
+    }
+
+    private func hideTimelinePositioningOverlay() {
+        timelinePositioningOverlayTask?.cancel()
+        timelinePositioningOverlayTask = nil
+        guard showTimelinePositioningOverlay else { return }
+        withTransaction(noAnimationTransaction) {
+            showTimelinePositioningOverlay = false
+        }
     }
 
     private func queueStatus(for event: ZEvent) -> QueuedEventStatus {

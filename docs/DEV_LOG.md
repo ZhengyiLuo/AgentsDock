@@ -4271,3 +4271,9 @@ Twelfth follow-up:
 - Disabled rubber-band elasticity on the Mac timeline's underlying `NSScrollView` so the chat cannot drift into a large blank area below the last message.
 - Added a defensive scroll-origin clamp before timeline scroll metrics are reported, covering any AppKit/SwiftUI pass that still produces an out-of-range document origin.
 - Added guardrails for both the disabled elasticity and the clamp path.
+
+## 2026-05-29 - Fast Chat Open Spinner Coalescing
+
+- Kept the fast warm-cache chat opening path visually quiet by delaying the `Opening latest messages` overlay until the structural mask persists long enough to matter.
+- Reset stale opening-overlay state on chat switches, so a cold-open mask and a large-batch mask cannot show as two quick spinner flashes.
+- Added guardrails around the delayed overlay and warm-cache masking rules to protect the improved chat-switch speed.
