@@ -306,6 +306,9 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains(".onChange(of: store.isSelectingSession)"), "Timeline must retry reveal when the latest snapshot load finishes")
     try assert(timeline.contains("settleBottomAfterLayout(proxy, sessionID: store.selectedSessionID)"), "Timeline thread switches must settle bottom position after SwiftUI lays out new rows")
     try assert(timeline.contains("guard store.selectedSessionID == sessionID else { return }"), "Delayed timeline bottom settles must be scoped to the selected session")
+    try assert(timeline.contains("@State private var pendingOpenBottomSessionID"), "Mac timeline must remember that newly opened chats should land at the latest message")
+    try assert(timeline.contains("pendingOpenBottomSessionID = store.selectedSessionID"), "Mac timeline must arm latest-message positioning on thread open")
+    try assert(timeline.contains("pendingOpenBottomSessionID = nil\n            scrollToBottom(proxy)"), "Mac timeline must consume the open-position request once rows are loaded")
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should structurally suspend cold opens when no selected-chat cache can be rendered")
     try assert(macStore.contains("@Published var isApplyingLargeTimelineBatch = false"), "Mac store must publish a large-batch timeline mask")
     try assert(macStore.contains("private let largeTimelineBatchEventThreshold = 80"), "Mac store must define a threshold for large timeline batch masking")
@@ -338,6 +341,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!macStore[applyCacheRange.lowerBound..<refreshFilesRange.lowerBound].contains("sessions[idx] = cached.session"), "Mac cached chat application must not replace existing sidebar metadata")
     try assert(mobileTimeline.contains("store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty"), "iOS timeline must reveal cached selected-chat rows while refreshing")
     try assert(mobileTimeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "iOS timeline must structurally suspend row rendering only for cold opens")
+    try assert(mobileTimeline.contains("@State private var pendingOpenBottomSessionID"), "iOS timeline must remember that newly opened chats should land at the latest message")
     try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")
     try assert(!mobileStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "iOS chat open must not request a non-tail catch-up page")
 }

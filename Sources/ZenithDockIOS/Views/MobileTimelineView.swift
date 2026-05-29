@@ -18,6 +18,7 @@ struct MobileTimelineView: View {
     @State private var isFileDropTargeted = false
     @State private var historyLoadSuppressedUntil = Date.distantPast
     @State private var lastObservedEventSeq = 0
+    @State private var pendingOpenBottomSessionID: String?
     private let bottomID = "mobile-timeline-bottom"
     private let defaultVisibleRowLimit = 110
     private let rowPageSize = 36
@@ -140,6 +141,7 @@ struct MobileTimelineView: View {
                     }
                 }
                 .onChange(of: store.selectedSessionID) {
+                    pendingOpenBottomSessionID = store.selectedSessionID
                     isAtBottom = true
                     olderHistoryLoadArmed = true
                     suppressScrollHistoryLoadUntilTopLeaves = false
@@ -161,7 +163,12 @@ struct MobileTimelineView: View {
                     }
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
-                    if shouldFollowLiveEvent {
+                    if let pendingSessionID = pendingOpenBottomSessionID,
+                       pendingSessionID == store.selectedSessionID,
+                       !displayEvents.isEmpty {
+                        pendingOpenBottomSessionID = nil
+                        scrollToBottom(proxy)
+                    } else if shouldFollowLiveEvent {
                         scrollToBottom(proxy)
                     }
                 }

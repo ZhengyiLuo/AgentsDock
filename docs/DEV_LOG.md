@@ -4020,6 +4020,22 @@ Changes:
 - Older-history logs now include the server `before` cursor, received event
   count, added event count, loaded window size, and remaining omitted count.
 
+### Thread Open Latest Position
+
+User issue:
+
+- Opening a thread could leave the timeline at a previous or non-latest
+  position instead of landing on the newest message.
+
+Changes:
+
+- Mac and iOS timelines now arm a one-shot `pendingOpenBottomSessionID` on
+  thread selection.
+- Once that selected thread's rows are actually loaded, the timeline consumes
+  the pending request and scrolls to the bottom/latest message.
+- This is separate from live-message behavior: opening a thread lands latest,
+  while new messages that arrive afterward still do not force-scroll the reader.
+
 ### Run Artifact Ordering
 
 User issue:

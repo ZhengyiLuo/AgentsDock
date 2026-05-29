@@ -19,6 +19,7 @@ struct TimelineView: View {
     @State private var lastObservedEventSeq = 0
     @State private var isInitialTimelineMasked = false
     @State private var maskedSessionID: String?
+    @State private var pendingOpenBottomSessionID: String?
     @State private var initialTimelineRevealRevision = 0
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
@@ -196,6 +197,7 @@ struct TimelineView: View {
                 }
                 .onChange(of: store.selectedSessionID) {
                     beginInitialTimelineMask()
+                    pendingOpenBottomSessionID = store.selectedSessionID
                     isAtBottom = true
                     isNearBottom = true
                     store.setSelectedTimelineAtBottom(true)
@@ -285,6 +287,21 @@ struct TimelineView: View {
     }
 
     private func settleInitialTimelinePosition(_ proxy: ScrollViewProxy) {
+        if let pendingSessionID = pendingOpenBottomSessionID,
+           pendingSessionID == store.selectedSessionID,
+           !store.displayEvents.isEmpty,
+           store.loadedSessionID == pendingSessionID {
+            pendingOpenBottomSessionID = nil
+            scrollToBottom(proxy)
+            settleBottomAfterLayout(proxy, sessionID: pendingSessionID)
+            if isInitialTimelineMasked {
+                withTransaction(noAnimationTransaction) {
+                    isInitialTimelineMasked = false
+                }
+            }
+            return
+        }
+
         guard isInitialTimelineMasked,
               let sessionID = maskedSessionID,
               sessionID == store.selectedSessionID else {
@@ -292,6 +309,8 @@ struct TimelineView: View {
         }
         let hasWarmSelectedTimeline = store.loadedSessionID == sessionID && !store.displayEvents.isEmpty
         if hasWarmSelectedTimeline {
+            scrollToBottom(proxy)
+            settleBottomAfterLayout(proxy, sessionID: sessionID)
             withTransaction(noAnimationTransaction) {
                 isInitialTimelineMasked = false
             }
