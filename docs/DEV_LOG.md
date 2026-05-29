@@ -4277,3 +4277,14 @@ Twelfth follow-up:
 - Kept the fast warm-cache chat opening path visually quiet by delaying the `Opening latest messages` overlay until the structural mask persists long enough to matter.
 - Reset stale opening-overlay state on chat switches, so a cold-open mask and a large-batch mask cannot show as two quick spinner flashes.
 - Added guardrails around the delayed overlay and warm-cache masking rules to protect the improved chat-switch speed.
+
+## 2026-05-29 - Job Sheet Labels And Stronger Timeline Clamp
+
+- Replaced free-sizing job sheet labels with a fixed, one-line `JobFormLabel`, preventing labels like `Mode` from wrapping vertically when the segmented controls are wide.
+- Removed the Mac timeline's extra bottom padding and zeroed the underlying `NSScrollView` content/scroller insets so the chat cannot expose artificial blank space below the last message.
+- Tightened the timeline clamp to run immediately on scroll attach, bounds changes, scroll-view frame changes, and document frame changes instead of waiting for the throttled metrics report.
+
+Follow-up:
+
+- Mac chat opens now call the bottom scroll before revealing masked timeline rows, preventing a visible top-then-bottom jump during selection.
+- Removed late `0.75s` / `1.25s` SwiftUI bottom-settle passes and kept only short stabilization passes; the AppKit scroll observer remains responsible for geometry-based forced-bottom settling.

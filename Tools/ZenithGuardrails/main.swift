@@ -292,6 +292,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
     let root = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/RootView.swift"), encoding: .utf8)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
 
     try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
@@ -323,10 +324,37 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("private func forceOpenThreadToLatest"), "Mac timeline must force open/reopen positioning independent of near-bottom state")
     try assert(timeline.contains("pendingOpenBottomSessionID = sessionID\n        suppressHistoryLoading(for: 2.4)\n        disarmAutomaticOlderHistoryLoad()\n        visibleRowLimit = defaultVisibleRowLimit\n        guard canSettleOpenThreadRows else"), "Forced latest-position requests must stay pending while large timeline batches are masked")
     try assert(timeline.contains("forceBottomRevision: store.forcedScrollToBottomRevision"), "Mac timeline must pass forced open/reopen bottom requests into the NSScrollView observer")
+    guard let openSettleRange = timeline.range(of: "private func settleOpenThreadAtLatest"),
+          let forceSettleRange = timeline.range(of: "private func forceOpenThreadToLatest", range: openSettleRange.upperBound..<timeline.endIndex) else {
+        throw GuardrailFailure.failed("Mac timeline must keep explicit open/force latest settle helpers")
+    }
+    let openSettleBlock = timeline[openSettleRange.lowerBound..<forceSettleRange.lowerBound]
+    guard let openScrollRange = openSettleBlock.range(of: "scrollToBottom(proxy)"),
+          let openUnmaskRange = openSettleBlock.range(of: "isInitialTimelineMasked = false") else {
+        throw GuardrailFailure.failed("Mac open settle must scroll and clear the initial mask")
+    }
+    try assert(openScrollRange.lowerBound < openUnmaskRange.lowerBound, "Mac chat open must scroll to bottom before revealing masked timeline rows")
+    guard let initialMaskCheckRange = timeline.range(of: "private func initialTimelineMaskIsCurrent", range: forceSettleRange.upperBound..<timeline.endIndex) else {
+        throw GuardrailFailure.failed("Mac timeline must keep initialTimelineMaskIsCurrent after force settle")
+    }
+    let forceSettleBlock = timeline[forceSettleRange.lowerBound..<initialMaskCheckRange.lowerBound]
+    guard let forceScrollRange = forceSettleBlock.range(of: "scrollToBottom(proxy)"),
+          let forceUnmaskRange = forceSettleBlock.range(of: "isInitialTimelineMasked = false") else {
+        throw GuardrailFailure.failed("Mac forced settle must scroll and clear the initial mask")
+    }
+    try assert(forceScrollRange.lowerBound < forceUnmaskRange.lowerBound, "Mac forced latest settle must scroll before revealing masked timeline rows")
+    try assert(timeline.contains("for delay in [0.04, 0.14, 0.28]"), "Mac timeline bottom settling must avoid late visible scroll nudges")
+    try assert(!timeline.contains("0.75, 1.25"), "Mac timeline bottom settling must not include late visible nudge passes")
     try assert(timeline.contains("clipView.scroll(to: target)"), "Forced open/reopen bottom positioning must use the underlying NSScrollView document geometry")
     try assert(timeline.contains("scrollView.verticalScrollElasticity = .none"), "Mac timeline must disable rubber-band overscroll on the underlying NSScrollView")
+    try assert(timeline.contains("let zeroInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)"), "Mac timeline must define explicit zero AppKit insets")
+    try assert(timeline.contains("scrollView.contentInsets = zeroInsets"), "Mac timeline must not allow AppKit content insets to create bottom overscroll slack")
+    try assert(!timeline.contains(".padding(.bottom, 56)"), "Mac timeline content must not add artificial bottom scroll slack")
+    try assert(timeline.contains("clampAttachedScrollViewIfNeeded()"), "Mac timeline must clamp the underlying NSScrollView immediately on attach and bounds changes")
     try assert(timeline.contains("clampDocumentOriginIfNeeded(scrollView, documentView: documentView)"), "Mac timeline must clamp scroll origins before reporting metrics")
     try assert(timeline.contains("forceBottomUntil = Date().addingTimeInterval"), "Forced open/reopen bottom positioning must persist only during layout settling")
+    try assert(inspector.contains("private struct JobFormLabel"), "Mac job sheets must use fixed-width one-line labels")
+    try assert(inspector.contains("JobFormLabel(title: \"Mode\")"), "Mac job mode label must not wrap vertically")
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should structurally suspend cold opens when no selected-chat cache can be rendered")
     try assert(macStore.contains("@Published var isApplyingLargeTimelineBatch = false"), "Mac store must publish a large-batch timeline mask")
     try assert(macStore.contains("private let largeTimelineBatchEventThreshold = 80"), "Mac store must define a threshold for large timeline batch masking")
@@ -678,7 +706,7 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("if revealOlderRowsShowingNewPage(proxy) {\n            olderHistoryLoadArmed = false"), "Automatic older-history loading must reveal the new page instead of preserving the old top anchor")
     try assert(timeline.contains("private func suppressHistoryLoading(for interval: TimeInterval)"), "Open-to-latest must use monotonic history-load suppression instead of shortening the suppression window")
     try assert(timeline.contains("suppressHistoryLoading(for: 2.4)"), "Opening a chat must suppress top-edge history loading while bottom scrolling settles")
-    try assert(timeline.contains("for delay in [0.04, 0.16, 0.36, 0.75, 1.25]"), "Opening a chat must keep settling bottom position across SwiftUI layout passes")
+    try assert(timeline.contains("for delay in [0.04, 0.14, 0.28]"), "Opening a chat must use short bottom settle passes without late visible jumps")
     try assert(timeline.contains("metrics.isScrollable && metrics.distanceFromBottom <= 28"), "Forced bottom scrolling must not declare success while only a placeholder/non-scrollable timeline is rendered")
     try assert(!timeline.contains("disarmAutomaticOlderHistoryLoad()\n                    historyLoadSuppressedUntil = Date.distantPast"), "Opening a chat must not immediately re-enable top-edge history loading")
     try assert(!timeline.contains("Loaded window limit"), "Mac history banner must keep offering Load Older while the server has older events")

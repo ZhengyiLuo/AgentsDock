@@ -133,7 +133,6 @@ struct TimelineView: View {
                             }
                         }
                         .padding(20)
-                        .padding(.bottom, 56)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             TimelineScrollObserver(
@@ -361,12 +360,12 @@ struct TimelineView: View {
         suppressHistoryLoading(for: 2.4)
         disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
+        scrollToBottom(proxy)
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
                 isInitialTimelineMasked = false
             }
         }
-        scrollToBottom(proxy)
         settleBottomAfterLayout(proxy, sessionID: pendingSessionID)
         AppLogger.info("open latest settled session=\(pendingSessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
         return true
@@ -385,12 +384,12 @@ struct TimelineView: View {
             return
         }
         store.markSelectedSessionRead(force: true)
+        scrollToBottom(proxy)
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
                 isInitialTimelineMasked = false
             }
         }
-        scrollToBottom(proxy)
         settleBottomAfterLayout(proxy, sessionID: sessionID)
         AppLogger.info("force latest settled session=\(sessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
     }
@@ -430,7 +429,7 @@ struct TimelineView: View {
 
     private func settleBottomAfterLayout(_ proxy: ScrollViewProxy, sessionID: String?) {
         guard let sessionID else { return }
-        for delay in [0.04, 0.16, 0.36, 0.75, 1.25] {
+        for delay in [0.04, 0.14, 0.28] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 guard store.selectedSessionID == sessionID else { return }
                 withTransaction(noAnimationTransaction) {
@@ -1057,10 +1056,15 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 documentView = nextDocumentView
                 observe(nextScrollView, documentView: nextDocumentView)
             }
+            clampAttachedScrollViewIfNeeded()
             scheduleReport()
         }
 
         private func configureScrollView(_ scrollView: NSScrollView) {
+            let zeroInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+            scrollView.automaticallyAdjustsContentInsets = false
+            scrollView.contentInsets = zeroInsets
+            scrollView.scrollerInsets = zeroInsets
             scrollView.verticalScrollElasticity = .none
             scrollView.horizontalScrollElasticity = .none
         }
@@ -1074,6 +1078,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.clampAttachedScrollViewIfNeeded()
                     self?.scheduleReport()
                 }
             }
@@ -1085,6 +1090,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.clampAttachedScrollViewIfNeeded()
                     self?.scheduleReport()
                 }
             }
@@ -1097,6 +1103,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                     queue: .main
                 ) { [weak self] _ in
                     MainActor.assumeIsolated {
+                        self?.clampAttachedScrollViewIfNeeded()
                         self?.scheduleReport()
                     }
                 }
@@ -1193,6 +1200,14 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             guard metrics != lastMetrics else { return }
             lastMetrics = metrics
             deliver(metrics)
+        }
+
+        private func clampAttachedScrollViewIfNeeded() {
+            guard let scrollView,
+                  let documentView = scrollView.documentView else {
+                return
+            }
+            clampDocumentOriginIfNeeded(scrollView, documentView: documentView)
         }
 
         private func clampDocumentOriginIfNeeded(_ scrollView: NSScrollView, documentView: NSView) {

@@ -728,6 +728,19 @@ private func localJobDateString(_ date: Date) -> String {
     return formatter.string(from: date)
 }
 
+private struct JobFormLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(width: 70, alignment: .leading)
+    }
+}
+
 private struct NewJobDetailsSheet: View {
     let sessionTitle: String
     let composerPrompt: String
@@ -771,16 +784,16 @@ private struct NewJobDetailsSheet: View {
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
-                    Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Title")
                     TextField("Job title", text: $title)
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    Text("Interval").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Interval")
                     JobIntervalControl(intervalText: $intervalText)
                 }
                 GridRow {
-                    Text("Start").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Start")
                     JobStartControl(
                         option: $startOption,
                         customDate: $startDate,
@@ -790,7 +803,7 @@ private struct NewJobDetailsSheet: View {
                     )
                 }
                 GridRow {
-                    Text("Mode").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Mode")
                     HStack(spacing: 10) {
                         Picker("Mode", selection: $loop) {
                             Text("Run fixed times").tag(false)
@@ -1012,12 +1025,12 @@ private struct JobEditorSheet: View {
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
-                    Text("Title").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Title")
                     TextField("Job title", text: $title)
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    Text("Backend").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Backend")
                     Picker("Backend", selection: $backend) {
                         Text("Claude").tag("claude")
                         Text("Codex").tag("codex")
@@ -1026,11 +1039,11 @@ private struct JobEditorSheet: View {
                     .frame(width: 180)
                 }
                 GridRow {
-                    Text("Interval").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Interval")
                     JobIntervalControl(intervalText: $intervalText)
                 }
                 GridRow {
-                    Text("Next Run").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Next Run")
                     JobStartControl(
                         option: $startOption,
                         customDate: $startDate,
@@ -1040,7 +1053,7 @@ private struct JobEditorSheet: View {
                     )
                 }
                 GridRow {
-                    Text("Options").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    JobFormLabel(title: "Options")
                     HStack(spacing: 16) {
                         Picker("Mode", selection: $loop) {
                             Text("Run fixed times").tag(false)
