@@ -4260,3 +4260,8 @@ Twelfth follow-up:
 - Fixed manifest artifact events so the server includes the active `run_id` when emitting `artifact_created` and `artifact_error`.
 - Mac and iOS timeline projection now also groups older nil-run manifest artifacts into the currently active run, so videos/files render after the assistant message instead of before it.
 - The existing timeline artifact grid now receives the whole turn's artifacts together, restoring compact grid behavior for multi-video turns.
+
+## 2026-05-29 - Archived Sidebar Subtitle Cleanup
+
+- Removed the redundant `archived` subtitle suffix from chats already shown inside the Archived section on Mac and iOS.
+- Added a guardrail so archive state remains section-based instead of repeated on every row.

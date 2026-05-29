@@ -719,8 +719,6 @@ struct SessionRow: View {
         ]
         if store.activeSessionIDs.contains(session.id) {
             pieces.append("running")
-        } else if session.archived == true {
-            pieces.append("archived")
         } else if store.unreadAgentSessionIDs.contains(session.id) {
             pieces.append("new agent message")
         } else if let effort = session.effort, !effort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

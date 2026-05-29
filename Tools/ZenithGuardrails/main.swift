@@ -219,6 +219,8 @@ func checkArchiveSessionBehavior() throws {
 
     try assert(macStore.contains("sessions.filter { $0.archived != true }"), "Mac active session lists must filter archived chats")
     try assert(mobileStore.contains("sessions.filter { $0.archived != true }"), "iOS active session lists must filter archived chats")
+    try assert(!macSidebar.contains("pieces.append(\"archived\")"), "Mac sidebar archived rows must not repeat archived in every subtitle")
+    try assert(!mobileSidebar.contains("pieces.append(\"archived\")"), "iOS sidebar archived rows must not repeat archived in every subtitle")
     try assert(macStore.contains("orderedSessions("), "Mac session rows must use stable explicit ordering")
     try assert(mobileStore.contains("orderedSessions("), "iOS session rows must use stable explicit ordering")
     try assert(macStore.contains("func reorderSession("), "Mac app must expose manual session reorder")
