@@ -4301,3 +4301,7 @@ Third follow-up:
 
 - Timeline artifact cards now split previewable media from regular files. Images and videos keep preview tiles; plain files render as compact rows with a small icon, metadata, open action, and drag-out support.
 - Replaced the Mac job sheet's grid-based form rows with fixed-label `JobFormRow` rows so labels like `Mode` and `Options` cannot squeeze vertically beside segmented controls.
+
+## 2026-05-29 - Quiet Warm-Cache Chat Refreshes
+
+- Warm cached Mac chat opens now preserve the visible timeline during background latest-tail and stream backfill refreshes. Cold opens can still use the large-batch positioning mask, but a chat that already has renderable cached rows should not switch from visible content back into an opening spinner.

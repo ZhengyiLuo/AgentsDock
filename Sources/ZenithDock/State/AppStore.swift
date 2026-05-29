@@ -339,6 +339,10 @@ final class AppStore: ObservableObject {
             abs(newCount - oldCount) >= largeTimelineBatchEventThreshold
     }
 
+    private var shouldPreserveRenderableTimelineDuringBackgroundRefresh: Bool {
+        isRefreshingCachedDelta && hasRenderableSelectedTimeline
+    }
+
     private func beginLargeTimelineBatchMask() {
         timelineBatchRevealTask?.cancel()
         timelineBatchRevealTask = nil
@@ -1989,7 +1993,8 @@ final class AppStore: ObservableObject {
         let buffered = pendingStreamEvents.sorted { $0.seq < $1.seq }
         pendingStreamEvents.removeAll()
         pendingStreamSessionID = nil
-        if buffered.count >= streamBackfillMaskThreshold {
+        if buffered.count >= streamBackfillMaskThreshold,
+           !shouldPreserveRenderableTimelineDuringBackgroundRefresh {
             beginLargeTimelineBatchMask()
         }
         applyStreamEvents(buffered)
@@ -2221,7 +2226,7 @@ final class AppStore: ObservableObject {
         let projectedCount = preservedEvents.isEmpty
             ? snapshotEvents.count
             : Set((preservedEvents + snapshotEvents).map(\.id)).count
-        let shouldMaskLargeBatch = shouldMaskTimelineBatch(
+        let shouldMaskLargeBatch = !shouldPreserveRenderableTimelineDuringBackgroundRefresh && shouldMaskTimelineBatch(
             oldCount: oldCount,
             newCount: projectedCount,
             incomingCount: newSnapshotEventCount

@@ -367,6 +367,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("beginLargeTimelineBatchMask()"), "Mac store must mask large session snapshots and stream bursts before applying them")
     try assert(macStore.contains("if !hasRenderableSelectedTimeline {\n            status = \"Opening latest messages\""), "Mac cached-chat tail refreshes must not show the opening spinner when a renderable timeline is already visible")
     try assert(macStore.contains("scheduleLargeTimelineBatchReveal()"), "Mac store must reveal large timeline batches after layout settles")
+    try assert(macStore.contains("private var shouldPreserveRenderableTimelineDuringBackgroundRefresh"), "Mac cached-chat refreshes must explicitly preserve an already-rendered timeline")
+    try assert(macStore.contains("!shouldPreserveRenderableTimelineDuringBackgroundRefresh && shouldMaskTimelineBatch"), "Mac cached-chat tail refreshes must not start a large-batch spinner over visible cached rows")
     try assert(timeline.contains("let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch && !(store.isRefreshingCachedDelta && hasWarmSelectedTimeline)"), "Mac timeline must keep warm cached rows visible while the latest tail refreshes")
     try assert(timeline.contains("let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch"), "Mac timeline must structurally suspend cold rows for large sync batches")
     try assert(timeline.contains("let shouldMaskTimeline = timelineRowsStructurallySuspended"), "Mac cached refresh state must not mask an already-rendered timeline")
