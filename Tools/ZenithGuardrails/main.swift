@@ -324,6 +324,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("pendingOpenBottomSessionID = sessionID\n        suppressHistoryLoading(for: 2.4)\n        disarmAutomaticOlderHistoryLoad()\n        visibleRowLimit = defaultVisibleRowLimit\n        guard canSettleOpenThreadRows else"), "Forced latest-position requests must stay pending while large timeline batches are masked")
     try assert(timeline.contains("forceBottomRevision: store.forcedScrollToBottomRevision"), "Mac timeline must pass forced open/reopen bottom requests into the NSScrollView observer")
     try assert(timeline.contains("clipView.scroll(to: target)"), "Forced open/reopen bottom positioning must use the underlying NSScrollView document geometry")
+    try assert(timeline.contains("scrollView.verticalScrollElasticity = .none"), "Mac timeline must disable rubber-band overscroll on the underlying NSScrollView")
+    try assert(timeline.contains("clampDocumentOriginIfNeeded(scrollView, documentView: documentView)"), "Mac timeline must clamp scroll origins before reporting metrics")
     try assert(timeline.contains("forceBottomUntil = Date().addingTimeInterval"), "Forced open/reopen bottom positioning must persist only during layout settling")
     try assert(timeline.contains("let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline"), "Mac timeline should structurally suspend cold opens when no selected-chat cache can be rendered")
     try assert(macStore.contains("@Published var isApplyingLargeTimelineBatch = false"), "Mac store must publish a large-batch timeline mask")

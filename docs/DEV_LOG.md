@@ -4265,3 +4265,9 @@ Twelfth follow-up:
 
 - Removed the redundant `archived` subtitle suffix from chats already shown inside the Archived section on Mac and iOS.
 - Added a guardrail so archive state remains section-based instead of repeated on every row.
+
+## 2026-05-29 - Mac Timeline Overscroll Clamp
+
+- Disabled rubber-band elasticity on the Mac timeline's underlying `NSScrollView` so the chat cannot drift into a large blank area below the last message.
+- Added a defensive scroll-origin clamp before timeline scroll metrics are reported, covering any AppKit/SwiftUI pass that still produces an out-of-range document origin.
+- Added guardrails for both the disabled elasticity and the clamp path.

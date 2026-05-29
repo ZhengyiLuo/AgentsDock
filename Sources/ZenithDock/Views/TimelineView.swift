@@ -1003,6 +1003,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 
         private func attach(from view: NSView) {
             guard let nextScrollView = view.enclosingScrollView else { return }
+            configureScrollView(nextScrollView)
             let nextDocumentView = nextScrollView.documentView
             if scrollView !== nextScrollView || documentView !== nextDocumentView {
                 detach()
@@ -1011,6 +1012,11 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 observe(nextScrollView, documentView: nextDocumentView)
             }
             scheduleReport()
+        }
+
+        private func configureScrollView(_ scrollView: NSScrollView) {
+            scrollView.verticalScrollElasticity = .none
+            scrollView.horizontalScrollElasticity = .none
         }
 
         private func observe(_ scrollView: NSScrollView, documentView: NSView?) {
@@ -1113,6 +1119,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 
         private func report() {
             guard let scrollView, let documentView = scrollView.documentView else { return }
+            clampDocumentOriginIfNeeded(scrollView, documentView: documentView)
             let visibleRect = scrollView.documentVisibleRect
             let documentBounds = documentView.bounds
             let viewportHeight = max(scrollView.contentView.bounds.height, 0)
@@ -1140,6 +1147,24 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             guard metrics != lastMetrics else { return }
             lastMetrics = metrics
             deliver(metrics)
+        }
+
+        private func clampDocumentOriginIfNeeded(_ scrollView: NSScrollView, documentView: NSView) {
+            let clipView = scrollView.contentView
+            let documentBounds = documentView.bounds
+            let viewportSize = clipView.bounds.size
+            let minX = documentBounds.minX
+            let minY = documentBounds.minY
+            let maxX = max(minX, documentBounds.maxX - viewportSize.width)
+            let maxY = max(minY, documentBounds.maxY - viewportSize.height)
+            let origin = clipView.bounds.origin
+            let clamped = NSPoint(
+                x: min(max(origin.x, minX), maxX),
+                y: min(max(origin.y, minY), maxY)
+            )
+            guard abs(clamped.x - origin.x) > 0.5 || abs(clamped.y - origin.y) > 0.5 else { return }
+            clipView.scroll(to: clamped)
+            scrollView.reflectScrolledClipView(clipView)
         }
 
         private var shouldForceBottom: Bool {
