@@ -41,15 +41,10 @@ struct TimelineView: View {
         let timelineRowsStructurallySuspended = timelineRowsSuspended || store.isApplyingLargeTimelineBatch
         let shouldMaskTimeline = timelineRowsStructurallySuspended || store.isRefreshingCachedDelta
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
-        let projectionEventLimit = max(defaultVisibleRowLimit * 8, visibleRowLimit * 8)
-        let projectedEvents = displayEvents.count > projectionEventLimit
-            ? Array(displayEvents.suffix(projectionEventLimit))
-            : displayEvents
-        let projection = TimelineRows.project(from: projectedEvents)
+        let projection = TimelineRows.project(from: displayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
-        let hiddenProjectedEventCount = max(0, displayEvents.count - projectedEvents.count)
-        let hiddenRenderedRowCount = hiddenProjectedEventCount + max(0, allRows.count - visibleRowLimit)
+        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
@@ -673,12 +668,7 @@ struct TimelineView: View {
     }
 
     private func renderedRows(visibleLimit: Int? = nil) -> [TimelineRow] {
-        let limit = visibleLimit ?? visibleRowLimit
-        let projectionEventLimit = max(defaultVisibleRowLimit * 8, limit * 8)
-        let projectedEvents = store.displayEvents.count > projectionEventLimit
-            ? Array(store.displayEvents.suffix(projectionEventLimit))
-            : store.displayEvents
-        return TimelineRows.build(from: projectedEvents)
+        TimelineRows.build(from: store.displayEvents)
     }
 
     private func setVisibleRowLimit(_ nextLimit: Int) {

@@ -4148,3 +4148,14 @@ Follow-up:
 - Added an `auto older loaded` log line with row limits, rendered row count, and
   the preserved anchor so the automatic infinite-scroll branch is visible in
   logs too.
+
+Second follow-up:
+
+- Fresh Air logs showed `auto older loaded` firing, but `rendered_rows` stayed
+  tiny (`19`, `31`, `38`) even after hundreds of events were loaded.
+- Root cause: the Mac timeline still projected only a latest-event suffix before
+  building rows. Newly fetched older events were outside that suffix, so the
+  app could fetch and cache older history without making it renderable.
+- The Mac timeline now projects the full bounded local event window. The store
+  already caps loaded timeline events, so older history remains bounded while
+  actually being visible.
