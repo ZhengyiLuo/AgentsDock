@@ -207,8 +207,7 @@ struct TimelineView: View {
                     isNearBottom = true
                     store.setSelectedTimelineAtBottom(true)
                     isTimelineScrollable = false
-                    olderHistoryLoadArmed = true
-                    suppressScrollHistoryLoadUntilTopLeaves = false
+                    disarmAutomaticOlderHistoryLoad()
                     historyLoadSuppressedUntil = Date.distantPast
                     visibleRowLimit = defaultVisibleRowLimit
                     lastObservedEventSeq = maxEventSeq(displayEvents)
@@ -344,6 +343,7 @@ struct TimelineView: View {
         }
         pendingOpenBottomSessionID = nil
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.8)
+        disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
@@ -361,6 +361,7 @@ struct TimelineView: View {
         }
         pendingOpenBottomSessionID = sessionID
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.8)
+        disarmAutomaticOlderHistoryLoad()
         visibleRowLimit = defaultVisibleRowLimit
         store.markSelectedSessionRead(force: true)
         if isInitialTimelineMasked {
@@ -381,6 +382,7 @@ struct TimelineView: View {
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         guard !store.displayEvents.isEmpty else { return }
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)
+        disarmAutomaticOlderHistoryLoad()
         let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
@@ -527,6 +529,11 @@ struct TimelineView: View {
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
         loadOlderHistoryPreservingPosition(proxy)
+    }
+
+    private func disarmAutomaticOlderHistoryLoad() {
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
     }
 
     private func loadOlderHistoryFromIntent(_ proxy: ScrollViewProxy) {
