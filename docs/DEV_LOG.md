@@ -4066,3 +4066,27 @@ Changes:
   the folded trace.
 - Added guardrails so future trace grouping work does not regress artifact
   ordering.
+
+### Rendered Older-Page Navigation
+
+User issue:
+
+- The previous explicit older-page fix still looked broken when older rows were
+  already in the local render window. Pressing `Show Older` expanded the window
+  above the viewport but preserved the same visible card, so the click looked
+  like a no-op.
+
+Root cause:
+
+- Only the server-backed `Load Older` path scrolled to the newly revealed page.
+  The in-memory `Show Older` path reused the automatic top-edge behavior, which
+  intentionally preserves position.
+
+Changes:
+
+- Added a separate `revealOlderRowsShowingNewPage` path for explicit user
+  clicks.
+- Automatic scroll-to-top paging still preserves position.
+- Explicit `Show Older` and `Load Older` now both use delayed no-animation
+  settling through `scrollToOlderPageTarget`, so the user lands on the newly
+  revealed older page instead of watching nothing happen.

@@ -618,6 +618,8 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("row(containingEventID: eventID, in: rows)"), "History paging must restore through the event-id fallback when row IDs change")
     try assert(timeline.contains("for delay in [0.0, 0.06, 0.18]"), "History paging must restore the scroll anchor across multiple layout passes")
     try assert(timeline.contains("loadOlderHistoryShowingNewPage"), "Explicit Load Older button must visibly move to the newly revealed older page")
+    try assert(timeline.contains("revealOlderRowsShowingNewPage"), "Explicit Show Older button must visibly move to the newly revealed rendered page")
+    try assert(timeline.contains("scrollToOlderPageTarget"), "Explicit older-page navigation must share delayed scroll settling")
     try assert(timeline.contains("private func disarmAutomaticOlderHistoryLoad()"), "Timeline must centralize the guard that prevents open-bottom from accidentally auto-loading older history")
     try assert(timeline.contains("disarmAutomaticOlderHistoryLoad()\n                    historyLoadSuppressedUntil = Date.distantPast"), "Opening a chat must disarm auto older-history loading until the user scrolls away from the top")
     try assert(timeline.contains("disarmAutomaticOlderHistoryLoad()\n        let action = {"), "Programmatic bottom scrolls must disarm older-history autoload before layout metrics arrive")
