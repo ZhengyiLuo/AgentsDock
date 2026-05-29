@@ -704,6 +704,7 @@ private enum MobileTimelineRows {
         var activeRunID: String?
         var activeAssistantEvents: [ZEvent] = []
         var activeFinishedEvent: ZEvent?
+        var activeArtifactEvents: [ZEvent] = []
         var activeTrace: [ZEvent] = []
         var pendingJobRuns: [MobileJobRunRow] = []
 
@@ -731,10 +732,14 @@ private enum MobileTimelineRows {
             if let assistant = mergedAssistantEvent() {
                 rows.append(.event(assistant))
             }
+            for artifact in activeArtifactEvents {
+                rows.append(.event(artifact))
+            }
             appendTrace(activeTrace, prefix: "trace-run-\(activeRunID ?? "unknown")")
             activeRunID = nil
             activeAssistantEvents.removeAll(keepingCapacity: true)
             activeFinishedEvent = nil
+            activeArtifactEvents.removeAll(keepingCapacity: true)
             activeTrace.removeAll(keepingCapacity: true)
         }
 
@@ -798,6 +803,12 @@ private enum MobileTimelineRows {
             if traceTypes.contains(event.type), event.run_id != nil {
                 beginAgentRunIfNeeded(for: event)
                 activeTrace.append(event)
+                continue
+            }
+
+            if event.type == "artifact_created", event.run_id != nil {
+                beginAgentRunIfNeeded(for: event)
+                activeArtifactEvents.append(event)
                 continue
             }
 

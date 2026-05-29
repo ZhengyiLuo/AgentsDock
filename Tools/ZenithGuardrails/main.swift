@@ -490,11 +490,15 @@ func checkTimelineCombinesRunTraces() throws {
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
 
     try assert(macTimeline.contains("activeAssistantEvents: [ZEvent]"), "Mac timeline must collect assistant chunks per run")
+    try assert(macTimeline.contains("activeArtifactEvents: [ZEvent]"), "Mac timeline must collect run artifacts so videos render after assistant text")
     try assert(macTimeline.contains("activeTrace: [ZEvent]"), "Mac timeline must collect trace events per run")
+    try assert(macTimeline.contains("event.type == \"artifact_created\", event.run_id != nil"), "Mac timeline must not flush an agent run before same-run artifacts")
     try assert(macTimeline.contains("trace-run-\\(activeRunID"), "Mac timeline trace rows must be run-scoped")
     try assert(macTimeline.contains("joined(separator: \"\\n\\n\")"), "Mac timeline must merge assistant chunks into one message")
     try assert(mobileTimeline.contains("activeAssistantEvents: [ZEvent]"), "iOS timeline must collect assistant chunks per run")
+    try assert(mobileTimeline.contains("activeArtifactEvents: [ZEvent]"), "iOS timeline must collect run artifacts so videos render after assistant text")
     try assert(mobileTimeline.contains("activeTrace: [ZEvent]"), "iOS timeline must collect trace events per run")
+    try assert(mobileTimeline.contains("event.type == \"artifact_created\", event.run_id != nil"), "iOS timeline must not flush an agent run before same-run artifacts")
     try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
 }
 

@@ -1059,6 +1059,7 @@ private enum TimelineRows {
         var activeRunID: String?
         var activeAssistantEvents: [ZEvent] = []
         var activeFinishedEvent: ZEvent?
+        var activeArtifactEvents: [ZEvent] = []
         var activeTrace: [ZEvent] = []
         var pendingJobRuns: [JobRunRow] = []
 
@@ -1085,10 +1086,14 @@ private enum TimelineRows {
             if let assistant = mergedAssistantEvent() {
                 rows.append(TimelineRow(id: "assistant-run-\(activeRunID ?? assistant.id)-\(assistant.seq)", kind: .event(assistant)))
             }
+            for artifact in activeArtifactEvents {
+                rows.append(TimelineRow(id: artifact.id, kind: .event(artifact)))
+            }
             appendTrace(activeTrace, prefix: "trace-run-\(activeRunID ?? "unknown")")
             activeRunID = nil
             activeAssistantEvents.removeAll(keepingCapacity: true)
             activeFinishedEvent = nil
+            activeArtifactEvents.removeAll(keepingCapacity: true)
             activeTrace.removeAll(keepingCapacity: true)
         }
 
@@ -1153,6 +1158,12 @@ private enum TimelineRows {
             if traceTypes.contains(event.type), event.run_id != nil {
                 beginAgentRunIfNeeded(for: event)
                 activeTrace.append(event)
+                continue
+            }
+
+            if event.type == "artifact_created", event.run_id != nil {
+                beginAgentRunIfNeeded(for: event)
+                activeArtifactEvents.append(event)
                 continue
             }
 

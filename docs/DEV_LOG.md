@@ -3940,3 +3940,26 @@ Changes:
   less brittle when SwiftUI regroups trace/job rows after prepending history.
 - Added guardrails so future changes do not reintroduce a local-cap gate on
   older-history paging.
+
+### Run Artifact Ordering
+
+User issue:
+
+- Videos/artifacts from an agent turn could render before the assistant text,
+  even though they are easier to understand after the message.
+
+Root cause:
+
+- The timeline projection grouped assistant text and trace events by `run_id`,
+  but treated same-run `artifact_created` events as generic run events. That
+  flushed the active assistant run early and placed the artifact row before the
+  final text.
+
+Changes:
+
+- Mac and iOS timeline projections now collect same-run `artifact_created`
+  events in `activeArtifactEvents`.
+- When a run flushes, the row order is assistant text, artifacts/videos, then
+  the folded trace.
+- Added guardrails so future trace grouping work does not regress artifact
+  ordering.
