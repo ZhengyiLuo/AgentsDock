@@ -551,7 +551,7 @@ struct TimelineView: View {
     @discardableResult
     private func revealOlderRows(preservingPositionWith proxy: ScrollViewProxy) -> Bool {
         let anchor = firstRenderedAnchor()
-        let rowCount = TimelineRows.build(from: store.displayEvents).count
+        let rowCount = renderedRows(visibleLimit: visibleRowLimit + rowPageSize).count
         guard visibleRowLimit < rowCount else { return false }
         setVisibleRowLimit(min(rowCount, visibleRowLimit + rowPageSize))
         restoreScrollPosition(to: anchor, proxy: proxy)
@@ -560,11 +560,13 @@ struct TimelineView: View {
 
     @discardableResult
     private func revealOlderRowsShowingNewPage(_ proxy: ScrollViewProxy) -> Bool {
-        let rows = TimelineRows.build(from: store.displayEvents)
+        let oldLimit = visibleRowLimit
+        let rows = renderedRows(visibleLimit: visibleRowLimit + rowPageSize)
         guard visibleRowLimit < rows.count else { return false }
         let nextLimit = min(rows.count, visibleRowLimit + rowPageSize)
         let target = Array(rows.suffix(nextLimit)).first
         setVisibleRowLimit(nextLimit)
+        AppLogger.info("show older rows old_limit=\(oldLimit) new_limit=\(nextLimit) rendered_rows=\(rows.count) target=\(target?.id ?? "-") hidden_before=\(store.hiddenDisplayEventCount)")
         scrollToOlderPageTarget(target?.id, proxy: proxy)
         return true
     }
@@ -590,39 +592,44 @@ struct TimelineView: View {
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
         let anchor = firstRenderedAnchor()
-        let beforeRowCount = TimelineRows.build(from: store.displayEvents).count
+        let oldLimit = visibleRowLimit
+        let beforeRowCount = renderedRows().count
         Task {
             let addedEvents = await store.loadOlderHistory()
             if addedEvents > 0 {
-                let afterRowCount = TimelineRows.build(from: store.displayEvents).count
-                let addedRows = max(0, afterRowCount - beforeRowCount)
-                if addedRows > 0 {
-                    setVisibleRowLimit(min(afterRowCount, visibleRowLimit + min(rowPageSize, addedRows)))
+                let afterRowCount = renderedRows(visibleLimit: visibleRowLimit + rowPageSize).count
+                let nextLimit = min(afterRowCount, max(visibleRowLimit, oldLimit) + rowPageSize)
+                if nextLimit > visibleRowLimit {
+                    setVisibleRowLimit(nextLimit)
                 }
+                AppLogger.info("auto older loaded added_events=\(addedEvents) old_limit=\(oldLimit) new_limit=\(nextLimit) old_rows=\(beforeRowCount) rendered_rows=\(afterRowCount) anchor=\(anchor?.rowID ?? "-") hidden_before=\(store.hiddenDisplayEventCount)")
             }
             restoreScrollPosition(to: anchor, proxy: proxy)
         }
     }
 
     private func loadOlderHistoryShowingNewPage(_ proxy: ScrollViewProxy) {
-        let beforeRowCount = TimelineRows.build(from: store.displayEvents).count
+        let beforeRowCount = renderedRows().count
         Task {
             let addedEvents = await store.loadOlderHistory()
-            let afterRows = TimelineRows.build(from: store.displayEvents)
-            guard !afterRows.isEmpty else { return }
+            let afterRowsBeforeLimit = renderedRows(visibleLimit: visibleRowLimit + rowPageSize)
+            var nextLimit = visibleRowLimit
+            let addedRows = max(0, afterRowsBeforeLimit.count - beforeRowCount)
+            guard !afterRowsBeforeLimit.isEmpty else { return }
             if addedEvents > 0 {
-                let addedRows = max(0, afterRows.count - beforeRowCount)
                 let revealCount = max(rowPageSize, addedRows)
-                setVisibleRowLimit(min(afterRows.count, visibleRowLimit + revealCount))
+                nextLimit = min(afterRowsBeforeLimit.count, visibleRowLimit + revealCount)
+                setVisibleRowLimit(nextLimit)
             }
-            let rows = TimelineRows.build(from: store.displayEvents)
-            guard let target = Array(rows.suffix(visibleRowLimit)).first else { return }
+            let rows = renderedRows(visibleLimit: nextLimit)
+            guard let target = Array(rows.suffix(nextLimit)).first else { return }
+            AppLogger.info("load older intent added_events=\(addedEvents) added_rows=\(addedRows) old_rows=\(beforeRowCount) rendered_rows=\(rows.count) next_limit=\(nextLimit) target=\(target.id)")
             scrollToOlderPageTarget(target.id, proxy: proxy)
         }
     }
 
     private func firstRenderedAnchor() -> TimelineScrollAnchor? {
-        let rows = TimelineRows.build(from: store.displayEvents)
+        let rows = renderedRows()
         guard let row = Array(rows.suffix(visibleRowLimit)).first else { return nil }
         return TimelineScrollAnchor(rowID: row.id, eventID: row.anchorEventID)
     }
@@ -654,7 +661,7 @@ struct TimelineView: View {
     }
 
     private func restoredRowID(for anchor: TimelineScrollAnchor) -> String {
-        let rows = TimelineRows.build(from: store.displayEvents)
+        let rows = renderedRows()
         if rows.contains(where: { $0.id == anchor.rowID }) {
             return anchor.rowID
         }
@@ -663,6 +670,15 @@ struct TimelineView: View {
             return row.id
         }
         return anchor.rowID
+    }
+
+    private func renderedRows(visibleLimit: Int? = nil) -> [TimelineRow] {
+        let limit = visibleLimit ?? visibleRowLimit
+        let projectionEventLimit = max(defaultVisibleRowLimit * 8, limit * 8)
+        let projectedEvents = store.displayEvents.count > projectionEventLimit
+            ? Array(store.displayEvents.suffix(projectionEventLimit))
+            : store.displayEvents
+        return TimelineRows.build(from: projectedEvents)
     }
 
     private func setVisibleRowLimit(_ nextLimit: Int) {

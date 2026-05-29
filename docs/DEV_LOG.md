@@ -4112,3 +4112,39 @@ Changes:
 - The merge path still updates the latest tail and omitted count, but no longer
   throws away older pages already loaded into the local cache.
 - Updated guardrails to protect this exact regression.
+
+### Older-Page Render Target Diagnostics
+
+User issue:
+
+- The Air logs showed no `loaded older` entry after the failing test, which
+  means the click path often stayed in the local `Show Older` branch instead of
+  reaching the server-backed `Load Older` branch.
+
+Root cause:
+
+- Timeline helper methods computed rows from the full loaded event list, while
+  the body renders a projected suffix window. In long chats, a manual older-page
+  target could be calculated from rows that were not actually present in the
+  current `ScrollView`, making the scroll look broken.
+
+Changes:
+
+- Added `renderedRows(visibleLimit:)`, matching the same projected event window
+  used by the visible timeline.
+- `Show Older`, `Load Older`, anchor capture, and anchor restore now target
+  projected rows that SwiftUI actually renders.
+- Added explicit `show older rows` and `load older intent` log lines with row
+  limits and target row IDs so future paging failures are diagnosable from the
+  app log.
+
+Follow-up:
+
+- Air logs showed the failing path was the automatic top-edge loader: it fetched
+  older events from the server, but did not emit explicit button logs.
+- The automatic loader now always expands the visible row window by one page
+  when server events are added, instead of depending on a row-count delta that
+  can be hidden by grouping/projection.
+- Added an `auto older loaded` log line with row limits, rendered row count, and
+  the preserved anchor so the automatic infinite-scroll branch is visible in
+  logs too.
