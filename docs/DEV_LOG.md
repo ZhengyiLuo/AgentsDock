@@ -4213,3 +4213,12 @@ Eighth follow-up:
   row window and then restore the exact old top row, which looked like a no-op.
 - The automatic path now uses the same "show newly revealed page" helper as the
   explicit Load Older action.
+
+Ninth follow-up:
+
+- Air logs showed opening a chat could immediately trigger `auto older loaded`
+  before the bottom scroll finished settling.
+- Root cause: the open-selection handler reset history-load suppression to the
+  past, and `scrollToBottom()` could shorten a longer suppression window.
+- History-load suppression is now monotonic and opening a chat suppresses
+  top-edge autoload long enough for the repeated bottom-scroll settling passes.

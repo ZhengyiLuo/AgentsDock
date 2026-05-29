@@ -203,7 +203,7 @@ struct TimelineView: View {
                     store.setSelectedTimelineAtBottom(true)
                     isTimelineScrollable = false
                     disarmAutomaticOlderHistoryLoad()
-                    historyLoadSuppressedUntil = Date.distantPast
+                    suppressHistoryLoading(for: 1.4)
                     visibleRowLimit = defaultVisibleRowLimit
                     lastObservedEventSeq = maxEventSeq(displayEvents)
                     store.markSelectedSessionRead()
@@ -337,7 +337,7 @@ struct TimelineView: View {
             return false
         }
         pendingOpenBottomSessionID = nil
-        historyLoadSuppressedUntil = Date().addingTimeInterval(0.8)
+        suppressHistoryLoading(for: 1.4)
         disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
         if isInitialTimelineMasked {
@@ -355,7 +355,7 @@ struct TimelineView: View {
             return
         }
         pendingOpenBottomSessionID = sessionID
-        historyLoadSuppressedUntil = Date().addingTimeInterval(0.8)
+        suppressHistoryLoading(for: 1.4)
         disarmAutomaticOlderHistoryLoad()
         visibleRowLimit = defaultVisibleRowLimit
         store.markSelectedSessionRead(force: true)
@@ -376,7 +376,7 @@ struct TimelineView: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         guard !store.displayEvents.isEmpty else { return }
-        historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)
+        suppressHistoryLoading(for: 0.45)
         disarmAutomaticOlderHistoryLoad()
         let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
@@ -390,6 +390,13 @@ struct TimelineView: View {
             }
         } else {
             action()
+        }
+    }
+
+    private func suppressHistoryLoading(for interval: TimeInterval) {
+        let until = Date().addingTimeInterval(interval)
+        if until > historyLoadSuppressedUntil {
+            historyLoadSuppressedUntil = until
         }
     }
 
