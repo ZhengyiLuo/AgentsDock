@@ -3996,6 +3996,30 @@ Changes:
 - Added guardrails for typed pasteboard image data so this does not regress
   back to only one clipboard representation.
 
+Follow-up:
+
+- Image-only clipboards can leave the standard Paste action disabled before
+  `paste(_:)` is ever called. The composer now validates Paste as available
+  when the pasteboard contains files or image data and catches `Command-V`
+  directly as a fallback.
+- Added paste diagnostics to the app log so clipboard representation mismatches
+  are visible without guessing.
+
+### Explicit Load Older Navigation
+
+User issue:
+
+- Clicking `Load Older` could look like a no-op because the app loaded rows
+  above the viewport and then preserved the same visible card.
+
+Changes:
+
+- Automatic top-edge history paging still preserves position.
+- The explicit `Load Older` button now reveals the newly loaded older page and
+  scrolls to it, so the click has visible feedback.
+- Older-history logs now include the server `before` cursor, received event
+  count, added event count, loaded window size, and remaining omitted count.
+
 ### Run Artifact Ordering
 
 User issue:

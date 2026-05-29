@@ -591,6 +591,7 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("anchorEventID"), "History paging must keep an event-id fallback for regrouped rows")
     try assert(timeline.contains("row(containingEventID: eventID, in: rows)"), "History paging must restore through the event-id fallback when row IDs change")
     try assert(timeline.contains("for delay in [0.0, 0.06, 0.18]"), "History paging must restore the scroll anchor across multiple layout passes")
+    try assert(timeline.contains("loadOlderHistoryShowingNewPage"), "Explicit Load Older button must visibly move to the newly revealed older page")
     try assert(!timeline.contains("Loaded window limit"), "Mac history banner must keep offering Load Older while the server has older events")
 }
 
@@ -657,6 +658,8 @@ func checkPromptImageAttachments() throws {
     try assert(mobileEvents.contains("MobileMessageAttachmentStrip"), "iOS user bubbles must render prompt attachments")
     try assert(mobileEvents.contains("attachment.file.content_type?.hasPrefix(\"image/\") == true"), "iOS prompt attachments must render image thumbnails")
     try assert(composer.contains("override func paste"), "Mac composer must intercept pasteboard images")
+    try assert(composer.contains("override func validateUserInterfaceItem"), "Mac composer must keep Paste enabled for image-only clipboards")
+    try assert(composer.contains("override func performKeyEquivalent"), "Mac composer must catch Command-V for image-only clipboards")
     try assert(composer.contains("NSImage(pasteboard: pasteboard)"), "Mac composer must read raw image data from the pasteboard")
     try assert(composer.contains("UTType(type.rawValue)"), "Mac composer must accept typed image pasteboard data, not only NSImage pasteboard decoding")
     try assert(composer.contains("utType.conforms(to: .image)"), "Mac composer must detect PNG/JPEG/TIFF/HEIC-style clipboard images")

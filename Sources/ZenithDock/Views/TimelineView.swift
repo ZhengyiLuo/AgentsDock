@@ -488,7 +488,7 @@ struct TimelineView: View {
         guard store.canLoadOlderHistory else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
-        loadOlderHistoryPreservingPosition(proxy)
+        loadOlderHistoryShowingNewPage(proxy)
     }
 
     @discardableResult
@@ -514,6 +514,33 @@ struct TimelineView: View {
                 }
             }
             restoreScrollPosition(to: anchor, proxy: proxy)
+        }
+    }
+
+    private func loadOlderHistoryShowingNewPage(_ proxy: ScrollViewProxy) {
+        let beforeRowCount = TimelineRows.build(from: store.displayEvents).count
+        Task {
+            let addedEvents = await store.loadOlderHistory()
+            let afterRows = TimelineRows.build(from: store.displayEvents)
+            guard !afterRows.isEmpty else { return }
+            if addedEvents > 0 {
+                let addedRows = max(0, afterRows.count - beforeRowCount)
+                let revealCount = addedRows > 0 ? min(rowPageSize, addedRows) : rowPageSize
+                setVisibleRowLimit(min(afterRows.count, visibleRowLimit + revealCount))
+            }
+            let rows = TimelineRows.build(from: store.displayEvents)
+            guard let target = Array(rows.suffix(visibleRowLimit)).first else { return }
+            historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
+            withTransaction(noAnimationTransaction) {
+                proxy.scrollTo(target.id, anchor: .top)
+                isAtBottom = false
+                isNearBottom = false
+                store.setSelectedTimelineAtBottom(false)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                olderHistoryLoadArmed = true
+                suppressScrollHistoryLoadUntilTopLeaves = false
+            }
         }
     }
 

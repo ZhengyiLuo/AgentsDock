@@ -689,16 +689,61 @@ struct PromptTextView: NSViewRepresentable {
         }
 
         override func paste(_ sender: Any?) {
-            let pasteboard = NSPasteboard.general
-            if let urls = Self.fileURLs(from: pasteboard), !urls.isEmpty {
-                onDropFiles?(urls)
-                return
-            }
-            if let imageURL = Self.writeImageFromPasteboard(pasteboard) {
-                onDropFiles?([imageURL])
+            if handleAttachmentPaste(from: NSPasteboard.general) {
                 return
             }
             super.paste(sender)
+        }
+
+        override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+            if item.action == #selector(paste(_:)),
+               Self.hasAttachmentPaste(in: NSPasteboard.general) {
+                return true
+            }
+            return super.validateUserInterfaceItem(item)
+        }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if flags == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "v",
+               handleAttachmentPaste(from: NSPasteboard.general) {
+                return true
+            }
+            return super.performKeyEquivalent(with: event)
+        }
+
+        private func handleAttachmentPaste(from pasteboard: NSPasteboard) -> Bool {
+            AppLogger.info("composer paste types=\((pasteboard.types ?? []).map(\.rawValue).joined(separator: ",")) items=\(pasteboard.pasteboardItems?.count ?? 0)")
+            if let urls = Self.fileURLs(from: pasteboard), !urls.isEmpty {
+                onDropFiles?(urls)
+                return true
+            }
+            if let imageURL = Self.writeImageFromPasteboard(pasteboard) {
+                AppLogger.info("composer pasted image url=\(imageURL.path)")
+                onDropFiles?([imageURL])
+                return true
+            }
+            AppLogger.info("composer paste had no attachment payload")
+            return false
+        }
+
+        private static func hasAttachmentPaste(in pasteboard: NSPasteboard) -> Bool {
+            if fileURLs(from: pasteboard)?.isEmpty == false {
+                return true
+            }
+            if !(imagePasteboardTypes(in: pasteboard).isEmpty) {
+                return true
+            }
+            return (pasteboard.pasteboardItems ?? []).contains { !imagePasteboardTypes(in: $0).isEmpty }
+        }
+
+        override func pasteAsPlainText(_ sender: Any?) {
+            let pasteboard = NSPasteboard.general
+            if handleAttachmentPaste(from: pasteboard) {
+                return
+            }
+            super.pasteAsPlainText(sender)
         }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

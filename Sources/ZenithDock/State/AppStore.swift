@@ -1066,7 +1066,7 @@ final class AppStore: ObservableObject {
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("loaded older session=\(sid) added=\(older.count) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(res.events.count) added=\(older.count) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             return older.count
         } catch {
             AppLogger.error("load older failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
