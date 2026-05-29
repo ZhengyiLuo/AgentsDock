@@ -3941,6 +3941,27 @@ Changes:
 - Added guardrails so future changes do not reintroduce a local-cap gate on
   older-history paging.
 
+### Local Mac Build Signing Repair
+
+User issue:
+
+- The freshly rebuilt local Mac app crashed immediately at launch.
+
+Root cause:
+
+- The crash report was a dyld launch abort: `ZenithCore.framework` was rejected
+  because the embedded framework and app were not signed with the same team
+  identity for hardened runtime library validation.
+
+Changes:
+
+- `scripts/build_local_mac.sh` now detects an Apple Development signing
+  identity, signs embedded frameworks first, then signs the app with the Mac
+  entitlements.
+- Verified both the app and `ZenithCore.framework` report the same Team ID.
+- Smoke-launched `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; no newer
+  ZenithDock crash report was produced and the process stayed running.
+
 ### Run Artifact Ordering
 
 User issue:

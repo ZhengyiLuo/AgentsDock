@@ -21,6 +21,28 @@ rm -rf "${DIST_APP}"
 mkdir -p "${DIST_DIR}"
 ditto "${BUILT_APP}" "${DIST_APP}"
 
+SIGN_IDENTITY="${ZENITHDOCK_CODESIGN_IDENTITY:-}"
+if [[ -z "${SIGN_IDENTITY}" ]]; then
+  SIGN_IDENTITY="$(
+    security find-identity -v -p codesigning 2>/dev/null \
+      | awk -F '"' '/Apple Development/ { print $2; exit }'
+  )"
+fi
+
+if [[ -n "${SIGN_IDENTITY}" ]]; then
+  if [[ -d "${DIST_APP}/Contents/Frameworks" ]]; then
+    while IFS= read -r -d '' framework; do
+      codesign --force --sign "${SIGN_IDENTITY}" --options runtime "${framework}"
+    done < <(find "${DIST_APP}/Contents/Frameworks" -maxdepth 1 -name "*.framework" -print0)
+  fi
+  codesign \
+    --force \
+    --sign "${SIGN_IDENTITY}" \
+    --options runtime \
+    --entitlements "${ROOT}/Apps/ZenithDockMac/ZenithDockMac.entitlements" \
+    "${DIST_APP}"
+fi
+
 codesign --verify --deep --strict --verbose=2 "${DIST_APP}"
 
 MBA_HOST="${ZENITHDOCK_MBA_HOST:-zens-macbook-air}"
