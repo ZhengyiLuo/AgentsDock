@@ -517,18 +517,23 @@ func checkTimelineCombinesRunTraces() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macTimeline.contains("activeAssistantEvents: [ZEvent]"), "Mac timeline must collect assistant chunks per run")
     try assert(macTimeline.contains("activeArtifactEvents: [ZEvent]"), "Mac timeline must collect run artifacts so videos render after assistant text")
     try assert(macTimeline.contains("activeTrace: [ZEvent]"), "Mac timeline must collect trace events per run")
-    try assert(macTimeline.contains("event.type == \"artifact_created\", event.run_id != nil"), "Mac timeline must not flush an agent run before same-run artifacts")
+    try assert(macTimeline.contains("if event.type == \"artifact_created\""), "Mac timeline must special-case artifacts before the generic row path")
+    try assert(macTimeline.contains("if activeRunID != nil {\n                    activeArtifactEvents.append(event)"), "Mac timeline must group old nil-run manifest artifacts with the active run")
     try assert(macTimeline.contains("trace-run-\\(activeRunID"), "Mac timeline trace rows must be run-scoped")
     try assert(macTimeline.contains("joined(separator: \"\\n\\n\")"), "Mac timeline must merge assistant chunks into one message")
     try assert(mobileTimeline.contains("activeAssistantEvents: [ZEvent]"), "iOS timeline must collect assistant chunks per run")
     try assert(mobileTimeline.contains("activeArtifactEvents: [ZEvent]"), "iOS timeline must collect run artifacts so videos render after assistant text")
     try assert(mobileTimeline.contains("activeTrace: [ZEvent]"), "iOS timeline must collect trace events per run")
-    try assert(mobileTimeline.contains("event.type == \"artifact_created\", event.run_id != nil"), "iOS timeline must not flush an agent run before same-run artifacts")
+    try assert(mobileTimeline.contains("if event.type == \"artifact_created\""), "iOS timeline must special-case artifacts before the generic row path")
+    try assert(mobileTimeline.contains("if activeRunID != nil {\n                    activeArtifactEvents.append(event)"), "iOS timeline must group old nil-run manifest artifacts with the active run")
     try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
+    try assert(server.contains("async def collect_manifest(session_id: str, run_id: str, manifest_path: Path)"), "Server manifest collection must know the active run id")
+    try assert(server.contains("\"artifact_created\", {\"run_id\": run_id, \"artifact\": rec}"), "Server artifact_created events must include run_id so videos render after assistant text")
 }
 
 func checkInlineVideoPlayAutoplays() throws {

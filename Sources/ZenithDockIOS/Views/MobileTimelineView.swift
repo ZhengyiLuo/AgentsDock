@@ -831,9 +831,16 @@ private enum MobileTimelineRows {
                 continue
             }
 
-            if event.type == "artifact_created", event.run_id != nil {
-                beginAgentRunIfNeeded(for: event)
-                activeArtifactEvents.append(event)
+            if event.type == "artifact_created" {
+                if event.run_id != nil {
+                    beginAgentRunIfNeeded(for: event)
+                }
+                if activeRunID != nil {
+                    activeArtifactEvents.append(event)
+                    continue
+                }
+                flushOrphanTrace()
+                rows.append(.event(event))
                 continue
             }
 

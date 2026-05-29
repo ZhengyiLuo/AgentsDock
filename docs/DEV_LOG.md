@@ -4254,3 +4254,9 @@ Twelfth follow-up:
 - Mac and iOS queue actions now treat `queued turn not found` as a stale local queue row instead of a user-facing modal. The client removes the stale queued message from local state and lets websocket/history reconciliation fill in the true server state.
 - Added guardrails for Opus 4.8 catalog coverage and stale queued-turn reconciliation.
 - Deployed the updated server to `sonic`; `zenithbot-agent.service` is active and the deployed `agent_server.py` compiles.
+
+## 2026-05-29 - Timeline Video Artifact Ordering
+
+- Fixed manifest artifact events so the server includes the active `run_id` when emitting `artifact_created` and `artifact_error`.
+- Mac and iOS timeline projection now also groups older nil-run manifest artifacts into the currently active run, so videos/files render after the assistant message instead of before it.
+- The existing timeline artifact grid now receives the whole turn's artifacts together, restoring compact grid behavior for multi-video turns.

@@ -3442,13 +3442,13 @@ def file_response_media_type(meta: dict[str, Any]) -> str:
     return recorded
 
 
-async def collect_manifest(session_id: str, manifest_path: Path) -> None:
+async def collect_manifest(session_id: str, run_id: str, manifest_path: Path) -> None:
     if not manifest_path.exists():
         return
     try:
         data = json.loads(manifest_path.read_text())
     except Exception as e:
-        await append_event(session_id, "artifact_error", {"error": f"manifest parse failed: {e}"})
+        await append_event(session_id, "artifact_error", {"run_id": run_id, "error": f"manifest parse failed: {e}"})
         return
     finally:
         with suppress(OSError):
@@ -3461,9 +3461,9 @@ async def collect_manifest(session_id: str, manifest_path: Path) -> None:
         seen.add(path)
         rec = artifact_record(session_id, entry)
         if rec:
-            await append_event(session_id, "artifact_created", {"artifact": rec})
+            await append_event(session_id, "artifact_created", {"run_id": run_id, "artifact": rec})
         else:
-            await append_event(session_id, "artifact_error", {"path": path, "error": "file not found"})
+            await append_event(session_id, "artifact_error", {"run_id": run_id, "path": path, "error": "file not found"})
 
 
 async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, Any], manifest_path: Path) -> None:
@@ -3614,7 +3614,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CLAUDE)
     result_text = clean_assistant_text(final_text or "\n\n".join(text_parts).strip())
-    await collect_manifest(session_id, manifest_path)
+    await collect_manifest(session_id, run_id, manifest_path)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
         "backend": BACKEND_CLAUDE,
@@ -3771,7 +3771,7 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
         await append_event(session_id, "error", {"run_id": run_id, "message": stderr[:4000], "exit_code": proc.returncode})
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CODEX)
-    await collect_manifest(session_id, manifest_path)
+    await collect_manifest(session_id, run_id, manifest_path)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
         "backend": BACKEND_CODEX,
