@@ -543,16 +543,16 @@ private struct MobileMessageAttachmentStrip: View {
     let attachments: [MobileMessageAttachment]
     let isUser: Bool
 
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 90, maximum: 170), spacing: 8), count: 2)
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(attachments, id: \.file.id) { attachment in
-                    MobileMessageAttachmentPreview(attachment: attachment)
-                }
+        LazyVGrid(columns: columns, alignment: isUser ? .trailing : .leading, spacing: 8) {
+            ForEach(attachments, id: \.file.id) { attachment in
+                MobileMessageAttachmentPreview(attachment: attachment)
             }
-            .padding(.vertical, 1)
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .frame(maxWidth: 360, alignment: isUser ? .trailing : .leading)
+        .padding(.vertical, 1)
     }
 }
 
@@ -574,7 +574,7 @@ private struct MobileMessageAttachmentPreview: View {
                         ProgressView()
                     }
                 }
-                .frame(width: 170, height: 118)
+                .frame(height: 108)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
                 HStack(spacing: 7) {
@@ -583,6 +583,7 @@ private struct MobileMessageAttachmentPreview: View {
                         .lineLimit(1)
                 }
                 .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 108)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(.black.opacity(0.07))
@@ -597,6 +598,125 @@ private struct MobileMessageAttachmentPreview: View {
         if attachment.file.content_type?.hasPrefix("video/") == true { return "film" }
         if attachment.file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
+    }
+}
+
+struct MobileArtifactGridItem: Identifiable, Hashable {
+    let file: ZFile
+    let url: URL
+
+    var id: String { file.id }
+}
+
+struct MobileArtifactGridCard: View {
+    let artifacts: [MobileArtifactGridItem]
+    var linkContext: ZMarkdownLinkContext?
+
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 120, maximum: 190), spacing: 10), count: 2)
+
+    var body: some View {
+        MobileSystemCard(icon: "shippingbox", title: "Files & Videos", tint: .green) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                ForEach(artifacts) { artifact in
+                    MobileArtifactGridTile(file: artifact.file, url: artifact.url, linkContext: linkContext)
+                }
+            }
+        }
+    }
+}
+
+private struct MobileArtifactGridTile: View {
+    let file: ZFile
+    let url: URL
+    var linkContext: ZMarkdownLinkContext?
+    @State private var fullscreenVideo = false
+    @State private var videoThumbnail: UIImage?
+    @State private var videoThumbnailFailed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if let text = file.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                MobileMarkdownView(markdown: text, linkContext: linkContext)
+                    .font(.caption)
+                    .lineLimit(3)
+            }
+            media
+                .frame(height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(file.title ?? file.filename)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                MobileArtifactShareButton(file: file, url: url)
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.black.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if file.content_type?.hasPrefix("video/") == true {
+                fullscreenVideo = true
+            }
+        }
+        .mobileVideoFullscreen(isPresented: $fullscreenVideo, url: url, title: file.title ?? file.filename)
+        .task(id: url) {
+            if file.content_type?.hasPrefix("video/") == true {
+                await loadVideoThumbnail()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var media: some View {
+        if file.content_type?.hasPrefix("image/") == true {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else if file.content_type?.hasPrefix("video/") == true {
+            MobileTimelineVideoPoster(image: videoThumbnail, failed: videoThumbnailFailed)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.black.opacity(0.08))
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var icon: String {
+        if file.content_type?.hasPrefix("video/") == true { return "film" }
+        if file.content_type?.hasPrefix("image/") == true { return "photo" }
+        return "doc"
+    }
+
+    private func loadVideoThumbnail() async {
+        do {
+            let localURL = try await MobileArtifactDragFileCache.shared.localFile(for: file, remoteURL: url)
+            let asset = AVURLAsset(url: localURL)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            let image = try await generator.image(at: .init(seconds: 0.2, preferredTimescale: 600)).image
+            await MainActor.run {
+                videoThumbnail = UIImage(cgImage: image)
+                videoThumbnailFailed = false
+            }
+        } catch {
+            await MainActor.run {
+                videoThumbnailFailed = true
+            }
+        }
     }
 }
 
@@ -969,6 +1089,9 @@ struct MobileArtifactView: View {
     var body: some View {
         MobileSystemCard(icon: icon, title: file.title ?? file.filename, tint: .green) {
             VStack(alignment: .leading, spacing: 10) {
+                if let text = file.text {
+                    MobileMarkdownView(markdown: text, linkContext: linkContext)
+                }
                 if file.content_type?.hasPrefix("image/") == true {
                     AsyncImage(url: url) { image in
                         image.resizable().scaledToFit()
@@ -996,9 +1119,6 @@ struct MobileArtifactView: View {
                         }
                     }
                     .font(.caption.weight(.semibold))
-                }
-                if let text = file.text {
-                    MobileMarkdownView(markdown: text, linkContext: linkContext)
                 }
                 Link(destination: url) {
                     Label("Open file", systemImage: "arrow.up.right.square")

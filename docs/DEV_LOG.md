@@ -3962,6 +3962,24 @@ Changes:
 - Smoke-launched `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`; no newer
   ZenithDock crash report was produced and the process stayed running.
 
+### Timeline Media Grids And No Auto-Follow
+
+User issue:
+
+- Artifact/video cards could put media before the text description, and runs
+  with many videos produced one giant full-width video card per file.
+- New selected-chat messages could force the timeline downward while the user
+  was reading elsewhere.
+
+Changes:
+
+- Mac and iOS artifact cards now render description text before media.
+- Artifact events from the same agent run are grouped into a compact
+  `Files & Videos` grid instead of separate giant timeline cards.
+- Prompt attachments now use bounded grids instead of horizontal strips.
+- New selected-chat agent output no longer auto-scrolls the timeline; it marks
+  the chat unread and leaves movement to the explicit bottom/latest control.
+
 ### Run Artifact Ordering
 
 User issue:

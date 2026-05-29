@@ -103,6 +103,14 @@ struct TimelineView: View {
                                         )
                                         .equatable()
                                             .id(row.id)
+                                    case .artifacts(let events):
+                                        ArtifactGridCard(
+                                            artifacts: events.compactMap { event in
+                                                event.artifact.map { ArtifactGridItem(file: $0, url: store.fileURL($0)) }
+                                            },
+                                            linkContext: linkContext
+                                        )
+                                            .id(row.id)
                                     case .job(let jobRun):
                                         JobRunBubble(jobRun: jobRun, linkContext: linkContext)
                                             .id(row.id)
@@ -359,12 +367,7 @@ struct TimelineView: View {
     }
 
     private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {
-        guard store.selectedSessionID != nil else { return false }
-        let hasNewerVisibleEvent = store.displayEvents.contains { event in
-            event.seq > previousSeq
-        }
-        guard hasNewerVisibleEvent else { return false }
-        return shouldFollowBottomRequest
+        false
     }
 
     private func cappedLiveVisibleRowLimit(rowCount: Int, oldCount: Int, newCount: Int) -> Int {
@@ -399,6 +402,10 @@ struct TimelineView: View {
             switch row.kind {
             case .event(let event):
                 if event.id == eventID {
+                    return (row.id, index)
+                }
+            case .artifacts(let events):
+                if events.contains(where: { $0.id == eventID }) {
                     return (row.id, index)
                 }
             case .job(let jobRun):
@@ -583,15 +590,11 @@ struct TimelineView: View {
             event.seq > previousSeq && store.isAgentVisibleMessage(event)
         }
         guard hasNewAgentMessage else { return }
-        if isAtBottom {
-            store.setSelectedTimelineAtBottom(true)
-        } else {
-            let firstSeq = store.displayEvents
-                .filter { $0.seq > previousSeq && store.isAgentVisibleMessage($0) }
-                .map(\.seq)
-                .min()
-            store.markAgentUnread(sessionID: sessionID, firstSeq: firstSeq)
-        }
+        let firstSeq = store.displayEvents
+            .filter { $0.seq > previousSeq && store.isAgentVisibleMessage($0) }
+            .map(\.seq)
+            .min()
+        store.markAgentUnread(sessionID: sessionID, firstSeq: firstSeq)
     }
 
     private func firstUnreadRowID(in rows: [TimelineRow], unreadSeq: Int?) -> String? {
@@ -941,6 +944,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 private final class TimelineRow: Identifiable {
     enum Kind {
         case event(ZEvent)
+        case artifacts([ZEvent])
         case job(JobRunRow)
         case jobGroup(JobRunGroupRow)
         case trace([ZEvent])
@@ -958,6 +962,8 @@ private final class TimelineRow: Identifiable {
         switch kind {
         case .event(let event):
             event.seq
+        case .artifacts(let events):
+            events.map(\.seq).max() ?? 0
         case .job(let jobRun):
             jobRun.lastSeq
         case .jobGroup(let group):
@@ -971,6 +977,8 @@ private final class TimelineRow: Identifiable {
         switch kind {
         case .event(let event):
             event.id
+        case .artifacts(let events):
+            events.first?.id ?? events.last?.id
         case .job(let jobRun):
             jobRun.runEvent.id
         case .jobGroup(let group):
@@ -1086,8 +1094,12 @@ private enum TimelineRows {
             if let assistant = mergedAssistantEvent() {
                 rows.append(TimelineRow(id: "assistant-run-\(activeRunID ?? assistant.id)-\(assistant.seq)", kind: .event(assistant)))
             }
-            for artifact in activeArtifactEvents {
-                rows.append(TimelineRow(id: artifact.id, kind: .event(artifact)))
+            if let firstArtifact = activeArtifactEvents.first,
+               let lastArtifact = activeArtifactEvents.last {
+                rows.append(TimelineRow(
+                    id: "artifacts-run-\(activeRunID ?? "unknown")-\(firstArtifact.seq)-\(lastArtifact.seq)",
+                    kind: .artifacts(activeArtifactEvents)
+                ))
             }
             appendTrace(activeTrace, prefix: "trace-run-\(activeRunID ?? "unknown")")
             activeRunID = nil

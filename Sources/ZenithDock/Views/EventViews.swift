@@ -685,16 +685,16 @@ private struct MessageAttachmentStrip: View {
     let attachments: [MessageAttachment]
     let isUser: Bool
 
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 120, maximum: 190), spacing: 8), count: 4)
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(attachments, id: \.file.id) { attachment in
-                    MessageAttachmentPreview(attachment: attachment)
-                }
+        LazyVGrid(columns: columns, alignment: isUser ? .trailing : .leading, spacing: 8) {
+            ForEach(attachments, id: \.file.id) { attachment in
+                MessageAttachmentPreview(attachment: attachment)
             }
-            .padding(.vertical, 1)
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .frame(maxWidth: 792, alignment: isUser ? .trailing : .leading)
+        .padding(.vertical, 1)
     }
 }
 
@@ -716,7 +716,7 @@ private struct MessageAttachmentPreview: View {
                         ProgressView()
                     }
                 }
-                .frame(width: 180, height: 124)
+                .frame(height: 116)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 HStack(spacing: 7) {
@@ -725,6 +725,7 @@ private struct MessageAttachmentPreview: View {
                         .lineLimit(1)
                 }
                 .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 116)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(Color.black.opacity(0.07))
@@ -745,6 +746,115 @@ private struct MessageAttachmentPreview: View {
     private var icon: String {
         if attachment.file.content_type?.hasPrefix("video/") == true { return "film" }
         if attachment.file.content_type?.hasPrefix("image/") == true { return "photo" }
+        return "doc"
+    }
+}
+
+struct ArtifactGridItem: Identifiable, Hashable {
+    let file: ZFile
+    let url: URL
+
+    var id: String { file.id }
+}
+
+struct ArtifactGridCard: View {
+    let artifacts: [ArtifactGridItem]
+    var linkContext: ZMarkdownLinkContext?
+
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 150, maximum: 210), spacing: 10), count: 4)
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "shippingbox")
+                .foregroundStyle(.green)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("Files & Videos")
+                        .font(.subheadline.weight(.semibold))
+                    Text("\(artifacts.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                    ForEach(artifacts) { artifact in
+                        ArtifactGridTile(file: artifact.file, url: artifact.url, linkContext: linkContext)
+                    }
+                }
+            }
+            .padding(14)
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator.opacity(0.35)))
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+    }
+}
+
+private struct ArtifactGridTile: View {
+    let file: ZFile
+    let url: URL
+    var linkContext: ZMarkdownLinkContext?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if let text = file.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                MarkdownView(markdown: text, compact: true, linkContext: linkContext)
+                    .font(.caption)
+                    .lineLimit(3)
+            }
+            media
+                .frame(height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(file.title ?? file.filename)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Link(destination: url) {
+                    Image(systemName: "arrow.up.right.square")
+                }
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(Color.black.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+        .contentShape(Rectangle())
+        .onDrag {
+            ArtifactDragItemProvider.provider(for: file, url: url)
+        }
+        .help(file.filename)
+    }
+
+    @ViewBuilder
+    private var media: some View {
+        if file.content_type?.hasPrefix("image/") == true {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else if file.content_type?.hasPrefix("video/") == true {
+            InlineVideoView(url: url)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(0.08))
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var icon: String {
+        if file.content_type?.hasPrefix("video/") == true { return "film" }
+        if file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
     }
 }
@@ -1168,6 +1278,10 @@ struct ArtifactPreview: View {
                     Image(systemName: "arrow.down.circle")
                 }
             }
+            if let text = file.text {
+                MarkdownView(markdown: text, compact: true, linkContext: linkContext)
+                    .foregroundStyle(.secondary)
+            }
             if file.content_type?.hasPrefix("image/") == true {
                 AsyncImage(url: url) { image in
                     image.resizable().scaledToFit()
@@ -1196,10 +1310,6 @@ struct ArtifactPreview: View {
 	                    }
                 }
                 .font(.caption)
-            }
-            if let text = file.text {
-                MarkdownView(markdown: text, compact: true, linkContext: linkContext)
-                    .foregroundStyle(.secondary)
             }
         }
         .contentShape(Rectangle())

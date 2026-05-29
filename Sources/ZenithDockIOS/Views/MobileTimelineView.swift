@@ -64,6 +64,14 @@ struct MobileTimelineView: View {
                                 case .event(let event):
                                     MobileEventCard(event: event, job: event.run_id.flatMap { jobsByRunID[$0] })
                                         .id(row.id)
+                                case .artifacts(let events):
+                                    MobileArtifactGridCard(
+                                        artifacts: events.compactMap { event in
+                                            event.artifact.map { MobileArtifactGridItem(file: $0, url: store.fileURL($0)) }
+                                        },
+                                        linkContext: linkContext
+                                    )
+                                    .id(row.id)
                                 case .job(let jobRun):
                                     MobileJobRunBubble(
                                         jobRun: jobRun,
@@ -151,6 +159,7 @@ struct MobileTimelineView: View {
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
                     }
+                    updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
                     if shouldFollowLiveEvent {
                         scrollToBottom(proxy)
@@ -185,12 +194,16 @@ struct MobileTimelineView: View {
     }
 
     private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {
-        guard store.selectedSessionID != nil else { return false }
-        let hasNewerVisibleEvent = store.displayEvents.contains { event in
-            event.seq > previousSeq
+        false
+    }
+
+    private func updateUnreadState(after previousSeq: Int) {
+        guard let sessionID = store.selectedSessionID else { return }
+        let hasNewAgentMessage = store.displayEvents.contains { event in
+            event.seq > previousSeq && store.isAgentVisibleMessage(event)
         }
-        guard hasNewerVisibleEvent else { return false }
-        return isAtBottom || store.isRunning
+        guard hasNewAgentMessage else { return }
+        store.markSessionUnread(sessionID)
     }
 
     private func cappedLiveVisibleRowLimit(rowCount: Int, oldCount: Int, newCount: Int) -> Int {
@@ -631,6 +644,7 @@ private struct MobileHistoryTopPreferenceKey: PreferenceKey {
 
 private enum MobileTimelineRow: Identifiable {
     case event(ZEvent)
+    case artifacts([ZEvent])
     case job(MobileJobRunRow)
     case jobGroup(MobileJobRunGroupRow)
     case trace(String, [ZEvent])
@@ -638,6 +652,10 @@ private enum MobileTimelineRow: Identifiable {
     var id: String {
         switch self {
         case .event(let event): return "event-\(event.id)"
+        case .artifacts(let events):
+            let first = events.first?.seq ?? 0
+            let last = events.last?.seq ?? first
+            return "artifacts-\(first)-\(last)"
         case .job(let jobRun): return "job-\(jobRun.id)-\(jobRun.lastSeq)"
         case .jobGroup(let group): return "job-group-\(group.id)"
         case .trace(let id, _): return id
@@ -732,8 +750,8 @@ private enum MobileTimelineRows {
             if let assistant = mergedAssistantEvent() {
                 rows.append(.event(assistant))
             }
-            for artifact in activeArtifactEvents {
-                rows.append(.event(artifact))
+            if !activeArtifactEvents.isEmpty {
+                rows.append(.artifacts(activeArtifactEvents))
             }
             appendTrace(activeTrace, prefix: "trace-run-\(activeRunID ?? "unknown")")
             activeRunID = nil
