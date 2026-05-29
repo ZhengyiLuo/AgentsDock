@@ -496,7 +496,7 @@ struct TimelineView: View {
               Date() >= historyLoadSuppressedUntil else {
             return
         }
-        if revealOlderRows(preservingPositionWith: proxy) {
+        if revealOlderRowsShowingNewPage(proxy) {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
             return

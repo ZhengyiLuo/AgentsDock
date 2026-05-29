@@ -4205,3 +4205,11 @@ Seventh follow-up:
   but reveal could still scroll to a row outside SwiftUI's rendered suffix.
 - Older-page reveal now calculates how many rows are required to include the
   target, expands the visible suffix to cover it, and logs the exact target row.
+
+Eighth follow-up:
+
+- Automatic top-edge loading still used the old preserve-anchor helper when
+  older rows were already cached locally. That made the app expand the visible
+  row window and then restore the exact old top row, which looked like a no-op.
+- The automatic path now uses the same "show newly revealed page" helper as the
+  explicit Load Older action.

@@ -640,6 +640,7 @@ func checkTimelineHistoryPaging() throws {
     try assert(timeline.contains("disarmAutomaticOlderHistoryLoad()\n                    historyLoadSuppressedUntil = Date.distantPast"), "Opening a chat must disarm auto older-history loading until the user scrolls away from the top")
     try assert(timeline.contains("disarmAutomaticOlderHistoryLoad()\n        let action = {"), "Programmatic bottom scrolls must disarm older-history autoload before layout metrics arrive")
     try assert(timeline.contains("if topHasLeftViewport {\n            olderHistoryLoadArmed = true"), "Older-history autoload should rearm only after the rendered top has left the viewport")
+    try assert(timeline.contains("if revealOlderRowsShowingNewPage(proxy) {\n            olderHistoryLoadArmed = false"), "Automatic older-history loading must reveal the new page instead of preserving the old top anchor")
     try assert(!timeline.contains("Loaded window limit"), "Mac history banner must keep offering Load Older while the server has older events")
 }
 
