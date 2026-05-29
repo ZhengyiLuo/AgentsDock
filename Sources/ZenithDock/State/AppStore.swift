@@ -1041,7 +1041,7 @@ final class AppStore: ObservableObject {
                 return
             }
             let previousSeq = lastSeq
-            applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: false)
+            applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
             markSessionRead(sessionID)
             loadedSessionID = sessionID
             saveSelectedChatCache()

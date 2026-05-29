@@ -14,6 +14,9 @@ xcodebuild \
   -configuration Release \
   -destination platform=macOS \
   -derivedDataPath "${DERIVED_DATA}" \
+  CODE_SIGN_IDENTITY=- \
+  CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= \
   build \
   -quiet
 
@@ -21,26 +24,28 @@ rm -rf "${DIST_APP}"
 mkdir -p "${DIST_DIR}"
 ditto "${BUILT_APP}" "${DIST_APP}"
 
-SIGN_IDENTITY="${ZENITHDOCK_CODESIGN_IDENTITY:-}"
-if [[ -z "${SIGN_IDENTITY}" ]]; then
-  SIGN_IDENTITY="$(
-    security find-identity -v -p codesigning 2>/dev/null \
-      | awk -F '"' '/Apple Development/ { print $2; exit }'
-  )"
-fi
+SIGN_IDENTITY="${ZENITHDOCK_CODESIGN_IDENTITY:--}"
 
 if [[ -n "${SIGN_IDENTITY}" ]]; then
   if [[ -d "${DIST_APP}/Contents/Frameworks" ]]; then
     while IFS= read -r -d '' framework; do
-      codesign --force --sign "${SIGN_IDENTITY}" --options runtime "${framework}"
+      if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+        codesign --force --sign - "${framework}"
+      else
+        codesign --force --sign "${SIGN_IDENTITY}" --options runtime "${framework}"
+      fi
     done < <(find "${DIST_APP}/Contents/Frameworks" -maxdepth 1 -name "*.framework" -print0)
   fi
-  codesign \
-    --force \
-    --sign "${SIGN_IDENTITY}" \
-    --options runtime \
-    --entitlements "${ROOT}/Apps/ZenithDockMac/ZenithDockMac.entitlements" \
-    "${DIST_APP}"
+  if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+    codesign --force --sign - "${DIST_APP}"
+  else
+    codesign \
+      --force \
+      --sign "${SIGN_IDENTITY}" \
+      --options runtime \
+      --entitlements "${ROOT}/Apps/ZenithDockMac/ZenithDockMac.entitlements" \
+      "${DIST_APP}"
+  fi
 fi
 
 codesign --verify --deep --strict --verbose=2 "${DIST_APP}"

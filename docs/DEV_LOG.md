@@ -4090,3 +4090,25 @@ Changes:
 - Explicit `Show Older` and `Load Older` now both use delayed no-animation
   settling through `scrollToOlderPageTarget`, so the user lands on the newly
   revealed older page instead of watching nothing happen.
+
+### Cached Tail Refresh Preserves Older Pages
+
+User issue:
+
+- Older history appeared to load, then disappeared after switching chats or
+  refreshing the selected chat.
+
+Root cause:
+
+- `refreshCachedSessionLatestTail` requested the latest server tail correctly,
+  but applied that snapshot with `preserveExisting: false`. That replaced the
+  locally loaded older pages with only the latest tail, shrinking long chats
+  back down after every freshness check.
+
+Changes:
+
+- Cached latest-tail refresh now merges with existing selected-chat events using
+  `preserveExisting: true`.
+- The merge path still updates the latest tail and omitted count, but no longer
+  throws away older pages already loaded into the local cache.
+- Updated guardrails to protect this exact regression.

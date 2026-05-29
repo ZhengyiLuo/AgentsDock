@@ -330,7 +330,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!macStore.contains("connectEvents(sessionID: sessionID, after: cachedLastSeq)"), "Mac warm-cache chat switches must not replay the whole websocket gap before refreshing the latest tail")
     try assert(macStore.contains("refreshCachedSessionLatestTail"), "Mac warm-cache chat switches must refresh the server latest tail")
     try assert(macStore.contains("URLQueryItem(name: \"tail\", value: \"true\")"), "Mac cached chat refresh must request the latest tail window")
-    try assert(macStore.contains("applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: false)"), "Mac cached chat refresh must replace stale local history with the server latest tail")
+    try assert(macStore.contains("applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)"), "Mac cached chat refresh must merge the server latest tail without dropping loaded older pages")
     try assert(macStore.contains("connectEvents(sessionID: sessionID, after: lastSeq)"), "Mac warm-cache chat switches must connect live streaming only after the latest tail is applied")
     try assert(macStore.contains("isRefreshingCachedDelta = true"), "Mac cached chat refresh must show loading UI while applying the server latest tail")
     try assert(macStore.contains("guard !newEvents.isEmpty else"), "Mac event merge must skip timeline rebuilds when catch-up returns duplicate/no-op events")
