@@ -257,6 +257,12 @@ struct TimelineView: View {
                         settleInitialTimelinePosition(proxy)
                     }
                 }
+                .onChange(of: store.isApplyingLargeTimelineBatch) {
+                    if !store.isApplyingLargeTimelineBatch {
+                        _ = settleOpenThreadAtLatest(proxy)
+                        settleInitialTimelinePosition(proxy)
+                    }
+                }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
                         olderHistoryLoadArmed = false
@@ -333,11 +339,11 @@ struct TimelineView: View {
     private func settleOpenThreadAtLatest(_ proxy: ScrollViewProxy) -> Bool {
         guard let pendingSessionID = pendingOpenBottomSessionID,
               pendingSessionID == store.selectedSessionID,
-              !store.displayEvents.isEmpty else {
+              canSettleOpenThreadRows else {
             return false
         }
         pendingOpenBottomSessionID = nil
-        suppressHistoryLoading(for: 1.4)
+        suppressHistoryLoading(for: 2.4)
         disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
         if isInitialTimelineMasked {
@@ -346,18 +352,23 @@ struct TimelineView: View {
             }
         }
         scrollToBottom(proxy)
+        settleBottomAfterLayout(proxy, sessionID: pendingSessionID)
+        AppLogger.info("open latest settled session=\(pendingSessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
         return true
     }
 
     private func forceOpenThreadToLatest(_ proxy: ScrollViewProxy) {
-        guard let sessionID = store.selectedSessionID,
-              !store.displayEvents.isEmpty else {
+        guard let sessionID = store.selectedSessionID else {
             return
         }
         pendingOpenBottomSessionID = sessionID
-        suppressHistoryLoading(for: 1.4)
+        suppressHistoryLoading(for: 2.4)
         disarmAutomaticOlderHistoryLoad()
         visibleRowLimit = defaultVisibleRowLimit
+        guard canSettleOpenThreadRows else {
+            AppLogger.info("force latest deferred session=\(sessionID) events=\(store.displayEvents.count) applying_batch=\(store.isApplyingLargeTimelineBatch) masked=\(isInitialTimelineMasked)")
+            return
+        }
         store.markSelectedSessionRead(force: true)
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
@@ -365,6 +376,8 @@ struct TimelineView: View {
             }
         }
         scrollToBottom(proxy)
+        settleBottomAfterLayout(proxy, sessionID: sessionID)
+        AppLogger.info("force latest settled session=\(sessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
     }
 
     private func initialTimelineMaskIsCurrent(revision: Int, sessionID: String) -> Bool {
@@ -402,7 +415,7 @@ struct TimelineView: View {
 
     private func settleBottomAfterLayout(_ proxy: ScrollViewProxy, sessionID: String?) {
         guard let sessionID else { return }
-        for delay in [0.04, 0.16, 0.36] {
+        for delay in [0.04, 0.16, 0.36, 0.75, 1.25] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 guard store.selectedSessionID == sessionID else { return }
                 withTransaction(noAnimationTransaction) {
@@ -418,6 +431,13 @@ struct TimelineView: View {
 
     private var hasWarmSelectedTimeline: Bool {
         store.loadedSessionID == store.selectedSessionID && !store.displayEvents.isEmpty
+    }
+
+    private var canSettleOpenThreadRows: Bool {
+        guard !store.displayEvents.isEmpty else { return false }
+        guard !store.isApplyingLargeTimelineBatch else { return false }
+        guard !(isInitialTimelineMasked && !hasWarmSelectedTimeline) else { return false }
+        return true
     }
 
     private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {
@@ -1111,7 +1131,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 distanceFromBottom: max(rawDistance, 0),
                 distanceFromTop: max(rawDistanceFromTop, 0)
             )
-            if metrics.distanceFromBottom <= 28 {
+            if metrics.isScrollable && metrics.distanceFromBottom <= 28 {
                 forceBottomUntil = nil
             } else if shouldForceBottom {
                 scheduleDocumentBottomScroll()

@@ -4222,3 +4222,14 @@ Ninth follow-up:
   past, and `scrollToBottom()` could shorten a longer suppression window.
 - History-load suppression is now monotonic and opening a chat suppresses
   top-edge autoload long enough for the repeated bottom-scroll settling passes.
+
+Tenth follow-up:
+
+- Air logs still showed `auto older loaded` after opening CMA-ES Debug, which meant the open-to-latest request was being consumed before real timeline rows were renderable.
+- The Mac timeline now waits for the large-batch/opening mask to drop before consuming the pending latest-position request, retries when that mask clears, and keeps bottom settling alive through longer SwiftUI layout passes.
+- The AppKit scroll observer no longer cancels its forced-bottom window just because an empty/non-scrollable placeholder reports distance-from-bottom zero. It only declares success once real scrollable content is at the bottom.
+
+Eleventh follow-up:
+
+- A second Air-log edge showed latest-tail refreshes could fire a forced-bottom revision while the large-batch mask was active, then return before recording a pending latest-position request.
+- `forceOpenThreadToLatest` now records the pending session and suppression window before checking renderability, so the mask-clear retry can finish the open-to-latest scroll.
