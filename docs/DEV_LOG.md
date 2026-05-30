@@ -4327,3 +4327,8 @@ Third follow-up:
 - Deployed the current server to `sonic` with `./server/deploy.sh sonic`; `zenithbot-agent.service` is active and the deployed server contains the Claude Opus 4.8 / 1M runtime options.
 - Confirmed the standalone `ZenithBotServer` repository matches `server/agent_server.py` and pushed `main` to GitHub at `6d41fdd`.
 - Uploaded TestFlight build 42 for iOS/iPadOS and macOS from `build/archives/ZenithDockIOS-42.xcarchive` and `build/archives/ZenithDockMac-42.xcarchive`.
+
+## 2026-05-29 - Runtime Save Race Fix
+
+- Runtime picker changes now save immediately and optimistically update the local session, so a quick send cannot overwrite the selected Claude model back to default before the save request lands.
+- Turn requests now include the current session model/effort. The server treats omitted runtime fields as "preserve current" and explicit empty strings as "reset to default."

@@ -746,6 +746,8 @@ final class MobileAppStore: ObservableObject {
 
     @discardableResult
     func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
+        let previousSession = sessions.first { $0.id == sessionID }
+        applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -773,8 +775,41 @@ final class MobileAppStore: ObservableObject {
             }
             return true
         } catch {
+            if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = previousSession
+            }
             report(error)
             return false
+        }
+    }
+
+    private func applyOptimisticSessionPatch(sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        if let title {
+            sessions[idx].title = title
+        }
+        if let folder {
+            sessions[idx].folder = folder
+        }
+        if let cwd {
+            sessions[idx].cwd = cwd
+        }
+        if let backend {
+            sessions[idx].backend = backend.lowercased()
+        }
+        if let model {
+            let clean = ZRuntimeCatalog.cleaned(model)
+            sessions[idx].model = clean.isEmpty ? nil : clean
+        }
+        if let effort {
+            let clean = ZRuntimeCatalog.cleaned(effort)
+            sessions[idx].effort = clean.isEmpty ? nil : clean
+        }
+        if let pinned {
+            sessions[idx].pinned = pinned
+        }
+        if let archived {
+            sessions[idx].archived = archived
         }
     }
 
@@ -879,6 +914,8 @@ final class MobileAppStore: ObservableObject {
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
+            let model: String
+            let effort: String
         }
         struct Response: Codable {
             let run_id: String?
@@ -893,7 +930,12 @@ final class MobileAppStore: ObservableObject {
         do {
             let res: Response = try await api.post(
                 "/api/sessions/\(sessionID)/turns",
-                body: Body(prompt: trimmed, file_ids: fileIDs)
+                body: Body(
+                    prompt: trimmed,
+                    file_ids: fileIDs,
+                    model: sessions.first { $0.id == sessionID }?.model ?? "",
+                    effort: sessions.first { $0.id == sessionID }?.effort ?? ""
+                )
             )
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
@@ -1093,6 +1135,8 @@ final class MobileAppStore: ObservableObject {
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
+            let model: String
+            let effort: String
         }
         if submittedPrompt == nil {
             prompt = ""
@@ -1106,7 +1150,12 @@ final class MobileAppStore: ObservableObject {
                 let queued: Bool?
                 let session: ZSession
             }
-            let body = Body(prompt: trimmed, file_ids: uploads.map(\.id))
+            let body = Body(
+                prompt: trimmed,
+                file_ids: uploads.map(\.id),
+                model: selectedSession?.model ?? "",
+                effort: selectedSession?.effort ?? ""
+            )
             let res: Response = try await api.post("/api/sessions/\(sid)/turns", body: body)
             if let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = res.session

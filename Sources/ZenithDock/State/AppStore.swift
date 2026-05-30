@@ -1321,6 +1321,8 @@ final class AppStore: ObservableObject {
     @discardableResult
     func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
         guard let sid = selectedSessionID else { return false }
+        let previousSession = sessions.first { $0.id == sid }
+        applyOptimisticSessionPatch(sessionID: sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -1349,6 +1351,9 @@ final class AppStore: ObservableObject {
             }
             return true
         } catch {
+            if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
+                sessions[idx] = previousSession
+            }
             reportServerError(error)
             return false
         }
@@ -1388,6 +1393,8 @@ final class AppStore: ObservableObject {
 
     @discardableResult
     func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
+        let previousSession = sessions.first { $0.id == sessionID }
+        applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -1415,8 +1422,41 @@ final class AppStore: ObservableObject {
             }
             return true
         } catch {
+            if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[idx] = previousSession
+            }
             reportServerError(error)
             return false
+        }
+    }
+
+    private func applyOptimisticSessionPatch(sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        if let title {
+            sessions[idx].title = title
+        }
+        if let folder {
+            sessions[idx].folder = folder
+        }
+        if let cwd {
+            sessions[idx].cwd = cwd
+        }
+        if let backend {
+            sessions[idx].backend = backend.lowercased()
+        }
+        if let model {
+            let clean = ZRuntimeCatalog.cleaned(model)
+            sessions[idx].model = clean.isEmpty ? nil : clean
+        }
+        if let effort {
+            let clean = ZRuntimeCatalog.cleaned(effort)
+            sessions[idx].effort = clean.isEmpty ? nil : clean
+        }
+        if let pinned {
+            sessions[idx].pinned = pinned
+        }
+        if let archived {
+            sessions[idx].archived = archived
         }
     }
 
@@ -1510,6 +1550,8 @@ final class AppStore: ObservableObject {
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
+            let model: String
+            let effort: String
         }
         struct Response: Codable {
             let run_id: String?
@@ -1526,7 +1568,12 @@ final class AppStore: ObservableObject {
             }
             let res: Response = try await api.post(
                 "/api/sessions/\(sessionID)/turns",
-                body: Body(prompt: trimmed, file_ids: fileIDs)
+                body: Body(
+                    prompt: trimmed,
+                    file_ids: fileIDs,
+                    model: sessions.first { $0.id == sessionID }?.model ?? "",
+                    effort: sessions.first { $0.id == sessionID }?.effort ?? ""
+                )
             )
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = res.session
@@ -1597,6 +1644,8 @@ final class AppStore: ObservableObject {
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
+            let model: String
+            let effort: String
         }
         do {
             isRunning = true
@@ -1613,7 +1662,12 @@ final class AppStore: ObservableObject {
                     await updateSelected(title: String(firstLine.prefix(72)))
                 }
             }
-            let body = Body(prompt: trimmed, file_ids: uploads.map(\.id))
+            let body = Body(
+                prompt: trimmed,
+                file_ids: uploads.map(\.id),
+                model: selectedSession?.model ?? "",
+                effort: selectedSession?.effort ?? ""
+            )
             struct Response: Codable {
                 let run_id: String?
                 let queued: Bool?

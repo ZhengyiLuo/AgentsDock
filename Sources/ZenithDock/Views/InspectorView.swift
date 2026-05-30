@@ -82,7 +82,7 @@ struct InspectorView: View {
                         .onChange(of: backend) {
                             model = ""
                             effort = ""
-                            scheduleRuntimeSave()
+                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         Picker("Model", selection: $model) {
                             ForEach(modelOptions(for: backend)) { option in
@@ -91,7 +91,7 @@ struct InspectorView: View {
                         }
                         .pickerStyle(.menu)
                         .onChange(of: model) {
-                            scheduleRuntimeSave(debounceNanoseconds: 450_000_000)
+                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         TextField("Custom model ID", text: $model)
                             .textFieldStyle(.roundedBorder)
@@ -105,7 +105,7 @@ struct InspectorView: View {
                         }
                         .pickerStyle(.menu)
                         .onChange(of: effort) {
-                            scheduleRuntimeSave()
+                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         runtimeSaveStatus
                         LabeledContent("Pinned", value: session.pinned == true ? "Yes" : "No")

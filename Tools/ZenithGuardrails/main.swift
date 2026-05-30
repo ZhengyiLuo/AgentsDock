@@ -102,11 +102,16 @@ func checkRuntimeDefaultLabels() throws {
 
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     try assert(server.contains("runtime_option(\"claude-opus-4-8\", \"Opus 4.8\")"), "Server runtime catalog must advertise Claude Opus 4.8")
     try assert(server.contains("runtime_option(\"opus[1m]\", \"Opus 1M\")"), "Server runtime catalog must advertise Claude Opus 1M")
     try assert(server.contains("runtime_option(\"claude-opus-4-8[1m]\", \"Opus 4.8 1M\")"), "Server runtime catalog must advertise Claude Opus 4.8 1M")
     try assert(server.contains("\"claude-opus-4-8[1m]\": \"Opus 4.8 1M\""), "Server default labels must render Claude Opus 4.8 1M cleanly")
     try assert(server.contains("cmd.extend([\"--model\", str(sess[\"model\"])])"), "Claude launcher must pass selected models with --model")
+    try assert(server.contains("model_fields_set"), "Server turns must distinguish omitted runtime fields from explicit default resets")
+    try assert(macStore.contains("applyOptimisticSessionPatch(sessionID: sid") && mobileStore.contains("applyOptimisticSessionPatch(sessionID: sessionID"), "Runtime changes must update local session state before the network round trip")
+    try assert(macStore.contains("model: selectedSession?.model ?? \"\"") && mobileStore.contains("model: selectedSession?.model ?? \"\""), "User sends must carry the selected runtime so a quick send cannot revert to defaults")
 }
 
 func checkBackendLocksAfterProviderStart() throws {
@@ -522,9 +527,9 @@ func checkRuntimeAutosavesAndBackendIcons() throws {
     try assert(!macSidebar.contains("sparkle.magnifyingglass"), "Codex sidebar icon must not be the search glyph")
     try assert(!mobileSidebar.contains("sparkle.magnifyingglass"), "iOS Codex sidebar icon must not be the search glyph")
     try assert(!macSidebar.contains("circle.hexagongrid"), "Claude sidebar icon must not be the old generic grid glyph")
-    try assert(macInspector.contains("scheduleRuntimeSave()"), "Mac inspector runtime changes must autosave")
+    try assert(macInspector.contains("scheduleRuntimeSave(debounceNanoseconds: 0)"), "Mac inspector runtime changes must autosave immediately")
     try assert(!macInspector.contains("\"Save Runtime\""), "Mac inspector must not show a Save Runtime button")
-    try assert(mobileOptions.contains("scheduleRuntimeSave()"), "iOS chat options runtime changes must autosave")
+    try assert(mobileOptions.contains("scheduleRuntimeSave(debounceNanoseconds: 0)"), "iOS chat options runtime changes must autosave immediately")
     try assert(!mobileOptions.contains("Save Runtime & Session"), "iOS options must not imply runtime requires a manual save")
 }
 

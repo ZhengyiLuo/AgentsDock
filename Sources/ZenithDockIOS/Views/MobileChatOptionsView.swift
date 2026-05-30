@@ -46,7 +46,7 @@ struct MobileChatOptionsView: View {
                         .onChange(of: backend) {
                             model = ""
                             effort = ""
-                            scheduleRuntimeSave()
+                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         Picker("Model", selection: $model) {
                             ForEach(modelOptions(for: backend)) { option in
@@ -54,7 +54,7 @@ struct MobileChatOptionsView: View {
                             }
                         }
                         .onChange(of: model) {
-                            scheduleRuntimeSave(debounceNanoseconds: 450_000_000)
+                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         TextField("Custom model ID", text: $model)
                             .textInputAutocapitalization(.never)
@@ -66,7 +66,7 @@ struct MobileChatOptionsView: View {
                             }
                         }
                         .onChange(of: effort) {
-                            scheduleRuntimeSave()
+                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         runtimeSaveStatus
                         TextField("Folder", text: $folder)
