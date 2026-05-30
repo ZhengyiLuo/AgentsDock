@@ -1426,10 +1426,12 @@ final class AppStore: ObservableObject {
     }
 
     @discardableResult
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
-        let previousSession = sessions.first { $0.id == sessionID }
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
+        let previousSession = applyOptimistic ? sessions.first { $0.id == sessionID } : nil
         markPendingRuntime(sessionID: sessionID, backend: backend, model: model, effort: effort)
-        applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+        if applyOptimistic {
+            applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+        }
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -1457,7 +1459,7 @@ final class AppStore: ObservableObject {
             return true
         } catch {
             discardPendingRuntime(sessionID: sessionID, backend: backend, model: model, effort: effort)
-            if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+            if applyOptimistic, let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = previousSession
             }
             reportServerError(error)

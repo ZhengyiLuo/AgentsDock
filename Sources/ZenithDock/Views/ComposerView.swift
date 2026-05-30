@@ -309,23 +309,24 @@ struct ComposerView: View {
     }
 
     private func setBackend(_ backend: String) {
-        guard store.selectedSession?.backend != backend else { return }
+        guard let session = store.selectedSession, session.backend != backend else { return }
+        let sessionID = session.id
         store.stageSelectedRuntime(backend: backend, model: "", effort: "")
-        Task { await store.updateSelected(backend: backend, model: "", effort: "", applyOptimistic: false) }
+        Task { await store.updateSession(sessionID, backend: backend, model: "", effort: "", applyOptimistic: false) }
     }
 
     private func setModel(_ model: String) {
-        guard store.selectedSession != nil else { return }
+        guard let sessionID = store.selectedSession?.id else { return }
         let cleanModel = ZRuntimeCatalog.cleanForAPI(model)
         store.stageSelectedRuntime(model: cleanModel)
-        Task { await store.updateSelected(model: cleanModel, applyOptimistic: false) }
+        Task { await store.updateSession(sessionID, model: cleanModel, applyOptimistic: false) }
     }
 
     private func setEffort(_ effort: String) {
-        guard store.selectedSession != nil else { return }
+        guard let sessionID = store.selectedSession?.id else { return }
         let cleanEffort = ZRuntimeCatalog.cleanForAPI(effort)
         store.stageSelectedRuntime(effort: cleanEffort)
-        Task { await store.updateSelected(effort: cleanEffort, applyOptimistic: false) }
+        Task { await store.updateSession(sessionID, effort: cleanEffort, applyOptimistic: false) }
     }
 
     private func sendDraft(_ submitted: String) {

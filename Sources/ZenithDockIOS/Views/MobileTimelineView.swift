@@ -489,8 +489,9 @@ private struct MobileChatHeader: View {
                         Picker("Backend", selection: Binding(
                             get: { session.backend },
                             set: { newValue in
+                                let sessionID = session.id
                                 store.stageSelectedRuntime(backend: newValue, model: "")
-                                Task { await store.updateSelected(backend: newValue, model: "", applyOptimistic: false) }
+                                Task { await store.updateSession(sessionID, backend: newValue, model: "", applyOptimistic: false) }
                             }
                         )) {
                             Text("Claude").tag("claude")
@@ -500,8 +501,9 @@ private struct MobileChatHeader: View {
                         Picker("Model", selection: Binding(
                             get: { normalized(session.model) },
                             set: { newValue in
+                                let sessionID = session.id
                                 store.stageSelectedRuntime(model: newValue)
-                                Task { await store.updateSelected(model: newValue, applyOptimistic: false) }
+                                Task { await store.updateSession(sessionID, model: newValue, applyOptimistic: false) }
                             }
                         )) {
                             ForEach(modelOptions(for: session)) { option in
@@ -511,8 +513,9 @@ private struct MobileChatHeader: View {
                         Picker("Effort", selection: Binding(
                             get: { normalized(session.effort) },
                             set: { newValue in
+                                let sessionID = session.id
                                 store.stageSelectedRuntime(effort: newValue)
-                                Task { await store.updateSelected(effort: newValue, applyOptimistic: false) }
+                                Task { await store.updateSession(sessionID, effort: newValue, applyOptimistic: false) }
                             }
                         )) {
                             ForEach(effortOptions(for: session)) { option in

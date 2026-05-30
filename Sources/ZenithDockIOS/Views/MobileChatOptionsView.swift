@@ -189,7 +189,7 @@ struct MobileChatOptionsView: View {
         }
         .onAppear { syncDrafts() }
         .onChange(of: store.selectedSessionID) {
-            cancelRuntimeSave()
+            clearRuntimeSaveIndicator()
             syncDrafts()
         }
         .onChange(of: store.selectedSession?.backend) { syncDrafts() }
@@ -307,7 +307,10 @@ struct MobileChatOptionsView: View {
         isRuntimeSaving = true
         runtimeSaveFailed = false
         runtimeSaveMessage = "Saving runtime..."
-        let selectedID = store.selectedSessionID
+        guard let selectedID = store.selectedSessionID else {
+            clearRuntimeSaveIndicator()
+            return
+        }
         runtimeDraftSessionID = selectedID
         let backendValue = backend
         let modelValue = ZRuntimeCatalog.cleanForAPI(model)
@@ -318,7 +321,8 @@ struct MobileChatOptionsView: View {
                 try? await Task.sleep(nanoseconds: debounceNanoseconds)
             }
             guard !Task.isCancelled else { return }
-            let saved = await store.updateSelected(
+            let saved = await store.updateSession(
+                selectedID,
                 backend: backendValue,
                 model: modelValue,
                 effort: effortValue,
@@ -340,6 +344,14 @@ struct MobileChatOptionsView: View {
 
     private func cancelRuntimeSave() {
         runtimeSaveTask?.cancel()
+        runtimeSaveTask = nil
+        isRuntimeSaving = false
+        runtimeSaveFailed = false
+        runtimeSaveMessage = ""
+        runtimeDraftSessionID = nil
+    }
+
+    private func clearRuntimeSaveIndicator() {
         runtimeSaveTask = nil
         isRuntimeSaving = false
         runtimeSaveFailed = false

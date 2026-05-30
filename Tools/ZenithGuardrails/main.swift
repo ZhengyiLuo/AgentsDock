@@ -123,6 +123,9 @@ func checkRuntimeDefaultLabels() throws {
     try assert(inspector.contains("runtimeDraftSessionID") && mobileOptions.contains("runtimeDraftSessionID"), "Runtime draft controls must remember the in-flight session")
     try assert(inspector.contains("guard !shouldPreserveRuntimeDraft(for: session?.id) else { return }"), "Mac inspector must not overwrite in-flight runtime picker drafts from stale session refreshes")
     try assert(mobileOptions.contains("guard !shouldPreserveRuntimeDraft(for: session.id) else { return }"), "iOS options must not overwrite in-flight runtime picker drafts from stale session refreshes")
+    try assert(composer.contains("await store.updateSession(sessionID, model: cleanModel, applyOptimistic: false)") && composer.contains("await store.updateSession(sessionID, effort: cleanEffort, applyOptimistic: false)"), "Mac composer runtime saves must target the captured session ID so chat switching cannot revert or misroute them")
+    try assert(inspector.contains("await store.updateSession(") && inspector.contains("clearRuntimeSaveIndicator()"), "Mac inspector runtime saves must keep persisting against the captured session when switching chats")
+    try assert(mobileTimeline.contains("await store.updateSession(sessionID, model: newValue, applyOptimistic: false)") && mobileOptions.contains("await store.updateSession("), "iOS runtime saves must target captured session IDs instead of the current selection")
 }
 
 func checkBackendLocksAfterProviderStart() throws {
