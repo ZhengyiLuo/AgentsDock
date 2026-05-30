@@ -310,17 +310,22 @@ struct ComposerView: View {
 
     private func setBackend(_ backend: String) {
         guard store.selectedSession?.backend != backend else { return }
-        Task { await store.updateSelected(backend: backend, model: "", effort: "") }
+        store.stageSelectedRuntime(backend: backend, model: "", effort: "")
+        Task { await store.updateSelected(backend: backend, model: "", effort: "", applyOptimistic: false) }
     }
 
     private func setModel(_ model: String) {
         guard store.selectedSession != nil else { return }
-        Task { await store.updateSelected(model: ZRuntimeCatalog.cleanForAPI(model)) }
+        let cleanModel = ZRuntimeCatalog.cleanForAPI(model)
+        store.stageSelectedRuntime(model: cleanModel)
+        Task { await store.updateSelected(model: cleanModel, applyOptimistic: false) }
     }
 
     private func setEffort(_ effort: String) {
         guard store.selectedSession != nil else { return }
-        Task { await store.updateSelected(effort: ZRuntimeCatalog.cleanForAPI(effort)) }
+        let cleanEffort = ZRuntimeCatalog.cleanForAPI(effort)
+        store.stageSelectedRuntime(effort: cleanEffort)
+        Task { await store.updateSelected(effort: cleanEffort, applyOptimistic: false) }
     }
 
     private func sendDraft(_ submitted: String) {

@@ -359,6 +359,7 @@ struct InspectorView: View {
         let backendValue = backend
         let modelValue = ZRuntimeCatalog.cleanForAPI(model)
         let effortValue = ZRuntimeCatalog.cleanForAPI(effort)
+        store.stageSelectedRuntime(backend: backendValue, model: modelValue, effort: effortValue)
         runtimeSaveTask = Task {
             if debounceNanoseconds > 0 {
                 try? await Task.sleep(nanoseconds: debounceNanoseconds)
@@ -367,7 +368,8 @@ struct InspectorView: View {
             let saved = await store.updateSelected(
                 backend: backendValue,
                 model: modelValue,
-                effort: effortValue
+                effort: effortValue,
+                applyOptimistic: false
             )
             guard !Task.isCancelled else { return }
             await MainActor.run {

@@ -112,6 +112,10 @@ func checkRuntimeDefaultLabels() throws {
     try assert(server.contains("model_fields_set"), "Server turns must distinguish omitted runtime fields from explicit default resets")
     try assert(macStore.contains("applyOptimisticSessionPatch(sessionID: sid") && mobileStore.contains("applyOptimisticSessionPatch(sessionID: sessionID"), "Runtime changes must update local session state before the network round trip")
     try assert(macStore.contains("model: selectedSession?.model ?? \"\"") && mobileStore.contains("model: selectedSession?.model ?? \"\""), "User sends must carry the selected runtime so a quick send cannot revert to defaults")
+    let composer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/ComposerView.swift"), encoding: .utf8)
+    let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+    try assert(composer.contains("store.stageSelectedRuntime(model: cleanModel)") && composer.contains("applyOptimistic: false"), "Mac runtime menu must stage model changes synchronously before async save")
+    try assert(mobileTimeline.contains("store.stageSelectedRuntime(model: newValue)") && mobileTimeline.contains("applyOptimistic: false"), "iOS runtime menu must stage model changes synchronously before async save")
 }
 
 func checkBackendLocksAfterProviderStart() throws {

@@ -739,15 +739,17 @@ final class MobileAppStore: ObservableObject {
     }
 
     @discardableResult
-    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
         guard let sid = selectedSessionID else { return false }
-        return await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+        return await updateSession(sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived, applyOptimistic: applyOptimistic)
     }
 
     @discardableResult
-    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
-        let previousSession = sessions.first { $0.id == sessionID }
-        applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+    func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
+        let previousSession = applyOptimistic ? sessions.first { $0.id == sessionID } : nil
+        if applyOptimistic {
+            applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+        }
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -775,12 +777,17 @@ final class MobileAppStore: ObservableObject {
             }
             return true
         } catch {
-            if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
+            if applyOptimistic, let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = previousSession
             }
             report(error)
             return false
         }
+    }
+
+    func stageSelectedRuntime(backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard let sid = selectedSessionID else { return }
+        applyOptimisticSessionPatch(sessionID: sid, backend: backend, model: model, effort: effort)
     }
 
     private func applyOptimisticSessionPatch(sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) {

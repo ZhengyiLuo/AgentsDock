@@ -488,7 +488,10 @@ private struct MobileChatHeader: View {
                     if let session = store.selectedSession {
                         Picker("Backend", selection: Binding(
                             get: { session.backend },
-                            set: { newValue in Task { await store.updateSelected(backend: newValue, model: "") } }
+                            set: { newValue in
+                                store.stageSelectedRuntime(backend: newValue, model: "")
+                                Task { await store.updateSelected(backend: newValue, model: "", applyOptimistic: false) }
+                            }
                         )) {
                             Text("Claude").tag("claude")
                             Text("Codex").tag("codex")
@@ -496,7 +499,10 @@ private struct MobileChatHeader: View {
                         .disabled(session.isBackendLocked)
                         Picker("Model", selection: Binding(
                             get: { normalized(session.model) },
-                            set: { newValue in Task { await store.updateSelected(model: newValue) } }
+                            set: { newValue in
+                                store.stageSelectedRuntime(model: newValue)
+                                Task { await store.updateSelected(model: newValue, applyOptimistic: false) }
+                            }
                         )) {
                             ForEach(modelOptions(for: session)) { option in
                                 Text(option.label).tag(option.value)
@@ -504,7 +510,10 @@ private struct MobileChatHeader: View {
                         }
                         Picker("Effort", selection: Binding(
                             get: { normalized(session.effort) },
-                            set: { newValue in Task { await store.updateSelected(effort: newValue) } }
+                            set: { newValue in
+                                store.stageSelectedRuntime(effort: newValue)
+                                Task { await store.updateSelected(effort: newValue, applyOptimistic: false) }
+                            }
                         )) {
                             ForEach(effortOptions(for: session)) { option in
                                 Text(option.label).tag(option.value)

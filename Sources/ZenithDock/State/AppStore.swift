@@ -1319,10 +1319,12 @@ final class AppStore: ObservableObject {
     }
 
     @discardableResult
-    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
+    func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
         guard let sid = selectedSessionID else { return false }
-        let previousSession = sessions.first { $0.id == sid }
-        applyOptimisticSessionPatch(sessionID: sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+        let previousSession = applyOptimistic ? sessions.first { $0.id == sid } : nil
+        if applyOptimistic {
+            applyOptimisticSessionPatch(sessionID: sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
+        }
         struct Body: Codable {
             var title: String?
             var folder: String?
@@ -1351,12 +1353,17 @@ final class AppStore: ObservableObject {
             }
             return true
         } catch {
-            if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
+            if applyOptimistic, let previousSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = previousSession
             }
             reportServerError(error)
             return false
         }
+    }
+
+    func stageSelectedRuntime(backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard let sid = selectedSessionID else { return }
+        applyOptimisticSessionPatch(sessionID: sid, backend: backend, model: model, effort: effort)
     }
 
     func togglePin(_ session: ZSession) async {
