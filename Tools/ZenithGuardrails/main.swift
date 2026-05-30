@@ -118,6 +118,11 @@ func checkRuntimeDefaultLabels() throws {
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
     try assert(composer.contains("store.stageSelectedRuntime(model: cleanModel)") && composer.contains("applyOptimistic: false"), "Mac runtime menu must stage model changes synchronously before async save")
     try assert(mobileTimeline.contains("store.stageSelectedRuntime(model: newValue)") && mobileTimeline.contains("applyOptimistic: false"), "iOS runtime menu must stage model changes synchronously before async save")
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let mobileOptions = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+    try assert(inspector.contains("runtimeDraftSessionID") && mobileOptions.contains("runtimeDraftSessionID"), "Runtime draft controls must remember the in-flight session")
+    try assert(inspector.contains("guard !shouldPreserveRuntimeDraft(for: session?.id) else { return }"), "Mac inspector must not overwrite in-flight runtime picker drafts from stale session refreshes")
+    try assert(mobileOptions.contains("guard !shouldPreserveRuntimeDraft(for: session.id) else { return }"), "iOS options must not overwrite in-flight runtime picker drafts from stale session refreshes")
 }
 
 func checkBackendLocksAfterProviderStart() throws {

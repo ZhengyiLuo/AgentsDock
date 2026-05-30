@@ -4345,3 +4345,4 @@ Third follow-up:
 - Fixed the remaining Claude runtime snap-back-to-Sonnet path.
 - Root cause: a quick send can trigger unrelated session responses, such as auto-title updates, while the runtime save is still in flight. Those stale session payloads could overwrite the locally staged model back to the server's old default before the turn body was built.
 - Mac and iOS now keep pending runtime patches authoritative across server session merges until the server confirms the same backend/model/effort. Sends also capture the selected runtime before any auto-title/session updates.
+- Follow-up: inspector/options picker drafts now preserve their in-flight runtime selection while the save spinner is active, so UI refreshes cannot visually snap the control back to Sonnet before the server reply lands.

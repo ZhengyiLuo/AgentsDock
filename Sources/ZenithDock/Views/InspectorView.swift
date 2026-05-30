@@ -19,6 +19,7 @@ struct InspectorView: View {
     @State private var runtimeSaveMessage = ""
     @State private var isRuntimeSaving = false
     @State private var runtimeSaveFailed = false
+    @State private var runtimeDraftSessionID: String?
     @State private var jobTitle = ""
     @State private var jobPrompt = ""
     @State private var intervalText = "3600"
@@ -290,12 +291,14 @@ struct InspectorView: View {
     }
 
     func syncDrafts() {
-        title = store.selectedSession?.title ?? ""
-        folder = store.selectedSession?.folder ?? "General"
-        cwd = store.selectedSession?.cwd ?? store.defaultCwd
-        backend = store.selectedSession?.backend ?? "claude"
-        model = store.selectedSession?.model ?? ""
-        effort = store.selectedSession?.effort ?? ""
+        let session = store.selectedSession
+        title = session?.title ?? ""
+        folder = session?.folder ?? "General"
+        cwd = session?.cwd ?? store.defaultCwd
+        guard !shouldPreserveRuntimeDraft(for: session?.id) else { return }
+        backend = session?.backend ?? "claude"
+        model = session?.model ?? ""
+        effort = session?.effort ?? ""
     }
 
     func syncServerDrafts() {
@@ -348,6 +351,7 @@ struct InspectorView: View {
             if !isRuntimeSaving {
                 runtimeSaveMessage = ""
                 runtimeSaveFailed = false
+                runtimeDraftSessionID = nil
             }
             return
         }
@@ -356,6 +360,7 @@ struct InspectorView: View {
         runtimeSaveFailed = false
         runtimeSaveMessage = "Saving runtime..."
         let selectedID = store.selectedSessionID
+        runtimeDraftSessionID = selectedID
         let backendValue = backend
         let modelValue = ZRuntimeCatalog.cleanForAPI(model)
         let effortValue = ZRuntimeCatalog.cleanForAPI(effort)
@@ -378,6 +383,7 @@ struct InspectorView: View {
                 runtimeSaveFailed = !saved
                 runtimeSaveMessage = saved ? "Runtime saved" : "Runtime save failed"
                 if saved {
+                    runtimeDraftSessionID = nil
                     syncDrafts()
                 }
             }
@@ -390,6 +396,11 @@ struct InspectorView: View {
         isRuntimeSaving = false
         runtimeSaveFailed = false
         runtimeSaveMessage = ""
+        runtimeDraftSessionID = nil
+    }
+
+    func shouldPreserveRuntimeDraft(for sessionID: String?) -> Bool {
+        isRuntimeSaving && runtimeDraftSessionID != nil && runtimeDraftSessionID == sessionID
     }
 
     var runtimeSelectionChanged: Bool {

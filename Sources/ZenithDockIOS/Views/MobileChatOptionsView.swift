@@ -18,6 +18,7 @@ struct MobileChatOptionsView: View {
     @State private var runtimeSaveMessage = ""
     @State private var isRuntimeSaving = false
     @State private var runtimeSaveFailed = false
+    @State private var runtimeDraftSessionID: String?
     @State private var pinned = false
     @State private var archived = false
     @State private var jobTitle = ""
@@ -267,11 +268,12 @@ struct MobileChatOptionsView: View {
         title = session.title
         folder = session.folder ?? "General"
         cwd = session.cwd ?? store.defaultCwd
+        pinned = session.pinned == true
+        archived = session.archived == true
+        guard !shouldPreserveRuntimeDraft(for: session.id) else { return }
         backend = session.backend
         model = session.model ?? ""
         effort = session.effort ?? ""
-        pinned = session.pinned == true
-        archived = session.archived == true
     }
 
     @ViewBuilder
@@ -297,6 +299,7 @@ struct MobileChatOptionsView: View {
             if !isRuntimeSaving {
                 runtimeSaveMessage = ""
                 runtimeSaveFailed = false
+                runtimeDraftSessionID = nil
             }
             return
         }
@@ -305,6 +308,7 @@ struct MobileChatOptionsView: View {
         runtimeSaveFailed = false
         runtimeSaveMessage = "Saving runtime..."
         let selectedID = store.selectedSessionID
+        runtimeDraftSessionID = selectedID
         let backendValue = backend
         let modelValue = ZRuntimeCatalog.cleanForAPI(model)
         let effortValue = ZRuntimeCatalog.cleanForAPI(effort)
@@ -327,6 +331,7 @@ struct MobileChatOptionsView: View {
                 runtimeSaveFailed = !saved
                 runtimeSaveMessage = saved ? "Runtime saved" : "Runtime save failed"
                 if saved {
+                    runtimeDraftSessionID = nil
                     syncDrafts()
                 }
             }
@@ -339,6 +344,11 @@ struct MobileChatOptionsView: View {
         isRuntimeSaving = false
         runtimeSaveFailed = false
         runtimeSaveMessage = ""
+        runtimeDraftSessionID = nil
+    }
+
+    private func shouldPreserveRuntimeDraft(for sessionID: String?) -> Bool {
+        isRuntimeSaving && runtimeDraftSessionID != nil && runtimeDraftSessionID == sessionID
     }
 
     private var runtimeSelectionChanged: Bool {
