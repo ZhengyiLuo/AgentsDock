@@ -4333,3 +4333,9 @@ Third follow-up:
 - Runtime picker changes now save immediately and optimistically update the local session, so a quick send cannot overwrite the selected Claude model back to default before the save request lands.
 - Turn requests now include the current session model/effort. The server treats omitted runtime fields as "preserve current" and explicit empty strings as "reset to default."
 - Follow-up: composer and mobile inline runtime menus now stage the chosen runtime synchronously before their async save task starts. This closes the click-model-then-send race where send could still read the old default runtime.
+
+## 2026-05-29 - Folded Code Copy Uses Full Source
+
+- Fixed folded-message code blocks on Mac and iOS so the visible clipped markdown is separate from the copy source.
+- `MarkdownView` / `MobileMarkdownView` now accept full backing markdown for copy actions and match code blocks by order, so the inline code-copy button copies the complete original fenced block even while the message stays folded.
+- Added guardrails to catch regressions where folded message bubbles stop passing full text into markdown/code copy actions.

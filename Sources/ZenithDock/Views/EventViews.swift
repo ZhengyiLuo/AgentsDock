@@ -327,6 +327,7 @@ struct MessageBubble: View {
             .frame(maxWidth: .infinity)
             MarkdownView(
                 markdown: visibleText,
+                copyMarkdown: text,
                 alignment: isUser ? .trailing : .leading,
                 allowTruncation: !fullTextExpanded,
                 linkContext: linkContext

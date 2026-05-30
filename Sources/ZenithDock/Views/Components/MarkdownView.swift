@@ -10,6 +10,7 @@ import UIKit
 
 struct MarkdownView: View {
     let markdown: String
+    var copyMarkdown: String? = nil
     var alignment: HorizontalAlignment = .leading
     var compact = false
     var allowTruncation = true
@@ -17,6 +18,12 @@ struct MarkdownView: View {
 
     private var blocks: [MarkdownBlock] {
         MarkdownRenderCache.blocks(for: Self.renderable(markdown, allowTruncation: allowTruncation))
+    }
+
+    private var copyCodeBlocks: [MarkdownBlock] {
+        let source = copyMarkdown ?? markdown
+        return MarkdownRenderCache.blocks(for: Self.renderable(source, allowTruncation: false))
+            .filter { $0.kind == .code }
     }
 
     private var frameAlignment: Alignment {
@@ -31,7 +38,7 @@ struct MarkdownView: View {
                     MarkdownText(block.text, linkContext: linkContext)
                         .frame(maxWidth: .infinity, alignment: frameAlignment)
                 case .code:
-                    CodeBlock(text: block.text, language: block.language)
+                    CodeBlock(text: block.text, copySource: copyCodeText(for: block), language: block.language)
                 case .table:
                     if let table = block.table {
                         MarkdownTableView(table: table, linkContext: linkContext)
@@ -40,6 +47,13 @@ struct MarkdownView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: frameAlignment)
+    }
+
+    private func copyCodeText(for block: MarkdownBlock) -> String {
+        let visibleCodeIndex = blocks
+            .filter { $0.kind == .code && $0.id < block.id }
+            .count
+        return copyCodeBlocks[safe: visibleCodeIndex]?.text ?? block.text
     }
 
     private static func renderable(_ text: String, allowTruncation: Bool) -> String {
@@ -246,6 +260,7 @@ private struct MarkdownTableView: View {
 
 struct CodeBlock: View {
     let text: String
+    var copySource: String? = nil
     var language: String?
     var limit: Int?
 
@@ -263,7 +278,7 @@ struct CodeBlock: View {
     }
 
     private var copyText: String {
-        ZClipboardText.normalizedForCopy(text, language: language)
+        ZClipboardText.normalizedForCopy(copySource ?? text, language: language)
     }
 
     private var languageLabel: String {

@@ -169,12 +169,22 @@ func checkShellCopyNormalization() throws {
 func checkCodeBlockCopyUsesFullText() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let markdown = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/Components/MarkdownView.swift"), encoding: .utf8)
+    let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
 
+    try assert(markdown.contains("var copyMarkdown: String?"), "Mac MarkdownView should accept untrimmed markdown for copy actions")
+    try assert(markdown.contains("copyCodeBlocks"), "Mac MarkdownView should parse copy-only code blocks from the full message")
+    try assert(markdown.contains("CodeBlock(text: block.text, copySource: copyCodeText(for: block)"), "Mac code blocks inside folded messages must copy the full source block")
     try assert(markdown.contains("private var visibleDisplayText"), "Mac code block should keep a separate visible display string")
     try assert(markdown.contains("private var copyText"), "Mac code block should keep a separate full copy string")
-    try assert(markdown.contains("ZClipboardText.normalizedForCopy(text, language: language)"), "Mac code block copy must use the full backing text")
+    try assert(markdown.contains("ZClipboardText.normalizedForCopy(copySource ?? text, language: language)"), "Mac code block copy must use the full backing text")
     try assert(markdown.contains("copyToPasteboard(copyText)"), "Mac code block copy button/context menu must copy the full backing text")
     try assert(markdown.contains("CodeHighlighter.highlight(visibleDisplayText"), "Mac code block rendering should still use the visible truncated display text")
+    try assert(macEvents.contains("copyMarkdown: text"), "Mac folded message bubbles must pass full text into MarkdownView copy actions")
+    try assert(mobileEvents.contains("var copyMarkdown: String?"), "iOS MarkdownView should accept untrimmed markdown for copy actions")
+    try assert(mobileEvents.contains("MobileCodeBlock(text: block.text, copySource: copyCodeText(for: block)"), "iOS code blocks inside folded messages must copy the full source block")
+    try assert(mobileEvents.contains("ZClipboardText.normalizedForCopy(copySource ?? text, language: language)"), "iOS code block copy must use the full backing text")
+    try assert(mobileEvents.contains("MobileMarkdownView(markdown: visibleText, copyMarkdown: text"), "iOS folded message bubbles must pass full text into markdown copy actions")
 }
 
 func checkMessageFoldingThresholds() throws {

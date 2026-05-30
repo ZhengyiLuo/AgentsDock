@@ -224,7 +224,7 @@ struct MobileMessageBubble: View {
                 .buttonStyle(.borderless)
                 if !isUser { Spacer(minLength: 0) }
             }
-            MobileMarkdownView(markdown: visibleText, linkContext: linkContext)
+            MobileMarkdownView(markdown: visibleText, copyMarkdown: text, linkContext: linkContext)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
             if !attachments.isEmpty {
                 MobileMessageAttachmentStrip(attachments: attachments, isUser: isUser)
@@ -923,11 +923,22 @@ private struct MobileTraceRow: View {
 
 struct MobileMarkdownView: View {
     let markdown: String
+    var copyMarkdown: String? = nil
     var linkContext: ZMarkdownLinkContext?
+
+    private var blocks: [MobileMarkdownBlock] {
+        MobileMarkdownParser.parse(MobileTextCleanup.stripDecorativePrefixes(markdown))
+    }
+
+    private var copyCodeBlocks: [MobileMarkdownBlock] {
+        let source = copyMarkdown ?? markdown
+        return MobileMarkdownParser.parse(MobileTextCleanup.stripDecorativePrefixes(source))
+            .filter { $0.kind == .code }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            ForEach(MobileMarkdownParser.parse(MobileTextCleanup.stripDecorativePrefixes(markdown))) { block in
+            ForEach(blocks) { block in
                 switch block.kind {
                 case .prose:
                     Text(attributed(block.text, linkContext: linkContext))
@@ -935,7 +946,7 @@ struct MobileMarkdownView: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 case .code:
-                    MobileCodeBlock(text: block.text, language: block.language)
+                    MobileCodeBlock(text: block.text, copySource: copyCodeText(for: block), language: block.language)
                 case .table:
                     if let table = block.table {
                         MobileMarkdownTableView(table: table, linkContext: linkContext)
@@ -944,6 +955,13 @@ struct MobileMarkdownView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func copyCodeText(for block: MobileMarkdownBlock) -> String {
+        let visibleCodeIndex = blocks
+            .filter { $0.kind == .code && $0.id < block.id }
+            .count
+        return copyCodeBlocks[safe: visibleCodeIndex]?.text ?? block.text
     }
 
     private func attributed(_ text: String, linkContext: ZMarkdownLinkContext?) -> AttributedString {
@@ -1041,10 +1059,15 @@ private enum MobileTextCleanup {
 
 struct MobileCodeBlock: View {
     let text: String
+    var copySource: String? = nil
     var language: String?
 
     private var displayText: String {
         ZClipboardText.normalizedForCopy(text, language: language)
+    }
+
+    private var copyText: String {
+        ZClipboardText.normalizedForCopy(copySource ?? text, language: language)
     }
 
     var body: some View {
@@ -1055,7 +1078,7 @@ struct MobileCodeBlock: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    copyToPasteboard(displayText)
+                    copyToPasteboard(copyText)
                 } label: {
                     Image(systemName: "doc.on.doc")
                 }
