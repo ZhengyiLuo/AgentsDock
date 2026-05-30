@@ -4321,3 +4321,9 @@ Third follow-up:
 - Removed the remaining store-level live-message bottom-scroll triggers. Mac streamed event batches no longer call `requestScrollToBottom()`, and iOS streamed events no longer bump `scrollRevision`.
 - Explicit navigation still scrolls: opening/selecting chats, pressing the bottom/latest button, and forced open-to-latest requests keep their existing behavior.
 - Follow-up: sending a user message still requests an immediate bottom scroll, so active sends land at the composer/latest-turn area while passive agent output remains non-disruptive.
+
+## 2026-05-29 - Build 42 TestFlight Release
+
+- Deployed the current server to `sonic` with `./server/deploy.sh sonic`; `zenithbot-agent.service` is active and the deployed server contains the Claude Opus 4.8 / 1M runtime options.
+- Confirmed the standalone `ZenithBotServer` repository matches `server/agent_server.py` and pushed `main` to GitHub at `6d41fdd`.
+- Uploaded TestFlight build 42 for iOS/iPadOS and macOS from `build/archives/ZenithDockIOS-42.xcarchive` and `build/archives/ZenithDockMac-42.xcarchive`.
