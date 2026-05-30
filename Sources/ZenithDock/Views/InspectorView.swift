@@ -73,41 +73,30 @@ struct InspectorView: View {
                             .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .help("Save chat name")
                         }
-                        Picker("Backend", selection: $backend) {
+                        Picker("Backend", selection: backendRuntimeBinding) {
                             Text("Claude").tag("claude")
                             Text("Codex").tag("codex")
                         }
                         .pickerStyle(.segmented)
                         .disabled(session.isBackendLocked)
                         .help(session.isBackendLocked ? "Backend is locked after chat starts. Fork or create a new chat to use another backend." : "Backend")
-                        .onChange(of: backend) {
-                            model = ""
-                            effort = ""
-                            scheduleRuntimeSave(debounceNanoseconds: 0)
-                        }
-                        Picker("Model", selection: $model) {
+                        Picker("Model", selection: modelRuntimeBinding) {
                             ForEach(modelOptions(for: backend)) { option in
                                 Text(option.label).tag(option.value)
                             }
                         }
                         .pickerStyle(.menu)
-                        .onChange(of: model) {
-                            scheduleRuntimeSave(debounceNanoseconds: 0)
-                        }
                         TextField("Custom model ID", text: $model)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
                             .autocorrectionDisabled()
                             .onSubmit { scheduleRuntimeSave(debounceNanoseconds: 0) }
-                        Picker("Effort", selection: $effort) {
+                        Picker("Effort", selection: effortRuntimeBinding) {
                             ForEach(effortOptions) { option in
                                 Text(option.label).tag(option.value)
                             }
                         }
                         .pickerStyle(.menu)
-                        .onChange(of: effort) {
-                            scheduleRuntimeSave(debounceNanoseconds: 0)
-                        }
                         runtimeSaveStatus
                         LabeledContent("Pinned", value: session.pinned == true ? "Yes" : "No")
                         LabeledContent("Archived", value: session.archived == true ? "Yes" : "No")
@@ -304,6 +293,41 @@ struct InspectorView: View {
     func syncServerDrafts() {
         serverURLDraft = store.serverURLString
         accessTokenDraft = store.accessToken
+    }
+
+    var backendRuntimeBinding: Binding<String> {
+        Binding(
+            get: { backend },
+            set: { newValue in
+                guard backend != newValue else { return }
+                backend = newValue
+                model = ""
+                effort = ""
+                scheduleRuntimeSave(debounceNanoseconds: 0)
+            }
+        )
+    }
+
+    var modelRuntimeBinding: Binding<String> {
+        Binding(
+            get: { model },
+            set: { newValue in
+                guard model != newValue else { return }
+                model = newValue
+                scheduleRuntimeSave(debounceNanoseconds: 0)
+            }
+        )
+    }
+
+    var effortRuntimeBinding: Binding<String> {
+        Binding(
+            get: { effort },
+            set: { newValue in
+                guard effort != newValue else { return }
+                effort = newValue
+                scheduleRuntimeSave(debounceNanoseconds: 0)
+            }
+        )
     }
 
     func applyServerSettings() {

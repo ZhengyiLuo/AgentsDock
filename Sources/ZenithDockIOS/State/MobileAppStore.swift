@@ -6,6 +6,7 @@ private let defaultAgentServerHost = "127.0.0.1"
 private let defaultAgentServerPort = "7850"
 private let fallbackServerCwd = "~"
 private let minimumAgentAPIContractVersion = 3
+private let pendingRuntimePatchTimeout: TimeInterval = 12
 
 @MainActor
 final class MobileAppStore: ObservableObject {
@@ -82,9 +83,32 @@ final class MobileAppStore: ObservableObject {
         var model: String?
         var effortSet = false
         var effort: String?
+        var updatedAt = Date()
 
         var isEmpty: Bool {
             backend == nil && !modelSet && !effortSet
+        }
+
+        func isExpired(now: Date = Date()) -> Bool {
+            now.timeIntervalSince(updatedAt) > pendingRuntimePatchTimeout
+        }
+
+        mutating func touch() {
+            updatedAt = Date()
+        }
+
+        mutating func clearConfirmed(by session: ZSession) {
+            if let backend, session.backend == backend {
+                self.backend = nil
+            }
+            if modelSet && Self.runtimeValue(session.model) == model {
+                modelSet = false
+                model = nil
+            }
+            if effortSet && Self.runtimeValue(session.effort) == effort {
+                effortSet = false
+                effort = nil
+            }
         }
 
         func applying(to session: ZSession) -> ZSession {
@@ -99,6 +123,11 @@ final class MobileAppStore: ObservableObject {
                 merged.effort = effort
             }
             return merged
+        }
+
+        private static func runtimeValue(_ value: String?) -> String? {
+            let clean = ZRuntimeCatalog.cleaned(value)
+            return clean.isEmpty ? nil : clean
         }
     }
 
@@ -857,7 +886,18 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func sessionWithPendingRuntime(_ session: ZSession) -> ZSession {
-        pendingRuntimeBySessionID[session.id]?.applying(to: session) ?? session
+        guard var pending = pendingRuntimeBySessionID[session.id] else { return session }
+        if pending.isExpired() {
+            pendingRuntimeBySessionID[session.id] = nil
+            return session
+        }
+        pending.clearConfirmed(by: session)
+        if pending.isEmpty {
+            pendingRuntimeBySessionID[session.id] = nil
+            return session
+        }
+        pendingRuntimeBySessionID[session.id] = pending
+        return pending.applying(to: session)
     }
 
     private func markPendingRuntime(sessionID: String, backend: String? = nil, model: String? = nil, effort: String? = nil) {
@@ -874,6 +914,7 @@ final class MobileAppStore: ObservableObject {
             pending.effortSet = true
             pending.effort = runtimeSessionValue(effort)
         }
+        pending.touch()
         pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
     }
 

@@ -38,36 +38,25 @@ struct MobileChatOptionsView: View {
                 if let session = store.selectedSession {
                     Section("Session") {
                         TextField("Chat name", text: $title)
-                        Picker("Backend", selection: $backend) {
+                        Picker("Backend", selection: backendRuntimeBinding) {
                             Text("Claude").tag("claude")
                             Text("Codex").tag("codex")
                         }
                         .pickerStyle(.segmented)
                         .disabled(session.isBackendLocked)
-                        .onChange(of: backend) {
-                            model = ""
-                            effort = ""
-                            scheduleRuntimeSave(debounceNanoseconds: 0)
-                        }
-                        Picker("Model", selection: $model) {
+                        Picker("Model", selection: modelRuntimeBinding) {
                             ForEach(modelOptions(for: backend)) { option in
                                 Text(option.label).tag(option.value)
                             }
-                        }
-                        .onChange(of: model) {
-                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         TextField("Custom model ID", text: $model)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .onSubmit { scheduleRuntimeSave(debounceNanoseconds: 0) }
-                        Picker("Effort", selection: $effort) {
+                        Picker("Effort", selection: effortRuntimeBinding) {
                             ForEach(effortOptions) { option in
                                 Text(option.label).tag(option.value)
                             }
-                        }
-                        .onChange(of: effort) {
-                            scheduleRuntimeSave(debounceNanoseconds: 0)
                         }
                         runtimeSaveStatus
                         TextField("Folder", text: $folder)
@@ -274,6 +263,41 @@ struct MobileChatOptionsView: View {
         backend = session.backend
         model = session.model ?? ""
         effort = session.effort ?? ""
+    }
+
+    private var backendRuntimeBinding: Binding<String> {
+        Binding(
+            get: { backend },
+            set: { newValue in
+                guard backend != newValue else { return }
+                backend = newValue
+                model = ""
+                effort = ""
+                scheduleRuntimeSave(debounceNanoseconds: 0)
+            }
+        )
+    }
+
+    private var modelRuntimeBinding: Binding<String> {
+        Binding(
+            get: { model },
+            set: { newValue in
+                guard model != newValue else { return }
+                model = newValue
+                scheduleRuntimeSave(debounceNanoseconds: 0)
+            }
+        )
+    }
+
+    private var effortRuntimeBinding: Binding<String> {
+        Binding(
+            get: { effort },
+            set: { newValue in
+                guard effort != newValue else { return }
+                effort = newValue
+                scheduleRuntimeSave(debounceNanoseconds: 0)
+            }
+        )
     }
 
     @ViewBuilder

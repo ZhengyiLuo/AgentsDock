@@ -4353,3 +4353,10 @@ Third follow-up:
 - Mac live agent output now publishes a passive scroll-preservation revision before rendering streamed assistant/job/error events.
 - The timeline scroll observer records the prior NSScrollView visible origin and restores it after passive live layout changes, canceling any leftover forced-bottom settling from an earlier send. Explicit sends and open-latest actions still request bottom scrolling.
 - Added guardrails so streamed event batches cannot reintroduce bottom-scroll requests without also preserving the live viewport.
+
+## 2026-05-30 - Runtime Draft Sync Regression
+
+- Fixed the chat-switch path that could reset a Claude session back to the default model. The session inspector and iOS options sheet were using `onChange` handlers on draft picker state, so loading another chat into the draft fields could look like a user backend change and autosave `model=""`.
+- Runtime pickers now use explicit user-action bindings. Programmatic `syncDrafts()` updates no longer fire autosaves, while real picker changes still save immediately.
+- Pending runtime patches now reconcile against confirmed server session payloads and expire after a short timeout, so stale local runtime state cannot mask server truth indefinitely.
+- Added guardrails for the user-action binding requirement and pending-runtime reconciliation.
