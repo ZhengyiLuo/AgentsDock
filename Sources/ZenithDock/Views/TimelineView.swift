@@ -137,7 +137,8 @@ struct TimelineView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             TimelineScrollObserver(
-                                forceBottomRevision: store.forcedScrollToBottomRevision
+                                forceBottomRevision: store.forcedScrollToBottomRevision,
+                                preservePositionRevision: store.preserveTimelineScrollRevision
                             ) { metrics in
                                 updateBottomVisibility(metrics)
                                 handleHistoryTopDistance(
@@ -987,6 +988,7 @@ private struct TimelineScrollMetrics: Equatable {
 
 private struct TimelineScrollObserver: NSViewRepresentable {
     var forceBottomRevision: Int
+    var preservePositionRevision: Int
     var onChange: (TimelineScrollMetrics) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -1002,6 +1004,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.onChange = onChange
         context.coordinator.scheduleAttach(from: view)
+        context.coordinator.handlePreservePositionRevision(preservePositionRevision)
         context.coordinator.handleForceBottomRevision(forceBottomRevision)
     }
 
@@ -1018,6 +1021,8 @@ private struct TimelineScrollObserver: NSViewRepresentable {
         private var deliveryScheduled = false
         private var pendingDelivery: TimelineScrollMetrics?
         private var lastForceBottomRevision = 0
+        private var lastPreservePositionRevision = 0
+        private var lastVisibleOrigin: NSPoint?
         private var forceBottomUntil: Date?
         private var forceBottomScrollScheduled = false
         private var lastForceBottomScrollAt: TimeInterval = 0
@@ -1136,6 +1141,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             scrollView = nil
             documentView = nil
             lastMetrics = nil
+            lastVisibleOrigin = nil
             lastReportTime = 0
             trailingReportWorkItem?.cancel()
             trailingReportWorkItem = nil
@@ -1149,6 +1155,15 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             lastForceBottomRevision = revision
             forceBottomUntil = Date().addingTimeInterval(2.0)
             scheduleDocumentBottomScroll()
+        }
+
+        func handlePreservePositionRevision(_ revision: Int) {
+            guard revision != lastPreservePositionRevision else { return }
+            lastPreservePositionRevision = revision
+            forceBottomUntil = nil
+            forceBottomScrollScheduled = false
+            guard let lastVisibleOrigin else { return }
+            scheduleVisibleOriginRestore(lastVisibleOrigin)
         }
 
         private func scheduleReport() {
@@ -1189,6 +1204,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             guard let scrollView, let documentView = scrollView.documentView else { return }
             clampDocumentOriginIfNeeded(scrollView, documentView: documentView)
             let visibleRect = scrollView.documentVisibleRect
+            lastVisibleOrigin = visibleRect.origin
             let documentBounds = documentView.bounds
             let viewportHeight = max(scrollView.contentView.bounds.height, 0)
             let contentHeight = max(documentBounds.height, 0)
@@ -1280,6 +1296,44 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 targetY = documentBounds.minY
             }
             let target = NSPoint(x: clipView.bounds.minX, y: targetY)
+            clipView.scroll(to: target)
+            scrollView.reflectScrolledClipView(clipView)
+            scheduleReport()
+        }
+
+        private func scheduleVisibleOriginRestore(_ origin: NSPoint) {
+            guard !shouldForceBottom else { return }
+            for delay in [0.0, 0.04, 0.12] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, !self.shouldForceBottom else { return }
+                    self.restoreVisibleOrigin(origin)
+                }
+            }
+        }
+
+        private func restoreVisibleOrigin(_ origin: NSPoint) {
+            guard let scrollView,
+                  let documentView = scrollView.documentView else {
+                return
+            }
+            documentView.layoutSubtreeIfNeeded()
+            scrollView.layoutSubtreeIfNeeded()
+
+            let clipView = scrollView.contentView
+            let documentBounds = documentView.bounds
+            let viewportSize = clipView.bounds.size
+            let minX = documentBounds.minX
+            let minY = documentBounds.minY
+            let maxX = max(minX, documentBounds.maxX - viewportSize.width)
+            let maxY = max(minY, documentBounds.maxY - viewportSize.height)
+            let target = NSPoint(
+                x: min(max(origin.x, minX), maxX),
+                y: min(max(origin.y, minY), maxY)
+            )
+            guard abs(target.x - clipView.bounds.origin.x) > 0.5 ||
+                abs(target.y - clipView.bounds.origin.y) > 0.5 else {
+                return
+            }
             clipView.scroll(to: target)
             scrollView.reflectScrolledClipView(clipView)
             scheduleReport()

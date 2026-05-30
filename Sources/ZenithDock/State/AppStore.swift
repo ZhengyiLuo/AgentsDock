@@ -47,6 +47,7 @@ final class AppStore: ObservableObject {
     @Published var isLoadingOlderHistory = false
     @Published var scrollToBottomRevision = 0
     @Published var forcedScrollToBottomRevision = 0
+    @Published var preserveTimelineScrollRevision = 0
     @Published var scrollToEventID: String?
     @Published var scrollToEventRevision = 0
     @Published var processSnapshot: ZProcessSnapshot?
@@ -2172,6 +2173,9 @@ final class AppStore: ObservableObject {
            !shouldPreserveRenderableTimelineDuringBackgroundRefresh {
             beginLargeTimelineBatchMask()
         }
+        if buffered.contains(where: isAgentVisibleMessage) {
+            preserveTimelineScrollRevision += 1
+        }
         applyStreamEvents(buffered)
         if isApplyingLargeTimelineBatch {
             scheduleLargeTimelineBatchReveal()
@@ -2267,6 +2271,9 @@ final class AppStore: ObservableObject {
             let overflow = events.count - maxLoadedTimelineEvents
             events.removeFirst(overflow)
             omittedHistoryEventCount += overflow
+        }
+        if isAgentVisibleMessage(event) {
+            preserveTimelineScrollRevision += 1
         }
         rebuildDisplayEvents()
         if isAgentVisibleMessage(event) {

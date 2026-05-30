@@ -4347,3 +4347,9 @@ Third follow-up:
 - Mac and iOS now keep pending runtime patches authoritative across server session merges until the server confirms the same backend/model/effort. Sends also capture the selected runtime before any auto-title/session updates.
 - Follow-up: inspector/options picker drafts now preserve their in-flight runtime selection while the save spinner is active, so UI refreshes cannot visually snap the control back to Sonnet before the server reply lands.
 - Follow-up: runtime saves now persist against the captured chat ID instead of `selectedSessionID`, and switching chats only clears the visible save indicator without canceling the network save. This fixes the pick Opus, switch away, switch back path.
+
+## 2026-05-30 - Passive Timeline Scroll Stability
+
+- Mac live agent output now publishes a passive scroll-preservation revision before rendering streamed assistant/job/error events.
+- The timeline scroll observer records the prior NSScrollView visible origin and restores it after passive live layout changes, canceling any leftover forced-bottom settling from an earlier send. Explicit sends and open-latest actions still request bottom scrolling.
+- Added guardrails so streamed event batches cannot reintroduce bottom-scroll requests without also preserving the live viewport.
