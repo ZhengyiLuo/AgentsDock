@@ -2996,6 +2996,13 @@ def title_model_label(value: str) -> str:
     clean = str(value or "").strip()
     if not clean:
         return "Server default"
+    known = {
+        "opus[1m]": "Opus 1M",
+        "claude-opus-4-8": "Opus 4.8",
+        "claude-opus-4-8[1m]": "Opus 4.8 1M",
+    }
+    if clean.lower() in known:
+        return known[clean.lower()]
     special = {
         "gpt": "GPT",
         "codex": "Codex",
@@ -3128,7 +3135,9 @@ def parse_claude_help_catalog() -> dict[str, Any]:
                 [
                     runtime_option("sonnet", "Sonnet"),
                     runtime_option("opus", "Opus"),
+                    runtime_option("opus[1m]", "Opus 1M"),
                     runtime_option("claude-opus-4-8", "Opus 4.8"),
+                    runtime_option("claude-opus-4-8[1m]", "Opus 4.8 1M"),
                     runtime_option("haiku", "Haiku"),
                 ],
                 title_model_label(default_model),
@@ -3157,7 +3166,9 @@ def parse_claude_help_catalog() -> dict[str, Any]:
     for alias, label in (
         ("sonnet", "Sonnet"),
         ("opus", "Opus"),
+        ("opus[1m]", "Opus 1M"),
         ("claude-opus-4-8", "Opus 4.8"),
+        ("claude-opus-4-8[1m]", "Opus 4.8 1M"),
         ("haiku", "Haiku"),
     ):
         model_options.append(runtime_option(alias, label))

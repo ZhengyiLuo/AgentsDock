@@ -97,10 +97,15 @@ func checkRuntimeDefaultLabels() throws {
     try assert(fallbackCatalog.models(for: "codex").contains { $0.value == "gpt-5.5" }, "Codex fallback catalog must include GPT-5.5 while server discovery is unavailable")
     try assert(fallbackCatalog.efforts(for: "codex").contains { $0.value == "xhigh" }, "Codex fallback catalog must include XHigh effort while server discovery is unavailable")
     try assert(fallbackCatalog.models(for: "claude").contains { $0.value == "claude-opus-4-8" && $0.label == "Opus 4.8" }, "Claude fallback catalog must include Opus 4.8")
+    try assert(fallbackCatalog.models(for: "claude").contains { $0.value == "opus[1m]" && $0.label == "Opus 1M" }, "Claude fallback catalog must include Opus 1M")
+    try assert(fallbackCatalog.models(for: "claude").contains { $0.value == "claude-opus-4-8[1m]" && $0.label == "Opus 4.8 1M" }, "Claude fallback catalog must include Opus 4.8 1M")
 
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     try assert(server.contains("runtime_option(\"claude-opus-4-8\", \"Opus 4.8\")"), "Server runtime catalog must advertise Claude Opus 4.8")
+    try assert(server.contains("runtime_option(\"opus[1m]\", \"Opus 1M\")"), "Server runtime catalog must advertise Claude Opus 1M")
+    try assert(server.contains("runtime_option(\"claude-opus-4-8[1m]\", \"Opus 4.8 1M\")"), "Server runtime catalog must advertise Claude Opus 4.8 1M")
+    try assert(server.contains("\"claude-opus-4-8[1m]\": \"Opus 4.8 1M\""), "Server default labels must render Claude Opus 4.8 1M cleanly")
     try assert(server.contains("cmd.extend([\"--model\", str(sess[\"model\"])])"), "Claude launcher must pass selected models with --model")
 }
 

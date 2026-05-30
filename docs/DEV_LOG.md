@@ -4305,3 +4305,8 @@ Third follow-up:
 ## 2026-05-29 - Quiet Warm-Cache Chat Refreshes
 
 - Warm cached Mac chat opens now preserve the visible timeline during background latest-tail and stream backfill refreshes. Cold opens can still use the large-batch positioning mask, but a chat that already has renderable cached rows should not switch from visible content back into an opening spinner.
+
+## 2026-05-29 - Claude 1M Model Choices
+
+- Added explicit Claude model dropdown choices for `opus[1m]` and `claude-opus-4-8[1m]` in both the shared fallback catalog and server runtime catalog.
+- The server now labels those aliases as `Opus 1M` and `Opus 4.8 1M`, and still passes the selected value directly through `claude -p --model`.
