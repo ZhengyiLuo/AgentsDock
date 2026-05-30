@@ -4339,3 +4339,9 @@ Third follow-up:
 - Fixed folded-message code blocks on Mac and iOS so the visible clipped markdown is separate from the copy source.
 - `MarkdownView` / `MobileMarkdownView` now accept full backing markdown for copy actions and match code blocks by order, so the inline code-copy button copies the complete original fenced block even while the message stays folded.
 - Added guardrails to catch regressions where folded message bubbles stop passing full text into markdown/code copy actions.
+
+## 2026-05-30 - Runtime Selection Stale Merge Fix
+
+- Fixed the remaining Claude runtime snap-back-to-Sonnet path.
+- Root cause: a quick send can trigger unrelated session responses, such as auto-title updates, while the runtime save is still in flight. Those stale session payloads could overwrite the locally staged model back to the server's old default before the turn body was built.
+- Mac and iOS now keep pending runtime patches authoritative across server session merges until the server confirms the same backend/model/effort. Sends also capture the selected runtime before any auto-title/session updates.

@@ -86,6 +86,7 @@ final class AppStore: ObservableObject {
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
     private var pendingReadSyncBySessionID: [String: Int] = [:]
+    private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
     private var serverIdentity: String?
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
@@ -109,6 +110,32 @@ final class AppStore: ObservableObject {
         let events_omitted_after: Int?
         let latest_seq: Int?
         let event_count: Int?
+    }
+
+    private struct PendingRuntimePatch {
+        var backend: String?
+        var modelSet = false
+        var model: String?
+        var effortSet = false
+        var effort: String?
+
+        var isEmpty: Bool {
+            backend == nil && !modelSet && !effortSet
+        }
+
+        func applying(to session: ZSession) -> ZSession {
+            var merged = session
+            if let backend {
+                merged.backend = backend
+            }
+            if modelSet {
+                merged.model = model
+            }
+            if effortSet {
+                merged.effort = effort
+            }
+            return merged
+        }
     }
 
     struct OlderHistoryLoadResult: Sendable {
@@ -553,9 +580,7 @@ final class AppStore: ObservableObject {
     }
 
     private func applyServerReadSession(_ session: ZSession, allowReadCursorDecrease: Bool) {
-        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
-            sessions[idx] = session
-        }
+        replaceSessionFromServer(session)
         if let readSeq = session.last_read_agent_event_seq {
             setLastReadAgentSeq(readSeq, for: session.id, allowDecrease: allowReadCursorDecrease)
             if let latestSeq = session.latest_agent_event_seq, readSeq >= latestSeq {
@@ -842,7 +867,7 @@ final class AppStore: ObservableObject {
                 status = "Server connected"
             }
             if sessions != res.sessions {
-                sessions = res.sessions
+                sessions = sessionsWithPendingRuntime(res.sessions)
                 AppLogger.info("loaded sessions count=\(sessions.count)")
             }
             reconcileUnreadFromSessions()
@@ -1091,7 +1116,7 @@ final class AppStore: ObservableObject {
                 ]
             )
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[idx] = res.session
+                replaceSessionFromServer(res.session, at: idx)
             }
             guard selectedSessionID == sessionID, selectionGeneration == generation else {
                 AppLogger.info("drop stale selection response session=\(sessionID)")
@@ -1188,7 +1213,7 @@ final class AppStore: ObservableObject {
                 return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
             }
             if let latestSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
-                sessions[idx] = latestSession
+                replaceSessionFromServer(latestSession, at: idx)
             }
             var mergedEvents = (older + events).sorted { $0.seq < $1.seq }
             if mergedEvents.count > maxLoadedTimelineEvents {
@@ -1321,6 +1346,7 @@ final class AppStore: ObservableObject {
     @discardableResult
     func updateSelected(backend: String? = nil, model: String? = nil, effort: String? = nil, folder: String? = nil, title: String? = nil, cwd: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
         guard let sid = selectedSessionID else { return false }
+        markPendingRuntime(sessionID: sid, backend: backend, model: model, effort: effort)
         let previousSession = applyOptimistic ? sessions.first { $0.id == sid } : nil
         if applyOptimistic {
             applyOptimisticSessionPatch(sessionID: sid, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
@@ -1348,11 +1374,11 @@ final class AppStore: ObservableObject {
                 archived: archived
             )
             let res: Response = try await api.patch("/api/sessions/\(sid)", body: body)
-            if let idx = sessions.firstIndex(where: { $0.id == sid }) {
-                sessions[idx] = res.session
-            }
+            clearConfirmedPendingRuntime(sessionID: sid, confirmed: res.session, backend: backend, model: model, effort: effort)
+            replaceSessionFromServer(res.session)
             return true
         } catch {
+            discardPendingRuntime(sessionID: sid, backend: backend, model: model, effort: effort)
             if applyOptimistic, let previousSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 sessions[idx] = previousSession
             }
@@ -1363,6 +1389,7 @@ final class AppStore: ObservableObject {
 
     func stageSelectedRuntime(backend: String? = nil, model: String? = nil, effort: String? = nil) {
         guard let sid = selectedSessionID else { return }
+        markPendingRuntime(sessionID: sid, backend: backend, model: model, effort: effort)
         applyOptimisticSessionPatch(sessionID: sid, backend: backend, model: model, effort: effort)
     }
 
@@ -1391,7 +1418,7 @@ final class AppStore: ObservableObject {
         do {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.post("/api/sessions/\(session.id)/order", body: Body(direction: direction))
-            sessions = res.sessions
+            sessions = sessionsWithPendingRuntime(res.sessions)
             reconcileUnreadFromSessions()
         } catch {
             reportServerError(error)
@@ -1401,6 +1428,7 @@ final class AppStore: ObservableObject {
     @discardableResult
     func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil) async -> Bool {
         let previousSession = sessions.first { $0.id == sessionID }
+        markPendingRuntime(sessionID: sessionID, backend: backend, model: model, effort: effort)
         applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
         struct Body: Codable {
             var title: String?
@@ -1424,11 +1452,11 @@ final class AppStore: ObservableObject {
                 pinned: pinned,
                 archived: archived
             ))
-            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[idx] = res.session
-            }
+            clearConfirmedPendingRuntime(sessionID: sessionID, confirmed: res.session, backend: backend, model: model, effort: effort)
+            replaceSessionFromServer(res.session)
             return true
         } catch {
+            discardPendingRuntime(sessionID: sessionID, backend: backend, model: model, effort: effort)
             if let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = previousSession
             }
@@ -1465,6 +1493,82 @@ final class AppStore: ObservableObject {
         if let archived {
             sessions[idx].archived = archived
         }
+    }
+
+    private func replaceSessionFromServer(_ session: ZSession, at existingIndex: Int? = nil) {
+        guard let idx = existingIndex ?? sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        sessions[idx] = sessionWithPendingRuntime(session)
+    }
+
+    private func sessionsWithPendingRuntime(_ incoming: [ZSession]) -> [ZSession] {
+        incoming.map(sessionWithPendingRuntime)
+    }
+
+    private func sessionWithPendingRuntime(_ session: ZSession) -> ZSession {
+        pendingRuntimeBySessionID[session.id]?.applying(to: session) ?? session
+    }
+
+    private func markPendingRuntime(sessionID: String, backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard backend != nil || model != nil || effort != nil else { return }
+        var pending = pendingRuntimeBySessionID[sessionID] ?? PendingRuntimePatch()
+        if let backend {
+            pending.backend = backend.lowercased()
+        }
+        if let model {
+            pending.modelSet = true
+            pending.model = runtimeSessionValue(model)
+        }
+        if let effort {
+            pending.effortSet = true
+            pending.effort = runtimeSessionValue(effort)
+        }
+        pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
+    }
+
+    private func clearConfirmedPendingRuntime(sessionID: String, confirmed: ZSession, backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard var pending = pendingRuntimeBySessionID[sessionID] else { return }
+        if let backend {
+            let clean = backend.lowercased()
+            if pending.backend == clean && confirmed.backend == clean {
+                pending.backend = nil
+            }
+        }
+        if let model {
+            let clean = runtimeSessionValue(model)
+            if pending.modelSet && pending.model == clean && runtimeSessionValue(confirmed.model) == clean {
+                pending.modelSet = false
+                pending.model = nil
+            }
+        }
+        if let effort {
+            let clean = runtimeSessionValue(effort)
+            if pending.effortSet && pending.effort == clean && runtimeSessionValue(confirmed.effort) == clean {
+                pending.effortSet = false
+                pending.effort = nil
+            }
+        }
+        pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
+    }
+
+    private func discardPendingRuntime(sessionID: String, backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard var pending = pendingRuntimeBySessionID[sessionID] else { return }
+        if backend != nil {
+            pending.backend = nil
+        }
+        if model != nil {
+            pending.modelSet = false
+            pending.model = nil
+        }
+        if effort != nil {
+            pending.effortSet = false
+            pending.effort = nil
+        }
+        pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
+    }
+
+    private func runtimeSessionValue(_ value: String?) -> String? {
+        let clean = ZRuntimeCatalog.cleaned(value)
+        return clean.isEmpty ? nil : clean
     }
 
     func deleteSession(_ session: ZSession) async {
@@ -1554,6 +1658,8 @@ final class AppStore: ObservableObject {
         let trimmed = submittedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let wasRunning = isRunning
+        let runtimeModel = sessions.first { $0.id == sessionID }?.model ?? ""
+        let runtimeEffort = sessions.first { $0.id == sessionID }?.effort ?? ""
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
@@ -1578,13 +1684,11 @@ final class AppStore: ObservableObject {
                 body: Body(
                     prompt: trimmed,
                     file_ids: fileIDs,
-                    model: sessions.first { $0.id == sessionID }?.model ?? "",
-                    effort: sessions.first { $0.id == sessionID }?.effort ?? ""
+                    model: runtimeModel,
+                    effort: runtimeEffort
                 )
             )
-            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[idx] = res.session
-            }
+            replaceSessionFromServer(res.session)
             if res.queued == true {
                 AppLogger.info("turn queued session=\(sessionID) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
             } else {
@@ -1648,6 +1752,8 @@ final class AppStore: ObservableObject {
         let trimmed = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let wasRunning = isRunning
+        let runtimeModel = selectedSession?.model ?? ""
+        let runtimeEffort = selectedSession?.effort ?? ""
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
@@ -1672,8 +1778,8 @@ final class AppStore: ObservableObject {
             let body = Body(
                 prompt: trimmed,
                 file_ids: uploads.map(\.id),
-                model: selectedSession?.model ?? "",
-                effort: selectedSession?.effort ?? ""
+                model: runtimeModel,
+                effort: runtimeEffort
             )
             struct Response: Codable {
                 let run_id: String?
@@ -1683,9 +1789,7 @@ final class AppStore: ObservableObject {
                 let session: ZSession
             }
             let res: Response = try await api.post("/api/sessions/\(sid)/turns", body: body)
-            if let idx = sessions.firstIndex(where: { $0.id == sid }) {
-                sessions[idx] = res.session
-            }
+            replaceSessionFromServer(res.session)
             if res.queued == true {
                 AppLogger.info("turn queued session=\(sid) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
             } else {
@@ -2276,9 +2380,7 @@ final class AppStore: ObservableObject {
         sessionID: String,
         preserveExisting: Bool = true
     ) {
-        if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-            sessions[idx] = response.session
-        }
+        replaceSessionFromServer(response.session)
         let snapshotEvents = timelineEvents(from: response.events)
         let oldCount = events.count
         let preservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []

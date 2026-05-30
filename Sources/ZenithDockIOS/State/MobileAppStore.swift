@@ -56,6 +56,7 @@ final class MobileAppStore: ObservableObject {
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
     private var pendingReadSyncBySessionID: [String: Int] = [:]
+    private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
     private var serverIdentity: String?
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
@@ -73,6 +74,32 @@ final class MobileAppStore: ObservableObject {
         let events_omitted_after: Int?
         let latest_seq: Int?
         let event_count: Int?
+    }
+
+    private struct PendingRuntimePatch {
+        var backend: String?
+        var modelSet = false
+        var model: String?
+        var effortSet = false
+        var effort: String?
+
+        var isEmpty: Bool {
+            backend == nil && !modelSet && !effortSet
+        }
+
+        func applying(to session: ZSession) -> ZSession {
+            var merged = session
+            if let backend {
+                merged.backend = backend
+            }
+            if modelSet {
+                merged.model = model
+            }
+            if effortSet {
+                merged.effort = effort
+            }
+            return merged
+        }
     }
 
     init() {
@@ -452,9 +479,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func applyServerReadSession(_ session: ZSession, allowReadCursorDecrease: Bool) {
-        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
-            sessions[idx] = session
-        }
+        replaceSessionFromServer(session)
         if let readSeq = session.last_read_agent_event_seq {
             setLastReadAgentSeq(readSeq, for: session.id, allowDecrease: allowReadCursorDecrease)
             if let latestSeq = session.latest_agent_event_seq, readSeq >= latestSeq {
@@ -670,7 +695,7 @@ final class MobileAppStore: ObservableObject {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.get("/api/sessions")
             if sessions != res.sessions {
-                sessions = res.sessions
+                sessions = sessionsWithPendingRuntime(res.sessions)
             }
             reconcileUnreadFromSessions()
             if let selectedSessionID, !sessions.contains(where: { $0.id == selectedSessionID }) {
@@ -747,6 +772,7 @@ final class MobileAppStore: ObservableObject {
     @discardableResult
     func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
         let previousSession = applyOptimistic ? sessions.first { $0.id == sessionID } : nil
+        markPendingRuntime(sessionID: sessionID, backend: backend, model: model, effort: effort)
         if applyOptimistic {
             applyOptimisticSessionPatch(sessionID: sessionID, folder: folder, title: title, cwd: cwd, backend: backend, model: model, effort: effort, pinned: pinned, archived: archived)
         }
@@ -772,11 +798,11 @@ final class MobileAppStore: ObservableObject {
                 pinned: pinned,
                 archived: archived
             ))
-            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[idx] = res.session
-            }
+            clearConfirmedPendingRuntime(sessionID: sessionID, confirmed: res.session, backend: backend, model: model, effort: effort)
+            replaceSessionFromServer(res.session)
             return true
         } catch {
+            discardPendingRuntime(sessionID: sessionID, backend: backend, model: model, effort: effort)
             if applyOptimistic, let previousSession, let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 sessions[idx] = previousSession
             }
@@ -787,6 +813,7 @@ final class MobileAppStore: ObservableObject {
 
     func stageSelectedRuntime(backend: String? = nil, model: String? = nil, effort: String? = nil) {
         guard let sid = selectedSessionID else { return }
+        markPendingRuntime(sessionID: sid, backend: backend, model: model, effort: effort)
         applyOptimisticSessionPatch(sessionID: sid, backend: backend, model: model, effort: effort)
     }
 
@@ -820,6 +847,82 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
+    private func replaceSessionFromServer(_ session: ZSession, at existingIndex: Int? = nil) {
+        guard let idx = existingIndex ?? sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        sessions[idx] = sessionWithPendingRuntime(session)
+    }
+
+    private func sessionsWithPendingRuntime(_ incoming: [ZSession]) -> [ZSession] {
+        incoming.map(sessionWithPendingRuntime)
+    }
+
+    private func sessionWithPendingRuntime(_ session: ZSession) -> ZSession {
+        pendingRuntimeBySessionID[session.id]?.applying(to: session) ?? session
+    }
+
+    private func markPendingRuntime(sessionID: String, backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard backend != nil || model != nil || effort != nil else { return }
+        var pending = pendingRuntimeBySessionID[sessionID] ?? PendingRuntimePatch()
+        if let backend {
+            pending.backend = backend.lowercased()
+        }
+        if let model {
+            pending.modelSet = true
+            pending.model = runtimeSessionValue(model)
+        }
+        if let effort {
+            pending.effortSet = true
+            pending.effort = runtimeSessionValue(effort)
+        }
+        pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
+    }
+
+    private func clearConfirmedPendingRuntime(sessionID: String, confirmed: ZSession, backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard var pending = pendingRuntimeBySessionID[sessionID] else { return }
+        if let backend {
+            let clean = backend.lowercased()
+            if pending.backend == clean && confirmed.backend == clean {
+                pending.backend = nil
+            }
+        }
+        if let model {
+            let clean = runtimeSessionValue(model)
+            if pending.modelSet && pending.model == clean && runtimeSessionValue(confirmed.model) == clean {
+                pending.modelSet = false
+                pending.model = nil
+            }
+        }
+        if let effort {
+            let clean = runtimeSessionValue(effort)
+            if pending.effortSet && pending.effort == clean && runtimeSessionValue(confirmed.effort) == clean {
+                pending.effortSet = false
+                pending.effort = nil
+            }
+        }
+        pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
+    }
+
+    private func discardPendingRuntime(sessionID: String, backend: String? = nil, model: String? = nil, effort: String? = nil) {
+        guard var pending = pendingRuntimeBySessionID[sessionID] else { return }
+        if backend != nil {
+            pending.backend = nil
+        }
+        if model != nil {
+            pending.modelSet = false
+            pending.model = nil
+        }
+        if effort != nil {
+            pending.effortSet = false
+            pending.effort = nil
+        }
+        pendingRuntimeBySessionID[sessionID] = pending.isEmpty ? nil : pending
+    }
+
+    private func runtimeSessionValue(_ value: String?) -> String? {
+        let clean = ZRuntimeCatalog.cleaned(value)
+        return clean.isEmpty ? nil : clean
+    }
+
     func togglePin(_ session: ZSession) async {
         await updateSession(session.id, pinned: !(session.pinned ?? false))
     }
@@ -845,7 +948,7 @@ final class MobileAppStore: ObservableObject {
         do {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.post("/api/sessions/\(session.id)/order", body: Body(direction: direction))
-            sessions = res.sessions
+            sessions = sessionsWithPendingRuntime(res.sessions)
             reconcileUnreadFromSessions()
         } catch {
             report(error)
@@ -918,6 +1021,8 @@ final class MobileAppStore: ObservableObject {
     func sendPrompt(to sessionID: String, prompt submittedPrompt: String, fileIDs: [String] = []) async -> Bool {
         let trimmed = submittedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        let runtimeModel = sessions.first { $0.id == sessionID }?.model ?? ""
+        let runtimeEffort = sessions.first { $0.id == sessionID }?.effort ?? ""
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
@@ -940,13 +1045,11 @@ final class MobileAppStore: ObservableObject {
                 body: Body(
                     prompt: trimmed,
                     file_ids: fileIDs,
-                    model: sessions.first { $0.id == sessionID }?.model ?? "",
-                    effort: sessions.first { $0.id == sessionID }?.effort ?? ""
+                    model: runtimeModel,
+                    effort: runtimeEffort
                 )
             )
-            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[idx] = res.session
-            }
+            replaceSessionFromServer(res.session)
             launchDeferredText = nil
             syncSelectedRunningState()
             return true
@@ -1021,9 +1124,7 @@ final class MobileAppStore: ObservableObject {
                 ]
             )
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
-            if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[idx] = res.session
-            }
+            replaceSessionFromServer(res.session)
             applySessionEventSnapshot(res, sessionID: sessionID)
             markSessionRead(sessionID)
             refreshSessionFilesFromLoadedEvents()
@@ -1065,9 +1166,7 @@ final class MobileAppStore: ObservableObject {
                     URLQueryItem(name: "tail", value: "true")
                 ]
             )
-            if let idx = sessions.firstIndex(where: { $0.id == sid }) {
-                sessions[idx] = res.session
-            }
+            replaceSessionFromServer(res.session)
             let existingIDs = Set(events.map(\.id))
             let older = timelineEvents(from: res.events).filter { !existingIDs.contains($0.id) }
             events = (older + events).sorted { $0.seq < $1.seq }
@@ -1139,6 +1238,8 @@ final class MobileAppStore: ObservableObject {
         let sourcePrompt = submittedPrompt ?? prompt
         let trimmed = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        let runtimeModel = selectedSession?.model ?? ""
+        let runtimeEffort = selectedSession?.effort ?? ""
         struct Body: Codable {
             let prompt: String
             let file_ids: [String]
@@ -1160,13 +1261,11 @@ final class MobileAppStore: ObservableObject {
             let body = Body(
                 prompt: trimmed,
                 file_ids: uploads.map(\.id),
-                model: selectedSession?.model ?? "",
-                effort: selectedSession?.effort ?? ""
+                model: runtimeModel,
+                effort: runtimeEffort
             )
             let res: Response = try await api.post("/api/sessions/\(sid)/turns", body: body)
-            if let idx = sessions.firstIndex(where: { $0.id == sid }) {
-                sessions[idx] = res.session
-            }
+            replaceSessionFromServer(res.session)
             launchDeferredText = nil
             uploads = []
             clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)
@@ -1585,9 +1684,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func applySessionEventSnapshot(_ response: SessionEventsResponse, sessionID: String) {
-        if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
-            sessions[idx] = response.session
-        }
+        replaceSessionFromServer(response.session)
         events = timelineEvents(from: response.events)
         omittedHistoryEventCount = response.events_omitted_before ?? 0
         latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
@@ -1600,9 +1697,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func applyCachedChat(_ cached: CachedChat) {
-        if let idx = sessions.firstIndex(where: { $0.id == cached.session.id }) {
-            sessions[idx] = cached.session
-        }
+        replaceSessionFromServer(cached.session)
         events = timelineEvents(from: cached.events)
         omittedHistoryEventCount = cached.omittedHistoryEventCount
         sessionFiles = mergedFiles(cached.sessionFiles + files(from: events))
