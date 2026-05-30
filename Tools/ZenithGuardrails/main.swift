@@ -736,13 +736,27 @@ func checkLiveTimelineAutoFollow() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let macTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+    guard let macApplyRange = macStore.range(of: "private func applyStreamEvents"),
+          let macRunningRange = macStore.range(of: "private func syncSelectedRunningState", range: macApplyRange.upperBound..<macStore.endIndex),
+          let macIngestRange = macStore.range(of: "private func ingest"),
+          let macRequestScrollRange = macStore.range(of: "private func requestScrollToBottom", range: macIngestRange.upperBound..<macStore.endIndex),
+          let mobileIngestRange = mobileStore.range(of: "private func ingest"),
+          let mobileRunningRange = mobileStore.range(of: "private func updateRunningState", range: mobileIngestRange.upperBound..<mobileStore.endIndex) else {
+        throw GuardrailFailure.failed("Could not locate live timeline stream handlers")
+    }
+    let macApplyStreamBlock = macStore[macApplyRange.lowerBound..<macRunningRange.lowerBound]
+    let macIngestBlock = macStore[macIngestRange.lowerBound..<macRequestScrollRange.lowerBound]
+    let mobileIngestBlock = mobileStore[mobileIngestRange.lowerBound..<mobileRunningRange.lowerBound]
 
     try assert(macTimeline.contains("private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {\n        false\n    }"), "Mac timeline must not auto-scroll downward when new selected-chat messages arrive")
     try assert(macTimeline.contains("store.markAgentUnread(sessionID: sessionID, firstSeq: firstSeq)"), "Mac timeline must mark selected-chat agent output unread instead of auto-following")
     try assert(macTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "Mac live-follow must not expand the rendered window to the full chat history")
     try assert(macTimeline.contains("suppressHistoryLoading(for: 0.45)"), "Mac programmatic bottom scrolls must suppress older-history autoload")
     try assert(macTimeline.contains("store.markSelectedSessionRead(force: true)"), "Mac auto-follow must clear selected unread state intentionally")
+    try assert(!macApplyStreamBlock.contains("requestScrollToBottom()"), "Mac streamed event batches must not request bottom scrolling")
+    try assert(!macIngestBlock.contains("requestScrollToBottom()"), "Mac single streamed events must not request bottom scrolling")
     try assert(macStore.contains("pendingStreamEvents"), "Mac streaming catch-up must buffer burst events instead of publishing one-by-one flyby")
     try assert(macStore.contains("streamBackfillMaskThreshold"), "Mac streaming catch-up must mask large event bursts")
     try assert(macStore.contains("applyStreamEvents(buffered)"), "Mac streaming catch-up must apply buffered events as one batch")
@@ -750,6 +764,7 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(mobileTimeline.contains("store.markSessionUnread(sessionID)"), "iOS timeline must mark selected-chat agent output unread instead of auto-following")
     try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
     try assert(mobileTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "iOS live-follow must not expand the rendered window to the full chat history")
+    try assert(!mobileIngestBlock.contains("scrollRevision += 1"), "iOS streamed events must not request bottom scrolling")
 }
 
 func checkQueuedRemovalDisappears() throws {

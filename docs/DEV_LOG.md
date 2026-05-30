@@ -4315,3 +4315,8 @@ Third follow-up:
 
 - Mac and iOS session refresh now adopt the server `last_read_agent_event_seq` as authoritative, including decreases from another device's manual unread state or from stale local caches.
 - In-flight local read posts are still protected, so a refresh cannot briefly move the local cursor backward while this device is actively syncing a newer read cursor.
+
+## 2026-05-29 - No Live Message Auto-Scroll
+
+- Removed the remaining store-level live-message bottom-scroll triggers. Mac streamed event batches no longer call `requestScrollToBottom()`, and iOS streamed events no longer bump `scrollRevision`.
+- Explicit navigation still scrolls: opening/selecting chats, pressing the bottom/latest button, and forced open-to-latest requests keep their existing behavior.

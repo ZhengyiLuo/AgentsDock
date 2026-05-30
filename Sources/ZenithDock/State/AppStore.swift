@@ -2036,7 +2036,6 @@ final class AppStore: ObservableObject {
         }
         latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
         var shouldSaveCache = false
-        var shouldScrollToBottom = false
         for event in newEvents {
             if isAgentVisibleMessage(event) {
                 if event.session_id != selectedSessionID {
@@ -2073,14 +2072,10 @@ final class AppStore: ObservableObject {
             if event.type != "raw_event" {
                 shouldSaveCache = true
             }
-            shouldScrollToBottom = true
         }
         rebuildDisplayEvents()
         if shouldSaveCache {
             saveSelectedChatCache()
-        }
-        if shouldScrollToBottom {
-            requestScrollToBottom()
         }
     }
 
@@ -2139,7 +2134,6 @@ final class AppStore: ObservableObject {
         if event.type != "raw_event" {
             saveSelectedChatCache()
         }
-        requestScrollToBottom()
     }
 
     private func requestScrollToBottom(immediate: Bool = false) {

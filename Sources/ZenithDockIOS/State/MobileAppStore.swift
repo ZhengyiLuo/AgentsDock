@@ -1481,7 +1481,6 @@ final class MobileAppStore: ObservableObject {
         if event.type != "raw_event" {
             rememberSelectedChat()
         }
-        scrollRevision += 1
     }
 
     private func updateRunningState(from event: ZEvent) {
