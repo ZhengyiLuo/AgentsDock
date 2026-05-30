@@ -489,6 +489,13 @@ final class AppStore: ObservableObject {
         saveReadState()
     }
 
+    private func adoptServerReadCursor(_ seq: Int, for sessionID: String) {
+        if let pending = pendingReadSyncBySessionID[sessionID], pending > seq {
+            return
+        }
+        setLastReadAgentSeq(seq, for: sessionID, allowDecrease: true)
+    }
+
     private struct ReadSessionResponse: Codable {
         let session: ZSession
     }
@@ -577,9 +584,8 @@ final class AppStore: ObservableObject {
         for session in sessions {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
             let serverManualUnread = session.manual_unread == true
-            if let serverReadSeq = session.last_read_agent_event_seq,
-               serverReadSeq > (lastReadAgentSeqBySessionID[session.id] ?? 0) {
-                setLastReadAgentSeq(serverReadSeq, for: session.id)
+            if let serverReadSeq = session.last_read_agent_event_seq {
+                adoptServerReadCursor(serverReadSeq, for: session.id)
             }
             if serverManualUnread, session.id != selectedSessionID {
                 manuallyUnreadSessionIDs.insert(session.id)

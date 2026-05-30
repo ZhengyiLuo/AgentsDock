@@ -4310,3 +4310,8 @@ Third follow-up:
 
 - Added explicit Claude model dropdown choices for `opus[1m]` and `claude-opus-4-8[1m]` in both the shared fallback catalog and server runtime catalog.
 - The server now labels those aliases as `Opus 1M` and `Opus 4.8 1M`, and still passes the selected value directly through `claude -p --model`.
+
+## 2026-05-29 - Cross-Device Unread Cursor Authority
+
+- Mac and iOS session refresh now adopt the server `last_read_agent_event_seq` as authoritative, including decreases from another device's manual unread state or from stale local caches.
+- In-flight local read posts are still protected, so a refresh cannot briefly move the local cursor backward while this device is actively syncing a newer read cursor.
