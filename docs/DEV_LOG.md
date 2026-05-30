@@ -4320,3 +4320,4 @@ Third follow-up:
 
 - Removed the remaining store-level live-message bottom-scroll triggers. Mac streamed event batches no longer call `requestScrollToBottom()`, and iOS streamed events no longer bump `scrollRevision`.
 - Explicit navigation still scrolls: opening/selecting chats, pressing the bottom/latest button, and forced open-to-latest requests keep their existing behavior.
+- Follow-up: sending a user message still requests an immediate bottom scroll, so active sends land at the composer/latest-turn area while passive agent output remains non-disruptive.

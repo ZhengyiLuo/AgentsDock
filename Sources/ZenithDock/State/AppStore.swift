@@ -1522,6 +1522,7 @@ final class AppStore: ObservableObject {
             activeSessionIDs.insert(sessionID)
             if sessionID == selectedSessionID {
                 isRunning = true
+                requestScrollToBottom(immediate: true)
             }
             let res: Response = try await api.post(
                 "/api/sessions/\(sessionID)/turns",
@@ -1603,6 +1604,7 @@ final class AppStore: ObservableObject {
             if submittedPrompt == nil {
                 prompt = ""
             }
+            requestScrollToBottom(immediate: true)
             AppLogger.info("send prompt session=\(sid) chars=\(trimmed.count) files=\(uploads.count)")
             if let session = selectedSession {
                 let currentTitle = session.title.trimmingCharacters(in: .whitespacesAndNewlines)

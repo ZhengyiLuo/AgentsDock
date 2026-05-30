@@ -757,6 +757,7 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(macTimeline.contains("store.markSelectedSessionRead(force: true)"), "Mac auto-follow must clear selected unread state intentionally")
     try assert(!macApplyStreamBlock.contains("requestScrollToBottom()"), "Mac streamed event batches must not request bottom scrolling")
     try assert(!macIngestBlock.contains("requestScrollToBottom()"), "Mac single streamed events must not request bottom scrolling")
+    try assert(macStore.contains("requestScrollToBottom(immediate: true)\n            AppLogger.info(\"send prompt"), "Mac user sends must still scroll the timeline to the bottom")
     try assert(macStore.contains("pendingStreamEvents"), "Mac streaming catch-up must buffer burst events instead of publishing one-by-one flyby")
     try assert(macStore.contains("streamBackfillMaskThreshold"), "Mac streaming catch-up must mask large event bursts")
     try assert(macStore.contains("applyStreamEvents(buffered)"), "Mac streaming catch-up must apply buffered events as one batch")
@@ -765,6 +766,7 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
     try assert(mobileTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "iOS live-follow must not expand the rendered window to the full chat history")
     try assert(!mobileIngestBlock.contains("scrollRevision += 1"), "iOS streamed events must not request bottom scrolling")
+    try assert(mobileStore.contains("syncSelectedRunningState()\n        scrollRevision += 1\n        do {"), "iOS user sends must still scroll the timeline to the bottom")
 }
 
 func checkQueuedRemovalDisappears() throws {

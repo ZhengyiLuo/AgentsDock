@@ -888,6 +888,7 @@ final class MobileAppStore: ObservableObject {
         activeSessionIDs.insert(sessionID)
         if sessionID == selectedSessionID {
             syncSelectedRunningState()
+            scrollRevision += 1
         }
         do {
             let res: Response = try await api.post(
@@ -1098,6 +1099,7 @@ final class MobileAppStore: ObservableObject {
         }
         activeSessionIDs.insert(sid)
         syncSelectedRunningState()
+        scrollRevision += 1
         do {
             struct Response: Codable {
                 let run_id: String?
