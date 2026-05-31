@@ -4364,3 +4364,6 @@ Third follow-up:
 ## 2026-05-31 - Build 43 TestFlight Prep
 
 - Bumped the shared Xcode `CURRENT_PROJECT_VERSION` from `42` to `43` for the iOS/iPadOS and macOS TestFlight upload containing the runtime draft-sync regression fix.
+- Uploaded TestFlight build `43` for both platforms:
+  - `build/archives/ZenithDockIOS-43.xcarchive` -> `Uploaded ZenithDockIOS`
+  - `build/archives/ZenithDockMac-43.xcarchive` -> `Uploaded ZenithDockMac`
