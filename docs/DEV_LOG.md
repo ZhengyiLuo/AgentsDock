@@ -4381,3 +4381,7 @@ Third follow-up:
 - Replaced the per-IP ATS whitelist with a simple `NSAllowsArbitraryLoads` policy for both iOS/iPadOS and macOS TestFlight builds. ZenithDock is a user-configured private agent client; the bearer token and reachable private network are the security boundary, not a baked-in IP list.
 - Polished the Local Network usage prompt and updated the `-1022` error copy so it no longer tells users to install a build with a hard-coded ATS exception.
 - Added `ZenithGuardrails` coverage that fails if `NSExceptionDomains`, `NSAllowsLocalNetworking`, or lab/Tailscale IP literals come back in either app plist.
+
+## 2026-05-31 - Build 44 TestFlight Prep
+
+- Bumped the shared Xcode `CURRENT_PROJECT_VERSION` from `43` to `44` for the iOS/iPadOS and macOS TestFlight upload containing the arbitrary agent HTTP transport fix and warm chat-switch cache optimization.
