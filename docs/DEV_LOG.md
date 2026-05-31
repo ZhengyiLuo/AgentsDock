@@ -4367,3 +4367,10 @@ Third follow-up:
 - Uploaded TestFlight build `43` for both platforms:
   - `build/archives/ZenithDockIOS-43.xcarchive` -> `Uploaded ZenithDockIOS`
   - `build/archives/ZenithDockMac-43.xcarchive` -> `Uploaded ZenithDockMac`
+
+## 2026-05-31 - Chat Switch Warm Cache Optimization
+
+- Profiling logs showed memory-cache chat switches restoring up to `1,440` events and rebuilding timeline projections for all of them even though the UI initially renders only the last `100` rows.
+- Memory-cache switches now render a `480` event warm tail while the full disk cache still retains the expanded local window. This preserves a three-page recent context without making every chat switch pay for older pages.
+- Cached latest-tail refreshes now skip timeline rebuilding when the server response contains no new visible events, and no longer send a second bottom-scroll request for no-op refreshes.
+- Rebuilt `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and synced the app bundle to `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.

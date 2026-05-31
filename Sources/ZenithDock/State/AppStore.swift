@@ -988,7 +988,7 @@ final class AppStore: ObservableObject {
         isApplyingLargeTimelineBatch = false
         if loadingSessionID == sessionID {
             if loadedSessionID != sessionID, let cached = memoryCachedChat(sessionID) {
-                applyCachedChat(cached)
+                applyCachedChat(cached, renderLimit: maxWarmCachedTimelineEvents)
                 status = "Loaded memory chat"
             }
             selectedSessionID = sessionID
@@ -1016,10 +1016,10 @@ final class AppStore: ObservableObject {
         }
         var loadedFromCache = false
         if let warmCachedChat {
-            applyCachedChat(warmCachedChat)
+            applyCachedChat(warmCachedChat, renderLimit: maxWarmCachedTimelineEvents)
             loadedFromCache = true
             status = "Loaded memory chat"
-            AppLogger.info("loaded memory cache before selection session=\(sessionID) events=\(warmCachedChat.events.count) omitted_before=\(warmCachedChat.omittedHistoryEventCount)")
+            AppLogger.info("loaded memory cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
         }
         selectedSessionID = sessionID
         syncSelectedRunningState()
@@ -1111,16 +1111,16 @@ final class AppStore: ObservableObject {
                 return
             }
             let previousSeq = lastSeq
-            applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
+            let changedTimeline = applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
             markSessionRead(sessionID)
             loadedSessionID = sessionID
             saveSelectedChatCache()
-            if selectedTimelineAtBottom || lastSeq > cachedLastSeq {
+            if changedTimeline && lastSeq > cachedLastSeq {
                 requestScrollToBottom(immediate: true)
             }
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
-            AppLogger.info("loaded cached latest tail session=\(sessionID) previous=\(previousSeq) cached=\(cachedLastSeq) latest=\(lastSeq) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            AppLogger.info("loaded cached latest tail session=\(sessionID) previous=\(previousSeq) cached=\(cachedLastSeq) latest=\(lastSeq) events=\(events.count) changed=\(changedTimeline) omitted_before=\(omittedHistoryEventCount)")
         } catch {
             AppLogger.warning("cached tail refresh failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
         }
@@ -2426,11 +2426,12 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @discardableResult
     private func applySessionEventSnapshot(
         _ response: SessionEventsResponse,
         sessionID: String,
         preserveExisting: Bool = true
-    ) {
+    ) -> Bool {
         replaceSessionFromServer(response.session)
         let snapshotEvents = timelineEvents(from: response.events)
         let oldCount = events.count
@@ -2449,6 +2450,20 @@ final class AppStore: ObservableObject {
         )
         if shouldMaskLargeBatch {
             beginLargeTimelineBatchMask()
+        }
+        if preserveExisting,
+           !preservedEvents.isEmpty,
+           newSnapshotEventCount == 0 {
+            let firstSnapshotSeq = snapshotEvents.map(\.seq).min()
+            let preservedBeforeSnapshot = firstSnapshotSeq.map { seq in
+                preservedEvents.filter { $0.seq < seq }.count
+            } ?? 0
+            omittedHistoryEventCount = max(0, (response.events_omitted_before ?? 0) - preservedBeforeSnapshot)
+            latestSeenSeq = max(response.latest_seq ?? 0, latestSeenSeq, events.map(\.seq).max() ?? 0)
+            if shouldMaskLargeBatch {
+                scheduleLargeTimelineBatchReveal()
+            }
+            return false
         }
         if preservedEvents.isEmpty {
             events = snapshotEvents
@@ -2481,6 +2496,7 @@ final class AppStore: ObservableObject {
         if shouldMaskLargeBatch {
             scheduleLargeTimelineBatchReveal()
         }
+        return true
     }
 
     private func requestScrollToEvent(_ eventID: String) {
@@ -2493,12 +2509,13 @@ final class AppStore: ObservableObject {
         uploads.append(file)
     }
 
-    private func applyCachedChat(_ cached: CachedChat) {
+    private func applyCachedChat(_ cached: CachedChat, renderLimit: Int? = nil) {
         if !sessions.contains(where: { $0.id == cached.session.id }) {
             sessions.append(cached.session)
         }
         let cachedEvents = timelineEvents(from: cached.events)
-        events = Array(cachedEvents.suffix(maxCachedTimelineEvents))
+        let limit = renderLimit ?? maxCachedTimelineEvents
+        events = Array(cachedEvents.suffix(limit))
         omittedHistoryEventCount = cached.omittedHistoryEventCount + max(0, cachedEvents.count - events.count)
         sessionFiles = mergedFiles((cached.sessionFiles ?? []) + files(from: events))
         sessionVideoFiles = mergedFiles(sessionFiles.filter { ($0.content_type ?? "").hasPrefix("video/") })

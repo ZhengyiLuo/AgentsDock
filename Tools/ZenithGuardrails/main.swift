@@ -419,6 +419,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("timelineRowsStructurallySuspended ? [] : store.displayEvents"), "Mac timeline must not build rows while a large sync batch is masked")
     try assert(!timeline.contains("suffix(projectionEventLimit)"), "Mac timeline must not hide loaded older events behind a latest-only projection")
     try assert(macStore.contains("private let maxWarmCachedTimelineEvents = 480"), "Mac warm-cache chat switches must render only the recent tail")
+    try assert(macStore.contains("applyCachedChat(warmCachedChat, renderLimit: maxWarmCachedTimelineEvents)"), "Mac memory-cache chat switches must apply only the warm recent tail")
+    try assert(macStore.contains("applyCachedChat(cached, renderLimit: maxWarmCachedTimelineEvents)"), "Mac duplicate-selection memory restores must apply only the warm recent tail")
     try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
     try assert(!macStore.contains("connectEvents(sessionID: sessionID, after: cachedLastSeq)"), "Mac warm-cache chat switches must not replay the whole websocket gap before refreshing the latest tail")
     try assert(macStore.contains("refreshCachedSessionLatestTail"), "Mac warm-cache chat switches must refresh the server latest tail")
@@ -429,6 +431,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("isRefreshingCachedDelta = true"), "Mac cached chat refresh must still mark its background refresh state")
     try assert(macStore.contains("let newSnapshotEventCount = preserveExisting"), "Mac cached tail refresh must count only actually new events for large-batch masking")
     try assert(macStore.contains("incomingCount: newSnapshotEventCount"), "Mac no-op latest-tail refreshes must not trigger large-batch timeline masking")
+    try assert(macStore.contains("newSnapshotEventCount == 0") && macStore.contains("return false"), "Mac no-op cached tail refreshes must skip timeline rebuilds")
     try assert(macStore.contains("guard !newEvents.isEmpty else"), "Mac event merge must skip timeline rebuilds when catch-up returns duplicate/no-op events")
     guard let memorySnapshotRange = macStore.range(of: "private func rememberSelectedChatInMemory()"),
           let diskSnapshotRange = macStore.range(of: "private func saveSelectedChatCache()", range: memorySnapshotRange.upperBound..<macStore.endIndex) else {
@@ -718,7 +721,8 @@ func checkTimelineHistoryPaging() throws {
 
     try assert(macStore.contains("private let initialSessionEventLimit = 480"), "Mac chat selection must load a three-page recent window")
     try assert(macStore.contains("private let maxCachedTimelineEvents = 1_440"), "Mac chat cache must retain more than the initial recent window")
-    try assert(macStore.contains("events = Array(cachedEvents.suffix(maxCachedTimelineEvents))"), "Mac cached chat restores must keep previously loaded older pages")
+    try assert(macStore.contains("let limit = renderLimit ?? maxCachedTimelineEvents"), "Mac disk cached chat restores must keep older pages while memory switches can render a warm tail")
+    try assert(macStore.contains("events = Array(cachedEvents.suffix(limit))"), "Mac cached chat restores must apply the requested cache render window")
     try assert(macStore.contains(".suffix(maxCachedTimelineEvents)"), "Mac memory/disk chat cache must retain expanded older-page windows")
     try assert(macStore.contains("drop stale older history session="), "Older-history responses must not mutate the timeline after switching chats")
     try assert(macStore.contains("preserveExisting ? events.filter { $0.session_id == sessionID } : []"), "Fresh session snapshots must support preserving cached pages for same-chat full refreshes")
