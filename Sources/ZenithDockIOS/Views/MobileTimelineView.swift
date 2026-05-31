@@ -117,7 +117,7 @@ struct MobileTimelineView: View {
                     )
                     if !isAtBottom && !displayEvents.isEmpty {
                         Button {
-                            scrollToBottom(proxy)
+                            scrollToBottom(proxy, animated: true)
                         } label: {
                             Image(systemName: "arrow.down.to.line.compact")
                                 .font(.headline)
@@ -192,11 +192,20 @@ struct MobileTimelineView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)
-        withAnimation(.snappy) {
+        let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
+        }
+        if animated {
+            withAnimation(.snappy) {
+                action()
+            }
+        } else {
+            withTransaction(noAnimationTransaction) {
+                action()
+            }
         }
     }
 

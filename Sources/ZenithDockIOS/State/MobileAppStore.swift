@@ -1173,7 +1173,6 @@ final class MobileAppStore: ObservableObject {
             rememberSelectedChat()
             Task { await loadSessionFiles(sessionID: sessionID, generation: generation) }
             connectEvents(sessionID: sessionID, after: lastSeq)
-            scrollRevision += 1
         } catch {
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
             isLoading = false

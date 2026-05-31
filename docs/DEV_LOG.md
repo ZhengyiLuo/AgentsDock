@@ -4386,3 +4386,10 @@ Third follow-up:
 
 - Bumped the shared Xcode `CURRENT_PROJECT_VERSION` from `43` to `44` for the iOS/iPadOS and macOS TestFlight upload containing the arbitrary agent HTTP transport fix and warm chat-switch cache optimization.
 - Uploaded macOS TestFlight build `44` from `build/archives/ZenithDockMac-44.xcarchive` -> `Uploaded ZenithDockMac`.
+
+## 2026-05-31 - iOS Chat Open Fly-By Fix
+
+- iOS chat opening was reusing the animated bottom-scroll helper, so a newly loaded timeline could visibly scroll through history before landing at the newest message.
+- Changed iOS bottom positioning to default to a non-animated transaction. The explicit bottom button still animates, but chat selection/history snapshot application now jumps directly to the latest row.
+- Removed the extra `scrollRevision` emitted after `MobileAppStore.select` loads a chat snapshot; send still emits its scroll revision, while opening a chat relies on the timeline's pending-open settle path.
+- Added `ZenithGuardrails` checks so iOS chat opens cannot accidentally reintroduce send-style animated scroll revisions or animated default bottom positioning.

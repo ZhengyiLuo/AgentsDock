@@ -448,6 +448,14 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(mobileTimeline.contains("store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty"), "iOS timeline must reveal cached selected-chat rows while refreshing")
     try assert(mobileTimeline.contains("timelineRowsSuspended ? [] : store.displayEvents"), "iOS timeline must structurally suspend row rendering only for cold opens")
     try assert(mobileTimeline.contains("@State private var pendingOpenBottomSessionID"), "iOS timeline must remember that newly opened chats should land at the latest message")
+    try assert(mobileTimeline.contains("private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false)"), "iOS timeline bottom positioning must default to a non-animated jump")
+    try assert(mobileTimeline.contains("scrollToBottom(proxy, animated: true)"), "iOS explicit bottom button may animate, but open-chat positioning must not fly through history")
+    try assert(mobileTimeline.contains("withTransaction(noAnimationTransaction)"), "iOS non-animated bottom jumps must disable SwiftUI animation")
+    guard let mobileSelectRange = mobileStore.range(of: "func select(sessionID: String) async"),
+          let mobileLoadOlderRange = mobileStore.range(of: "@discardableResult\n    func loadOlderHistory()", range: mobileSelectRange.upperBound..<mobileStore.endIndex) else {
+        throw GuardrailFailure.failed("iOS store must keep an identifiable select/session history boundary")
+    }
+    try assert(!mobileStore[mobileSelectRange.lowerBound..<mobileLoadOlderRange.lowerBound].contains("scrollRevision += 1"), "iOS chat open must not fire the send-style bottom scroll revision after loading history")
     try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")
     try assert(!mobileStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "iOS chat open must not request a non-tail catch-up page")
 }
