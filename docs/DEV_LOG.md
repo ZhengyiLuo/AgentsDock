@@ -4385,3 +4385,4 @@ Third follow-up:
 ## 2026-05-31 - Build 44 TestFlight Prep
 
 - Bumped the shared Xcode `CURRENT_PROJECT_VERSION` from `43` to `44` for the iOS/iPadOS and macOS TestFlight upload containing the arbitrary agent HTTP transport fix and warm chat-switch cache optimization.
+- Uploaded macOS TestFlight build `44` from `build/archives/ZenithDockMac-44.xcarchive` -> `Uploaded ZenithDockMac`.
