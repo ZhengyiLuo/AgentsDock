@@ -2859,6 +2859,9 @@ final class AppStore: ObservableObject {
             return nil
         }
         if ns.domain == NSURLErrorDomain {
+            if ns.code == NSURLErrorAppTransportSecurityRequiresSecureConnection {
+                return "macOS App Transport Security blocked HTTP to \(serverURLString). Install the latest ZenithDock build with arbitrary user-entered agent HTTP URLs enabled, or use HTTPS."
+            }
             if isLocalNetworkPrivacyError(ns) {
                 return "macOS blocked ZenithDock from accessing the local network. Open System Settings > Privacy & Security > Local Network and enable ZenithDock, or use a reachable Tailscale endpoint."
             }

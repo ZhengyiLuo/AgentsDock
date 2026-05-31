@@ -920,6 +920,24 @@ func checkExportCompliancePlists() throws {
     try assert(macPlist.contains(value), "macOS Info.plist must mark non-exempt encryption as false")
 }
 
+func checkAgentHTTPTransportPlists() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let iosPlist = try String(contentsOf: cwd.appendingPathComponent("Apps/ZenithDockIOS/Info.plist"), encoding: .utf8)
+    let macPlist = try String(contentsOf: cwd.appendingPathComponent("Apps/ZenithDockMac/Info.plist"), encoding: .utf8)
+
+    for (label, plist) in [("iOS", iosPlist), ("macOS", macPlist)] {
+        try assert(plist.contains("<key>NSAllowsArbitraryLoads</key>"), "\(label) Info.plist must allow arbitrary user-entered agent HTTP URLs")
+        try assert(!plist.contains("<key>NSExceptionDomains</key>"), "\(label) Info.plist must not regress to hard-coded ATS IP exceptions")
+        try assert(!plist.contains("<key>NSAllowsLocalNetworking</key>"), "\(label) Info.plist must avoid scoped ATS keys that can make broad HTTP allowance brittle")
+        try assert(!plist.contains("10.112.") && !plist.contains("100.88.") && !plist.contains("100.73."), "\(label) Info.plist must not ship lab/Tailscale IP literals")
+    }
+
+    try assert(iosPlist.contains("<key>NSLocalNetworkUsageDescription</key>"), "iOS Info.plist must explain Local Network access")
+    try assert(iosPlist.contains("local network or Tailscale"), "iOS Local Network prompt must mention the private agent route")
+    try assert(macPlist.contains("<key>NSLocalNetworkUsageDescription</key>"), "macOS Info.plist must explain Local Network access")
+    try assert(macPlist.contains("local network or Tailscale"), "macOS Local Network prompt must mention the private agent route")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -951,6 +969,7 @@ do {
     try checkMobileVideoDownloads()
     try checkTmuxSubmitterVisualizer()
     try checkExportCompliancePlists()
+    try checkAgentHTTPTransportPlists()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

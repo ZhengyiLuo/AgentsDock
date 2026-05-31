@@ -1914,7 +1914,7 @@ final class MobileAppStore: ObservableObject {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
             if ns.code == NSURLErrorAppTransportSecurityRequiresSecureConnection {
-                return "iOS App Transport Security blocked HTTP to \(resolvedServerURLString) (-1022). Install the latest build with the ZenithDock ATS exception."
+                return "iOS App Transport Security blocked HTTP to \(resolvedServerURLString) (-1022). Install the latest ZenithDock build with arbitrary user-entered agent HTTP URLs enabled, or use HTTPS."
             }
             if isLocalNetworkPrivacyError(ns) {
                 return "iOS blocked ZenithDock from accessing the local network. Enable ZenithDock in Settings > Privacy & Security > Local Network, or use a reachable Tailscale endpoint."

@@ -4374,3 +4374,10 @@ Third follow-up:
 - Memory-cache switches now render a `480` event warm tail while the full disk cache still retains the expanded local window. This preserves a three-page recent context without making every chat switch pay for older pages.
 - Cached latest-tail refreshes now skip timeline rebuilding when the server response contains no new visible events, and no longer send a second bottom-scroll request for no-op refreshes.
 - Rebuilt `/Users/zen/agi/ZenithDock/dist/ZenithDock.app` and synced the app bundle to `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
+## 2026-05-31 - Arbitrary Agent HTTP Transport
+
+- Build 43 still shipped narrow ATS exception domains for a few lab/Tailscale IPs, which meant a friend's iOS device could hit `-1022` when the agent URL moved to a different HTTP host.
+- Replaced the per-IP ATS whitelist with a simple `NSAllowsArbitraryLoads` policy for both iOS/iPadOS and macOS TestFlight builds. ZenithDock is a user-configured private agent client; the bearer token and reachable private network are the security boundary, not a baked-in IP list.
+- Polished the Local Network usage prompt and updated the `-1022` error copy so it no longer tells users to install a build with a hard-coded ATS exception.
+- Added `ZenithGuardrails` coverage that fails if `NSExceptionDomains`, `NSAllowsLocalNetworking`, or lab/Tailscale IP literals come back in either app plist.
