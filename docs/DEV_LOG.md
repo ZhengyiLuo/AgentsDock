@@ -19,6 +19,26 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 Follow-Up - TestFlight Build 47
+
+Context:
+
+- User requested shipping the latest app state to TestFlight and Git before a
+  deeper UI performance optimization pass.
+- This release includes the latest folder reorder interaction fixes from
+  `81b3c31 Tighten folder reorder interactions`.
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `46` to `47`.
+
+Verification:
+
+- Pending: `swift run ZenithGuardrails`
+- Pending: iOS/iPadOS archive/export upload
+- Pending: macOS archive/export upload
+- Pending: Git push
+
 ## 2026-06-01 Follow-Up - TestFlight Build 46
 
 Context:
