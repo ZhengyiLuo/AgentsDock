@@ -233,6 +233,17 @@ final class AppStore: ObservableObject {
         activeSessions.filter { $0.pinned == true }
     }
 
+    var sidebarNavigationSessions: [ZSession] {
+        var ordered: [ZSession] = pinnedSessions
+        for folder in folderNames where !isFolderCollapsed(folder) {
+            ordered.append(contentsOf: folders[folder] ?? [])
+        }
+        if !archivedSectionCollapsed {
+            ordered.append(contentsOf: archivedSessions)
+        }
+        return ordered
+    }
+
     var folders: [String: [ZSession]] {
         Dictionary(grouping: activeSessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
     }
@@ -294,6 +305,22 @@ final class AppStore: ObservableObject {
     private func normalizedFolderName(_ folder: String) -> String {
         let clean = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         return clean.isEmpty ? "General" : clean
+    }
+
+    func selectAdjacentSession(direction: Int) async {
+        let visibleSessions = sidebarNavigationSessions
+        guard !visibleSessions.isEmpty else { return }
+        let step = direction >= 0 ? 1 : -1
+        let currentIndex = selectedSessionID.flatMap { selectedID in
+            visibleSessions.firstIndex { $0.id == selectedID }
+        }
+        let nextIndex: Int
+        if let currentIndex {
+            nextIndex = (currentIndex + step + visibleSessions.count) % visibleSessions.count
+        } else {
+            nextIndex = step > 0 ? 0 : visibleSessions.count - 1
+        }
+        await select(sessionID: visibleSessions[nextIndex].id)
     }
 
     func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {

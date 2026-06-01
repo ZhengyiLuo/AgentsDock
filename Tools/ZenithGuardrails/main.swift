@@ -1000,6 +1000,21 @@ func checkInspectorCollapseAndPins() throws {
     try assert(inspector.contains("store.togglePin(file)"), "Mac files/videos inspector must support pinning files")
 }
 
+func checkMacChatKeyboardNavigation() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let app = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/ZenithDockApp.swift"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+
+    try assert(app.contains("Button(\"Next Chat\")"), "Mac app must expose a Next Chat command")
+    try assert(app.contains(".keyboardShortcut(.tab, modifiers: [.control])"), "Next Chat must use Ctrl-Tab")
+    try assert(app.contains("Button(\"Previous Chat\")"), "Mac app must expose a Previous Chat command")
+    try assert(app.contains(".keyboardShortcut(.tab, modifiers: [.control, .shift])"), "Previous Chat must use Ctrl-Shift-Tab")
+    try assert(macStore.contains("var sidebarNavigationSessions: [ZSession]"), "Mac store must expose sidebar-ordered navigation sessions")
+    try assert(macStore.contains("for folder in folderNames where !isFolderCollapsed(folder)"), "Mac chat keyboard navigation must respect collapsed folders")
+    try assert(macStore.contains("func selectAdjacentSession(direction: Int) async"), "Mac store must provide adjacent chat selection")
+    try assert(macStore.contains("await select(sessionID: visibleSessions[nextIndex].id)"), "Adjacent chat selection must reuse the normal select path")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -1033,6 +1048,7 @@ do {
     try checkExportCompliancePlists()
     try checkAgentHTTPTransportPlists()
     try checkInspectorCollapseAndPins()
+    try checkMacChatKeyboardNavigation()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

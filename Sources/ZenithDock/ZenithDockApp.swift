@@ -22,6 +22,20 @@ struct ZenithDockApp: App {
             CommandGroup(replacing: .newItem) {
                 ShowZenithDockWindowCommand()
             }
+            CommandMenu("Chat") {
+                Button("Next Chat") {
+                    Task { @MainActor in
+                        await store.selectAdjacentSession(direction: 1)
+                    }
+                }
+                .keyboardShortcut(.tab, modifiers: [.control])
+                Button("Previous Chat") {
+                    Task { @MainActor in
+                        await store.selectAdjacentSession(direction: -1)
+                    }
+                }
+                .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            }
         }
     }
 }
