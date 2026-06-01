@@ -600,6 +600,8 @@ func checkJobIntervalPresets() throws {
     try assert(macStore.contains("max_runs: Int?"), "Mac job payloads must support fixed run counts")
     try assert(inspector.contains("maxRunsText"), "Mac job sheets must expose fixed run-count controls")
     try assert(inspector.contains("jobRunModeDescription(loop:"), "Mac job rows must describe finite run counts")
+    try assert(allPickersHideLabels(named: "Mode", binding: "$loop", in: inspector), "Mac job mode segmented pickers must hide their own labels so Mode does not wrap/cut off")
+    try assert(allPickersHideLabels(named: "Backend", binding: "$backend", in: inspector), "Mac job backend segmented pickers must hide their own labels so Backend does not wrap/cut off")
     try assert(mobileStore.contains("first_run_at: String?"), "iOS job create payload must stay compatible with first_run_at")
     try assert(mobileStore.contains("max_runs: Int?"), "iOS job payloads must support fixed run counts")
     try assert(mobileOptions.contains("maxRunsText"), "iOS job sheets must expose fixed run-count controls")
@@ -608,6 +610,16 @@ func checkJobIntervalPresets() throws {
     try assert(server.contains("max_runs: int | None = None"), "Server job models must accept max_runs")
     try assert(server.contains("finite_has_more"), "Server scheduler must keep finite jobs running until max_runs is reached")
     try assert(server.contains("parse_job_timestamp"), "Server must parse explicit job timestamps")
+}
+
+func allPickersHideLabels(named name: String, binding: String, in source: String) -> Bool {
+    let marker = "Picker(\"\(name)\", selection: \(binding))"
+    let chunks = source.components(separatedBy: marker).dropFirst()
+    guard !chunks.isEmpty else { return false }
+    return chunks.allSatisfy { chunk in
+        let prefix = String(chunk.prefix(320))
+        return prefix.contains(".labelsHidden()") && prefix.contains(".pickerStyle(.segmented)")
+    }
 }
 
 func checkTimelineCombinesRunTraces() throws {

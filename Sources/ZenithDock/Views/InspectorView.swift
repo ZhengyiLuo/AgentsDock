@@ -870,6 +870,7 @@ private struct NewJobDetailsSheet: View {
                             Text("Run fixed times").tag(false)
                             Text("Loop forever").tag(true)
                         }
+                        .labelsHidden()
                         .pickerStyle(.segmented)
                         .frame(width: 250)
                         if !loop {
@@ -1094,6 +1095,7 @@ private struct JobEditorSheet: View {
                         Text("Claude").tag("claude")
                         Text("Codex").tag("codex")
                     }
+                    .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 180)
                 }
@@ -1115,6 +1117,7 @@ private struct JobEditorSheet: View {
                             Text("Run fixed times").tag(false)
                             Text("Loop forever").tag(true)
                         }
+                        .labelsHidden()
                         .pickerStyle(.segmented)
                         .frame(width: 250)
                         if !loop {
