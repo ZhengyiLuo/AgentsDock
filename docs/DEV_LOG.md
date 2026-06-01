@@ -19,6 +19,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 - Claude Resume Poison Guard
+
+- Fixed a server-side Claude resume bug where `error_during_execution` results
+  could overwrite a valid Claude provider session id with the failed run's
+  diagnostic `session_id`.
+- Claude provider ids are now persisted only after a successful `result` event;
+  failed result events surface as timeline errors but leave the previous resume
+  id intact.
+- Added `ZenithGuardrails` coverage so streamed Claude session ids cannot be
+  saved before the result succeeds.
+- Diagnosed the live `OSMO Stability` failure as a poisoned resume-id cascade,
+  not deleted server state.
+
 ## 2026-06-01 Follow-Up - TestFlight Build 48
 
 Context:

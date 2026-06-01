@@ -155,6 +155,18 @@ func checkBackendLocksAfterProviderStart() throws {
     try assert(mobileTimeline.contains(".disabled(session.isBackendLocked)"), "iOS timeline backend picker must disable after chat starts")
 }
 
+func checkClaudeResumeFailureDoesNotPoisonSession() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+
+    try assert(server.contains("def claude_result_error(event: dict[str, Any]) -> str | None:"), "Server must classify Claude result failures before saving resume IDs")
+    try assert(server.contains("event.get(\"subtype\") == \"error_during_execution\""), "Claude error_during_execution results must be treated as failed resumes")
+    try assert(server.contains("result_error = claude_result_error(event)"), "Claude runner must inspect result events for provider errors")
+    try assert(server.contains("provider_id = None\n                    await append_event(session_id, \"error\""), "Claude failed-result session IDs must be discarded and surfaced as errors")
+    try assert(server.contains("if provider_id and not result_error:"), "Claude provider session must only save after a successful result")
+    try assert(!server.contains("provider_id = event[\"session_id\"]\n                await STORE.save_provider_session(session_id, provider_id, BACKEND_CLAUDE)"), "Claude streamed session IDs must not be saved before the result succeeds")
+}
+
 func checkServerURLNormalization() throws {
     let fallback = "http://127.0.0.1:7850"
 
@@ -1028,6 +1040,7 @@ do {
     try checkEndpointCacheKeysAreServerScoped()
     try checkRuntimeDefaultLabels()
     try checkBackendLocksAfterProviderStart()
+    try checkClaudeResumeFailureDoesNotPoisonSession()
     try checkServerURLNormalization()
     try checkShellCopyNormalization()
     try checkCodeBlockCopyUsesFullText()
