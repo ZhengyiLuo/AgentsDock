@@ -19,6 +19,38 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 Follow-Up - UI Responsiveness Optimization
+
+Context:
+
+- User reported that the UI still did not feel snappy, especially during chat
+  switching, typing while background refreshes run, and iOS timeline opens.
+- Investigation found repeated `@Published` writes from heartbeat/session
+  polling, duplicate timeline settle hooks, unbounded selected-chat video
+  metadata loads, and a computed iOS `displayEvents` hot path.
+
+Change:
+
+- Mac store now gates repeated status/reachability/socket/display-event/file
+  publishes so identical heartbeat data does not invalidate the whole UI.
+- Mac warm-cache chat switches now skip the REST latest-tail call when the
+  session list already proves the local cache is current, then attach the live
+  websocket directly.
+- Mac selected-chat video metadata fetch is paged instead of pulling every
+  video for large chats during chat switch.
+- Mac and iOS timelines no longer run a duplicate `displaySignature` scroll
+  settle after `displayEvents.count` already handled the same update.
+- iOS raw events are no longer published directly; the mobile store now exposes
+  a filtered `displayEvents` publication boundary like macOS.
+- Added guardrails for the fresh-cache skip, paged video fetch, and iOS
+  display-event publication boundary.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination platform=macOS build -quiet`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet`
+
 ## 2026-06-01 Follow-Up - TestFlight Build 47
 
 Context:

@@ -57,7 +57,6 @@ struct TimelineView: View {
         let rows = Array(allRows.suffix(visibleRowLimit))
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
-        let displaySignature = "\(displayEvents.count):\(displayEvents.last?.id ?? "")"
 
         VStack(spacing: 0) {
             HeaderView(
@@ -259,10 +258,6 @@ struct TimelineView: View {
                     } else {
                         settleInitialTimelinePosition(proxy)
                     }
-                }
-                .onChange(of: displaySignature) {
-                    _ = settleOpenThreadAtLatest(proxy)
-                    settleInitialTimelinePosition(proxy)
                 }
                 .onChange(of: store.loadedSessionID) {
                     _ = settleOpenThreadAtLatest(proxy)
@@ -852,14 +847,11 @@ struct TimelineView: View {
     private func updateUnreadState(after previousSeq: Int) {
         guard let sessionID = store.selectedSessionID else { return }
         guard pendingOpenBottomSessionID == nil else { return }
-        let hasNewAgentMessage = store.displayEvents.contains { event in
-            event.seq > previousSeq && store.isAgentVisibleMessage(event)
+        var firstSeq: Int?
+        for event in store.displayEvents where event.seq > previousSeq && store.isAgentVisibleMessage(event) {
+            firstSeq = min(firstSeq ?? event.seq, event.seq)
         }
-        guard hasNewAgentMessage else { return }
-        let firstSeq = store.displayEvents
-            .filter { $0.seq > previousSeq && store.isAgentVisibleMessage($0) }
-            .map(\.seq)
-            .min()
+        guard firstSeq != nil else { return }
         store.markAgentUnread(sessionID: sessionID, firstSeq: firstSeq)
     }
 
@@ -869,7 +861,7 @@ struct TimelineView: View {
     }
 
     private func maxEventSeq(_ events: [ZEvent]) -> Int {
-        events.map(\.seq).max() ?? 0
+        events.last?.seq ?? 0
     }
 
     private func acceptTimelineFileDrop(_ providers: [NSItemProvider]) -> Bool {

@@ -524,7 +524,28 @@ final class AppStore: ObservableObject {
     }
 
     private func rebuildDisplayEvents() {
-        displayEvents = makeDisplayEvents(from: events)
+        let next = makeDisplayEvents(from: events)
+        if displayEvents != next {
+            displayEvents = next
+        }
+    }
+
+    private func setStatus(_ next: String) {
+        if status != next {
+            status = next
+        }
+    }
+
+    private func setServerReachable(_ reachable: Bool) {
+        if serverReachable != reachable {
+            serverReachable = reachable
+        }
+    }
+
+    private func setSocketLive(_ live: Bool) {
+        if socketLive != live {
+            socketLive = live
+        }
     }
 
     private func shouldMaskTimelineBatch(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
@@ -543,7 +564,7 @@ final class AppStore: ObservableObject {
             isApplyingLargeTimelineBatch = true
         }
         if !hasRenderableSelectedTimeline {
-            status = "Opening latest messages"
+            setStatus("Opening latest messages")
         }
     }
 
@@ -554,7 +575,7 @@ final class AppStore: ObservableObject {
             guard !Task.isCancelled else { return }
             self.isApplyingLargeTimelineBatch = false
             if !self.isRefreshingCachedDelta {
-                self.status = self.socketLive ? "Live" : "Server connected"
+                self.setStatus(self.socketLive ? "Live" : "Server connected")
             }
         }
     }
@@ -617,8 +638,12 @@ final class AppStore: ObservableObject {
             setLastReadAgentSeq(latestSeq, for: sessionID)
             syncServerReadState(sessionID: sessionID, seq: latestSeq)
         }
-        unreadAgentSessionIDs.remove(sessionID)
-        firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
+        if unreadAgentSessionIDs.contains(sessionID) {
+            unreadAgentSessionIDs.remove(sessionID)
+        }
+        if firstUnreadAgentSeqBySessionID[sessionID] != nil {
+            firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
+        }
         manuallyUnreadSessionIDs.remove(sessionID)
     }
 
@@ -649,7 +674,10 @@ final class AppStore: ObservableObject {
     func markAgentUnread(sessionID: String, firstSeq: Int? = nil) {
         if let firstSeq {
             let existing = firstUnreadAgentSeqBySessionID[sessionID]
-            firstUnreadAgentSeqBySessionID[sessionID] = existing.map { min($0, firstSeq) } ?? firstSeq
+            let next = existing.map { min($0, firstSeq) } ?? firstSeq
+            if existing != next {
+                firstUnreadAgentSeqBySessionID[sessionID] = next
+            }
         }
         guard !unreadAgentSessionIDs.contains(sessionID) else { return }
         unreadAgentSessionIDs.insert(sessionID)
@@ -865,8 +893,9 @@ final class AppStore: ObservableObject {
 
     private func reconcileUnreadFromSessions() {
         let knownSessionIDs = Set(sessions.map(\.id))
-        unreadAgentSessionIDs = unreadAgentSessionIDs.intersection(knownSessionIDs)
-        firstUnreadAgentSeqBySessionID = firstUnreadAgentSeqBySessionID.filter { knownSessionIDs.contains($0.key) }
+        var nextUnread = unreadAgentSessionIDs.intersection(knownSessionIDs)
+        var nextFirstUnread = firstUnreadAgentSeqBySessionID.filter { knownSessionIDs.contains($0.key) }
+        var nextManualUnread = manuallyUnreadSessionIDs.intersection(knownSessionIDs)
 
         for session in sessions {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
@@ -875,21 +904,37 @@ final class AppStore: ObservableObject {
                 adoptServerReadCursor(serverReadSeq, for: session.id)
             }
             if serverManualUnread, session.id != selectedSessionID {
-                manuallyUnreadSessionIDs.insert(session.id)
+                nextManualUnread.insert(session.id)
             }
             if session.id == selectedSessionID, selectedTimelineAtBottom {
                 markSessionRead(session.id)
+                nextUnread.remove(session.id)
+                nextFirstUnread.removeValue(forKey: session.id)
+                nextManualUnread.remove(session.id)
                 continue
             }
             let lastReadSeq = lastReadAgentSeqBySessionID[session.id] ?? 0
             if serverManualUnread || latestSeq > lastReadSeq {
-                markAgentUnread(sessionID: session.id, firstSeq: lastReadSeq + 1)
+                nextUnread.insert(session.id)
+                let nextSeq = lastReadSeq + 1
+                if let existing = nextFirstUnread[session.id] {
+                    nextFirstUnread[session.id] = min(existing, nextSeq)
+                } else {
+                    nextFirstUnread[session.id] = nextSeq
+                }
             } else {
-                unreadAgentSessionIDs.remove(session.id)
-                firstUnreadAgentSeqBySessionID.removeValue(forKey: session.id)
-                manuallyUnreadSessionIDs.remove(session.id)
+                nextUnread.remove(session.id)
+                nextFirstUnread.removeValue(forKey: session.id)
+                nextManualUnread.remove(session.id)
             }
         }
+        if unreadAgentSessionIDs != nextUnread {
+            unreadAgentSessionIDs = nextUnread
+        }
+        if firstUnreadAgentSeqBySessionID != nextFirstUnread {
+            firstUnreadAgentSeqBySessionID = nextFirstUnread
+        }
+        manuallyUnreadSessionIDs = nextManualUnread
     }
 
     func isAgentVisibleMessage(_ event: ZEvent) -> Bool {
@@ -937,7 +982,7 @@ final class AppStore: ObservableObject {
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         webSocketSessionID = nil
-        socketLive = false
+        setSocketLive(false)
         selectedSessionID = nil
         loadedSessionID = nil
         isSelectingSession = false
@@ -1084,28 +1129,41 @@ final class AppStore: ObservableObject {
                 markServerUpgradeRequired(version: res.api_contract_version)
                 return
             }
-            serverReachable = res.ok
+            setServerReachable(res.ok)
             adoptServerIdentity(res.server_identity)
             if let cleanCwd = res.default_cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cleanCwd.isEmpty {
-                defaultCwd = cleanCwd
+                if defaultCwd != cleanCwd {
+                    defaultCwd = cleanCwd
+                }
             }
-            activeSessionIDs = Set(res.active)
-            lastHealthAt = Date()
-            connectionProblemText = nil
+            let activeIDs = Set(res.active)
+            if activeSessionIDs != activeIDs {
+                activeSessionIDs = activeIDs
+            }
+            if lastHealthAt == nil || Date().timeIntervalSince(lastHealthAt ?? .distantPast) > 60 {
+                lastHealthAt = Date()
+            }
+            if connectionProblemText != nil {
+                connectionProblemText = nil
+            }
             syncSelectedRunningState()
-            status = socketLive ? "Live" : "Server connected"
+            setStatus(socketLive ? "Live" : "Server connected")
             if let sid = selectedSessionID, !activeSessionIDs.contains(sid), processSnapshot?.active == true {
                 processSnapshot = nil
                 processLogTail = nil
             }
         } catch {
-            serverReachable = false
-            socketLive = false
-            activeSessionIDs = []
+            setServerReachable(false)
+            setSocketLive(false)
+            if !activeSessionIDs.isEmpty {
+                activeSessionIDs = []
+            }
             syncSelectedRunningState()
-            status = "Server offline"
+            setStatus("Server offline")
             let message = serverErrorMessage(error) ?? "\(error)"
-            connectionProblemText = message
+            if connectionProblemText != message {
+                connectionProblemText = message
+            }
             AppLogger.warning("health failed \(message)")
             if showErrors {
                 reportServerError(error)
@@ -1118,11 +1176,13 @@ final class AppStore: ObservableObject {
     }
 
     private func markServerUpgradeRequired(version: Int?) {
-        serverReachable = false
-        socketLive = false
-        activeSessionIDs = []
+        setServerReachable(false)
+        setSocketLive(false)
+        if !activeSessionIDs.isEmpty {
+            activeSessionIDs = []
+        }
         syncSelectedRunningState()
-        status = "Server upgrade required"
+        setStatus("Server upgrade required")
         connectionProblemText = "Server upgrade required: app build needs agent API v\(minimumAgentAPIContractVersion), but this server reports v\(version ?? 0). Redeploy/restart the ZenithDock server."
         AppLogger.warning("server upgrade required contract=\(version ?? 0) required=\(minimumAgentAPIContractVersion)")
     }
@@ -1131,16 +1191,16 @@ final class AppStore: ObservableObject {
         do {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.get("/api/sessions")
-            serverReachable = true
+            setServerReachable(true)
             if !socketLive {
-                status = "Server connected"
+                setStatus("Server connected")
             }
             if sessions != res.sessions {
                 sessions = sessionsWithPendingRuntime(res.sessions)
                 AppLogger.info("loaded sessions count=\(sessions.count)")
+                lastLoadedAt = Date()
             }
             reconcileUnreadFromSessions()
-            lastLoadedAt = Date()
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
                 selectedSessionID = sessions.first?.id
                 if let selectedSessionID {
@@ -1159,7 +1219,7 @@ final class AppStore: ObservableObject {
         do {
             struct Response: Codable { let jobs: [ZJob] }
             let res: Response = try await api.get("/api/jobs")
-            serverReachable = true
+            setServerReachable(true)
             if jobs != res.jobs {
                 jobs = res.jobs
             }
@@ -1228,7 +1288,7 @@ final class AppStore: ObservableObject {
         if loadingSessionID == sessionID {
             if loadedSessionID != sessionID, let cached = memoryCachedChat(sessionID) {
                 applyCachedChat(cached, renderLimit: maxWarmCachedTimelineEvents)
-                status = "Loaded memory chat"
+                setStatus("Loaded memory chat")
             }
             selectedSessionID = sessionID
             requestScrollToBottom(immediate: true)
@@ -1257,7 +1317,7 @@ final class AppStore: ObservableObject {
         if let warmCachedChat {
             applyCachedChat(warmCachedChat, renderLimit: maxWarmCachedTimelineEvents)
             loadedFromCache = true
-            status = "Loaded memory chat"
+            setStatus("Loaded memory chat")
             AppLogger.info("loaded memory cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
         }
         selectedSessionID = sessionID
@@ -1269,8 +1329,8 @@ final class AppStore: ObservableObject {
         pendingStreamFlushTask = nil
         pendingStreamEvents.removeAll()
         pendingStreamSessionID = nil
-        socketLive = false
-        status = loadedFromCache ? (serverReachable ? "Server connected" : "Server offline") : (serverReachable ? "Loading chat" : "Server offline")
+        setSocketLive(false)
+        setStatus(loadedFromCache ? (serverReachable ? "Server connected" : "Server offline") : (serverReachable ? "Loading chat" : "Server offline"))
         processSnapshot = nil
         processLogTail = nil
         tmuxSnapshot = nil
@@ -1300,7 +1360,7 @@ final class AppStore: ObservableObject {
                 rememberChatCache(cached)
                 applyCachedChat(cached)
                 loadedFromCache = true
-                status = "Loaded cached chat"
+                setStatus("Loaded cached chat")
                 AppLogger.info("loaded disk cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
                 requestScrollToBottom(immediate: true)
             }
@@ -1308,6 +1368,12 @@ final class AppStore: ObservableObject {
         if loadedFromCache {
             let cachedLastSeq = lastSeq
             syncSelectedRunningState()
+            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq) {
+                loadedSessionID = sessionID
+                connectEvents(sessionID: sessionID, after: lastSeq)
+                AppLogger.info("skip cached latest tail session=\(sessionID) cached_latest=\(cachedLastSeq)")
+                return
+            }
             Task {
                 await refreshCachedSessionLatestTail(
                     sessionID: sessionID,
@@ -1324,6 +1390,14 @@ final class AppStore: ObservableObject {
             refreshFiles: true,
             connectStream: true
         )
+    }
+
+    private func cachedTailIsKnownFresh(sessionID: String, cachedLastSeq: Int) -> Bool {
+        guard serverReachable, cachedLastSeq > 0 else { return false }
+        let knownLatestSeq = sessions.first { $0.id == sessionID }?.latest_event_seq
+            ?? memoryCachedChat(sessionID)?.session.latest_event_seq
+        guard let knownLatestSeq else { return false }
+        return knownLatestSeq <= cachedLastSeq
     }
 
     private func refreshCachedSessionLatestTail(sessionID: String, generation: Int, cachedLastSeq: Int) async {
@@ -1393,7 +1467,7 @@ final class AppStore: ObservableObject {
             }
             applySessionEventSnapshot(res, sessionID: sessionID)
             markSessionRead(sessionID)
-            status = "Loaded latest chat"
+            setStatus("Loaded latest chat")
             refreshSessionFilesFromLoadedEvents()
             loadedSessionID = sessionID
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
@@ -1605,7 +1679,7 @@ final class AppStore: ObservableObject {
             let res: Response = try await api.get("/api/sessions/\(sid)/files/\(file.id)/event")
             mergeEventsKeeping(res.event)
             requestScrollToEvent(res.event.id)
-            status = "Found file in chat"
+            setStatus("Found file in chat")
         } catch {
             AppLogger.warning("find file event failed file=\(file.id) \(serverErrorMessage(error) ?? "\(error)")")
             errorText = "I could not find that file in this chat history."
@@ -2366,9 +2440,11 @@ final class AppStore: ObservableObject {
         webSocket = task
         webSocketSessionID = sessionID
         task.resume()
-        socketLive = true
-        status = "Live"
-        lastSocketError = nil
+        setSocketLive(true)
+        setStatus("Live")
+        if lastSocketError != nil {
+            lastSocketError = nil
+        }
         AppLogger.info("websocket connect session=\(sessionID) after=\(after)")
         receiveNext(task: task, sessionID: sessionID)
     }
@@ -2395,11 +2471,14 @@ final class AppStore: ObservableObject {
                     self.receiveNext(task: task, sessionID: sessionID)
                 case .failure(let error):
                     guard self.webSocket === task, self.selectedSessionID == sessionID else { return }
-                    self.socketLive = false
+                    self.setSocketLive(false)
                     self.webSocket = nil
                     self.webSocketSessionID = nil
-                    self.status = self.serverReachable ? "Stream reconnecting" : "Server offline"
-                    self.lastSocketError = self.serverErrorMessage(error)
+                    self.setStatus(self.serverReachable ? "Stream reconnecting" : "Server offline")
+                    let nextSocketError = self.serverErrorMessage(error)
+                    if self.lastSocketError != nextSocketError {
+                        self.lastSocketError = nextSocketError
+                    }
                     AppLogger.warning("websocket failed session=\(sessionID) \(self.lastSocketError ?? "\(error)")")
                     self.scheduleReconnect(sessionID: sessionID, failedTask: task)
                 }
@@ -2443,7 +2522,7 @@ final class AppStore: ObservableObject {
               !pendingStreamEvents.isEmpty else {
             if isRefreshingCachedDelta {
                 isRefreshingCachedDelta = false
-                status = socketLive ? "Live" : "Server connected"
+                setStatus(socketLive ? "Live" : "Server connected")
             }
             return
         }
@@ -2468,7 +2547,7 @@ final class AppStore: ObservableObject {
                 guard !Task.isCancelled else { return }
                 self.isApplyingLargeTimelineBatch = false
                 self.isRefreshingCachedDelta = false
-                self.status = self.socketLive ? "Live" : "Server connected"
+                self.setStatus(self.socketLive ? "Live" : "Server connected")
             }
         }
     }
@@ -2535,10 +2614,15 @@ final class AppStore: ObservableObject {
 
     private func syncSelectedRunningState() {
         guard let selectedSessionID else {
-            isRunning = false
+            if isRunning {
+                isRunning = false
+            }
             return
         }
-        isRunning = activeSessionIDs.contains(selectedSessionID)
+        let running = activeSessionIDs.contains(selectedSessionID)
+        if isRunning != running {
+            isRunning = running
+        }
     }
 
     private func ingest(_ event: ZEvent) {
@@ -2775,10 +2859,16 @@ final class AppStore: ObservableObject {
     private func refreshSessionFilesFromLoadedEvents() {
         let known = files(from: events)
         guard !known.isEmpty || sessionFiles.isEmpty else { return }
-        sessionFiles = mergedFiles(sessionFiles + known)
+        let nextFiles = mergedFiles(sessionFiles + known)
+        if sessionFiles != nextFiles {
+            sessionFiles = nextFiles
+        }
         let videos = known.filter { ($0.content_type ?? "").hasPrefix("video/") }
         if !videos.isEmpty {
-            sessionVideoFiles = mergedFiles(sessionVideoFiles + videos)
+            let nextVideos = mergedFiles(sessionVideoFiles + videos)
+            if sessionVideoFiles != nextVideos {
+                sessionVideoFiles = nextVideos
+            }
         }
     }
 
@@ -2789,12 +2879,21 @@ final class AppStore: ObservableObject {
     }
 
     private func upsertSessionFile(_ file: ZFile) {
-        sessionFiles = mergedFiles(sessionFiles + [file])
+        let nextFiles = mergedFiles(sessionFiles + [file])
+        if sessionFiles != nextFiles {
+            sessionFiles = nextFiles
+        }
         if (file.content_type ?? "").hasPrefix("video/") {
-            sessionVideoFiles = mergedFiles(sessionVideoFiles + [file])
+            let nextVideos = mergedFiles(sessionVideoFiles + [file])
+            if sessionVideoFiles != nextVideos {
+                sessionVideoFiles = nextVideos
+            }
         }
         if let total = sessionFilesTotal {
-            sessionFilesTotal = max(total, sessionFiles.count)
+            let nextTotal = max(total, sessionFiles.count)
+            if sessionFilesTotal != nextTotal {
+                sessionFilesTotal = nextTotal
+            }
         }
     }
 
@@ -2820,14 +2919,27 @@ final class AppStore: ObservableObject {
             )
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
             let timelineFiles = files(from: events)
+            let nextFiles: [ZFile]
             if reset {
-                sessionFiles = mergedFiles(res.files + timelineFiles + sessionVideoFiles)
+                nextFiles = mergedFiles(res.files + timelineFiles + sessionVideoFiles)
             } else {
-                sessionFiles = mergedFiles(sessionFiles + res.files + timelineFiles)
+                nextFiles = mergedFiles(sessionFiles + res.files + timelineFiles)
             }
-            sessionFilesTotal = res.total ?? max(sessionFilesTotal ?? 0, sessionFiles.count)
-            sessionFilesNextOffset = (res.offset ?? offset) + res.files.count
-            sessionFilesHasMore = res.has_more ?? false
+            if sessionFiles != nextFiles {
+                sessionFiles = nextFiles
+            }
+            let nextTotal = res.total ?? max(sessionFilesTotal ?? 0, sessionFiles.count)
+            if sessionFilesTotal != nextTotal {
+                sessionFilesTotal = nextTotal
+            }
+            let nextOffset = (res.offset ?? offset) + res.files.count
+            if sessionFilesNextOffset != nextOffset {
+                sessionFilesNextOffset = nextOffset
+            }
+            let nextHasMore = res.has_more ?? false
+            if sessionFilesHasMore != nextHasMore {
+                sessionFilesHasMore = nextHasMore
+            }
             saveSelectedChatCache()
         } catch {
             AppLogger.error("files failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
@@ -2846,13 +2958,20 @@ final class AppStore: ObservableObject {
             let res: Response = try await api.get(
                 "/api/sessions/\(sessionID)/files",
                 queryItems: [
-                    URLQueryItem(name: "content_prefix", value: "video/")
+                    URLQueryItem(name: "content_prefix", value: "video/"),
+                    URLQueryItem(name: "limit", value: "\(sessionFilesPageLimit)"),
+                    URLQueryItem(name: "offset", value: "0")
                 ]
             )
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
             let videos = mergedFiles(res.files + files(from: events).filter { ($0.content_type ?? "").hasPrefix("video/") })
-            sessionVideoFiles = videos
-            sessionFiles = mergedFiles(sessionFiles + videos)
+            if sessionVideoFiles != videos {
+                sessionVideoFiles = videos
+            }
+            let nextFiles = mergedFiles(sessionFiles + videos)
+            if sessionFiles != nextFiles {
+                sessionFiles = nextFiles
+            }
             if let total = res.total, total > videos.count {
                 AppLogger.info("video metadata partially loaded session=\(sessionID) loaded=\(videos.count) total=\(total)")
             }
@@ -3080,13 +3199,17 @@ final class AppStore: ObservableObject {
     private func reportServerError(_ error: Error) {
         guard let message = serverErrorMessage(error) else { return }
         if isAgentLaunchDeferred(error, message: message) {
-            launchDeferredText = message
-            status = "Launch deferred"
+            if launchDeferredText != message {
+                launchDeferredText = message
+            }
+            setStatus("Launch deferred")
             return
         }
         if isConnectionError(error) {
-            connectionProblemText = message
-            status = "Server offline"
+            if connectionProblemText != message {
+                connectionProblemText = message
+            }
+            setStatus("Server offline")
             return
         }
         errorText = message

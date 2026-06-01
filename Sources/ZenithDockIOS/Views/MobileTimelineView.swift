@@ -32,7 +32,6 @@ struct MobileTimelineView: View {
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
-        let displaySignature = "\(displayEvents.count):\(displayEvents.last?.id ?? "")"
 
         VStack(spacing: 0) {
             MobileChatHeader(
@@ -167,9 +166,6 @@ struct MobileTimelineView: View {
                         scrollToBottom(proxy)
                     }
                 }
-                .onChange(of: displaySignature) {
-                    _ = settleOpenThreadAtLatest(proxy, displayEvents: displayEvents)
-                }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
                         olderHistoryLoadArmed = false
@@ -249,10 +245,7 @@ struct MobileTimelineView: View {
 
     private func updateUnreadState(after previousSeq: Int) {
         guard let sessionID = store.selectedSessionID else { return }
-        let hasNewAgentMessage = store.displayEvents.contains { event in
-            event.seq > previousSeq && store.isAgentVisibleMessage(event)
-        }
-        guard hasNewAgentMessage else { return }
+        guard store.displayEvents.contains(where: { $0.seq > previousSeq && store.isAgentVisibleMessage($0) }) else { return }
         store.markSessionUnread(sessionID)
     }
 
@@ -394,7 +387,7 @@ struct MobileTimelineView: View {
     }
 
     private func maxEventSeq(_ events: [ZEvent]) -> Int {
-        events.map(\.seq).max() ?? 0
+        events.last?.seq ?? 0
     }
 
     private func acceptTimelineFileDrop(_ providers: [NSItemProvider]) -> Bool {

@@ -16,7 +16,8 @@ final class MobileAppStore: ObservableObject {
     @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = []
     @Published var selectedSessionID: String?
-    @Published var events: [ZEvent] = []
+    private(set) var events: [ZEvent] = []
+    @Published private(set) var displayEvents: [ZEvent] = []
     @Published var uploads: [ZFile] = []
     @Published var sessionFiles: [ZFile] = []
     @Published var jobs: [ZJob] = []
@@ -289,15 +290,22 @@ final class MobileAppStore: ObservableObject {
             }
     }
 
-    var displayEvents: [ZEvent] {
-        let assistantRuns = Set(events.compactMap { event -> String? in
+    private func rebuildDisplayEvents() {
+        let next = makeDisplayEvents(from: events)
+        if displayEvents != next {
+            displayEvents = next
+        }
+    }
+
+    private func makeDisplayEvents(from source: [ZEvent]) -> [ZEvent] {
+        let assistantRuns = Set(source.compactMap { event -> String? in
             guard event.type == "assistant_text",
                   event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
                 return nil
             }
             return event.run_id
         })
-        return events.filter { event in
+        return source.filter { event in
             switch event.type {
             case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now", "turn_stopped":
                 return false
@@ -579,6 +587,7 @@ final class MobileAppStore: ObservableObject {
         status = "Connecting"
         selectedSessionID = nil
         events = []
+        rebuildDisplayEvents()
         uploads = []
         launchDeferredText = nil
         sessions = []
@@ -1143,6 +1152,7 @@ final class MobileAppStore: ObservableObject {
             applyCachedChat(cached)
         } else {
             events = []
+            rebuildDisplayEvents()
             uploads = []
             sessionFiles = []
             omittedHistoryEventCount = 0
@@ -1212,6 +1222,7 @@ final class MobileAppStore: ObservableObject {
             omittedHistoryEventCount = res.events_omitted_before ?? 0
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             refreshSessionFilesFromLoadedEvents()
+            rebuildDisplayEvents()
             rememberSelectedChat()
             return older.count
         } catch {
@@ -1353,6 +1364,7 @@ final class MobileAppStore: ObservableObject {
         do {
             let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
             events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+            rebuildDisplayEvents()
             rememberSelectedChat()
         } catch {
             if handleStaleQueuedTurn(queuedID, error: error) { return }
@@ -1376,6 +1388,7 @@ final class MobileAppStore: ObservableObject {
             if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == queuedID }) {
                 events[idx].prompt = cleanPrompt
             }
+            rebuildDisplayEvents()
             rememberSelectedChat()
         } catch {
             if handleStaleQueuedTurn(queuedID, error: error) { return }
@@ -1402,6 +1415,7 @@ final class MobileAppStore: ObservableObject {
                     }
                 }
             }
+            rebuildDisplayEvents()
             rememberSelectedChat()
         } catch {
             if handleStaleQueuedTurn(queuedID, error: error) { return }
@@ -1422,6 +1436,7 @@ final class MobileAppStore: ObservableObject {
             if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == queuedID }) {
                 events[idx].position = 1
             }
+            rebuildDisplayEvents()
             activeSessionIDs.insert(event.session_id)
             syncSelectedRunningState()
         } catch {
@@ -1433,6 +1448,7 @@ final class MobileAppStore: ObservableObject {
     private func handleStaleQueuedTurn(_ queuedID: String, error: Error) -> Bool {
         guard isQueuedTurnNotFound(error) else { return false }
         events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+        rebuildDisplayEvents()
         rememberSelectedChat()
         return true
     }
@@ -1661,6 +1677,7 @@ final class MobileAppStore: ObservableObject {
         }
         guard !events.contains(where: { $0.id == event.id }) else { return }
         events.append(event)
+        rebuildDisplayEvents()
         updateRunningState(from: event)
         if isAgentVisibleMessage(event) {
             setLastReadAgentSeq(event.seq, for: event.session_id)
@@ -1698,6 +1715,7 @@ final class MobileAppStore: ObservableObject {
         webSocket = nil
         selectedSessionID = nil
         events = []
+        rebuildDisplayEvents()
         uploads = []
         sessionFiles = []
         omittedHistoryEventCount = 0
@@ -1716,10 +1734,13 @@ final class MobileAppStore: ObservableObject {
         guard !incoming.isEmpty else { return }
         let existingIDs = Set(events.map(\.id))
         let incomingEvents = timelineEvents(from: incoming)
-        events.append(contentsOf: incomingEvents.filter { !existingIDs.contains($0.id) })
+        let newEvents = incomingEvents.filter { !existingIDs.contains($0.id) }
+        guard !newEvents.isEmpty else { return }
+        events.append(contentsOf: newEvents)
         events.sort { $0.seq < $1.seq }
         latestSeenSeq = max(latestSeenSeq, incomingEvents.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
+        rebuildDisplayEvents()
     }
 
     private func applySessionEventSnapshot(_ response: SessionEventsResponse, sessionID: String) {
@@ -1728,6 +1749,7 @@ final class MobileAppStore: ObservableObject {
         omittedHistoryEventCount = response.events_omitted_before ?? 0
         latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
+        rebuildDisplayEvents()
     }
 
     private func addPendingUpload(_ file: ZFile) {
@@ -1742,12 +1764,16 @@ final class MobileAppStore: ObservableObject {
         sessionFiles = mergedFiles(cached.sessionFiles + files(from: events))
         refreshSessionFilesFromLoadedEvents()
         latestSeenSeq = events.map(\.seq).max() ?? 0
+        rebuildDisplayEvents()
     }
 
     private func refreshSessionFilesFromLoadedEvents() {
         let known = files(from: events)
         guard !known.isEmpty || sessionFiles.isEmpty else { return }
-        sessionFiles = mergedFiles(sessionFiles + known)
+        let nextFiles = mergedFiles(sessionFiles + known)
+        if sessionFiles != nextFiles {
+            sessionFiles = nextFiles
+        }
     }
 
     private func files(from source: [ZEvent]) -> [ZFile] {
@@ -1757,7 +1783,10 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func upsertSessionFile(_ file: ZFile) {
-        sessionFiles = mergedFiles(sessionFiles + [file])
+        let nextFiles = mergedFiles(sessionFiles + [file])
+        if sessionFiles != nextFiles {
+            sessionFiles = nextFiles
+        }
     }
 
     private func loadSessionFiles(sessionID: String, generation: Int) async {
@@ -1765,7 +1794,10 @@ final class MobileAppStore: ObservableObject {
             struct Response: Codable { let files: [ZFile] }
             let res: Response = try await api.get("/api/sessions/\(sessionID)/files")
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
-            sessionFiles = mergedFiles(res.files + files(from: events))
+            let nextFiles = mergedFiles(res.files + files(from: events))
+            if sessionFiles != nextFiles {
+                sessionFiles = nextFiles
+            }
         } catch {
             guard !isCancelledNetworkError(error) else { return }
         }
