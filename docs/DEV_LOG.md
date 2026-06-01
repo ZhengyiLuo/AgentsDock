@@ -4404,3 +4404,7 @@ Third follow-up:
 
 - Bumped shared Xcode `CURRENT_PROJECT_VERSION` from `44` to `45` for iOS/iPadOS and macOS TestFlight.
 - Build `45` includes the iOS chat-open fly-by fix and the smaller Mac chat-switch tail/cache windows.
+- Uploaded TestFlight build `45` for both platforms:
+  - `build/archives/ZenithDockIOS-45.xcarchive` -> `Uploaded ZenithDockIOS`
+  - `build/archives/ZenithDockMac-45.xcarchive` -> `Uploaded ZenithDockMac`
+- The first iOS archive attempt hit Xcode/CoreSimulator `AssetCatalogSimulatorAgent` / `MPSCore` policy noise; retrying with isolated DerivedData at `/private/tmp/ZenithDockArchiveDD45` succeeded.
