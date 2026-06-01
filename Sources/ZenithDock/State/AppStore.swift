@@ -64,12 +64,12 @@ final class AppStore: ObservableObject {
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
     @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "archivedSectionCollapsed")
 
-    private let initialSessionEventLimit = 480
+    private let initialSessionEventLimit = 240
     private let olderHistoryPageLimit = 160
     private let maxLoadedTimelineEvents = 2_000
-    private let maxCachedTimelineEvents = 1_440
-    private let maxWarmCachedTimelineEvents = 480
-    private let maxCachedStringCharacters = 12_000
+    private let maxCachedTimelineEvents = 720
+    private let maxWarmCachedTimelineEvents = 240
+    private let maxCachedStringCharacters = 6_000
     private let sessionFilesPageLimit = 48
     private var webSocket: URLSessionWebSocketTask?
     private var webSocketSessionID: String?

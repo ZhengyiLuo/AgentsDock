@@ -4393,3 +4393,9 @@ Third follow-up:
 - Changed iOS bottom positioning to default to a non-animated transaction. The explicit bottom button still animates, but chat selection/history snapshot application now jumps directly to the latest row.
 - Removed the extra `scrollRevision` emitted after `MobileAppStore.select` loads a chat snapshot; send still emits its scroll revision, while opening a chat relies on the timeline's pending-open settle path.
 - Added `ZenithGuardrails` checks so iOS chat opens cannot accidentally reintroduce send-style animated scroll revisions or animated default bottom positioning.
+
+## 2026-05-31 - Mac Chat Tail Window Reduction
+
+- Mac chat selection was still pulling and rendering `480` recent events on warm switches, while memory/disk cache retained `1,440` events and disk cache preserved up to `12,000` characters per text field.
+- Cut the Mac latest-tail fetch and warm-cache render window to `240` events, retained cache to `720` events, and per-field disk-cache string cap to `6,000` characters.
+- Older-history paging remains explicit through `Load Older`/scroll-top behavior, so switching chats should favor fast recent context while long history is still available on demand.
