@@ -4399,3 +4399,8 @@ Third follow-up:
 - Mac chat selection was still pulling and rendering `480` recent events on warm switches, while memory/disk cache retained `1,440` events and disk cache preserved up to `12,000` characters per text field.
 - Cut the Mac latest-tail fetch and warm-cache render window to `240` events, retained cache to `720` events, and per-field disk-cache string cap to `6,000` characters.
 - Older-history paging remains explicit through `Load Older`/scroll-top behavior, so switching chats should favor fast recent context while long history is still available on demand.
+
+## 2026-05-31 - Build 45 TestFlight Prep
+
+- Bumped shared Xcode `CURRENT_PROJECT_VERSION` from `44` to `45` for iOS/iPadOS and macOS TestFlight.
+- Build `45` includes the iOS chat-open fly-by fix and the smaller Mac chat-switch tail/cache windows.
