@@ -32,7 +32,7 @@ final class AppStore: ObservableObject {
     @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = []
     @Published var selectedSessionID: String?
-    @Published var events: [ZEvent] = []
+    private(set) var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
     @Published var sessionFiles: [ZFile] = []
     @Published var sessionVideoFiles: [ZFile] = []
@@ -115,6 +115,7 @@ final class AppStore: ObservableObject {
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
     private let maxMemoryCachedChats = 32
     private let streamBackfillMaskThreshold = 18
+    private let streamFlushDelayNanos: UInt64 = 320_000_000
     private let largeTimelineBatchEventThreshold = 80
 
     private struct CachedChat: Codable, Sendable {
@@ -2403,7 +2404,7 @@ final class AppStore: ObservableObject {
         }
         guard pendingStreamFlushTask == nil else { return }
         pendingStreamFlushTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 180_000_000)
+            try? await Task.sleep(nanoseconds: streamFlushDelayNanos)
             guard !Task.isCancelled else { return }
             self.flushPendingStreamEvents(sessionID: sessionID)
         }

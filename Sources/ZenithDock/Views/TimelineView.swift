@@ -30,6 +30,8 @@ struct TimelineView: View {
     private let rowPageSize = 40
     private let bottomButtonHideDistance: CGFloat = 180
     private let timelinePositioningOverlayDelayNanos: UInt64 = 180_000_000
+    private let projectionBaseEventLimit = 480
+    private let projectionEventsPerVisibleRow = 8
 
     private struct TimelineScrollAnchor {
         let rowID: String
@@ -46,10 +48,12 @@ struct TimelineView: View {
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
         let shouldMaskTimeline = timelineRowsStructurallySuspended
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
-        let projection = TimelineRows.project(from: displayEvents)
+        let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)
+        let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
+        let projection = TimelineRows.project(from: projectedDisplayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
-        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
+        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit) + projectedHiddenEventCount
         let rows = Array(allRows.suffix(visibleRowLimit))
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
@@ -581,8 +585,8 @@ struct TimelineView: View {
     private func revealOlderRows(preservingPositionWith proxy: ScrollViewProxy) -> Bool {
         let anchor = firstRenderedAnchor()
         let rowCount = renderedRows(visibleLimit: visibleRowLimit + rowPageSize).count
-        guard visibleRowLimit < rowCount else { return false }
-        setVisibleRowLimit(min(rowCount, visibleRowLimit + rowPageSize))
+        guard visibleRowLimit < rowCount || hasHiddenProjectedEvents(visibleLimit: visibleRowLimit) else { return false }
+        setVisibleRowLimit(min(max(rowCount, visibleRowLimit + rowPageSize), visibleRowLimit + rowPageSize))
         restoreScrollPosition(to: anchor, proxy: proxy)
         return true
     }
@@ -591,8 +595,8 @@ struct TimelineView: View {
     private func revealOlderRowsShowingNewPage(_ proxy: ScrollViewProxy) -> Bool {
         let oldLimit = visibleRowLimit
         let rows = renderedRows(visibleLimit: visibleRowLimit + rowPageSize)
-        guard visibleRowLimit < rows.count else { return false }
-        let nextLimit = min(rows.count, visibleRowLimit + rowPageSize)
+        guard visibleRowLimit < rows.count || hasHiddenProjectedEvents(visibleLimit: visibleRowLimit) else { return false }
+        let nextLimit = min(max(rows.count, visibleRowLimit + rowPageSize), visibleRowLimit + rowPageSize)
         let target = Array(rows.suffix(nextLimit)).first
         setVisibleRowLimit(nextLimit)
         AppLogger.info("show older rows old_limit=\(oldLimit) new_limit=\(nextLimit) rendered_rows=\(rows.count) target=\(target?.id ?? "-") hidden_before=\(store.hiddenDisplayEventCount)")
@@ -773,7 +777,21 @@ struct TimelineView: View {
     }
 
     private func renderedRows(visibleLimit: Int? = nil) -> [TimelineRow] {
-        TimelineRows.build(from: store.displayEvents)
+        TimelineRows.build(from: timelineProjectionEvents(from: store.displayEvents, visibleLimit: visibleLimit ?? visibleRowLimit))
+    }
+
+    private func hasHiddenProjectedEvents(visibleLimit: Int) -> Bool {
+        store.displayEvents.count > projectionEventBudget(visibleLimit: visibleLimit)
+    }
+
+    private func timelineProjectionEvents(from source: [ZEvent], visibleLimit: Int) -> [ZEvent] {
+        let budget = projectionEventBudget(visibleLimit: visibleLimit)
+        guard source.count > budget else { return source }
+        return Array(source.suffix(budget))
+    }
+
+    private func projectionEventBudget(visibleLimit: Int) -> Int {
+        min(store.displayEvents.count, max(projectionBaseEventLimit, visibleLimit * projectionEventsPerVisibleRow))
     }
 
     private func setVisibleRowLimit(_ nextLimit: Int) {
