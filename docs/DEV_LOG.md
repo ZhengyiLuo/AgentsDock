@@ -34,10 +34,15 @@ Change:
 
 Verification:
 
-- Pending: `swift run ZenithGuardrails`
-- Pending: iOS/iPadOS archive/export upload
-- Pending: macOS archive/export upload
-- Pending: Git push
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-47.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-47.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-47 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockIOS`.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-47.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-47.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-47 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Git push succeeded for app repo commit
+  `787b45f Bump build 47 for TestFlight`.
 
 ## 2026-06-01 Follow-Up - TestFlight Build 46
 
