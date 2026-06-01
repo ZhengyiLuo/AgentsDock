@@ -41,6 +41,8 @@ struct ComposerView: View {
                     sendDraft($0)
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
+                } onDraftChange: { text in
+                    store.rememberDraftPrompt(text, for: store.selectedSessionID)
                 } onTextPresenceChange: { hasText in
                     if editorHasVisibleText != hasText {
                         editorHasVisibleText = hasText
@@ -87,10 +89,11 @@ struct ComposerView: View {
         .padding(.vertical, 9)
         .background(Theme.panel)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            restoreDraft(for: store.selectedSessionID)
+        }
         .onChange(of: store.selectedSessionID) {
-            draftPrompt = ""
-            editorHasVisibleText = false
-            editorResetID += 1
+            restoreDraft(for: store.selectedSessionID)
         }
     }
 
@@ -330,7 +333,9 @@ struct ComposerView: View {
     }
 
     private func sendDraft(_ submitted: String) {
+        guard let sessionID = store.selectedSessionID else { return }
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        store.clearDraftPrompt(for: sessionID)
         draftPrompt = ""
         editorHasVisibleText = false
         editorResetID += 1
@@ -340,12 +345,20 @@ struct ComposerView: View {
                 await MainActor.run {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
+                        store.rememberDraftPrompt(submitted, for: sessionID)
                         editorHasVisibleText = true
                         editorResetID += 1
                     }
                 }
             }
         }
+    }
+
+    private func restoreDraft(for sessionID: String?) {
+        let restored = store.draftPrompt(for: sessionID)
+        draftPrompt = restored
+        editorHasVisibleText = !restored.isEmpty
+        editorResetID += 1
     }
 
     private func acceptAttachmentDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -559,6 +572,7 @@ private struct StablePromptEditor: View, Equatable {
     var submitRevision: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void
+    var onDraftChange: (String) -> Void
     var onTextPresenceChange: (Bool) -> Void
 
     nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
@@ -575,6 +589,7 @@ private struct StablePromptEditor: View, Equatable {
             submitRevision: submitRevision,
             onSubmit: onSubmit,
             onDropFiles: onDropFiles,
+            onDraftChange: onDraftChange,
             onTextPresenceChange: onTextPresenceChange
         )
     }
@@ -587,6 +602,7 @@ struct PromptTextView: NSViewRepresentable {
     var submitRevision: Int
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
+    var onDraftChange: (String) -> Void = { _ in }
     var onTextPresenceChange: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
@@ -662,6 +678,7 @@ struct PromptTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            parent.onDraftChange(textView.string)
             publishPresence(textView)
         }
 

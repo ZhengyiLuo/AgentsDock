@@ -109,6 +109,8 @@ final class AppStore: ObservableObject {
     private var manuallyUnreadSessionIDs: Set<String> = []
     private var pendingReadSyncBySessionID: [String: Int] = [:]
     private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
+    private var draftPromptsBySessionID: [String: String] = [:]
+    private var pendingDraftSave: Task<Void, Never>?
     private var serverIdentity: String?
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
@@ -197,6 +199,7 @@ final class AppStore: ObservableObject {
     init() {
         serverIdentity = Self.loadServerIdentity(for: serverURLString)
         lastReadAgentSeqBySessionID = loadReadState()
+        draftPromptsBySessionID = loadDraftPrompts()
         pinnedItemsBySessionID = loadPinnedItems()
     }
 
@@ -699,6 +702,14 @@ final class AppStore: ObservableObject {
         "ZenithDock.pinnedTimelineItems.\(namespace)"
     }
 
+    private var draftPromptsDefaultsKey: String {
+        draftPromptsDefaultsKey(namespace: serverCacheNamespace)
+    }
+
+    private func draftPromptsDefaultsKey(namespace: String) -> String {
+        "ZenithDock.composerDrafts.\(namespace)"
+    }
+
     private func loadReadState() -> [String: Int] {
         guard let data = UserDefaults.standard.data(forKey: readStateDefaultsKey),
               let decoded = try? JSONDecoder().decode([String: Int].self, from: data) else {
@@ -710,6 +721,55 @@ final class AppStore: ObservableObject {
     private func saveReadState() {
         guard let data = try? JSONEncoder().encode(lastReadAgentSeqBySessionID) else { return }
         UserDefaults.standard.set(data, forKey: readStateDefaultsKey)
+    }
+
+    private func loadDraftPrompts() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: draftPromptsDefaultsKey),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func scheduleDraftPromptsSave() {
+        pendingDraftSave?.cancel()
+        let key = draftPromptsDefaultsKey
+        let snapshot = draftPromptsBySessionID
+        pendingDraftSave = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            if let data = try? JSONEncoder().encode(snapshot) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
+        }
+    }
+
+    private func saveDraftPromptsNow() {
+        pendingDraftSave?.cancel()
+        pendingDraftSave = nil
+        guard let data = try? JSONEncoder().encode(draftPromptsBySessionID) else { return }
+        UserDefaults.standard.set(data, forKey: draftPromptsDefaultsKey)
+    }
+
+    func draftPrompt(for sessionID: String?) -> String {
+        guard let sessionID else { return "" }
+        return draftPromptsBySessionID[sessionID] ?? ""
+    }
+
+    func rememberDraftPrompt(_ text: String, for sessionID: String?) {
+        guard let sessionID else { return }
+        if text.isEmpty {
+            draftPromptsBySessionID.removeValue(forKey: sessionID)
+        } else {
+            draftPromptsBySessionID[sessionID] = text
+        }
+        scheduleDraftPromptsSave()
+    }
+
+    func clearDraftPrompt(for sessionID: String?) {
+        guard let sessionID else { return }
+        guard draftPromptsBySessionID.removeValue(forKey: sessionID) != nil else { return }
+        saveDraftPromptsNow()
     }
 
     private func loadPinnedItems() -> [String: [PinnedTimelineItem]] {
@@ -977,6 +1037,8 @@ final class AppStore: ObservableObject {
 
     private func resetEndpointState() {
         pendingCacheWrite?.cancel()
+        pendingDraftSave?.cancel()
+        pendingDraftSave = nil
         timelineBatchRevealTask?.cancel()
         timelineBatchRevealTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
@@ -1004,6 +1066,7 @@ final class AppStore: ObservableObject {
         memoryChatCache = [:]
         memoryChatCacheOrder = []
         lastReadAgentSeqBySessionID = loadReadState()
+        draftPromptsBySessionID = loadDraftPrompts()
         pinnedItemsBySessionID = loadPinnedItems()
         unreadAgentSessionIDs = []
         firstUnreadAgentSeqBySessionID = [:]
@@ -1042,6 +1105,12 @@ final class AppStore: ObservableObject {
         if UserDefaults.standard.data(forKey: newPinnedKey) == nil,
            let oldData = UserDefaults.standard.data(forKey: oldPinnedKey) {
             UserDefaults.standard.set(oldData, forKey: newPinnedKey)
+        }
+        let oldDraftKey = draftPromptsDefaultsKey(namespace: oldNamespace)
+        let newDraftKey = draftPromptsDefaultsKey(namespace: newNamespace)
+        if UserDefaults.standard.data(forKey: newDraftKey) == nil,
+           let oldData = UserDefaults.standard.data(forKey: oldDraftKey) {
+            UserDefaults.standard.set(oldData, forKey: newDraftKey)
         }
         let oldDirectory = chatCacheDirectory(namespace: oldNamespace)
         let newDirectory = chatCacheDirectory(namespace: newNamespace)
@@ -1938,6 +2007,7 @@ final class AppStore: ObservableObject {
         do {
             let _: Response = try await api.delete("/api/sessions/\(session.id)")
             deleteCachedChat(session.id)
+            clearDraftPrompt(for: session.id)
             sessions.removeAll { $0.id == session.id }
             activeSessionIDs.remove(session.id)
             if selectedSessionID == session.id {

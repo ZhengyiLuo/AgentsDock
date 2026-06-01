@@ -55,6 +55,29 @@ func checkComposerUsesPresenceGate() throws {
     try assert(source.contains("allowsNonContiguousLayout = true"), "Composer text view should allow non-contiguous layout for long drafts")
 }
 
+func checkComposerDraftPersistence() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macComposer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/ComposerView.swift"), encoding: .utf8)
+    let mobileComposer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileComposerView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("private var draftPromptsBySessionID: [String: String] = [:]"), "Mac store must keep per-session composer drafts outside published state")
+    try assert(mobileStore.contains("private var draftPromptsBySessionID: [String: String] = [:]"), "iOS store must keep per-session composer drafts")
+    try assert(macStore.contains("\"ZenithDock.composerDrafts.\\(namespace)\""), "Mac composer drafts must be scoped by canonical server namespace")
+    try assert(mobileStore.contains("\"ZenithDock.composerDrafts.\\(serverCacheNamespace)\""), "iOS composer drafts must be scoped by canonical server namespace")
+    try assert(macStore.contains("func rememberDraftPrompt(_ text: String, for sessionID: String?)"), "Mac store must expose non-published draft save")
+    try assert(mobileStore.contains("func rememberDraftPrompt(_ text: String, for sessionID: String?)"), "iOS store must expose draft save")
+    try assert(macComposer.contains("restoreDraft(for: store.selectedSessionID)"), "Mac composer must restore the selected chat draft")
+    try assert(mobileComposer.contains("restoreDraft(for: store.selectedSessionID)"), "iOS composer must restore the selected chat draft")
+    try assert(macComposer.contains("onDraftChange: { text in") && macComposer.contains("store.rememberDraftPrompt(text, for: store.selectedSessionID)"), "Mac native text changes must save drafts without publishing the whole binding")
+    try assert(mobileComposer.contains(".onChange(of: draftPrompt)") && mobileComposer.contains("store.rememberDraftPrompt(newValue, for: store.selectedSessionID)"), "iOS draft text changes must save the selected chat draft")
+    try assert(macComposer.contains("store.clearDraftPrompt(for: sessionID)") && mobileComposer.contains("store.clearDraftPrompt(for: sessionID)"), "Submitted drafts must clear only the submitted session")
+    try assert(!macComposer.contains(".onChange(of: store.selectedSessionID) {\n            draftPrompt = \"\""), "Mac chat switching must not wipe composer drafts")
+    try assert(!mobileComposer.contains(".onChange(of: store.selectedSessionID) {\n            draftPrompt = \"\""), "iOS chat switching must not wipe composer drafts")
+    try assert(!macComposer.contains("parent.text ="), "Mac native composer must still avoid publishing full draft text per keystroke")
+}
+
 func checkEndpointCacheKeysAreServerScoped() throws {
     let sessionID = "sess_same_after_copy"
     let fallback = "http://127.0.0.1:7850"
@@ -1037,6 +1060,7 @@ func checkMacChatKeyboardNavigation() throws {
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
+    try checkComposerDraftPersistence()
     try checkEndpointCacheKeysAreServerScoped()
     try checkRuntimeDefaultLabels()
     try checkBackendLocksAfterProviderStart()

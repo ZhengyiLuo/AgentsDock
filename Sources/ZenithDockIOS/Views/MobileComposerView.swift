@@ -117,9 +117,14 @@ struct MobileComposerView: View {
         .padding(.top, 8)
         .padding(.bottom, 7)
         .background(.bar)
+        .onAppear {
+            restoreDraft(for: store.selectedSessionID)
+        }
         .onChange(of: store.selectedSessionID) {
-            draftPrompt = ""
-            promptHeight = MobilePromptTextView.minimumHeight
+            restoreDraft(for: store.selectedSessionID)
+        }
+        .onChange(of: draftPrompt) { _, newValue in
+            store.rememberDraftPrompt(newValue, for: store.selectedSessionID)
         }
     }
 
@@ -137,7 +142,9 @@ struct MobileComposerView: View {
 
     private func submitPrompt() {
         guard canSend else { return }
+        guard let sessionID = store.selectedSessionID else { return }
         let submitted = draftPrompt
+        store.clearDraftPrompt(for: sessionID)
         draftPrompt = ""
         promptHeight = MobilePromptTextView.minimumHeight
         Task {
@@ -146,10 +153,16 @@ struct MobileComposerView: View {
                 await MainActor.run {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
+                        store.rememberDraftPrompt(submitted, for: sessionID)
                     }
                 }
             }
         }
+    }
+
+    private func restoreDraft(for sessionID: String?) {
+        draftPrompt = store.draftPrompt(for: sessionID)
+        promptHeight = MobilePromptTextView.minimumHeight
     }
 
     private func acceptAttachmentDrop(_ providers: [NSItemProvider]) -> Bool {

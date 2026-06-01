@@ -59,6 +59,8 @@ final class MobileAppStore: ObservableObject {
     private var manuallyUnreadSessionIDs: Set<String> = []
     private var pendingReadSyncBySessionID: [String: Int] = [:]
     private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
+    private var draftPromptsBySessionID: [String: String] = [:]
+    private var pendingDraftSave: Task<Void, Never>?
     private var serverIdentity: String?
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
@@ -145,6 +147,7 @@ final class MobileAppStore: ObservableObject {
         serverURLString = effectiveServerAddress
         serverIdentity = Self.loadServerIdentity(for: serverURLString)
         lastReadAgentSeqBySessionID = loadReadState()
+        draftPromptsBySessionID = loadDraftPrompts()
     }
 
     var api: APIClient {
@@ -436,6 +439,10 @@ final class MobileAppStore: ObservableObject {
         "ZenithDock.lastReadAgentSeq.\(serverCacheNamespace)"
     }
 
+    private var draftPromptsDefaultsKey: String {
+        "ZenithDock.composerDrafts.\(serverCacheNamespace)"
+    }
+
     private func loadReadState() -> [String: Int] {
         guard let data = UserDefaults.standard.data(forKey: readStateDefaultsKey),
               let decoded = try? JSONDecoder().decode([String: Int].self, from: data) else {
@@ -447,6 +454,55 @@ final class MobileAppStore: ObservableObject {
     private func saveReadState() {
         guard let data = try? JSONEncoder().encode(lastReadAgentSeqBySessionID) else { return }
         UserDefaults.standard.set(data, forKey: readStateDefaultsKey)
+    }
+
+    private func loadDraftPrompts() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: draftPromptsDefaultsKey),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func scheduleDraftPromptsSave() {
+        pendingDraftSave?.cancel()
+        let key = draftPromptsDefaultsKey
+        let snapshot = draftPromptsBySessionID
+        pendingDraftSave = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            if let data = try? JSONEncoder().encode(snapshot) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
+        }
+    }
+
+    private func saveDraftPromptsNow() {
+        pendingDraftSave?.cancel()
+        pendingDraftSave = nil
+        guard let data = try? JSONEncoder().encode(draftPromptsBySessionID) else { return }
+        UserDefaults.standard.set(data, forKey: draftPromptsDefaultsKey)
+    }
+
+    func draftPrompt(for sessionID: String?) -> String {
+        guard let sessionID else { return "" }
+        return draftPromptsBySessionID[sessionID] ?? ""
+    }
+
+    func rememberDraftPrompt(_ text: String, for sessionID: String?) {
+        guard let sessionID else { return }
+        if text.isEmpty {
+            draftPromptsBySessionID.removeValue(forKey: sessionID)
+        } else {
+            draftPromptsBySessionID[sessionID] = text
+        }
+        scheduleDraftPromptsSave()
+    }
+
+    func clearDraftPrompt(for sessionID: String?) {
+        guard let sessionID else { return }
+        guard draftPromptsBySessionID.removeValue(forKey: sessionID) != nil else { return }
+        saveDraftPromptsNow()
     }
 
     private func setLastReadAgentSeq(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
@@ -580,6 +636,8 @@ final class MobileAppStore: ObservableObject {
 
     func reconnect() async {
         cleanServerURL()
+        pendingDraftSave?.cancel()
+        pendingDraftSave = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         socketLive = false
@@ -598,6 +656,7 @@ final class MobileAppStore: ObservableObject {
         memoryChatCacheOrder = []
         serverIdentity = Self.loadServerIdentity(for: effectiveServerAddress)
         lastReadAgentSeqBySessionID = loadReadState()
+        draftPromptsBySessionID = loadDraftPrompts()
         unreadAgentSessionIDs = []
         manuallyUnreadSessionIDs = []
         await refresh(showErrors: true)
@@ -615,21 +674,28 @@ final class MobileAppStore: ObservableObject {
         saveServerIdentity(clean, for: effectiveServerAddress)
         let newNamespace = serverCacheNamespace
         guard oldNamespace != newNamespace else { return }
-        migrateReadState(from: oldNamespace, to: newNamespace)
+        migrateLocalServerState(from: oldNamespace, to: newNamespace)
         memoryChatCache = [:]
         memoryChatCacheOrder = []
         lastReadAgentSeqBySessionID = loadReadState()
+        draftPromptsBySessionID = loadDraftPrompts()
         unreadAgentSessionIDs = []
         manuallyUnreadSessionIDs = []
     }
 
-    private func migrateReadState(from oldNamespace: String, to newNamespace: String) {
+    private func migrateLocalServerState(from oldNamespace: String, to newNamespace: String) {
         guard oldNamespace != newNamespace else { return }
         let oldKey = "ZenithDock.lastReadAgentSeq.\(oldNamespace)"
         let newKey = "ZenithDock.lastReadAgentSeq.\(newNamespace)"
         if UserDefaults.standard.data(forKey: newKey) == nil,
            let oldData = UserDefaults.standard.data(forKey: oldKey) {
             UserDefaults.standard.set(oldData, forKey: newKey)
+        }
+        let oldDraftKey = "ZenithDock.composerDrafts.\(oldNamespace)"
+        let newDraftKey = "ZenithDock.composerDrafts.\(newNamespace)"
+        if UserDefaults.standard.data(forKey: newDraftKey) == nil,
+           let oldData = UserDefaults.standard.data(forKey: oldDraftKey) {
+            UserDefaults.standard.set(oldData, forKey: newDraftKey)
         }
     }
 
@@ -1013,6 +1079,7 @@ final class MobileAppStore: ObservableObject {
         }
         do {
             let _: Response = try await api.delete("/api/sessions/\(session.id)")
+            clearDraftPrompt(for: session.id)
             sessions.removeAll { $0.id == session.id }
             jobs.removeAll { $0.session_id == session.id }
             activeSessionIDs.remove(session.id)

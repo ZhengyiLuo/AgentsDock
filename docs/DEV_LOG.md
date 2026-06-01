@@ -19,6 +19,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 - Per-Chat Composer Drafts
+
+- Composer drafts are now saved per chat and scoped by canonical server
+  namespace, so switching chats restores the unsent message for that chat
+  instead of wiping it.
+- Mac draft persistence stays off the published SwiftUI text path: the native
+  text view reports changes into a private, debounced draft cache so typing
+  stays snappy.
+- iOS/iPadOS restores and saves the selected chat's draft through the same
+  local draft cache.
+- Submitted drafts clear only the submitted session, and failed sends restore
+  the draft for that same session.
+
 ## 2026-06-01 - Claude Resume Poison Guard
 
 - Fixed a server-side Claude resume bug where `error_during_execution` results
