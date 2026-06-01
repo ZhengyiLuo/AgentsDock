@@ -19,6 +19,34 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 Follow-Up - TestFlight Build 46
+
+Context:
+
+- User requested a TestFlight push after the Mac `Ctrl-Tab` chat-switching
+  shortcut and recent timeline performance fixes.
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `45` to `46`.
+- Uploaded build `46` for both TestFlight platforms:
+  - iOS/iPadOS: `build/archives/ZenithDockIOS-46.xcarchive`
+  - macOS: `build/archives/ZenithDockMac-46.xcarchive`
+- Server repo push was checked as part of the release rule;
+  `/Users/zen/agi/ZenithBotServer` was already up to date.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Release -destination generic/platform=iOS -archivePath build/archives/ZenithDockIOS-46.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockIOS-46.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightIOSExport-46 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockIOS`.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockMac -configuration Release -destination generic/platform=macOS -archivePath build/archives/ZenithDockMac-46.xcarchive archive -quiet -allowProvisioningUpdates`
+- `xcodebuild -exportArchive -archivePath build/archives/ZenithDockMac-46.xcarchive -exportOptionsPlist build/TestFlightExportOptions.plist -exportPath build/TestFlightMacExport-46 -quiet -allowProvisioningUpdates`
+  uploaded successfully: `Uploaded ZenithDockMac`.
+- Both archives report `CFBundleShortVersionString = 0.1.1` and
+  `CFBundleVersion = 46`.
+
 ## 2026-05-31 Follow-Up - Right Panel Collapse And Pinned Items
 
 Problem:
