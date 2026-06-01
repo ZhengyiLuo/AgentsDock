@@ -19,6 +19,26 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 Follow-Up - TestFlight Build 48
+
+Context:
+
+- Build 47 was uploaded before the deeper UI responsiveness optimization pass.
+- Build 48 ships the optimized Mac/iOS timeline/store changes so TestFlight
+  matches the current Git state.
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `47` to `48`.
+- Includes `34d87c3 Optimize timeline responsiveness`.
+
+Verification:
+
+- Pending: `swift run ZenithGuardrails`
+- Pending: iOS/iPadOS archive/export upload
+- Pending: macOS archive/export upload
+- Pending: Git push
+
 ## 2026-06-01 Follow-Up - UI Responsiveness Optimization
 
 Context:
