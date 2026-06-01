@@ -5,6 +5,7 @@ struct RootView: View {
     @State private var importerOpen = false
     @State private var resumeOpen = false
     @State private var serverSettingsOpen = false
+    @AppStorage("rightInspectorVisible") private var inspectorVisible = true
 
     var body: some View {
         NavigationSplitView {
@@ -18,8 +19,14 @@ struct RootView: View {
             )
             .navigationSplitViewColumnWidth(min: 560, ideal: 720)
         } detail: {
-            InspectorView()
-                .navigationSplitViewColumnWidth(min: 340, ideal: 380, max: 480)
+            if inspectorVisible {
+                InspectorView()
+                    .navigationSplitViewColumnWidth(min: 340, ideal: 380, max: 480)
+            } else {
+                Color.clear
+                    .frame(width: 0)
+                    .navigationSplitViewColumnWidth(min: 0, ideal: 0, max: 0)
+            }
         }
         .background(Theme.window)
         .task { await store.startLiveTracking() }

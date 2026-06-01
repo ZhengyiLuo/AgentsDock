@@ -29,6 +29,8 @@ struct EventCard: View, Equatable {
     let fileURL: URL?
     let linkContext: ZMarkdownLinkContext?
     let job: ZJob?
+    let isPinned: Bool
+    let onTogglePin: (ZEvent) -> Void
     let onUnqueue: (ZEvent) -> Void
 
     @State private var expanded = false
@@ -44,7 +46,8 @@ struct EventCard: View, Equatable {
             lhs.artifactURL == rhs.artifactURL &&
             lhs.fileURL == rhs.fileURL &&
             lhs.linkContext == rhs.linkContext &&
-            lhs.job == rhs.job
+            lhs.job == rhs.job &&
+            lhs.isPinned == rhs.isPinned
     }
 
     var body: some View {
@@ -57,7 +60,9 @@ struct EventCard: View, Equatable {
                     isUser: true,
                     timestamp: messageTimestamp,
                     attachments: attachments,
-                    linkContext: linkContext
+                    linkContext: linkContext,
+                    isPinned: isPinned,
+                    onTogglePin: { onTogglePin(event) }
                 )
             }
         } else if event.type == "turn_queued" {
@@ -73,12 +78,22 @@ struct EventCard: View, Equatable {
                     actionTitle: queueStatus.isPending ? "Unqueue" : nil,
                     actionSystemImage: queueStatus.isPending ? "xmark.circle" : nil,
                     linkContext: linkContext,
+                    isPinned: isPinned,
+                    onTogglePin: { onTogglePin(event) },
                     action: queueStatus.isPending ? { onUnqueue(event) } : nil
                 )
             }
         } else if event.type == "assistant_text" {
             HStack {
-                MessageBubble(label: "Assistant", text: event.text ?? "", isUser: false, timestamp: messageTimestamp, linkContext: linkContext)
+                MessageBubble(
+                    label: "Assistant",
+                    text: event.text ?? "",
+                    isUser: false,
+                    timestamp: messageTimestamp,
+                    linkContext: linkContext,
+                    isPinned: isPinned,
+                    onTogglePin: { onTogglePin(event) }
+                )
                 Spacer(minLength: 80)
             }
         } else if event.type == "turn_finished", let text = event.result_text, !text.isEmpty {
@@ -89,7 +104,9 @@ struct EventCard: View, Equatable {
                     isUser: false,
                     isJob: job != nil,
                     timestamp: messageTimestamp,
-                    linkContext: linkContext
+                    linkContext: linkContext,
+                    isPinned: isPinned,
+                    onTogglePin: { onTogglePin(event) }
                 )
                 Spacer(minLength: 80)
             }
@@ -117,6 +134,16 @@ struct EventCard: View, Equatable {
                         Text("#\(event.seq)")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
+                    }
+                    if canPin {
+                        Button {
+                            onTogglePin(event)
+                        } label: {
+                            Image(systemName: isPinned ? "pin.fill" : "pin")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help(isPinned ? "Unpin from right panel" : "Pin to right panel")
                     }
                 }
                 content
@@ -259,6 +286,15 @@ struct EventCard: View, Equatable {
     private var messageTimestamp: String? {
         localTimestampString(event.ts)
     }
+
+    private var canPin: Bool {
+        event.artifact != nil ||
+            event.file != nil ||
+            [event.prompt, event.text, event.result_text, event.message, event.output, event.error].contains { value in
+                guard let value else { return false }
+                return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+    }
 }
 
 private extension QueuedEventStatus {
@@ -279,6 +315,8 @@ struct MessageBubble: View {
     var actionTitle: String?
     var actionSystemImage: String?
     var linkContext: ZMarkdownLinkContext?
+    var isPinned = false
+    var onTogglePin: (() -> Void)?
     var action: (() -> Void)?
 
     @State private var fullTextExpanded = false
@@ -303,6 +341,14 @@ struct MessageBubble: View {
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .help(actionTitle ?? "Action")
+                }
+                if let onTogglePin {
+                    Button(action: onTogglePin) {
+                        Image(systemName: isPinned ? "pin.fill" : "pin")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(isPinned ? "Unpin from right panel" : "Pin to right panel")
                 }
                 if shouldClip {
                     Button {
@@ -761,6 +807,8 @@ struct ArtifactGridItem: Identifiable, Hashable {
 struct ArtifactGridCard: View {
     let artifacts: [ArtifactGridItem]
     var linkContext: ZMarkdownLinkContext?
+    var isPinned: (ZFile) -> Bool
+    var onTogglePin: (ZFile) -> Void
     @State private var isExpanded = false
 
     private let columns = Array(repeating: GridItem(.flexible(minimum: 150, maximum: 210), spacing: 10), count: 4)
@@ -789,14 +837,25 @@ struct ArtifactGridCard: View {
                 if !mediaArtifacts.isEmpty {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                         ForEach(mediaArtifacts) { artifact in
-                            ArtifactGridTile(file: artifact.file, url: artifact.url, linkContext: linkContext)
+                            ArtifactGridTile(
+                                file: artifact.file,
+                                url: artifact.url,
+                                linkContext: linkContext,
+                                isPinned: isPinned(artifact.file),
+                                onTogglePin: { onTogglePin(artifact.file) }
+                            )
                         }
                     }
                 }
                 if !fileArtifacts.isEmpty {
                     VStack(spacing: 6) {
                         ForEach(fileArtifacts) { artifact in
-                            ArtifactFileRow(file: artifact.file, url: artifact.url)
+                            ArtifactFileRow(
+                                file: artifact.file,
+                                url: artifact.url,
+                                isPinned: isPinned(artifact.file),
+                                onTogglePin: { onTogglePin(artifact.file) }
+                            )
                         }
                     }
                 }
@@ -830,6 +889,8 @@ private struct ArtifactGridTile: View {
     let file: ZFile
     let url: URL
     var linkContext: ZMarkdownLinkContext?
+    var isPinned: Bool
+    var onTogglePin: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -864,6 +925,11 @@ private struct ArtifactGridTile: View {
             Link(destination: url) {
                 Image(systemName: "arrow.up.right.square")
             }
+            Button(action: onTogglePin) {
+                Image(systemName: isPinned ? "pin.fill" : "pin")
+            }
+            .buttonStyle(.borderless)
+            .help(isPinned ? "Unpin from right panel" : "Pin to right panel")
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -887,6 +953,8 @@ private struct ArtifactGridTile: View {
 private struct ArtifactFileRow: View {
     let file: ZFile
     let url: URL
+    var isPinned = false
+    var onTogglePin: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -913,6 +981,15 @@ private struct ArtifactFileRow: View {
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
+            if let onTogglePin {
+                Button(action: onTogglePin) {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .help(isPinned ? "Unpin from right panel" : "Pin to right panel")
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

@@ -98,6 +98,10 @@ struct TimelineView: View {
                                             fileURL: event.file.map { store.fileURL($0) },
                                             linkContext: linkContext,
                                             job: event.run_id.flatMap { jobsByRunID[$0] },
+                                            isPinned: store.isPinned(event),
+                                            onTogglePin: { event in
+                                                store.togglePin(event)
+                                            },
                                             onUnqueue: { event in
                                                 Task { await store.unqueue(event) }
                                             }
@@ -109,7 +113,13 @@ struct TimelineView: View {
                                             artifacts: events.compactMap { event in
                                                 event.artifact.map { ArtifactGridItem(file: $0, url: store.fileURL($0)) }
                                             },
-                                            linkContext: linkContext
+                                            linkContext: linkContext,
+                                            isPinned: { file in
+                                                store.isPinned(file)
+                                            },
+                                            onTogglePin: { file in
+                                                store.togglePin(file)
+                                            }
                                         )
                                             .id(row.id)
                                     case .job(let jobRun):
@@ -1964,6 +1974,7 @@ struct HeaderView: View {
     @Binding var resumeOpen: Bool
     @Binding var serverSettingsOpen: Bool
     @State private var draftTitle = ""
+    @AppStorage("rightInspectorVisible") private var inspectorVisible = true
     @AppStorage("chatFontSize") private var chatFontSize = 14.0
     @AppStorage("chatFontDesign") private var chatFontDesign = "default"
 
@@ -1975,6 +1986,9 @@ struct HeaderView: View {
                     .layoutPriority(1)
 
                 ServerConnectionToolbarButton(isPresented: $serverSettingsOpen)
+                    .layoutPriority(3)
+
+                inspectorToggleButton
                     .layoutPriority(3)
             }
 
@@ -2167,6 +2181,18 @@ struct HeaderView: View {
             Label("Font", systemImage: "textformat.size")
         }
         .help("Change chat font")
+    }
+
+    private var inspectorToggleButton: some View {
+        Button {
+            inspectorVisible.toggle()
+        } label: {
+            Label(inspectorVisible ? "Hide Right Panel" : "Show Right Panel", systemImage: "sidebar.right")
+                .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(inspectorVisible ? "Hide right panel" : "Show right panel")
     }
 
     private var sessionSubtitle: String {

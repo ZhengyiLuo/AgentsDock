@@ -6,6 +6,25 @@ private let defaultAgentServerURLString = "http://127.0.0.1:7850"
 private let fallbackServerCwd = "~"
 private let minimumAgentAPIContractVersion = 3
 private let pendingRuntimePatchTimeout: TimeInterval = 12
+private let pinnedMessageBodyLimit = 20_000
+
+struct PinnedTimelineItem: Codable, Identifiable, Hashable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case message
+        case file
+    }
+
+    var id: String
+    var sessionID: String
+    var kind: Kind
+    var eventID: String?
+    var file: ZFile?
+    var title: String
+    var subtitle: String?
+    var body: String?
+    var createdAt: String?
+    var pinnedAt: String
+}
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -63,6 +82,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "folderOrder") ?? []
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
     @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "archivedSectionCollapsed")
+    @Published private(set) var pinnedItemsBySessionID: [String: [PinnedTimelineItem]] = [:]
 
     private let initialSessionEventLimit = 240
     private let olderHistoryPageLimit = 160
@@ -176,6 +196,7 @@ final class AppStore: ObservableObject {
     init() {
         serverIdentity = Self.loadServerIdentity(for: serverURLString)
         lastReadAgentSeqBySessionID = loadReadState()
+        pinnedItemsBySessionID = loadPinnedItems()
     }
 
     var api: APIClient {
@@ -325,6 +346,93 @@ final class AppStore: ObservableObject {
     var sessionVideos: [ZFile] {
         mergedFiles(sessionFiles + sessionVideoFiles)
             .filter { ($0.content_type ?? "").hasPrefix("video/") }
+    }
+
+    var selectedPinnedItems: [PinnedTimelineItem] {
+        guard let selectedSessionID else { return [] }
+        return (pinnedItemsBySessionID[selectedSessionID] ?? []).sorted { lhs, rhs in
+            if lhs.pinnedAt != rhs.pinnedAt {
+                return lhs.pinnedAt > rhs.pinnedAt
+            }
+            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    func isPinned(_ event: ZEvent) -> Bool {
+        if let file = event.artifact ?? event.file {
+            return isPinned(file)
+        }
+        return pinnedItemsBySessionID[event.session_id]?.contains { item in
+            item.kind == .message && item.eventID == event.id
+        } == true
+    }
+
+    func isPinned(_ file: ZFile) -> Bool {
+        let sessionID = file.session_id ?? selectedSessionID
+        guard let sessionID else { return false }
+        return pinnedItemsBySessionID[sessionID]?.contains { item in
+            item.kind == .file && item.file?.id == file.id
+        } == true
+    }
+
+    func togglePin(_ event: ZEvent) {
+        if let file = event.artifact ?? event.file {
+            togglePin(file, eventID: event.id)
+            return
+        }
+        let itemID = pinnedMessageItemID(eventID: event.id)
+        if removePinnedItem(id: itemID, sessionID: event.session_id) {
+            return
+        }
+        guard let body = pinnableText(for: event) else { return }
+        let item = PinnedTimelineItem(
+            id: itemID,
+            sessionID: event.session_id,
+            kind: .message,
+            eventID: event.id,
+            file: nil,
+            title: pinnedMessageTitle(for: event),
+            subtitle: localTimestampString(event.ts),
+            body: trimmedPinnedBody(body),
+            createdAt: event.ts,
+            pinnedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        addPinnedItem(item)
+    }
+
+    func togglePin(_ file: ZFile, eventID: String? = nil) {
+        let sessionID = file.session_id ?? selectedSessionID
+        guard let sessionID else { return }
+        let itemID = pinnedFileItemID(fileID: file.id)
+        if removePinnedItem(id: itemID, sessionID: sessionID) {
+            return
+        }
+        let item = PinnedTimelineItem(
+            id: itemID,
+            sessionID: sessionID,
+            kind: .file,
+            eventID: eventID ?? file.event_id,
+            file: file,
+            title: file.title ?? file.filename,
+            subtitle: pinnedFileSubtitle(file),
+            body: file.text,
+            createdAt: file.created_at,
+            pinnedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        addPinnedItem(item)
+    }
+
+    func removePinnedItem(_ item: PinnedTimelineItem) {
+        _ = removePinnedItem(id: item.id, sessionID: item.sessionID)
+    }
+
+    func revealPinnedItem(_ item: PinnedTimelineItem) {
+        if let file = item.file {
+            Task { await findFileInChat(file) }
+            return
+        }
+        guard let eventID = item.eventID else { return }
+        requestScrollToEvent(eventID)
     }
 
     var pendingQueuedEvents: [ZEvent] {
@@ -527,6 +635,14 @@ final class AppStore: ObservableObject {
         "ZenithDock.lastReadAgentSeq.\(namespace)"
     }
 
+    private var pinnedItemsDefaultsKey: String {
+        pinnedItemsDefaultsKey(namespace: serverCacheNamespace)
+    }
+
+    private func pinnedItemsDefaultsKey(namespace: String) -> String {
+        "ZenithDock.pinnedTimelineItems.\(namespace)"
+    }
+
     private func loadReadState() -> [String: Int] {
         guard let data = UserDefaults.standard.data(forKey: readStateDefaultsKey),
               let decoded = try? JSONDecoder().decode([String: Int].self, from: data) else {
@@ -538,6 +654,94 @@ final class AppStore: ObservableObject {
     private func saveReadState() {
         guard let data = try? JSONEncoder().encode(lastReadAgentSeqBySessionID) else { return }
         UserDefaults.standard.set(data, forKey: readStateDefaultsKey)
+    }
+
+    private func loadPinnedItems() -> [String: [PinnedTimelineItem]] {
+        guard let data = UserDefaults.standard.data(forKey: pinnedItemsDefaultsKey),
+              let decoded = try? JSONDecoder().decode([String: [PinnedTimelineItem]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func savePinnedItems() {
+        guard let data = try? JSONEncoder().encode(pinnedItemsBySessionID) else { return }
+        UserDefaults.standard.set(data, forKey: pinnedItemsDefaultsKey)
+    }
+
+    private func addPinnedItem(_ item: PinnedTimelineItem) {
+        var items = pinnedItemsBySessionID[item.sessionID] ?? []
+        items.removeAll { $0.id == item.id }
+        items.insert(item, at: 0)
+        pinnedItemsBySessionID[item.sessionID] = items
+        savePinnedItems()
+    }
+
+    @discardableResult
+    private func removePinnedItem(id: String, sessionID: String) -> Bool {
+        guard var items = pinnedItemsBySessionID[sessionID] else { return false }
+        let oldCount = items.count
+        items.removeAll { $0.id == id }
+        guard items.count != oldCount else { return false }
+        if items.isEmpty {
+            pinnedItemsBySessionID.removeValue(forKey: sessionID)
+        } else {
+            pinnedItemsBySessionID[sessionID] = items
+        }
+        savePinnedItems()
+        return true
+    }
+
+    private func pinnableText(for event: ZEvent) -> String? {
+        let value = event.prompt ?? event.text ?? event.result_text ?? event.message ?? event.output ?? event.error
+        let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean?.isEmpty == false ? clean : nil
+    }
+
+    private func pinnedMessageTitle(for event: ZEvent) -> String {
+        switch event.type {
+        case "turn_started":
+            return "User message"
+        case "turn_finished":
+            return "Assistant response"
+        case "assistant_text":
+            return "Assistant message"
+        case "reasoning_summary":
+            return "Reasoning note"
+        case "tool_started", "tool_finished":
+            if let toolName = event.tool?.name, !toolName.isEmpty {
+                return "Tool: \(toolName)"
+            }
+            return "Tool output"
+        default:
+            return event.type.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private func pinnedFileSubtitle(_ file: ZFile) -> String {
+        var parts: [String] = []
+        if let contentType = file.content_type, !contentType.isEmpty {
+            parts.append(contentType)
+        }
+        if let size = file.size {
+            parts.append(byteString(size))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func trimmedPinnedBody(_ body: String) -> String {
+        if body.count <= pinnedMessageBodyLimit {
+            return body
+        }
+        return String(body.prefix(pinnedMessageBodyLimit)) + "\n\n[message trimmed in pinned shelf; use Find for the full timeline message]"
+    }
+
+    private func pinnedMessageItemID(eventID: String) -> String {
+        "message:\(eventID)"
+    }
+
+    private func pinnedFileItemID(fileID: String) -> String {
+        "file:\(fileID)"
     }
 
     private func setLastReadAgentSeq(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
@@ -727,6 +931,7 @@ final class AppStore: ObservableObject {
         memoryChatCache = [:]
         memoryChatCacheOrder = []
         lastReadAgentSeqBySessionID = loadReadState()
+        pinnedItemsBySessionID = loadPinnedItems()
         unreadAgentSessionIDs = []
         firstUnreadAgentSeqBySessionID = [:]
         manuallyUnreadSessionIDs = []
@@ -758,6 +963,12 @@ final class AppStore: ObservableObject {
         if UserDefaults.standard.data(forKey: newReadKey) == nil,
            let oldData = UserDefaults.standard.data(forKey: oldReadKey) {
             UserDefaults.standard.set(oldData, forKey: newReadKey)
+        }
+        let oldPinnedKey = pinnedItemsDefaultsKey(namespace: oldNamespace)
+        let newPinnedKey = pinnedItemsDefaultsKey(namespace: newNamespace)
+        if UserDefaults.standard.data(forKey: newPinnedKey) == nil,
+           let oldData = UserDefaults.standard.data(forKey: oldPinnedKey) {
+            UserDefaults.standard.set(oldData, forKey: newPinnedKey)
         }
         let oldDirectory = chatCacheDirectory(namespace: oldNamespace)
         let newDirectory = chatCacheDirectory(namespace: newNamespace)

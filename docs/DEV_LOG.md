@@ -19,6 +19,34 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-05-31 Follow-Up - Right Panel Collapse And Pinned Items
+
+Problem:
+
+- The Mac inspector/right panel was always visible, which cost horizontal room
+  during focused chat work.
+- Important timeline messages/files had no first-class place to live after they
+  scrolled away.
+
+Change:
+
+- Added a persistent Mac header toggle for the right inspector panel. When
+  hidden, the detail column releases its width and the header button brings it
+  back.
+- Added local, server-namespaced pinned timeline items for the selected chat.
+  Timeline messages, artifact groups, and the files/videos inspector now expose
+  pin controls.
+- The inspector now has a `Pinned` shelf with compact rows plus `Find`, `Open`,
+  `Copy`, and `Unpin` actions.
+- Pinned item state migrates when the app adopts a canonical server identity,
+  matching the chat cache/read-state behavior.
+- Added guardrails for inspector collapse and pinned item wiring.
+
+Verification:
+
+- `swift run ZenithGuardrails`
+- `swift build --product ZenithDock`
+
 ## 2026-05-27 Follow-Up - Sidebar Reorder Mode
 
 Problem:

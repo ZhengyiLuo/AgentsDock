@@ -947,6 +947,27 @@ func checkAgentHTTPTransportPlists() throws {
     try assert(macPlist.contains("local network or Tailscale"), "macOS Local Network prompt must mention the private agent route")
 }
 
+func checkInspectorCollapseAndPins() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let root = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/RootView.swift"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+    let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+
+    try assert(root.contains("@AppStorage(\"rightInspectorVisible\")"), "Mac root must persist right-inspector visibility")
+    try assert(root.contains("navigationSplitViewColumnWidth(min: 0, ideal: 0, max: 0)"), "Hidden right inspector must release its column width")
+    try assert(timeline.contains("inspectorToggleButton"), "Mac header must expose a right-panel toggle")
+    try assert(macStore.contains("struct PinnedTimelineItem"), "Mac store must model pinned timeline items")
+    try assert(macStore.contains("pinnedItemsDefaultsKey(namespace: serverCacheNamespace)"), "Pinned items must be scoped by canonical server namespace")
+    try assert(macStore.contains("migrateLocalServerState") && macStore.contains("oldPinnedKey"), "Pinned items must migrate when server identity is adopted")
+    try assert(timeline.contains("isPinned: store.isPinned(event)"), "Mac timeline event cards must receive pin state")
+    try assert(eventViews.contains("onTogglePin") && timeline.contains("onTogglePin: { event in"), "Mac timeline must wire event pin actions")
+    try assert(inspector.contains("PinnedItemsInspector"), "Mac inspector must show a pinned shelf")
+    try assert(inspector.contains("store.revealPinnedItem(item)"), "Pinned shelf must support finding pins in chat")
+    try assert(inspector.contains("store.togglePin(file)"), "Mac files/videos inspector must support pinning files")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -979,6 +1000,7 @@ do {
     try checkTmuxSubmitterVisualizer()
     try checkExportCompliancePlists()
     try checkAgentHTTPTransportPlists()
+    try checkInspectorCollapseAndPins()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

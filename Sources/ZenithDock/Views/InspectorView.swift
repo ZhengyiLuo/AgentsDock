@@ -130,6 +130,8 @@ struct InspectorView: View {
                     .padding(.vertical, 4)
                 }
 
+                PinnedItemsInspector()
+
                 GroupBox("Run") {
                     VStack(alignment: .leading, spacing: 10) {
                         LabeledContent("Events", value: "\(store.events.count)")
@@ -1947,6 +1949,144 @@ private func elapsedString(_ seconds: Int) -> String {
     return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
 }
 
+private struct PinnedItemsInspector: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 8) {
+                    Label("Pinned", systemImage: "pin.fill")
+                        .font(.headline)
+                    Text("\(store.selectedPinnedItems.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+
+                if store.selectedPinnedItems.isEmpty {
+                    Text("Pin messages or files from the timeline to keep them here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(store.selectedPinnedItems) { item in
+                            PinnedItemRow(item: item)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+private struct PinnedItemRow: View {
+    @EnvironmentObject private var store: AppStore
+    let item: PinnedTimelineItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 18)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    if let subtitle = item.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 6)
+                Button {
+                    store.removePinnedItem(item)
+                } label: {
+                    Image(systemName: "pin.slash")
+                }
+                .buttonStyle(.borderless)
+                .help("Unpin")
+            }
+
+            if let body = item.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
+                Text(body)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    store.revealPinnedItem(item)
+                } label: {
+                    Label("Find", systemImage: "text.magnifyingglass")
+                }
+                .controlSize(.mini)
+                .help("Find in chat")
+
+                if let file = item.file {
+                    Link(destination: store.fileURL(file)) {
+                        Label("Open", systemImage: "arrow.up.right.square")
+                    }
+                    .controlSize(.mini)
+                }
+
+                if let body = item.body, !body.isEmpty {
+                    Button {
+                        copyToPasteboard(ZClipboardText.normalizedForCopy(body))
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    .controlSize(.mini)
+                    .help("Copy pinned text")
+                }
+            }
+            .font(.caption2.weight(.semibold))
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.softLine))
+    }
+
+    private var icon: String {
+        switch item.kind {
+        case .message:
+            return "text.bubble"
+        case .file:
+            if item.file?.content_type?.hasPrefix("video/") == true { return "film" }
+            if item.file?.content_type?.hasPrefix("image/") == true { return "photo" }
+            return "doc"
+        }
+    }
+
+    private var tint: Color {
+        switch item.kind {
+        case .message:
+            return .accentColor
+        case .file:
+            if item.file?.content_type?.hasPrefix("video/") == true { return .green }
+            if item.file?.content_type?.hasPrefix("image/") == true { return .blue }
+            return .secondary
+        }
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+}
+
 private struct ChatFilesInspector: View {
     @EnvironmentObject private var store: AppStore
     let files: [ZFile]
@@ -2187,6 +2327,14 @@ private struct ChatVideoGridCell: View {
                     Image(systemName: "arrow.up.right.square")
                 }
                 .help("Open file")
+
+                Button {
+                    store.togglePin(file)
+                } label: {
+                    Image(systemName: store.isPinned(file) ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderless)
+                .help(store.isPinned(file) ? "Unpin from right panel" : "Pin to right panel")
             }
             .font(.caption2)
         }
@@ -2306,6 +2454,7 @@ private func makeVideoThumbnailData(from url: URL) throws -> Data {
 }
 
 private struct ChatFileRow: View {
+    @EnvironmentObject private var store: AppStore
     let file: ZFile
     let url: URL
 
@@ -2337,6 +2486,13 @@ private struct ChatFileRow: View {
                 Image(systemName: "arrow.up.right.square")
             }
             .help("Open file")
+            Button {
+                store.togglePin(file)
+            } label: {
+                Image(systemName: store.isPinned(file) ? "pin.fill" : "pin")
+            }
+            .buttonStyle(.borderless)
+            .help(store.isPinned(file) ? "Unpin from right panel" : "Pin to right panel")
         }
         .padding(8)
         .background(Theme.card)
