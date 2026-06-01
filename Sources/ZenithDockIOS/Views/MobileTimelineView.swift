@@ -32,6 +32,7 @@ struct MobileTimelineView: View {
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit)
         let rows = Array(allRows.suffix(visibleRowLimit))
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
+        let displaySignature = "\(displayEvents.count):\(displayEvents.last?.id ?? "")"
 
         VStack(spacing: 0) {
             MobileChatHeader(
@@ -136,19 +137,16 @@ struct MobileTimelineView: View {
                     acceptTimelineFileDrop(providers)
                 }
                 .onChange(of: store.scrollRevision) {
-                    if isAtBottom || store.isRunning {
-                        scrollToBottom(proxy)
-                    }
+                    scrollToBottom(proxy)
                 }
                 .onChange(of: store.selectedSessionID) {
                     pendingOpenBottomSessionID = store.selectedSessionID
                     isAtBottom = true
-                    olderHistoryLoadArmed = true
-                    suppressScrollHistoryLoadUntilTopLeaves = false
-                    historyLoadSuppressedUntil = Date.distantPast
+                    disarmAutomaticOlderHistoryLoad()
+                    suppressHistoryLoading(for: 2.0)
                     visibleRowLimit = defaultVisibleRowLimit
                     lastObservedEventSeq = maxEventSeq(displayEvents)
-                    scrollToBottom(proxy)
+                    settleOpenThreadAtLatest(proxy, displayEvents: displayEvents)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
                     let previousObservedSeq = lastObservedEventSeq
@@ -163,14 +161,14 @@ struct MobileTimelineView: View {
                     }
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
-                    if let pendingSessionID = pendingOpenBottomSessionID,
-                       pendingSessionID == store.selectedSessionID,
-                       !displayEvents.isEmpty {
-                        pendingOpenBottomSessionID = nil
-                        scrollToBottom(proxy)
+                    if settleOpenThreadAtLatest(proxy, displayEvents: displayEvents) {
+                        return
                     } else if shouldFollowLiveEvent {
                         scrollToBottom(proxy)
                     }
+                }
+                .onChange(of: displaySignature) {
+                    _ = settleOpenThreadAtLatest(proxy, displayEvents: displayEvents)
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
@@ -193,7 +191,8 @@ struct MobileTimelineView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
-        historyLoadSuppressedUntil = Date().addingTimeInterval(0.35)
+        suppressHistoryLoading(for: 0.55)
+        disarmAutomaticOlderHistoryLoad()
         let action = {
             proxy.scrollTo(bottomID, anchor: .bottom)
             isAtBottom = true
@@ -207,6 +206,41 @@ struct MobileTimelineView: View {
                 action()
             }
         }
+    }
+
+    @discardableResult
+    private func settleOpenThreadAtLatest(_ proxy: ScrollViewProxy, displayEvents: [ZEvent]) -> Bool {
+        guard let pendingSessionID = pendingOpenBottomSessionID,
+              pendingSessionID == store.selectedSessionID,
+              !displayEvents.isEmpty else {
+            return false
+        }
+        pendingOpenBottomSessionID = nil
+        suppressHistoryLoading(for: 2.0)
+        disarmAutomaticOlderHistoryLoad()
+        scrollToBottom(proxy)
+        for delay in [0.06, 0.16, 0.32] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard store.selectedSessionID == pendingSessionID else { return }
+                withTransaction(noAnimationTransaction) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                    isAtBottom = true
+                }
+            }
+        }
+        return true
+    }
+
+    private func suppressHistoryLoading(for interval: TimeInterval) {
+        let until = Date().addingTimeInterval(interval)
+        if until > historyLoadSuppressedUntil {
+            historyLoadSuppressedUntil = until
+        }
+    }
+
+    private func disarmAutomaticOlderHistoryLoad() {
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
     }
 
     private func shouldAutoFollowLiveEvent(after previousSeq: Int) -> Bool {

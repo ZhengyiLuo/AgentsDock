@@ -17,10 +17,6 @@ struct MobileRootView: View {
             }
         }
         .task { await store.startLiveTracking() }
-        .onChange(of: store.selectedSessionID) {
-            guard let sessionID = store.selectedSessionID else { return }
-            Task { await store.select(sessionID: sessionID) }
-        }
         .sheet(isPresented: $resumeOpen) {
             MobileResumeView(isPresented: $resumeOpen)
                 .environmentObject(store)

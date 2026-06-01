@@ -316,11 +316,21 @@ func checkFolderSectionControls() throws {
 func checkMobileDoesNotAutoSelectFirstChat() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let mobileSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
+    let mobileRoot = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileRootView.swift"), encoding: .utf8)
 
     try assert(!mobileStore.contains("selectedSessionID = sessions.first?.id"), "iOS refresh must not auto-open the first chat")
     try assert(!mobileStore.contains("if let next = sessions.first"), "iOS delete flow must not auto-open the next first chat")
     try assert(mobileStore.contains("private func clearSelection()"), "iOS store must have an explicit clear-selection path")
     try assert(mobileStore.contains("if let selectedSessionID, !sessions.contains"), "iOS refresh should only clear a stale selection")
+    try assert(mobileSidebar.contains("List(selection: sessionSelection)"), "iOS sidebar selection must route through store.select so warm cache can apply before publishing selection")
+    try assert(!mobileSidebar.contains("List(selection: $store.selectedSessionID)"), "iOS sidebar must not publish selectedSessionID directly before cached rows are ready")
+    try assert(!mobileRoot.contains(".onChange(of: store.selectedSessionID)"), "iOS root must not run a second store.select after sidebar/store selection already started")
+    guard let cacheRange = mobileStore.range(of: "if let cached = memoryCachedChat(sessionID)"),
+          let selectedRange = mobileStore.range(of: "selectedSessionID = sessionID", range: cacheRange.upperBound..<mobileStore.endIndex) else {
+        throw GuardrailFailure.failed("iOS session select must prepare cached rows before publishing selectedSessionID")
+    }
+    try assert(cacheRange.lowerBound < selectedRange.lowerBound, "iOS session select must apply cached rows before publishing selectedSessionID")
 }
 
 func checkTimelineRevealWaitsForLatestSnapshot() throws {
@@ -827,6 +837,11 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(mobileTimeline.contains("store.markSessionUnread(sessionID)"), "iOS timeline must mark selected-chat agent output unread instead of auto-following")
     try assert(mobileTimeline.contains("lastObservedEventSeq"), "iOS timeline must distinguish new streamed events from older history prepends")
     try assert(mobileTimeline.contains("cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount)"), "iOS live-follow must not expand the rendered window to the full chat history")
+    try assert(mobileTimeline.contains("pendingOpenBottomSessionID = store.selectedSessionID\n                    isAtBottom = true\n                    disarmAutomaticOlderHistoryLoad()"), "iOS opening a chat must disarm older-history autoload while latest-position settling runs")
+    try assert(mobileTimeline.contains("private func settleOpenThreadAtLatest"), "iOS timeline must centralize newly opened thread latest-position settling")
+    try assert(mobileTimeline.contains("pendingOpenBottomSessionID = nil\n        suppressHistoryLoading(for: 2.0)"), "iOS open-to-latest must consume the pending request only after rows are renderable")
+    try assert(mobileTimeline.contains("for delay in [0.06, 0.16, 0.32]"), "iOS opening a chat must use short bottom settle passes without late visible jumps")
+    try assert(!mobileTimeline.contains("historyLoadSuppressedUntil = Date.distantPast\n                    visibleRowLimit"), "iOS opening a chat must not immediately re-enable top-edge history loading")
     try assert(!mobileIngestBlock.contains("scrollRevision += 1"), "iOS streamed events must not request bottom scrolling")
     try assert(mobileStore.contains("syncSelectedRunningState()\n        scrollRevision += 1\n        do {"), "iOS user sends must still scroll the timeline to the bottom")
 }

@@ -8,7 +8,7 @@ struct MobileSidebarView: View {
     @State private var reorderMode = false
 
     var body: some View {
-        List(selection: $store.selectedSessionID) {
+        List(selection: sessionSelection) {
             Section {
                 MobileServerStatusView()
             }
@@ -127,6 +127,20 @@ struct MobileSidebarView: View {
             return "This chat will be removed from ZenithDock."
         }
         return "Delete \"\(title)\" from ZenithDock? This cannot be undone."
+    }
+
+    private var sessionSelection: Binding<String?> {
+        Binding(
+            get: { store.selectedSessionID },
+            set: { newValue in
+                guard !reorderMode else { return }
+                guard let sessionID = newValue,
+                      sessionID != store.selectedSessionID else {
+                    return
+                }
+                Task { await store.select(sessionID: sessionID) }
+            }
+        )
     }
 
     private func sessionRow(_ session: ZSession) -> some View {

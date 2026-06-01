@@ -1120,8 +1120,6 @@ final class MobileAppStore: ObservableObject {
 
     func select(sessionID: String) async {
         if loadingSessionID == sessionID {
-            selectedSessionID = sessionID
-            markSessionRead(sessionID)
             syncSelectedRunningState()
             return
         }
@@ -1134,9 +1132,6 @@ final class MobileAppStore: ObservableObject {
             }
         }
 
-        selectedSessionID = sessionID
-        markSessionRead(sessionID)
-        syncSelectedRunningState()
         webSocket?.cancel(with: .goingAway, reason: nil)
         socketLive = false
         isLoading = true
@@ -1153,6 +1148,10 @@ final class MobileAppStore: ObservableObject {
             omittedHistoryEventCount = 0
             latestSeenSeq = 0
         }
+
+        selectedSessionID = sessionID
+        markSessionRead(sessionID)
+        syncSelectedRunningState()
 
         guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
 
