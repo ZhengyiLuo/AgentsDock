@@ -2237,13 +2237,6 @@ final class AppStore: ObservableObject {
             }
             requestScrollToBottom(immediate: true)
             AppLogger.info("send prompt session=\(sid) chars=\(trimmed.count) files=\(uploads.count)")
-            if let session = selectedSession {
-                let currentTitle = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                if currentTitle.isEmpty || currentTitle == "New chat" {
-                    let firstLine = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? trimmed
-                    await updateSelected(title: String(firstLine.prefix(72)))
-                }
-            }
             let body = Body(
                 prompt: trimmed,
                 file_ids: uploads.map(\.id),

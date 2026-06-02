@@ -131,6 +131,8 @@ func checkRuntimeDefaultLabels() throws {
     try assert(server.contains("runtime_option(\"opus[1m]\", \"Opus 1M\")"), "Server runtime catalog must advertise Claude Opus 1M")
     try assert(server.contains("runtime_option(\"claude-opus-4-8[1m]\", \"Opus 4.8 1M\")"), "Server runtime catalog must advertise Claude Opus 4.8 1M")
     try assert(server.contains("\"claude-opus-4-8[1m]\": \"Opus 4.8 1M\""), "Server default labels must render Claude Opus 4.8 1M cleanly")
+    try assert(server.contains("discovered_codex_default_model") && server.contains("slug == \"gpt-5.5\""), "Server Codex catalog must prefer GPT-5.5 as the resolved default when present")
+    try assert(server.contains("default_effort = \"xhigh\""), "Server Codex catalog must not regress GPT-5.5 default effort to medium")
     try assert(server.contains("cmd.extend([\"--model\", str(sess[\"model\"])])"), "Claude launcher must pass selected models with --model")
     try assert(server.contains("model_fields_set"), "Server turns must distinguish omitted runtime fields from explicit default resets")
     try assert(macStore.contains("pendingRuntimeBySessionID") && mobileStore.contains("pendingRuntimeBySessionID"), "Runtime saves must protect staged values from stale session responses")
@@ -139,6 +141,7 @@ func checkRuntimeDefaultLabels() throws {
     try assert(macStore.contains("pending.clearConfirmed(by: session)") && mobileStore.contains("pending.clearConfirmed(by: session)"), "Pending runtime overrides must reconcile when session refresh confirms server state")
     try assert(macStore.contains("let runtimeModel = selectedSession?.model ?? \"\"") && mobileStore.contains("let runtimeModel = selectedSession?.model ?? \"\""), "User sends must capture the selected runtime before any auto-title/session updates")
     try assert(macStore.contains("model: runtimeModel") && mobileStore.contains("model: runtimeModel"), "Turn requests must carry the captured runtime so a quick send cannot revert to defaults")
+    try assert(!macStore.contains("await updateSelected(title: String(firstLine.prefix(72)))"), "Mac send path must not await title saves before posting the turn")
     let composer = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/ComposerView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
     try assert(composer.contains("store.stageSelectedRuntime(model: cleanModel)") && composer.contains("applyOptimistic: false"), "Mac runtime menu must stage model changes synchronously before async save")
@@ -698,8 +701,37 @@ func checkTimelineCombinesRunTraces() throws {
     try assert(mobileTimeline.contains("if event.type == \"artifact_created\""), "iOS timeline must special-case artifacts before the generic row path")
     try assert(mobileTimeline.contains("if activeRunID != nil {\n                    activeArtifactEvents.append(event)"), "iOS timeline must group old nil-run manifest artifacts with the active run")
     try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
-    try assert(server.contains("async def collect_manifest(session_id: str, run_id: str, manifest_path: Path)"), "Server manifest collection must know the active run id")
+    try assert(server.contains("async def collect_manifest("), "Server manifest collection must know the active run id")
+    try assert(server.contains("async def watch_manifest_artifacts"), "Server must watch manifests during a running turn so artifacts can appear before turn end")
+    try assert(server.contains("live_manifest_entry_ready"), "Live manifest watcher must wait for stable files before publishing artifacts")
+    try assert(server.contains("manifest_watch_task = asyncio.create_task(watch_manifest_artifacts"), "Claude and Codex runs must start live manifest watcher tasks")
     try assert(server.contains("\"artifact_created\", {\"run_id\": run_id, \"artifact\": rec}"), "Server artifact_created events must include run_id so videos render after assistant text")
+}
+
+func checkFlexibleEventOutputDecoding() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    let json = """
+    {
+      "seq": 1,
+      "id": "evt_test",
+      "session_id": "sess_test",
+      "type": "tool_finished",
+      "ts": "2026-06-02T00:00:00Z",
+      "output": [
+        {"type": "text", "text": "hello"},
+        {"type": "image", "source": {"type": "base64", "data": "abc"}}
+      ]
+    }
+    """
+    let event = try JSONDecoder().decode(ZEvent.self, from: Data(json.utf8))
+    try assert(event.output?.contains("hello") == true, "ZEvent must decode Claude array-style tool output into text")
+    try assert(event.output?.contains("[image result]") == true, "ZEvent must summarize image output blocks instead of failing decode")
+    try assert(core.contains("decodeStringLike") && core.contains("stringLikeText"), "Core event decoder must keep flexible output decoding")
+    try assert(server.contains("def event_output_text") && server.contains("def client_safe_event"), "Server must sanitize legacy non-string tool output when serving history")
+    try assert(server.contains("event = client_safe_event(event)"), "Server read_events must normalize legacy event output before API responses")
+    try assert(server.contains("content = event_output_text(block.get(\"content\", \"\"))"), "Claude stream ingestion must write tool output as text")
 }
 
 func checkInlineVideoPlayAutoplays() throws {
@@ -1119,6 +1151,7 @@ do {
     try checkRuntimeAutosavesAndBackendIcons()
     try checkJobIntervalPresets()
     try checkTimelineCombinesRunTraces()
+    try checkFlexibleEventOutputDecoding()
     try checkInlineVideoPlayAutoplays()
     try checkCodeReviewSurfaceIsStructured()
     try checkUnreadMessageMarker()

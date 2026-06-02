@@ -19,6 +19,37 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - Claude Tool Output Decode Guard
+
+- Fixed Mac/iOS chat-open failures on Claude chats where historical
+  `tool_finished.output` was a JSON array of content blocks instead of a string.
+- Server now normalizes legacy non-string `output` fields in `read_events`, and
+  new Claude tool-result events are written as compact text from the start.
+- `ZEvent` also decodes flexible `output` values defensively, including text,
+  image, and tool-reference blocks, so a malformed/older server response does
+  not brick the entire chat view.
+- Added a `ZenithGuardrails` regression test that decodes a Claude-style array
+  output event and verifies both client and server guards stay in place.
+
+## 2026-06-02 - Live Artifact Watching And Codex Defaults
+
+- Added a server-side live manifest watcher for Claude and Codex turns. The
+  watcher polls the run manifest while the provider is still running, waits for
+  artifact file size/mtime stability, emits `artifact_created` with the active
+  `run_id`, and leaves final manifest collection as a deduped cleanup pass.
+- This should let videos/files appear during a long turn once they are fully
+  written, instead of waiting for `turn_finished`.
+- Guardrails now require the live manifest watcher and stable-file check so the
+  timeline does not regress back to end-of-turn artifact delivery.
+- Codex runtime catalog discovery now prefers `gpt-5.5` as the resolved server
+  default when that model is present and keeps GPT-5.5 default effort at `xhigh`
+  instead of accepting a misleading `medium` debug-catalog default.
+- Mac send no longer waits for a title-save request before posting a new-chat
+  turn. The server already titles from the first prompt, so the turn reaches the
+  provider path faster and the running indicator appears sooner.
+- Multi-message text selection/copy remains punted for now; the reliable path is
+  still per-message full-text/copy controls.
+
 ## 2026-06-01 - LLM Handoff Digests
 
 - Handoff digest creation now runs an actual LLM summarizer. The old

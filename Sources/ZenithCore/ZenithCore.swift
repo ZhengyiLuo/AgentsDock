@@ -580,6 +580,91 @@ public struct ZEvent: Codable, Identifiable, Hashable, Sendable {
     public var job_id: String?
     public var direction: String?
     public var positions: [ZQueuePosition]?
+
+    private enum CodingKeys: String, CodingKey {
+        case seq, id, session_id, type, ts, run_id, queued_id, position, purpose, digest_job_id, target_session_id
+        case backend, prompt, file_ids, text, result_text, message, error, output, raw, argv, exit_code, is_error
+        case provider_session_id, tool_id, tool, file, artifact, job, job_id, direction, positions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        seq = try container.decode(Int.self, forKey: .seq)
+        id = try container.decode(String.self, forKey: .id)
+        session_id = try container.decode(String.self, forKey: .session_id)
+        type = try container.decode(String.self, forKey: .type)
+        ts = try container.decode(String.self, forKey: .ts)
+        run_id = try container.decodeIfPresent(String.self, forKey: .run_id)
+        queued_id = try container.decodeIfPresent(String.self, forKey: .queued_id)
+        position = try container.decodeIfPresent(Int.self, forKey: .position)
+        purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
+        digest_job_id = try container.decodeIfPresent(String.self, forKey: .digest_job_id)
+        target_session_id = try container.decodeIfPresent(String.self, forKey: .target_session_id)
+        backend = try container.decodeIfPresent(String.self, forKey: .backend)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
+        file_ids = try container.decodeIfPresent([String].self, forKey: .file_ids)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        result_text = try container.decodeIfPresent(String.self, forKey: .result_text)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        output = try Self.decodeStringLike(container, forKey: .output)
+        raw = try container.decodeIfPresent(String.self, forKey: .raw)
+        argv = try container.decodeIfPresent([String].self, forKey: .argv)
+        exit_code = try container.decodeIfPresent(Int.self, forKey: .exit_code)
+        is_error = try container.decodeIfPresent(Bool.self, forKey: .is_error)
+        provider_session_id = try container.decodeIfPresent(String.self, forKey: .provider_session_id)
+        tool_id = try container.decodeIfPresent(String.self, forKey: .tool_id)
+        tool = try container.decodeIfPresent(ZTool.self, forKey: .tool)
+        file = try container.decodeIfPresent(ZFile.self, forKey: .file)
+        artifact = try container.decodeIfPresent(ZFile.self, forKey: .artifact)
+        job = try container.decodeIfPresent(ZJob.self, forKey: .job)
+        job_id = try container.decodeIfPresent(String.self, forKey: .job_id)
+        direction = try container.decodeIfPresent(String.self, forKey: .direction)
+        positions = try container.decodeIfPresent([ZQueuePosition].self, forKey: .positions)
+    }
+
+    private static func decodeStringLike(_ container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) throws -> String? {
+        if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+            return value
+        }
+        guard let value = try? container.decodeIfPresent(JSONValue.self, forKey: key) else {
+            return nil
+        }
+        return stringLikeText(value)
+    }
+
+    private static func stringLikeText(_ value: JSONValue) -> String? {
+        switch value {
+        case .string(let text):
+            return text
+        case .number(let number):
+            return String(number)
+        case .bool(let bool):
+            return bool ? "true" : "false"
+        case .null:
+            return nil
+        case .array(let values):
+            let parts = values.compactMap(stringLikeText).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        case .object(let object):
+            if case .string(let text)? = object["text"] {
+                return text
+            }
+            if case .string(let text)? = object["message"] {
+                return text
+            }
+            if case .string(let type)? = object["type"], type == "image" {
+                return "[image result]"
+            }
+            if case .string(let type)? = object["type"], type == "tool_reference" {
+                if case .string(let name)? = object["tool_name"] {
+                    return "[tool reference: \(name)]"
+                }
+                return "[tool reference]"
+            }
+            return value.pretty
+        }
+    }
 }
 
 public struct ZQueuePosition: Codable, Identifiable, Hashable, Sendable {
