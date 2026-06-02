@@ -56,10 +56,10 @@ struct MobileEventCard: View {
                     MobileUploadedFileLabel(file: file, url: store.fileURL(file))
                 }
             }
-        case "job_created", "job_ran":
+        case "job_created", "job_ran", "job_deferred":
             MobileSystemCard(
                 icon: "clock.badge.checkmark",
-                title: event.type == "job_created" ? "Job Created" : "Job Ran",
+                title: jobEventTitle,
                 timestamp: messageTimestamp,
                 tint: .orange
             ) {
@@ -105,6 +105,19 @@ struct MobileEventCard: View {
             return "Queued #\(position)"
         }
         return "Queued"
+    }
+
+    private var jobEventTitle: String {
+        switch event.type {
+        case "job_created":
+            return "Job Created"
+        case "job_ran":
+            return "Job Ran"
+        case "job_deferred":
+            return "Job Deferred"
+        default:
+            return "Job"
+        }
     }
 
     private func userBubble(
@@ -170,7 +183,16 @@ private struct MobileJobEventSummary: View {
     }
 
     private var fallbackMessage: String {
-        event.type == "job_created" ? "Scheduled job created" : "Scheduled job ran"
+        switch event.type {
+        case "job_created":
+            return "Scheduled job created"
+        case "job_ran":
+            return "Scheduled job ran"
+        case "job_deferred":
+            return "Scheduled job deferred"
+        default:
+            return event.type
+        }
     }
 }
 

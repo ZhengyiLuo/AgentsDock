@@ -32,6 +32,15 @@ painful to rediscover later.
 - Submitted drafts clear only the submitted session, and failed sends restore
   the draft for that same session.
 
+## 2026-06-01 - Job Deferred Timeline State
+
+- Scheduled jobs that hit a busy chat are deferred, not failed: the server
+  pushes `next_run_at` out by the busy retry delay and the scheduler retries
+  later.
+- `job_deferred` events must render as orange job/status cards on Mac and
+  iOS/iPadOS, alongside `job_created` and `job_ran`, so users can see that the
+  job is still alive but waiting for the active turn to finish.
+
 ## 2026-06-01 - Claude Resume Poison Guard
 
 - Fixed a server-side Claude resume bug where `error_during_execution` results

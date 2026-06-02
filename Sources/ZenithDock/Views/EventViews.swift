@@ -235,7 +235,7 @@ struct EventCard: View, Equatable {
         case "tool_started", "tool_finished": "terminal"
         case "artifact_created": "shippingbox"
         case "file_uploaded": "tray.and.arrow.up"
-        case "job_created", "job_ran": "clock.badge.checkmark"
+        case "job_created", "job_ran", "job_deferred": "clock.badge.checkmark"
         case "error": "exclamationmark.triangle"
         case "turn_started": "arrow.up.message"
         case "turn_queued": "text.badge.clock"
@@ -250,7 +250,7 @@ struct EventCard: View, Equatable {
         case "error": .red
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
-        case "job_created", "job_ran": .orange
+        case "job_created", "job_ran", "job_deferred": .orange
         case "turn_queued", "turn_unqueued": .secondary
         case "artifact_created": .green
         default: .accentColor
@@ -261,7 +261,7 @@ struct EventCard: View, Equatable {
         if event.type == "error" {
             return AnyShapeStyle(.red.opacity(0.08))
         }
-        if event.type == "job_created" || event.type == "job_ran" {
+        if event.type == "job_created" || event.type == "job_ran" || event.type == "job_deferred" {
             return AnyShapeStyle(Theme.jobBubble.opacity(0.70))
         }
         return AnyShapeStyle(Theme.card)
@@ -1308,7 +1308,7 @@ private struct TraceEventDetail: View {
                 Text(event.message ?? event.type)
                     .foregroundStyle(.secondary)
             }
-        case "job_created", "job_ran":
+        case "job_created", "job_ran", "job_deferred":
             JobEventSummary(event: event)
         case "error", "job_error", "artifact_error":
             VStack(alignment: .leading, spacing: 6) {
@@ -1339,6 +1339,7 @@ private struct TraceEventDetail: View {
         case "backend_changed": "Backend"
         case "job_created": "Job Created"
         case "job_ran": "Job Ran"
+        case "job_deferred": "Job Deferred"
         case "job_error": "Job Error"
         case "artifact_error": "Artifact Error"
         default: event.type.replacingOccurrences(of: "_", with: " ").capitalized
@@ -1350,7 +1351,7 @@ private struct TraceEventDetail: View {
         case "reasoning_summary": "brain.head.profile"
         case "tool_started", "tool_finished": "terminal"
         case "raw_event": "curlybraces"
-        case "job_created", "job_ran": "clock.badge.checkmark"
+        case "job_created", "job_ran", "job_deferred": "clock.badge.checkmark"
         case "error", "job_error", "artifact_error": "exclamationmark.triangle"
         default: "circle"
         }
@@ -1360,7 +1361,7 @@ private struct TraceEventDetail: View {
         switch event.type {
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
-        case "job_created", "job_ran": .orange
+        case "job_created", "job_ran", "job_deferred": .orange
         case "error", "job_error", "artifact_error": .red
         default: .secondary
         }
@@ -1397,6 +1398,8 @@ private struct JobEventSummary: View {
             return "Scheduled job created"
         case "job_ran":
             return "Scheduled job ran"
+        case "job_deferred":
+            return "Scheduled job deferred"
         default:
             return event.type
         }
