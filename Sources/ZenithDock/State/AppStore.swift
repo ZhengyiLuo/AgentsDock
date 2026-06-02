@@ -1860,6 +1860,49 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func reorderSession(_ session: ZSession, relativeTo target: ZSession, placement: String) async {
+        guard session.id != target.id,
+              sessionSidebarSectionKey(session) == sessionSidebarSectionKey(target) else {
+            return
+        }
+        let peers = sidebarSectionPeers(for: session)
+        guard let sourceIndex = peers.firstIndex(where: { $0.id == session.id }),
+              let targetIndex = peers.firstIndex(where: { $0.id == target.id }) else {
+            return
+        }
+        var destination = placement == "after" ? targetIndex + 1 : targetIndex
+        if sourceIndex < destination {
+            destination -= 1
+        }
+        guard destination != sourceIndex else { return }
+
+        let direction = destination < sourceIndex ? "up" : "down"
+        for _ in 0..<abs(destination - sourceIndex) {
+            await reorderSession(session, direction: direction)
+        }
+    }
+
+    func canReorderSession(_ session: ZSession, relativeTo target: ZSession) -> Bool {
+        session.id != target.id &&
+            sessionSidebarSectionKey(session) == sessionSidebarSectionKey(target)
+    }
+
+    private func sidebarSectionPeers(for session: ZSession) -> [ZSession] {
+        let key = sessionSidebarSectionKey(session)
+        return sessions.filter { sessionSidebarSectionKey($0) == key }
+    }
+
+    private func sessionSidebarSectionKey(_ session: ZSession) -> String {
+        if session.archived == true {
+            return "archived"
+        }
+        if session.pinned == true {
+            return "pinned"
+        }
+        let folder = session.folder?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "folder:\(folder?.isEmpty == false ? folder! : "General")"
+    }
+
     @discardableResult
     func updateSession(_ sessionID: String, folder: String? = nil, title: String? = nil, cwd: String? = nil, backend: String? = nil, model: String? = nil, effort: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, applyOptimistic: Bool = true) async -> Bool {
         let previousSession = applyOptimistic ? sessions.first { $0.id == sessionID } : nil

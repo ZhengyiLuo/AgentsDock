@@ -822,6 +822,14 @@ private struct MessageAttachmentPreview: View {
             }
         }
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
+        .overlay(alignment: .topTrailing) {
+            if let url = attachment.url {
+                MacArtifactDownloadButton(file: attachment.file, url: url, title: "")
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .help("Download attachment")
+            }
+        }
         .contentShape(Rectangle())
         .onDrag {
             if let url = attachment.url {
@@ -967,6 +975,7 @@ private struct ArtifactGridTile: View {
             Link(destination: url) {
                 Image(systemName: "arrow.up.right.square")
             }
+            MacArtifactDownloadButton(file: file, url: url, title: "")
             Button(action: onTogglePin) {
                 Image(systemName: isPinned ? "pin.fill" : "pin")
             }
@@ -1023,6 +1032,9 @@ private struct ArtifactFileRow: View {
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
+            MacArtifactDownloadButton(file: file, url: url, title: "")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
             if let onTogglePin {
                 Button(action: onTogglePin) {
                     Image(systemName: isPinned ? "pin.fill" : "pin")
@@ -1507,9 +1519,7 @@ struct ArtifactPreview: View {
                 Text(file.title ?? file.filename)
                     .font(.headline)
                 Spacer()
-                Link(destination: url) {
-                    Image(systemName: "arrow.down.circle")
-                }
+                MacArtifactDownloadButton(file: file, url: url, title: "")
             }
             if let text = file.text {
                 MarkdownView(markdown: text, compact: true, linkContext: linkContext)
@@ -1529,18 +1539,19 @@ struct ArtifactPreview: View {
                 HStack {
                     Label(file.size.map(byteString) ?? "Video", systemImage: "film")
                         .foregroundStyle(.secondary)
-	                    Spacer(minLength: 12)
-	                    #if os(macOS)
-	                    Button {
-	                        VideoFullscreenPresenter.present(url: url)
-	                    } label: {
-	                        Label("Open Player", systemImage: "play.rectangle")
-	                    }
-	                    .buttonStyle(.link)
-	                    #endif
-	                    Link(destination: url) {
-	                        Label("Open", systemImage: "arrow.up.right.square")
-	                    }
+                    Spacer(minLength: 12)
+                    #if os(macOS)
+                    Button {
+                        VideoFullscreenPresenter.present(url: url)
+                    } label: {
+                        Label("Open Player", systemImage: "play.rectangle")
+                    }
+                    .buttonStyle(.link)
+                    #endif
+                    Link(destination: url) {
+                        Label("Open", systemImage: "arrow.up.right.square")
+                    }
+                    MacArtifactDownloadButton(file: file, url: url, title: "")
                 }
                 .font(.caption)
             }
@@ -1565,12 +1576,16 @@ private struct UploadedFileLabel: View {
 
     var body: some View {
         if let url {
-            Label(file.filename, systemImage: "tray.and.arrow.up")
-                .contentShape(Rectangle())
-                .onDrag {
-                    ArtifactDragItemProvider.provider(for: file, url: url)
-                }
-                .help("Drag file to Finder or another app")
+            HStack(spacing: 8) {
+                Label(file.filename, systemImage: "tray.and.arrow.up")
+                Spacer(minLength: 6)
+                MacArtifactDownloadButton(file: file, url: url, title: "")
+            }
+            .contentShape(Rectangle())
+            .onDrag {
+                ArtifactDragItemProvider.provider(for: file, url: url)
+            }
+            .help("Drag file to Finder or another app")
         } else {
             Label(file.filename, systemImage: "tray.and.arrow.up")
         }

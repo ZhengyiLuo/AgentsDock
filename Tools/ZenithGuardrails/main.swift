@@ -311,7 +311,10 @@ func checkArchiveSessionBehavior() throws {
     try assert(macSidebar.contains("guard !reorderMode else { return }"), "Mac sidebar must suppress chat selection while reordering")
     try assert(macSidebar.contains("SidebarFolderDragHandleNSView") && macSidebar.contains("beginDraggingSession"), "Mac sidebar reorder mode must use a native draggable folder handle")
     try assert(macSidebar.contains(".onDrop"), "Mac sidebar reorder mode must expose drop targets")
-    try assert(!macSidebar.contains("SidebarSessionDropDelegate"), "Mac sidebar reorder mode must not make chat rows draggable")
+    try assert(macSidebar.contains("SidebarSessionDropDelegate"), "Mac sidebar reorder mode must make chat rows draggable")
+    try assert(macSidebar.contains("handleSessionDrop"), "Mac sidebar must reorder chats by drag/drop in reorder mode")
+    try assert(macStore.contains("func reorderSession(_ session: ZSession, relativeTo target: ZSession"), "Mac store must translate chat drops into server reorder calls")
+    try assert(macStore.contains("canReorderSession(_ session: ZSession, relativeTo target: ZSession)"), "Mac sidebar must guard chat drops to compatible sections")
     try assert(macSidebar.contains("handleFolderDrop"), "Mac sidebar must reorder folders by drag/drop in reorder mode")
     try assert(macSidebar.contains("withoutSidebarAnimation"), "Mac sidebar drag reorder must suppress implicit list animations")
     try assert(macSidebar.contains("store.reorderFolders(from: IndexSet(integer: sourceIndex), to: destination)"), "Mac folder drag reorder must apply one final order update instead of stepwise swaps")
@@ -594,6 +597,12 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(eventViews.contains("visibleArtifacts.filter { $0.file.isPreviewableArtifact }"), "Mac timeline artifact cards must split media previews from plain files")
     try assert(eventViews.contains("private struct ArtifactFileRow"), "Mac timeline plain files must render as compact rows instead of large preview tiles")
     try assert(eventViews.contains("private extension ZFile"), "Mac timeline artifact preview classification should live with artifact rendering")
+    try assert(inspector.contains("struct MacArtifactDownloadButton"), "Mac must expose a reusable artifact download button")
+    try assert(inspector.contains("NSSavePanel()"), "Mac artifact downloads must let the user choose a save location")
+    try assert(inspector.contains("ArtifactDragFileCache.shared.localFile"), "Mac artifact downloads must cache remote files locally before saving")
+    try assert(eventViews.contains("MacArtifactDownloadButton(file: file, url: url, title: \"\")"), "Mac timeline artifacts must expose explicit download controls")
+    try assert(eventViews.contains("MacArtifactDownloadButton(file: attachment.file, url: url, title: \"\")"), "Mac message attachment cards must expose explicit download controls")
+    try assert(inspector.contains("MacArtifactDownloadButton(file: file, url: url, title: \"\")"), "Mac files/videos inspector must expose explicit download controls")
 }
 
 func checkRuntimeAutosavesAndBackendIcons() throws {

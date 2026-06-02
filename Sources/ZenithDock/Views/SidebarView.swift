@@ -189,6 +189,29 @@ struct SidebarView: View {
 
         if reorderMode {
             row
+                .overlay(alignment: .top) {
+                    SidebarInsertionRule(isVisible: shouldShowSessionDropTarget(session, placement: .before))
+                }
+                .overlay(alignment: .bottom) {
+                    SidebarInsertionRule(isVisible: shouldShowSessionDropTarget(session, placement: .after))
+                }
+                .onDrag {
+                    beginSidebarDrag(.session(session.id))
+                    return NSItemProvider(object: SidebarDragPayload.session(session.id).rawValue as NSString)
+                }
+                .onDrop(
+                    of: [.text],
+                    delegate: SidebarSessionDropDelegate(
+                        targetSession: session,
+                        activePayload: $sidebarDragPayload,
+                        dropTarget: $sidebarDropTarget,
+                        clearDragState: clearSidebarDragState,
+                        canDropSession: canDropSession,
+                        performMove: { sourceID, targetSession, placement in
+                            handleSessionDrop(sourceID, targetSession: targetSession, placement: placement)
+                        }
+                    )
+                )
         } else {
             row.contextMenu {
                 Button {
@@ -247,6 +270,16 @@ struct SidebarView: View {
         }
     }
 
+    private func shouldShowSessionDropTarget(_ session: ZSession, placement: SidebarDropPlacement) -> Bool {
+        guard case let .session(sourceID)? = sidebarDragPayload,
+              sourceID != session.id,
+              sidebarDropTarget == .session(session.id, placement),
+              let source = store.sessions.first(where: { $0.id == sourceID }) else {
+            return false
+        }
+        return store.canReorderSession(source, relativeTo: session)
+    }
+
     private func beginSidebarDrag(_ payload: SidebarDragPayload) {
         withoutSidebarAnimation {
             sidebarDragPayload = payload
@@ -268,6 +301,26 @@ struct SidebarView: View {
             return false
         }
         return moveFolder(sourceFolder, relativeTo: targetFolder, placement: placement)
+    }
+
+    private func canDropSession(sourceID: String, targetSession: ZSession) -> Bool {
+        guard reorderMode,
+              let source = store.sessions.first(where: { $0.id == sourceID }) else {
+            return false
+        }
+        return store.canReorderSession(source, relativeTo: targetSession)
+    }
+
+    private func handleSessionDrop(_ sourceID: String, targetSession: ZSession, placement: SidebarDropPlacement) -> Bool {
+        guard reorderMode,
+              let source = store.sessions.first(where: { $0.id == sourceID }),
+              store.canReorderSession(source, relativeTo: targetSession) else {
+            return false
+        }
+        Task {
+            await store.reorderSession(source, relativeTo: targetSession, placement: placement.rawValue)
+        }
+        return true
     }
 
     private func moveFolder(_ source: String, relativeTo target: String, placement: SidebarDropPlacement) -> Bool {
@@ -297,21 +350,32 @@ struct SidebarView: View {
 private enum SidebarDropPlacement: Equatable {
     case before
     case after
+
+    var rawValue: String {
+        switch self {
+        case .before: "before"
+        case .after: "after"
+        }
+    }
 }
 
 private enum SidebarDragPayload: Equatable {
     case folder(String)
+    case session(String)
 
     var rawValue: String {
         switch self {
         case .folder(let name):
             return "folder:\(name)"
+        case .session(let id):
+            return "session:\(id)"
         }
     }
 }
 
 private enum SidebarDropTarget: Equatable {
     case folder(String, SidebarDropPlacement)
+    case session(String, SidebarDropPlacement)
 }
 
 private func withoutSidebarAnimation(_ body: () -> Void) {
@@ -387,6 +451,59 @@ private struct SidebarFolderDropDelegate: DropDelegate {
         if dropTarget != .folder(targetFolder, placement) {
             withoutSidebarAnimation {
                 dropTarget = .folder(targetFolder, placement)
+            }
+        }
+    }
+}
+
+private struct SidebarSessionDropDelegate: DropDelegate {
+    let targetSession: ZSession
+    @Binding var activePayload: SidebarDragPayload?
+    @Binding var dropTarget: SidebarDropTarget?
+    let clearDragState: () -> Void
+    let canDropSession: (String, ZSession) -> Bool
+    let performMove: (String, ZSession, SidebarDropPlacement) -> Bool
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        updateTarget(info: info)
+        return DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateTarget(info: info)
+    }
+
+    func dropExited(info: DropInfo) {
+        withoutSidebarAnimation {
+            dropTarget = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer {
+            DispatchQueue.main.async {
+                clearDragState()
+            }
+        }
+        guard case let .session(sourceID)? = activePayload,
+              canDropSession(sourceID, targetSession) else {
+            return false
+        }
+        return performMove(sourceID, targetSession, sidebarPlacement(for: info))
+    }
+
+    private func updateTarget(info: DropInfo) {
+        guard case let .session(sourceID)? = activePayload,
+              canDropSession(sourceID, targetSession) else {
+            withoutSidebarAnimation {
+                dropTarget = nil
+            }
+            return
+        }
+        let placement = sidebarPlacement(for: info)
+        if dropTarget != .session(targetSession.id, placement) {
+            withoutSidebarAnimation {
+                dropTarget = .session(targetSession.id, placement)
             }
         }
     }
@@ -514,11 +631,15 @@ private struct FolderSectionHeader: View {
         switch activeDragPayload {
         case .folder(let folder):
             sourceFolder = folder
+        case .session:
+            return false
         }
         let targetFolder: String
         switch target {
         case .folder(let folder, _):
             targetFolder = folder
+        case .session:
+            return false
         }
         return sourceFolder != targetFolder && dropTarget == target
     }

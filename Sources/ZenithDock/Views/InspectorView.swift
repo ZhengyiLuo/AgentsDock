@@ -2041,6 +2041,9 @@ private struct PinnedItemRow: View {
                         Label("Open", systemImage: "arrow.up.right.square")
                     }
                     .controlSize(.mini)
+
+                    MacArtifactDownloadButton(file: file, url: store.fileURL(file), title: "Download")
+                        .controlSize(.mini)
                 }
 
                 if let body = item.body, !body.isEmpty {
@@ -2318,6 +2321,10 @@ private struct ChatVideoGridCell: View {
                 .controlSize(.mini)
                 .help("Open video player")
 
+                MacArtifactDownloadButton(file: file, url: url, title: "")
+                    .controlSize(.mini)
+                    .help("Download video")
+
                 Button {
                     Task { await store.findFileInChat(file) }
                 } label: {
@@ -2489,6 +2496,8 @@ private struct ChatFileRow: View {
                 Image(systemName: "arrow.up.right.square")
             }
             .help("Open file")
+            MacArtifactDownloadButton(file: file, url: url, title: "")
+                .help("Download file")
             Button {
                 store.togglePin(file)
             } label: {
@@ -2529,6 +2538,74 @@ private struct ChatFileRow: View {
             parts.append(byteString(size))
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+struct MacArtifactDownloadButton: View {
+    let file: ZFile
+    let url: URL
+    var title = "Download"
+
+    @State private var isPreparing = false
+    @State private var errorText: String?
+
+    var body: some View {
+        Button {
+            Task { await download() }
+        } label: {
+            if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Image(systemName: isPreparing ? "hourglass" : "arrow.down.circle")
+            } else {
+                Label(isPreparing ? "Preparing" : title, systemImage: "arrow.down.circle")
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(isPreparing)
+        .help("Download \(file.filename)")
+        .alert("Download Failed", isPresented: errorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorText ?? "Could not download \(file.filename).")
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding {
+            errorText != nil
+        } set: { newValue in
+            if !newValue {
+                errorText = nil
+            }
+        }
+    }
+
+    @MainActor
+    private func download() async {
+        guard let destination = chooseDestination() else { return }
+        isPreparing = true
+        defer { isPreparing = false }
+        do {
+            let localURL = try await ArtifactDragFileCache.shared.localFile(for: file, remoteURL: url)
+            if localURL.standardizedFileURL != destination.standardizedFileURL {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.copyItem(at: localURL, to: destination)
+            }
+            NSWorkspace.shared.activateFileViewerSelecting([destination])
+        } catch {
+            errorText = "Could not save \(file.filename)."
+        }
+    }
+
+    @MainActor
+    private func chooseDestination() -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "Download \(file.filename)"
+        panel.nameFieldStringValue = file.filename
+        panel.canCreateDirectories = true
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        return panel.runModal() == .OK ? panel.url : nil
     }
 }
 

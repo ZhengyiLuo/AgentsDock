@@ -19,6 +19,24 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - Mac Asset Downloads And Chat Drag Reorder
+
+- Added explicit Mac download buttons for assets in the timeline artifact grid,
+  plain file rows, message attachment cards, uploaded-file cards, pinned file
+  rows, and the right-side Files & Videos inspector.
+- The Mac download path reuses `ArtifactDragFileCache.shared.localFile`, so
+  remote files are first cached locally, then saved with `NSSavePanel`, and the
+  saved file is revealed in Finder.
+- Fixed Mac sidebar reorder mode so chat rows are actually draggable. Reorder
+  mode now shows before/after insertion rules and translates a chat drop into
+  the current server-supported up/down reorder calls.
+- Chat drag reorder is intentionally limited to compatible sections: pinned
+  chats reorder with pinned chats, archived with archived, and folder chats
+  inside the same folder. Moving across folders still uses the existing
+  `Move to Folder` action.
+- `Tools/ZenithGuardrails/main.swift` now protects chat-row drag/drop reorder
+  and explicit Mac artifact download controls.
+
 ## 2026-06-02 - Mac Cache Freshness Must Come From Server
 
 - Fixed a Mac cache-divergence bug where two Macs could show different history
