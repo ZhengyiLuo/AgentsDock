@@ -523,6 +523,12 @@ final class MobileAppStore: ObservableObject {
         saveDraftPromptsNow()
     }
 
+    func clearUploadsIfCurrent(fileIDs: [String], for sessionID: String?) {
+        guard selectedSessionID == sessionID else { return }
+        guard uploads.map(\.id) == fileIDs else { return }
+        uploads = []
+    }
+
     private func setLastReadAgentSeq(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
         guard allowDecrease || seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
         lastReadAgentSeqBySessionID[sessionID] = seq

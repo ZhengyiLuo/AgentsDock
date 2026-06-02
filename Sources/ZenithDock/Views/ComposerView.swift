@@ -335,13 +335,18 @@ struct ComposerView: View {
     private func sendDraft(_ submitted: String) {
         guard let sessionID = store.selectedSessionID else { return }
         guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let uploadIDs = store.uploads.map(\.id)
         store.clearDraftPrompt(for: sessionID)
         draftPrompt = ""
         editorHasVisibleText = false
         editorResetID += 1
         Task {
-            let accepted = await store.sendPrompt(submitted)
-            if !accepted {
+            let accepted = await store.sendPrompt(to: sessionID, prompt: submitted, fileIDs: uploadIDs)
+            if accepted {
+                await MainActor.run {
+                    store.clearUploadsIfCurrent(fileIDs: uploadIDs, for: sessionID)
+                }
+            } else {
                 await MainActor.run {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
@@ -683,7 +688,12 @@ struct PromptTextView: NSViewRepresentable {
         }
 
         func submit(textView: NSTextView) {
-            parent.onSubmit(textView.string)
+            let submitted = textView.string
+            parent.onSubmit(submitted)
+            guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            textView.string = ""
+            parent.onDraftChange("")
+            publishPresence(textView)
         }
 
         func publishPresence(_ textView: NSTextView) {

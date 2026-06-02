@@ -19,6 +19,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - Queue Submit Composer Clear
+
+- Fixed a queued-send edge where the Mac composer could keep the submitted text
+  visible after the server had already accepted the queued turn.
+- The native Mac text view now clears itself immediately after a non-empty submit,
+  while the store still avoids publishing full draft text on every keystroke.
+- Mac and iOS submits now send to the captured chat/session id instead of the
+  currently selected chat at async execution time, so switching chats during a
+  submit cannot restore or send the wrong draft.
+- Attachments are cleared only if the accepted submit still belongs to the
+  currently selected chat and the pending attachment ids have not changed.
+- Guardrails now check the captured-session send path and native-submit clear.
+
 ## 2026-06-02 - Claude Tool Output Decode Guard
 
 - Fixed Mac/iOS chat-open failures on Claude chats where historical

@@ -144,17 +144,22 @@ struct MobileComposerView: View {
         guard canSend else { return }
         guard let sessionID = store.selectedSessionID else { return }
         let submitted = draftPrompt
+        let uploadIDs = store.uploads.map(\.id)
         store.clearDraftPrompt(for: sessionID)
         draftPrompt = ""
         promptHeight = MobilePromptTextView.minimumHeight
         Task {
-            let accepted = await store.sendPrompt(submitted)
+            let accepted = await store.sendPrompt(to: sessionID, prompt: submitted, fileIDs: uploadIDs)
             if !accepted {
                 await MainActor.run {
                     if draftPrompt.isEmpty {
                         draftPrompt = submitted
                         store.rememberDraftPrompt(submitted, for: sessionID)
                     }
+                }
+            } else {
+                await MainActor.run {
+                    store.clearUploadsIfCurrent(fileIDs: uploadIDs, for: sessionID)
                 }
             }
         }

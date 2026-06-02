@@ -2214,6 +2214,12 @@ final class AppStore: ObservableObject {
         uploads.removeAll { $0.id == file.id }
     }
 
+    func clearUploadsIfCurrent(fileIDs: [String], for sessionID: String?) {
+        guard selectedSessionID == sessionID else { return }
+        guard uploads.map(\.id) == fileIDs else { return }
+        uploads = []
+    }
+
     @discardableResult
     func sendPrompt(_ submittedPrompt: String? = nil) async -> Bool {
         guard let sid = selectedSessionID else { return false }
