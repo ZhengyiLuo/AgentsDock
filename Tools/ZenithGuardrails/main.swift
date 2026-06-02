@@ -1104,11 +1104,13 @@ func checkInspectorCollapseAndPins() throws {
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let app = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/ZenithDockApp.swift"), encoding: .utf8)
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
 
     try assert(root.contains("@AppStorage(\"rightInspectorVisible\")"), "Mac root must persist right-inspector visibility")
     try assert(root.contains("navigationSplitViewColumnWidth(min: 0, ideal: 0, max: 0)"), "Hidden right inspector must release its column width")
     try assert(timeline.contains("inspectorToggleButton"), "Mac header must expose a right-panel toggle")
+    try assert(app.contains("@AppStorage(\"rightInspectorVisible\")") && app.contains(".keyboardShortcut(\"l\", modifiers: .command)"), "Mac app must toggle the right panel with Cmd-L")
     try assert(macStore.contains("struct PinnedTimelineItem"), "Mac store must model pinned timeline items")
     try assert(macStore.contains("pinnedItemsDefaultsKey(namespace: serverCacheNamespace)"), "Pinned items must be scoped by canonical server namespace")
     try assert(macStore.contains("migrateLocalServerState") && macStore.contains("oldPinnedKey"), "Pinned items must migrate when server identity is adopted")

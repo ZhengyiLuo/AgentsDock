@@ -32,6 +32,14 @@ painful to rediscover later.
 - This keeps the composer clear and the queue shelf visible even after stream
   reconnects or server restarts.
 
+## 2026-06-02 - Right Panel Keyboard Shortcut
+
+- Added a Mac app command for the existing right inspector visibility state.
+- `Cmd-L` now toggles the right side panel using the same
+  `rightInspectorVisible` storage as the header button, so the keyboard and UI
+  stay in sync.
+- Added a guardrail that requires the app-level `Cmd-L` command.
+
 ## 2026-06-02 - Reliable Queue Event Reconciliation
 
 - Tightened the send/queue contract so `/turns` returns the accepted

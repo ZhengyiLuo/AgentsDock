@@ -5,6 +5,7 @@ import SwiftUI
 struct ZenithDockApp: App {
     @NSApplicationDelegateAdaptor(ZenithDockAppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
+    @AppStorage("rightInspectorVisible") private var inspectorVisible = true
 
     init() {
         AppLogger.install()
@@ -35,6 +36,13 @@ struct ZenithDockApp: App {
                     }
                 }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
+
+                Divider()
+
+                Button(inspectorVisible ? "Hide Right Panel" : "Show Right Panel") {
+                    inspectorVisible.toggle()
+                }
+                .keyboardShortcut("l", modifiers: .command)
             }
         }
     }
