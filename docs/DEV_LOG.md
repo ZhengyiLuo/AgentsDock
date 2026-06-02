@@ -31,6 +31,11 @@ painful to rediscover later.
   can tailor the handoff to the target backend/session/cwd.
 - Digest sheets now default to `Normal` context depth and display
   `Summarizing with LLM` while the server runs the summarizer.
+- Preview remains a blocking LLM summary request because the user explicitly
+  wants to see the digest. Send to Chat uses `/digest/send`, starts a
+  server-owned background digest job, closes the sheet quickly, emits
+  `handoff_digest_started` / `ready` / `sent` / `error` events in the target
+  chat, and submits the generated digest when ready.
 
 ## 2026-06-01 - Per-Chat Composer Drafts
 

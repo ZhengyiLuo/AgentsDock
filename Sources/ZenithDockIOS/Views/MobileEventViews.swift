@@ -65,10 +65,32 @@ struct MobileEventCard: View {
             ) {
                 MobileJobEventSummary(event: event)
             }
-        case "error", "job_error", "artifact_error":
+        case "handoff_digest_started":
+            MobileSystemCard(
+                icon: "sparkles",
+                title: "Digest Generating",
+                timestamp: messageTimestamp,
+                tint: .orange
+            ) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    MobileMarkdownView(markdown: event.message ?? "Generating LLM context digest.", linkContext: linkContext)
+                }
+            }
+        case "handoff_digest_ready", "handoff_digest_sent":
+            MobileSystemCard(
+                icon: "checkmark.seal",
+                title: event.type == "handoff_digest_ready" ? "Digest Ready" : "Digest Submitted",
+                timestamp: messageTimestamp,
+                tint: .orange
+            ) {
+                MobileMarkdownView(markdown: event.message ?? "Context digest submitted.", linkContext: linkContext)
+            }
+        case "error", "job_error", "artifact_error", "handoff_digest_error":
             MobileSystemCard(
                 icon: "exclamationmark.triangle",
-                title: event.type == "job_error" ? "Job Error" : "Error",
+                title: errorEventTitle,
                 timestamp: messageTimestamp,
                 tint: .red
             ) {
@@ -117,6 +139,17 @@ struct MobileEventCard: View {
             return "Job Deferred"
         default:
             return "Job"
+        }
+    }
+
+    private var errorEventTitle: String {
+        switch event.type {
+        case "job_error":
+            return "Job Error"
+        case "handoff_digest_error":
+            return "Digest Error"
+        default:
+            return "Error"
         }
     }
 

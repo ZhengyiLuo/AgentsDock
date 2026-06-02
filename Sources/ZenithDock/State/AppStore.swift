@@ -2148,15 +2148,34 @@ final class AppStore: ObservableObject {
             errorText = "Choose a different target chat for the digest."
             return false
         }
-        guard let digest = await createHandoffDigest(
-            sourceSessionID: sourceSessionID,
-            targetSessionID: targetSessionID,
-            detail: detail,
-            userPrompt: userPrompt
-        ) else {
+        struct Body: Codable {
+            let detail: String
+            let user_prompt: String?
+            let target_session_id: String
+        }
+        struct Response: Codable {
+            let ok: Bool
+            let digest_job_id: String?
+            let session: ZSession
+        }
+        let cleanPrompt = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let res: Response = try await api.post(
+                "/api/sessions/\(sourceSessionID)/digest/send",
+                body: Body(
+                    detail: detail,
+                    user_prompt: cleanPrompt.isEmpty ? nil : cleanPrompt,
+                    target_session_id: targetSessionID
+                )
+            )
+            replaceSessionFromServer(res.session)
+            AppLogger.info("handoff digest started source=\(sourceSessionID) target=\(targetSessionID) job=\(res.digest_job_id ?? "-")")
+            return res.ok
+        } catch {
+            AppLogger.error("handoff digest send failed source=\(sourceSessionID) target=\(targetSessionID) \(serverErrorMessage(error) ?? "\(error)")")
+            reportServerError(error)
             return false
         }
-        return await sendPrompt(to: targetSessionID, prompt: digest)
     }
 
     func upload(urls: [URL]) async {

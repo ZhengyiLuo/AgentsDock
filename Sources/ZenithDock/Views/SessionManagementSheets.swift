@@ -230,7 +230,7 @@ struct HandoffDigestSheet: View {
     private func sendDigest() async {
         guard !targetSessionID.isEmpty else { return }
         isWorking = true
-        status = "Summarizing with LLM"
+        status = "Starting background digest"
         defer { isWorking = false }
         let ok = await store.sendHandoffDigest(
             sourceSessionID: sourceSession.id,
@@ -239,7 +239,7 @@ struct HandoffDigestSheet: View {
             userPrompt: userPrompt
         )
         if ok {
-            status = "Sent"
+            status = "Digest running in target chat"
             await store.select(sessionID: targetSessionID)
             isPresented = false
         } else {

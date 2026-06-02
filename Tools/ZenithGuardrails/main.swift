@@ -1068,17 +1068,27 @@ func checkHandoffDigestUsesLLM() throws {
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     let macSheet = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SessionManagementSheets.swift"), encoding: .utf8)
     let mobileSheet = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+    let macEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
 
     try assert(server.contains("async def build_handoff_digest("), "Server handoff digest must be async so it can run an LLM summarizer")
     try assert(server.contains("build_handoff_source_pack"), "Server may build a source pack, but only as LLM input")
     try assert(server.contains("run_claude_handoff_summarizer") && server.contains("run_codex_handoff_summarizer"), "Server digest must support real LLM summarizers")
     try assert(server.contains("return await build_handoff_digest("), "Digest endpoint must await the LLM digest path")
+    try assert(server.contains("@app.post(\"/api/sessions/{session_id}/digest/send\")"), "Server must expose a background digest-send endpoint")
+    try assert(server.contains("asyncio.create_task(run_handoff_digest_send"), "Digest send must run in a server-owned background task")
+    try assert(server.contains("\"handoff_digest_started\"") && server.contains("\"handoff_digest_sent\"") && server.contains("\"handoff_digest_error\""), "Server must emit background digest lifecycle events")
     try assert(!server.contains("return build_handoff_digest(session_id, detail=req.detail, user_prompt=req.user_prompt)"), "Digest endpoint must not return the deterministic source pack directly")
     try assert(macStore.contains("target_session_id: targetSessionID"), "Mac digest requests must pass the selected target chat")
     try assert(mobileStore.contains("target_session_id: targetSessionID"), "iOS digest requests must pass the selected target chat")
+    try assert(macStore.contains("\"/api/sessions/\\(sourceSessionID)/digest/send\""), "Mac Send to Chat must call the background digest-send endpoint")
+    try assert(mobileStore.contains("\"/api/sessions/\\(sourceSessionID)/digest/send\""), "iOS Send to Chat must call the background digest-send endpoint")
     try assert(macSheet.contains("@State private var detail = \"normal\""), "Mac digest sheet must default to normal LLM context depth")
     try assert(mobileSheet.contains("@State private var detail = \"normal\""), "iOS digest sheet must default to normal LLM context depth")
-    try assert(macSheet.contains("Summarizing with LLM") && mobileSheet.contains("Summarizing with LLM"), "Digest UI must disclose that creation is an LLM summarization step")
+    try assert(macSheet.contains("Summarizing with LLM") && mobileSheet.contains("Summarizing with LLM"), "Digest preview UI must disclose that creation is an LLM summarization step")
+    try assert(macSheet.contains("Starting background digest") && mobileSheet.contains("Starting background digest"), "Digest send UI must not block on the whole LLM summary")
+    try assert(macEvents.contains("handoff_digest_started") && macEvents.contains("ProgressView()"), "Mac timeline must show background digest progress")
+    try assert(mobileEvents.contains("handoff_digest_started") && mobileEvents.contains("ProgressView()"), "iOS timeline must show background digest progress")
 }
 
 do {

@@ -197,6 +197,19 @@ struct EventCard: View, Equatable {
         case "error":
             Text(event.message ?? event.error ?? "Unknown error")
                 .foregroundStyle(.red)
+        case "handoff_digest_started":
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                MarkdownView(markdown: event.message ?? "Generating LLM context digest.", compact: true, linkContext: linkContext)
+                    .foregroundStyle(.secondary)
+            }
+        case "handoff_digest_ready", "handoff_digest_sent":
+            MarkdownView(markdown: event.message ?? "Context digest submitted.", compact: true, linkContext: linkContext)
+                .foregroundStyle(.secondary)
+        case "handoff_digest_error":
+            Text(event.message ?? event.error ?? "Context digest failed")
+                .foregroundStyle(.red)
         case "raw_event":
             TraceDisclosureHeader(title: "Raw JSON", detail: nil, isExpanded: $expanded)
             if expanded {
@@ -224,6 +237,10 @@ struct EventCard: View, Equatable {
         case "process_started": "Process"
         case "idle_warning": "Idle Warning"
         case "error": "Error"
+        case "handoff_digest_started": "Digest Generating"
+        case "handoff_digest_ready": "Digest Ready"
+        case "handoff_digest_sent": "Digest Submitted"
+        case "handoff_digest_error": "Digest Error"
         default: event.type.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
@@ -241,6 +258,9 @@ struct EventCard: View, Equatable {
         case "turn_queued": "text.badge.clock"
         case "turn_unqueued": "xmark.circle"
         case "turn_finished": "checkmark.circle"
+        case "handoff_digest_started": "sparkles"
+        case "handoff_digest_ready", "handoff_digest_sent": "checkmark.seal"
+        case "handoff_digest_error": "exclamationmark.triangle"
         default: "circle"
         }
     }
@@ -251,6 +271,8 @@ struct EventCard: View, Equatable {
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
         case "job_created", "job_ran", "job_deferred": .orange
+        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent": .orange
+        case "handoff_digest_error": .red
         case "turn_queued", "turn_unqueued": .secondary
         case "artifact_created": .green
         default: .accentColor
@@ -263,6 +285,12 @@ struct EventCard: View, Equatable {
         }
         if event.type == "job_created" || event.type == "job_ran" || event.type == "job_deferred" {
             return AnyShapeStyle(Theme.jobBubble.opacity(0.70))
+        }
+        if event.type == "handoff_digest_started" || event.type == "handoff_digest_ready" || event.type == "handoff_digest_sent" {
+            return AnyShapeStyle(Theme.jobBubble.opacity(0.52))
+        }
+        if event.type == "handoff_digest_error" {
+            return AnyShapeStyle(.red.opacity(0.08))
         }
         return AnyShapeStyle(Theme.card)
     }
@@ -1310,7 +1338,7 @@ private struct TraceEventDetail: View {
             }
         case "job_created", "job_ran", "job_deferred":
             JobEventSummary(event: event)
-        case "error", "job_error", "artifact_error":
+        case "error", "job_error", "artifact_error", "handoff_digest_error":
             VStack(alignment: .leading, spacing: 6) {
                 Text(event.message ?? event.error ?? "Unknown error")
                     .foregroundStyle(.red)
@@ -1320,6 +1348,16 @@ private struct TraceEventDetail: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        case "handoff_digest_started":
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(event.message ?? "Generating LLM context digest.")
+                    .foregroundStyle(.secondary)
+            }
+        case "handoff_digest_ready", "handoff_digest_sent":
+            Text(event.message ?? "Context digest submitted.")
+                .foregroundStyle(.secondary)
         default:
             Text(event.message ?? event.text ?? event.type)
                 .foregroundStyle(.secondary)
@@ -1341,6 +1379,10 @@ private struct TraceEventDetail: View {
         case "job_ran": "Job Ran"
         case "job_deferred": "Job Deferred"
         case "job_error": "Job Error"
+        case "handoff_digest_started": "Digest Generating"
+        case "handoff_digest_ready": "Digest Ready"
+        case "handoff_digest_sent": "Digest Submitted"
+        case "handoff_digest_error": "Digest Error"
         case "artifact_error": "Artifact Error"
         default: event.type.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -1352,7 +1394,9 @@ private struct TraceEventDetail: View {
         case "tool_started", "tool_finished": "terminal"
         case "raw_event": "curlybraces"
         case "job_created", "job_ran", "job_deferred": "clock.badge.checkmark"
-        case "error", "job_error", "artifact_error": "exclamationmark.triangle"
+        case "handoff_digest_started": "sparkles"
+        case "handoff_digest_ready", "handoff_digest_sent": "checkmark.seal"
+        case "error", "job_error", "artifact_error", "handoff_digest_error": "exclamationmark.triangle"
         default: "circle"
         }
     }
@@ -1362,7 +1406,8 @@ private struct TraceEventDetail: View {
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
         case "job_created", "job_ran", "job_deferred": .orange
-        case "error", "job_error", "artifact_error": .red
+        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent": .orange
+        case "error", "job_error", "artifact_error", "handoff_digest_error": .red
         default: .secondary
         }
     }
