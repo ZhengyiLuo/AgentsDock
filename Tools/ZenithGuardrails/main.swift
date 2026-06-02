@@ -313,7 +313,9 @@ func checkArchiveSessionBehavior() throws {
     try assert(macSidebar.contains(".onDrop"), "Mac sidebar reorder mode must expose drop targets")
     try assert(macSidebar.contains("SidebarSessionDropDelegate"), "Mac sidebar reorder mode must make chat rows draggable")
     try assert(macSidebar.contains("handleSessionDrop"), "Mac sidebar must reorder chats by drag/drop in reorder mode")
-    try assert(macStore.contains("func reorderSession(_ session: ZSession, relativeTo target: ZSession"), "Mac store must translate chat drops into server reorder calls")
+    try assert(macStore.contains("func reorderSession(_ session: ZSession, relativeTo target: ZSession"), "Mac store must send chat drops through server reorder calls")
+    try assert(macStore.contains("let target_id: String") && macStore.contains("body: Body(target_id: target.id, placement: placement)"), "Mac chat drag/drop reorder must send a single target placement request")
+    try assert(!macStore.contains("for _ in 0..<abs(destination - sourceIndex)"), "Mac chat drag/drop reorder must not animate through repeated up/down swaps")
     try assert(macStore.contains("canReorderSession(_ session: ZSession, relativeTo target: ZSession)"), "Mac sidebar must guard chat drops to compatible sections")
     try assert(macSidebar.contains("handleFolderDrop"), "Mac sidebar must reorder folders by drag/drop in reorder mode")
     try assert(macSidebar.contains("withoutSidebarAnimation"), "Mac sidebar drag reorder must suppress implicit list animations")
@@ -330,6 +332,9 @@ func checkArchiveSessionBehavior() throws {
     try assert(server.contains("\"archived\", \"archived_at\", \"sort_order\""), "Server public sessions must expose archived state and stable order")
     try assert(server.contains("def sorted_sessions("), "Server session list must use explicit sort_order instead of updated_at recency")
     try assert(server.contains("@app.post(\"/api/sessions/{session_id}/order\")"), "Server must expose manual session reorder endpoint")
+    try assert(server.contains("target_id: str | None = None") && server.contains("placement: str | None = None"), "Server reorder endpoint must accept target placement for drag/drop")
+    try assert(server.contains("reordered = peers[:insert_index] + [sess] + peers[insert_index:]"), "Server drag/drop reorder must compute one final order")
+    try assert(server.contains("req.direction, req.target_id, req.placement"), "Server reorder route must pass target placement to the store")
 }
 
 func checkFolderSectionControls() throws {
@@ -973,6 +978,9 @@ func checkQueuedRemovalDisappears() throws {
     try assert(macStore.contains("func updateQueued"), "Mac store must support editing queued prompts")
     try assert(macStore.contains("func handleStaleQueuedTurn"), "Mac store must silently reconcile stale queued rows")
     try assert(macStore.contains("isQueuedTurnNotFound(error)"), "Mac stale queued rows must be detected without showing a modal")
+    try assert(macStore.contains("ns.code == 404") && macStore.contains("message.localizedCaseInsensitiveContains(\"not found\")"), "Mac queue actions must treat generic 404 queue rows as stale local cache")
+    try assert(macStore.contains("let event: ZEvent?"), "Mac turn responses must decode accepted timeline events")
+    try assert(macStore.contains("applyAcceptedTurnEvent(res.event, sessionID:"), "Mac sends must render accepted queued/started events without waiting for websocket delivery")
     try assert(macStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "Mac send success must clear a stale submitted draft after queued sends")
     try assert(macStore.contains("prompt.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed"), "Mac draft clearing must not wipe a newer prompt typed during submit")
     try assert(mobileStore.contains("events.removeAll { $0.type == \"turn_queued\" && $0.queued_id == queuedID }"), "iOS unqueue should remove queued rows locally after server success")
@@ -981,9 +989,15 @@ func checkQueuedRemovalDisappears() throws {
     try assert(mobileStore.contains("func updateQueued"), "iOS store must support editing queued prompts")
     try assert(mobileStore.contains("func handleStaleQueuedTurn"), "iOS store must silently reconcile stale queued rows")
     try assert(mobileStore.contains("isQueuedTurnNotFound(error)"), "iOS stale queued rows must be detected without showing an alert")
+    try assert(mobileStore.contains("ns.code == 404") && mobileStore.contains("message.localizedCaseInsensitiveContains(\"not found\")"), "iOS queue actions must treat generic 404 queue rows as stale local cache")
+    try assert(mobileStore.contains("let event: ZEvent?"), "iOS turn responses must decode accepted timeline events")
+    try assert(mobileStore.contains("applyAcceptedTurnEvent(res.event, sessionID:"), "iOS sends must render accepted queued/started events without waiting for websocket delivery")
     try assert(mobileStore.contains("clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)"), "iOS send success must clear a stale submitted draft after queued sends")
     try assert(server.contains("RUN_NOW_TURNS"), "Server Send Now must reserve the exact queued item instead of relying on queue order")
     try assert(server.contains("stop_turn(session_id, emit_event=False, schedule_queue=False)"), "Server Send Now must silently interrupt without appending visible stop cards")
+    try assert(server.contains("\"event\": queued_event"), "Server queued sends must return the turn_queued event to the app")
+    try assert(server.contains("\"event\": started_event"), "Server started sends must return the turn_started event to the app")
+    try assert(server.contains("def should_schedule_queue_after_finish") && server.contains("return not stopped or session_id in RUN_NOW_TURNS"), "Server plain Stop must leave queued turns pending while Send Now still drains the reserved item")
 }
 
 func checkPromptImageAttachments() throws {

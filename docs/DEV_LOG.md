@@ -19,6 +19,46 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - Queue Accepted Event Contract
+
+- Fixed a queue reliability regression where accepted sends could fail to show
+  the queued row/user turn until websocket delivery caught up.
+- `server/agent_server.py` now returns the exact `turn_queued` or
+  `turn_started` event in the `/api/sessions/{session_id}/turns` response.
+- `Sources/ZenithDock/State/AppStore.swift` and
+  `Sources/ZenithDockIOS/State/MobileAppStore.swift` ingest that accepted event
+  immediately, with existing event-ID dedupe still handling the later websocket
+  copy.
+- This keeps the composer clear and the queue shelf visible even after stream
+  reconnects or server restarts.
+
+## 2026-06-02 - Reliable Queue Event Reconciliation
+
+- Tightened the send/queue contract so `/turns` returns the accepted
+  `turn_started` or `turn_queued` event and Mac/iOS render that event
+  immediately instead of waiting on websocket delivery.
+- Queue action 404s now reconcile stale local queued rows quietly on Mac and
+  iOS, including generic `Not Found` responses from cache/server drift.
+- Plain Stop now leaves queued turns pending. Only normal turn completion or
+  explicit Send Now drains the next queued turn; Send Now still reserves the
+  exact queued item before interrupting the current run.
+- Added guardrails for immediate accepted-event rendering, stale queue row
+  reconciliation, and the Stop-vs-Send-Now queue drain rule.
+
+## 2026-06-02 - Single-Shot Chat Drag Reorder
+
+- Fixed the Mac sidebar chat drag/drop reorder path that still animated through
+  repeated neighbor swaps after a drop.
+- `server/agent_server.py` now lets `/api/sessions/{session_id}/order` accept
+  `target_id` plus `placement` (`before`/`after`) and computes the final section
+  order in one save/response.
+- `Sources/ZenithDock/State/AppStore.swift` now sends that single target
+  placement request for drag/drop instead of looping over `up`/`down` reorder
+  calls.
+- The old `direction` path remains for context-menu `Move Up` / `Move Down`.
+- Guardrails now explicitly reject the repeated-swap loop and require the
+  server target-placement API.
+
 ## 2026-06-02 - Mac Asset Downloads And Chat Drag Reorder
 
 - Added explicit Mac download buttons for assets in the timeline artifact grid,

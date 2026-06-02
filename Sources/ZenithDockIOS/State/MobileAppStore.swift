@@ -1207,6 +1207,7 @@ final class MobileAppStore: ObservableObject {
             let run_id: String?
             let queued: Bool?
             let session: ZSession
+            let event: ZEvent?
         }
         activeSessionIDs.insert(sessionID)
         if sessionID == selectedSessionID {
@@ -1224,6 +1225,7 @@ final class MobileAppStore: ObservableObject {
                 )
             )
             replaceSessionFromServer(res.session)
+            applyAcceptedTurnEvent(res.event, sessionID: sessionID)
             launchDeferredText = nil
             syncSelectedRunningState()
             return true
@@ -1452,6 +1454,7 @@ final class MobileAppStore: ObservableObject {
                 let run_id: String?
                 let queued: Bool?
                 let session: ZSession
+                let event: ZEvent?
             }
             let body = Body(
                 prompt: trimmed,
@@ -1461,6 +1464,7 @@ final class MobileAppStore: ObservableObject {
             )
             let res: Response = try await api.post("/api/sessions/\(sid)/turns", body: body)
             replaceSessionFromServer(res.session)
+            applyAcceptedTurnEvent(res.event, sessionID: sid)
             launchDeferredText = nil
             uploads = []
             clearSubmittedPromptIfCurrent(submittedPrompt: submittedPrompt, trimmed: trimmed)
@@ -1474,6 +1478,16 @@ final class MobileAppStore: ObservableObject {
             report(error)
             return false
         }
+    }
+
+    private func applyAcceptedTurnEvent(_ event: ZEvent?, sessionID: String) {
+        guard let event else { return }
+        if event.type == "turn_started" {
+            activeSessionIDs.insert(event.session_id)
+            syncSelectedRunningState()
+        }
+        guard event.session_id == sessionID, event.session_id == selectedSessionID else { return }
+        ingest(event)
     }
 
     private func clearSubmittedPromptIfCurrent(submittedPrompt: String?, trimmed: String) {
@@ -1599,7 +1613,12 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func isQueuedTurnNotFound(_ error: Error) -> Bool {
-        (apiErrorDetail(error) ?? error.localizedDescription).localizedCaseInsensitiveContains("queued turn not found")
+        let ns = error as NSError
+        let message = apiErrorDetail(error) ?? error.localizedDescription
+        return message.localizedCaseInsensitiveContains("queued turn not found") ||
+            (ns.domain == "ZenithDock.API" &&
+             ns.code == 404 &&
+             message.localizedCaseInsensitiveContains("not found"))
     }
 
     func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, maxRuns: Int? = nil, firstRunAt: Date? = nil) async {

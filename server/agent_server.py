@@ -370,7 +370,9 @@ class UpdateSessionRequest(BaseModel):
 
 
 class ReorderSessionRequest(BaseModel):
-    direction: str
+    direction: str | None = None
+    target_id: str | None = None
+    placement: str | None = None
 
 
 class ReadSessionRequest(BaseModel):
@@ -638,15 +640,50 @@ class SessionStore:
             await self.save()
             return sess
 
-    async def reorder(self, sid: str, direction: str) -> list[dict[str, Any]]:
-        normalized = direction.strip().lower()
-        if normalized not in {"up", "down"}:
-            raise HTTPException(status_code=400, detail="direction must be up or down")
+    async def reorder(
+        self,
+        sid: str,
+        direction: str | None = None,
+        target_id: str | None = None,
+        placement: str | None = None,
+    ) -> list[dict[str, Any]]:
         async with self._lock:
             sess = self.sessions.get(sid)
             if not sess:
                 raise HTTPException(status_code=404, detail="session not found")
             section = session_section_key(sess)
+
+            if target_id:
+                normalized_placement = (placement or "before").strip().lower()
+                if normalized_placement not in {"before", "after"}:
+                    raise HTTPException(status_code=400, detail="placement must be before or after")
+                target = self.sessions.get(target_id)
+                if not target:
+                    raise HTTPException(status_code=404, detail="target session not found")
+                if session_section_key(target) != section:
+                    raise HTTPException(status_code=400, detail="sessions must be in the same section")
+                if target_id == sid:
+                    return sorted_sessions(list(self.sessions.values()))
+
+                peers = [
+                    peer for peer in sorted_sessions(list(self.sessions.values()))
+                    if session_section_key(peer) == section
+                    and peer.get("id") != sid
+                ]
+                target_index = next((idx for idx, peer in enumerate(peers) if peer.get("id") == target_id), None)
+                if target_index is None:
+                    raise HTTPException(status_code=404, detail="target session not found")
+                insert_index = target_index + 1 if normalized_placement == "after" else target_index
+                reordered = peers[:insert_index] + [sess] + peers[insert_index:]
+                for index, peer in enumerate(reordered):
+                    peer["sort_order"] = (index + 1) * SESSION_ORDER_STEP
+                sess["updated_at"] = now_iso()
+                await self.save()
+                return sorted_sessions(list(self.sessions.values()))
+
+            normalized = (direction or "").strip().lower()
+            if normalized not in {"up", "down"}:
+                raise HTTPException(status_code=400, detail="direction must be up or down")
             peers = [
                 peer for peer in sorted_sessions(list(self.sessions.values()))
                 if session_section_key(peer) == section
@@ -1077,7 +1114,7 @@ async def enqueue_turn(session_id: str, req: TurnRequest, sess: dict[str, Any]) 
         queue = QUEUED_TURNS.setdefault(session_id, deque())
         queue.append(item)
         position = len(queue)
-    await append_event(session_id, "turn_queued", {
+    queued_event = await append_event(session_id, "turn_queued", {
         "queued_id": queued_id,
         "backend": req.backend or sess.get("backend") or DEFAULT_BACKEND,
         "prompt": req.display_prompt or req.prompt,
@@ -1092,6 +1129,7 @@ async def enqueue_turn(session_id: str, req: TurnRequest, sess: dict[str, Any]) 
         "queued_id": queued_id,
         "position": position,
         "session": public_session(STORE.sessions[session_id]),
+        "event": queued_event,
     }
 
 
@@ -1316,6 +1354,10 @@ async def start_next_queued_turn(session_id: str) -> None:
 
 def schedule_next_queued_turn(session_id: str) -> None:
     asyncio.create_task(start_next_queued_turn(session_id))
+
+
+def should_schedule_queue_after_finish(session_id: str, stopped: bool) -> bool:
+    return not stopped or session_id in RUN_NOW_TURNS
 
 
 def rebuild_queued_turns_from_events() -> int:
@@ -4224,8 +4266,10 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
     })
     RUN_METADATA.pop(run_id, None)
     await release_turn_slot(session_id)
+    drain_queue = should_schedule_queue_after_finish(session_id, stopped)
     STOPPED_RUNS.discard(run_id)
-    schedule_next_queued_turn(session_id)
+    if drain_queue:
+        schedule_next_queued_turn(session_id)
 
 
 async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, Any], manifest_path: Path) -> None:
@@ -4390,8 +4434,10 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
     })
     RUN_METADATA.pop(run_id, None)
     await release_turn_slot(session_id)
+    drain_queue = should_schedule_queue_after_finish(session_id, stopped)
     STOPPED_RUNS.discard(run_id)
-    schedule_next_queued_turn(session_id)
+    if drain_queue:
+        schedule_next_queued_turn(session_id)
 
 
 async def start_turn(
@@ -4487,7 +4533,7 @@ async def start_turn(
         if run_metadata:
             RUN_METADATA[run_id] = run_metadata
             started_payload.update(run_metadata)
-        await append_event(session_id, "turn_started", started_payload)
+        started_event = await append_event(session_id, "turn_started", started_payload)
         task = run_codex(session_id, run_id, prompt, dict(sess), manifest_path) if backend == BACKEND_CODEX else run_claude(session_id, run_id, prompt, dict(sess), manifest_path)
         asyncio.create_task(task)
         current_title = str(sess.get("title") or "").strip()
@@ -4496,7 +4542,7 @@ async def start_turn(
             await STORE.update(session_id, {"title": first_line[:72] or "New chat"})
         else:
             await STORE.update(session_id, {})
-        return {"run_id": run_id, "queued": False, "session": public_session(STORE.sessions[session_id])}
+        return {"run_id": run_id, "queued": False, "session": public_session(STORE.sessions[session_id]), "event": started_event}
     except Exception:
         if reserved:
             await release_turn_slot(session_id)
@@ -4753,7 +4799,7 @@ async def update_session(session_id: str, req: UpdateSessionRequest) -> dict[str
 
 @app.post("/api/sessions/{session_id}/order")
 async def reorder_session(session_id: str, req: ReorderSessionRequest) -> dict[str, Any]:
-    sessions = await STORE.reorder(session_id, req.direction)
+    sessions = await STORE.reorder(session_id, req.direction, req.target_id, req.placement)
     return {"sessions": [public_session(sess) for sess in sessions]}
 
 

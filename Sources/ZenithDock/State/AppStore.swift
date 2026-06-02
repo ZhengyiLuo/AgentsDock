@@ -1865,31 +1865,26 @@ final class AppStore: ObservableObject {
               sessionSidebarSectionKey(session) == sessionSidebarSectionKey(target) else {
             return
         }
-        let peers = sidebarSectionPeers(for: session)
-        guard let sourceIndex = peers.firstIndex(where: { $0.id == session.id }),
-              let targetIndex = peers.firstIndex(where: { $0.id == target.id }) else {
-            return
+        struct Body: Codable {
+            let target_id: String
+            let placement: String
         }
-        var destination = placement == "after" ? targetIndex + 1 : targetIndex
-        if sourceIndex < destination {
-            destination -= 1
-        }
-        guard destination != sourceIndex else { return }
-
-        let direction = destination < sourceIndex ? "up" : "down"
-        for _ in 0..<abs(destination - sourceIndex) {
-            await reorderSession(session, direction: direction)
+        do {
+            struct Response: Codable { let sessions: [ZSession] }
+            let res: Response = try await api.post(
+                "/api/sessions/\(session.id)/order",
+                body: Body(target_id: target.id, placement: placement)
+            )
+            sessions = sessionsWithPendingRuntime(res.sessions)
+            reconcileUnreadFromSessions()
+        } catch {
+            reportServerError(error)
         }
     }
 
     func canReorderSession(_ session: ZSession, relativeTo target: ZSession) -> Bool {
         session.id != target.id &&
             sessionSidebarSectionKey(session) == sessionSidebarSectionKey(target)
-    }
-
-    private func sidebarSectionPeers(for session: ZSession) -> [ZSession] {
-        let key = sessionSidebarSectionKey(session)
-        return sessions.filter { sessionSidebarSectionKey($0) == key }
     }
 
     private func sessionSidebarSectionKey(_ session: ZSession) -> String {
@@ -2169,6 +2164,7 @@ final class AppStore: ObservableObject {
             let queued_id: String?
             let position: Int?
             let session: ZSession
+            let event: ZEvent?
         }
         do {
             activeSessionIDs.insert(sessionID)
@@ -2186,6 +2182,7 @@ final class AppStore: ObservableObject {
                 )
             )
             replaceSessionFromServer(res.session)
+            applyAcceptedTurnEvent(res.event, sessionID: sessionID)
             if res.queued == true {
                 AppLogger.info("turn queued session=\(sessionID) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
             } else {
@@ -2303,9 +2300,11 @@ final class AppStore: ObservableObject {
                 let queued_id: String?
                 let position: Int?
                 let session: ZSession
+                let event: ZEvent?
             }
             let res: Response = try await api.post("/api/sessions/\(sid)/turns", body: body)
             replaceSessionFromServer(res.session)
+            applyAcceptedTurnEvent(res.event, sessionID: sid)
             if res.queued == true {
                 AppLogger.info("turn queued session=\(sid) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
             } else {
@@ -2329,6 +2328,16 @@ final class AppStore: ObservableObject {
             reportServerError(error)
             return false
         }
+    }
+
+    private func applyAcceptedTurnEvent(_ event: ZEvent?, sessionID: String) {
+        guard let event else { return }
+        if event.type == "turn_started" {
+            activeSessionIDs.insert(event.session_id)
+            syncSelectedRunningState()
+        }
+        guard event.session_id == sessionID, event.session_id == selectedSessionID else { return }
+        ingest(event)
     }
 
     private func clearSubmittedPromptIfCurrent(submittedPrompt: String?, trimmed: String) {
@@ -2462,7 +2471,12 @@ final class AppStore: ObservableObject {
     }
 
     private func isQueuedTurnNotFound(_ error: Error) -> Bool {
-        (serverErrorMessage(error) ?? "").localizedCaseInsensitiveContains("queued turn not found")
+        let ns = error as NSError
+        let message = serverErrorMessage(error) ?? ""
+        return message.localizedCaseInsensitiveContains("queued turn not found") ||
+            (ns.domain == "ZenithDock.API" &&
+             ns.code == 404 &&
+             message.localizedCaseInsensitiveContains("not found"))
     }
 
     func createJob(title: String, prompt: String, intervalSeconds: Int, loop: Bool, maxRuns: Int? = nil, firstRunAt: Date? = nil) async {
