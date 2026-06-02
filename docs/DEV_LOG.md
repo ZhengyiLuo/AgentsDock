@@ -19,6 +19,28 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - Surface Codex Tool Failures
+
+- A Codex turn in `CMA-ES - Gripper - Dev` accepted the user prompt but then
+  produced no visible assistant response. The remote event log showed Codex
+  emitted `type:error` / `turn.failed` with
+  `The model 'gpt-image-2' does not exist`, then exited with empty
+  `result_text`.
+- The server previously stored those Codex failures as raw events only, so the
+  app showed a sent user bubble and silence.
+- `server/agent_server.py` now converts Codex JSON `error` and `turn.failed`
+  events into visible `error` cards, including nonzero exits with no stderr.
+- Server-launched Codex turns now pass `--disable image_generation` to avoid
+  the currently broken image-generation tool path while preserving normal image
+  file attachments.
+
+## 2026-06-02 - Remove Dead Composer Mic
+
+- Removed the Mac composer microphone icon because voice input is not wired up
+  yet and the static icon looked like a broken button.
+- Added a `ZenithGuardrails` check so the disabled/dead mic affordance cannot
+  quietly return before real voice input exists.
+
 ## 2026-06-02 - Queue Accepted Event Contract
 
 - Fixed a queue reliability regression where accepted sends could fail to show

@@ -131,12 +131,6 @@ struct ComposerView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
 
-            Image(systemName: "mic")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .frame(width: 24, height: 24)
-                .help("Voice input is not enabled")
-
             Button {
                 editorSubmitRevision += 1
             } label: {

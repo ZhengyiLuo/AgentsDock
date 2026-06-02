@@ -54,6 +54,7 @@ func checkComposerUsesPresenceGate() throws {
     try assert(!source.contains("scheduleSync"), "Composer must not schedule recurring full-draft SwiftUI sync while typing")
     try assert(!source.contains("parent.text ="), "Composer must not publish the full draft binding during normal typing")
     try assert(source.contains("allowsNonContiguousLayout = true"), "Composer text view should allow non-contiguous layout for long drafts")
+    try assert(!source.contains("Voice input is not enabled") && !source.contains("Image(systemName: \"mic\")"), "Mac composer must not show a dead microphone control")
 }
 
 func checkComposerDraftPersistence() throws {
@@ -196,6 +197,10 @@ func checkClaudeResumeFailureDoesNotPoisonSession() throws {
     try assert(server.contains("provider_id = None\n                    await append_event(session_id, \"error\""), "Claude failed-result session IDs must be discarded and surfaced as errors")
     try assert(server.contains("if provider_id and not result_error:"), "Claude provider session must only save after a successful result")
     try assert(!server.contains("provider_id = event[\"session_id\"]\n                await STORE.save_provider_session(session_id, provider_id, BACKEND_CLAUDE)"), "Claude streamed session IDs must not be saved before the result succeeds")
+    try assert(server.contains("def codex_result_error(event: dict[str, Any]) -> str | None:"), "Server must classify Codex JSON error and turn.failed events")
+    try assert(server.contains("event_type == \"turn.failed\""), "Codex turn.failed events must be surfaced as visible errors")
+    try assert(server.contains("cmd.extend([\"--disable\", \"image_generation\"])"), "Server-launched Codex turns must disable the currently broken image_generation tool")
+    try assert(server.contains("Codex exited {proc.returncode} without error output."), "Codex nonzero exits without stderr must still show a visible error")
 }
 
 func checkServerURLNormalization() throws {

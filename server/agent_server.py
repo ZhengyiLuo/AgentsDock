@@ -3796,6 +3796,7 @@ def build_codex_cmd(sess: dict[str, Any], prompt: str, manifest_path: Path) -> l
         cmd.extend(["resume", provider_id])
     cmd.append("--json")
     cmd.extend(["-c", "model_reasoning_summary=detailed"])
+    cmd.extend(["--disable", "image_generation"])
     if not provider_id:
         cmd.append("--skip-git-repo-check")
     cmd.append("--dangerously-bypass-approvals-and-sandbox")
@@ -3812,6 +3813,44 @@ def claude_result_error(event: dict[str, Any]) -> str | None:
             return "; ".join(str(item) for item in errors if item)
         result = event.get("result")
         return str(result or "Claude execution failed")
+    return None
+
+
+def concise_error_message(value: Any) -> str:
+    if value is None:
+        return "Unknown error"
+    if isinstance(value, str):
+        text = value.strip()
+        with suppress(Exception):
+            parsed = json.loads(text)
+            return concise_error_message(parsed)
+        return text or "Unknown error"
+    if isinstance(value, dict):
+        if "error" in value:
+            message = concise_error_message(value.get("error"))
+            status = value.get("status")
+            if status and f"status {status}" not in message.lower():
+                return f"{message} (status {status})"
+            return message
+        message = str(value.get("message") or value.get("detail") or "").strip()
+        code = str(value.get("code") or value.get("type") or "").strip()
+        if message and code:
+            return f"{message} ({code})"
+        if message:
+            return message
+        if code:
+            return code
+        with suppress(Exception):
+            return compact_memory_text(json.dumps(value, separators=(",", ":")), 4000)
+    return str(value)
+
+
+def codex_result_error(event: dict[str, Any]) -> str | None:
+    event_type = str(event.get("type") or "")
+    if event_type == "error":
+        return concise_error_message(event.get("message") or event.get("error") or event)
+    if event_type == "turn.failed":
+        return concise_error_message(event.get("error") or event.get("message") or event)
     return None
 
 
@@ -4336,6 +4375,8 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
     last_event = time.time()
     idle_killed = False
     stream_error: str | None = None
+    codex_error: str | None = None
+    codex_error_emitted = False
     seen_artifacts: set[str] = set()
     manifest_watch_task = asyncio.create_task(watch_manifest_artifacts(session_id, run_id, manifest_path, seen_artifacts))
 
@@ -4366,6 +4407,18 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
             except Exception:
                 continue
             etype = event.get("type", "")
+            result_error = codex_result_error(event)
+            if result_error:
+                codex_error = result_error
+                if not codex_error_emitted:
+                    await append_event(session_id, "error", {
+                        "run_id": run_id,
+                        "backend": BACKEND_CODEX,
+                        "message": result_error,
+                        **run_event_metadata(run_id),
+                    })
+                    codex_error_emitted = True
+                continue
             if etype == "thread.started" and event.get("thread_id"):
                 provider_id = event["thread_id"]
                 await STORE.save_provider_session(session_id, provider_id, BACKEND_CODEX)
@@ -4419,8 +4472,13 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
         await append_event(session_id, "error", {"run_id": run_id, "message": f"Codex stream failed: {stream_error}", **run_event_metadata(run_id)})
     if idle_killed:
         await append_event(session_id, "error", {"run_id": run_id, "message": "killed after idle timeout", **run_event_metadata(run_id)})
-    if not stopped and proc.returncode not in (0, None) and stderr:
-        await append_event(session_id, "error", {"run_id": run_id, "message": stderr[:4000], "exit_code": proc.returncode, **run_event_metadata(run_id)})
+    if not stopped and proc.returncode not in (0, None):
+        if stderr:
+            await append_event(session_id, "error", {"run_id": run_id, "message": stderr[:4000], "exit_code": proc.returncode, **run_event_metadata(run_id)})
+        elif codex_error and not codex_error_emitted:
+            await append_event(session_id, "error", {"run_id": run_id, "message": codex_error, "exit_code": proc.returncode, **run_event_metadata(run_id)})
+        elif not codex_error:
+            await append_event(session_id, "error", {"run_id": run_id, "message": f"Codex exited {proc.returncode} without error output.", "exit_code": proc.returncode, **run_event_metadata(run_id)})
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CODEX)
     await collect_manifest(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts, final=True)
