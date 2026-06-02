@@ -556,6 +556,9 @@ public struct ZEvent: Codable, Identifiable, Hashable, Sendable {
     public var run_id: String?
     public var queued_id: String?
     public var position: Int?
+    public var purpose: String?
+    public var digest_job_id: String?
+    public var target_session_id: String?
     public var backend: String?
     public var prompt: String?
     public var file_ids: [String]?

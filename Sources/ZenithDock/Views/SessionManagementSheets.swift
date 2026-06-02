@@ -239,8 +239,7 @@ struct HandoffDigestSheet: View {
             userPrompt: userPrompt
         )
         if ok {
-            status = "Digest running in target chat"
-            await store.select(sessionID: targetSessionID)
+            status = "Digest running in source chat"
             isPresented = false
         } else {
             status = "Send failed"

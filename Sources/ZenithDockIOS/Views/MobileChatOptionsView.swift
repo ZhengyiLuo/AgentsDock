@@ -1004,7 +1004,6 @@ private struct MobileHandoffDigestView: View {
             userPrompt: userPrompt
         )
         if ok {
-            await store.select(sessionID: targetSessionID)
             isPresented = false
         } else {
             status = "Send failed"

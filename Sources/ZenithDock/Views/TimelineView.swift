@@ -1711,6 +1711,10 @@ private enum TimelineRows {
                 flushAgentRun()
             }
 
+            if activeRunID != nil {
+                flushAgentRun()
+            }
+
             if traceTypes.contains(event.type) {
                 orphanTrace.append(event)
             } else {

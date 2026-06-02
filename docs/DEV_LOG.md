@@ -32,10 +32,24 @@ painful to rediscover later.
 - Digest sheets now default to `Normal` context depth and display
   `Summarizing with LLM` while the server runs the summarizer.
 - Preview remains a blocking LLM summary request because the user explicitly
-  wants to see the digest. Send to Chat uses `/digest/send`, starts a
-  server-owned background digest job, closes the sheet quickly, emits
-  `handoff_digest_started` / `ready` / `sent` / `error` events in the target
-  chat, and submits the generated digest when ready.
+  wants to see the digest.
+
+## 2026-06-01 - Source-Chat Handoff Digest Turns
+
+- Changed background handoff sends so the digest is generated as a real tagged
+  turn in the source chat, using that chat's normal Claude/Codex backend and
+  runtime.
+- The source digest turn uses a short visible prompt plus hidden handoff
+  instructions, renders in the yellow digest/queue palette, and keeps the user
+  on the source chat while it runs.
+- When the source digest turn finishes, the server forwards the resulting digest
+  to the target chat as a normal queued/started target turn.
+- Existing handoff lifecycle status cards now collapse to the newest status per
+  digest job, preventing stale `Digest Generating` spinners after ready/sent/error
+  events exist.
+- Fixed Mac and iOS timeline projection ordering so non-run events flush any
+  buffered run output first; newer digest/status rows no longer appear above
+  older assistant text.
 
 ## 2026-06-01 - Per-Chat Composer Drafts
 

@@ -1077,7 +1077,10 @@ func checkHandoffDigestUsesLLM() throws {
     try assert(server.contains("return await build_handoff_digest("), "Digest endpoint must await the LLM digest path")
     try assert(server.contains("@app.post(\"/api/sessions/{session_id}/digest/send\")"), "Server must expose a background digest-send endpoint")
     try assert(server.contains("asyncio.create_task(run_handoff_digest_send"), "Digest send must run in a server-owned background task")
-    try assert(server.contains("\"handoff_digest_started\"") && server.contains("\"handoff_digest_sent\"") && server.contains("\"handoff_digest_error\""), "Server must emit background digest lifecycle events")
+    try assert(server.contains("purpose=\"handoff_digest\""), "Digest send must create a tagged source-chat turn")
+    try assert(server.contains("wait_for_digest_turn_result"), "Digest send must wait for the source-chat digest turn before forwarding")
+    try assert(server.contains("source_digest_display_prompt"), "Digest send must use a short visible source-chat prompt instead of dumping internal instructions into the timeline")
+    try assert(server.contains("\"handoff_digest_sent\"") && server.contains("\"handoff_digest_error\""), "Server must emit source-chat digest completion/error events")
     try assert(!server.contains("return build_handoff_digest(session_id, detail=req.detail, user_prompt=req.user_prompt)"), "Digest endpoint must not return the deterministic source pack directly")
     try assert(macStore.contains("target_session_id: targetSessionID"), "Mac digest requests must pass the selected target chat")
     try assert(mobileStore.contains("target_session_id: targetSessionID"), "iOS digest requests must pass the selected target chat")
@@ -1087,8 +1090,10 @@ func checkHandoffDigestUsesLLM() throws {
     try assert(mobileSheet.contains("@State private var detail = \"normal\""), "iOS digest sheet must default to normal LLM context depth")
     try assert(macSheet.contains("Summarizing with LLM") && mobileSheet.contains("Summarizing with LLM"), "Digest preview UI must disclose that creation is an LLM summarization step")
     try assert(macSheet.contains("Starting background digest") && mobileSheet.contains("Starting background digest"), "Digest send UI must not block on the whole LLM summary")
-    try assert(macEvents.contains("handoff_digest_started") && macEvents.contains("ProgressView()"), "Mac timeline must show background digest progress")
-    try assert(mobileEvents.contains("handoff_digest_started") && mobileEvents.contains("ProgressView()"), "iOS timeline must show background digest progress")
+    try assert(macSheet.contains("Digest running in source chat"), "Mac digest send must keep the user oriented on the source chat")
+    try assert(!macSheet.contains("await store.select(sessionID: targetSessionID)") && !mobileSheet.contains("await store.select(sessionID: targetSessionID)"), "Digest send must not jump to the target chat before the source turn runs")
+    try assert(macEvents.contains("isDigestTurn") && macEvents.contains("isDigest"), "Mac timeline must render tagged digest turns distinctly")
+    try assert(mobileEvents.contains("isDigestTurn") && mobileEvents.contains("queued: isDigest"), "iOS timeline must render tagged digest turns distinctly")
 }
 
 do {

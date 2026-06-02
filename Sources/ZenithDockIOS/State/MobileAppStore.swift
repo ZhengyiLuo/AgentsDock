@@ -301,6 +301,12 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func makeDisplayEvents(from source: [ZEvent]) -> [ZEvent] {
+        var latestDigestStatusIDByJob: [String: String] = [:]
+        for event in source where isHandoffDigestStatus(event) {
+            if let jobID = event.digest_job_id {
+                latestDigestStatusIDByJob[jobID] = event.id
+            }
+        }
         let assistantRuns = Set(source.compactMap { event -> String? in
             guard event.type == "assistant_text",
                   event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
@@ -309,6 +315,9 @@ final class MobileAppStore: ObservableObject {
             return event.run_id
         })
         return source.filter { event in
+            if isHandoffDigestStatus(event), let jobID = event.digest_job_id {
+                return latestDigestStatusIDByJob[jobID] == event.id
+            }
             switch event.type {
             case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback", "turn_queued", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now", "turn_stopped":
                 return false
@@ -325,6 +334,15 @@ final class MobileAppStore: ObservableObject {
             default:
                 return true
             }
+        }
+    }
+
+    private func isHandoffDigestStatus(_ event: ZEvent) -> Bool {
+        switch event.type {
+        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent", "handoff_digest_error":
+            return true
+        default:
+            return false
         }
     }
 

@@ -55,9 +55,10 @@ struct EventCard: View, Equatable {
             HStack {
                 Spacer(minLength: 80)
                 MessageBubble(
-                    label: "You",
+                    label: isDigestTurn ? "Digest Request" : "You",
                     text: event.prompt ?? "",
                     isUser: true,
+                    isDigest: isDigestTurn,
                     timestamp: messageTimestamp,
                     attachments: attachments,
                     linkContext: linkContext,
@@ -86,9 +87,10 @@ struct EventCard: View, Equatable {
         } else if event.type == "assistant_text" {
             HStack {
                 MessageBubble(
-                    label: "Assistant",
+                    label: isDigestTurn ? "Digest" : "Assistant",
                     text: event.text ?? "",
                     isUser: false,
+                    isDigest: isDigestTurn,
                     timestamp: messageTimestamp,
                     linkContext: linkContext,
                     isPinned: isPinned,
@@ -99,9 +101,10 @@ struct EventCard: View, Equatable {
         } else if event.type == "turn_finished", let text = event.result_text, !text.isEmpty {
             HStack {
                 MessageBubble(
-                    label: job.map { "Job Response · \($0.title)" } ?? "Assistant",
+                    label: isDigestTurn ? "Digest" : (job.map { "Job Response · \($0.title)" } ?? "Assistant"),
                     text: text,
                     isUser: false,
+                    isDigest: isDigestTurn,
                     isJob: job != nil,
                     timestamp: messageTimestamp,
                     linkContext: linkContext,
@@ -271,7 +274,7 @@ struct EventCard: View, Equatable {
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
         case "job_created", "job_ran", "job_deferred": .orange
-        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent": .orange
+        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent": .yellow
         case "handoff_digest_error": .red
         case "turn_queued", "turn_unqueued": .secondary
         case "artifact_created": .green
@@ -287,7 +290,7 @@ struct EventCard: View, Equatable {
             return AnyShapeStyle(Theme.jobBubble.opacity(0.70))
         }
         if event.type == "handoff_digest_started" || event.type == "handoff_digest_ready" || event.type == "handoff_digest_sent" {
-            return AnyShapeStyle(Theme.jobBubble.opacity(0.52))
+            return AnyShapeStyle(Theme.queuedBubble.opacity(0.85))
         }
         if event.type == "handoff_digest_error" {
             return AnyShapeStyle(.red.opacity(0.08))
@@ -315,6 +318,10 @@ struct EventCard: View, Equatable {
         localTimestampString(event.ts)
     }
 
+    private var isDigestTurn: Bool {
+        event.purpose == "handoff_digest"
+    }
+
     private var canPin: Bool {
         event.artifact != nil ||
             event.file != nil ||
@@ -337,6 +344,7 @@ struct MessageBubble: View {
     let text: String
     let isUser: Bool
     var isQueued = false
+    var isDigest = false
     var isJob = false
     var timestamp: String?
     var attachments: [MessageAttachment] = []
@@ -426,6 +434,9 @@ struct MessageBubble: View {
         if isQueued {
             return AnyShapeStyle(Theme.queuedBubble)
         }
+        if isDigest {
+            return AnyShapeStyle(Theme.queuedBubble)
+        }
         if isJob {
             return AnyShapeStyle(Theme.jobBubble)
         }
@@ -434,6 +445,9 @@ struct MessageBubble: View {
 
     private var bubbleStroke: some ShapeStyle {
         if isQueued {
+            return AnyShapeStyle(Theme.queuedBubbleStroke)
+        }
+        if isDigest {
             return AnyShapeStyle(Theme.queuedBubbleStroke)
         }
         if isJob {
@@ -1406,7 +1420,7 @@ private struct TraceEventDetail: View {
         case "reasoning_summary": .purple
         case "tool_started", "tool_finished": .orange
         case "job_created", "job_ran", "job_deferred": .orange
-        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent": .orange
+        case "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent": .yellow
         case "error", "job_error", "artifact_error", "handoff_digest_error": .red
         default: .secondary
         }

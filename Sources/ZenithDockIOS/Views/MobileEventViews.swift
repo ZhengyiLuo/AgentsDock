@@ -24,7 +24,7 @@ struct MobileEventCard: View {
     var body: some View {
         switch event.type {
         case "turn_started":
-            userBubble(label: "You", text: event.prompt ?? "", attachments: promptAttachments)
+            userBubble(label: isDigestTurn ? "Digest Request" : "You", text: event.prompt ?? "", queued: isDigestTurn, attachments: promptAttachments)
         case "turn_queued":
             let isPending = store.isQueuedEventPending(event)
             userBubble(
@@ -37,12 +37,13 @@ struct MobileEventCard: View {
                 action: isPending ? { Task { await store.unqueue(event) } } : nil
             )
         case "assistant_text":
-            assistantBubble(text: event.text ?? "")
+            assistantBubble(label: isDigestTurn ? "Digest" : "Assistant", text: event.text ?? "", isDigest: isDigestTurn)
         case "turn_finished":
             if let text = event.result_text, !text.isEmpty {
                 assistantBubble(
-                    label: job.map { "Job Response · \($0.title)" } ?? "Assistant",
+                    label: isDigestTurn ? "Digest" : (job.map { "Job Response · \($0.title)" } ?? "Assistant"),
                     text: text,
+                    isDigest: isDigestTurn,
                     isJob: job != nil
                 )
             }
@@ -61,7 +62,7 @@ struct MobileEventCard: View {
                 icon: "clock.badge.checkmark",
                 title: jobEventTitle,
                 timestamp: messageTimestamp,
-                tint: .orange
+                tint: .yellow
             ) {
                 MobileJobEventSummary(event: event)
             }
@@ -70,7 +71,7 @@ struct MobileEventCard: View {
                 icon: "sparkles",
                 title: "Digest Generating",
                 timestamp: messageTimestamp,
-                tint: .orange
+                tint: .yellow
             ) {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -83,7 +84,7 @@ struct MobileEventCard: View {
                 icon: "checkmark.seal",
                 title: event.type == "handoff_digest_ready" ? "Digest Ready" : "Digest Submitted",
                 timestamp: messageTimestamp,
-                tint: .orange
+                tint: .yellow
             ) {
                 MobileMarkdownView(markdown: event.message ?? "Context digest submitted.", linkContext: linkContext)
             }
@@ -179,15 +180,19 @@ struct MobileEventCard: View {
         }
     }
 
-    private func assistantBubble(label: String = "Assistant", text: String, isJob: Bool = false) -> some View {
+    private func assistantBubble(label: String = "Assistant", text: String, isDigest: Bool = false, isJob: Bool = false) -> some View {
         HStack {
-            MobileMessageBubble(label: label, text: text, isUser: false, isJob: isJob, timestamp: messageTimestamp, linkContext: linkContext)
+            MobileMessageBubble(label: label, text: text, isUser: false, queued: isDigest, isJob: isJob, timestamp: messageTimestamp, linkContext: linkContext)
             Spacer(minLength: 44)
         }
     }
 
     private var messageTimestamp: String? {
         mobileMessageTimestampString(event.ts)
+    }
+
+    private var isDigestTurn: Bool {
+        event.purpose == "handoff_digest"
     }
 }
 
