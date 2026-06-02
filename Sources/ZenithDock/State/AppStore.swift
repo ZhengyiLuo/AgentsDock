@@ -89,6 +89,7 @@ final class AppStore: ObservableObject {
     private let maxLoadedTimelineEvents = 2_000
     private let maxCachedTimelineEvents = 720
     private let maxWarmCachedTimelineEvents = 240
+    private let cachedTailFreshnessWindow: TimeInterval = 45
     private let maxCachedStringCharacters = 6_000
     private let sessionFilesPageLimit = 48
     private var webSocket: URLSessionWebSocketTask?
@@ -1282,10 +1283,12 @@ final class AppStore: ObservableObject {
             if !socketLive {
                 setStatus("Server connected")
             }
-            if sessions != res.sessions {
-                sessions = sessionsWithPendingRuntime(res.sessions)
+            let loadedAt = Date()
+            let resolvedSessions = sessionsWithPendingRuntime(res.sessions)
+            lastLoadedAt = loadedAt
+            if sessions != resolvedSessions {
+                sessions = resolvedSessions
                 AppLogger.info("loaded sessions count=\(sessions.count)")
-                lastLoadedAt = Date()
             }
             reconcileUnreadFromSessions()
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
@@ -1481,9 +1484,11 @@ final class AppStore: ObservableObject {
 
     private func cachedTailIsKnownFresh(sessionID: String, cachedLastSeq: Int) -> Bool {
         guard serverReachable, cachedLastSeq > 0 else { return false }
-        let knownLatestSeq = sessions.first { $0.id == sessionID }?.latest_event_seq
-            ?? memoryCachedChat(sessionID)?.session.latest_event_seq
-        guard let knownLatestSeq else { return false }
+        guard let sessionListLoadedAt = lastLoadedAt,
+              Date().timeIntervalSince(sessionListLoadedAt) <= cachedTailFreshnessWindow,
+              let knownLatestSeq = sessions.first(where: { $0.id == sessionID })?.latest_event_seq else {
+            return false
+        }
         return knownLatestSeq <= cachedLastSeq
     }
 

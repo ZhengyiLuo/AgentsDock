@@ -19,6 +19,22 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - Mac Cache Freshness Must Come From Server
+
+- Fixed a Mac cache-divergence bug where two Macs could show different history
+  for the same chat, especially after switching machines or endpoints.
+- The warm-cache fast path still renders the local tail immediately, but it now
+  skips the REST latest-tail refresh only when a recent successful
+  `/api/sessions` response from the server proves the cached `latest_event_seq`
+  is current.
+- `Sources/ZenithDock/State/AppStore.swift` no longer lets
+  `memoryCachedChat(sessionID)?.session.latest_event_seq` prove freshness,
+  because that was self-referential local metadata and could validate a stale
+  cache on one Mac.
+- `Tools/ZenithGuardrails/main.swift` now checks that session-list freshness is
+  refreshed on every successful `/api/sessions` call and that local chat cache
+  metadata cannot be used as the freshness authority.
+
 ## 2026-06-02 - iOS Timeline Fly-By Mask
 
 - Fixed an iOS/iPadOS timeline regression where opening a chat could visibly
