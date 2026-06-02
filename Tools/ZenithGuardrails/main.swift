@@ -1061,6 +1061,26 @@ func checkMacChatKeyboardNavigation() throws {
     try assert(macStore.contains("await select(sessionID: visibleSessions[nextIndex].id)"), "Adjacent chat selection must reuse the normal select path")
 }
 
+func checkHandoffDigestUsesLLM() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
+    let macSheet = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SessionManagementSheets.swift"), encoding: .utf8)
+    let mobileSheet = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+
+    try assert(server.contains("async def build_handoff_digest("), "Server handoff digest must be async so it can run an LLM summarizer")
+    try assert(server.contains("build_handoff_source_pack"), "Server may build a source pack, but only as LLM input")
+    try assert(server.contains("run_claude_handoff_summarizer") && server.contains("run_codex_handoff_summarizer"), "Server digest must support real LLM summarizers")
+    try assert(server.contains("return await build_handoff_digest("), "Digest endpoint must await the LLM digest path")
+    try assert(!server.contains("return build_handoff_digest(session_id, detail=req.detail, user_prompt=req.user_prompt)"), "Digest endpoint must not return the deterministic source pack directly")
+    try assert(macStore.contains("target_session_id: targetSessionID"), "Mac digest requests must pass the selected target chat")
+    try assert(mobileStore.contains("target_session_id: targetSessionID"), "iOS digest requests must pass the selected target chat")
+    try assert(macSheet.contains("@State private var detail = \"normal\""), "Mac digest sheet must default to normal LLM context depth")
+    try assert(mobileSheet.contains("@State private var detail = \"normal\""), "iOS digest sheet must default to normal LLM context depth")
+    try assert(macSheet.contains("Summarizing with LLM") && mobileSheet.contains("Summarizing with LLM"), "Digest UI must disclose that creation is an LLM summarization step")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -1097,6 +1117,7 @@ do {
     try checkAgentHTTPTransportPlists()
     try checkInspectorCollapseAndPins()
     try checkMacChatKeyboardNavigation()
+    try checkHandoffDigestUsesLLM()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

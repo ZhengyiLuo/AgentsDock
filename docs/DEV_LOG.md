@@ -19,6 +19,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-01 - LLM Handoff Digests
+
+- Handoff digest creation now runs an actual LLM summarizer. The old
+  deterministic transcript/file pack is kept only as internal source material
+  for the summarizer.
+- The digest endpoint must not return the raw source pack directly. If the LLM
+  summarizer fails, the request should fail visibly instead of pretending a
+  hard-coded pack is a digest.
+- Mac and iOS/iPadOS pass the target chat id into digest creation so the LLM
+  can tailor the handoff to the target backend/session/cwd.
+- Digest sheets now default to `Normal` context depth and display
+  `Summarizing with LLM` while the server runs the summarizer.
+
 ## 2026-06-01 - Per-Chat Composer Drafts
 
 - Composer drafts are now saved per chat and scoped by canonical server

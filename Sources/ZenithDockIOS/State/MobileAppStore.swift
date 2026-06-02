@@ -1106,10 +1106,11 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    func createHandoffDigest(sourceSessionID: String, detail: String, userPrompt: String) async -> String? {
+    func createHandoffDigest(sourceSessionID: String, targetSessionID: String? = nil, detail: String, userPrompt: String) async -> String? {
         struct Body: Codable {
             let detail: String
             let user_prompt: String?
+            let target_session_id: String?
         }
         struct Response: Codable {
             let digest: String
@@ -1117,6 +1118,7 @@ final class MobileAppStore: ObservableObject {
             let event_count: Int?
             let file_count: Int?
             let detail: String?
+            let summarizer: [String: String]?
         }
         let cleanPrompt = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -1124,7 +1126,8 @@ final class MobileAppStore: ObservableObject {
                 "/api/sessions/\(sourceSessionID)/digest",
                 body: Body(
                     detail: detail,
-                    user_prompt: cleanPrompt.isEmpty ? nil : cleanPrompt
+                    user_prompt: cleanPrompt.isEmpty ? nil : cleanPrompt,
+                    target_session_id: targetSessionID
                 )
             )
             return res.digest
@@ -1186,6 +1189,7 @@ final class MobileAppStore: ObservableObject {
         }
         guard let digest = await createHandoffDigest(
             sourceSessionID: sourceSessionID,
+            targetSessionID: targetSessionID,
             detail: detail,
             userPrompt: userPrompt
         ) else {

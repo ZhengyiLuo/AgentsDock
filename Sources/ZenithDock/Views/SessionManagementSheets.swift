@@ -97,7 +97,7 @@ struct HandoffDigestSheet: View {
     let sourceSession: ZSession
 
     @State private var targetSessionID = ""
-    @State private var detail = "short"
+    @State private var detail = "normal"
     @State private var userPrompt = ""
     @State private var preview = ""
     @State private var isWorking = false
@@ -212,10 +212,11 @@ struct HandoffDigestSheet: View {
 
     private func previewDigest() async {
         isWorking = true
-        status = "Creating digest"
+        status = "Summarizing with LLM"
         defer { isWorking = false }
         if let digest = await store.createHandoffDigest(
             sourceSessionID: sourceSession.id,
+            targetSessionID: targetSessionID.isEmpty ? nil : targetSessionID,
             detail: detail,
             userPrompt: userPrompt
         ) {
@@ -229,7 +230,7 @@ struct HandoffDigestSheet: View {
     private func sendDigest() async {
         guard !targetSessionID.isEmpty else { return }
         isWorking = true
-        status = "Sending digest"
+        status = "Summarizing with LLM"
         defer { isWorking = false }
         let ok = await store.sendHandoffDigest(
             sourceSessionID: sourceSession.id,
