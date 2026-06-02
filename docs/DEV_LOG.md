@@ -19,6 +19,22 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 - iOS Timeline Fly-By Mask
+
+- Fixed an iOS/iPadOS timeline regression where opening a chat could visibly
+  fly through message history while the latest tail snapshot and bottom
+  positioning settled.
+- `Sources/ZenithDockIOS/State/MobileAppStore.swift` now has a mobile
+  large-batch timeline mask for cold session snapshots. Cached rows can still
+  render quickly, but cold large tails are hidden until layout has a stable
+  bottom target.
+- `Sources/ZenithDockIOS/Views/MobileTimelineView.swift` now keeps newly opened
+  chats visually masked until short non-animated bottom-settle passes complete.
+  Top-edge older-history autoload is also disabled while opening/loading/applying
+  a large batch, so it cannot accidentally page upward during chat open.
+- `Tools/ZenithGuardrails/main.swift` now checks these iOS-specific fly-by
+  guards so future performance work does not silently reintroduce the waterfall.
+
 ## 2026-06-02 - Queue Submit Composer Clear
 
 - Fixed a queued-send edge where the Mac composer could keep the submitted text

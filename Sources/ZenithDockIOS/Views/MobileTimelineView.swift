@@ -19,12 +19,15 @@ struct MobileTimelineView: View {
     @State private var historyLoadSuppressedUntil = Date.distantPast
     @State private var lastObservedEventSeq = 0
     @State private var pendingOpenBottomSessionID: String?
+    @State private var isOpeningTimelineMasked = false
+    @State private var openingTimelineRevealRevision = 0
     private let bottomID = "mobile-timeline-bottom"
     private let defaultVisibleRowLimit = 110
     private let rowPageSize = 36
 
     var body: some View {
-        let timelineRowsSuspended = store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty
+        let coldOpenRowsSuspended = store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty
+        let timelineRowsSuspended = coldOpenRowsSuspended || (store.isApplyingLargeTimelineBatch && store.selectedSessionID != nil)
         let displayEvents = timelineRowsSuspended ? [] : store.displayEvents
         let projection = MobileTimelineRows.project(from: displayEvents)
         let allRows = projection.rows
@@ -101,6 +104,7 @@ struct MobileTimelineView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
+                        .opacity(isOpeningTimelineMasked && !displayEvents.isEmpty ? 0 : 1)
                     }
                     .coordinateSpace(name: "mobileTimelineScroll")
                     .refreshable {
@@ -131,6 +135,11 @@ struct MobileTimelineView: View {
                             .padding(18)
                             .allowsHitTesting(false)
                     }
+                    if isOpeningTimelineMasked || store.isApplyingLargeTimelineBatch {
+                        MobileTimelinePositioningOverlay()
+                            .padding(18)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .onDrop(of: MobileTimelineFileDrop.supportedTypes, isTargeted: $isFileDropTargeted) { providers in
                     acceptTimelineFileDrop(providers)
@@ -139,6 +148,8 @@ struct MobileTimelineView: View {
                     scrollToBottom(proxy)
                 }
                 .onChange(of: store.selectedSessionID) {
+                    openingTimelineRevealRevision += 1
+                    isOpeningTimelineMasked = store.selectedSessionID != nil
                     pendingOpenBottomSessionID = store.selectedSessionID
                     isAtBottom = true
                     disarmAutomaticOlderHistoryLoad()
@@ -151,6 +162,13 @@ struct MobileTimelineView: View {
                     let previousObservedSeq = lastObservedEventSeq
                     let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
                     let rowCount = MobileTimelineRows.build(from: displayEvents).count
+                    if isOpeningTimelineMasked || store.isApplyingLargeTimelineBatch {
+                        setVisibleRowLimit(min(rowCount, defaultVisibleRowLimit))
+                        updateUnreadState(after: previousObservedSeq)
+                        lastObservedEventSeq = maxEventSeq(displayEvents)
+                        _ = settleOpenThreadAtLatest(proxy, displayEvents: displayEvents)
+                        return
+                    }
                     if newCount == 0 {
                         setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
@@ -170,6 +188,11 @@ struct MobileTimelineView: View {
                     if store.hiddenDisplayEventCount <= 0 {
                         olderHistoryLoadArmed = false
                         suppressScrollHistoryLoadUntilTopLeaves = false
+                    }
+                }
+                .onChange(of: store.isApplyingLargeTimelineBatch) {
+                    if !store.isApplyingLargeTimelineBatch {
+                        settleOpenThreadAtLatest(proxy, displayEvents: store.displayEvents)
                     }
                 }
                 .onPreferenceChange(MobileHistoryTopPreferenceKey.self) { topY in
@@ -208,20 +231,35 @@ struct MobileTimelineView: View {
     private func settleOpenThreadAtLatest(_ proxy: ScrollViewProxy, displayEvents: [ZEvent]) -> Bool {
         guard let pendingSessionID = pendingOpenBottomSessionID,
               pendingSessionID == store.selectedSessionID,
-              !displayEvents.isEmpty else {
+              !displayEvents.isEmpty,
+              !store.isApplyingLargeTimelineBatch else {
             return false
         }
         pendingOpenBottomSessionID = nil
+        openingTimelineRevealRevision += 1
+        let revision = openingTimelineRevealRevision
         suppressHistoryLoading(for: 2.0)
         disarmAutomaticOlderHistoryLoad()
         scrollToBottom(proxy)
-        for delay in [0.06, 0.16, 0.32] {
+        for delay in [0.04, 0.12, 0.22] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard store.selectedSessionID == pendingSessionID else { return }
+                guard store.selectedSessionID == pendingSessionID,
+                      openingTimelineRevealRevision == revision else {
+                    return
+                }
                 withTransaction(noAnimationTransaction) {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                     isAtBottom = true
                 }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+            guard store.selectedSessionID == pendingSessionID,
+                  openingTimelineRevealRevision == revision else {
+                return
+            }
+            withTransaction(noAnimationTransaction) {
+                isOpeningTimelineMasked = false
             }
         }
         return true
@@ -260,6 +298,11 @@ struct MobileTimelineView: View {
 
     private func handleHistoryTopChange(_ topY: CGFloat?, proxy: ScrollViewProxy) {
         guard let topY else { return }
+        guard !isOpeningTimelineMasked,
+              !store.isApplyingLargeTimelineBatch,
+              !store.isLoading else {
+            return
+        }
         let topIsVisible = topY >= -24 && topY <= 96
         let topHasLeftViewport = topY < -64 || topY > 160
 
@@ -416,6 +459,21 @@ private struct MobileTimelineFileDropOverlay: View {
                     .padding(.vertical, 10)
                     .background(.regularMaterial, in: Capsule())
             }
+    }
+}
+
+private struct MobileTimelinePositioningOverlay: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Opening latest")
+                .font(.caption.weight(.semibold))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().stroke(MobileTheme.softLine))
     }
 }
 

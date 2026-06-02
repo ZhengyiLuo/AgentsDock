@@ -36,6 +36,7 @@ final class MobileAppStore: ObservableObject {
     @Published var errorText: String?
     @Published var omittedHistoryEventCount = 0
     @Published var scrollRevision = 0
+    @Published var isApplyingLargeTimelineBatch = false
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
@@ -46,6 +47,7 @@ final class MobileAppStore: ObservableObject {
 
     private let initialEventLimit = 160
     private let olderHistoryPageLimit = 160
+    private let largeTimelineBatchEventThreshold = 80
     private let maxMemoryCachedChats = 8
     private let maxMemoryCachedEvents = 360
     private var webSocket: URLSessionWebSocketTask?
@@ -61,6 +63,7 @@ final class MobileAppStore: ObservableObject {
     private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
     private var draftPromptsBySessionID: [String: String] = [:]
     private var pendingDraftSave: Task<Void, Never>?
+    private var timelineBatchRevealTask: Task<Void, Never>?
     private var serverIdentity: String?
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
 
@@ -297,6 +300,33 @@ final class MobileAppStore: ObservableObject {
         let next = makeDisplayEvents(from: events)
         if displayEvents != next {
             displayEvents = next
+        }
+    }
+
+    private func shouldMaskTimelineBatch(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
+        incomingCount >= largeTimelineBatchEventThreshold ||
+            abs(newCount - oldCount) >= largeTimelineBatchEventThreshold
+    }
+
+    private func beginLargeTimelineBatchMaskIfCold(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
+        guard displayEvents.isEmpty,
+              shouldMaskTimelineBatch(oldCount: oldCount, newCount: newCount, incomingCount: incomingCount) else {
+            return false
+        }
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = nil
+        if !isApplyingLargeTimelineBatch {
+            isApplyingLargeTimelineBatch = true
+        }
+        return true
+    }
+
+    private func scheduleLargeTimelineBatchReveal() {
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled else { return }
+            self.isApplyingLargeTimelineBatch = false
         }
     }
 
@@ -1240,6 +1270,9 @@ final class MobileAppStore: ObservableObject {
     }
 
     func select(sessionID: String) async {
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = nil
+        isApplyingLargeTimelineBatch = false
         if loadingSessionID == sessionID {
             syncSelectedRunningState()
             return
@@ -1823,6 +1856,9 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func clearSelection() {
+        timelineBatchRevealTask?.cancel()
+        timelineBatchRevealTask = nil
+        isApplyingLargeTimelineBatch = false
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         selectedSessionID = nil
@@ -1857,11 +1893,23 @@ final class MobileAppStore: ObservableObject {
 
     private func applySessionEventSnapshot(_ response: SessionEventsResponse, sessionID: String) {
         replaceSessionFromServer(response.session)
-        events = timelineEvents(from: response.events)
+        let snapshotEvents = timelineEvents(from: response.events)
+        let oldCount = events.count
+        let existingIDs = Set(events.map(\.id))
+        let incomingCount = snapshotEvents.filter { !existingIDs.contains($0.id) }.count
+        let masked = beginLargeTimelineBatchMaskIfCold(
+            oldCount: oldCount,
+            newCount: snapshotEvents.count,
+            incomingCount: incomingCount
+        )
+        events = snapshotEvents
         omittedHistoryEventCount = response.events_omitted_before ?? 0
         latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
         rebuildDisplayEvents()
+        if masked {
+            scheduleLargeTimelineBatchReveal()
+        }
     }
 
     private func addPendingUpload(_ file: ZFile) {
