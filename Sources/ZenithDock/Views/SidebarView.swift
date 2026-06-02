@@ -2,6 +2,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 import ZenithCore
 
+#if os(macOS)
+import AppKit
+#endif
+
 struct SidebarView: View {
     @EnvironmentObject private var store: AppStore
     @State private var newFolderOpen = false
@@ -89,7 +93,7 @@ struct SidebarView: View {
                             reorderMode: reorderMode,
                             activeDragPayload: $sidebarDragPayload,
                             dropTarget: $sidebarDropTarget,
-                            dragProvider: dragProvider,
+                            beginDrag: beginSidebarDrag,
                             onDropFolder: { payload, target, placement in
                                 handleFolderDrop(payload, targetFolder: target, placement: placement)
                             }
@@ -243,12 +247,11 @@ struct SidebarView: View {
         }
     }
 
-    private func dragProvider(_ payload: SidebarDragPayload) -> NSItemProvider {
+    private func beginSidebarDrag(_ payload: SidebarDragPayload) {
         withoutSidebarAnimation {
             sidebarDragPayload = payload
             sidebarDropTarget = nil
         }
-        return NSItemProvider(object: payload.rawValue as NSString)
     }
 
     private func clearSidebarDragState() {
@@ -427,16 +430,17 @@ private struct FolderSectionHeader: View {
     let reorderMode: Bool
     @Binding var activeDragPayload: SidebarDragPayload?
     @Binding var dropTarget: SidebarDropTarget?
-    let dragProvider: (SidebarDragPayload) -> NSItemProvider
+    let beginDrag: (SidebarDragPayload) -> Void
     let onDropFolder: (SidebarDragPayload, String, SidebarDropPlacement) -> Bool
 
     @ViewBuilder
     var body: some View {
         let header = HStack(spacing: 6) {
             if reorderMode {
-                Image(systemName: "line.3.horizontal")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
+                SidebarFolderDragHandle(
+                    folder: folder,
+                    beginDrag: beginDrag
+                )
             } else {
                 Button {
                     store.toggleFolderCollapsed(folder)
@@ -484,9 +488,6 @@ private struct FolderSectionHeader: View {
 
         if reorderMode {
             header
-                .onDrag {
-                    dragProvider(.folder(folder))
-                }
                 .onDrop(
                     of: [.text],
                     delegate: SidebarFolderDropDelegate(
@@ -522,6 +523,95 @@ private struct FolderSectionHeader: View {
         return sourceFolder != targetFolder && dropTarget == target
     }
 }
+
+private struct SidebarFolderDragHandle: View {
+    let folder: String
+    let beginDrag: (SidebarDragPayload) -> Void
+
+    var body: some View {
+        SidebarFolderDragHandleView(
+            folder: folder,
+            payloadText: SidebarDragPayload.folder(folder).rawValue,
+            beginDrag: { beginDrag(.folder(folder)) }
+        )
+        .frame(width: 18, height: 18)
+        .help("Drag to reorder \(folder)")
+    }
+}
+
+#if os(macOS)
+private struct SidebarFolderDragHandleView: NSViewRepresentable {
+    let folder: String
+    let payloadText: String
+    let beginDrag: () -> Void
+
+    func makeNSView(context: Context) -> SidebarFolderDragHandleNSView {
+        let view = SidebarFolderDragHandleNSView()
+        view.folder = folder
+        view.payloadText = payloadText
+        view.beginDrag = beginDrag
+        return view
+    }
+
+    func updateNSView(_ nsView: SidebarFolderDragHandleNSView, context: Context) {
+        nsView.folder = folder
+        nsView.payloadText = payloadText
+        nsView.beginDrag = beginDrag
+    }
+}
+
+private final class SidebarFolderDragHandleNSView: NSView, NSDraggingSource {
+    var folder = "" {
+        didSet {
+            toolTip = "Drag to reorder \(folder)"
+        }
+    }
+    var payloadText = ""
+    var beginDrag: (() -> Void)?
+
+    private let imageView = NSImageView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        imageView.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Reorder folder")
+        imageView.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+        imageView.contentTintColor = .secondaryLabelColor
+        imageView.imageScaling = .scaleProportionallyDown
+        addSubview(imageView)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 18, height: 18)
+    }
+
+    override func layout() {
+        super.layout()
+        imageView.frame = bounds.insetBy(dx: 2, dy: 2)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        beginDrag?()
+        let item = NSPasteboardItem()
+        item.setString(payloadText, forType: .string)
+        let draggingItem = NSDraggingItem(pasteboardWriter: item)
+        draggingItem.setDraggingFrame(bounds, contents: imageView.image)
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        .move
+    }
+
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
+        true
+    }
+}
+#endif
 
 struct ConnectionStatusCard: View {
     @EnvironmentObject private var store: AppStore

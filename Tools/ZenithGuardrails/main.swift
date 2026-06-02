@@ -301,7 +301,7 @@ func checkArchiveSessionBehavior() throws {
     try assert(macSidebar.contains("@State private var reorderMode"), "Mac sidebar must expose explicit reorder mode")
     try assert(mobileSidebar.contains("@State private var reorderMode"), "iOS sidebar must expose explicit reorder mode")
     try assert(macSidebar.contains("guard !reorderMode else { return }"), "Mac sidebar must suppress chat selection while reordering")
-    try assert(macSidebar.contains(".onDrag"), "Mac sidebar reorder mode must make folders draggable")
+    try assert(macSidebar.contains("SidebarFolderDragHandleNSView") && macSidebar.contains("beginDraggingSession"), "Mac sidebar reorder mode must use a native draggable folder handle")
     try assert(macSidebar.contains(".onDrop"), "Mac sidebar reorder mode must expose drop targets")
     try assert(!macSidebar.contains("SidebarSessionDropDelegate"), "Mac sidebar reorder mode must not make chat rows draggable")
     try assert(macSidebar.contains("handleFolderDrop"), "Mac sidebar must reorder folders by drag/drop in reorder mode")
