@@ -4894,3 +4894,17 @@ Third follow-up:
   and to prevent reintroducing forced layout in bottom-scroll retries.
 - Verified with `swift run ZenithGuardrails` and a local macOS build. The
   rebuilt app was synced to `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
+## 2026-06-03 - Recover Stale Manifest Artifacts
+
+- Debugged a Claude turn that rendered a valid MP4 but showed no Dock
+  attachment. The agent wrote the artifact manifest to an older run manifest
+  path from resumed context instead of the current run's canonical manifest
+  path, so the server watcher never consumed it.
+- Registered the stranded manifest with the server collector, producing
+  `artifact_created` for `chunk3_forcegate5x_3x3.mp4`.
+- Added turn-end recovery for recent leftover manifests in the same session.
+  The sweep is bounded to six-hour-old manifests so old abandoned manifests do
+  not get resurrected during unrelated turns.
+- Added guardrails requiring both Claude and Codex runs to sweep recent
+  leftover manifests after collecting the primary manifest.

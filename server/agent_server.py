@@ -4229,6 +4229,40 @@ async def watch_manifest_artifacts(session_id: str, run_id: str, manifest_path: 
         await asyncio.sleep(1.0)
 
 
+async def collect_recent_leftover_manifests(
+    session_id: str,
+    run_id: str,
+    primary_manifest_path: Path,
+    *,
+    seen_artifacts: set[str],
+    max_age_seconds: int = 6 * 60 * 60,
+) -> None:
+    """Recover artifacts when an agent writes to a stale run manifest path."""
+    root = manifests_dir(session_id)
+    if not root.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    try:
+        candidates = sorted(root.glob("*.json"), key=lambda path: path.stat().st_mtime)
+    except OSError:
+        return
+    for candidate in candidates:
+        if candidate == primary_manifest_path:
+            continue
+        try:
+            if candidate.stat().st_mtime < cutoff:
+                continue
+        except OSError:
+            continue
+        logger.info(
+            "collecting leftover manifest session=%s run=%s path=%s",
+            session_id,
+            run_id,
+            candidate,
+        )
+        await collect_manifest(session_id, run_id, candidate, seen_artifacts=seen_artifacts, final=True)
+
+
 async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, Any], manifest_path: Path) -> None:
     cmd = build_claude_cmd(sess, manifest_path)
     requested_cwd = str(sess.get("cwd") or DEFAULT_CWD)
@@ -4390,6 +4424,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
         await append_event(session_id, "provider_session", {"run_id": run_id, "backend": BACKEND_CLAUDE, "provider_session_id": provider_id})
     result_text = clean_assistant_text(final_text or "\n\n".join(text_parts).strip())
     await collect_manifest(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts, final=True)
+    await collect_recent_leftover_manifests(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
         "backend": BACKEND_CLAUDE,
@@ -4577,6 +4612,7 @@ async def run_codex(session_id: str, run_id: str, prompt: str, sess: dict[str, A
     if provider_id:
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CODEX)
     await collect_manifest(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts, final=True)
+    await collect_recent_leftover_manifests(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
         "backend": BACKEND_CODEX,

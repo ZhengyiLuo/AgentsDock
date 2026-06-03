@@ -756,8 +756,11 @@ func checkTimelineCombinesRunTraces() throws {
     try assert(mobileTimeline.contains("trace-run-\\(activeRunID"), "iOS timeline trace rows must be run-scoped")
     try assert(server.contains("async def collect_manifest("), "Server manifest collection must know the active run id")
     try assert(server.contains("async def watch_manifest_artifacts"), "Server must watch manifests during a running turn so artifacts can appear before turn end")
+    try assert(server.contains("async def collect_recent_leftover_manifests"), "Server must recover recent stale-run manifests written by resumed agents")
+    try assert(server.contains("max_age_seconds: int = 6 * 60 * 60"), "Stale manifest recovery must be bounded to recent manifests")
     try assert(server.contains("live_manifest_entry_ready"), "Live manifest watcher must wait for stable files before publishing artifacts")
     try assert(server.contains("manifest_watch_task = asyncio.create_task(watch_manifest_artifacts"), "Claude and Codex runs must start live manifest watcher tasks")
+    try assert(server.components(separatedBy: "collect_recent_leftover_manifests").count >= 4, "Both Claude and Codex runs must sweep recent leftover manifests after the primary manifest")
     try assert(server.contains("\"artifact_created\", {\"run_id\": run_id, \"artifact\": rec}"), "Server artifact_created events must include run_id so videos render after assistant text")
 }
 
