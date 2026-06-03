@@ -4855,3 +4855,24 @@ Third follow-up:
   draft store instead of the old published composer prompt.
 - Added guardrails so full draft text cannot accidentally get pushed through
   SwiftUI/global store on every key again.
+
+## 2026-06-03 - Authoritative Queue State And Switch Churn Fix
+
+- Found a real queue bug: after server restart, rebuilt pending queues were
+  reconstructed from event history but not scheduled to drain, so an idle chat
+  could keep queued turns forever.
+- The server now exposes authoritative `queued_turns` on session responses and
+  schedules rebuilt queues during startup; startup logs include `queue_drains`.
+- The Mac queue shelf now renders from server queue state instead of scanning the
+  loaded timeline window. Event inference remains only as an older-server
+  fallback.
+- Cached-fresh chat selection now still fetches once when queue state is unknown,
+  preventing zombie queued rows from old cached `turn_queued` events.
+- Queue action buttons now operate by `queued_id` directly and update compact
+  local queue state, so stale event-window logic cannot block Send Now/remove.
+- Reduced chat-switch churn by avoiding redundant published resets and by
+  skipping timeline rebuilds for hidden queue metadata events.
+- Verified with `python3 -m py_compile server/agent_server.py`,
+  `swift run ZenithGuardrails`, and a local macOS build. The rebuilt app was
+  synced to `zens-macbook-air:/Users/zen/agi/ZenithDock.app`, and the active
+  `sonic` server was deployed/restarted.

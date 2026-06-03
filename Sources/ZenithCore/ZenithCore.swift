@@ -674,6 +674,54 @@ public struct ZQueuePosition: Codable, Identifiable, Hashable, Sendable {
     public var id: String { queued_id }
 }
 
+public struct ZQueuedTurn: Codable, Identifiable, Hashable, Sendable {
+    public var queued_id: String
+    public var session_id: String?
+    public var prompt: String
+    public var file_ids: [String]
+    public var backend: String?
+    public var model: String?
+    public var effort: String?
+    public var display_prompt: String?
+    public var purpose: String?
+    public var digest_job_id: String?
+    public var target_session_id: String?
+    public var created_at: String?
+    public var position: Int?
+
+    public var id: String { queued_id }
+
+    public init(
+        queued_id: String,
+        session_id: String? = nil,
+        prompt: String,
+        file_ids: [String] = [],
+        backend: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        display_prompt: String? = nil,
+        purpose: String? = nil,
+        digest_job_id: String? = nil,
+        target_session_id: String? = nil,
+        created_at: String? = nil,
+        position: Int? = nil
+    ) {
+        self.queued_id = queued_id
+        self.session_id = session_id
+        self.prompt = prompt
+        self.file_ids = file_ids
+        self.backend = backend
+        self.model = model
+        self.effort = effort
+        self.display_prompt = display_prompt
+        self.purpose = purpose
+        self.digest_job_id = digest_job_id
+        self.target_session_id = target_session_id
+        self.created_at = created_at
+        self.position = position
+    }
+}
+
 public struct ZMarkdownLinkContext: Hashable, Sendable {
     public var sessionID: String
     public var baseURL: URL

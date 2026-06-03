@@ -42,7 +42,7 @@ func checkComposerUsesPresenceGate() throws {
         throw GuardrailFailure.failed("Composer publishPresence must gate SwiftUI callbacks")
     }
     try assert(guardRange.lowerBound < callbackRange.lowerBound, "Composer must gate text presence before calling SwiftUI")
-    try assert(source.contains("private var promptHeight: CGFloat {\n        store.pendingQueuedEvents.isEmpty ? 58 : 44\n    }"), "Mac composer must use fixed editor heights instead of resizing while typing")
+    try assert(source.contains("private var promptHeight: CGFloat {\n        store.pendingQueuedTurns.isEmpty ? 58 : 44\n    }"), "Mac composer must use fixed editor heights instead of resizing while typing")
     try assert(!source.contains("let sendableText = value.trimmingCharacters"), "Composer must not trim the whole draft on every keystroke")
     try assert(!source.contains("hasSendableText(value)"), "Composer must not scan the whole draft for sendable text on every keystroke")
     try assert(!source.contains("value.split(separator: \"\\n\""), "Composer must not split the whole draft on every line-count update")
@@ -989,7 +989,10 @@ func checkQueuedRemovalDisappears() throws {
     let mobileStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/State/MobileAppStore.swift"), encoding: .utf8)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
-    try assert(macStore.contains("var pendingQueuedEvents: [ZEvent]"), "Mac store must expose pending queued turns outside the timeline")
+    try assert(macStore.contains("var pendingQueuedTurns: [ZQueuedTurn]"), "Mac queue shelf must use authoritative queued turns instead of timeline event inference")
+    try assert(macStore.contains("queuedTurnsBySessionID"), "Mac store must keep queue state separate from the timeline window")
+    try assert(macStore.contains("applyAuthoritativeQueuedTurns"), "Mac session refresh must reconcile stale queued rows from server queue state")
+    try assert(macStore.contains("queuedTurnsBySessionID[sessionID] != nil"), "Mac cached-fresh skips must still fetch once when authoritative queue state is unknown")
     try assert(macStore.contains("case \"turn_queued\":\n                return false"), "Mac timeline must keep pending queued turns out of the timeline")
     try assert(macStore.contains("\"turn_queue_updated\""), "Mac timeline must hide queue metadata events")
     try assert(macStore.contains("\"turn_stopped\""), "Mac timeline must hide stop events from Send Now interruptions")
@@ -1019,6 +1022,8 @@ func checkQueuedRemovalDisappears() throws {
     try assert(server.contains("stop_turn(session_id, emit_event=False, schedule_queue=False)"), "Server Send Now must silently interrupt without appending visible stop cards")
     try assert(server.contains("\"event\": queued_event"), "Server queued sends must return the turn_queued event to the app")
     try assert(server.contains("\"event\": started_event"), "Server started sends must return the turn_started event to the app")
+    try assert(server.contains("\"queued_turns\": await queued_turns_snapshot(session_id)"), "Server session responses must include authoritative pending queue state")
+    try assert(server.contains("schedule_rebuilt_queued_turns") && server.contains("queue_drains"), "Server startup must schedule rebuilt queues to drain")
     try assert(server.contains("def should_schedule_queue_after_finish") && server.contains("return not stopped or session_id in RUN_NOW_TURNS"), "Server plain Stop must leave queued turns pending while Send Now still drains the reserved item")
 }
 

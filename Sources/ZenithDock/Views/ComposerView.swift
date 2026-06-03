@@ -28,7 +28,7 @@ struct ComposerView: View {
                     }
                 }
 
-                if !store.pendingQueuedEvents.isEmpty {
+                if !store.pendingQueuedTurns.isEmpty {
                     QueuedTurnShelf()
                 }
 
@@ -99,7 +99,7 @@ struct ComposerView: View {
     }
 
     private var promptHeight: CGFloat {
-        store.pendingQueuedEvents.isEmpty ? 58 : 44
+        store.pendingQueuedTurns.isEmpty ? 58 : 44
     }
 
     @ViewBuilder
@@ -411,15 +411,15 @@ private struct QueuedTurnShelf: View {
         VStack(alignment: .trailing, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "text.line.last.and.arrowtriangle.forward")
-                Text("Queued \(store.pendingQueuedEvents.count)")
+                Text("Queued \(store.pendingQueuedTurns.count)")
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
 
             ScrollView {
                 VStack(alignment: .trailing, spacing: 6) {
-                    ForEach(store.pendingQueuedEvents) { event in
-                        QueuedTurnRow(event: event)
+                    ForEach(store.pendingQueuedTurns) { turn in
+                        QueuedTurnRow(turn: turn)
                     }
                 }
             }
@@ -430,13 +430,13 @@ private struct QueuedTurnShelf: View {
     }
 
     private var shelfHeight: CGFloat {
-        min(CGFloat(store.pendingQueuedEvents.count) * 38, 128)
+        min(CGFloat(store.pendingQueuedTurns.count) * 38, 128)
     }
 }
 
 private struct QueuedTurnRow: View {
     @EnvironmentObject private var store: AppStore
-    let event: ZEvent
+    let turn: ZQueuedTurn
     @State private var editOpen = false
     @State private var draft = ""
 
@@ -445,7 +445,7 @@ private struct QueuedTurnRow: View {
             Image(systemName: "text.line.last.and.arrowtriangle.forward")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.yellow)
-            Text(store.queuedPrompt(for: event))
+            Text(store.queuedPrompt(for: turn))
                 .font(.caption)
                 .foregroundStyle(.primary)
                 .lineLimit(2)
@@ -453,7 +453,7 @@ private struct QueuedTurnRow: View {
                 .frame(maxWidth: 420, alignment: .leading)
 
             Button {
-                Task { await store.runQueuedNow(event) }
+                Task { await store.runQueuedNow(turn) }
             } label: {
                 Label("Send Now", systemImage: "arrow.turn.down.right")
             }
@@ -462,7 +462,7 @@ private struct QueuedTurnRow: View {
             .help("Interrupt the current turn and send this queued message now")
 
             Button {
-                Task { await store.moveQueued(event, direction: "up") }
+                Task { await store.moveQueued(turn, direction: "up") }
             } label: {
                 Image(systemName: "arrow.up")
             }
@@ -470,7 +470,7 @@ private struct QueuedTurnRow: View {
             .help("Move queued message up")
 
             Button {
-                Task { await store.moveQueued(event, direction: "down") }
+                Task { await store.moveQueued(turn, direction: "down") }
             } label: {
                 Image(systemName: "arrow.down")
             }
@@ -478,7 +478,7 @@ private struct QueuedTurnRow: View {
             .help("Move queued message down")
 
             Button {
-                Task { await store.unqueue(event) }
+                Task { await store.unqueue(turn) }
             } label: {
                 Image(systemName: "trash")
             }
@@ -487,22 +487,22 @@ private struct QueuedTurnRow: View {
 
             Menu {
                 Button("Edit Message") {
-                    draft = store.queuedPrompt(for: event)
+                    draft = store.queuedPrompt(for: turn)
                     editOpen = true
                 }
                 Button("Send Now") {
-                    Task { await store.runQueuedNow(event) }
+                    Task { await store.runQueuedNow(turn) }
                 }
                 Divider()
                 Button("Move Up") {
-                    Task { await store.moveQueued(event, direction: "up") }
+                    Task { await store.moveQueued(turn, direction: "up") }
                 }
                 Button("Move Down") {
-                    Task { await store.moveQueued(event, direction: "down") }
+                    Task { await store.moveQueued(turn, direction: "down") }
                 }
                 Divider()
                 Button("Remove", role: .destructive) {
-                    Task { await store.unqueue(event) }
+                    Task { await store.unqueue(turn) }
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -527,7 +527,7 @@ private struct QueuedTurnRow: View {
                 onSave: {
                     let next = draft
                     editOpen = false
-                    Task { await store.updateQueued(event, prompt: next) }
+                    Task { await store.updateQueued(turn, prompt: next) }
                 }
             )
         }

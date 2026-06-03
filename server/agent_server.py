@@ -1182,6 +1182,39 @@ def queue_positions(queue: deque[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def public_queued_turn(session_id: str, item: dict[str, Any], position: int) -> dict[str, Any]:
+    return {
+        "queued_id": str(item.get("queued_id") or ""),
+        "session_id": session_id,
+        "prompt": str(item.get("display_prompt") or item.get("prompt") or ""),
+        "file_ids": list(item.get("file_ids") or []),
+        "backend": item.get("backend"),
+        "model": item.get("model"),
+        "effort": item.get("effort"),
+        "display_prompt": item.get("display_prompt"),
+        "purpose": item.get("purpose"),
+        "digest_job_id": item.get("digest_job_id"),
+        "target_session_id": item.get("target_session_id"),
+        "created_at": item.get("created_at"),
+        "position": position,
+    }
+
+
+async def queued_turns_snapshot(session_id: str) -> list[dict[str, Any]]:
+    async with QUEUE_LOCK:
+        queue = list(QUEUED_TURNS.get(session_id) or [])
+        run_now = RUN_NOW_TURNS.get(session_id)
+    items: list[dict[str, Any]] = []
+    if run_now is not None:
+        items.append(run_now)
+    items.extend(queue)
+    return [
+        public_queued_turn(session_id, item, idx + 1)
+        for idx, item in enumerate(items)
+        if str(item.get("queued_id") or "").strip()
+    ]
+
+
 async def update_queued_turn(session_id: str, queued_id: str, req: UpdateQueuedTurnRequest) -> dict[str, Any]:
     if session_id not in STORE.sessions:
         raise HTTPException(status_code=404, detail="session not found")
@@ -1354,6 +1387,15 @@ async def start_next_queued_turn(session_id: str) -> None:
 
 def schedule_next_queued_turn(session_id: str) -> None:
     asyncio.create_task(start_next_queued_turn(session_id))
+
+
+def schedule_rebuilt_queued_turns() -> int:
+    scheduled = 0
+    for session_id, queue in list(QUEUED_TURNS.items()):
+        if queue:
+            schedule_next_queued_turn(session_id)
+            scheduled += 1
+    return scheduled
 
 
 def should_schedule_queue_after_finish(session_id: str, stopped: bool) -> bool:
@@ -4667,8 +4709,9 @@ async def lifespan(app: FastAPI):
     ensure_dirs()
     rebuilt_queue_count = rebuild_queued_turns_from_events()
     JOBS.start_scheduler()
+    scheduled_queue_drains = schedule_rebuilt_queued_turns()
     host_monitor_task = asyncio.create_task(host_monitor_loop())
-    logger.info("agent server ready state=%s sessions=%d jobs=%d queued=%d", STATE_DIR, len(STORE.sessions), len(JOBS.jobs), rebuilt_queue_count)
+    logger.info("agent server ready state=%s sessions=%d jobs=%d queued=%d queue_drains=%d", STATE_DIR, len(STORE.sessions), len(JOBS.jobs), rebuilt_queue_count, scheduled_queue_drains)
     try:
         yield
     finally:
@@ -4870,6 +4913,7 @@ async def get_session(
     return {
         "session": public_session(sess),
         "events": events,
+        "queued_turns": await queued_turns_snapshot(session_id),
         "events_omitted_before": omitted_before,
         "events_omitted_after": omitted_after,
         "latest_seq": latest_seq,

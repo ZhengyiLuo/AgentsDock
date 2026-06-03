@@ -83,6 +83,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
     @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "archivedSectionCollapsed")
     @Published private(set) var pinnedItemsBySessionID: [String: [PinnedTimelineItem]] = [:]
+    @Published private(set) var queuedTurnsBySessionID: [String: [ZQueuedTurn]] = [:]
 
     private let initialSessionEventLimit = 240
     private let olderHistoryPageLimit = 160
@@ -137,6 +138,7 @@ final class AppStore: ObservableObject {
         let events_omitted_after: Int?
         let latest_seq: Int?
         let event_count: Int?
+        let queued_turns: [ZQueuedTurn]?
     }
 
     private struct PendingRuntimePatch {
@@ -481,6 +483,14 @@ final class AppStore: ObservableObject {
             }
     }
 
+    var pendingQueuedTurns: [ZQueuedTurn] {
+        guard let selectedSessionID else { return [] }
+        if let turns = queuedTurnsBySessionID[selectedSessionID] {
+            return sortedQueuedTurns(turns)
+        }
+        return pendingQueuedEvents.compactMap(queuedTurn(from:))
+    }
+
     func hasStartedQueuedEvent(_ event: ZEvent) -> Bool {
         guard event.type == "turn_queued", let queuedID = event.queued_id else { return false }
         return events.contains { $0.type == "turn_started" && $0.queued_id == queuedID }
@@ -534,6 +544,20 @@ final class AppStore: ObservableObject {
             default:
                 return true
             }
+        }
+    }
+
+    private func shouldRebuildDisplayEvents(for source: [ZEvent]) -> Bool {
+        showDebugEvents || source.contains { !isDisplayHiddenMetadataEvent($0) }
+    }
+
+    private func isDisplayHiddenMetadataEvent(_ event: ZEvent) -> Bool {
+        switch event.type {
+        case "session_created", "process_started", "provider_session", "raw_event", "cwd_fallback",
+            "turn_queued", "turn_unqueued", "turn_queue_updated", "turn_queue_reordered", "turn_queue_run_now", "turn_stopped":
+            return true
+        default:
+            return false
         }
     }
 
@@ -620,6 +644,15 @@ final class AppStore: ObservableObject {
             .last?.prompt ?? event.prompt ?? "Queued message"
     }
 
+    func queuedPrompt(for turn: ZQueuedTurn) -> String {
+        let clean = turn.display_prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean?.isEmpty == false {
+            return clean ?? "Queued message"
+        }
+        let prompt = turn.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return prompt.isEmpty ? "Queued message" : prompt
+    }
+
     func queuedPosition(_ event: ZEvent) -> Int? {
         guard let queuedID = event.queued_id else { return event.position }
         var position = event.position
@@ -632,6 +665,150 @@ final class AppStore: ObservableObject {
             }
         }
         return position
+    }
+
+    private func sortedQueuedTurns(_ turns: [ZQueuedTurn]) -> [ZQueuedTurn] {
+        turns.sorted { lhs, rhs in
+            let left = lhs.position ?? Int.max
+            let right = rhs.position ?? Int.max
+            if left != right {
+                return left < right
+            }
+            let leftCreated = lhs.created_at ?? ""
+            let rightCreated = rhs.created_at ?? ""
+            if leftCreated != rightCreated {
+                return leftCreated < rightCreated
+            }
+            return lhs.queued_id < rhs.queued_id
+        }
+    }
+
+    private func queuedTurn(from event: ZEvent) -> ZQueuedTurn? {
+        guard event.type == "turn_queued",
+              let queuedID = event.queued_id else {
+            return nil
+        }
+        return ZQueuedTurn(
+            queued_id: queuedID,
+            session_id: event.session_id,
+            prompt: queuedPrompt(for: event),
+            file_ids: event.file_ids ?? [],
+            backend: event.backend,
+            purpose: event.purpose,
+            digest_job_id: event.digest_job_id,
+            target_session_id: event.target_session_id,
+            created_at: event.ts,
+            position: queuedPosition(event) ?? event.position
+        )
+    }
+
+    private func sessionID(for turn: ZQueuedTurn) -> String? {
+        turn.session_id ?? selectedSessionID
+    }
+
+    @discardableResult
+    private func applyAuthoritativeQueuedTurns(_ turns: [ZQueuedTurn]?, sessionID: String) -> Bool {
+        guard let turns else { return false }
+        let sortedTurns = sortedQueuedTurns(turns.map { turn in
+            var next = turn
+            if next.session_id == nil {
+                next.session_id = sessionID
+            }
+            return next
+        })
+        var changed = false
+        if queuedTurnsBySessionID[sessionID] != sortedTurns {
+            queuedTurnsBySessionID[sessionID] = sortedTurns
+            changed = true
+        }
+
+        let pendingIDs = Set(sortedTurns.map(\.queued_id))
+        let oldEventCount = events.count
+        events.removeAll { event in
+            guard event.session_id == sessionID,
+                  event.type == "turn_queued",
+                  let queuedID = event.queued_id else {
+                return false
+            }
+            return !pendingIDs.contains(queuedID)
+        }
+        if events.count != oldEventCount {
+            changed = true
+            if showDebugEvents {
+                rebuildDisplayEvents()
+            }
+        }
+        return changed
+    }
+
+    private func applyQueuedTurnState(from event: ZEvent) {
+        guard let queuedID = event.queued_id else { return }
+        switch event.type {
+        case "turn_queued":
+            guard var turn = queuedTurn(from: event) else { return }
+            turn.session_id = event.session_id
+            upsertQueuedTurn(turn, sessionID: event.session_id)
+        case "turn_queue_updated":
+            updateLocalQueuedTurn(sessionID: event.session_id, queuedID: queuedID) { turn in
+                if let prompt = event.prompt {
+                    turn.prompt = prompt
+                    turn.display_prompt = prompt
+                }
+                if let fileIDs = event.file_ids {
+                    turn.file_ids = fileIDs
+                }
+                if let position = event.position {
+                    turn.position = position
+                }
+            }
+        case "turn_queue_reordered":
+            guard let positions = event.positions else { return }
+            for position in positions {
+                updateLocalQueuedTurn(sessionID: event.session_id, queuedID: position.queued_id) { turn in
+                    turn.position = position.position
+                }
+            }
+        case "turn_queue_run_now", "turn_started", "turn_unqueued":
+            removeLocalQueuedTurn(sessionID: event.session_id, queuedID: queuedID)
+        default:
+            return
+        }
+    }
+
+    private func applyQueuedTurnState(from events: [ZEvent]) {
+        for event in events {
+            applyQueuedTurnState(from: event)
+        }
+    }
+
+    private func upsertQueuedTurn(_ turn: ZQueuedTurn, sessionID: String) {
+        var turns = queuedTurnsBySessionID[sessionID] ?? []
+        if let idx = turns.firstIndex(where: { $0.queued_id == turn.queued_id }) {
+            turns[idx] = turn
+        } else {
+            turns.append(turn)
+        }
+        queuedTurnsBySessionID[sessionID] = sortedQueuedTurns(turns)
+    }
+
+    private func updateLocalQueuedTurn(sessionID: String, queuedID: String, mutate: (inout ZQueuedTurn) -> Void) {
+        guard var turns = queuedTurnsBySessionID[sessionID],
+              let idx = turns.firstIndex(where: { $0.queued_id == queuedID }) else {
+            return
+        }
+        mutate(&turns[idx])
+        queuedTurnsBySessionID[sessionID] = sortedQueuedTurns(turns)
+    }
+
+    private func removeLocalQueuedTurn(sessionID: String, queuedID: String) {
+        if var turns = queuedTurnsBySessionID[sessionID] {
+            let oldCount = turns.count
+            turns.removeAll { $0.queued_id == queuedID }
+            if turns.count != oldCount {
+                queuedTurnsBySessionID[sessionID] = sortedQueuedTurns(turns)
+            }
+        }
+        events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
     }
 
     func rememberServerURL() {
@@ -1428,10 +1605,10 @@ final class AppStore: ObservableObject {
         pendingStreamSessionID = nil
         setSocketLive(false)
         setStatus(loadedFromCache ? (serverReachable ? "Server connected" : "Server offline") : (serverReachable ? "Loading chat" : "Server offline"))
-        processSnapshot = nil
-        processLogTail = nil
-        tmuxSnapshot = nil
-        tmuxCapture = nil
+        if processSnapshot != nil { processSnapshot = nil }
+        if processLogTail != nil { processLogTail = nil }
+        if tmuxSnapshot != nil { tmuxSnapshot = nil }
+        if tmuxCapture != nil { tmuxCapture = nil }
         markSessionRead(sessionID)
         AppLogger.info("select session=\(sessionID)")
         if loadedFromCache {
@@ -1439,13 +1616,13 @@ final class AppStore: ObservableObject {
         } else {
             events = []
             rebuildDisplayEvents()
-            uploads = []
-            sessionFiles = []
-            sessionVideoFiles = []
-            sessionFilesTotal = nil
-            sessionFilesHasMore = false
-            sessionFilesNextOffset = 0
-            omittedHistoryEventCount = 0
+            if !uploads.isEmpty { uploads = [] }
+            if !sessionFiles.isEmpty { sessionFiles = [] }
+            if !sessionVideoFiles.isEmpty { sessionVideoFiles = [] }
+            if sessionFilesTotal != nil { sessionFilesTotal = nil }
+            if sessionFilesHasMore { sessionFilesHasMore = false }
+            if sessionFilesNextOffset != 0 { sessionFilesNextOffset = 0 }
+            if omittedHistoryEventCount != 0 { omittedHistoryEventCount = 0 }
             loadedSessionID = nil
             latestSeenSeq = 0
             let cacheURL = chatCacheURL(sessionID)
@@ -1465,7 +1642,8 @@ final class AppStore: ObservableObject {
         if loadedFromCache {
             let cachedLastSeq = lastSeq
             syncSelectedRunningState()
-            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq) {
+            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq),
+               queuedTurnsBySessionID[sessionID] != nil {
                 loadedSessionID = sessionID
                 connectEvents(sessionID: sessionID, after: lastSeq)
                 AppLogger.info("skip cached latest tail session=\(sessionID) cached_latest=\(cachedLastSeq)")
@@ -2342,6 +2520,7 @@ final class AppStore: ObservableObject {
 
     private func applyAcceptedTurnEvent(_ event: ZEvent?, sessionID: String) {
         guard let event else { return }
+        applyQueuedTurnState(from: event)
         if event.type == "turn_started" {
             activeSessionIDs.insert(event.session_id)
             syncSelectedRunningState()
@@ -2375,7 +2554,16 @@ final class AppStore: ObservableObject {
     }
 
     func unqueue(_ event: ZEvent) async {
-        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        guard let queuedID = event.queued_id else { return }
+        await unqueue(sessionID: event.session_id, queuedID: queuedID)
+    }
+
+    func unqueue(_ turn: ZQueuedTurn) async {
+        guard let sessionID = sessionID(for: turn) else { return }
+        await unqueue(sessionID: sessionID, queuedID: turn.queued_id)
+    }
+
+    private func unqueue(sessionID: String, queuedID: String) async {
         struct Response: Codable {
             let ok: Bool
             let unqueued: Bool?
@@ -2383,20 +2571,29 @@ final class AppStore: ObservableObject {
             let remaining: Int?
         }
         do {
-            let _: Response = try await api.delete("/api/sessions/\(event.session_id)/queue/\(queuedID)")
-            events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
+            let _: Response = try await api.delete("/api/sessions/\(sessionID)/queue/\(queuedID)")
+            removeLocalQueuedTurn(sessionID: sessionID, queuedID: queuedID)
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("unqueued session=\(event.session_id) queued=\(queuedID)")
+            AppLogger.info("unqueued session=\(sessionID) queued=\(queuedID)")
         } catch {
-            AppLogger.error("unqueue failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            AppLogger.error("unqueue failed session=\(sessionID) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
             if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
     }
 
     func updateQueued(_ event: ZEvent, prompt: String) async {
-        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        guard let queuedID = event.queued_id else { return }
+        await updateQueued(sessionID: event.session_id, queuedID: queuedID, prompt: prompt)
+    }
+
+    func updateQueued(_ turn: ZQueuedTurn, prompt: String) async {
+        guard let sessionID = sessionID(for: turn) else { return }
+        await updateQueued(sessionID: sessionID, queuedID: turn.queued_id, prompt: prompt)
+    }
+
+    private func updateQueued(sessionID: String, queuedID: String, prompt: String) async {
         let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanPrompt.isEmpty else { return }
         struct Body: Codable {
@@ -2407,22 +2604,35 @@ final class AppStore: ObservableObject {
             let queued_id: String
         }
         do {
-            let _: Response = try await api.patch("/api/sessions/\(event.session_id)/queue/\(queuedID)", body: Body(prompt: cleanPrompt))
+            let _: Response = try await api.patch("/api/sessions/\(sessionID)/queue/\(queuedID)", body: Body(prompt: cleanPrompt))
             if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == queuedID }) {
                 events[idx].prompt = cleanPrompt
             }
+            updateLocalQueuedTurn(sessionID: sessionID, queuedID: queuedID) { turn in
+                turn.prompt = cleanPrompt
+                turn.display_prompt = cleanPrompt
+            }
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("queued prompt updated session=\(event.session_id) queued=\(queuedID)")
+            AppLogger.info("queued prompt updated session=\(sessionID) queued=\(queuedID)")
         } catch {
-            AppLogger.error("queued update failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            AppLogger.error("queued update failed session=\(sessionID) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
             if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
     }
 
     func moveQueued(_ event: ZEvent, direction: String) async {
-        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        guard let queuedID = event.queued_id else { return }
+        await moveQueued(sessionID: event.session_id, queuedID: queuedID, direction: direction)
+    }
+
+    func moveQueued(_ turn: ZQueuedTurn, direction: String) async {
+        guard let sessionID = sessionID(for: turn) else { return }
+        await moveQueued(sessionID: sessionID, queuedID: turn.queued_id, direction: direction)
+    }
+
+    private func moveQueued(sessionID: String, queuedID: String, direction: String) async {
         struct Body: Codable {
             let direction: String
         }
@@ -2432,26 +2642,38 @@ final class AppStore: ObservableObject {
             let positions: [ZQueuePosition]?
         }
         do {
-            let res: Response = try await api.post("/api/sessions/\(event.session_id)/queue/\(queuedID)/move", body: Body(direction: direction))
+            let res: Response = try await api.post("/api/sessions/\(sessionID)/queue/\(queuedID)/move", body: Body(direction: direction))
             if let positions = res.positions {
                 for position in positions {
                     if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == position.queued_id }) {
                         events[idx].position = position.position
                     }
+                    updateLocalQueuedTurn(sessionID: sessionID, queuedID: position.queued_id) { turn in
+                        turn.position = position.position
+                    }
                 }
             }
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("queued moved session=\(event.session_id) queued=\(queuedID) direction=\(direction)")
+            AppLogger.info("queued moved session=\(sessionID) queued=\(queuedID) direction=\(direction)")
         } catch {
-            AppLogger.error("queued move failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            AppLogger.error("queued move failed session=\(sessionID) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
             if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
     }
 
     func runQueuedNow(_ event: ZEvent) async {
-        guard let queuedID = event.queued_id, isQueuedEventPending(event) else { return }
+        guard let queuedID = event.queued_id else { return }
+        await runQueuedNow(sessionID: event.session_id, queuedID: queuedID)
+    }
+
+    func runQueuedNow(_ turn: ZQueuedTurn) async {
+        guard let sessionID = sessionID(for: turn) else { return }
+        await runQueuedNow(sessionID: sessionID, queuedID: turn.queued_id)
+    }
+
+    private func runQueuedNow(sessionID: String, queuedID: String) async {
         struct Empty: Codable {}
         struct Response: Codable {
             let ok: Bool
@@ -2459,13 +2681,16 @@ final class AppStore: ObservableObject {
             let interrupted: Bool?
         }
         do {
-            let _: Response = try await api.post("/api/sessions/\(event.session_id)/queue/\(queuedID)/run-now", body: Empty())
+            let _: Response = try await api.post("/api/sessions/\(sessionID)/queue/\(queuedID)/run-now", body: Empty())
             if let idx = events.firstIndex(where: { $0.type == "turn_queued" && $0.queued_id == queuedID }) {
                 events[idx].position = 1
             }
-            AppLogger.info("queued run-now session=\(event.session_id) queued=\(queuedID)")
+            removeLocalQueuedTurn(sessionID: sessionID, queuedID: queuedID)
+            rebuildDisplayEvents()
+            saveSelectedChatCache()
+            AppLogger.info("queued run-now session=\(sessionID) queued=\(queuedID)")
         } catch {
-            AppLogger.error("queued run-now failed session=\(event.session_id) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
+            AppLogger.error("queued run-now failed session=\(sessionID) queued=\(queuedID) \(serverErrorMessage(error) ?? "\(error)")")
             if handleStaleQueuedTurn(queuedID, error: error) { return }
             reportServerError(error)
         }
@@ -2473,6 +2698,9 @@ final class AppStore: ObservableObject {
 
     private func handleStaleQueuedTurn(_ queuedID: String, error: Error) -> Bool {
         guard isQueuedTurnNotFound(error) else { return false }
+        for sessionID in Array(queuedTurnsBySessionID.keys) {
+            removeLocalQueuedTurn(sessionID: sessionID, queuedID: queuedID)
+        }
         events.removeAll { $0.type == "turn_queued" && $0.queued_id == queuedID }
         rebuildDisplayEvents()
         saveSelectedChatCache()
@@ -2752,6 +2980,7 @@ final class AppStore: ObservableObject {
         latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
         var shouldSaveCache = false
         for event in newEvents {
+            applyQueuedTurnState(from: event)
             if isAgentVisibleMessage(event) {
                 if event.session_id != selectedSessionID {
                     markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
@@ -2788,7 +3017,9 @@ final class AppStore: ObservableObject {
                 shouldSaveCache = true
             }
         }
-        rebuildDisplayEvents()
+        if shouldRebuildDisplayEvents(for: newEvents) {
+            rebuildDisplayEvents()
+        }
         if shouldSaveCache {
             saveSelectedChatCache()
         }
@@ -2813,6 +3044,7 @@ final class AppStore: ObservableObject {
             return
         }
         guard !events.contains(where: { $0.id == event.id }) else { return }
+        applyQueuedTurnState(from: event)
         events.append(event)
         if events.count > maxLoadedTimelineEvents {
             let overflow = events.count - maxLoadedTimelineEvents
@@ -2822,7 +3054,9 @@ final class AppStore: ObservableObject {
         if isAgentVisibleMessage(event) {
             preserveTimelineScrollRevision += 1
         }
-        rebuildDisplayEvents()
+        if shouldRebuildDisplayEvents(for: [event]) {
+            rebuildDisplayEvents()
+        }
         if isAgentVisibleMessage(event) {
             if event.session_id != selectedSessionID {
                 markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
@@ -2890,6 +3124,7 @@ final class AppStore: ObservableObject {
             latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
             return
         }
+        applyQueuedTurnState(from: newEvents)
         events.append(contentsOf: newEvents)
         events.sort { $0.seq < $1.seq }
         if events.count > maxLoadedTimelineEvents {
@@ -2899,7 +3134,9 @@ final class AppStore: ObservableObject {
         }
         latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
-        rebuildDisplayEvents()
+        if shouldRebuildDisplayEvents(for: newEvents) {
+            rebuildDisplayEvents()
+        }
     }
 
     private func mergeEventsKeeping(_ incoming: ZEvent) {
@@ -2908,6 +3145,7 @@ final class AppStore: ObservableObject {
         let existingIDs = Set(events.map(\.id))
         let newEvents = incomingEvents.filter { !existingIDs.contains($0.id) }
         if !newEvents.isEmpty {
+            applyQueuedTurnState(from: newEvents)
             events.append(contentsOf: newEvents)
             events.sort { $0.seq < $1.seq }
         }
@@ -2921,7 +3159,9 @@ final class AppStore: ObservableObject {
         }
         latestSeenSeq = max(latestSeenSeq, incoming.seq)
         refreshSessionFilesFromLoadedEvents()
-        rebuildDisplayEvents()
+        if shouldRebuildDisplayEvents(for: newEvents) {
+            rebuildDisplayEvents()
+        }
         saveSelectedChatCache()
     }
 
@@ -2938,7 +3178,11 @@ final class AppStore: ObservableObject {
         preserveExisting: Bool = true
     ) -> Bool {
         replaceSessionFromServer(response.session)
+        let queueChanged = applyAuthoritativeQueuedTurns(response.queued_turns, sessionID: sessionID)
         let snapshotEvents = timelineEvents(from: response.events)
+        if response.queued_turns == nil {
+            applyQueuedTurnState(from: snapshotEvents)
+        }
         let oldCount = events.count
         let oldTextWeight = timelineDisplayWeight(displayEvents)
         let preservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []
@@ -2972,7 +3216,7 @@ final class AppStore: ObservableObject {
             if shouldMaskLargeBatch {
                 scheduleLargeTimelineBatchReveal()
             }
-            return false
+            return queueChanged
         }
         if preservedEvents.isEmpty {
             events = snapshotEvents
