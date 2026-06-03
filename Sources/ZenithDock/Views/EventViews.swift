@@ -1202,16 +1202,17 @@ struct TraceGroupCard: View, Equatable {
     }
 
     var body: some View {
+        let summary = TraceGroupSummaryCache.summary(for: events)
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "chevron.left.forwardslash.chevron.right")
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 8) {
-                if let changeSummary {
+                if let changeSummary = summary.changeSummary {
                     TraceChangeSetCard(summary: changeSummary)
                         .padding(.bottom, 2)
                 }
-                TraceDisclosureHeader(title: summaryTitle, detail: summaryDetail, isExpanded: $expanded)
+                TraceDisclosureHeader(title: summary.title, detail: summary.detail, isExpanded: $expanded)
                 if expanded {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(events) { event in
@@ -1219,7 +1220,7 @@ struct TraceGroupCard: View, Equatable {
                         }
                     }
                     .padding(.top, 8)
-                } else if let previewText {
+                } else if let previewText = summary.previewText {
                     Text(previewText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1236,17 +1237,62 @@ struct TraceGroupCard: View, Equatable {
         }
     }
 
-    private var summaryTitle: String {
-        if toolCount > 0 && reasoningCount == 0 {
-            return "Ran \(toolCount) \(toolCount == 1 ? "tool" : "tools")"
-        }
-        if reasoningCount > 0 && toolCount == 0 {
-            return "Reasoning trace"
-        }
-        return "Trace"
+    private var signature: String {
+        Self.signature(for: events)
     }
 
-    private var summaryDetail: String {
+    nonisolated private static func signature(for events: [ZEvent]) -> String {
+        "\(events.count):\(events.first?.id ?? ""):\(events.last?.id ?? "")"
+    }
+}
+
+private struct TraceGroupComputedSummary: Equatable {
+    let title: String
+    let detail: String
+    let previewText: String?
+    let changeSummary: TraceChangeSummary?
+}
+
+private final class TraceGroupSummaryEntry: NSObject {
+    let summary: TraceGroupComputedSummary
+
+    init(_ summary: TraceGroupComputedSummary) {
+        self.summary = summary
+    }
+}
+
+private enum TraceGroupSummaryCache {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, TraceGroupSummaryEntry> = {
+        let cache = NSCache<NSString, TraceGroupSummaryEntry>()
+        cache.countLimit = 500
+        cache.totalCostLimit = 3_000
+        return cache
+    }()
+
+    static func summary(for events: [ZEvent]) -> TraceGroupComputedSummary {
+        let key = cacheKey(for: events)
+        if let cached = cache.object(forKey: key) {
+            return cached.summary
+        }
+        let summary = makeSummary(for: events)
+        cache.setObject(TraceGroupSummaryEntry(summary), forKey: key, cost: max(1, events.count))
+        return summary
+    }
+
+    private static func makeSummary(for events: [ZEvent]) -> TraceGroupComputedSummary {
+        let toolEventCount = events.filter { $0.type == "tool_started" || $0.type == "tool_finished" }.count
+        let reasoningCount = events.filter { $0.type == "reasoning_summary" }.count
+        let ids = Set(events.compactMap { $0.tool?.id ?? $0.tool_id })
+        let toolCount = ids.isEmpty ? events.filter { $0.type == "tool_started" }.count : ids.count
+        let title: String
+        if toolCount > 0 && reasoningCount == 0 {
+            title = "Ran \(toolCount) \(toolCount == 1 ? "tool" : "tools")"
+        } else if reasoningCount > 0 && toolCount == 0 {
+            title = "Reasoning trace"
+        } else {
+            title = "Trace"
+        }
+
         var parts: [String] = []
         if toolCount > 0 {
             parts.append("\(toolCount) \(toolCount == 1 ? "tool" : "tools")")
@@ -1258,14 +1304,18 @@ struct TraceGroupCard: View, Equatable {
         if other > 0 {
             parts.append("\(other) system")
         }
-        return parts.joined(separator: " · ")
+
+        let previewText = tracePreviewText(for: events)
+        let changeSummary = TraceChangeSummary.extract(from: events)
+        return TraceGroupComputedSummary(
+            title: title,
+            detail: parts.joined(separator: " · "),
+            previewText: previewText,
+            changeSummary: changeSummary
+        )
     }
 
-    private var changeSummary: TraceChangeSummary? {
-        TraceChangeSummary.extract(from: events)
-    }
-
-    private var previewText: String? {
+    private static func tracePreviewText(for events: [ZEvent]) -> String? {
         let pieces = events.compactMap { event -> String? in
             switch event.type {
             case "reasoning_summary":
@@ -1283,7 +1333,7 @@ struct TraceGroupCard: View, Equatable {
         return pieces.prefix(2).joined(separator: " · ")
     }
 
-    private func toolPreview(for event: ZEvent) -> String? {
+    private static func toolPreview(for event: ZEvent) -> String? {
         if let command = event.tool?.traceCommandText {
             return command
         }
@@ -1293,26 +1343,12 @@ struct TraceGroupCard: View, Equatable {
         return event.tool_id
     }
 
-    private var toolEventCount: Int {
-        events.filter { $0.type == "tool_started" || $0.type == "tool_finished" }.count
-    }
-
-    private var toolCount: Int {
-        let ids = Set(events.compactMap { $0.tool?.id ?? $0.tool_id })
-        if !ids.isEmpty { return ids.count }
-        return events.filter { $0.type == "tool_started" }.count
-    }
-
-    private var reasoningCount: Int {
-        events.filter { $0.type == "reasoning_summary" }.count
-    }
-
-    private var signature: String {
-        Self.signature(for: events)
-    }
-
-    nonisolated private static func signature(for events: [ZEvent]) -> String {
-        "\(events.count):\(events.first?.id ?? ""):\(events.last?.id ?? "")"
+    private static func cacheKey(for events: [ZEvent]) -> NSString {
+        guard let first = events.first, let last = events.last else {
+            return "empty" as NSString
+        }
+        let middle = events.count > 2 ? events[events.count / 2] : last
+        return "\(events.count):\(first.seq):\(first.id):\(middle.seq):\(middle.id):\(last.seq):\(last.id)" as NSString
     }
 }
 

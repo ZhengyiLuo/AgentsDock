@@ -4832,3 +4832,10 @@ Third follow-up:
 - Bumped the agent API contract to v4 and added `visible=true` session-history paging. The server now pages by displayable timeline events and reports visible omitted counts instead of raw sequence gaps.
 - Updated macOS and iOS/iPadOS session open and older-history fetches to request visible pages. iOS also now skips invisible-only older pages the same way the Mac path already did.
 - Added `ZenithGuardrails` checks so future history fetches cannot regress to raw-event tail windows.
+
+## 2026-06-03 - Mac Timeline Scroll Smoothing
+
+- The v4 visible-history fix correctly returns real timeline events instead of raw trace noise, but that also made the Mac timeline render more heavy rows at once on long chats.
+- Reduced the default Mac rendered row window from `100` to `80`, the page reveal size from `40` to `32`, and the hidden event projection budget from `480` to `360`.
+- Cached collapsed trace summaries, including expensive code-change extraction, so SwiftUI scroll/layout passes do not repeatedly parse tool output for every visible trace row.
+- Added `ZenithGuardrails` coverage for the smaller render window and trace-summary cache.

@@ -12,7 +12,7 @@ struct TimelineView: View {
     @State private var isTimelineScrollable = false
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
-    @State private var visibleRowLimit = 100
+    @State private var visibleRowLimit = 80
     @State private var isFileDropTargeted = false
     @State private var isNearBottom = true
     @State private var historyLoadSuppressedUntil = Date.distantPast
@@ -26,12 +26,12 @@ struct TimelineView: View {
     @State private var timelinePositioningOverlayTask: Task<Void, Never>?
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
-    private let defaultVisibleRowLimit = 100
-    private let rowPageSize = 40
+    private let defaultVisibleRowLimit = 80
+    private let rowPageSize = 32
     private let bottomButtonHideDistance: CGFloat = 180
     private let timelinePositioningOverlayDelayNanos: UInt64 = 180_000_000
-    private let projectionBaseEventLimit = 480
-    private let projectionEventsPerVisibleRow = 8
+    private let projectionBaseEventLimit = 360
+    private let projectionEventsPerVisibleRow = 6
 
     private struct TimelineScrollAnchor {
         let rowID: String

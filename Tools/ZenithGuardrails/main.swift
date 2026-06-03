@@ -399,6 +399,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
     let root = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/RootView.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
@@ -489,6 +490,9 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("timelineRowsStructurallySuspended ? [] : store.displayEvents"), "Mac timeline must not build rows while a large sync batch is masked")
     try assert(timeline.contains("let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)"), "Mac timeline must project only the currently visible event budget while keeping loaded history in store")
     try assert(timeline.contains("projectionEventsPerVisibleRow"), "Mac timeline projection budget must expand as the visible row budget expands")
+    try assert(timeline.contains("private let defaultVisibleRowLimit = 80"), "Mac timeline must keep the default rendered row window small enough for smooth scrolling")
+    try assert(timeline.contains("private let projectionBaseEventLimit = 360"), "Mac timeline event projection must avoid rebuilding too many hidden events while scrolling")
+    try assert(eventViews.contains("TraceGroupSummaryCache") && eventViews.contains("TraceChangeSummary.extract(from: events)"), "Mac collapsed trace summaries must be cached instead of reparsed during scroll layout")
     try assert(timeline.contains("hasHiddenProjectedEvents(visibleLimit: visibleRowLimit)"), "Mac show-older must reveal locally loaded projected events before asking the server")
     try assert(timeline.contains("TimelineRows.build(from: timelineProjectionEvents(from: store.displayEvents"), "Mac helper row builds must use the same bounded projection path")
     try assert(macStore.contains("private let maxWarmCachedTimelineEvents = 240"), "Mac warm-cache chat switches must render only a small recent tail")
