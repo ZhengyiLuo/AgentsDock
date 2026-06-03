@@ -35,12 +35,16 @@ Change:
 
 Verification:
 
-- Pending: `swift run ZenithGuardrails`
-- Pending: local Mac app rebuild at `dist/ZenithDock.app`
-- Pending: active server deploy/restart
-- Pending: iOS/iPadOS archive/export upload
-- Pending: macOS archive/export upload
-- Pending: app and server Git pushes
+- `swift run ZenithGuardrails` passed.
+- `python3 -m py_compile server/agent_server.py` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app`; the build script also synced
+  `ZenithDock.app` to `zens-macbook-air:/Users/zen/agi/`.
+- Deployed/restarted the active `sonic` server with `./server/deploy.sh sonic`;
+  service responded with token-required health.
+- Uploaded iOS/iPadOS build `49` successfully: `Uploaded ZenithDockIOS`.
+- Uploaded macOS build `49` successfully: `Uploaded ZenithDockMac`.
+- Pushed standalone `ZhengyiLuo/ZenithBotServer` at `b305ed8`.
+- Pending: app Git push after this log completion commit.
 
 ## 2026-06-02 - Surface Codex Tool Failures
 
