@@ -5,7 +5,7 @@ private let defaultAgentServerURLString = "http://127.0.0.1:7850"
 private let defaultAgentServerHost = "127.0.0.1"
 private let defaultAgentServerPort = "7850"
 private let fallbackServerCwd = "~"
-private let minimumAgentAPIContractVersion = 3
+private let minimumAgentAPIContractVersion = 4
 private let pendingRuntimePatchTimeout: TimeInterval = 12
 
 @MainActor
@@ -1336,7 +1336,8 @@ final class MobileAppStore: ObservableObject {
                 "/api/sessions/\(sessionID)",
                 queryItems: [
                     URLQueryItem(name: "limit", value: "\(initialEventLimit)"),
-                    URLQueryItem(name: "tail", value: "true")
+                    URLQueryItem(name: "tail", value: "true"),
+                    URLQueryItem(name: "visible", value: "true")
                 ]
             )
             guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
@@ -1373,19 +1374,47 @@ final class MobileAppStore: ObservableObject {
                 let events: [ZEvent]
                 let events_omitted_before: Int?
             }
-            let res: Response = try await api.get(
-                "/api/sessions/\(sid)",
-                queryItems: [
-                    URLQueryItem(name: "before", value: "\(before)"),
-                    URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
-                    URLQueryItem(name: "tail", value: "true")
-                ]
-            )
-            replaceSessionFromServer(res.session)
-            let existingIDs = Set(events.map(\.id))
-            let older = timelineEvents(from: res.events).filter { !existingIDs.contains($0.id) }
+            var cursorBefore = before
+            var remainingOmitted = omittedHistoryEventCount
+            var latestSession: ZSession?
+            var knownIDs = Set(events.map(\.id))
+            var older: [ZEvent] = []
+
+            for _ in 0..<8 {
+                let res: Response = try await api.get(
+                    "/api/sessions/\(sid)",
+                    queryItems: [
+                        URLQueryItem(name: "before", value: "\(cursorBefore)"),
+                        URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
+                        URLQueryItem(name: "tail", value: "true"),
+                        URLQueryItem(name: "visible", value: "true")
+                    ]
+                )
+                latestSession = res.session
+                remainingOmitted = res.events_omitted_before ?? 0
+
+                let visibleOlder = timelineEvents(from: res.events).filter { event in
+                    guard !knownIDs.contains(event.id) else { return false }
+                    knownIDs.insert(event.id)
+                    return true
+                }
+                older.append(contentsOf: visibleOlder)
+                if !visibleOlder.isEmpty || res.events.isEmpty || remainingOmitted <= 0 {
+                    break
+                }
+
+                guard let nextBefore = res.events.map(\.seq).min(),
+                      nextBefore < cursorBefore else {
+                    break
+                }
+                cursorBefore = nextBefore
+            }
+
+            if let latestSession {
+                replaceSessionFromServer(latestSession)
+            }
             events = (older + events).sorted { $0.seq < $1.seq }
-            omittedHistoryEventCount = res.events_omitted_before ?? 0
+            omittedHistoryEventCount = remainingOmitted
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             refreshSessionFilesFromLoadedEvents()
             rebuildDisplayEvents()

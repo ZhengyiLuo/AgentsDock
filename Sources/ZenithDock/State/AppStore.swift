@@ -4,7 +4,7 @@ import ZenithCore
 
 private let defaultAgentServerURLString = "http://127.0.0.1:7850"
 private let fallbackServerCwd = "~"
-private let minimumAgentAPIContractVersion = 3
+private let minimumAgentAPIContractVersion = 4
 private let pendingRuntimePatchTimeout: TimeInterval = 12
 private let pinnedMessageBodyLimit = 20_000
 
@@ -1516,7 +1516,8 @@ final class AppStore: ObservableObject {
                 "/api/sessions/\(sessionID)",
                 queryItems: [
                     URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
-                    URLQueryItem(name: "tail", value: "true")
+                    URLQueryItem(name: "tail", value: "true"),
+                    URLQueryItem(name: "visible", value: "true")
                 ]
             )
             guard selectedSessionID == sessionID, selectionGeneration == generation else {
@@ -1555,7 +1556,8 @@ final class AppStore: ObservableObject {
                 "/api/sessions/\(sessionID)",
                 queryItems: [
                     URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
-                    URLQueryItem(name: "tail", value: "true")
+                    URLQueryItem(name: "tail", value: "true"),
+                    URLQueryItem(name: "visible", value: "true")
                 ]
             )
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
@@ -1623,7 +1625,8 @@ final class AppStore: ObservableObject {
                     queryItems: [
                         URLQueryItem(name: "before", value: "\(cursorBefore)"),
                         URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
-                        URLQueryItem(name: "tail", value: "true")
+                        URLQueryItem(name: "tail", value: "true"),
+                        URLQueryItem(name: "visible", value: "true")
                     ]
                 )
                 latestSession = res.session

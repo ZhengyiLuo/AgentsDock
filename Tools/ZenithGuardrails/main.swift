@@ -400,6 +400,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     let root = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/RootView.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let mobileTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+    let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(macStore.contains("@Published var isSelectingSession = false"), "Mac store must publish session selection/loading state")
     try assert(macStore.contains("@Published var isRefreshingCachedDelta = false"), "Mac store must publish warm-cache delta refresh state")
@@ -505,6 +506,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("refreshCachedSessionLatestTail"), "Mac warm-cache chat switches must refresh the server latest tail")
     try assert(!macStore.contains("Refreshing latest chat"), "Mac warm-cache chat switches must not present background tail refresh as foreground loading")
     try assert(macStore.contains("URLQueryItem(name: \"tail\", value: \"true\")"), "Mac cached chat refresh must request the latest tail window")
+    try assert(macStore.contains("URLQueryItem(name: \"visible\", value: \"true\")"), "Mac session history fetches must page displayable events instead of raw trace noise")
     try assert(macStore.contains("applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)"), "Mac cached chat refresh must merge the server latest tail without dropping loaded older pages")
     try assert(macStore.contains("connectEvents(sessionID: sessionID, after: lastSeq)"), "Mac warm-cache chat switches must connect live streaming only after the latest tail is applied")
     try assert(macStore.contains("isRefreshingCachedDelta = true"), "Mac cached chat refresh must still mark its background refresh state")
@@ -539,6 +541,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(mobileStore.contains("@Published private(set) var displayEvents: [ZEvent] = []"), "iOS store must publish filtered display events instead of recomputing them in the timeline body")
     try assert(mobileStore.contains("private(set) var events: [ZEvent] = []"), "iOS raw event storage must not publish directly into the whole UI")
     try assert(mobileStore.contains("private func rebuildDisplayEvents()"), "iOS store must rebuild display events only when raw events change")
+    try assert(mobileStore.contains("URLQueryItem(name: \"visible\", value: \"true\")"), "iOS session history fetches must page displayable events instead of raw trace noise")
+    try assert(mobileStore.contains("for _ in 0..<8") && mobileStore.contains("remainingOmitted = res.events_omitted_before ?? 0"), "iOS older-history fetches must skip invisible-only pages")
     try assert(mobileTimeline.contains("@State private var pendingOpenBottomSessionID"), "iOS timeline must remember that newly opened chats should land at the latest message")
     try assert(mobileTimeline.contains("private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false)"), "iOS timeline bottom positioning must default to a non-animated jump")
     try assert(mobileTimeline.contains("scrollToBottom(proxy, animated: true)"), "iOS explicit bottom button may animate, but open-chat positioning must not fly through history")
@@ -550,6 +554,9 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!mobileStore[mobileSelectRange.lowerBound..<mobileLoadOlderRange.lowerBound].contains("scrollRevision += 1"), "iOS chat open must not fire the send-style bottom scroll revision after loading history")
     try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")
     try assert(!mobileStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "iOS chat open must not request a non-tail catch-up page")
+    try assert(server.contains("API_CONTRACT_VERSION = 4"), "Server visible-history paging is a v4 API contract")
+    try assert(server.contains("visible: bool = False") && server.contains("is_visible_timeline_event"), "Server session endpoint must support visible timeline event paging")
+    try assert(server.contains("read_visible_events_page(") && server.contains("visible_count - len(events)"), "Server visible-history paging must report visible omitted counts, not raw seq gaps")
 }
 
 func checkConnectionFailuresDoNotModal() throws {

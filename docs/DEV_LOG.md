@@ -4825,3 +4825,10 @@ Third follow-up:
   - `build/archives/ZenithDockIOS-45.xcarchive` -> `Uploaded ZenithDockIOS`
   - `build/archives/ZenithDockMac-45.xcarchive` -> `Uploaded ZenithDockMac`
 - The first iOS archive attempt hit Xcode/CoreSimulator `AssetCatalogSimulatorAgent` / `MPSCore` policy noise; retrying with isolated DerivedData at `/private/tmp/ZenithDockArchiveDD45` succeeded.
+
+## 2026-06-03 - Visible History Paging Contract
+
+- Investigated `CMA-ES - Gripper - Rewrite` missing large chunks on one Mac and found the newest server page could contain only `raw_event` records. The UI filters those out but still advanced its latest-seen cursor, so visible assistant/artifact messages just before the raw tail could be skipped.
+- Bumped the agent API contract to v4 and added `visible=true` session-history paging. The server now pages by displayable timeline events and reports visible omitted counts instead of raw sequence gaps.
+- Updated macOS and iOS/iPadOS session open and older-history fetches to request visible pages. iOS also now skips invisible-only older pages the same way the Mac path already did.
+- Added `ZenithGuardrails` checks so future history fetches cannot regress to raw-event tail windows.
