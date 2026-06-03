@@ -34,8 +34,13 @@ final class AppStore: ObservableObject {
     @Published var selectedSessionID: String?
     private(set) var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
-    @Published var sessionFiles: [ZFile] = []
-    @Published var sessionVideoFiles: [ZFile] = []
+    @Published var sessionFiles: [ZFile] = [] {
+        didSet { scheduleSessionMediaCacheRebuild() }
+    }
+    @Published var sessionVideoFiles: [ZFile] = [] {
+        didSet { scheduleSessionMediaCacheRebuild() }
+    }
+    @Published private(set) var sessionVideos: [ZFile] = []
     @Published var sessionFilesTotal: Int?
     @Published var sessionFilesHasMore = false
     @Published var isLoadingSessionFiles = false
@@ -116,6 +121,7 @@ final class AppStore: ObservableObject {
     private var serverIdentity: String?
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
+    private var sessionMediaCacheRebuildScheduled = false
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
     private let maxMemoryCachedChats = 32
     private let streamBackfillMaskThreshold = 18
@@ -376,11 +382,6 @@ final class AppStore: ObservableObject {
 
     var canLoadOlderHistory: Bool {
         omittedHistoryEventCount > 0 && !isLoadingOlderHistory
-    }
-
-    var sessionVideos: [ZFile] {
-        mergedFiles(sessionFiles + sessionVideoFiles)
-            .filter { ($0.content_type ?? "").hasPrefix("video/") }
     }
 
     var selectedPinnedItems: [PinnedTimelineItem] {
@@ -3336,6 +3337,25 @@ final class AppStore: ObservableObject {
     private func files(from source: [ZEvent]) -> [ZFile] {
         source.flatMap { event -> [ZFile] in
             [event.file, event.artifact].compactMap { $0 }
+        }
+    }
+
+    private func scheduleSessionMediaCacheRebuild() {
+        guard !sessionMediaCacheRebuildScheduled else { return }
+        sessionMediaCacheRebuildScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.sessionMediaCacheRebuildScheduled = false
+            self.rebuildSessionMediaCaches()
+        }
+    }
+
+    private func rebuildSessionMediaCaches() {
+        let nextVideos = mergedFiles((sessionFiles + sessionVideoFiles).filter { file in
+            (file.content_type ?? "").hasPrefix("video/")
+        })
+        if sessionVideos != nextVideos {
+            sessionVideos = nextVideos
         }
     }
 

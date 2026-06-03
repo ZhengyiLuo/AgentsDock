@@ -616,7 +616,7 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(macStore.contains("@Published var sessionVideoFiles: [ZFile] = []"), "Mac store must keep video metadata separate from mixed file pages")
     try assert(macStore.contains("URLQueryItem(name: \"content_prefix\", value: \"video/\")"), "Mac store must fetch videos independently of mixed file paging")
     try assert(macStore.contains("URLQueryItem(name: \"limit\", value: \"\\(sessionFilesPageLimit)\")"), "Mac video metadata fetch must be paged instead of pulling every video while switching chats")
-    try assert(inspector.contains("sortedLatestFirst(store.sessionVideos)"), "Mac files inspector must render the independent video list")
+    try assert(inspector.contains("store.sessionVideos"), "Mac files inspector must render the independent video list")
     try assert(inspector.contains("@State private var visibleVideoCount = 4"), "Mac files inspector must start video grids at four previews")
     try assert(inspector.contains("private let videoPageSize = 4"), "Mac files inspector must page video grids four at a time")
     try assert(eventViews.contains("private let initialArtifactLimit = 4"), "Mac timeline artifact grids must start at four previews")
@@ -1198,6 +1198,33 @@ func checkHandoffDigestUsesLLM() throws {
     try assert(mobileEvents.contains("isDigestTurn") && mobileEvents.contains("queued: isDigest"), "iOS timeline must render tagged digest turns distinctly")
 }
 
+func checkMacTimelineScrollPerformanceGuards() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
+    let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
+
+    try assert(macStore.contains("@Published private(set) var sessionVideos: [ZFile] = []"), "Mac store must cache selected-session videos instead of deriving them during render")
+    try assert(!macStore.contains("var sessionVideos: [ZFile] {\n        mergedFiles"), "Mac sessionVideos must not be a merge/sort computed getter")
+    try assert(inspector.contains("private var videos: [ZFile] {\n        store.sessionVideos\n    }"), "Files inspector must use cached video ordering")
+    try assert(!inspector.contains("sortedLatestFirst("), "Files inspector must not sort media lists during ordinary body updates")
+    try assert(timeline.contains("let minimumInterval = 0.14"), "Timeline scroll observer reports must be throttled enough to avoid bottom-scroll churn")
+
+    guard let boundsStart = timeline.range(of: "forName: NSView.boundsDidChangeNotification"),
+          let boundsEnd = timeline.range(of: "scrollView.postsFrameChangedNotifications", range: boundsStart.upperBound..<timeline.endIndex) else {
+        throw GuardrailFailure.failed("Timeline bounds observer block not found")
+    }
+    let boundsBlock = timeline[boundsStart.lowerBound..<boundsEnd.lowerBound]
+    try assert(!boundsBlock.contains("clampAttachedScrollViewIfNeeded"), "Bounds-change observer must not manually clamp on every scroll tick")
+
+    guard let bottomStart = timeline.range(of: "private func scrollDocumentToBottom()"),
+          let bottomEnd = timeline.range(of: "private func scheduleVisibleOriginRestore", range: bottomStart.upperBound..<timeline.endIndex) else {
+        throw GuardrailFailure.failed("Timeline bottom scroll function not found")
+    }
+    let bottomBlock = timeline[bottomStart.lowerBound..<bottomEnd.lowerBound]
+    try assert(!bottomBlock.contains("layoutSubtreeIfNeeded()"), "Bottom-scroll chase must not force full layout on every retry")
+}
+
 do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
@@ -1236,6 +1263,7 @@ do {
     try checkInspectorCollapseAndPins()
     try checkMacChatKeyboardNavigation()
     try checkHandoffDigestUsesLLM()
+    try checkMacTimelineScrollPerformanceGuards()
     print("ZenithGuardrails passed")
 } catch {
     fputs("ZenithGuardrails failed: \(error)\n", stderr)

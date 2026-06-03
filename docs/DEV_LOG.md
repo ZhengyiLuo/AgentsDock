@@ -4876,3 +4876,21 @@ Third follow-up:
   `swift run ZenithGuardrails`, and a local macOS build. The rebuilt app was
   synced to `zens-macbook-air:/Users/zen/agi/ZenithDock.app`, and the active
   `sonic` server was deployed/restarted.
+
+## 2026-06-03 - Bottom Scroll Performance Pass
+
+- Sampled the running Mac app during sluggish scrolling and found the main
+  thread in SwiftUI/AppKit layout while app symbols repeatedly recomputed
+  selected-chat media lists (`sessionVideos`, `mergedFiles`, and sort work).
+- Changed the Mac store so `sessionVideos` is a cached published list rebuilt
+  only when selected-chat files/video metadata changes, not during ordinary
+  SwiftUI body updates.
+- Removed redundant latest-first sorting from the Files & Videos inspector; the
+  store already maintains the selected media lists in newest-first order.
+- Reduced bottom-scroll observer churn by avoiding per-bounds-change manual
+  clamping, throttling metric reports, shortening force-bottom chase time, and
+  removing forced layout from the repeated bottom-scroll path.
+- Added guardrails to keep media merge/sort work out of render-time scroll paths
+  and to prevent reintroducing forced layout in bottom-scroll retries.
+- Verified with `swift run ZenithGuardrails` and a local macOS build. The
+  rebuilt app was synced to `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.

@@ -2104,11 +2104,11 @@ private struct ChatFilesInspector: View {
     private let documentPageSize = 12
 
     private var videos: [ZFile] {
-        sortedLatestFirst(store.sessionVideos)
+        store.sessionVideos
     }
 
     private var documents: [ZFile] {
-        sortedLatestFirst(files.filter { !($0.content_type ?? "").hasPrefix("video/") })
+        files.filter { !($0.content_type ?? "").hasPrefix("video/") }
     }
 
     private var visibleVideos: [ZFile] {
@@ -2264,16 +2264,6 @@ private struct ChatFilesInspector: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func sortedLatestFirst(_ source: [ZFile]) -> [ZFile] {
-        source.sorted { lhs, rhs in
-            let leftDate = lhs.created_at ?? ""
-            let rightDate = rhs.created_at ?? ""
-            if leftDate != rightDate {
-                return leftDate > rightDate
-            }
-            return lhs.filename.localizedStandardCompare(rhs.filename) == .orderedAscending
-        }
-    }
 }
 
 private struct ChatVideoGridCell: View {

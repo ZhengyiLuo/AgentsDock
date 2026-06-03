@@ -1118,7 +1118,6 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.clampAttachedScrollViewIfNeeded()
                     self?.scheduleReport()
                 }
             }
@@ -1173,7 +1172,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
         func handleForceBottomRevision(_ revision: Int) {
             guard revision != lastForceBottomRevision else { return }
             lastForceBottomRevision = revision
-            forceBottomUntil = Date().addingTimeInterval(2.0)
+            forceBottomUntil = Date().addingTimeInterval(0.75)
             scheduleDocumentBottomScroll()
         }
 
@@ -1191,7 +1190,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 scheduleDocumentBottomScroll()
             }
             let now = Date().timeIntervalSinceReferenceDate
-            let minimumInterval = 0.08
+            let minimumInterval = 0.14
             let elapsed = now - lastReportTime
             if elapsed < minimumInterval {
                 trailingReportWorkItem?.cancel()
@@ -1222,7 +1221,6 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 
         private func report() {
             guard let scrollView, let documentView = scrollView.documentView else { return }
-            clampDocumentOriginIfNeeded(scrollView, documentView: documentView)
             let visibleRect = scrollView.documentVisibleRect
             lastVisibleOrigin = visibleRect.origin
             let documentBounds = documentView.bounds
@@ -1303,8 +1301,6 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                   let documentView = scrollView.documentView else {
                 return
             }
-            documentView.layoutSubtreeIfNeeded()
-            scrollView.layoutSubtreeIfNeeded()
 
             let clipView = scrollView.contentView
             let documentBounds = documentView.bounds
