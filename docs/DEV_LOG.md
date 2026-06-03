@@ -19,6 +19,29 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 Follow-Up - TestFlight Build 49
+
+Context:
+
+- User requested pushing the latest app to TestFlight after the queue acceptance,
+  drag reorder, right-panel shortcut, and Codex failure surfacing fixes.
+- Build 49 should carry the latest app/server contract, including visible Codex
+  JSON failures and disabled server-launched Codex image-generation tooling.
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `48` to `49`.
+- Reusing `MARKETING_VERSION` `0.1.1`.
+
+Verification:
+
+- Pending: `swift run ZenithGuardrails`
+- Pending: local Mac app rebuild at `dist/ZenithDock.app`
+- Pending: active server deploy/restart
+- Pending: iOS/iPadOS archive/export upload
+- Pending: macOS archive/export upload
+- Pending: app and server Git pushes
+
 ## 2026-06-02 - Surface Codex Tool Failures
 
 - A Codex turn in `CMA-ES - Gripper - Dev` accepted the user prompt but then
