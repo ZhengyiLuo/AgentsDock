@@ -760,13 +760,11 @@ final class AppStore: ObservableObject {
 
     private func scheduleDraftPromptsSave() {
         pendingDraftSave?.cancel()
-        let key = draftPromptsDefaultsKey
-        let snapshot = draftPromptsBySessionID
-        pendingDraftSave = Task { @MainActor in
+        pendingDraftSave = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 450_000_000)
-            guard !Task.isCancelled else { return }
-            if let data = try? JSONEncoder().encode(snapshot) {
-                UserDefaults.standard.set(data, forKey: key)
+            guard let self, !Task.isCancelled else { return }
+            if let data = try? JSONEncoder().encode(self.draftPromptsBySessionID) {
+                UserDefaults.standard.set(data, forKey: self.draftPromptsDefaultsKey)
             }
         }
     }
@@ -785,6 +783,7 @@ final class AppStore: ObservableObject {
 
     func rememberDraftPrompt(_ text: String, for sessionID: String?) {
         guard let sessionID else { return }
+        guard (draftPromptsBySessionID[sessionID] ?? "") != text else { return }
         if text.isEmpty {
             draftPromptsBySessionID.removeValue(forKey: sessionID)
         } else {

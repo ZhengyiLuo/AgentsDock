@@ -4839,3 +4839,19 @@ Third follow-up:
 - Reduced the default Mac rendered row window from `100` to `80`, the page reveal size from `40` to `32`, and the hidden event projection budget from `480` to `360`.
 - Cached collapsed trace summaries, including expensive code-change extraction, so SwiftUI scroll/layout passes do not repeatedly parse tool output for every visible trace row.
 - Added `ZenithGuardrails` coverage for the smaller render window and trace-summary cache.
+
+## 2026-06-03 - Composer Draft Debounce And Scroll Budget
+
+- The native Mac composer was still copying the full text buffer into draft
+  persistence on every keystroke. This was cheap for short prompts but painful
+  for long command blocks.
+- Changed the `NSTextView` bridge to debounce full-draft persistence and flush
+  immediately only on send or when switching chats.
+- Changed Mac draft persistence so the store does not copy the entire draft
+  dictionary when scheduling every debounce save.
+- Trimmed the default Mac timeline render window again, from `80` rows to `64`
+  rows, and reduced the projection budget to make normal scrolling lighter.
+- The job scheduler sheet now reads the selected chat draft from the per-session
+  draft store instead of the old published composer prompt.
+- Added guardrails so full draft text cannot accidentally get pushed through
+  SwiftUI/global store on every key again.

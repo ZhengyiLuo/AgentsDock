@@ -36,13 +36,14 @@ struct ComposerView: View {
                     text: $draftPrompt,
                     isEditable: store.selectedSession != nil,
                     resetID: editorResetID,
-                    submitRevision: editorSubmitRevision
+                    submitRevision: editorSubmitRevision,
+                    draftSessionID: store.selectedSessionID
                 ) {
                     sendDraft($0)
                 } onDropFiles: { urls in
                     uploadDroppedFiles(urls)
-                } onDraftChange: { text in
-                    store.rememberDraftPrompt(text, for: store.selectedSessionID)
+                } onDraftChange: { text, sessionID in
+                    store.rememberDraftPrompt(text, for: sessionID)
                 } onTextPresenceChange: { hasText in
                     if editorHasVisibleText != hasText {
                         editorHasVisibleText = hasText
@@ -569,15 +570,17 @@ private struct StablePromptEditor: View, Equatable {
     var isEditable: Bool
     var resetID: Int
     var submitRevision: Int
+    var draftSessionID: String?
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void
-    var onDraftChange: (String) -> Void
+    var onDraftChange: (String, String?) -> Void
     var onTextPresenceChange: (Bool) -> Void
 
     nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
         lhs.isEditable == rhs.isEditable &&
             lhs.resetID == rhs.resetID &&
-            lhs.submitRevision == rhs.submitRevision
+            lhs.submitRevision == rhs.submitRevision &&
+            lhs.draftSessionID == rhs.draftSessionID
     }
 
     var body: some View {
@@ -586,6 +589,7 @@ private struct StablePromptEditor: View, Equatable {
             isEditable: isEditable,
             resetID: resetID,
             submitRevision: submitRevision,
+            draftSessionID: draftSessionID,
             onSubmit: onSubmit,
             onDropFiles: onDropFiles,
             onDraftChange: onDraftChange,
@@ -599,9 +603,10 @@ struct PromptTextView: NSViewRepresentable {
     var isEditable: Bool
     var resetID: Int
     var submitRevision: Int
+    var draftSessionID: String?
     var onSubmit: (String) -> Void
     var onDropFiles: ([URL]) -> Void = { _ in }
-    var onDraftChange: (String) -> Void = { _ in }
+    var onDraftChange: (String, String?) -> Void = { _, _ in }
     var onTextPresenceChange: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
@@ -648,8 +653,12 @@ struct PromptTextView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.parent = self
         guard let textView = scrollView.documentView as? SubmitTextView else { return }
+        let previousParent = context.coordinator.parent
+        if previousParent.draftSessionID != draftSessionID {
+            context.coordinator.flushDraft(textView: textView, parent: previousParent)
+        }
+        context.coordinator.parent = self
         if context.coordinator.lastAppliedResetID != resetID {
             textView.string = text
             context.coordinator.lastAppliedResetID = resetID
@@ -668,6 +677,7 @@ struct PromptTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: PromptTextView
         private var presenceGate = ZTextPresenceGate()
+        private var pendingDraftWorkItem: DispatchWorkItem?
         var lastAppliedResetID = 0
         var lastHandledSubmitRevision = 0
 
@@ -677,17 +687,36 @@ struct PromptTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.onDraftChange(textView.string)
+            scheduleDraftChange(textView)
             publishPresence(textView)
         }
 
         func submit(textView: NSTextView) {
+            pendingDraftWorkItem?.cancel()
+            pendingDraftWorkItem = nil
             let submitted = textView.string
             parent.onSubmit(submitted)
             guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             textView.string = ""
-            parent.onDraftChange("")
+            parent.onDraftChange("", parent.draftSessionID)
             publishPresence(textView)
+        }
+
+        func flushDraft(textView: NSTextView, parent draftParent: PromptTextView) {
+            pendingDraftWorkItem?.cancel()
+            pendingDraftWorkItem = nil
+            draftParent.onDraftChange(textView.string, draftParent.draftSessionID)
+        }
+
+        private func scheduleDraftChange(_ textView: NSTextView) {
+            pendingDraftWorkItem?.cancel()
+            let draftParent = parent
+            let item = DispatchWorkItem { [weak textView] in
+                guard let textView else { return }
+                draftParent.onDraftChange(textView.string, draftParent.draftSessionID)
+            }
+            pendingDraftWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: item)
         }
 
         func publishPresence(_ textView: NSTextView) {

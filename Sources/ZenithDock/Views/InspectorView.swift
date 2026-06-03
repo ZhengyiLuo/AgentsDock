@@ -256,7 +256,7 @@ struct InspectorView: View {
             if let session = store.selectedSession {
                 NewJobDetailsSheet(
                     sessionTitle: session.title,
-                    composerPrompt: store.prompt,
+                    composerPrompt: store.draftPrompt(for: store.selectedSessionID),
                     title: $jobTitle,
                     prompt: $jobPrompt,
                     intervalText: $intervalText,
@@ -461,7 +461,7 @@ struct InspectorView: View {
     }
 
     var effectiveJobPrompt: String {
-        cleanJobPrompt.isEmpty ? store.prompt.trimmingCharacters(in: .whitespacesAndNewlines) : cleanJobPrompt
+        cleanJobPrompt.isEmpty ? store.draftPrompt(for: store.selectedSessionID).trimmingCharacters(in: .whitespacesAndNewlines) : cleanJobPrompt
     }
 
     var parsedJobInterval: Int? {
