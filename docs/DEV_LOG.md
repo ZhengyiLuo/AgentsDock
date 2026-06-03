@@ -19,6 +19,32 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-02 Follow-Up - Timeline Fly-By Regression Guard
+
+Context:
+
+- User reported the message fly-by effect returned after build 49.
+- Root cause was not only event count. Disk cache trims large message bodies;
+  the latest server snapshot can replace those same event ids with full text,
+  causing huge row expansion without adding many events.
+
+Change:
+
+- Mac and iOS/iPadOS timeline snapshot masking now compares projected rendered
+  text weight as well as event-count deltas.
+- Heavy same-row text expansion masks the timeline until the latest snapshot is
+  applied and bottom positioning can settle.
+- Small no-op cached refreshes still avoid the foreground spinner.
+- Added guardrails so future anti-flyby checks cover text expansion, not just
+  large event batches.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination 'generic/platform=iOS Simulator' build -quiet` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app`; build script synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-02 Follow-Up - TestFlight Build 49
 
 Context:

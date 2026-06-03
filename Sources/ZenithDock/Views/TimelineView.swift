@@ -44,7 +44,7 @@ struct TimelineView: View {
             store.isSelectingSession ||
             store.loadedSessionID != store.selectedSessionID
         )
-        let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch && !(store.isRefreshingCachedDelta && hasWarmSelectedTimeline)
+        let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
         let shouldMaskTimeline = timelineRowsStructurallySuspended
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents

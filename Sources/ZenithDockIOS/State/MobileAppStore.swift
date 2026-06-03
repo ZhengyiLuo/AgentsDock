@@ -48,6 +48,7 @@ final class MobileAppStore: ObservableObject {
     private let initialEventLimit = 160
     private let olderHistoryPageLimit = 160
     private let largeTimelineBatchEventThreshold = 80
+    private let largeTimelineBatchCharacterThreshold = 14_000
     private let maxMemoryCachedChats = 8
     private let maxMemoryCachedEvents = 360
     private var webSocket: URLSessionWebSocketTask?
@@ -303,14 +304,32 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
-    private func shouldMaskTimelineBatch(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
+    private func shouldMaskTimelineBatch(
+        oldCount: Int,
+        newCount: Int,
+        incomingCount: Int,
+        oldTextWeight: Int = 0,
+        newTextWeight: Int = 0
+    ) -> Bool {
         incomingCount >= largeTimelineBatchEventThreshold ||
-            abs(newCount - oldCount) >= largeTimelineBatchEventThreshold
+            abs(newCount - oldCount) >= largeTimelineBatchEventThreshold ||
+            abs(newTextWeight - oldTextWeight) >= largeTimelineBatchCharacterThreshold
     }
 
-    private func beginLargeTimelineBatchMaskIfCold(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
-        guard displayEvents.isEmpty,
-              shouldMaskTimelineBatch(oldCount: oldCount, newCount: newCount, incomingCount: incomingCount) else {
+    private func beginLargeTimelineBatchMaskIfNeeded(
+        oldCount: Int,
+        newCount: Int,
+        incomingCount: Int,
+        oldTextWeight: Int = 0,
+        newTextWeight: Int = 0
+    ) -> Bool {
+        guard shouldMaskTimelineBatch(
+            oldCount: oldCount,
+            newCount: newCount,
+            incomingCount: incomingCount,
+            oldTextWeight: oldTextWeight,
+            newTextWeight: newTextWeight
+        ) else {
             return false
         }
         timelineBatchRevealTask?.cancel()
@@ -1914,12 +1933,15 @@ final class MobileAppStore: ObservableObject {
         replaceSessionFromServer(response.session)
         let snapshotEvents = timelineEvents(from: response.events)
         let oldCount = events.count
+        let oldTextWeight = timelineDisplayWeight(displayEvents)
         let existingIDs = Set(events.map(\.id))
         let incomingCount = snapshotEvents.filter { !existingIDs.contains($0.id) }.count
-        let masked = beginLargeTimelineBatchMaskIfCold(
+        let masked = beginLargeTimelineBatchMaskIfNeeded(
             oldCount: oldCount,
             newCount: snapshotEvents.count,
-            incomingCount: incomingCount
+            incomingCount: incomingCount,
+            oldTextWeight: oldTextWeight,
+            newTextWeight: timelineDisplayWeight(makeDisplayEvents(from: snapshotEvents))
         )
         events = snapshotEvents
         omittedHistoryEventCount = response.events_omitted_before ?? 0
@@ -1928,6 +1950,21 @@ final class MobileAppStore: ObservableObject {
         rebuildDisplayEvents()
         if masked {
             scheduleLargeTimelineBatchReveal()
+        }
+    }
+
+    private func timelineDisplayWeight(_ source: [ZEvent]) -> Int {
+        source.reduce(0) { total, event in
+            let eventWeight = [
+                event.text,
+                event.result_text,
+                event.output,
+                event.message,
+                event.prompt
+            ].compactMap { value in
+                value.map { min($0.count, largeTimelineBatchCharacterThreshold * 2) }
+            }.reduce(0, +)
+            return total + eventWeight
         }
     }
 

@@ -120,6 +120,7 @@ final class AppStore: ObservableObject {
     private let streamBackfillMaskThreshold = 18
     private let streamFlushDelayNanos: UInt64 = 320_000_000
     private let largeTimelineBatchEventThreshold = 80
+    private let largeTimelineBatchCharacterThreshold = 14_000
 
     private struct CachedChat: Codable, Sendable {
         var session: ZSession
@@ -570,9 +571,16 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func shouldMaskTimelineBatch(oldCount: Int, newCount: Int, incomingCount: Int) -> Bool {
+    private func shouldMaskTimelineBatch(
+        oldCount: Int,
+        newCount: Int,
+        incomingCount: Int,
+        oldTextWeight: Int = 0,
+        newTextWeight: Int = 0
+    ) -> Bool {
         incomingCount >= largeTimelineBatchEventThreshold ||
-            abs(newCount - oldCount) >= largeTimelineBatchEventThreshold
+            abs(newCount - oldCount) >= largeTimelineBatchEventThreshold ||
+            abs(newTextWeight - oldTextWeight) >= largeTimelineBatchCharacterThreshold
     }
 
     private var shouldPreserveRenderableTimelineDuringBackgroundRefresh: Bool {
@@ -2930,18 +2938,22 @@ final class AppStore: ObservableObject {
         replaceSessionFromServer(response.session)
         let snapshotEvents = timelineEvents(from: response.events)
         let oldCount = events.count
+        let oldTextWeight = timelineDisplayWeight(displayEvents)
         let preservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []
         let preservedIDs = Set(preservedEvents.map(\.id))
         let newSnapshotEventCount = preserveExisting
             ? snapshotEvents.filter { !preservedIDs.contains($0.id) }.count
             : snapshotEvents.count
-        let projectedCount = preservedEvents.isEmpty
-            ? snapshotEvents.count
-            : Set((preservedEvents + snapshotEvents).map(\.id)).count
-        let shouldMaskLargeBatch = !shouldPreserveRenderableTimelineDuringBackgroundRefresh && shouldMaskTimelineBatch(
+        let projectedEvents = projectedTimelineEventsAfterSnapshot(
+            snapshotEvents: snapshotEvents,
+            preservedEvents: preservedEvents
+        )
+        let shouldMaskLargeBatch = shouldMaskTimelineBatch(
             oldCount: oldCount,
-            newCount: projectedCount,
-            incomingCount: newSnapshotEventCount
+            newCount: projectedEvents.count,
+            incomingCount: newSnapshotEventCount,
+            oldTextWeight: oldTextWeight,
+            newTextWeight: timelineDisplayWeight(makeDisplayEvents(from: projectedEvents))
         )
         if shouldMaskLargeBatch {
             beginLargeTimelineBatchMask()
@@ -2992,6 +3004,37 @@ final class AppStore: ObservableObject {
             scheduleLargeTimelineBatchReveal()
         }
         return true
+    }
+
+    private func projectedTimelineEventsAfterSnapshot(snapshotEvents: [ZEvent], preservedEvents: [ZEvent]) -> [ZEvent] {
+        guard !preservedEvents.isEmpty else { return snapshotEvents }
+        var byID: [String: ZEvent] = [:]
+        for event in preservedEvents {
+            byID[event.id] = event
+        }
+        for event in snapshotEvents {
+            byID[event.id] = event
+        }
+        var mergedEvents = byID.values.sorted { $0.seq < $1.seq }
+        if mergedEvents.count > maxLoadedTimelineEvents {
+            mergedEvents.removeFirst(mergedEvents.count - maxLoadedTimelineEvents)
+        }
+        return mergedEvents
+    }
+
+    private func timelineDisplayWeight(_ source: [ZEvent]) -> Int {
+        source.reduce(0) { total, event in
+            let eventWeight = [
+                event.text,
+                event.result_text,
+                event.output,
+                event.message,
+                event.prompt
+            ].compactMap { value in
+                value.map { min($0.count, largeTimelineBatchCharacterThreshold * 2) }
+            }.reduce(0, +)
+            return total + eventWeight
+        }
     }
 
     private func requestScrollToEvent(_ eventID: String) {
