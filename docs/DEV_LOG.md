@@ -19,6 +19,33 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-03 Follow-Up - TestFlight Build 50
+
+Context:
+
+- User requested TestFlight after the stale-manifest artifact recovery fix and
+  bottom-scroll churn reduction.
+- A Claude turn wrote its video manifest to an older run file, so the app did
+  not show the delivered MP4 until the server recovered the stale manifest.
+
+Change:
+
+- Bumped `CURRENT_PROJECT_VERSION` from `49` to `50`.
+- Reusing `MARKETING_VERSION` `0.1.1`.
+- `server/agent_server.py` now recovers recent leftover manifest files for the
+  same session/run window after normal manifest collection.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `python3 -m py_compile server/agent_server.py` passed.
+- Deployed/restarted the active `sonic` server with `server/deploy.sh sonic`.
+- Uploaded iOS/iPadOS build `50` successfully: `Uploaded ZenithDockIOS`.
+- Uploaded macOS build `50` successfully: `Uploaded ZenithDockMac`.
+- Rebuilt local Mac app at `dist/ZenithDock.app`.
+- MBA sync was skipped because `zens-macbook-air` was unreachable over SSH.
+- Pushed standalone `ZhengyiLuo/ZenithBotServer` with the latest server code.
+
 ## 2026-06-02 Follow-Up - Timeline Fly-By Regression Guard
 
 Context:
