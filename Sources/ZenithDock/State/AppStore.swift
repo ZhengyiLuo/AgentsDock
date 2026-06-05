@@ -2944,9 +2944,7 @@ final class AppStore: ObservableObject {
            !shouldPreserveRenderableTimelineDuringBackgroundRefresh {
             beginLargeTimelineBatchMask()
         }
-        if buffered.contains(where: isAgentVisibleMessage) {
-            preserveTimelineScrollRevision += 1
-        }
+        preserveSelectedTimelineIfNeeded(for: buffered)
         applyStreamEvents(buffered)
         if isApplyingLargeTimelineBatch {
             scheduleLargeTimelineBatchReveal()
@@ -3052,9 +3050,7 @@ final class AppStore: ObservableObject {
             events.removeFirst(overflow)
             omittedHistoryEventCount += overflow
         }
-        if isAgentVisibleMessage(event) {
-            preserveTimelineScrollRevision += 1
-        }
+        preserveSelectedTimelineIfNeeded(for: [event])
         if shouldRebuildDisplayEvents(for: [event]) {
             rebuildDisplayEvents()
         }
@@ -3114,6 +3110,15 @@ final class AppStore: ObservableObject {
             self.lastScrollRequestAt = Date()
             self.scrollToBottomRevision += 1
         }
+    }
+
+    private func preserveSelectedTimelineIfNeeded(for incoming: [ZEvent]) {
+        guard !selectedTimelineAtBottom,
+              let selectedSessionID,
+              incoming.contains(where: { $0.session_id == selectedSessionID && isAgentVisibleMessage($0) }) else {
+            return
+        }
+        preserveTimelineScrollRevision += 1
     }
 
     private func mergeEvents(_ incoming: [ZEvent]) {

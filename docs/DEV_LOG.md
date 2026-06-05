@@ -19,6 +19,30 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-05 Follow-Up - Near-Bottom Timeline Scroll Churn
+
+Context:
+
+- User reported that scrolling near the end of long Mac chat histories was
+  still clunky.
+- Root cause found in the Mac timeline: live selected-chat updates preserved
+  exact scroll origin on every visible agent event and expanded the rendered row
+  window while already at the bottom. That created forced layout restores and
+  gradually heavier row projection during streaming.
+
+Change:
+
+- Live bottom updates now keep the visible row window stable instead of growing
+  it for every incoming event.
+- Passive scroll-position preservation now runs only when the selected timeline
+  is away from the bottom, avoiding unnecessary forced layout restores at the
+  end of the chat.
+- Added guardrails for both behaviors.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+
 ## 2026-06-03 Follow-Up - TestFlight Build 50
 
 Context:

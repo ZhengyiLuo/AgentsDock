@@ -470,12 +470,8 @@ struct TimelineView: View {
     }
 
     private func cappedLiveVisibleRowLimit(rowCount: Int, oldCount: Int, newCount: Int) -> Int {
-        let incomingCount = max(0, newCount - oldCount)
         let currentLimit = max(visibleRowLimit, defaultVisibleRowLimit)
-        guard incomingCount > 0 else {
-            return min(rowCount, currentLimit)
-        }
-        return min(rowCount, currentLimit + min(rowPageSize, incomingCount))
+        return min(rowCount, currentLimit)
     }
 
     private func scrollToRequestedEvent(_ proxy: ScrollViewProxy) {
