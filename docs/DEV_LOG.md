@@ -19,6 +19,31 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-09 Follow-Up - Pull Server MR
+
+Context:
+
+- User asked to pull the server-code MR.
+- `ZhengyiLuo/ZenithBotServer` had PR #1 already merged into `origin/main`:
+  `Merge pull request #1 from ZhengyiLuo/fix/codex-event-stream-parser`.
+- A separate `origin/fernando` branch exists but diverged from
+  `69d7abe Repair stale unread cursors`; it is not a GitHub PR ref and was not
+  merged into local `main`.
+
+Change:
+
+- Fast-forwarded standalone server repo `/Users/zen/agi/ZenithbotServer` to
+  `6c78f1a`.
+- Synced the pulled `agent_server.py` into
+  `/Users/zen/agi/ZenithDock/server/agent_server.py` so app-local deploy paths
+  match the standalone server source.
+
+Verification:
+
+- `python3 -m py_compile agent_server.py` passed in the standalone server repo.
+- `python3 -m py_compile server/agent_server.py` passed in the app repo.
+- `swift run ZenithGuardrails` passed.
+
 ## 2026-06-05 Follow-Up - Near-Bottom Timeline Scroll Churn
 
 Context:
