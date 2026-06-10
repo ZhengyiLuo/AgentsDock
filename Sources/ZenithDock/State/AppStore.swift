@@ -337,7 +337,15 @@ final class AppStore: ObservableObject {
     }
 
     func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {
-        activeSessions.filter { $0.id != sourceSessionID }
+        sidebarOrderedActiveSessions.filter { $0.id != sourceSessionID }
+    }
+
+    private var sidebarOrderedActiveSessions: [ZSession] {
+        var ordered: [ZSession] = pinnedSessions
+        for folder in folderNames {
+            ordered.append(contentsOf: folders[folder] ?? [])
+        }
+        return ordered
     }
 
     private func orderedSessions(_ source: [ZSession]) -> [ZSession] {
