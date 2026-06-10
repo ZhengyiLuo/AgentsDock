@@ -4984,3 +4984,18 @@ Third follow-up:
   not get resurrected during unrelated turns.
 - Added guardrails requiring both Claude and Codex runs to sweep recent
   leftover manifests after collecting the primary manifest.
+
+## 2026-06-10 - Claude Resume Cwd Guard
+
+- Debugged Fable/Claude turns that failed with `No conversation found with
+  session ID` after the chat cwd changed from the cwd that created the original
+  Claude transcript.
+- Claude Code resume IDs are scoped by the cwd-derived project transcript path,
+  so the server now checks that the transcript exists for the current cwd before
+  passing `--resume`.
+- Saved Claude provider sessions now remember their launch cwd. If an old or
+  moved session points at a transcript from another cwd, the server skips resume
+  and starts a fresh Claude provider session instead of repeatedly injecting a
+  visible error into the chat.
+- Added guardrails so future Claude launches keep the cwd-scoped resume preflight
+  and cwd metadata save.
