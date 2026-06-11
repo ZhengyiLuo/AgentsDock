@@ -351,6 +351,7 @@ class CreateSessionRequest(BaseModel):
     model: str | None = None
     effort: str | None = None
     pinned: bool | None = None
+    archived: bool | None = None
     provider_session_id: str | None = None
     session_id: str | None = None
     claude_session_id: str | None = None
@@ -559,6 +560,8 @@ class SessionStore:
         title = req.title or (
             f"Resumed {backend.title()} {str(active_provider_id)[:8]}" if active_provider_id else "New chat"
         )
+        archived = bool(req.archived)
+        pinned = bool(req.pinned) and not archived
         sess = {
             "id": sid,
             "title": title,
@@ -572,10 +575,10 @@ class SessionStore:
             "codex_thread_id": codex_thread_id,
             "parent_id": parent_id,
             "fork_from": None,
-            "pinned": bool(req.pinned),
-            "pinned_at": now if req.pinned else None,
-            "archived": False,
-            "archived_at": None,
+            "pinned": pinned,
+            "pinned_at": now if pinned else None,
+            "archived": archived,
+            "archived_at": now if archived else None,
             "created_at": now,
             "updated_at": now,
         }
@@ -5320,11 +5323,15 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
             backend=parent_backend,
             model=parent.get("model"),
             effort=parent.get("effort"),
+            pinned=bool(parent.get("pinned")),
+            archived=bool(parent.get("archived")),
             provider_session_id=forked_codex_thread_id if parent_backend == BACKEND_CODEX else None,
             codex_thread_id=forked_codex_thread_id if parent_backend == BACKEND_CODEX else None,
         ),
         parent_id=session_id,
     )
+    await STORE.reorder(child["id"], target_id=session_id, placement="after")
+    child = STORE.sessions[child["id"]]
     if parent_backend == BACKEND_CODEX and codex_fork_error:
         child["memory_seed"] = build_fork_memory(parent, session_id, reason=codex_fork_error)
         child["memory_seed_used"] = False

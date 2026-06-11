@@ -343,6 +343,18 @@ func checkArchiveSessionBehavior() throws {
     try assert(macStore.contains("sidebarOrderedActiveSessions.filter { $0.id != sourceSessionID }"), "Mac digest targets must follow sidebar order instead of raw active-session order")
     try assert(mobileStore.contains("sidebarOrderedActiveSessions.filter { $0.id != sourceSessionID }"), "iOS digest targets must follow sidebar order instead of raw active-session order")
     try assert(macStore.contains("for folder in folderNames") && mobileStore.contains("for folder in folderNames"), "Digest target ordering must respect manual folder order")
+    guard let macForkRange = macStore.range(of: "func forkSelected() async"),
+          let macDigestRange = macStore.range(of: "func createHandoffDigest", range: macForkRange.upperBound..<macStore.endIndex),
+          let mobileForkRange = mobileStore.range(of: "func forkSelected() async"),
+          let mobileDigestRange = mobileStore.range(of: "func createHandoffDigest", range: mobileForkRange.upperBound..<mobileStore.endIndex) else {
+        throw GuardrailFailure.failed("Mac and iOS stores must keep identifiable forkSelected boundaries")
+    }
+    let macForkBody = macStore[macForkRange.lowerBound..<macDigestRange.lowerBound]
+    let mobileForkBody = mobileStore[mobileForkRange.lowerBound..<mobileDigestRange.lowerBound]
+    try assert(macForkBody.contains("insertForkedSession(res.session, after: sid)"), "Mac forks must insert beside the source chat locally")
+    try assert(mobileForkBody.contains("insertForkedSession(res.session, after: sid)"), "iOS forks must insert beside the source chat locally")
+    try assert(!macForkBody.contains("sessions.insert(res.session, at: 0)"), "Mac forks must not jump to the top of the sidebar")
+    try assert(!mobileForkBody.contains("sessions.insert(res.session, at: 0)"), "iOS forks must not jump to the top of the sidebar")
     try assert(server.contains("archived: bool | None = None"), "Server session update API must accept archived state")
     try assert(server.contains("\"archived\", \"archived_at\", \"sort_order\""), "Server public sessions must expose archived state and stable order")
     try assert(server.contains("def sorted_sessions("), "Server session list must use explicit sort_order instead of updated_at recency")
@@ -350,6 +362,8 @@ func checkArchiveSessionBehavior() throws {
     try assert(server.contains("target_id: str | None = None") && server.contains("placement: str | None = None"), "Server reorder endpoint must accept target placement for drag/drop")
     try assert(server.contains("reordered = peers[:insert_index] + [sess] + peers[insert_index:]"), "Server drag/drop reorder must compute one final order")
     try assert(server.contains("req.direction, req.target_id, req.placement"), "Server reorder route must pass target placement to the store")
+    try assert(server.contains("pinned=bool(parent.get(\"pinned\"))") && server.contains("archived=bool(parent.get(\"archived\"))"), "Server forks must preserve parent sidebar section metadata")
+    try assert(server.contains("await STORE.reorder(child[\"id\"], target_id=session_id, placement=\"after\")"), "Server forks must place the child directly after the parent")
 }
 
 func checkFolderSectionControls() throws {

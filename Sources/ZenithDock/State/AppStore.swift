@@ -2177,6 +2177,16 @@ final class AppStore: ObservableObject {
         sessions[idx] = sessionWithPendingRuntime(session)
     }
 
+    private func insertForkedSession(_ session: ZSession, after parentID: String) {
+        let prepared = sessionWithPendingRuntime(session)
+        sessions.removeAll { $0.id == prepared.id }
+        if let parentIndex = sessions.firstIndex(where: { $0.id == parentID }) {
+            sessions.insert(prepared, at: min(parentIndex + 1, sessions.count))
+        } else {
+            sessions.insert(prepared, at: 0)
+        }
+    }
+
     private func sessionsWithPendingRuntime(_ incoming: [ZSession]) -> [ZSession] {
         incoming.map(sessionWithPendingRuntime)
     }
@@ -2306,7 +2316,7 @@ final class AppStore: ObservableObject {
             struct Response: Codable { let session: ZSession }
             let title = "Fork of \(selectedSession?.title ?? "Chat")"
             let res: Response = try await api.post("/api/sessions/\(sid)/fork", body: Body(title: title))
-            sessions.insert(res.session, at: 0)
+            insertForkedSession(res.session, after: sid)
             AppLogger.info("forked parent=\(sid) child=\(res.session.id) backend=\(res.session.backend)")
             await select(sessionID: res.session.id)
         } catch {

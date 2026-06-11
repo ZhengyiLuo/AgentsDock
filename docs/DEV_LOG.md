@@ -19,6 +19,36 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-11 Follow-Up - Fork Placement Near Source Chat
+
+Context:
+
+- User wanted forked chats to stay close to the original chat rather than jump
+  to the top of the sidebar.
+- Forks should preserve the original sidebar section context, including folder,
+  pinned state, and archived state.
+
+Change:
+
+- Server forks now copy parent `pinned` and `archived` metadata and immediately
+  reorder the forked session directly after the source session.
+- Mac and iOS/iPadOS stores now use `insertForkedSession(_:after:)` only for
+  forks, so the local sidebar updates beside the parent immediately.
+- Create/resume flows still insert at the top; this fork-specific behavior is
+  intentionally scoped.
+- Added guardrails covering Mac/iOS local fork placement and server-side parent
+  metadata preservation/reorder behavior.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+- `xcodebuild` iOS no-sign compile passed.
+- Deployed/restarted the active `sonic` server with `server/deploy.sh sonic`.
+
 ## 2026-06-09 Follow-Up - Pull Server MR
 
 Context:
