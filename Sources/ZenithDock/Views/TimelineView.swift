@@ -575,9 +575,8 @@ struct TimelineView: View {
     @discardableResult
     private func revealOlderRows(preservingPositionWith proxy: ScrollViewProxy) -> Bool {
         let anchor = firstRenderedAnchor()
-        let rowCount = renderedRows(visibleLimit: visibleRowLimit + rowPageSize).count
-        guard visibleRowLimit < rowCount || hasHiddenProjectedEvents(visibleLimit: visibleRowLimit) else { return false }
-        setVisibleRowLimit(min(max(rowCount, visibleRowLimit + rowPageSize), visibleRowLimit + rowPageSize))
+        guard let page = olderPageReveal(oldLimit: visibleRowLimit) else { return false }
+        setVisibleRowLimit(page.limit)
         restoreScrollPosition(to: anchor, proxy: proxy)
         return true
     }
@@ -585,14 +584,47 @@ struct TimelineView: View {
     @discardableResult
     private func revealOlderRowsShowingNewPage(_ proxy: ScrollViewProxy) -> Bool {
         let oldLimit = visibleRowLimit
-        let rows = renderedRows(visibleLimit: visibleRowLimit + rowPageSize)
-        guard visibleRowLimit < rows.count || hasHiddenProjectedEvents(visibleLimit: visibleRowLimit) else { return false }
-        let nextLimit = min(max(rows.count, visibleRowLimit + rowPageSize), visibleRowLimit + rowPageSize)
-        let target = Array(rows.suffix(nextLimit)).first
-        setVisibleRowLimit(nextLimit)
-        AppLogger.info("show older rows old_limit=\(oldLimit) new_limit=\(nextLimit) rendered_rows=\(rows.count) target=\(target?.id ?? "-") hidden_before=\(store.hiddenDisplayEventCount)")
-        scrollToOlderPageTarget(target?.id, proxy: proxy)
+        guard let page = olderPageReveal(oldLimit: oldLimit) else { return false }
+        setVisibleRowLimit(page.limit)
+        AppLogger.info("show older rows old_limit=\(oldLimit) new_limit=\(page.limit) rendered_rows=\(page.renderedCount) target=\(page.target?.id ?? "-") hidden_before=\(store.hiddenDisplayEventCount)")
+        scrollToOlderPageTarget(page.target?.id, proxy: proxy)
         return true
+    }
+
+    private func olderPageReveal(oldLimit: Int) -> (limit: Int, target: TimelineRow?, renderedCount: Int)? {
+        let maxExpansion = oldLimit + rowPageSize * 6
+        var candidateLimit = oldLimit
+        var best: (limit: Int, target: TimelineRow?, renderedCount: Int)?
+
+        repeat {
+            candidateLimit += rowPageSize
+            let rows = renderedRows(visibleLimit: candidateLimit)
+            let nextLimit = min(rows.count, candidateLimit)
+            guard nextLimit > oldLimit || hasHiddenProjectedEvents(visibleLimit: oldLimit) else { return nil }
+
+            let target = olderPageTarget(in: rows, oldLimit: oldLimit, nextLimit: nextLimit)
+            best = (max(oldLimit, nextLimit), target, rows.count)
+
+            if target?.isPrimaryPageRow == true ||
+                candidateLimit >= maxExpansion ||
+                (rows.count <= candidateLimit && !hasHiddenProjectedEvents(visibleLimit: candidateLimit)) {
+                return (best?.limit ?? 0) > oldLimit ? best : nil
+            }
+        } while candidateLimit < maxExpansion
+
+        return (best?.limit ?? 0) > oldLimit ? best : nil
+    }
+
+    private func olderPageTarget(in rows: [TimelineRow], oldLimit: Int, nextLimit: Int) -> TimelineRow? {
+        guard !rows.isEmpty, nextLimit > oldLimit else { return nil }
+        let newStart = max(0, rows.count - nextLimit)
+        let oldStart = max(0, rows.count - min(oldLimit, rows.count))
+        guard newStart < oldStart else {
+            let visibleRows = Array(rows.suffix(nextLimit))
+            return visibleRows.first(where: { $0.isPrimaryPageRow }) ?? visibleRows.first
+        }
+        let newlyRevealed = rows[newStart..<oldStart]
+        return newlyRevealed.first(where: { $0.isPrimaryPageRow }) ?? newlyRevealed.first
     }
 
     private func scrollToOlderPageTarget(_ rowID: String?, proxy: ScrollViewProxy) {
@@ -688,7 +720,7 @@ struct TimelineView: View {
             return (fallback.id, index)
         }
         let visibleRows = Array(rows.suffix(preferredLimit))
-        guard let row = visibleRows.first,
+        guard let row = visibleRows.first(where: { $0.isPrimaryPageRow }) ?? visibleRows.first,
               let index = rows.firstIndex(where: { $0.id == row.id }) else {
             return nil
         }
@@ -725,8 +757,12 @@ struct TimelineView: View {
         } else {
             anchorIndex = nil
         }
-        guard let anchorIndex, anchorIndex > 0 else { return rows.first }
-        return rows[max(0, anchorIndex - rowPageSize)]
+        guard let anchorIndex, anchorIndex > 0 else {
+            return rows.first(where: { $0.isPrimaryPageRow }) ?? rows.first
+        }
+        let start = max(0, anchorIndex - rowPageSize)
+        let candidates = rows[start..<anchorIndex]
+        return candidates.first(where: { $0.isPrimaryPageRow }) ?? candidates.first
     }
 
     private func restoreScrollPosition(to anchor: TimelineScrollAnchor?, proxy: ScrollViewProxy) {
@@ -1435,6 +1471,26 @@ private final class TimelineRow: Identifiable {
         }
     }
 
+    var isPrimaryPageRow: Bool {
+        switch kind {
+        case .artifacts, .job, .jobGroup:
+            return true
+        case .trace:
+            return false
+        case .event(let event):
+            if Self.nonPrimaryPageEventTypes.contains(event.type) {
+                return false
+            }
+            if event.type == "assistant_text" {
+                return event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+            if event.type == "turn_finished" {
+                return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+            return true
+        }
+    }
+
     func containsEventID(_ eventID: String) -> Bool {
         if eventIDs.contains(eventID) {
             return true
@@ -1452,6 +1508,21 @@ private final class TimelineRow: Identifiable {
             return events.contains(where: { $0.id == eventID })
         }
     }
+
+    private static let nonPrimaryPageEventTypes: Set<String> = [
+        "reasoning_summary",
+        "tool_started",
+        "tool_finished",
+        "idle_warning",
+        "raw_event",
+        "process_started",
+        "provider_session",
+        "cwd_fallback",
+        "history_imported",
+        "backend_changed",
+        "artifact_error",
+        "session_created"
+    ]
 }
 
 private struct TimelineUnreadMarker: View {

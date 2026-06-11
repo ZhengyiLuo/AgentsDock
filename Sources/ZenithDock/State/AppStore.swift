@@ -1801,6 +1801,7 @@ final class AppStore: ObservableObject {
             var latestSession: ZSession?
             var receivedCount = 0
             var skippedInvisiblePages = 0
+            var skippedNonPrimaryPages = 0
             var knownIDs = Set(events.map(\.id))
             var older: [ZEvent] = []
             var firstAddedEventID: String?
@@ -1825,10 +1826,10 @@ final class AppStore: ObservableObject {
                     return true
                 }
                 if firstAddedEventID == nil {
-                    firstAddedEventID = visibleOlder.first?.id
+                    firstAddedEventID = visibleOlder.first(where: isPrimaryTimelinePageEvent)?.id ?? visibleOlder.first?.id
                 }
                 older.append(contentsOf: visibleOlder)
-                if !visibleOlder.isEmpty || res.events.isEmpty || remainingOmitted <= 0 {
+                if visibleOlder.contains(where: isPrimaryTimelinePageEvent) || res.events.isEmpty || remainingOmitted <= 0 {
                     break
                 }
 
@@ -1836,7 +1837,11 @@ final class AppStore: ObservableObject {
                       nextBefore < cursorBefore else {
                     break
                 }
-                skippedInvisiblePages += 1
+                if visibleOlder.isEmpty {
+                    skippedInvisiblePages += 1
+                } else {
+                    skippedNonPrimaryPages += 1
+                }
                 cursorBefore = nextBefore
             }
 
@@ -1858,7 +1863,7 @@ final class AppStore: ObservableObject {
             latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
             rebuildDisplayEvents()
             saveSelectedChatCache()
-            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) added=\(older.count) first_added=\(firstAddedEventID ?? "-") skipped_invisible_pages=\(skippedInvisiblePages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) added=\(older.count) first_added=\(firstAddedEventID ?? "-") skipped_invisible_pages=\(skippedInvisiblePages) skipped_non_primary_pages=\(skippedNonPrimaryPages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             return OlderHistoryLoadResult(addedCount: older.count, firstAddedEventID: firstAddedEventID)
         } catch {
             AppLogger.error("load older failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
@@ -3640,6 +3645,34 @@ final class AppStore: ObservableObject {
     private func timelineEvents(from source: [ZEvent]) -> [ZEvent] {
         showDebugEvents ? source : source.filter { $0.type != "raw_event" }
     }
+
+    private func isPrimaryTimelinePageEvent(_ event: ZEvent) -> Bool {
+        if Self.nonPrimaryTimelinePageEventTypes.contains(event.type) {
+            return false
+        }
+        if event.type == "assistant_text" {
+            return event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        if event.type == "turn_finished" {
+            return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        return true
+    }
+
+    private static let nonPrimaryTimelinePageEventTypes: Set<String> = [
+        "reasoning_summary",
+        "tool_started",
+        "tool_finished",
+        "idle_warning",
+        "raw_event",
+        "process_started",
+        "provider_session",
+        "cwd_fallback",
+        "history_imported",
+        "backend_changed",
+        "artifact_error",
+        "session_created"
+    ]
 
     nonisolated private static func sanitizedForCache(_ event: ZEvent, maxCharacters: Int) -> ZEvent {
         var copy = event

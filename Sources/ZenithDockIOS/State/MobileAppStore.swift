@@ -1407,7 +1407,7 @@ final class MobileAppStore: ObservableObject {
                     return true
                 }
                 older.append(contentsOf: visibleOlder)
-                if !visibleOlder.isEmpty || res.events.isEmpty || remainingOmitted <= 0 {
+                if visibleOlder.contains(where: isPrimaryTimelinePageEvent) || res.events.isEmpty || remainingOmitted <= 0 {
                     break
                 }
 
@@ -1952,6 +1952,34 @@ final class MobileAppStore: ObservableObject {
     private func timelineEvents(from source: [ZEvent]) -> [ZEvent] {
         source.filter { $0.type != "raw_event" }
     }
+
+    private func isPrimaryTimelinePageEvent(_ event: ZEvent) -> Bool {
+        if Self.nonPrimaryTimelinePageEventTypes.contains(event.type) {
+            return false
+        }
+        if event.type == "assistant_text" {
+            return event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        if event.type == "turn_finished" {
+            return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        return true
+    }
+
+    private static let nonPrimaryTimelinePageEventTypes: Set<String> = [
+        "reasoning_summary",
+        "tool_started",
+        "tool_finished",
+        "idle_warning",
+        "raw_event",
+        "process_started",
+        "provider_session",
+        "cwd_fallback",
+        "history_imported",
+        "backend_changed",
+        "artifact_error",
+        "session_created"
+    ]
 
     private func mergeEvents(_ incoming: [ZEvent]) {
         guard !incoming.isEmpty else { return }

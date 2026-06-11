@@ -370,11 +370,30 @@ struct MobileTimelineView: View {
     @discardableResult
     private func revealOlderRows(preservingPositionWith proxy: ScrollViewProxy) -> Bool {
         let anchorID = firstRenderedRowID()
-        let rowCount = MobileTimelineRows.build(from: store.displayEvents).count
-        guard visibleRowLimit < rowCount else { return false }
-        setVisibleRowLimit(min(rowCount, visibleRowLimit + rowPageSize))
+        guard let nextLimit = olderPageRevealLimit(oldLimit: visibleRowLimit) else { return false }
+        setVisibleRowLimit(nextLimit)
         restoreScrollPosition(to: anchorID, proxy: proxy)
         return true
+    }
+
+    private func olderPageRevealLimit(oldLimit: Int) -> Int? {
+        let rows = MobileTimelineRows.build(from: store.displayEvents)
+        guard oldLimit < rows.count else { return nil }
+        var nextLimit = min(rows.count, oldLimit + rowPageSize)
+        let maxLimit = min(rows.count, oldLimit + rowPageSize * 6)
+
+        while !newlyRevealedRows(in: rows, oldLimit: oldLimit, nextLimit: nextLimit).contains(where: { $0.isPrimaryPageRow }) &&
+            nextLimit < maxLimit {
+            nextLimit = min(rows.count, nextLimit + rowPageSize)
+        }
+        return nextLimit > oldLimit ? nextLimit : nil
+    }
+
+    private func newlyRevealedRows(in rows: [MobileTimelineRow], oldLimit: Int, nextLimit: Int) -> ArraySlice<MobileTimelineRow> {
+        let newStart = max(0, rows.count - nextLimit)
+        let oldStart = max(0, rows.count - min(oldLimit, rows.count))
+        guard newStart < oldStart else { return [] }
+        return rows[newStart..<oldStart]
     }
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
@@ -774,6 +793,41 @@ private enum MobileTimelineRow: Identifiable {
         case .trace(let id, _): return id
         }
     }
+
+    var isPrimaryPageRow: Bool {
+        switch self {
+        case .artifacts, .job, .jobGroup:
+            return true
+        case .trace:
+            return false
+        case .event(let event):
+            if Self.nonPrimaryPageEventTypes.contains(event.type) {
+                return false
+            }
+            if event.type == "assistant_text" {
+                return event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+            if event.type == "turn_finished" {
+                return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+            return true
+        }
+    }
+
+    private static let nonPrimaryPageEventTypes: Set<String> = [
+        "reasoning_summary",
+        "tool_started",
+        "tool_finished",
+        "idle_warning",
+        "raw_event",
+        "process_started",
+        "provider_session",
+        "cwd_fallback",
+        "history_imported",
+        "backend_changed",
+        "artifact_error",
+        "session_created"
+    ]
 }
 
 private struct MobileTimelineProjection {
