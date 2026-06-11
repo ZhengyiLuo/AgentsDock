@@ -577,6 +577,11 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(mobileTimeline.contains("@State private var pendingOpenBottomSessionID"), "iOS timeline must remember that newly opened chats should land at the latest message")
     try assert(mobileTimeline.contains("private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false)"), "iOS timeline bottom positioning must default to a non-animated jump")
     try assert(mobileTimeline.contains("scrollToBottom(proxy, animated: true)"), "iOS explicit bottom button may animate, but open-chat positioning must not fly through history")
+    try assert(mobileTimeline.contains("MobileTimelineViewportHeightPreferenceKey") && mobileTimeline.contains("MobileTimelineBottomPreferenceKey"), "iOS bottom button visibility must use measured scroll geometry")
+    try assert(mobileTimeline.contains("private func updateBottomStateFromGeometry()"), "iOS bottom button state must be derived from distance to the viewport bottom")
+    try assert(mobileTimeline.contains("if maxY == nil && !displayEvents.isEmpty"), "iOS bottom button must show when LazyVStack stops instantiating the bottom marker")
+    try assert(!mobileTimeline.contains(".onAppear { isAtBottom = true }") && !mobileTimeline.contains(".onDisappear { isAtBottom = false }"), "iOS bottom button must not rely on lazy bottom marker appearance")
+    try assert(mobileTimeline.contains("settleBottomAfterExplicitScroll(proxy)"), "iOS explicit bottom button scrolls must settle after lazy layout and keyboard inset changes")
     try assert(mobileTimeline.contains("withTransaction(noAnimationTransaction)"), "iOS non-animated bottom jumps must disable SwiftUI animation")
     guard let mobileSelectRange = mobileStore.range(of: "func select(sessionID: String) async"),
           let mobileLoadOlderRange = mobileStore.range(of: "@discardableResult\n    func loadOlderHistory()", range: mobileSelectRange.upperBound..<mobileStore.endIndex) else {

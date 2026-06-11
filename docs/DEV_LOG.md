@@ -19,6 +19,34 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-11 Follow-Up - iOS Bottom Button Geometry
+
+Context:
+
+- User reported the iOS go-to-bottom button was flaky.
+- The previous implementation inferred bottom state from the bottom marker's
+  `onAppear`/`onDisappear`, which is unreliable with `LazyVStack`, keyboard
+  inset changes, and opening masks.
+
+Change:
+
+- iOS timeline now measures viewport height and bottom-marker position, then
+  derives `isAtBottom` from actual distance to the viewport bottom.
+- If `LazyVStack` stops instantiating the bottom marker while rows are visible,
+  the timeline treats that as away from bottom and shows the button.
+- Explicit button taps now do the animated scroll plus two quiet settle passes
+  so lazy layout and keyboard inset changes do not leave the timeline short of
+  the true bottom.
+- Added guardrails to keep iOS bottom visibility geometry-based.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOSCheck CODE_SIGNING_ALLOWED=NO build` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-11 Follow-Up - Fork Placement Near Source Chat
 
 Context:

@@ -21,9 +21,12 @@ struct MobileTimelineView: View {
     @State private var pendingOpenBottomSessionID: String?
     @State private var isOpeningTimelineMasked = false
     @State private var openingTimelineRevealRevision = 0
+    @State private var scrollViewportHeight: CGFloat = 0
+    @State private var bottomMarkerMaxY: CGFloat?
     private let bottomID = "mobile-timeline-bottom"
     private let defaultVisibleRowLimit = 110
     private let rowPageSize = 36
+    private let bottomVisibilityThreshold: CGFloat = 42
 
     var body: some View {
         let coldOpenRowsSuspended = store.isLoading && store.selectedSessionID != nil && store.displayEvents.isEmpty
@@ -99,14 +102,14 @@ struct MobileTimelineView: View {
                             Color.clear
                                 .frame(height: 1)
                                 .id(bottomID)
-                                .onAppear { isAtBottom = true }
-                                .onDisappear { isAtBottom = false }
+                                .background(MobileTimelineBottomReader())
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
                         .opacity(isOpeningTimelineMasked && !displayEvents.isEmpty ? 0 : 1)
                     }
                     .coordinateSpace(name: "mobileTimelineScroll")
+                    .background(MobileTimelineViewportReader())
                     .refreshable {
                         await loadOlderHistoryFromPull(proxy)
                     }
@@ -119,7 +122,7 @@ struct MobileTimelineView: View {
                         TapGesture()
                             .onEnded { dismissMobileKeyboard() }
                     )
-                    if !isAtBottom && !displayEvents.isEmpty {
+                    if shouldShowBottomButton(displayEvents: displayEvents) {
                         Button {
                             scrollToBottom(proxy, animated: true)
                         } label: {
@@ -198,6 +201,18 @@ struct MobileTimelineView: View {
                 .onPreferenceChange(MobileHistoryTopPreferenceKey.self) { topY in
                     handleHistoryTopChange(topY, proxy: proxy)
                 }
+                .onPreferenceChange(MobileTimelineViewportHeightPreferenceKey.self) { height in
+                    scrollViewportHeight = height
+                    updateBottomStateFromGeometry()
+                }
+                .onPreferenceChange(MobileTimelineBottomPreferenceKey.self) { maxY in
+                    bottomMarkerMaxY = maxY
+                    if maxY == nil && !displayEvents.isEmpty && !isOpeningTimelineMasked && !store.isApplyingLargeTimelineBatch {
+                        isAtBottom = false
+                    } else {
+                        updateBottomStateFromGeometry()
+                    }
+                }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -220,6 +235,7 @@ struct MobileTimelineView: View {
             withAnimation(.snappy) {
                 action()
             }
+            settleBottomAfterExplicitScroll(proxy)
         } else {
             withTransaction(noAnimationTransaction) {
                 action()
@@ -263,6 +279,36 @@ struct MobileTimelineView: View {
             }
         }
         return true
+    }
+
+    private func settleBottomAfterExplicitScroll(_ proxy: ScrollViewProxy) {
+        let sessionID = store.selectedSessionID
+        for delay in [0.08, 0.18] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard store.selectedSessionID == sessionID else { return }
+                suppressHistoryLoading(for: 0.35)
+                withTransaction(noAnimationTransaction) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                    isAtBottom = true
+                }
+            }
+        }
+    }
+
+    private func shouldShowBottomButton(displayEvents: [ZEvent]) -> Bool {
+        !isAtBottom &&
+            !displayEvents.isEmpty &&
+            !isOpeningTimelineMasked &&
+            !store.isApplyingLargeTimelineBatch
+    }
+
+    private func updateBottomStateFromGeometry() {
+        guard scrollViewportHeight > 0, let bottomMarkerMaxY else { return }
+        let distanceFromBottom = bottomMarkerMaxY - scrollViewportHeight
+        let nextAtBottom = distanceFromBottom <= bottomVisibilityThreshold
+        if isAtBottom != nextAtBottom {
+            isAtBottom = nextAtBottom
+        }
     }
 
     private func suppressHistoryLoading(for interval: TimeInterval) {
@@ -766,7 +812,45 @@ private struct MobileHistoryTopReader: View {
     }
 }
 
+private struct MobileTimelineViewportReader: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: MobileTimelineViewportHeightPreferenceKey.self,
+                value: proxy.size.height
+            )
+        }
+    }
+}
+
+private struct MobileTimelineBottomReader: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: MobileTimelineBottomPreferenceKey.self,
+                value: proxy.frame(in: .named("mobileTimelineScroll")).maxY
+            )
+        }
+    }
+}
+
 private struct MobileHistoryTopPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
+}
+
+private struct MobileTimelineViewportHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct MobileTimelineBottomPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat? = nil
 
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
