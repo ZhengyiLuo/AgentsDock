@@ -625,11 +625,14 @@ func checkLaunchDeferredIsInline() throws {
     try assert(macStore.contains("isAgentLaunchDeferred(error, message: message)"), "Mac store must classify launch-deferred API responses")
     try assert(macStore.contains("launchDeferredText = message"), "Mac launch-deferred responses must become inline status")
     try assert(macStore.contains("setStatus(\"Launch deferred\")"), "Mac launch-deferred responses must update run status")
+    try assert(macStore.contains("clearLaunchDeferredIfResolved(by: event)"), "Mac selected-chat turn events must clear stale launch-deferred banners")
+    try assert(macStore.contains("launchDeferredText != nil") && macStore.contains("\"turn_started\", \"assistant_text\", \"turn_finished\", \"error\", \"turn_stopped\""), "Mac launch-deferred clearing must be scoped to real turn activity")
     try assert(macStore.contains("apiErrorDetail"), "Mac API errors should unwrap JSON detail strings")
     try assert(macTimeline.contains("store.launchDeferredText"), "Mac timeline header must render launch-deferred state inline")
     try assert(mobileStore.contains("@Published var launchDeferredText: String?"), "iOS store must keep launch-deferred state separate from modal errors")
     try assert(mobileStore.contains("isAgentLaunchDeferred(error, message: message)"), "iOS store must classify launch-deferred API responses")
     try assert(mobileStore.contains("setStatus(\"Launch deferred\")"), "iOS launch-deferred responses must update run status")
+    try assert(mobileStore.contains("clearLaunchDeferredIfResolved(by: event)"), "iOS selected-chat turn events must clear stale launch-deferred banners")
     try assert(mobileTimeline.contains("store.launchDeferredText"), "iOS timeline header must render launch-deferred state inline")
 }
 

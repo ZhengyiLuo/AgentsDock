@@ -1906,6 +1906,7 @@ final class MobileAppStore: ObservableObject {
             return
         }
         guard !events.contains(where: { $0.id == event.id }) else { return }
+        clearLaunchDeferredIfResolved(by: event)
         events.append(event)
         rebuildDisplayEvents()
         updateRunningState(from: event)
@@ -1924,6 +1925,15 @@ final class MobileAppStore: ObservableObject {
         if event.type != "raw_event" {
             rememberSelectedChat()
         }
+    }
+
+    private func clearLaunchDeferredIfResolved(by event: ZEvent) {
+        guard event.session_id == selectedSessionID,
+              launchDeferredText != nil,
+              ["turn_started", "assistant_text", "turn_finished", "error", "turn_stopped"].contains(event.type) else {
+            return
+        }
+        launchDeferredText = nil
     }
 
     private func updateRunningState(from event: ZEvent) {

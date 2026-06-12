@@ -19,6 +19,32 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-11 Follow-Up - Clear Stale Launch Deferred Banner
+
+Context:
+
+- User saw `Launch deferred: host load high (...)` while the selected chat had
+  already produced a normal assistant response.
+- The launch-deferred banner was set on a 503 guardrail response but was only
+  cleared on a successful send path, so later stream events could leave stale
+  warning UI behind.
+
+Change:
+
+- Mac and iOS stores now clear `launchDeferredText` when the selected chat
+  receives real turn activity: `turn_started`, `assistant_text`,
+  `turn_finished`, `error`, or `turn_stopped`.
+- Added guardrails so launch-deferred remains inline but cannot outlive later
+  selected-chat turn activity.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOSCheck CODE_SIGNING_ALLOWED=NO build` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-11 Follow-Up - iOS Bottom Button Geometry
 
 Context:

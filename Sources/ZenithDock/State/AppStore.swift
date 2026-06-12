@@ -3003,6 +3003,7 @@ final class AppStore: ObservableObject {
         var shouldSaveCache = false
         for event in newEvents {
             applyQueuedTurnState(from: event)
+            clearLaunchDeferredIfResolved(by: event)
             if isAgentVisibleMessage(event) {
                 if event.session_id != selectedSessionID {
                     markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
@@ -3067,6 +3068,7 @@ final class AppStore: ObservableObject {
         }
         guard !events.contains(where: { $0.id == event.id }) else { return }
         applyQueuedTurnState(from: event)
+        clearLaunchDeferredIfResolved(by: event)
         events.append(event)
         if events.count > maxLoadedTimelineEvents {
             let overflow = events.count - maxLoadedTimelineEvents
@@ -3111,6 +3113,15 @@ final class AppStore: ObservableObject {
         if event.type != "raw_event" {
             saveSelectedChatCache()
         }
+    }
+
+    private func clearLaunchDeferredIfResolved(by event: ZEvent) {
+        guard event.session_id == selectedSessionID,
+              launchDeferredText != nil,
+              ["turn_started", "assistant_text", "turn_finished", "error", "turn_stopped"].contains(event.type) else {
+            return
+        }
+        launchDeferredText = nil
     }
 
     private func requestScrollToBottom(immediate: Bool = false) {
