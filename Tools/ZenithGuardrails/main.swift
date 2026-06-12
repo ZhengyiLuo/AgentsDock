@@ -343,6 +343,8 @@ func checkArchiveSessionBehavior() throws {
     try assert(macStore.contains("sidebarOrderedActiveSessions.filter { $0.id != sourceSessionID }"), "Mac digest targets must follow sidebar order instead of raw active-session order")
     try assert(mobileStore.contains("sidebarOrderedActiveSessions.filter { $0.id != sourceSessionID }"), "iOS digest targets must follow sidebar order instead of raw active-session order")
     try assert(macStore.contains("for folder in folderNames") && mobileStore.contains("for folder in folderNames"), "Digest target ordering must respect manual folder order")
+    try assert(macSidebar.contains("Task { await store.fork(session) }") && macSidebar.contains("Label(\"Fork Chat\", systemImage: \"arrow.triangle.branch\")"), "Mac sidebar row context menu must expose Fork Chat for the clicked row")
+    try assert(mobileSidebar.contains("Task { await store.fork(session) }") && mobileSidebar.contains("Label(\"Fork Chat\", systemImage: \"arrow.triangle.branch\")"), "iOS sidebar row context menu must expose Fork Chat for the pressed row")
     guard let macForkRange = macStore.range(of: "func forkSelected() async"),
           let macDigestRange = macStore.range(of: "func createHandoffDigest", range: macForkRange.upperBound..<macStore.endIndex),
           let mobileForkRange = mobileStore.range(of: "func forkSelected() async"),

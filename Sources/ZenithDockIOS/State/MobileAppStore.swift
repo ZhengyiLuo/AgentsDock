@@ -1184,11 +1184,16 @@ final class MobileAppStore: ObservableObject {
     }
 
     func forkSelected() async {
-        guard let sid = selectedSessionID else { return }
+        guard let session = selectedSession else { return }
+        await fork(session)
+    }
+
+    func fork(_ session: ZSession) async {
+        let sid = session.id
         struct Body: Codable { var title: String? }
         do {
             struct Response: Codable { let session: ZSession }
-            let title = "Fork of \(selectedSession?.title ?? "Chat")"
+            let title = "Fork of \(session.title)"
             let res: Response = try await api.post("/api/sessions/\(sid)/fork", body: Body(title: title))
             insertForkedSession(res.session, after: sid)
             await select(sessionID: res.session.id)

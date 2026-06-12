@@ -225,6 +225,12 @@ struct SidebarView: View {
                 .disabled(!store.unreadAgentSessionIDs.contains(session.id) && !store.canMarkSessionUnread(session))
                 Divider()
                 Button {
+                    Task { await store.fork(session) }
+                } label: {
+                    Label("Fork Chat", systemImage: "arrow.triangle.branch")
+                }
+                Divider()
+                Button {
                     Task { await store.reorderSession(session, direction: "up") }
                 } label: {
                     Label("Move Up", systemImage: "arrow.up")

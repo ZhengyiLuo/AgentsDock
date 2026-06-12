@@ -19,6 +19,31 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-12 Follow-Up - Fork Chat In Sidebar Menu
+
+Context:
+
+- User right-clicked a chat in the Mac sidebar and could not fork it.
+- Fork Chat existed in the right inspector/header actions, but the sidebar row
+  context menu omitted it.
+
+Change:
+
+- Added `fork(_ session:)` to Mac and iOS stores so row menus can fork the
+  clicked/pressed chat instead of relying on whichever chat is currently
+  selected.
+- Mac sidebar context menu now includes `Fork Chat`.
+- iOS/iPadOS sidebar long-press context menu now includes `Fork Chat`.
+- Added guardrails so sidebar row menus keep the fork action.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOSCheck CODE_SIGNING_ALLOWED=NO build` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-11 Follow-Up - Clear Stale Launch Deferred Banner
 
 Context:
