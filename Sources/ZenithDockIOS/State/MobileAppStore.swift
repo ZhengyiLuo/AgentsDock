@@ -10,6 +10,11 @@ private let pendingRuntimePatchTimeout: TimeInterval = 12
 
 @MainActor
 final class MobileAppStore: ObservableObject {
+    struct OlderHistoryLoadResult {
+        let addedCount: Int
+        let firstAddedEventID: String?
+    }
+
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
     @Published var serverHost = UserDefaults.standard.string(forKey: "serverHost") ?? defaultAgentServerHost
     @Published var serverPort = UserDefaults.standard.string(forKey: "serverPort") ?? defaultAgentServerPort
@@ -1380,12 +1385,12 @@ final class MobileAppStore: ObservableObject {
     }
 
     @discardableResult
-    func loadOlderHistory() async -> Int {
+    func loadOlderHistory() async -> OlderHistoryLoadResult {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
               let before = events.map(\.seq).min() else {
-            return 0
+            return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
 
         isLoadingOlderHistory = true
@@ -1402,6 +1407,7 @@ final class MobileAppStore: ObservableObject {
             var latestSession: ZSession?
             var knownIDs = Set(events.map(\.id))
             var older: [ZEvent] = []
+            var firstAddedEventID: String?
 
             for _ in 0..<8 {
                 let res: Response = try await api.get(
@@ -1422,6 +1428,9 @@ final class MobileAppStore: ObservableObject {
                     return true
                 }
                 older.append(contentsOf: visibleOlder)
+                if firstAddedEventID == nil {
+                    firstAddedEventID = visibleOlder.first(where: isPrimaryTimelinePageEvent)?.id ?? visibleOlder.first?.id
+                }
                 if visibleOlder.contains(where: isPrimaryTimelinePageEvent) || res.events.isEmpty || remainingOmitted <= 0 {
                     break
                 }
@@ -1442,10 +1451,10 @@ final class MobileAppStore: ObservableObject {
             refreshSessionFilesFromLoadedEvents()
             rebuildDisplayEvents()
             rememberSelectedChat()
-            return older.count
+            return OlderHistoryLoadResult(addedCount: older.count, firstAddedEventID: firstAddedEventID)
         } catch {
             report(error)
-            return 0
+            return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
     }
 

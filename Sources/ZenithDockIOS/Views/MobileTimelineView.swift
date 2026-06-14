@@ -56,7 +56,7 @@ struct MobileTimelineView: View {
                             }
                             if !timelineRowsSuspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
                                 MobileTimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
-                                    revealOlderRows(preservingPositionWith: proxy)
+                                    revealOlderRowsShowingNewPage(proxy)
                                 } onLoadOlder: {
                                     loadOlderHistoryFromIntent(proxy)
                                 }
@@ -377,7 +377,7 @@ struct MobileTimelineView: View {
     }
 
     private func loadOlderHistoryFromIntent(_ proxy: ScrollViewProxy) {
-        if revealOlderRows(preservingPositionWith: proxy) {
+        if revealOlderRowsShowingNewPage(proxy) {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
             return
@@ -385,7 +385,7 @@ struct MobileTimelineView: View {
         guard store.canLoadOlderHistory else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
-        loadOlderHistoryPreservingPosition(proxy)
+        loadOlderHistoryShowingNewPage(proxy)
     }
 
     private func loadOlderHistoryFromPull(_ proxy: ScrollViewProxy) async {
@@ -399,8 +399,8 @@ struct MobileTimelineView: View {
             let beforeRowCount = MobileTimelineRows.build(from: store.displayEvents).count
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
-            let addedEvents = await store.loadOlderHistory()
-            if addedEvents > 0 {
+            let result = await store.loadOlderHistory()
+            if result.addedCount > 0 {
                 let afterRowCount = MobileTimelineRows.build(from: store.displayEvents).count
                 let addedRows = max(0, afterRowCount - beforeRowCount)
                 if addedRows > 0 {
@@ -422,8 +422,22 @@ struct MobileTimelineView: View {
         return true
     }
 
+    @discardableResult
+    private func revealOlderRowsShowingNewPage(_ proxy: ScrollViewProxy) -> Bool {
+        let oldLimit = visibleRowLimit
+        let rows = MobileTimelineRows.build(from: store.displayEvents)
+        guard let page = olderPageReveal(oldLimit: oldLimit, rows: rows) else { return false }
+        setVisibleRowLimit(page.limit)
+        scrollToOlderPageTarget(page.target?.id, proxy: proxy)
+        return true
+    }
+
     private func olderPageRevealLimit(oldLimit: Int) -> Int? {
         let rows = MobileTimelineRows.build(from: store.displayEvents)
+        return olderPageReveal(oldLimit: oldLimit, rows: rows)?.limit
+    }
+
+    private func olderPageReveal(oldLimit: Int, rows: [MobileTimelineRow]) -> (limit: Int, target: MobileTimelineRow?)? {
         guard oldLimit < rows.count else { return nil }
         var nextLimit = min(rows.count, oldLimit + rowPageSize)
         let maxLimit = min(rows.count, oldLimit + rowPageSize * 6)
@@ -432,7 +446,14 @@ struct MobileTimelineView: View {
             nextLimit < maxLimit {
             nextLimit = min(rows.count, nextLimit + rowPageSize)
         }
-        return nextLimit > oldLimit ? nextLimit : nil
+        guard nextLimit > oldLimit else { return nil }
+        let target = olderPageTarget(in: rows, oldLimit: oldLimit, nextLimit: nextLimit)
+        return (nextLimit, target)
+    }
+
+    private func olderPageTarget(in rows: [MobileTimelineRow], oldLimit: Int, nextLimit: Int) -> MobileTimelineRow? {
+        let revealed = newlyRevealedRows(in: rows, oldLimit: oldLimit, nextLimit: nextLimit)
+        return revealed.first(where: { $0.isPrimaryPageRow }) ?? revealed.first
     }
 
     private func newlyRevealedRows(in rows: [MobileTimelineRow], oldLimit: Int, nextLimit: Int) -> ArraySlice<MobileTimelineRow> {
@@ -446,8 +467,8 @@ struct MobileTimelineView: View {
         let anchorID = firstRenderedRowID()
         let beforeRowCount = MobileTimelineRows.build(from: store.displayEvents).count
         Task {
-            let addedEvents = await store.loadOlderHistory()
-            if addedEvents > 0 {
+            let result = await store.loadOlderHistory()
+            if result.addedCount > 0 {
                 let afterRowCount = MobileTimelineRows.build(from: store.displayEvents).count
                 let addedRows = max(0, afterRowCount - beforeRowCount)
                 if addedRows > 0 {
@@ -458,9 +479,75 @@ struct MobileTimelineView: View {
         }
     }
 
+    private func loadOlderHistoryShowingNewPage(_ proxy: ScrollViewProxy) {
+        let beforeRowCount = MobileTimelineRows.build(from: store.displayEvents).count
+        Task {
+            let result = await store.loadOlderHistory()
+            let rows = MobileTimelineRows.build(from: store.displayEvents)
+            guard !rows.isEmpty else { return }
+            if result.addedCount > 0 {
+                let addedRows = max(0, rows.count - beforeRowCount)
+                let target = olderHistoryTarget(firstAddedEventID: result.firstAddedEventID, rows: rows, preferredLimit: visibleRowLimit + max(rowPageSize, addedRows))
+                let nextLimit = olderHistoryVisibleLimit(for: target, rows: rows, preferredLimit: visibleRowLimit + max(rowPageSize, addedRows))
+                if nextLimit > visibleRowLimit {
+                    setVisibleRowLimit(nextLimit)
+                }
+                scrollToOlderPageTarget(target?.id, proxy: proxy)
+                return
+            }
+            scrollToOlderPageTarget(Array(rows.suffix(visibleRowLimit)).first?.id, proxy: proxy)
+        }
+    }
+
+    private func olderHistoryTarget(firstAddedEventID: String?, rows: [MobileTimelineRow], preferredLimit: Int) -> (id: String, index: Int)? {
+        if let firstAddedEventID,
+           let target = row(containingEventID: firstAddedEventID, in: rows) {
+            return target
+        }
+        let visibleRows = Array(rows.suffix(preferredLimit))
+        guard let row = visibleRows.first(where: { $0.isPrimaryPageRow }) ?? visibleRows.first,
+              let index = rows.firstIndex(where: { $0.id == row.id }) else {
+            return nil
+        }
+        return (row.id, index)
+    }
+
+    private func olderHistoryVisibleLimit(for target: (id: String, index: Int)?, rows: [MobileTimelineRow], preferredLimit: Int) -> Int {
+        guard !rows.isEmpty else { return 0 }
+        guard let target else {
+            return min(rows.count, preferredLimit)
+        }
+        let rowsNeeded = rows.count - target.index
+        return min(rows.count, max(preferredLimit, rowsNeeded + 2))
+    }
+
+    private func row(containingEventID eventID: String, in rows: [MobileTimelineRow]) -> (id: String, index: Int)? {
+        for (index, row) in rows.enumerated() where row.containsEventID(eventID) {
+            return (row.id, index)
+        }
+        return nil
+    }
+
     private func firstRenderedRowID() -> String? {
         let rows = MobileTimelineRows.build(from: store.displayEvents)
         return Array(rows.suffix(visibleRowLimit)).first?.id
+    }
+
+    private func scrollToOlderPageTarget(_ rowID: String?, proxy: ScrollViewProxy) {
+        guard let rowID else { return }
+        historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
+        for delay in [0.0, 0.06, 0.18] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withTransaction(noAnimationTransaction) {
+                    proxy.scrollTo(rowID, anchor: .top)
+                }
+                isAtBottom = false
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            olderHistoryLoadArmed = true
+            suppressScrollHistoryLoadUntilTopLeaves = false
+        }
     }
 
     private func restoreScrollPosition(to rowID: String?, proxy: ScrollViewProxy) {
@@ -895,6 +982,19 @@ private enum MobileTimelineRow: Identifiable {
                 return event.result_text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             }
             return true
+        }
+    }
+
+    func containsEventID(_ eventID: String) -> Bool {
+        switch self {
+        case .event(let event):
+            return event.id == eventID
+        case .artifacts(let events), .trace(_, let events):
+            return events.contains { $0.id == eventID }
+        case .job(let jobRun):
+            return jobRun.runEvent.id == eventID
+        case .jobGroup(let group):
+            return group.runs.contains { $0.runEvent.id == eventID }
         }
     }
 

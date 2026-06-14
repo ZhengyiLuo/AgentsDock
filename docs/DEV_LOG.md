@@ -19,6 +19,37 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-14 - Stabilize Show Older / Load Older Paging
+
+Context:
+
+- User reported `Show Older` / older-history loading was flaky on both Mac and
+  iOS.
+- Mac could show an older-hidden banner while clicking did nothing when hidden
+  content was caused by the timeline projection budget rather than the rendered
+  row count.
+- iOS explicit `Show Older` and `Load Older` preserved the old top anchor, which
+  made the button feel like it did not load anything.
+
+Change:
+
+- Mac `olderPageReveal` now expands the projection budget when projected events
+  are still hidden, and falls back to a primary row target if newly revealed
+  rows are compacted.
+- iOS older-history loading now returns the first newly added event ID, grouped
+  mobile rows expose `containsEventID(_:)`, and explicit `Show Older` / `Load
+  Older` scroll to the newly revealed page.
+- Guardrails now cover Mac projection-budget expansion and iOS deterministic
+  older-page targeting.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOSCheck CODE_SIGNING_ALLOWED=NO build` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-12 Follow-Up - Fork Chat In Sidebar Menu
 
 Context:

@@ -600,10 +600,14 @@ struct TimelineView: View {
             candidateLimit += rowPageSize
             let rows = renderedRows(visibleLimit: candidateLimit)
             let nextLimit = min(rows.count, candidateLimit)
-            guard nextLimit > oldLimit || hasHiddenProjectedEvents(visibleLimit: oldLimit) else { return nil }
+            let isProjectionExpansion = hasHiddenProjectedEvents(visibleLimit: oldLimit)
+            guard nextLimit > oldLimit || isProjectionExpansion else { return nil }
 
-            let target = olderPageTarget(in: rows, oldLimit: oldLimit, nextLimit: nextLimit)
-            best = (max(oldLimit, nextLimit), target, rows.count)
+            let target = olderPageTarget(in: rows, oldLimit: oldLimit, nextLimit: nextLimit) ??
+                rows.first(where: { $0.isPrimaryPageRow }) ??
+                rows.first
+            let effectiveLimit = isProjectionExpansion ? max(candidateLimit, nextLimit) : max(oldLimit, nextLimit)
+            best = (effectiveLimit, target, rows.count)
 
             if target?.isPrimaryPageRow == true ||
                 candidateLimit >= maxExpansion ||
