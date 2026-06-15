@@ -19,6 +19,30 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-15 - Click Images To Preview
+
+Context:
+
+- User noted that clicking image thumbnails in chat should open a larger preview,
+  like video previews do.
+
+Change:
+
+- Mac timeline image artifact tiles and standalone image artifact cards now open
+  a larger preview sheet when the image itself is clicked.
+- iOS/iPadOS timeline image artifact tiles and standalone image artifact cards
+  now open a full-screen image preview.
+- Download/share/open controls remain separate from the media click target.
+- Added guardrails so timeline image previews stay wired on both platforms.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOSCheck CODE_SIGNING_ALLOWED=NO build` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-14 - Stabilize Show Older / Load Older Paging
 
 Context:

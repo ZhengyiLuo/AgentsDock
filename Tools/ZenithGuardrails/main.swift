@@ -650,6 +650,7 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     let macStore = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/State/AppStore.swift"), encoding: .utf8)
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
+    let mobileEvents = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
 
     try assert(server.contains("content_prefix: str | None = Query(default=None)"), "Server files API must support content-type prefix filtering")
@@ -671,6 +672,9 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(eventViews.contains("MacArtifactDownloadButton(file: file, url: url, title: \"\")"), "Mac timeline artifacts must expose explicit download controls")
     try assert(eventViews.contains("MacArtifactDownloadButton(file: attachment.file, url: url, title: \"\")"), "Mac message attachment cards must expose explicit download controls")
     try assert(inspector.contains("MacArtifactDownloadButton(file: file, url: url, title: \"\")"), "Mac files/videos inspector must expose explicit download controls")
+    try assert(eventViews.contains("MacImagePreviewSheet(file: file, url: url)"), "Mac timeline image thumbnails must open a larger preview")
+    try assert(mobileEvents.contains("mobileImageFullscreen(isPresented:"), "iOS timeline image thumbnails must open a larger preview")
+    try assert(mobileEvents.contains("MobileFullscreenImageView"), "iOS image preview must have a dedicated full-screen viewer")
 }
 
 func checkRuntimeAutosavesAndBackendIcons() throws {

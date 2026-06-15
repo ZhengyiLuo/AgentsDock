@@ -941,6 +941,7 @@ private struct ArtifactGridTile: View {
     var linkContext: ZMarkdownLinkContext?
     var isPinned: Bool
     var onTogglePin: () -> Void
+    @State private var imagePreviewOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -949,9 +950,7 @@ private struct ArtifactGridTile: View {
                     .font(.caption)
                     .lineLimit(3)
             }
-            media
-                .frame(height: 112)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            previewableMedia
             fileFooter
         }
         .padding(8)
@@ -963,6 +962,9 @@ private struct ArtifactGridTile: View {
             ArtifactDragItemProvider.provider(for: file, url: url)
         }
         .help(file.filename)
+        .sheet(isPresented: $imagePreviewOpen) {
+            MacImagePreviewSheet(file: file, url: url)
+        }
     }
 
     private var fileFooter: some View {
@@ -984,6 +986,34 @@ private struct ArtifactGridTile: View {
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var previewableMedia: some View {
+        if file.content_type?.hasPrefix("image/") == true {
+            Button {
+                imagePreviewOpen = true
+            } label: {
+                media
+                    .frame(height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .bottomTrailing) {
+                        Label("Preview", systemImage: "arrow.up.left.and.arrow.down.right")
+                            .labelStyle(.iconOnly)
+                            .font(.caption.weight(.bold))
+                            .padding(7)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .foregroundStyle(.white)
+                            .padding(6)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help("Open image preview")
+        } else {
+            media
+                .frame(height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
     }
 
     @ViewBuilder
@@ -1547,6 +1577,7 @@ struct ArtifactPreview: View {
     let file: ZFile
     let url: URL
     var linkContext: ZMarkdownLinkContext?
+    @State private var imagePreviewOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1562,13 +1593,19 @@ struct ArtifactPreview: View {
                     .foregroundStyle(.secondary)
             }
             if file.content_type?.hasPrefix("image/") == true {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    ProgressView()
+                Button {
+                    imagePreviewOpen = true
+                } label: {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        ProgressView()
+                    }
+                    .frame(maxHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .frame(maxHeight: 260)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .buttonStyle(.plain)
+                .help("Open image preview")
             } else if file.content_type?.hasPrefix("video/") == true {
                 InlineVideoView(url: url)
                     .frame(height: 300)
@@ -1597,12 +1634,58 @@ struct ArtifactPreview: View {
             ArtifactDragItemProvider.provider(for: file, url: url)
         }
         .help("Drag file to Finder or another app")
+        .sheet(isPresented: $imagePreviewOpen) {
+            MacImagePreviewSheet(file: file, url: url)
+        }
     }
 
     var icon: String {
         if file.content_type?.hasPrefix("video/") == true { return "film" }
         if file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
+    }
+}
+
+private struct MacImagePreviewSheet: View {
+    let file: ZFile
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "photo")
+                    .foregroundStyle(.green)
+                Text(file.title ?? file.filename)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 16)
+                Link(destination: url) {
+                    Label("Open", systemImage: "arrow.up.right.square")
+                }
+                MacArtifactDownloadButton(file: file, url: url, title: "Download")
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(14)
+            Divider()
+            ZStack {
+                Color.black.opacity(0.88)
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .padding(12)
+                } placeholder: {
+                    ProgressView()
+                        .controlSize(.large)
+                }
+            }
+        }
+        .frame(minWidth: 760, minHeight: 540)
     }
 }
 

@@ -689,6 +689,7 @@ private struct MobileArtifactGridTile: View {
     let file: ZFile
     let url: URL
     var linkContext: ZMarkdownLinkContext?
+    @State private var fullscreenImage = false
     @State private var fullscreenVideo = false
     @State private var videoThumbnail: UIImage?
     @State private var videoThumbnailFailed = false
@@ -703,6 +704,10 @@ private struct MobileArtifactGridTile: View {
             media
                 .frame(height: 112)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    openPreview()
+                }
             HStack(spacing: 6) {
                 Image(systemName: icon)
                 Text(file.title ?? file.filename)
@@ -718,11 +723,7 @@ private struct MobileArtifactGridTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
         .contentShape(Rectangle())
-        .onTapGesture {
-            if file.content_type?.hasPrefix("video/") == true {
-                fullscreenVideo = true
-            }
-        }
+        .mobileImageFullscreen(isPresented: $fullscreenImage, url: url, title: file.title ?? file.filename)
         .mobileVideoFullscreen(isPresented: $fullscreenVideo, url: url, title: file.title ?? file.filename)
         .task(id: url) {
             if file.content_type?.hasPrefix("video/") == true {
@@ -759,6 +760,14 @@ private struct MobileArtifactGridTile: View {
         if file.content_type?.hasPrefix("video/") == true { return "film" }
         if file.content_type?.hasPrefix("image/") == true { return "photo" }
         return "doc"
+    }
+
+    private func openPreview() {
+        if file.content_type?.hasPrefix("image/") == true {
+            fullscreenImage = true
+        } else if file.content_type?.hasPrefix("video/") == true {
+            fullscreenVideo = true
+        }
     }
 
     private func loadVideoThumbnail() async {
@@ -1165,6 +1174,7 @@ struct MobileArtifactView: View {
     let file: ZFile
     let url: URL
     var linkContext: ZMarkdownLinkContext?
+    @State private var fullscreenImage = false
     @State private var fullscreenVideo = false
     @State private var videoThumbnail: UIImage?
     @State private var videoThumbnailFailed = false
@@ -1183,6 +1193,10 @@ struct MobileArtifactView: View {
                     }
                     .frame(maxHeight: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        fullscreenImage = true
+                    }
                 } else if file.content_type?.hasPrefix("video/") == true {
                     MobileTimelineVideoPoster(image: videoThumbnail, failed: videoThumbnailFailed)
                         .frame(maxWidth: .infinity)
@@ -1211,6 +1225,7 @@ struct MobileArtifactView: View {
                     .font(.caption.weight(.semibold))
             }
         }
+        .mobileImageFullscreen(isPresented: $fullscreenImage, url: url, title: file.title ?? file.filename)
         .mobileVideoFullscreen(isPresented: $fullscreenVideo, url: url, title: file.title ?? file.filename)
         .contentShape(Rectangle())
         .onDrag {
@@ -1515,6 +1530,20 @@ actor MobileArtifactDragFileCache {
 
 private extension View {
     @ViewBuilder
+    func mobileImageFullscreen(isPresented: Binding<Bool>, url: URL, title: String) -> some View {
+        #if os(iOS)
+        self.fullScreenCover(isPresented: isPresented) {
+            MobileFullscreenImageView(url: url, title: title)
+        }
+        #else
+        self.sheet(isPresented: isPresented) {
+            MobileFullscreenImageView(url: url, title: title)
+                .frame(minWidth: 900, minHeight: 560)
+        }
+        #endif
+    }
+
+    @ViewBuilder
     func mobileVideoFullscreen(isPresented: Binding<Bool>, url: URL, title: String) -> some View {
         #if os(iOS)
         self.fullScreenCover(isPresented: isPresented) {
@@ -1526,6 +1555,50 @@ private extension View {
                 .frame(minWidth: 900, minHeight: 560)
         }
         #endif
+    }
+}
+
+struct MobileFullscreenImageView: View {
+    let url: URL
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            AsyncImage(url: url) { image in
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .padding(12)
+            } placeholder: {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+            }
+            .ignoresSafeArea()
+
+            VStack(alignment: .trailing, spacing: 10) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white)
+                        .padding(18)
+                }
+                .accessibilityLabel("Close image preview")
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.45), in: Capsule())
+                    .foregroundStyle(.white)
+                    .padding(.trailing, 18)
+            }
+        }
     }
 }
 
