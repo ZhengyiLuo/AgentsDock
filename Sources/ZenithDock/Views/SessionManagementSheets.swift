@@ -107,6 +107,10 @@ struct HandoffDigestSheet: View {
         store.digestTargetSessions(excluding: sourceSession.id)
     }
 
+    private var targetSections: [DigestTargetSection] {
+        store.digestTargetSections(excluding: sourceSession.id)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -134,8 +138,12 @@ struct HandoffDigestSheet: View {
                         .foregroundStyle(.secondary)
                     Picker("Target Chat", selection: $targetSessionID) {
                         Text("Choose chat").tag("")
-                        ForEach(targets) { session in
-                            Text(session.title).tag(session.id)
+                        ForEach(targetSections) { section in
+                            Section(section.title) {
+                                ForEach(section.sessions) { session in
+                                    Text(session.title).tag(session.id)
+                                }
+                            }
                         }
                     }
                     .labelsHidden()

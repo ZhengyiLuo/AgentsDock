@@ -19,6 +19,32 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-16 - Section Digest Target Picker Like Sidebar
+
+Context:
+
+- User reported the Create Digest target chat menu was out of sync with the main
+  chat list.
+- The picker used the same rough order but flattened every chat into one list,
+  hiding sidebar sections/folders and making duplicate chat names ambiguous.
+
+Change:
+
+- Added shared `DigestTargetSection` to `ZenithCore`.
+- Mac and iOS stores now expose `digestTargetSections(excluding:)`, matching the
+  sidebar structure: pinned chats first, then folder sections in manual folder
+  order, excluding archived chats and the source chat.
+- Mac and iOS digest target pickers render those sections instead of a flat list.
+- Updated guardrails to reject the old hidden flat ordering helper.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -project ZenithDock.xcodeproj -scheme ZenithDockIOS -configuration Debug -destination generic/platform=iOS -derivedDataPath build/DerivedDataIOSCheck CODE_SIGNING_ALLOWED=NO build` passed.
+- Rebuilt local Mac app at `dist/ZenithDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/ZenithDock.app`.
+
 ## 2026-06-15 - Click Images To Preview
 
 Context:

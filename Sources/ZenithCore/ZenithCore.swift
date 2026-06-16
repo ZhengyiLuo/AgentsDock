@@ -39,6 +39,18 @@ public struct ZSession: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+public struct DigestTargetSection: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let title: String
+    public let sessions: [ZSession]
+
+    public init(id: String, title: String, sessions: [ZSession]) {
+        self.id = id
+        self.title = title
+        self.sessions = sessions
+    }
+}
+
 public struct ZRuntimeOption: Codable, Identifiable, Hashable, Sendable {
     public let value: String
     public let label: String

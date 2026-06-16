@@ -337,15 +337,22 @@ final class AppStore: ObservableObject {
     }
 
     func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {
-        sidebarOrderedActiveSessions.filter { $0.id != sourceSessionID }
+        digestTargetSections(excluding: sourceSessionID).flatMap(\.sessions)
     }
 
-    private var sidebarOrderedActiveSessions: [ZSession] {
-        var ordered: [ZSession] = pinnedSessions
-        for folder in folderNames {
-            ordered.append(contentsOf: folders[folder] ?? [])
+    func digestTargetSections(excluding sourceSessionID: String) -> [DigestTargetSection] {
+        var sections: [DigestTargetSection] = []
+        let pinned = pinnedSessions.filter { $0.id != sourceSessionID }
+        if !pinned.isEmpty {
+            sections.append(DigestTargetSection(id: "pinned", title: "Pinned", sessions: pinned))
         }
-        return ordered
+        for folder in folderNames {
+            let sessions = (folders[folder] ?? []).filter { $0.id != sourceSessionID }
+            if !sessions.isEmpty {
+                sections.append(DigestTargetSection(id: "folder:\(folder)", title: folder, sessions: sessions))
+            }
+        }
+        return sections
     }
 
     private func orderedSessions(_ source: [ZSession]) -> [ZSession] {
