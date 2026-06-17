@@ -19,6 +19,33 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-16 - TestFlight Build 51
+
+Context:
+
+- User requested a new TestFlight cut after the digest target picker and image
+  preview updates.
+
+Change:
+
+- Bumped shared iOS/iPadOS and macOS `CURRENT_PROJECT_VERSION` from `50` to
+  `51`.
+- Kept `MARKETING_VERSION` at `0.1.1`.
+- Uploaded both `ZenithDockIOS` and `ZenithDockMac` archives to App Store
+  Connect/TestFlight.
+
+Verification:
+
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+- `xcodebuild -exportArchive ... ZenithDockIOS-51.xcarchive ...` uploaded
+  `ZenithDockIOS`.
+- `xcodebuild -exportArchive ... ZenithDockMac-51.xcarchive ...` uploaded
+  `ZenithDockMac`.
+- Standalone server repo `/Users/zen/agi/ZenithBotServer` was clean at
+  `1a43f19 Guard Claude resumes by cwd`; no server deploy/restart was needed
+  for this app-only build.
+
 ## 2026-06-16 - Section Digest Target Picker Like Sidebar
 
 Context:
