@@ -199,6 +199,8 @@ func checkClaudeResumeFailureDoesNotPoisonSession() throws {
     try assert(server.contains("result_error = claude_result_error(event)"), "Claude runner must inspect result events for provider errors")
     try assert(server.contains("provider_id = None\n                    await append_event(session_id, \"error\""), "Claude failed-result session IDs must be discarded and surfaced as errors")
     try assert(server.contains("if provider_id and not result_error:"), "Claude provider session must only save after a successful result")
+    try assert(server.contains("Avoid Markdown heading markers like `#`, `##`, or `###`"), "Claude prompt should avoid noisy Markdown heading markers")
+    try assert(server.contains("run `git diff --stat`") && server.contains("bounded unified diff"), "Claude prompt should require bounded diff traces after code edits")
     try assert(server.contains("def resolve_claude_resume_provider(sess: dict[str, Any], cwd: str)"), "Server must verify Claude resume IDs against the current cwd before launching")
     try assert(server.contains("claude_resume_file_for_cwd(provider_id, cwd)"), "Claude resume preflight must check the cwd-scoped transcript file")
     try assert(server.contains("resume_provider_id, resume_skip_message = resolve_claude_resume_provider(sess, cwd)"), "Claude launches must use the cwd-scoped resume preflight")

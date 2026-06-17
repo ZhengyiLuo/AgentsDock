@@ -19,6 +19,31 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-17 - Claude Diff And Heading Hygiene
+
+Context:
+
+- User reported Claude answers were not producing useful code-change review
+  cards and were overusing Markdown `##` headings.
+- The Mac review UI only renders a Code Changes card when a trace contains
+  real patch/unified-diff content; prose-only "what changed" summaries are not
+  enough.
+
+Change:
+
+- Tightened the Claude server prompt to avoid ordinary `#`/`##`/`###` headings
+  and prefer short bold labels.
+- Added a Claude code-edit rule: after edits and validation, run
+  `git diff --stat` plus a bounded unified diff so ZenithDock can extract a
+  review card from the tool trace.
+- Added guardrails to keep both prompt rules from regressing.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+
 ## 2026-06-16 - TestFlight Build 51
 
 Context:
