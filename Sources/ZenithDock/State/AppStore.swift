@@ -2325,10 +2325,18 @@ final class AppStore: ObservableObject {
         let sid = session.id
         struct Body: Codable { var title: String? }
         do {
-            struct Response: Codable { let session: ZSession }
+            struct Response: Codable {
+                let session: ZSession
+                let sessions: [ZSession]?
+            }
             let title = "Fork of \(session.title)"
             let res: Response = try await api.post("/api/sessions/\(sid)/fork", body: Body(title: title))
-            insertForkedSession(res.session, after: sid)
+            if let authoritativeSessions = res.sessions {
+                sessions = sessionsWithPendingRuntime(authoritativeSessions)
+                reconcileUnreadFromSessions()
+            } else {
+                insertForkedSession(res.session, after: sid)
+            }
             AppLogger.info("forked parent=\(sid) child=\(res.session.id) backend=\(res.session.backend)")
             await select(sessionID: res.session.id)
         } catch {

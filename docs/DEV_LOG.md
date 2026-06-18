@@ -19,6 +19,34 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-17 - Fork Sidebar Order Must Be Authoritative
+
+Context:
+
+- User reported forked chats dropping down into `General` again instead of
+  staying near the source chat.
+- Live server metadata for an existing fork showed correct `pinned` and
+  `sort_order`, but the deployed standalone server copy had drifted behind the
+  app-bundled server fork logic.
+
+Change:
+
+- `/api/sessions/{id}/fork` now returns the full authoritative server session
+  list after placing the child directly after the parent.
+- Mac and iOS consume that authoritative list when present, falling back to the
+  older local beside-parent insert only for old servers.
+- Synced standalone `ZenithBotServer/agent_server.py` fork behavior so it
+  preserves `pinned`/`archived`, reorders the child after the parent, and
+  returns the authoritative list.
+- Added guardrails for authoritative fork ordering.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `python3 -m py_compile /Users/zen/agi/ZenithBotServer/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+
 ## 2026-06-17 - Claude Diff And Heading Hygiene
 
 Context:

@@ -357,8 +357,10 @@ func checkArchiveSessionBehavior() throws {
     }
     let macForkBody = macStore[macForkRange.lowerBound..<macDigestRange.lowerBound]
     let mobileForkBody = mobileStore[mobileForkRange.lowerBound..<mobileDigestRange.lowerBound]
-    try assert(macForkBody.contains("insertForkedSession(res.session, after: sid)"), "Mac forks must insert beside the source chat locally")
-    try assert(mobileForkBody.contains("insertForkedSession(res.session, after: sid)"), "iOS forks must insert beside the source chat locally")
+    try assert(macForkBody.contains("let sessions: [ZSession]?") && macForkBody.contains("if let authoritativeSessions = res.sessions"), "Mac forks must prefer the server's authoritative sidebar order")
+    try assert(mobileForkBody.contains("let sessions: [ZSession]?") && mobileForkBody.contains("if let authoritativeSessions = res.sessions"), "iOS forks must prefer the server's authoritative sidebar order")
+    try assert(macForkBody.contains("insertForkedSession(res.session, after: sid)"), "Mac forks must still fall back to local beside-parent insertion for older servers")
+    try assert(mobileForkBody.contains("insertForkedSession(res.session, after: sid)"), "iOS forks must still fall back to local beside-parent insertion for older servers")
     try assert(!macForkBody.contains("sessions.insert(res.session, at: 0)"), "Mac forks must not jump to the top of the sidebar")
     try assert(!mobileForkBody.contains("sessions.insert(res.session, at: 0)"), "iOS forks must not jump to the top of the sidebar")
     try assert(server.contains("archived: bool | None = None"), "Server session update API must accept archived state")
@@ -369,7 +371,8 @@ func checkArchiveSessionBehavior() throws {
     try assert(server.contains("reordered = peers[:insert_index] + [sess] + peers[insert_index:]"), "Server drag/drop reorder must compute one final order")
     try assert(server.contains("req.direction, req.target_id, req.placement"), "Server reorder route must pass target placement to the store")
     try assert(server.contains("pinned=bool(parent.get(\"pinned\"))") && server.contains("archived=bool(parent.get(\"archived\"))"), "Server forks must preserve parent sidebar section metadata")
-    try assert(server.contains("await STORE.reorder(child[\"id\"], target_id=session_id, placement=\"after\")"), "Server forks must place the child directly after the parent")
+    try assert(server.contains("ordered_sessions = await STORE.reorder(child[\"id\"], target_id=session_id, placement=\"after\")"), "Server forks must place the child directly after the parent")
+    try assert(server.contains("\"sessions\": [public_session(sess) for sess in ordered_sessions]"), "Server fork response must return authoritative sidebar order")
 }
 
 func checkFolderSectionControls() throws {

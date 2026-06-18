@@ -5341,7 +5341,7 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
         ),
         parent_id=session_id,
     )
-    await STORE.reorder(child["id"], target_id=session_id, placement="after")
+    ordered_sessions = await STORE.reorder(child["id"], target_id=session_id, placement="after")
     child = STORE.sessions[child["id"]]
     if parent_backend == BACKEND_CODEX and codex_fork_error:
         child["memory_seed"] = build_fork_memory(parent, session_id, reason=codex_fork_error)
@@ -5379,7 +5379,7 @@ async def fork_session(session_id: str, req: ForkSessionRequest) -> dict[str, An
                 "copied_events": copied,
             },
         )
-    return {"session": public_session(child)}
+    return {"session": public_session(child), "sessions": [public_session(sess) for sess in ordered_sessions]}
 
 
 @app.post("/api/sessions/{session_id}/turns")
