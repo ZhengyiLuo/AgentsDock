@@ -19,6 +19,35 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-17 - Agents Must Discover AMLFS/OSMO Skills
+
+Context:
+
+- User reported provider agents saying `/mnt/amlfs-07` was not mounted or not
+  reachable even though server-side skills/memories exist for OSMO/AMLFS access.
+- Remote inventory on `sonic` showed relevant playbooks under
+  `/home/zen/.codex/skills` and `/home/zen/.claude`, including `osmo`,
+  `osmo-exec`, `sonic`, `ssh-portforward`, and
+  `reference-osmo-amlfs-ssh`.
+
+Change:
+
+- Added a provider prompt section for both Claude and Codex launches requiring
+  agents to check local skills, agents, project docs, and memory notes before
+  claiming cluster paths such as `/mnt/amlfs-07` are unavailable.
+- Called out the OSMO/SONIC skill family explicitly so agents prefer the existing
+  playbooks before substituting local data.
+- Added guardrails so the AMLFS skill-discovery prompt cannot be removed quietly.
+- Synced the change to the standalone server repo.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `python3 -m py_compile /Users/zen/agi/ZenithBotServer/agent_server.py`
+  passed.
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed for both repos.
+
 ## 2026-06-17 - Claude Must Not Pretend Turns Stay Alive
 
 Context:
