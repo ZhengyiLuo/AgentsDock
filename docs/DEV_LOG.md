@@ -19,6 +19,33 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-17 - Claude Must Not Pretend Turns Stay Alive
+
+Context:
+
+- User reported Claude acting like timers/subagents/watchers would keep running
+  after the visible turn.
+- ZenithDock provider turns are bounded process launches; once the turn exits,
+  in-memory promises such as "I'll check back" are gone unless the agent created
+  a real durable process or scheduled job.
+
+Change:
+
+- Added a Claude prompt lifecycle section explaining that the process ends when
+  the current turn finishes.
+- Forbid promising in-memory timers, watchers, subagents, reminders, or loops
+  will continue after the turn.
+- Require a real durable mechanism for background work: ZenithDock scheduled job,
+  tmux/session process, system service, or an explicit user-run script.
+- Synced the rule to the standalone server repo and added guardrails.
+
+Verification:
+
+- `python3 -m py_compile server/agent_server.py` passed.
+- `python3 -m py_compile /Users/zen/agi/ZenithBotServer/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+- `git diff --check` passed.
+
 ## 2026-06-17 - Fork Sidebar Order Must Be Authoritative
 
 Context:
