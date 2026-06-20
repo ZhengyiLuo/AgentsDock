@@ -443,7 +443,7 @@ private enum MarkdownRenderCache {
         if let cached = blockCache.object(forKey: key) {
             return cached.blocks
         }
-        let parsed = MarkdownParser.parse(markdown)
+        let parsed = AppSignpost.interval("markdown.blocks") { MarkdownParser.parse(markdown) }
         blockCache.setObject(MarkdownBlocksEntry(parsed), forKey: key, cost: markdown.utf8.count)
         return parsed
     }
@@ -454,15 +454,23 @@ private enum MarkdownRenderCache {
             return cached.value
         }
 
-        let rendered = EmojiShortcodes.render(text)
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace
-        )
-        var parsed = (try? AttributedString(markdown: rendered, options: options)) ?? AttributedString(rendered)
-        parsed.font = .system(size: fontSize, design: fontDesign(for: design))
-        autolinkBareURLs(in: &parsed)
-        resolveMarkdownLinks(in: &parsed, context: linkContext)
-        attributedCache.setObject(AttributedStringEntry(parsed), forKey: key, cost: rendered.utf8.count)
+        let perfStart = DispatchTime.now()
+        let parsed = AppSignpost.interval("markdown.attributed") { () -> AttributedString in
+            let rendered = EmojiShortcodes.render(text)
+            let options = AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+            var parsed = (try? AttributedString(markdown: rendered, options: options)) ?? AttributedString(rendered)
+            parsed.font = .system(size: fontSize, design: fontDesign(for: design))
+            autolinkBareURLs(in: &parsed)
+            resolveMarkdownLinks(in: &parsed, context: linkContext)
+            return parsed
+        }
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - perfStart.uptimeNanoseconds) / 1_000_000
+        if ms > 4 {
+            AppLogger.info("PERF markdownAttributed chars=\(text.count) ms=\(String(format: "%.1f", ms))")
+        }
+        attributedCache.setObject(AttributedStringEntry(parsed), forKey: key, cost: text.utf8.count)
         return parsed
     }
 
@@ -473,7 +481,12 @@ private enum MarkdownRenderCache {
             return cached.value
         }
 
+        let perfStart = DispatchTime.now()
         let highlighted = CodeHighlighter.highlightUncached(source, language: language, fontSize: fontSize)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - perfStart.uptimeNanoseconds) / 1_000_000
+        if ms > 4 {
+            AppLogger.info("PERF highlightCode lang=\(normalized.isEmpty ? "-" : normalized) chars=\(source.count) ms=\(String(format: "%.1f", ms))")
+        }
         codeCache.setObject(AttributedStringEntry(highlighted), forKey: key, cost: source.utf8.count)
         return highlighted
     }

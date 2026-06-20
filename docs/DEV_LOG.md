@@ -19,6 +19,54 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-19 - Mac UI Sluggishness Audit + Perf Fixes
+
+- Symptom: Mac SwiftUI app felt periodically janky / "not smooth", worse during
+  activity. Root cause was over-invalidation of the view tree plus expensive
+  per-render allocations, not GPU/layout.
+- Findings:
+  - `AppStore` is one `ObservableObject` with ~54 `@Published` props observed by
+    the whole tree via `@EnvironmentObject`; any change re-evaluates every view.
+  - `refreshSessions` reassigned `@Published lastLoadedAt` unconditionally every
+    5s poll → guaranteed whole-tree repaint every 5s. `lastLoadedAt`/`lastHealthAt`
+    are read only inside the store (cache-freshness check), never by views.
+  - `Support/Formatting.swift` `localTimestampString`/`parseServerDate` allocated
+    up to 4 `DateFormatter`/`ISO8601DateFormatter` per call (ICU spin-up), invoked
+    per message timestamp per render.
+  - `SidebarView.body` called `store.folders[folder]` inside `ForEach(folderNames)`,
+    and `folders`/`folderNames`/`activeSessions`/etc. were computed properties that
+    re-sorted+re-grouped all sessions on every access → ~N full sorts per body, on
+    every store change (incl. every 320ms streaming flush).
+  - `applyStreamEvents`/`mergeEvents` ran `events.sort()` (O(n log n)) every flush.
+- Fixes (Mac target only; `ZenithCore`/iOS untouched):
+  - Cached the date formatters as `static let` in `Formatting.swift`; cached the
+    `ISO8601DateFormatter` in `AppLogger`.
+  - De-`@Published`ed `lastLoadedAt`/`lastHealthAt` (now `private var`). Exact same
+    freshness semantics, no per-poll repaint.
+  - Memoized the sidebar-derived collections in `AppStore` (`SidebarDerived`
+    snapshot, invalidated via `didSet` on `sessions`/`folderOrder`).
+  - Conditional sort: `sortEventsBySeqIfNeeded()` does an O(n) sortedness check and
+    only re-sorts when needed (streaming appends are already in order).
+  - Added `Support/AppSignpost.swift` (`OSSignposter`, subsystem
+    `com.zenithdock.perf`) and instrumented `timeline.project`,
+    `markdown.blocks`, `markdown.attributed`, `timeline.displayEvents`.
+- NOT done / deliberately rejected:
+  - `LazyVStack` for the timeline: timeline hard-caps to 64 rendered rows and the
+    scroll-anchor/clamp logic depends on eager layout height; low upside, real
+    regression risk. Left as eager `VStack`.
+  - Markdown is NOT O(L^2) during streaming: `attributedText` is NSCache'd per
+    block by block text, so a growing assistant bubble only re-parses its final
+    block. No markdown change needed.
+  - Full multi-store split deferred (large, risky, needs runtime verification).
+- Verification:
+  - `swift run ZenithGuardrails` passed after updating the collapsed-folder
+    guardrail for the memoized sidebar path.
+  - `git diff --check` passed.
+  - `scripts/build_local_mac.sh` passed and refreshed
+    `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+  - MBA sync is blocked because `air` / `zens-macbook-air` currently times out on
+    SSH.
+
 ## 2026-06-17 - Agents Must Discover AMLFS/OSMO Skills
 
 Context:

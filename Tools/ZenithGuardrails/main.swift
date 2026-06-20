@@ -1227,7 +1227,7 @@ func checkMacChatKeyboardNavigation() throws {
     try assert(app.contains("Button(\"Previous Chat\")"), "Mac app must expose a Previous Chat command")
     try assert(app.contains(".keyboardShortcut(.tab, modifiers: [.control, .shift])"), "Previous Chat must use Ctrl-Shift-Tab")
     try assert(macStore.contains("var sidebarNavigationSessions: [ZSession]"), "Mac store must expose sidebar-ordered navigation sessions")
-    try assert(macStore.contains("for folder in folderNames where !isFolderCollapsed(folder)"), "Mac chat keyboard navigation must respect collapsed folders")
+    try assert(macStore.contains("for folder in derived.folderNames where !isFolderCollapsed(folder)") || macStore.contains("for folder in folderNames where !isFolderCollapsed(folder)"), "Mac chat keyboard navigation must respect collapsed folders")
     try assert(macStore.contains("func selectAdjacentSession(direction: Int) async"), "Mac store must provide adjacent chat selection")
     try assert(macStore.contains("await select(sessionID: visibleSessions[nextIndex].id)"), "Adjacent chat selection must reuse the normal select path")
 }

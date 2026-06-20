@@ -30,7 +30,9 @@ struct PinnedTimelineItem: Codable, Identifiable, Hashable, Sendable {
 final class AppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
     @Published var accessToken = ZenithTokenStore.load()
-    @Published var sessions: [ZSession] = []
+    @Published var sessions: [ZSession] = [] {
+        didSet { invalidateSidebarDerived() }
+    }
     @Published var selectedSessionID: String?
     private(set) var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
@@ -65,8 +67,12 @@ final class AppStore: ObservableObject {
     @Published var socketLive = false
     @Published var activeSessionIDs: Set<String> = []
     @Published var defaultCwd = fallbackServerCwd
-    @Published var lastHealthAt: Date?
-    @Published var lastLoadedAt: Date?
+    // Internal freshness bookkeeping only — never read by the view layer, so
+    // these are intentionally NOT @Published. Publishing them forced a
+    // whole-tree re-render on every 5s poll (lastLoadedAt was reassigned
+    // unconditionally each refresh).
+    private var lastHealthAt: Date?
+    private var lastLoadedAt: Date?
     @Published var lastSocketError: String?
     @Published var omittedHistoryEventCount = 0
     @Published var isLoadingOlderHistory = false
@@ -84,7 +90,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
     @Published private(set) var firstUnreadAgentSeqBySessionID: [String: Int] = [:]
     @Published private(set) var selectedTimelineAtBottom = true
-    @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "folderOrder") ?? []
+    @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "folderOrder") ?? [] {
+        didSet { invalidateSidebarDerived() }
+    }
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
     @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "archivedSectionCollapsed")
     @Published private(set) var pinnedItemsBySessionID: [String: [PinnedTimelineItem]] = [:]
@@ -234,35 +242,74 @@ final class AppStore: ObservableObject {
         return firstUnreadAgentSeqBySessionID[selectedSessionID]
     }
 
+    // Sidebar collections are derived from `sessions` + `folderOrder` via sorts
+    // and groupings. They were previously recomputed on every access — and the
+    // sidebar body calls them once per folder, on every store change (including
+    // every 320ms streaming flush). Memoize a single snapshot, invalidated only
+    // when the inputs change (see the didSet on `sessions`/`folderOrder`).
+    private struct SidebarDerived {
+        var active: [ZSession]
+        var archived: [ZSession]
+        var pinned: [ZSession]
+        var folders: [String: [ZSession]]
+        var folderNames: [String]
+    }
+    private var sidebarDerivedCache: SidebarDerived?
+
+    private func invalidateSidebarDerived() {
+        sidebarDerivedCache = nil
+    }
+
+    private var sidebarDerived: SidebarDerived {
+        if let cached = sidebarDerivedCache {
+            return cached
+        }
+        let active = orderedSessions(sessions.filter { $0.archived != true })
+        let archived = orderedSessions(sessions.filter { $0.archived == true })
+        let pinned = active.filter { $0.pinned == true }
+        let foldersDict = Dictionary(grouping: active.filter { $0.pinned != true }) { $0.folder ?? "General" }
+        let names = orderedFolderNames(Array(Set(active.map { $0.folder ?? "General" })))
+        let derived = SidebarDerived(
+            active: active,
+            archived: archived,
+            pinned: pinned,
+            folders: foldersDict,
+            folderNames: names
+        )
+        sidebarDerivedCache = derived
+        return derived
+    }
+
     var activeSessions: [ZSession] {
-        orderedSessions(sessions.filter { $0.archived != true })
+        sidebarDerived.active
     }
 
     var archivedSessions: [ZSession] {
-        orderedSessions(sessions.filter { $0.archived == true })
+        sidebarDerived.archived
     }
 
     var pinnedSessions: [ZSession] {
-        activeSessions.filter { $0.pinned == true }
+        sidebarDerived.pinned
     }
 
     var sidebarNavigationSessions: [ZSession] {
-        var ordered: [ZSession] = pinnedSessions
-        for folder in folderNames where !isFolderCollapsed(folder) {
-            ordered.append(contentsOf: folders[folder] ?? [])
+        let derived = sidebarDerived
+        var ordered: [ZSession] = derived.pinned
+        for folder in derived.folderNames where !isFolderCollapsed(folder) {
+            ordered.append(contentsOf: derived.folders[folder] ?? [])
         }
         if !archivedSectionCollapsed {
-            ordered.append(contentsOf: archivedSessions)
+            ordered.append(contentsOf: derived.archived)
         }
         return ordered
     }
 
     var folders: [String: [ZSession]] {
-        Dictionary(grouping: activeSessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
+        sidebarDerived.folders
     }
 
     var folderNames: [String] {
-        orderedFolderNames(Array(Set(activeSessions.map { $0.folder ?? "General" })))
+        sidebarDerived.folderNames
     }
 
     func isFolderCollapsed(_ folder: String) -> Bool {
@@ -382,13 +429,15 @@ final class AppStore: ObservableObject {
     }
 
     var connectionSubtitle: String {
-        let loaded = sessions.isEmpty ? "no chats loaded" : "\(sessions.count) chats loaded"
-        let active = activeSessionIDs.isEmpty ? "no active runs" : "\(activeSessionIDs.count) active"
-        let stream = selectedSessionID == nil ? "no chat selected" : (socketLive ? "streaming selected chat" : "stream reconnecting")
         if !serverReachable, let connectionProblemText, !connectionProblemText.isEmpty {
             return connectionProblemText
         }
-        return "\(loaded) · \(active) · \(stream)"
+        let loaded = sessions.isEmpty ? "no chats loaded" : "\(sessions.count) chats loaded"
+        let active = activeSessionIDs.isEmpty ? "no active runs" : "\(activeSessionIDs.count) active"
+        // Intentionally omit live socket state here. It flips on every chat
+        // switch (socket drops + reconnects) and was making the sidebar text
+        // reflow/jump constantly. Keep only the stable counts.
+        return "\(loaded) · \(active)"
     }
 
     var hiddenDisplayEventCount: Int {
@@ -587,7 +636,17 @@ final class AppStore: ObservableObject {
     }
 
     private func rebuildDisplayEvents() {
+        // Inlined begin/end (rather than the closure-based AppSignpost.interval)
+        // to avoid passing a MainActor-isolated closure into a nonisolated helper
+        // under Swift 6 strict concurrency.
+        let signpostState = AppSignpost.signposter.beginInterval("timeline.displayEvents")
+        let perfStart = DispatchTime.now()
         let next = makeDisplayEvents(from: events)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - perfStart.uptimeNanoseconds) / 1_000_000
+        AppSignpost.signposter.endInterval("timeline.displayEvents", signpostState)
+        if ms > 2 {
+            AppLogger.info("PERF displayEvents in=\(events.count) out=\(next.count) ms=\(String(format: "%.1f", ms))")
+        }
         if displayEvents != next {
             displayEvents = next
         }
@@ -1571,7 +1630,31 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // End-to-end switch instrumentation: timestamp the click and the load path,
+    // then TimelineView reports when the new chat actually appears on screen.
+    private var pendingSwitch: (sessionID: String, at: DispatchTime, path: String)?
+
+    private func noteSwitchStart(_ sessionID: String) {
+        pendingSwitch = (sessionID, DispatchTime.now(), "pending")
+    }
+
+    private func noteSwitchPath(_ sessionID: String, _ path: String) {
+        guard var p = pendingSwitch, p.sessionID == sessionID else { return }
+        p.path = path
+        pendingSwitch = p
+    }
+
+    func noteSwitchRevealed(_ sessionID: String) {
+        guard let p = pendingSwitch, p.sessionID == sessionID else { return }
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - p.at.uptimeNanoseconds) / 1_000_000
+        pendingSwitch = nil
+        AppLogger.info("PERF switchReveal session=\(sessionID) path=\(p.path) ms=\(String(format: "%.0f", ms))")
+    }
+
     func select(sessionID: String) async {
+        if sessionID != loadedSessionID {
+            noteSwitchStart(sessionID)
+        }
         timelineBatchRevealTask?.cancel()
         timelineBatchRevealTask = nil
         isApplyingLargeTimelineBatch = false
@@ -1605,6 +1688,7 @@ final class AppStore: ObservableObject {
         }
         var loadedFromCache = false
         if let warmCachedChat {
+            noteSwitchPath(sessionID, "memory")
             applyCachedChat(warmCachedChat, renderLimit: maxWarmCachedTimelineEvents)
             loadedFromCache = true
             setStatus("Loaded memory chat")
@@ -1647,6 +1731,7 @@ final class AppStore: ObservableObject {
                     AppLogger.info("drop stale cache response session=\(sessionID)")
                     return
                 }
+                noteSwitchPath(sessionID, "disk")
                 rememberChatCache(cached)
                 applyCachedChat(cached)
                 loadedFromCache = true
@@ -1674,6 +1759,7 @@ final class AppStore: ObservableObject {
             }
             return
         }
+        noteSwitchPath(sessionID, "network")
         await refreshLatestSessionSnapshot(
             sessionID: sessionID,
             generation: generation,
@@ -1745,6 +1831,7 @@ final class AppStore: ObservableObject {
             return
         }
         do {
+            let netStart = DispatchTime.now()
             let res: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: [
@@ -1753,6 +1840,8 @@ final class AppStore: ObservableObject {
                     URLQueryItem(name: "visible", value: "true")
                 ]
             )
+            let netMs = Double(DispatchTime.now().uptimeNanoseconds - netStart.uptimeNanoseconds) / 1_000_000
+            AppLogger.info("PERF snapshotFetch session=\(sessionID) events=\(res.events.count) ms=\(String(format: "%.0f", netMs))")
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 replaceSessionFromServer(res.session, at: idx)
             }
@@ -3004,6 +3093,26 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // `events` is maintained sorted by seq. Streaming/merge appends are almost
+    // always already in order, so this O(n) check lets callers skip an
+    // O(n log n) re-sort in the common case while staying correct otherwise.
+    private func eventsAreSortedBySeq() -> Bool {
+        guard events.count > 1 else { return true }
+        var previous = events[0].seq
+        for index in 1..<events.count {
+            let current = events[index].seq
+            if current < previous { return false }
+            previous = current
+        }
+        return true
+    }
+
+    private func sortEventsBySeqIfNeeded() {
+        if !eventsAreSortedBySeq() {
+            events.sort { $0.seq < $1.seq }
+        }
+    }
+
     private func applyStreamEvents(_ incoming: [ZEvent]) {
         guard !incoming.isEmpty else { return }
         let existingIDs = Set(events.map(\.id))
@@ -3013,7 +3122,7 @@ final class AppStore: ObservableObject {
             return
         }
         events.append(contentsOf: newEvents)
-        events.sort { $0.seq < $1.seq }
+        sortEventsBySeqIfNeeded()
         if events.count > maxLoadedTimelineEvents {
             let overflow = events.count - maxLoadedTimelineEvents
             events.removeFirst(overflow)
@@ -3186,7 +3295,7 @@ final class AppStore: ObservableObject {
         }
         applyQueuedTurnState(from: newEvents)
         events.append(contentsOf: newEvents)
-        events.sort { $0.seq < $1.seq }
+        sortEventsBySeqIfNeeded()
         if events.count > maxLoadedTimelineEvents {
             let overflow = events.count - maxLoadedTimelineEvents
             events.removeFirst(overflow)
@@ -3207,7 +3316,7 @@ final class AppStore: ObservableObject {
         if !newEvents.isEmpty {
             applyQueuedTurnState(from: newEvents)
             events.append(contentsOf: newEvents)
-            events.sort { $0.seq < $1.seq }
+            sortEventsBySeqIfNeeded()
         }
         let protectedIDs = Set(incomingEvents.map(\.id))
         while events.count > maxLoadedTimelineEvents {
@@ -3354,6 +3463,11 @@ final class AppStore: ObservableObject {
     }
 
     private func applyCachedChat(_ cached: CachedChat, renderLimit: Int? = nil) {
+        let perfStart = DispatchTime.now()
+        defer {
+            let ms = Double(DispatchTime.now().uptimeNanoseconds - perfStart.uptimeNanoseconds) / 1_000_000
+            AppLogger.info("PERF applyCachedChat events=\(events.count) files=\(sessionFiles.count) ms=\(String(format: "%.1f", ms))")
+        }
         if !sessions.contains(where: { $0.id == cached.session.id }) {
             sessions.append(cached.session)
         }

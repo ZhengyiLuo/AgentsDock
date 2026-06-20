@@ -755,7 +755,12 @@ struct ConnectionStatusCard: View {
                 Text(store.connectionSubtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    // Reserve two lines so the card height stays fixed as the
+                    // subtitle text changes length (streaming/reconnecting,
+                    // active-count) — otherwise the card reflows 1<->2 lines on
+                    // every poll and the whole sidebar below it jumps.
+                    .lineLimit(2, reservesSpace: true)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
