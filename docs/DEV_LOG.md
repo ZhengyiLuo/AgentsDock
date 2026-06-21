@@ -19,6 +19,41 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-21 - Mac Timeline MUST Stay Eager VStack (LazyVStack Spirals)
+
+- HARD RULE: the Mac timeline list in `Sources/ZenithDock/Views/TimelineView.swift`
+  MUST remain an eager `VStack`, NOT `LazyVStack`. Do not "optimize" it to lazy.
+- Symptom: switching that single `VStack` (line ~71) to `LazyVStack` causes a
+  100% CPU infinite layout loop (sampled: `ViewLayoutEngine`/`UnaryLayoutEngine`/
+  `StyledTextLayoutEngine`/`StringDrawing.sizeThatFits` recursion via
+  `LazyLayoutViewCache`/`ScrollViewLayoutComputer`). It is intermittent — can run
+  fine for a while, then peg at 100% under scroll/window-resize. Do not trust a
+  short "looks fine" test; it is a latent time bomb.
+- Fixes ATTEMPTED and FAILED (do not repeat): plain LazyVStack (spiral);
+  `.containerRelativeFrame(.horizontal)` (SIGSEGV in swift_beginAccess/
+  ObservationTracking during `_NSViewLayout`); bound rows to a `columnWidth`
+  read from an OUTER `GeometryReader` into `@State` (still spirals — it tracks
+  the oscillation instead of removing it); `.defaultScrollAnchor(.bottom)`
+  (spiral); bounding the `NavigationSplitView` content column with `max:` in
+  RootView (did not fix it).
+- A minimal standalone repro (NavigationSplitView + unbounded column + LazyVStack
+  + fixedSize horizontal code block + scroll-observer feedback + long wrapping
+  text + window-resize oscillation) does NOT spiral (~10% CPU). So the cause is
+  an EMERGENT interaction in the full app (real MarkdownView AttributedString
+  rendering + live store churn + real data), not any single structural ingredient
+  — which is why isolated fixes kept failing.
+- iOS uses LazyVStack in its timeline and does NOT spiral (UIScrollView-backed,
+  no custom NSClipView, definite column width). The Mac's custom NSScrollView
+  bridge (`TimelineScrollObserver`/`TimelineClampingClipView`) + macOS
+  `NavigationSplitView` is the platform difference, but bounding either did not
+  resolve it in testing.
+- DECISION: ship eager `VStack`. Row count is bounded by pagination
+  (`visibleRowLimit`/older-history paging), so eager render cost is capped —
+  "eager forever" is an acceptable permanent answer. If lazy is ever required,
+  the only untried structural option is rewriting the timeline on `List`
+  (NSTableView-backed), which sidesteps the ScrollView+LazyVStack layout-loop
+  class entirely — track that as a separate effort.
+
 ## 2026-06-19 - Mac UI Sluggishness Audit + Perf Fixes
 
 - Symptom: Mac SwiftUI app felt periodically janky / "not smooth", worse during

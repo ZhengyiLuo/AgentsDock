@@ -68,7 +68,7 @@ struct TimelineView: View {
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 14) {
                             if store.selectedSession == nil {
                                 EmptyStateView()
                             } else {
@@ -143,14 +143,6 @@ struct TimelineView: View {
                                 Color.clear
                                     .frame(height: 1)
                                     .id(bottomID)
-                                if let sid = store.selectedSessionID, !rows.isEmpty {
-                                    // Fires when the new chat's rows are first
-                                    // inserted — proxies "chat became visible".
-                                    Color.clear
-                                        .frame(width: 0, height: 0)
-                                        .id("reveal-\(sid)-\(rows.first?.id ?? "")")
-                                        .onAppear { store.noteSwitchRevealed(sid) }
-                                }
                             }
                         }
                         .padding(.horizontal, 20)
@@ -359,12 +351,7 @@ struct TimelineView: View {
                     store.setSelectedTimelineAtBottom(true)
                 }
             }
-            // Reveal as soon as the scroll-to-bottom above has applied. The
-            // content is already positioned in the same runloop tick, so a long
-            // hold here is pure perceived latency on chat switch (measured: the
-            // work behind the mask is <3ms). One extra tick is enough to avoid
-            // showing a mid-scroll frame.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 guard initialTimelineMaskIsCurrent(revision: revision, sessionID: sessionID) else { return }
                 withTransaction(noAnimationTransaction) {
                     isInitialTimelineMasked = false
@@ -1605,16 +1592,9 @@ private enum TimelineRows {
             return cached.projection
         }
 
-        let perfStart = DispatchTime.now()
-        let projection = AppSignpost.interval("timeline.project") { () -> TimelineProjection in
-            let jobRuns = jobRunsByRunID(events)
-            let rows = compactAdjacentTraceRows(buildRows(from: events, jobRuns: jobRuns))
-            return TimelineProjection(rows: rows, jobsByRunID: jobRuns.mapValues(\.job))
-        }
-        let ms = Double(DispatchTime.now().uptimeNanoseconds - perfStart.uptimeNanoseconds) / 1_000_000
-        if ms > 2 {
-            AppLogger.info("PERF project events=\(events.count) rows=\(projection.rows.count) ms=\(String(format: "%.1f", ms))")
-        }
+        let jobRuns = jobRunsByRunID(events)
+        let rows = compactAdjacentTraceRows(buildRows(from: events, jobRuns: jobRuns))
+        let projection = TimelineProjection(rows: rows, jobsByRunID: jobRuns.mapValues(\.job))
         cache.setObject(Entry(projection), forKey: key)
         return projection
     }
