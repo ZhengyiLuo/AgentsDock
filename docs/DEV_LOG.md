@@ -19,6 +19,36 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-21 - TestFlight Build 52
+
+Context:
+- User requested uploading build 52 after the version was already bumped.
+- Initial upload attempt failed because Apple returned `PLA Update available`;
+  retry succeeded after that account-side blocker cleared.
+
+Change:
+- Uploaded iOS/iPadOS and macOS build 52 to TestFlight.
+- Kept `MARKETING_VERSION = 0.1.1` and `CURRENT_PROJECT_VERSION = 52`.
+- Build 52 includes the recent timeline performance work, iOS/iPadOS perf
+  parity pass, stable eager `VStack` Mac timeline rollback, AMLFS/Claude prompt
+  cleanups, and fork ordering fixes since build 51.
+
+Verification:
+- `swift run ZenithGuardrails` passed before upload.
+- `xcodebuild archive -scheme ZenithDockIOS ... ZenithDockIOS-52.xcarchive`
+  succeeded.
+- `xcodebuild archive -scheme ZenithDockMac ... ZenithDockMac-52.xcarchive`
+  succeeded.
+- `xcodebuild -exportArchive ... ZenithDockIOS-52.xcarchive ...` uploaded
+  `ZenithDockIOS`; archive plist shows `uploadedBuildNumber = 52` and
+  `uploadEvent.state = success`.
+- `xcodebuild -exportArchive ... ZenithDockMac-52.xcarchive ...` uploaded
+  `ZenithDockMac`; archive plist shows `uploadedBuildNumber = 52` and
+  `uploadEvent.state = success`.
+- Standalone server repo `/Users/zen/agi/ZenithBotServer` was clean at
+  `cfea0ad Clarify AMLFS skill discovery`; no server deploy/restart was needed
+  for this upload.
+
 ## 2026-06-21 - Mac Timeline MUST Stay Eager VStack (LazyVStack Spirals)
 
 - HARD RULE: the Mac timeline list in `Sources/ZenithDock/Views/TimelineView.swift`
