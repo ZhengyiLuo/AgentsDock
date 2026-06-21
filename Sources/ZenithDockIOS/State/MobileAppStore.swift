@@ -19,7 +19,9 @@ final class MobileAppStore: ObservableObject {
     @Published var serverHost = UserDefaults.standard.string(forKey: "serverHost") ?? defaultAgentServerHost
     @Published var serverPort = UserDefaults.standard.string(forKey: "serverPort") ?? defaultAgentServerPort
     @Published var accessToken = ZenithTokenStore.load()
-    @Published var sessions: [ZSession] = []
+    @Published var sessions: [ZSession] = [] {
+        didSet { invalidateSidebarDerived() }
+    }
     @Published var selectedSessionID: String?
     private(set) var events: [ZEvent] = []
     @Published private(set) var displayEvents: [ZEvent] = []
@@ -46,7 +48,9 @@ final class MobileAppStore: ObservableObject {
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
     @Published private(set) var unreadAgentSessionIDs: Set<String> = []
-    @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "mobileFolderOrder") ?? []
+    @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "mobileFolderOrder") ?? [] {
+        didSet { invalidateSidebarDerived() }
+    }
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "mobileCollapsedFolders") ?? [])
     @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "mobileArchivedSectionCollapsed")
 
@@ -182,24 +186,56 @@ final class MobileAppStore: ObservableObject {
         sessions.first { $0.id == selectedSessionID }
     }
 
+    // Derived sidebar collections (sorts + grouping) memoized into one snapshot,
+    // invalidated only when their inputs (sessions / folderOrder) change. They
+    // were recomputed on every access, and the sidebar body reads them
+    // once-per-folder on every store change -> O(N) sorts per render. Mirrors
+    // the Mac AppStore.SidebarDerived fix.
+    private struct SidebarDerived {
+        var active: [ZSession]
+        var archived: [ZSession]
+        var pinned: [ZSession]
+        var folders: [String: [ZSession]]
+        var folderNames: [String]
+    }
+    private var sidebarDerivedCache: SidebarDerived?
+
+    private func invalidateSidebarDerived() {
+        sidebarDerivedCache = nil
+    }
+
+    private var sidebarDerived: SidebarDerived {
+        if let cached = sidebarDerivedCache {
+            return cached
+        }
+        let active = orderedSessions(sessions.filter { $0.archived != true })
+        let archived = orderedSessions(sessions.filter { $0.archived == true })
+        let pinned = active.filter { $0.pinned == true }
+        let foldersDict = Dictionary(grouping: active.filter { $0.pinned != true }) { $0.folder ?? "General" }
+        let names = orderedFolderNames(Array(Set(active.map { $0.folder ?? "General" })))
+        let derived = SidebarDerived(active: active, archived: archived, pinned: pinned, folders: foldersDict, folderNames: names)
+        sidebarDerivedCache = derived
+        return derived
+    }
+
     var activeSessions: [ZSession] {
-        orderedSessions(sessions.filter { $0.archived != true })
+        sidebarDerived.active
     }
 
     var archivedSessions: [ZSession] {
-        orderedSessions(sessions.filter { $0.archived == true })
+        sidebarDerived.archived
     }
 
     var pinnedSessions: [ZSession] {
-        activeSessions.filter { $0.pinned == true }
+        sidebarDerived.pinned
     }
 
     var folders: [String: [ZSession]] {
-        Dictionary(grouping: activeSessions.filter { $0.pinned != true }) { $0.folder ?? "General" }
+        sidebarDerived.folders
     }
 
     var folderNames: [String] {
-        orderedFolderNames(Array(Set(activeSessions.map { $0.folder ?? "General" })))
+        sidebarDerived.folderNames
     }
 
     func isFolderCollapsed(_ folder: String) -> Bool {
@@ -1793,10 +1829,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func serverTimestamp(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter.string(from: date)
+        MobileDateFormatters.iso8601UTC.string(from: date)
     }
 
     func runJobNow(_ job: ZJob) async {
@@ -2037,10 +2070,28 @@ final class MobileAppStore: ObservableObject {
         let newEvents = incomingEvents.filter { !existingIDs.contains($0.id) }
         guard !newEvents.isEmpty else { return }
         events.append(contentsOf: newEvents)
-        events.sort { $0.seq < $1.seq }
+        sortEventsBySeqIfNeeded()
         latestSeenSeq = max(latestSeenSeq, incomingEvents.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
         rebuildDisplayEvents()
+    }
+
+    // `events` is kept sorted by seq; streaming/merge appends are almost always
+    // already in order, so an O(n) check lets us skip the O(n log n) sort in the
+    // common case. (loadOlderHistory does a true older+current merge and keeps
+    // its unconditional sort.)
+    private func eventsAreSortedBySeq() -> Bool {
+        guard events.count > 1 else { return true }
+        for i in 1..<events.count where events[i].seq < events[i - 1].seq {
+            return false
+        }
+        return true
+    }
+
+    private func sortEventsBySeqIfNeeded() {
+        if !eventsAreSortedBySeq() {
+            events.sort { $0.seq < $1.seq }
+        }
     }
 
     private func applySessionEventSnapshot(_ response: SessionEventsResponse, sessionID: String) {
