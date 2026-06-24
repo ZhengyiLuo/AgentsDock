@@ -547,9 +547,13 @@ struct MessageBubble: View {
     }
 }
 
-struct JobRunBubble: View {
+struct JobRunBubble: View, Equatable {
     let jobRun: JobRunRow
     let linkContext: ZMarkdownLinkContext?
+
+    nonisolated static func == (lhs: JobRunBubble, rhs: JobRunBubble) -> Bool {
+        lhs.jobRun == rhs.jobRun && lhs.linkContext == rhs.linkContext
+    }
 
     var body: some View {
         HStack {
@@ -578,10 +582,14 @@ struct JobRunBubble: View {
     }
 }
 
-struct JobRunGroupBubble: View {
+struct JobRunGroupBubble: View, Equatable {
     let group: JobRunGroupRow
     let linkContext: ZMarkdownLinkContext?
     @State private var olderOpen = false
+
+    nonisolated static func == (lhs: JobRunGroupBubble, rhs: JobRunGroupBubble) -> Bool {
+        lhs.group == rhs.group && lhs.linkContext == rhs.linkContext
+    }
 
     var body: some View {
         HStack {
@@ -854,12 +862,16 @@ struct ArtifactGridItem: Identifiable, Hashable {
     var id: String { file.id }
 }
 
-struct ArtifactGridCard: View {
+struct ArtifactGridCard: View, Equatable {
     let artifacts: [ArtifactGridItem]
     var linkContext: ZMarkdownLinkContext?
     var isPinned: (ZFile) -> Bool
     var onTogglePin: (ZFile) -> Void
     @State private var isExpanded = false
+
+    nonisolated static func == (lhs: ArtifactGridCard, rhs: ArtifactGridCard) -> Bool {
+        lhs.artifacts == rhs.artifacts && lhs.linkContext == rhs.linkContext
+    }
 
     private let columns = Array(repeating: GridItem(.flexible(minimum: 150, maximum: 210), spacing: 10), count: 4)
     private let initialArtifactLimit = 4

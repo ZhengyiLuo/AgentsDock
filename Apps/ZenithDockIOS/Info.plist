@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>ZenithDock</string>
+	<string>AgentsDock</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -30,7 +30,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ZenithDock connects to your agent server on your local network or Tailscale.</string>
+	<string>AgentsDock connects to your agent server on your local network or Tailscale.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_http._tcp</string>

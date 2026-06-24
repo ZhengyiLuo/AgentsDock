@@ -6,6 +6,7 @@ struct MobileSidebarView: View {
     @Binding var resumeOpen: Bool
     @State private var deleteCandidate: ZSession?
     @State private var reorderMode = false
+    @State private var searchText = ""
 
     var body: some View {
         List(selection: sessionSelection) {
@@ -13,25 +14,25 @@ struct MobileSidebarView: View {
                 MobileServerStatusView()
             }
 
-            if !store.pinnedSessions.isEmpty {
+            if !filteredPinnedSessions.isEmpty {
                 Section("Pinned") {
-                    ForEach(store.pinnedSessions) { session in
+                    ForEach(filteredPinnedSessions) { session in
                         sessionRow(session)
                     }
                     .onMove { source, destination in
-                        moveSessions(store.pinnedSessions, from: source, to: destination)
+                        moveSessions(filteredPinnedSessions, from: source, to: destination)
                     }
                 }
             }
 
-            ForEach(store.folderNames, id: \.self) { folder in
+            ForEach(filteredFolderNames, id: \.self) { folder in
                 Section {
-                    if !store.isFolderCollapsed(folder) {
-                        ForEach(store.folders[folder] ?? []) { session in
+                    if isSearching || !store.isFolderCollapsed(folder) {
+                        ForEach(filteredSessions(in: folder)) { session in
                             sessionRow(session)
                         }
                         .onMove { source, destination in
-                            moveSessions(store.folders[folder] ?? [], from: source, to: destination)
+                            moveSessions(filteredSessions(in: folder), from: source, to: destination)
                         }
                     }
                 } header: {
@@ -39,25 +40,37 @@ struct MobileSidebarView: View {
                 }
             }
             .onMove { source, destination in
+                guard !isSearching else { return }
                 store.reorderFolders(from: source, to: destination)
             }
-            if !store.archivedSessions.isEmpty {
+            if !filteredArchivedSessions.isEmpty {
                 Section {
-                    if !store.archivedSectionCollapsed {
-                        ForEach(store.archivedSessions) { session in
+                    if isSearching || !store.archivedSectionCollapsed {
+                        ForEach(filteredArchivedSessions) { session in
                             sessionRow(session)
                         }
                         .onMove { source, destination in
-                            moveSessions(store.archivedSessions, from: source, to: destination)
+                            moveSessions(filteredArchivedSessions, from: source, to: destination)
                         }
                     }
                 } header: {
                     MobileArchivedSectionHeader()
                 }
             }
+            if isSearching && filteredPinnedSessions.isEmpty && filteredFolderNames.isEmpty && filteredArchivedSessions.isEmpty {
+                Text("No chats match “\(normalizedSearchText)”")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .environment(\.editMode, .constant(reorderMode ? .active : .inactive))
         .navigationTitle("ZenithDock")
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
+        .onChange(of: searchText) { _, _ in
+            if isSearching && reorderMode {
+                reorderMode = false
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(reorderMode ? "Done" : "Reorder") {
@@ -65,6 +78,7 @@ struct MobileSidebarView: View {
                         reorderMode.toggle()
                     }
                 }
+                .disabled(isSearching)
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -103,6 +117,7 @@ struct MobileSidebarView: View {
 
     private func moveSessions(_ visibleSessions: [ZSession], from source: IndexSet, to destination: Int) {
         guard reorderMode,
+              !isSearching,
               let sourceIndex = source.first,
               source.count == 1,
               visibleSessions.indices.contains(sourceIndex) else {
@@ -141,6 +156,63 @@ struct MobileSidebarView: View {
                 Task { await store.select(sessionID: sessionID) }
             }
         )
+    }
+
+    private var normalizedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isSearching: Bool {
+        !normalizedSearchText.isEmpty
+    }
+
+    private func matchesSearch(_ session: ZSession) -> Bool {
+        guard isSearching else { return true }
+        let query = normalizedSearchText
+        if session.title.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        if let folder = session.folder, folder.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        let searchableParts = [
+            session.backend,
+            session.model,
+            session.effort,
+            session.cwd,
+            session.session_id,
+            session.claude_session_id,
+            session.codex_thread_id
+        ].compactMap { $0 }
+        return searchableParts.contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var filteredPinnedSessions: [ZSession] {
+        store.pinnedSessions.filter(matchesSearch)
+    }
+
+    private var filteredArchivedSessions: [ZSession] {
+        store.archivedSessions.filter(matchesSearch)
+    }
+
+    private func filteredSessions(in folder: String) -> [ZSession] {
+        let sessions = store.folders[folder] ?? []
+        guard isSearching else {
+            return sessions
+        }
+        return sessions.filter(matchesSearch)
+    }
+
+    private var filteredFolderNames: [String] {
+        store.folderNames.filter { folder in
+            if !isSearching {
+                return true
+            }
+            if folder.localizedCaseInsensitiveContains(normalizedSearchText) {
+                return true
+            }
+            return !filteredSessions(in: folder).isEmpty
+        }
     }
 
     private func sessionRow(_ session: ZSession) -> some View {

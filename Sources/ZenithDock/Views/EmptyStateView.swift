@@ -3,7 +3,7 @@ import SwiftUI
 struct EmptyStateView: View {
     var body: some View {
         ContentUnavailableView {
-            Label("Zenith Dock", systemImage: "sparkles")
+            Label("AgentsDock", systemImage: "sparkles")
         } description: {
             Text("A native cockpit for Claude and Codex running on your agent server.")
         }

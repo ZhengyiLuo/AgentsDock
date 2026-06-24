@@ -24,7 +24,7 @@
     { "idiom": "mac", "size": "256x256", "scale": "1x", "filename": "AppIcon-mac-256.png" },
     { "idiom": "mac", "size": "256x256", "scale": "2x", "filename": "AppIcon-mac-256@2x.png" },
     { "idiom": "mac", "size": "512x512", "scale": "1x", "filename": "AppIcon-mac-512.png" },
-    { "idiom": "mac", "size": "512x512", "scale": "2x", "filename": "AppIcon-1024.png" }
+    { "idiom": "mac", "size": "512x512", "scale": "2x", "filename": "AppIcon-mac-512@2x.png" }
   ],
   "info": {
     "author": "xcode",

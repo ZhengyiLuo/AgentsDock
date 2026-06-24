@@ -2,7 +2,7 @@
 # Build the Mac app via direct swiftc (sandbox-safe) and deploy to an ISOLATED
 # bundle on the Air so experiments never touch the working app.
 #   ZenithDock.app       <- stable, what the user runs
-#   ZenithDock-test.app  <- candidate under test
+#   AgentsDock.app  <- candidate under test
 set -euo pipefail
 ROOT="/Users/zen/agi/ZenithDock"
 cd "$ROOT"
@@ -24,14 +24,14 @@ swiftc "${FLAGS[@]}" -module-name ZenithDock -I "$TMPDIR_BASE" -framework AVKit 
 if [ ! -f "$TMPDIR_BASE/ZenithDock" ]; then echo "BUILD FAILED"; exit 1; fi
 
 # Stage into a copy of the stable bundle layout, then ship to the test path.
-STAGE="$TMPDIR_BASE/ZenithDock-test.app"
+STAGE="$TMPDIR_BASE/AgentsDock.app"
 rm -rf "$STAGE"
-cp -R "$ROOT/dist/ZenithDock.app" "$STAGE"
+cp -R "$ROOT/dist/AgentsDock.app" "$STAGE"
 cp "$TMPDIR_BASE/ZenithDock" "$STAGE/Contents/MacOS/ZenithDock"
 codesign --remove-signature "$STAGE" 2>/dev/null || true
 codesign --force --deep --sign - "$STAGE" >/dev/null 2>&1
 HASH=$(shasum -a 256 "$STAGE/Contents/MacOS/ZenithDock" | awk '{print $1}')
 echo "BUILD OK hash=$HASH"
 
-rsync -a --delete "$STAGE/" air:/Users/zen/agi/ZenithDock-test.app/ 2>&1 | tail -1
-echo "DEPLOYED to air:/Users/zen/agi/ZenithDock-test.app  hash=$HASH"
+rsync -a --delete "$STAGE/" air:/Users/zen/agi/AgentsDock.app/ 2>&1 | tail -1
+echo "DEPLOYED to air:/Users/zen/agi/AgentsDock.app  hash=$HASH"

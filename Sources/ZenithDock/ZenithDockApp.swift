@@ -13,7 +13,7 @@ struct ZenithDockApp: App {
     }
 
     var body: some Scene {
-        Window("Zenith Dock", id: "main") {
+        Window("AgentsDock", id: "main") {
             RootView()
                 .environmentObject(store)
                 .frame(minWidth: 1180, minHeight: 760)
@@ -23,7 +23,15 @@ struct ZenithDockApp: App {
             CommandGroup(replacing: .newItem) {
                 ShowZenithDockWindowCommand()
             }
+            CommandGroup(replacing: .printItem) { }
             CommandMenu("Chat") {
+                Button("Find Chat…") {
+                    store.chatSearchPaletteOpen = true
+                }
+                .keyboardShortcut("p", modifiers: .command)
+
+                Divider()
+
                 Button("Next Chat") {
                     Task { @MainActor in
                         await store.selectAdjacentSession(direction: 1)
@@ -220,7 +228,7 @@ private final class ZenithDockSingleInstanceGuard {
 
 @MainActor
 private enum ZenithDockWindowController {
-    private static let mainWindowTitle = "Zenith Dock"
+    private static let mainWindowTitle = "AgentsDock"
 
     static func activateExistingMainWindow() -> Bool {
         cullDuplicateMainWindows()

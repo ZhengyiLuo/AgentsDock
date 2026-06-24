@@ -51,6 +51,8 @@ final class AppStore: ObservableObject {
     @Published var isRunning = false
     @Published var status = "Disconnected"
     @Published var errorText: String?
+    /// Cmd+P opens the Notion-style chat quick-find palette overlay.
+    @Published var chatSearchPaletteOpen = false
     @Published var connectionProblemText: String?
     @Published var launchDeferredText: String?
     @Published var jobs: [ZJob] = []
@@ -98,8 +100,8 @@ final class AppStore: ObservableObject {
     @Published private(set) var pinnedItemsBySessionID: [String: [PinnedTimelineItem]] = [:]
     @Published private(set) var queuedTurnsBySessionID: [String: [ZQueuedTurn]] = [:]
 
-    private let initialSessionEventLimit = 240
-    private let olderHistoryPageLimit = 160
+    private let initialSessionEventLimit = 500
+    private let olderHistoryPageLimit = 400
     private let maxLoadedTimelineEvents = 2_000
     private let maxCachedTimelineEvents = 720
     private let maxWarmCachedTimelineEvents = 240

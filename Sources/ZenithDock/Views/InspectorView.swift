@@ -137,6 +137,7 @@ struct InspectorView: View {
                         LabeledContent("Events", value: "\(store.events.count)")
                         LabeledContent("Files", value: "\(store.sessionFiles.count)")
                         LabeledContent("Videos", value: "\(store.sessionVideos.count)")
+                        LabeledContent("Images", value: "\(store.sessionFiles.filter { ($0.content_type ?? "").hasPrefix("image/") }.count)")
                         LabeledContent("Uploads queued", value: "\(store.uploads.count)")
                         Button {
                             handoffOpen = true
@@ -173,7 +174,7 @@ struct InspectorView: View {
                             Label("Delete Chat", systemImage: "trash")
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .help("Delete this chat from Zenith Dock")
+                        .help("Delete this chat from AgentsDock")
                     }
                 }
 
@@ -244,7 +245,7 @@ struct InspectorView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(store.selectedSession?.title ?? "This chat will be removed from Zenith Dock.")
+            Text(store.selectedSession?.title ?? "This chat will be removed from AgentsDock.")
         }
         .sheet(isPresented: $handoffOpen) {
             if let session = store.selectedSession {
@@ -2097,49 +2098,64 @@ private struct ChatFilesInspector: View {
     @EnvironmentObject private var store: AppStore
     let files: [ZFile]
     @AppStorage("zenithdock.filesInspector.expanded") private var isExpanded = false
-    @State private var visibleVideoCount = 4
+    @State private var visibleMediaCount = 6
     @State private var visibleDocumentCount = 10
 
-    private let videoPageSize = 4
+    private let mediaPageSize = 6
     private let documentPageSize = 12
 
-    private var videos: [ZFile] {
-        store.sessionVideos
+    private var images: [ZFile] {
+        files.filter { ($0.content_type ?? "").hasPrefix("image/") }
     }
 
+    // Videos and images grouped together into one visual gallery (videos first,
+    // then images), de-duplicated by id.
+    private var media: [ZFile] {
+        var seen = Set<String>()
+        var result: [ZFile] = []
+        for file in store.sessionVideos + images where seen.insert(file.id).inserted {
+            result.append(file)
+        }
+        return result
+    }
+
+    // Non-visual files only — images and videos now live in the Media gallery.
     private var documents: [ZFile] {
-        files.filter { !($0.content_type ?? "").hasPrefix("video/") }
+        files.filter {
+            let ct = $0.content_type ?? ""
+            return !ct.hasPrefix("video/") && !ct.hasPrefix("image/")
+        }
     }
 
-    private var visibleVideos: [ZFile] {
-        Array(videos.prefix(visibleVideoCount))
+    private var visibleMedia: [ZFile] {
+        Array(media.prefix(visibleMediaCount))
     }
 
-    private var videoRows: [[ZFile]] {
-        let current = visibleVideos
+    private var mediaRows: [[ZFile]] {
+        let current = visibleMedia
         return stride(from: 0, to: current.count, by: 2).map { index in
             Array(current[index..<min(index + 2, current.count)])
         }
     }
 
     private var fileChangeToken: String {
-        "\(files.count):\(videos.count):\(files.first?.id ?? ""):\(files.last?.id ?? ""):\(videos.first?.id ?? "")"
+        "\(files.count):\(media.count):\(files.first?.id ?? ""):\(files.last?.id ?? ""):\(media.first?.id ?? "")"
     }
 
     var body: some View {
         GroupBox {
             DisclosureGroup(isExpanded: $isExpanded) {
                 VStack(alignment: .leading, spacing: 10) {
-                    if files.isEmpty && videos.isEmpty {
+                    if files.isEmpty && media.isEmpty {
                         Text("No files in this chat yet")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        if !videos.isEmpty {
-                            videoSection
+                        if !media.isEmpty {
+                            mediaSection
                         }
                         if !documents.isEmpty {
-                            fileSection(videos.isEmpty ? "Files" : "Other Files", files: documents)
+                            fileSection(media.isEmpty ? "Files" : "Other Files", files: documents)
                         }
                         if store.sessionFilesHasMore {
                             Button {
@@ -2157,7 +2173,7 @@ private struct ChatFilesInspector: View {
                 .padding(.top, 10)
             } label: {
                 HStack(spacing: 8) {
-                    Label("Files & Videos", systemImage: "paperclip")
+                    Label("Media & Files", systemImage: "paperclip")
                         .font(.headline)
                     Text(summaryText)
                         .font(.caption2.monospacedDigit())
@@ -2178,19 +2194,19 @@ private struct ChatFilesInspector: View {
             resetVisibleCounts()
         }
         .onChange(of: fileChangeToken) {
-            visibleVideoCount = min(max(visibleVideoCount, 4), max(videos.count, 4))
+            visibleMediaCount = min(max(visibleMediaCount, 6), max(media.count, 6))
             visibleDocumentCount = min(max(visibleDocumentCount, 10), max(documents.count, 10))
         }
     }
 
-    private var videoSection: some View {
+    private var mediaSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Videos", visible: min(visibleVideoCount, videos.count), total: videos.count)
+            sectionHeader("Media", visible: min(visibleMediaCount, media.count), total: media.count)
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(videoRows.enumerated()), id: \.offset) { _, row in
+                ForEach(Array(mediaRows.enumerated()), id: \.offset) { _, row in
                     HStack(alignment: .top, spacing: 8) {
                         ForEach(row) { file in
-                            ChatVideoGridCell(file: file, url: store.fileURL(file))
+                            mediaCell(file)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         if row.count == 1 {
@@ -2200,11 +2216,20 @@ private struct ChatFilesInspector: View {
                     }
                 }
             }
-            if visibleVideoCount < videos.count {
-                showMoreButton(title: "Show More Videos", count: videos.count - visibleVideoCount) {
-                    visibleVideoCount = min(videos.count, visibleVideoCount + videoPageSize)
+            if visibleMediaCount < media.count {
+                showMoreButton(title: "Show More Media", count: media.count - visibleMediaCount) {
+                    visibleMediaCount = min(media.count, visibleMediaCount + mediaPageSize)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func mediaCell(_ file: ZFile) -> some View {
+        if (file.content_type ?? "").hasPrefix("image/") {
+            ChatImageGridCell(file: file, url: store.fileURL(file))
+        } else {
+            ChatVideoGridCell(file: file, url: store.fileURL(file))
         }
     }
 
@@ -2234,7 +2259,7 @@ private struct ChatFilesInspector: View {
     }
 
     private func resetVisibleCounts() {
-        visibleVideoCount = 4
+        visibleMediaCount = 6
         visibleDocumentCount = 10
     }
 
@@ -2364,6 +2389,157 @@ private struct ChatVideoGridCell: View {
         }
         thumbnail = NSImage(data: data)
         thumbnailFailed = thumbnail == nil
+    }
+}
+
+private struct ChatImageGridCell: View {
+    @EnvironmentObject private var store: AppStore
+    let file: ZFile
+    let url: URL
+    @State private var previewOpen = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                previewOpen = true
+            } label: {
+                ChatImageThumbnail(url: url)
+                    .frame(height: 64)
+            }
+            .buttonStyle(.plain)
+            .help("View image")
+            .accessibilityLabel("View image")
+            Text(file.title ?? file.filename)
+                .font(.caption.weight(.semibold))
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            HStack(spacing: 6) {
+                Button {
+                    previewOpen = true
+                } label: {
+                    Label("View", systemImage: "eye")
+                }
+                .controlSize(.mini)
+                .help("View image")
+
+                MacArtifactDownloadButton(file: file, url: url, title: "")
+                    .controlSize(.mini)
+                    .help("Download image")
+
+                Button {
+                    Task { await store.findFileInChat(file) }
+                } label: {
+                    Label("Find", systemImage: "text.magnifyingglass")
+                }
+                .controlSize(.mini)
+                .help("Find in chat")
+
+                Link(destination: url) {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .help("Open file")
+
+                Button {
+                    store.togglePin(file)
+                } label: {
+                    Image(systemName: store.isPinned(file) ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderless)
+                .help(store.isPinned(file) ? "Unpin from right panel" : "Pin to right panel")
+            }
+            .font(.caption2)
+        }
+        .padding(7)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.softLine))
+        .onDrag {
+            ArtifactDragItemProvider.provider(for: file, url: url)
+        }
+        .help("Drag to Finder or another app")
+        .sheet(isPresented: $previewOpen) {
+            InspectorImagePreviewSheet(file: file, url: url)
+        }
+    }
+
+    private var detail: String {
+        file.size.map(byteString) ?? "Image"
+    }
+}
+
+private struct ChatImageThumbnail: View {
+    let url: URL
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(.black.opacity(0.18))
+            .overlay {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        Image(systemName: "photo")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.green)
+                    default:
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .clipped()
+    }
+}
+
+private struct InspectorImagePreviewSheet: View {
+    let file: ZFile
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "photo")
+                    .foregroundStyle(.green)
+                Text(file.title ?? file.filename)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 16)
+                Link(destination: url) {
+                    Label("Open", systemImage: "arrow.up.right.square")
+                }
+                MacArtifactDownloadButton(file: file, url: url, title: "Download")
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(14)
+            Divider()
+            ZStack {
+                Color.black.opacity(0.88)
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .padding(12)
+                } placeholder: {
+                    ProgressView()
+                        .controlSize(.large)
+                }
+            }
+        }
+        .frame(minWidth: 760, minHeight: 540)
     }
 }
 

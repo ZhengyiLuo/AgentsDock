@@ -1,4 +1,5 @@
 import SwiftUI
+import ZenithCore
 
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
@@ -6,9 +7,10 @@ struct RootView: View {
     @State private var resumeOpen = false
     @State private var serverSettingsOpen = false
     @AppStorage("rightInspectorVisible") private var inspectorVisible = true
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
         } content: {
@@ -29,6 +31,13 @@ struct RootView: View {
             }
         }
         .background(Theme.window)
+        .overlay {
+            if store.chatSearchPaletteOpen {
+                ChatSearchPalette()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: store.chatSearchPaletteOpen)
         .task { await store.startLiveTracking() }
         .sheet(isPresented: $resumeOpen) {
             ResumeSessionSheet(isPresented: $resumeOpen)
@@ -38,7 +47,7 @@ struct RootView: View {
             ServerSettingsSheet(isPresented: $serverSettingsOpen)
                 .environmentObject(store)
         }
-        .alert("Zenith Dock", isPresented: Binding(
+        .alert("AgentsDock", isPresented: Binding(
             get: { store.errorText != nil },
             set: { if !$0 { store.errorText = nil } }
         )) {
@@ -170,5 +179,172 @@ struct ServerSettingsSheet: View {
                 isApplying = false
             }
         }
+    }
+}
+
+// Notion-style ⌘P quick-find: a floating, centered overlay that fuzzy-searches
+// every loaded chat. Arrow keys move the selection, Return opens it, Esc / click
+// outside dismisses.
+private struct ChatSearchPalette: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var query = ""
+    @State private var selection = 0
+    @FocusState private var fieldFocused: Bool
+
+    private var results: [ZSession] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return Array(store.sessions.prefix(50)) }
+        return Array(store.sessions.filter { matches($0, q) }.prefix(50))
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(.black.opacity(0.32))
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { close() }
+
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search chats…", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .focused($fieldFocused)
+                        .onKeyPress(.downArrow) { move(1); return .handled }
+                        .onKeyPress(.upArrow) { move(-1); return .handled }
+                        .onKeyPress(.return) { openSelected(); return .handled }
+                        .onKeyPress(.escape) { close(); return .handled }
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+
+                Divider()
+
+                if results.isEmpty {
+                    Text(query.isEmpty ? "Type to search your chats" : "No chats match “\(query)”")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 2) {
+                                ForEach(Array(results.enumerated()), id: \.element.id) { index, session in
+                                    PaletteRow(session: session, selected: index == selection)
+                                        .id(index)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            selection = index
+                                            openSelected()
+                                        }
+                                }
+                            }
+                            .padding(6)
+                        }
+                        .frame(maxHeight: 340)
+                        .onChange(of: selection) {
+                            withAnimation(.linear(duration: 0.08)) {
+                                proxy.scrollTo(selection, anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(width: 600)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.softLine))
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 14)
+            .padding(.top, 110)
+        }
+        .onAppear {
+            selection = 0
+            DispatchQueue.main.async { fieldFocused = true }
+        }
+        .onChange(of: query) { selection = 0 }
+    }
+
+    private func move(_ delta: Int) {
+        guard !results.isEmpty else { return }
+        selection = max(0, min(results.count - 1, selection + delta))
+    }
+
+    private func openSelected() {
+        guard results.indices.contains(selection) else { return }
+        let id = results[selection].id
+        close()
+        Task { await store.select(sessionID: id) }
+    }
+
+    private func close() {
+        store.chatSearchPaletteOpen = false
+    }
+
+    private func matches(_ session: ZSession, _ query: String) -> Bool {
+        if session.title.localizedCaseInsensitiveContains(query) { return true }
+        if let folder = session.folder, folder.localizedCaseInsensitiveContains(query) { return true }
+        let parts = [
+            session.backend,
+            session.model,
+            session.effort,
+            session.cwd,
+            session.session_id,
+            session.claude_session_id,
+            session.codex_thread_id
+        ].compactMap { $0 }
+        return parts.contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+}
+
+private struct PaletteRow: View {
+    let session: ZSession
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "bubble.left")
+                .font(.callout)
+                .foregroundStyle(selected ? Color.white : Color.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.title.isEmpty ? "Untitled chat" : session.title)
+                    .font(.body)
+                    .lineLimit(1)
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(selected ? Color.white.opacity(0.82) : Color.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(selected ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private var subtitle: String? {
+        var parts: [String] = []
+        if let folder = session.folder, !folder.isEmpty { parts.append(folder) }
+        if let model = session.model, !model.isEmpty {
+            parts.append(model)
+        } else if !session.backend.isEmpty {
+            parts.append(session.backend)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

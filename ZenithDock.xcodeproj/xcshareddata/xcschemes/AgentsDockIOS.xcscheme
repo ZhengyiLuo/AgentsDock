@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "T00000000000000000000003"
-               BuildableName = "ZenithDock.app"
-               BlueprintName = "ZenithDockMac"
+               BlueprintIdentifier = "T00000000000000000000001"
+               BuildableName = "AgentsDock.app"
+               BlueprintName = "ZenithDockIOS"
                ReferencedContainer = "container:ZenithDock.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -44,9 +44,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "T00000000000000000000003"
-            BuildableName = "ZenithDock.app"
-            BlueprintName = "ZenithDockMac"
+            BlueprintIdentifier = "T00000000000000000000001"
+            BuildableName = "AgentsDock.app"
+            BlueprintName = "ZenithDockIOS"
             ReferencedContainer = "container:ZenithDock.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -61,9 +61,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "T00000000000000000000003"
-            BuildableName = "ZenithDock.app"
-            BlueprintName = "ZenithDockMac"
+            BlueprintIdentifier = "T00000000000000000000001"
+            BuildableName = "AgentsDock.app"
+            BlueprintName = "ZenithDockIOS"
             ReferencedContainer = "container:ZenithDock.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

@@ -80,8 +80,8 @@ The mobile SwiftUI target is `ZenithDockIOS` and reuses `ZenithCore`.
 
 ```bash
 swift build -c release --target ZenithDockIOS
-xcodebuild -scheme ZenithDockIOS -destination 'generic/platform=iOS' build
-xcodebuild -scheme ZenithDockIOS -destination 'platform=iOS Simulator,name=iPhone 17' build
+xcodebuild -scheme AgentsDockIOS -destination 'generic/platform=iOS' build
+xcodebuild -scheme AgentsDockIOS -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
 ## Archive For TestFlight
@@ -91,7 +91,7 @@ The iOS scheme builds one TestFlight binary for both iPhone and iPad:
 ```bash
 xcodebuild archive \
   -project ZenithDock.xcodeproj \
-  -scheme ZenithDockIOS \
+  -scheme AgentsDockIOS \
   -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath build/ZenithDockIOS.xcarchive
@@ -102,7 +102,7 @@ The macOS scheme builds the Mac TestFlight binary:
 ```bash
 xcodebuild archive \
   -project ZenithDock.xcodeproj \
-  -scheme ZenithDockMac \
+  -scheme AgentsDockMac \
   -configuration Release \
   -destination 'generic/platform=macOS' \
   -archivePath build/ZenithDockMac.xcarchive

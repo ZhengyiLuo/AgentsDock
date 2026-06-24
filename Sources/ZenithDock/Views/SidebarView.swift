@@ -14,13 +14,15 @@ struct SidebarView: View {
     @State private var reorderMode = false
     @State private var sidebarDragPayload: SidebarDragPayload?
     @State private var sidebarDropTarget: SidebarDropTarget?
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Zenith Dock")
+                        Text("AgentsDock")
                             .font(.headline)
                         Text(store.serverURLString)
                             .font(.caption2)
@@ -29,6 +31,29 @@ struct SidebarView: View {
                     }
                     Spacer()
                 }
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search chats", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .focused($searchFocused)
+                        .onSubmit { selectFirstSearchResult() }
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear chat search")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Theme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
                 HStack(spacing: 8) {
                     Button {
                         Task { await store.createSession() }
@@ -66,6 +91,7 @@ struct SidebarView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(reorderMode ? .accentColor : .secondary)
+                    .disabled(isSearching)
                     .help(reorderMode ? "Finish reordering chats and folders" : "Drag chats and folders to reorder")
                 }
                 ConnectionStatusCard()
@@ -73,17 +99,17 @@ struct SidebarView: View {
             .padding(14)
 
             List(selection: sessionSelection) {
-                if !store.pinnedSessions.isEmpty {
+                if !filteredPinnedSessions.isEmpty {
                     Section("Pinned") {
-                        ForEach(store.pinnedSessions) { session in
+                        ForEach(filteredPinnedSessions) { session in
                             sessionRow(session)
                         }
                     }
                 }
-                ForEach(store.folderNames, id: \.self) { folder in
+                ForEach(filteredFolderNames, id: \.self) { folder in
                     Section {
-                        if !store.isFolderCollapsed(folder) {
-                            ForEach(store.folders[folder] ?? []) { session in
+                        if isSearching || !store.isFolderCollapsed(folder) {
+                            ForEach(filteredSessions(in: folder)) { session in
                                 sessionRow(session)
                             }
                         }
@@ -100,16 +126,22 @@ struct SidebarView: View {
                         )
                     }
                 }
-                if !store.archivedSessions.isEmpty {
+                if !filteredArchivedSessions.isEmpty {
                     Section {
-                        if !store.archivedSectionCollapsed {
-                            ForEach(store.archivedSessions) { session in
+                        if isSearching || !store.archivedSectionCollapsed {
+                            ForEach(filteredArchivedSessions) { session in
                                 sessionRow(session)
                             }
                         }
                     } header: {
                         ArchivedSectionHeader()
                     }
+                }
+                if isSearching && filteredPinnedSessions.isEmpty && filteredFolderNames.isEmpty && filteredArchivedSessions.isEmpty {
+                    Text("No chats match “\(normalizedSearchText)”")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 8)
                 }
             }
             .listStyle(.sidebar)
@@ -139,6 +171,14 @@ struct SidebarView: View {
                 clearSidebarDragState()
             }
         }
+        .onChange(of: searchText) { _, _ in
+            if isSearching && reorderMode {
+                withoutSidebarAnimation {
+                    reorderMode = false
+                    clearSidebarDragState()
+                }
+            }
+        }
         .sheet(isPresented: $newFolderOpen) {
             NewFolderSheet(isPresented: $newFolderOpen)
                 .environmentObject(store)
@@ -163,7 +203,7 @@ struct SidebarView: View {
                 deleteCandidate = nil
             }
         } message: {
-            Text(deleteCandidate?.title ?? "This chat will be removed from Zenith Dock.")
+            Text(deleteCandidate?.title ?? "This chat will be removed from AgentsDock.")
         }
     }
 
@@ -179,6 +219,77 @@ struct SidebarView: View {
                 Task { await store.select(sessionID: sessionID) }
             }
         )
+    }
+
+    // Enter in the search field jumps to the top match (quick-switcher).
+    private func selectFirstSearchResult() {
+        guard isSearching else { return }
+        let first = filteredPinnedSessions.first
+            ?? filteredFolderNames.lazy.compactMap { filteredSessions(in: $0).first }.first
+            ?? filteredArchivedSessions.first
+        guard let session = first else { return }
+        searchFocused = false
+        Task { await store.select(sessionID: session.id) }
+    }
+
+    private var normalizedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isSearching: Bool {
+        !normalizedSearchText.isEmpty
+    }
+
+    private func matchesSearch(_ session: ZSession) -> Bool {
+        guard isSearching else { return true }
+        let query = normalizedSearchText
+        if session.title.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        if let folder = session.folder, folder.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        let searchableParts = [
+            session.backend,
+            session.model,
+            session.effort,
+            session.cwd,
+            session.session_id,
+            session.claude_session_id,
+            session.codex_thread_id
+        ].compactMap { $0 }
+        if searchableParts.contains(where: { $0.localizedCaseInsensitiveContains(query) }) {
+            return true
+        }
+        return false
+    }
+
+    private var filteredPinnedSessions: [ZSession] {
+        store.pinnedSessions.filter(matchesSearch)
+    }
+
+    private var filteredArchivedSessions: [ZSession] {
+        store.archivedSessions.filter(matchesSearch)
+    }
+
+    private func filteredSessions(in folder: String) -> [ZSession] {
+        let sessions = store.folders[folder] ?? []
+        guard isSearching else {
+            return sessions
+        }
+        return sessions.filter(matchesSearch)
+    }
+
+    private var filteredFolderNames: [String] {
+        store.folderNames.filter { folder in
+            if !isSearching {
+                return true
+            }
+            if folder.localizedCaseInsensitiveContains(normalizedSearchText) {
+                return true
+            }
+            return !filteredSessions(in: folder).isEmpty
+        }
     }
 
     @ViewBuilder

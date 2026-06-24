@@ -48,13 +48,19 @@ struct TimelineView: View {
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
         let shouldMaskTimeline = timelineRowsStructurallySuspended
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
-        let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)
+        // The AppKit table virtualizes (cell reuse), so it can render ALL loaded
+        // rows cheaply — no need for the visibleRowLimit cap that the eager VStack
+        // requires. That removes the "click show-older to reveal more rendered
+        // rows" friction entirely; the table shows everything currently loaded,
+        // and we fetch MORE from the server on scroll-to-top (onNeedOlder).
+        let tableMode = useTableContainer
+        let projectedDisplayEvents = tableMode ? displayEvents : timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)
         let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
         let projection = TimelineRows.project(from: projectedDisplayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
         let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit) + projectedHiddenEventCount
-        let rows = Array(allRows.suffix(visibleRowLimit))
+        let rows = tableMode ? allRows : Array(allRows.suffix(visibleRowLimit))
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
 
@@ -67,103 +73,16 @@ struct TimelineView: View {
             Divider()
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if store.selectedSession == nil {
-                                EmptyStateView()
-                            } else {
-                                if !timelineRowsStructurallySuspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
-                                    TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
-                                        revealOlderRowsShowingNewPage(proxy)
-                                    } onLoadOlder: {
-                                        loadOlderHistoryFromIntent(proxy)
-                                    }
-                                    .onDisappear {
-                                        olderHistoryLoadArmed = true
-                                        suppressScrollHistoryLoadUntilTopLeaves = false
-                                    }
-                                }
-                                ForEach(rows) { row in
-                                    if row.id == firstUnreadRowID {
-                                        TimelineUnreadMarker()
-                                            .id("unread-marker-\(row.id)")
-                                    }
-                                    switch row.kind {
-                                    case .event(let event):
-                                        EventCard(
-                                            event: event,
-                                            showDebugEvents: store.showDebugEvents,
-                                            queueStatus: queueStatus(for: event),
-                                            attachments: store.promptFiles(for: event).map {
-                                                MessageAttachment(file: $0, url: store.fileURL($0))
-                                            },
-                                            artifactURL: event.artifact.map { store.fileURL($0) },
-                                            fileURL: event.file.map { store.fileURL($0) },
-                                            linkContext: linkContext,
-                                            job: event.run_id.flatMap { jobsByRunID[$0] },
-                                            isPinned: store.isPinned(event),
-                                            onTogglePin: { event in
-                                                store.togglePin(event)
-                                            },
-                                            onUnqueue: { event in
-                                                Task { await store.unqueue(event) }
-                                            }
-                                        )
-                                        .equatable()
-                                            .id(row.id)
-                                    case .artifacts(let events):
-                                        ArtifactGridCard(
-                                            artifacts: events.compactMap { event in
-                                                event.artifact.map { ArtifactGridItem(file: $0, url: store.fileURL($0)) }
-                                            },
-                                            linkContext: linkContext,
-                                            isPinned: { file in
-                                                store.isPinned(file)
-                                            },
-                                            onTogglePin: { file in
-                                                store.togglePin(file)
-                                            }
-                                        )
-                                            .id(row.id)
-                                    case .job(let jobRun):
-                                        JobRunBubble(jobRun: jobRun, linkContext: linkContext)
-                                            .id(row.id)
-                                    case .jobGroup(let group):
-                                        JobRunGroupBubble(group: group, linkContext: linkContext)
-                                            .id(row.id)
-                                    case .trace(let events):
-                                        TraceGroupCard(
-                                            events: events,
-                                            linkContext: linkContext
-                                        )
-                                            .equatable()
-                                            .id(row.id)
-                                    }
-                                }
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id(bottomID)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            TimelineScrollObserver(
-                                forceBottomRevision: store.forcedScrollToBottomRevision,
-                                preservePositionRevision: store.preserveTimelineScrollRevision
-                            ) { metrics in
-                                updateBottomVisibility(metrics)
-                                handleHistoryTopDistance(
-                                    metrics.distanceFromTop,
-                                    hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
-                                    proxy: proxy
-                                )
-                            }
-                        )
-                    }
-                    .opacity(shouldMaskTimeline ? 0 : 1)
-                    .coordinateSpace(name: coordinateSpaceName)
+                    timelineScrollRegion(
+                        proxy: proxy,
+                        rows: rows,
+                        firstUnreadRowID: firstUnreadRowID,
+                        jobsByRunID: jobsByRunID,
+                        linkContext: linkContext,
+                        hiddenRenderedRowCount: hiddenRenderedRowCount,
+                        suspended: timelineRowsStructurallySuspended,
+                        shouldMask: shouldMaskTimeline
+                    )
                     if shouldMaskTimeline, store.selectedSession != nil, showTimelinePositioningOverlay {
                         TimelinePositioningOverlay()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -311,6 +230,260 @@ struct TimelineView: View {
             timelinePositioningOverlayTask?.cancel()
             timelinePositioningOverlayTask = nil
         }
+    }
+
+    // A/B flag (defaults OFF -> ships the stable eager VStack). Flip with:
+    //   defaults write <app-id> ZD_TimelineUseList -bool true
+    // to test the NSTableView-backed List path. STEP 1 of the List rewrite:
+    // proves whether List avoids the LazyVStack layout spiral under live
+    // streaming, with ALL existing scroll machinery still wired.
+    private var useListContainer: Bool {
+        UserDefaults.standard.bool(forKey: "ZD_TimelineUseList")
+    }
+
+    // AppKit NSTableView path (production snappy+stable tier). Flip with:
+    //   defaults write com.zhengyiluo.ZenithDock ZD_TimelineUseTable -bool true
+    private var useTableContainer: Bool {
+        UserDefaults.standard.bool(forKey: "ZD_TimelineUseTable")
+    }
+
+    // The chosen scroll container (Table / List / eager VStack). Extracted from
+    // body so the type-checker doesn't choke on the 3-way branch inline.
+    @ViewBuilder
+    private func timelineScrollRegion(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool,
+        shouldMask: Bool
+    ) -> some View {
+        if useTableContainer {
+            TimelineTableView(
+                rows: rows,
+                signature: { rowSignature($0) },
+                makeRow: { AnyView(timelineCard($0, jobsByRunID: jobsByRunID, linkContext: linkContext).environmentObject(store)) },
+                fontSize: 14,
+                scrollToBottomTick: store.scrollToBottomRevision,
+                forceBottomTick: store.forcedScrollToBottomRevision,
+                hasOlder: store.canLoadOlderHistory,
+                onNeedOlder: { Task { _ = await store.loadOlderHistory() } }
+            )
+            .opacity(shouldMask ? 0 : 1)
+        } else if useListContainer {
+            timelineListContainer(
+                proxy: proxy,
+                rows: rows,
+                firstUnreadRowID: firstUnreadRowID,
+                jobsByRunID: jobsByRunID,
+                linkContext: linkContext,
+                hiddenRenderedRowCount: hiddenRenderedRowCount,
+                suspended: suspended
+            )
+            .opacity(shouldMask ? 0 : 1)
+            .coordinateSpace(name: coordinateSpaceName)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if store.selectedSession == nil {
+                        EmptyStateView()
+                    } else {
+                        if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
+                            TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
+                                revealOlderRowsShowingNewPage(proxy)
+                            } onLoadOlder: {
+                                loadOlderHistoryFromIntent(proxy)
+                            }
+                            .onDisappear {
+                                olderHistoryLoadArmed = true
+                                suppressScrollHistoryLoadUntilTopLeaves = false
+                            }
+                        }
+                        ForEach(rows) { row in
+                            if row.id == firstUnreadRowID {
+                                TimelineUnreadMarker()
+                                    .id("unread-marker-\(row.id)")
+                            }
+                            timelineCard(row, jobsByRunID: jobsByRunID, linkContext: linkContext)
+                        }
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomID)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    TimelineScrollObserver(
+                        forceBottomRevision: store.forcedScrollToBottomRevision,
+                        preservePositionRevision: store.preserveTimelineScrollRevision
+                    ) { metrics in
+                        updateBottomVisibility(metrics)
+                        handleHistoryTopDistance(
+                            metrics.distanceFromTop,
+                            hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
+                            proxy: proxy
+                        )
+                    }
+                )
+            }
+            .opacity(shouldMask ? 0 : 1)
+            .coordinateSpace(name: coordinateSpaceName)
+        }
+    }
+
+    // Height-cache signature: stable per row, but changes when the row's rendered
+    // content changes (so a growing streaming row re-measures, others stay cached).
+    private func rowSignature(_ row: TimelineRow) -> String {
+        let fontToken = Int(UserDefaults.standard.double(forKey: "chatFontSize"))
+        let contentLen: Int
+        switch row.kind {
+        case .event(let e):
+            contentLen = (e.text ?? e.result_text ?? e.prompt ?? "").count
+        case .artifacts(let evs):
+            contentLen = evs.count
+        case .trace(let evs):
+            contentLen = evs.count
+        case .job(let j):
+            contentLen = (j.resultText ?? j.errorText ?? "").count
+        case .jobGroup(let g):
+            contentLen = g.runs.count
+        }
+        return "\(row.id):\(row.maxSeq):\(contentLen):\(fontToken)"
+    }
+
+    // Shared per-row renderer used by BOTH the VStack and List paths so they
+    // can't diverge (pure extraction of the former inline switch).
+    @ViewBuilder
+    private func timelineCard(_ row: TimelineRow, jobsByRunID: [String: ZJob], linkContext: ZMarkdownLinkContext?) -> some View {
+        switch row.kind {
+        case .event(let event):
+            EventCard(
+                event: event,
+                showDebugEvents: store.showDebugEvents,
+                queueStatus: queueStatus(for: event),
+                attachments: store.promptFiles(for: event).map {
+                    MessageAttachment(file: $0, url: store.fileURL($0))
+                },
+                artifactURL: event.artifact.map { store.fileURL($0) },
+                fileURL: event.file.map { store.fileURL($0) },
+                linkContext: linkContext,
+                job: event.run_id.flatMap { jobsByRunID[$0] },
+                isPinned: store.isPinned(event),
+                onTogglePin: { event in
+                    store.togglePin(event)
+                },
+                onUnqueue: { event in
+                    Task { await store.unqueue(event) }
+                }
+            )
+            .equatable()
+            .id(row.id)
+        case .artifacts(let events):
+            ArtifactGridCard(
+                artifacts: events.compactMap { event in
+                    event.artifact.map { ArtifactGridItem(file: $0, url: store.fileURL($0)) }
+                },
+                linkContext: linkContext,
+                isPinned: { file in
+                    store.isPinned(file)
+                },
+                onTogglePin: { file in
+                    store.togglePin(file)
+                }
+            )
+            .equatable()
+            .id(row.id)
+        case .job(let jobRun):
+            JobRunBubble(jobRun: jobRun, linkContext: linkContext)
+                .equatable()
+                .id(row.id)
+        case .jobGroup(let group):
+            JobRunGroupBubble(group: group, linkContext: linkContext)
+                .equatable()
+                .id(row.id)
+        case .trace(let events):
+            TraceGroupCard(events: events, linkContext: linkContext)
+                .equatable()
+                .id(row.id)
+        }
+    }
+
+    // STEP 1 List container: NSTableView-backed, behind useListContainer.
+    // Keeps the SAME rows, SAME observer (.background), SAME ScrollViewReader
+    // (caller). Only the container differs vs the VStack path.
+    @ViewBuilder
+    private func timelineListContainer(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool
+    ) -> some View {
+        List {
+            if store.selectedSession == nil {
+                EmptyStateView()
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            } else {
+                if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
+                    TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
+                        revealOlderRowsShowingNewPage(proxy)
+                    } onLoadOlder: {
+                        loadOlderHistoryFromIntent(proxy)
+                    }
+                    .onDisappear {
+                        olderHistoryLoadArmed = true
+                        suppressScrollHistoryLoadUntilTopLeaves = false
+                    }
+                    .listRowInsets(EdgeInsets(top: 7, leading: 20, bottom: 7, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+                ForEach(rows) { row in
+                    if row.id == firstUnreadRowID {
+                        TimelineUnreadMarker()
+                            .id("unread-marker-\(row.id)")
+                            .listRowInsets(EdgeInsets(top: 7, leading: 20, bottom: 7, trailing: 20))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                    timelineCard(row, jobsByRunID: jobsByRunID, linkContext: linkContext)
+                        .listRowInsets(EdgeInsets(top: 7, leading: 20, bottom: 7, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+                Color.clear
+                    .frame(height: 1)
+                    .id(bottomID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.window)
+        .environment(\.defaultMinListRowHeight, 1)
+        .background(
+            TimelineScrollObserver(
+                forceBottomRevision: store.forcedScrollToBottomRevision,
+                preservePositionRevision: store.preserveTimelineScrollRevision
+            ) { metrics in
+                updateBottomVisibility(metrics)
+                handleHistoryTopDistance(
+                    metrics.distanceFromTop,
+                    hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
+                    proxy: proxy
+                )
+            }
+        )
     }
 
     private func beginInitialTimelineMask() {
@@ -1423,7 +1596,7 @@ private final class TimelineClampingClipView: NSClipView {
     }
 }
 
-private final class TimelineRow: Identifiable {
+final class TimelineRow: Identifiable {
     enum Kind {
         case event(ZEvent)
         case artifacts([ZEvent])
@@ -1653,7 +1826,14 @@ private enum TimelineRows {
                    let first = chunk.first,
                    let last = chunk.last {
                     rows.append(TimelineRow(
-                        id: "assistant-run-\(activeRunID ?? assistant.id)-\(first.seq)-\(last.seq)",
+                        // Stable per-chunk identity: do NOT include last.seq. The
+                        // active streaming chunk grows (last.seq increments every
+                        // token batch); keying on it changed the row's identity each
+                        // batch -> delete+insert+full re-measure (esp. costly in List)
+                        // instead of in-place update. first.seq is unique+stable per
+                        // chunk; the merged event's seq still changes so the card
+                        // re-renders the new text in place.
+                        id: "assistant-run-\(activeRunID ?? assistant.id)-\(first.seq)",
                         kind: .event(assistant),
                         eventIDs: chunk.map(\.id)
                     ))
