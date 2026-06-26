@@ -498,7 +498,14 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("scrollView.contentInsets = zeroInsets"), "Mac timeline must not allow AppKit content insets to create bottom overscroll slack")
     try assert(!timeline.contains(".padding(.bottom, 56)"), "Mac timeline content must not add artificial bottom scroll slack")
     try assert(!timeline.contains(".padding(20)"), "Mac timeline content must not apply symmetric padding that creates bottom scroll slack")
-    try assert(timeline.contains(".padding(.horizontal, 20)\n                        .padding(.top, 20)"), "Mac timeline content should keep side/top padding without bottom padding")
+    guard let horizontalPaddingRange = timeline.range(of: ".padding(.horizontal, 20)") else {
+        throw GuardrailFailure.failed("Mac timeline content should keep horizontal padding without bottom padding")
+    }
+    let topPaddingSearchEnd = timeline.index(horizontalPaddingRange.upperBound, offsetBy: 160, limitedBy: timeline.endIndex) ?? timeline.endIndex
+    try assert(
+        timeline[horizontalPaddingRange.upperBound..<topPaddingSearchEnd].contains(".padding(.top, 20)"),
+        "Mac timeline content should keep side/top padding without bottom padding"
+    )
     try assert(timeline.contains("clampAttachedScrollViewIfNeeded()"), "Mac timeline must clamp the underlying NSScrollView immediately on attach and bounds changes")
     try assert(timeline.contains("installClampingClipViewIfNeeded"), "Mac timeline must install an NSClipView that rejects overscroll bounds")
     try assert(timeline.contains("private final class TimelineClampingClipView: NSClipView"), "Mac timeline must use a custom clamping clip view")
@@ -672,8 +679,8 @@ func checkVideoMetadataIsNotHiddenByMixedFilePaging() throws {
     try assert(macStore.contains("URLQueryItem(name: \"content_prefix\", value: \"video/\")"), "Mac store must fetch videos independently of mixed file paging")
     try assert(macStore.contains("URLQueryItem(name: \"limit\", value: \"\\(sessionFilesPageLimit)\")"), "Mac video metadata fetch must be paged instead of pulling every video while switching chats")
     try assert(inspector.contains("store.sessionVideos"), "Mac files inspector must render the independent video list")
-    try assert(inspector.contains("@State private var visibleVideoCount = 4"), "Mac files inspector must start video grids at four previews")
-    try assert(inspector.contains("private let videoPageSize = 4"), "Mac files inspector must page video grids four at a time")
+    try assert(inspector.contains("@State private var visibleMediaCount = 4"), "Mac files inspector must start media grids at four previews")
+    try assert(inspector.contains("private let mediaPageSize = 4"), "Mac files inspector must page media grids four at a time")
     try assert(eventViews.contains("private let initialArtifactLimit = 4"), "Mac timeline artifact grids must start at four previews")
     try assert(eventViews.contains("let mediaArtifacts = visibleArtifacts.filter"), "Mac timeline artifact cards must derive media/files from the capped preview set")
     try assert(eventViews.contains("visibleArtifacts.filter { $0.file.isPreviewableArtifact }"), "Mac timeline artifact cards must split media previews from plain files")
@@ -1275,7 +1282,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
 
     try assert(macStore.contains("@Published private(set) var sessionVideos: [ZFile] = []"), "Mac store must cache selected-session videos instead of deriving them during render")
     try assert(!macStore.contains("var sessionVideos: [ZFile] {\n        mergedFiles"), "Mac sessionVideos must not be a merge/sort computed getter")
-    try assert(inspector.contains("private var videos: [ZFile] {\n        store.sessionVideos\n    }"), "Files inspector must use cached video ordering")
+    try assert(inspector.contains("for file in store.sessionVideos + images"), "Files inspector must use cached video ordering before image previews")
     try assert(!inspector.contains("sortedLatestFirst("), "Files inspector must not sort media lists during ordinary body updates")
     try assert(timeline.contains("let minimumInterval = 0.14"), "Timeline scroll observer reports must be throttled enough to avoid bottom-scroll churn")
 

@@ -2098,10 +2098,10 @@ private struct ChatFilesInspector: View {
     @EnvironmentObject private var store: AppStore
     let files: [ZFile]
     @AppStorage("zenithdock.filesInspector.expanded") private var isExpanded = false
-    @State private var visibleMediaCount = 6
+    @State private var visibleMediaCount = 4
     @State private var visibleDocumentCount = 10
 
-    private let mediaPageSize = 6
+    private let mediaPageSize = 4
     private let documentPageSize = 12
 
     private var images: [ZFile] {
@@ -2194,7 +2194,7 @@ private struct ChatFilesInspector: View {
             resetVisibleCounts()
         }
         .onChange(of: fileChangeToken) {
-            visibleMediaCount = min(max(visibleMediaCount, 6), max(media.count, 6))
+            visibleMediaCount = min(max(visibleMediaCount, 4), max(media.count, 4))
             visibleDocumentCount = min(max(visibleDocumentCount, 10), max(documents.count, 10))
         }
     }
@@ -2259,7 +2259,7 @@ private struct ChatFilesInspector: View {
     }
 
     private func resetVisibleCounts() {
-        visibleMediaCount = 6
+        visibleMediaCount = 4
         visibleDocumentCount = 10
     }
 

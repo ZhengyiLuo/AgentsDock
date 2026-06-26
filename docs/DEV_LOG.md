@@ -12,12 +12,57 @@ painful to rediscover later.
 - Do not use temporary paths as source-of-truth. The repo is
   `/Users/zen/agi/ZenithDock`.
 - Normal Mac app bundle path is
-  `/Users/zen/agi/ZenithDock/dist/ZenithDock.app`.
+  `/Users/zen/agi/ZenithDock/dist/AgentsDock.app`.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
 - Every TestFlight release must also update the server side: deploy/restart the
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
+
+## 2026-06-25 - AgentsDock TestFlight Build 53 / Uploaded Build 54
+
+Context:
+- User requested iOS/iPadOS and macOS TestFlight updates after the AgentsDock
+  rename/icon work and Claude's latest UI changes.
+- The repo was at `5835c95 Remove dormant AppKit timeline experiment
+  (Mac timeline is VStack-only)` before release bookkeeping.
+
+Change:
+- Uploaded the current AgentsDock app to TestFlight for iOS/iPadOS and macOS.
+- The app archives have `CFBundleVersion = 53`, but App Store Connect reports
+  `uploadedBuildNumber = 54` because `build/TestFlightExportOptions.plist` has
+  `manageAppVersionAndBuildNumber = true`.
+- Kept the media inspector grid capped at four visual previews per page so the
+  right panel does not explode with large video/image chats.
+- Restored the selected-chat initial event tail to `240` to preserve the faster
+  chat-open behavior instead of pulling a heavier tail at switch time.
+- Updated `ZenithGuardrails` so it matches the current media gallery rename
+  (`media`, videos first via `store.sessionVideos`, images after) and still
+  protects the Mac timeline from bottom-padding/overscroll regressions.
+
+Verification:
+- `swift run ZenithGuardrails` passed.
+- `xcodebuild archive -scheme AgentsDockIOS ... AgentsDockIOS-53.xcarchive`
+  succeeded.
+- `xcodebuild -exportArchive ... AgentsDockIOS-53.xcarchive ...` uploaded
+  `AgentsDockIOS`; archive plist shows `uploadedBuildNumber = 54` and
+  `uploadEvent.state = success`.
+- `xcodebuild archive -scheme AgentsDockMac ... AgentsDockMac-53.xcarchive`
+  succeeded. Xcode emitted one existing warning in
+  `Sources/ZenithDock/Views/TimelineView.swift` about an unused `last` local.
+- `xcodebuild -exportArchive ... AgentsDockMac-53.xcarchive ...` uploaded
+  `AgentsDockMac`; archive plist shows `uploadedBuildNumber = 54` and
+  `uploadEvent.state = success`.
+- `scripts/build_local_mac.sh` refreshed the local app at
+  `/Users/zen/agi/ZenithDock/dist/AgentsDock.app` and synced it to
+  `zens-macbook-air:/Users/zen/agi/AgentsDock.app`.
+- Direct Xcode-account upload initially failed with missing `Xcode-Token`; retry
+  succeeded using the App Store Connect API key at
+  `/Users/zen/.appstoreconnect/private_keys/AuthKey_3FLS2NAFCN.p8` plus
+  `/Users/zen/.appstoreconnect/issuer_id`.
+- Standalone server repo `/Users/zen/agi/ZenithBotServer` was clean at
+  `cfea0ad Clarify AMLFS skill discovery`; no server deploy/restart was needed
+  for this app-only upload.
 
 ## 2026-06-21 - TestFlight Build 52
 

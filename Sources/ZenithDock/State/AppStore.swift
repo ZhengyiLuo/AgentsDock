@@ -100,7 +100,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var pinnedItemsBySessionID: [String: [PinnedTimelineItem]] = [:]
     @Published private(set) var queuedTurnsBySessionID: [String: [ZQueuedTurn]] = [:]
 
-    private let initialSessionEventLimit = 500
+    private let initialSessionEventLimit = 240
     private let olderHistoryPageLimit = 400
     private let maxLoadedTimelineEvents = 2_000
     private let maxCachedTimelineEvents = 720
