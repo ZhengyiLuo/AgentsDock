@@ -34,6 +34,15 @@ Change:
 - Existing sessions are repaired when the server loads, new/update requests are
   validated, backend switches clear unspecified model/effort values, and Codex
   command construction normalizes once more before launch.
+- Follow-up testing showed the first normalization alone was insufficient:
+  unset runtimes inherited the host's newer `gpt-5.6-sol` / `ultra` config, and
+  resumed-thread flags were attached to `codex exec` instead of the separate
+  `codex exec resume` option scope. Fresh turns now explicitly pass the server's
+  advertised GPT-5.5/XHigh defaults, and resumed turns receive those flags after
+  the `resume` subcommand.
+- Codex `Reconnecting... N/5` packets are now treated as transient transport
+  telemetry instead of fatal timeline errors. A structured terminal failure is
+  authoritative and suppresses duplicate stderr/RMCP error cards.
 - Added guardrails that prohibit passing raw persisted effort values directly
   into the Codex CLI.
 
