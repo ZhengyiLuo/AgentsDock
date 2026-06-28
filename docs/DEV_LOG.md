@@ -19,6 +19,28 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-28 - Backend-Specific Effort Validation Hotfix
+
+Context:
+- A Codex turn failed before launch with `Invalid value: 'max'`; Codex accepts
+  `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+- `max` is a Claude effort value. The server previously stored and forwarded
+  arbitrary effort strings, so stale app state or a cross-backend session value
+  could reach `codex exec` unchanged.
+
+Change:
+- Added server-side backend-aware effort normalization. Legacy Codex `max` and
+  equivalent Extra High spellings map to `xhigh`.
+- Existing sessions are repaired when the server loads, new/update requests are
+  validated, backend switches clear unspecified model/effort values, and Codex
+  command construction normalizes once more before launch.
+- Added guardrails that prohibit passing raw persisted effort values directly
+  into the Codex CLI.
+
+Verification:
+- `python3 -m py_compile server/agent_server.py` passed.
+- `swift run ZenithGuardrails` passed.
+
 ## 2026-06-25 - AgentsDock TestFlight Build 53 / Uploaded Build 54
 
 Context:
