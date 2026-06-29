@@ -19,6 +19,29 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-28 - GPT-5.6 Priority Tier Root Cause
+
+Context:
+- PR `ZhengyiLuo/ZenithBotServer#2` identified the missing GPT-5.6 launch
+  contract: preview models use the priority service tier (shown as Fast in the
+  Codex UI).
+- Direct probes proved `gpt-5.6-sol` with `ultra` fails when no service tier is
+  supplied but succeeds with either the user-facing `service_tier=fast` alias
+  or the canonical `service_tier=priority` value.
+- A fresh interactive Codex TUI turn and a fresh `codex exec` turn both returned
+  the requested Sol response. This disproved the earlier account-gating and
+  app-server-only theories.
+
+Decision:
+- Use canonical `service_tier=priority` for Sol, Terra, and Luna in normal turns
+  and handoff digest turns. Keep the UI label as Fast.
+- Preserve the model-specific `max` and `ultra` effort choices advertised for
+  GPT-5.6.
+- Remove the Sol-to-Terra automatic fallback. A selected Sol chat must either
+  run Sol or surface the real error; it must never silently mutate runtimes.
+- This entry supersedes the fallback decision in the older preview-isolation
+  notes below.
+
 ## 2026-06-28 - GPT-5.6 Preview Isolation
 
 Context:
