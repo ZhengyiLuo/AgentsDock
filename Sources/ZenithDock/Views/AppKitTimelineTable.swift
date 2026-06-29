@@ -418,6 +418,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard let row = items.firstIndex(where: { $0.id == anchor.itemID }),
                   let scrollView,
                   let tableView else { return }
+            tableView.scrollRowToVisible(row)
             tableView.layoutSubtreeIfNeeded()
             let rowRect = tableView.rect(ofRow: row)
             scroll(toY: rowRect.minY + anchor.offset, in: scrollView, tableView: tableView)
