@@ -5727,3 +5727,30 @@ Third follow-up:
 - Added stale-load generation checks and recycler/guardrail coverage for loader
   anchoring, single bottom revisions, session-keyed row windows, synchronous
   positioning, and native one-page history loading.
+
+## 2026-06-29 - Native Timeline Scroll Ownership
+
+- Replaced the AppKit path's second 64-row/300-event projection window with one
+  loaded timeline model. `NSTableView` is now the only view-virtualization layer,
+  and SwiftUI row content is constructed lazily only for recycled visible cells.
+- Removed unconditional anchor restoration. Streaming or other mutations below
+  the viewport do not write the clip origin; prepends and row-height changes at
+  or above the viewport preserve one semantic event anchor with one nonanimated
+  origin write.
+- Added full live/momentum-scroll ownership. Passive updates and forced-bottom
+  revisions cannot interrupt a gesture, and switching chats discards momentum
+  state from the previous document before positioning the new one.
+- Changed the native table to plain style, retained strict no-overscroll
+  elasticity, disabled height-change animation, refreshed retained rows on every
+  structural fast path, and replaced trailing-only metrics debounce with bounded
+  leading/trailing delivery.
+- Native history loading now requests one server page only at the true top. It
+  does not reveal local suffix windows, expand projection budgets, chase a target
+  row, or automatically chain another page.
+- Warm cache restoration now uses the complete 720-event cache. Older-page
+  merges preserve the live tail and reject stale boundaries instead of dropping
+  newest events while retaining a newer resume sequence.
+- Added deterministic regression scenarios for offscreen streaming, changing
+  height above the viewport, one-page prepends, momentum priority, and rapid
+  chat-switch isolation. The runner also requires one machine-readable pass
+  record per scenario.

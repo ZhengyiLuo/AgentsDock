@@ -104,7 +104,6 @@ final class AppStore: ObservableObject {
     private let olderHistoryPageLimit = 400
     private let maxLoadedTimelineEvents = 2_000
     private let maxCachedTimelineEvents = 720
-    private let maxWarmCachedTimelineEvents = 240
     private let cachedTailFreshnessWindow: TimeInterval = 45
     private let maxCachedStringCharacters = 6_000
     private let sessionFilesPageLimit = 48
@@ -447,7 +446,9 @@ final class AppStore: ObservableObject {
     }
 
     var canLoadOlderHistory: Bool {
-        omittedHistoryEventCount > 0 && !isLoadingOlderHistory
+        omittedHistoryEventCount > 0 &&
+            events.count < maxLoadedTimelineEvents &&
+            !isLoadingOlderHistory
     }
 
     var selectedPinnedItems: [PinnedTimelineItem] {
@@ -1662,7 +1663,7 @@ final class AppStore: ObservableObject {
         isApplyingLargeTimelineBatch = false
         if loadingSessionID == sessionID {
             if loadedSessionID != sessionID, let cached = memoryCachedChat(sessionID) {
-                applyCachedChat(cached, renderLimit: maxWarmCachedTimelineEvents)
+                applyCachedChat(cached)
                 setStatus("Loaded memory chat")
             }
             selectedSessionID = sessionID
@@ -1690,7 +1691,7 @@ final class AppStore: ObservableObject {
         var loadedFromCache = false
         if let warmCachedChat {
             noteSwitchPath(sessionID, "memory")
-            applyCachedChat(warmCachedChat, renderLimit: maxWarmCachedTimelineEvents)
+            applyCachedChat(warmCachedChat)
             loadedFromCache = true
             setStatus("Loaded memory chat")
             AppLogger.info("loaded memory cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
@@ -1802,10 +1803,6 @@ final class AppStore: ObservableObject {
                 return
             }
             let previousSeq = lastSeq
-            let responseLatestSeq = res.events.map(\.seq).max() ?? cachedLastSeq
-            if responseLatestSeq > cachedLastSeq {
-                requestScrollToBottom(immediate: true)
-            }
             let changedTimeline = applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
             markSessionRead(sessionID)
             loadedSessionID = sessionID
@@ -1876,10 +1873,12 @@ final class AppStore: ObservableObject {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
+              events.count < maxLoadedTimelineEvents,
               let before = events.map(\.seq).min() else {
             return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
         let generation = selectionGeneration
+        let requestedCapacity = maxLoadedTimelineEvents - events.count
 
         isLoadingOlderHistory = true
         defer { isLoadingOlderHistory = false }
@@ -1898,14 +1897,15 @@ final class AppStore: ObservableObject {
             var skippedNonPrimaryPages = 0
             var knownIDs = Set(events.map(\.id))
             var older: [ZEvent] = []
-            var firstAddedEventID: String?
 
             for _ in 0..<8 {
+                let remainingCapacity = requestedCapacity - older.count
+                guard remainingCapacity > 0 else { break }
                 let res: Response = try await api.get(
                     "/api/sessions/\(sid)",
                     queryItems: [
                         URLQueryItem(name: "before", value: "\(cursorBefore)"),
-                        URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
+                        URLQueryItem(name: "limit", value: "\(min(olderHistoryPageLimit, remainingCapacity))"),
                         URLQueryItem(name: "tail", value: "true"),
                         URLQueryItem(name: "visible", value: "true")
                     ]
@@ -1919,11 +1919,11 @@ final class AppStore: ObservableObject {
                     knownIDs.insert(event.id)
                     return true
                 }
-                if firstAddedEventID == nil {
-                    firstAddedEventID = visibleOlder.first(where: isPrimaryTimelinePageEvent)?.id ?? visibleOlder.first?.id
-                }
                 older.append(contentsOf: visibleOlder)
-                if visibleOlder.contains(where: isPrimaryTimelinePageEvent) || res.events.isEmpty || remainingOmitted <= 0 {
+                if visibleOlder.contains(where: isPrimaryTimelinePageEvent) ||
+                    res.events.isEmpty ||
+                    remainingOmitted <= 0 ||
+                    older.count >= requestedCapacity {
                     break
                 }
 
@@ -1943,22 +1943,58 @@ final class AppStore: ObservableObject {
                 AppLogger.info("drop stale older history session=\(sid)")
                 return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
             }
+
+            // `events` intentionally represents one bounded ordered window with no
+            // omitted middle segment. Its high end is the websocket resume tail, so
+            // older paging must never evict it or splice history across a hidden gap.
+            // If that window moved while this request was suspended, discard the page.
+            let currentBefore = events.map(\.seq).min()
+            guard currentBefore == before else {
+                AppLogger.info("drop stale older history boundary session=\(sid) before=\(before) current_before=\(currentBefore ?? 0)")
+                return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
+            }
+
+            let currentIDs = Set(events.map(\.id))
+            let sortedOlder = older
+                .filter { $0.seq < before && !currentIDs.contains($0.id) }
+                .sorted { $0.seq < $1.seq }
+            let availableCapacity = max(0, maxLoadedTimelineEvents - events.count)
+            let acceptedOlder = Array(sortedOlder.suffix(availableCapacity))
+            let droppedFetchedCount = sortedOlder.count - acceptedOlder.count
+            let nextOmittedHistoryEventCount = remainingOmitted + droppedFetchedCount
+            let firstAddedEventID = acceptedOlder.first(where: isPrimaryTimelinePageEvent)?.id ?? acceptedOlder.first?.id
+            let previousTailSeq = events.map(\.seq).max() ?? 0
+            let mergedEvents = (acceptedOlder + events).sorted { $0.seq < $1.seq }
+
+            assert(
+                mergedEvents.count <= maxLoadedTimelineEvents,
+                "Older history merge exceeded the bounded timeline window"
+            )
+            assert(
+                (mergedEvents.map(\.seq).max() ?? 0) == previousTailSeq,
+                "Older history merge replaced the live timeline tail"
+            )
+
+            if !acceptedOlder.isEmpty {
+                events = mergedEvents
+                latestSeenSeq = max(latestSeenSeq, previousTailSeq)
+            }
             if let latestSession, let idx = sessions.firstIndex(where: { $0.id == sid }) {
                 replaceSessionFromServer(latestSession, at: idx)
             }
-            var mergedEvents = (older + events).sorted { $0.seq < $1.seq }
-            if mergedEvents.count > maxLoadedTimelineEvents {
-                let overflow = mergedEvents.count - maxLoadedTimelineEvents
-                mergedEvents.removeLast(overflow)
+            let omittedCountChanged = omittedHistoryEventCount != nextOmittedHistoryEventCount
+            if omittedCountChanged {
+                omittedHistoryEventCount = nextOmittedHistoryEventCount
             }
-            events = mergedEvents
-            omittedHistoryEventCount = remainingOmitted
-            refreshSessionFilesFromLoadedEvents()
-            latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
-            rebuildDisplayEvents()
-            saveSelectedChatCache()
-            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) added=\(older.count) first_added=\(firstAddedEventID ?? "-") skipped_invisible_pages=\(skippedInvisiblePages) skipped_non_primary_pages=\(skippedNonPrimaryPages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
-            return OlderHistoryLoadResult(addedCount: older.count, firstAddedEventID: firstAddedEventID)
+            if !acceptedOlder.isEmpty {
+                refreshSessionFilesFromLoadedEvents()
+                rebuildDisplayEvents()
+            }
+            if !acceptedOlder.isEmpty || omittedCountChanged {
+                saveSelectedChatCache()
+            }
+            AppLogger.info("loaded older session=\(sid) before=\(before) received=\(receivedCount) fetched_visible=\(older.count) added=\(acceptedOlder.count) dropped_for_capacity=\(droppedFetchedCount) first_added=\(firstAddedEventID ?? "-") skipped_invisible_pages=\(skippedInvisiblePages) skipped_non_primary_pages=\(skippedNonPrimaryPages) loaded=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            return OlderHistoryLoadResult(addedCount: acceptedOlder.count, firstAddedEventID: firstAddedEventID)
         } catch {
             AppLogger.error("load older failed session=\(sid) \(serverErrorMessage(error) ?? "\(error)")")
             reportServerError(error)
@@ -2268,7 +2304,9 @@ final class AppStore: ObservableObject {
 
     private func replaceSessionFromServer(_ session: ZSession, at existingIndex: Int? = nil) {
         guard let idx = existingIndex ?? sessions.firstIndex(where: { $0.id == session.id }) else { return }
-        sessions[idx] = sessionWithPendingRuntime(session)
+        let nextSession = sessionWithPendingRuntime(session)
+        guard sessions[idx] != nextSession else { return }
+        sessions[idx] = nextSession
     }
 
     private func insertForkedSession(_ session: ZSession, after parentID: String) {
@@ -3472,7 +3510,7 @@ final class AppStore: ObservableObject {
         uploads.append(file)
     }
 
-    private func applyCachedChat(_ cached: CachedChat, renderLimit: Int? = nil) {
+    private func applyCachedChat(_ cached: CachedChat) {
         let perfStart = DispatchTime.now()
         defer {
             let ms = Double(DispatchTime.now().uptimeNanoseconds - perfStart.uptimeNanoseconds) / 1_000_000
@@ -3482,7 +3520,7 @@ final class AppStore: ObservableObject {
             sessions.append(cached.session)
         }
         let cachedEvents = timelineEvents(from: cached.events)
-        let limit = renderLimit ?? maxCachedTimelineEvents
+        let limit = maxCachedTimelineEvents
         events = Array(cachedEvents.suffix(limit))
         omittedHistoryEventCount = cached.omittedHistoryEventCount + max(0, cachedEvents.count - events.count)
         sessionFiles = mergedFiles((cached.sessionFiles ?? []) + files(from: events))
@@ -3712,18 +3750,27 @@ final class AppStore: ObservableObject {
 
     private func rememberSelectedChatInMemory() {
         guard let session = selectedSession, !events.isEmpty else { return }
-        let eventsToCache = Array(events
-            .filter { $0.type != "raw_event" }
-            .suffix(maxCachedTimelineEvents))
-        guard !eventsToCache.isEmpty else { return }
+        let cacheWindow = selectedChatCacheWindow()
+        guard !cacheWindow.events.isEmpty else { return }
         let cached = CachedChat(
             session: session,
-            events: eventsToCache,
+            events: cacheWindow.events,
             sessionFiles: sessionFiles.isEmpty ? files(from: events) : sessionFiles,
-            omittedHistoryEventCount: omittedHistoryEventCount,
+            omittedHistoryEventCount: cacheWindow.omittedBefore,
             cachedAt: ISO8601DateFormatter().string(from: Date())
         )
         rememberChatCache(cached)
+    }
+
+    private func selectedChatCacheWindow() -> (events: [ZEvent], omittedBefore: Int) {
+        // A cached suffix drops a locally loaded prefix; preserve that count so a
+        // warm restore can still offer the missing history to older-page loading.
+        let cacheableEvents = events.filter { $0.type != "raw_event" }
+        let cachedEvents = Array(cacheableEvents.suffix(maxCachedTimelineEvents))
+        return (
+            events: cachedEvents,
+            omittedBefore: omittedHistoryEventCount + max(0, cacheableEvents.count - cachedEvents.count)
+        )
     }
 
     nonisolated private static func loadCachedChat(from url: URL) async -> CachedChat? {
@@ -3753,16 +3800,15 @@ final class AppStore: ObservableObject {
         guard let session = selectedSession else { return }
         let directory = chatCacheDirectory
         let url = chatCacheURL(session.id)
-        let eventsToCache = Array(events
-            .filter { $0.type != "raw_event" }
-            .suffix(maxCachedTimelineEvents))
+        let cacheWindow = selectedChatCacheWindow()
+        let eventsToCache = cacheWindow.events
         let cachedAt = ISO8601DateFormatter().string(from: Date())
         let cachedFiles = sessionFiles.isEmpty ? files(from: events) : sessionFiles
         let warmCached = CachedChat(
             session: session,
             events: eventsToCache,
             sessionFiles: cachedFiles,
-            omittedHistoryEventCount: omittedHistoryEventCount,
+            omittedHistoryEventCount: cacheWindow.omittedBefore,
             cachedAt: cachedAt
         )
         rememberChatCache(warmCached)

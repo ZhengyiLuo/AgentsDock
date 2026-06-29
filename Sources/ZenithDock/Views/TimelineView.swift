@@ -26,8 +26,7 @@ struct TimelineView: View {
     @State private var timelinePositioningOverlayTask: Task<Void, Never>?
 #if AGENTSDOCK_APPKIT_TIMELINE
     @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
-    @State private var appKitWindowSessionID: String?
-    @State private var appKitProjectionEventLimit = 300
+    @State private var appKitTimelineSessionID: String?
     @State private var appKitHistoryLoadInFlight = false
     @State private var appKitHistoryLoadRevision = 0
 #endif
@@ -62,9 +61,6 @@ struct TimelineView: View {
         // one transaction. Masking it here adds a second visibility/position
         // owner and produces a visible flash on every chat switch.
         let timelineRowsStructurallySuspended = false
-        let renderedVisibleRowLimit = appKitWindowSessionID == store.selectedSessionID
-            ? visibleRowLimit
-            : defaultVisibleRowLimit
 #else
         let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
@@ -76,6 +72,17 @@ struct TimelineView: View {
 #else
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
 #endif
+#if AGENTSDOCK_APPKIT_TIMELINE
+        // NSTableView already virtualizes views. Keep the complete loaded model
+        // available so paging is exclusively a server concern on the native path.
+        let projectedDisplayEvents = displayEvents
+        let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
+        let projection = TimelineRows.project(from: projectedDisplayEvents)
+        let allRows = projection.rows
+        let jobsByRunID = projection.jobsByRunID
+        let hiddenRenderedRowCount = 0
+        let rows = allRows
+#else
         let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: renderedVisibleRowLimit)
         let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
         let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
@@ -84,6 +91,7 @@ struct TimelineView: View {
         let jobsByRunID = projection.jobsByRunID
         let hiddenRenderedRowCount = max(0, allRows.count - renderedVisibleRowLimit) + projectedHiddenEventCount
         let rows = Array(allRows.suffix(renderedVisibleRowLimit))
+#endif
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
 
@@ -189,18 +197,15 @@ struct TimelineView: View {
                 .onChange(of: displayEvents.count) { oldCount, newCount in
                     let previousObservedSeq = lastObservedEventSeq
                     let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
-                    let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
 #if AGENTSDOCK_APPKIT_TIMELINE
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
                         store.setSelectedTimelineAtBottom(true)
                         isTimelineScrollable = false
-                        setVisibleRowLimit(defaultVisibleRowLimit)
-                    } else if isAtBottom {
-                        setVisibleRowLimit(min(rowCount, max(visibleRowLimit, defaultVisibleRowLimit)))
                     }
 #else
+                    let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
@@ -275,7 +280,7 @@ struct TimelineView: View {
         }
         .onAppear {
 #if AGENTSDOCK_APPKIT_TIMELINE
-            if appKitWindowSessionID != store.selectedSessionID {
+            if appKitTimelineSessionID != store.selectedSessionID {
                 resetAppKitTimelineForSelectedSession()
             }
 #endif
@@ -315,9 +320,7 @@ struct TimelineView: View {
             firstUnreadRowID: firstUnreadRowID,
             jobsByRunID: jobsByRunID,
             promptFilesByEventID: promptFilesByEventID,
-            linkContext: linkContext,
-            hiddenRenderedRowCount: hiddenRenderedRowCount,
-            suspended: suspended
+            linkContext: linkContext
         )
         .opacity(shouldMask ? 0 : 1)
         .coordinateSpace(name: coordinateSpaceName)
@@ -384,9 +387,7 @@ struct TimelineView: View {
         firstUnreadRowID: String?,
         jobsByRunID: [String: ZJob],
         promptFilesByEventID: [String: [ZFile]],
-        linkContext: ZMarkdownLinkContext?,
-        hiddenRenderedRowCount: Int,
-        suspended: Bool
+        linkContext: ZMarkdownLinkContext?
     ) -> some View {
         AppKitTimelineTable(
             sessionID: store.selectedSessionID,
@@ -396,9 +397,7 @@ struct TimelineView: View {
                 firstUnreadRowID: firstUnreadRowID,
                 jobsByRunID: jobsByRunID,
                 promptFilesByEventID: promptFilesByEventID,
-                linkContext: linkContext,
-                hiddenRenderedRowCount: hiddenRenderedRowCount,
-                suspended: suspended
+                linkContext: linkContext
             ),
             scrollCommand: appKitScrollCommand,
             forcedBottomRevision: store.forcedScrollToBottomRevision
@@ -406,7 +405,7 @@ struct TimelineView: View {
             updateBottomVisibility(metrics)
             handleHistoryTopDistance(
                 metrics.distanceFromTop,
-                hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
+                hasHiddenRenderedRows: false,
                 proxy: proxy
             )
         }
@@ -418,11 +417,16 @@ struct TimelineView: View {
         firstUnreadRowID: String?,
         jobsByRunID: [String: ZJob],
         promptFilesByEventID: [String: [ZFile]],
-        linkContext: ZMarkdownLinkContext?,
-        hiddenRenderedRowCount: Int,
-        suspended: Bool
+        linkContext: ZMarkdownLinkContext?
     ) -> [AppKitTimelineItem] {
         var items: [AppKitTimelineItem] = []
+
+#if DEBUG
+        assert(
+            Set(rows.map(\.id)).count == rows.count,
+            "AppKit timeline snapshots require unique projected row IDs"
+        )
+#endif
 
         if store.selectedSession == nil {
             items.append(AppKitTimelineItem(
@@ -433,15 +437,24 @@ struct TimelineView: View {
             return items
         }
 
-        if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
-            let loader = TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
-                revealOlderRowsShowingNewPage(proxy)
+        // Keep one session-scoped loading owner. AppStore's published flag may
+        // briefly still describe the previous session during a rapid switch.
+        let historyIsLoading = appKitTimelineSessionID == store.selectedSessionID &&
+            appKitHistoryLoadInFlight
+        if store.hiddenDisplayEventCount > 0 || historyIsLoading {
+            let loader = TimelineHistoryLoader(
+                hiddenRenderedRowCount: 0,
+                isLoadingOverride: historyIsLoading
+            ) {
+#if DEBUG
+                assertionFailure("AppKit timeline must not expose local row paging")
+#endif
             } onLoadOlder: {
                 loadOlderHistoryFromIntent(proxy)
             }
             items.append(AppKitTimelineItem(
                 id: "history-loader",
-                version: hiddenRenderedRowCount ^ store.hiddenDisplayEventCount,
+                version: appKitHistoryLoaderVersion(isLoading: historyIsLoading),
                 content: appKitRowContent(loader)
             ))
         }
@@ -456,7 +469,10 @@ struct TimelineView: View {
             }
             items.append(AppKitTimelineItem(
                 id: row.id,
-                version: appKitRowVersion(row, promptFilesByEventID: promptFilesByEventID),
+                version: appKitRowVersion(
+                    row,
+                    promptFilesByEventID: promptFilesByEventID
+                ),
                 eventIDs: row.eventIDs,
                 content: appKitRowContent(
                     timelineCard(
@@ -469,6 +485,16 @@ struct TimelineView: View {
             ))
         }
         return items
+    }
+
+    private func appKitHistoryLoaderVersion(isLoading: Bool) -> Int {
+        var hasher = Hasher()
+        hasher.combine(isLoading)
+        if !isLoading {
+            hasher.combine(store.hiddenDisplayEventCount)
+            hasher.combine(store.canLoadOlderHistory)
+        }
+        return hasher.finalize()
     }
 
     private func appKitRowContent<Content: View>(_ content: Content) -> AnyView {
@@ -486,10 +512,9 @@ struct TimelineView: View {
         promptFilesByEventID: [String: [ZFile]]
     ) -> Int {
         var hasher = Hasher()
-        // Timeline projection rebuilds row objects when the newest event changes.
-        // Object identity therefore invalidated every visible cell during streaming,
-        // even when that row's content was unchanged. Keep the version semantic so
-        // the recycler only rehosts rows whose underlying events actually changed.
+        // Server events are immutable once accepted; grouped rows grow by adding
+        // new event IDs. Keep this fingerprint O(event count), not O(all text), so
+        // a streamed tail never re-hashes megabytes of earlier transcript.
         hasher.combine(row.id)
         hasher.combine(row.maxSeq)
         hasher.combine(row.eventIDs.count)
@@ -498,9 +523,15 @@ struct TimelineView: View {
         hasher.combine(store.showDebugEvents)
         switch row.kind {
         case .event(let event):
+            hasher.combine(event.id)
+            hasher.combine(event.seq)
+            hasher.combine(event.type)
+            hasher.combine(event.file?.id)
+            hasher.combine(event.artifact?.id)
             hasher.combine(store.isPinned(event))
             for file in promptFilesByEventID[event.id] ?? [] {
                 hasher.combine(file.id)
+                hasher.combine(store.isPinned(file))
             }
             switch queueStatus(for: event) {
             case .none:
@@ -515,13 +546,26 @@ struct TimelineView: View {
             }
         case .artifacts(let events):
             for event in events {
+                hasher.combine(event.id)
+                hasher.combine(event.seq)
                 hasher.combine(event.artifact?.id)
                 if let file = event.artifact {
                     hasher.combine(store.isPinned(file))
                 }
             }
-        case .job, .jobGroup, .trace:
-            break
+        case .job(let jobRun):
+            hasher.combine(jobRun.id)
+            hasher.combine(jobRun.lastSeq)
+            hasher.combine(jobRun.isFinished)
+        case .jobGroup(let group):
+            hasher.combine(group.id)
+            hasher.combine(group.runs.count)
+            hasher.combine(group.latest.lastSeq)
+            hasher.combine(group.latest.isFinished)
+        case .trace(let events):
+            hasher.combine(events.count)
+            hasher.combine(events.first?.id)
+            hasher.combine(events.last?.id)
         }
         return hasher.finalize()
     }
@@ -692,9 +736,7 @@ struct TimelineView: View {
 
 #if AGENTSDOCK_APPKIT_TIMELINE
     private func resetAppKitTimelineForSelectedSession() {
-        appKitWindowSessionID = store.selectedSessionID
-        visibleRowLimit = defaultVisibleRowLimit
-        appKitProjectionEventLimit = projectionBaseEventLimit
+        appKitTimelineSessionID = store.selectedSessionID
         appKitHistoryLoadInFlight = false
         appKitHistoryLoadRevision &+= 1
         pendingOpenBottomSessionID = nil
@@ -826,10 +868,12 @@ struct TimelineView: View {
         guard let eventID = store.scrollToEventID else { return }
         let rows = TimelineRows.build(from: store.displayEvents)
         guard let target = row(containingEventID: eventID, in: rows) else { return }
+#if !AGENTSDOCK_APPKIT_TIMELINE
         let rowsNeeded = rows.count - target.index
         if visibleRowLimit < rowsNeeded {
             visibleRowLimit = min(rows.count, rowsNeeded + 8)
         }
+#endif
         DispatchQueue.main.async {
             withAnimation(.snappy) {
                 requestTimelineRowScroll(target.id, anchor: .center, proxy: proxy)
@@ -871,6 +915,36 @@ struct TimelineView: View {
     }
 
     private func handleHistoryTopDistance(_ distanceFromTop: CGFloat, hasHiddenRenderedRows: Bool, proxy: ScrollViewProxy) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        guard store.hiddenDisplayEventCount > 0 else {
+            olderHistoryLoadArmed = false
+            suppressScrollHistoryLoadUntilTopLeaves = false
+            return
+        }
+
+        // Native history advances only at the actual scroll boundary. Once a
+        // page starts, the table's snapshot anchor keeps the visible row fixed;
+        // leaving the top after that prepend is what arms the next user visit.
+        if distanceFromTop > 1 {
+            olderHistoryLoadArmed = true
+            suppressScrollHistoryLoadUntilTopLeaves = false
+            return
+        }
+
+        guard !appKitHistoryLoadInFlight else { return }
+        guard distanceFromTop <= 0.5,
+              !isAtBottom,
+              olderHistoryLoadArmed,
+              !suppressScrollHistoryLoadUntilTopLeaves,
+              Date() >= historyLoadSuppressedUntil,
+              !store.isLoadingOlderHistory,
+              store.canLoadOlderHistory else {
+            return
+        }
+        guard loadOneOlderAppKitPage() else { return }
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
+#else
         guard store.hiddenDisplayEventCount > 0 || hasHiddenRenderedRows else {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = false
@@ -892,12 +966,6 @@ struct TimelineView: View {
               Date() >= historyLoadSuppressedUntil else {
             return
         }
-#if AGENTSDOCK_APPKIT_TIMELINE
-        guard !appKitHistoryLoadInFlight else { return }
-        olderHistoryLoadArmed = false
-        suppressScrollHistoryLoadUntilTopLeaves = true
-        loadOneOlderAppKitPage()
-#else
         if revealOlderRowsShowingNewPage(proxy) {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
@@ -917,10 +985,9 @@ struct TimelineView: View {
 
     private func loadOlderHistoryFromIntent(_ proxy: ScrollViewProxy) {
 #if AGENTSDOCK_APPKIT_TIMELINE
-        guard !appKitHistoryLoadInFlight else { return }
+        guard loadOneOlderAppKitPage() else { return }
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
-        loadOneOlderAppKitPage()
 #else
         if revealOlderRowsShowingNewPage(proxy) {
             olderHistoryLoadArmed = false
@@ -935,26 +1002,13 @@ struct TimelineView: View {
     }
 
 #if AGENTSDOCK_APPKIT_TIMELINE
-    private func loadOneOlderAppKitPage() {
-        let projectedRows = renderedRows()
-        if projectedRows.count > visibleRowLimit {
-            setVisibleRowLimit(min(projectedRows.count, visibleRowLimit + rowPageSize))
-            AppLogger.info("AppKit older page revealed local rows visible_limit=\(visibleRowLimit)")
-            return
+    @discardableResult
+    private func loadOneOlderAppKitPage() -> Bool {
+        guard !appKitHistoryLoadInFlight,
+              !store.isLoadingOlderHistory,
+              store.canLoadOlderHistory else {
+            return false
         }
-
-        if store.displayEvents.count > appKitProjectionEventLimit {
-            appKitProjectionEventLimit = min(
-                store.displayEvents.count,
-                appKitProjectionEventLimit + olderHistoryProjectionPageSize
-            )
-            let expandedRows = renderedRows()
-            setVisibleRowLimit(min(expandedRows.count, visibleRowLimit + rowPageSize))
-            AppLogger.info("AppKit older page expanded projection events=\(appKitProjectionEventLimit) visible_limit=\(visibleRowLimit)")
-            return
-        }
-
-        guard store.canLoadOlderHistory else { return }
         appKitHistoryLoadInFlight = true
         appKitHistoryLoadRevision &+= 1
         let loadRevision = appKitHistoryLoadRevision
@@ -964,18 +1018,12 @@ struct TimelineView: View {
             guard loadRevision == appKitHistoryLoadRevision,
                   sessionID == store.selectedSessionID else { return }
             appKitHistoryLoadInFlight = false
-            guard result.addedCount > 0 else { return }
-            appKitProjectionEventLimit = min(
-                store.displayEvents.count,
-                appKitProjectionEventLimit + max(result.addedCount, olderHistoryProjectionPageSize)
-            )
-            let expandedRows = renderedRows()
-            setVisibleRowLimit(min(expandedRows.count, visibleRowLimit + rowPageSize))
             AppLogger.info(
-                "AppKit older page loaded added_events=\(result.addedCount) " +
-                "projection_events=\(appKitProjectionEventLimit) visible_limit=\(visibleRowLimit)"
+                "AppKit older page completed added_events=\(result.addedCount) " +
+                "loaded_events=\(store.displayEvents.count) remaining_hidden=\(store.hiddenDisplayEventCount)"
             )
         }
+        return true
     }
 #endif
 
@@ -1229,20 +1277,8 @@ struct TimelineView: View {
     }
 
     private func projectionEventBudget(visibleLimit: Int) -> Int {
-#if AGENTSDOCK_APPKIT_TIMELINE
-        let eventLimit = appKitWindowSessionID == store.selectedSessionID
-            ? appKitProjectionEventLimit
-            : projectionBaseEventLimit
-        return min(sourceEventCount, max(projectionBaseEventLimit, eventLimit))
-#else
         return min(store.displayEvents.count, max(projectionBaseEventLimit, visibleLimit * projectionEventsPerVisibleRow))
-#endif
     }
-
-#if AGENTSDOCK_APPKIT_TIMELINE
-    private var sourceEventCount: Int { store.displayEvents.count }
-    private var olderHistoryProjectionPageSize: Int { 400 }
-#endif
 
     private func setVisibleRowLimit(_ nextLimit: Int) {
         withTransaction(noAnimationTransaction) {
@@ -2013,6 +2049,12 @@ private enum TimelineRows {
 
         let jobRuns = jobRunsByRunID(events)
         let rows = compactAdjacentTraceRows(buildRows(from: events, jobRuns: jobRuns))
+#if DEBUG
+        assert(
+            Set(rows.map(\.id)).count == rows.count,
+            "Timeline projection produced duplicate row identities"
+        )
+#endif
         let projection = TimelineProjection(rows: rows, jobsByRunID: jobRuns.mapValues(\.job))
         cache.setObject(Entry(projection), forKey: key)
         return projection
@@ -2038,9 +2080,9 @@ private enum TimelineRows {
             while start < events.endIndex {
                 let end = min(events.endIndex, start + traceRowChunkSize)
                 let chunk = Array(events[start..<end])
-                if let first = chunk.first, let last = chunk.last {
+                if let first = chunk.first {
                     rows.append(TimelineRow(
-                        id: "\(prefix)-\(first.seq)-\(last.seq)",
+                        id: "\(prefix)-\(first.id)",
                         kind: .trace(chunk),
                         eventIDs: chunk.map(\.id)
                     ))
@@ -2096,10 +2138,9 @@ private enum TimelineRows {
 
         func flushAgentRun() {
             appendAssistantRows()
-            if let firstArtifact = activeArtifactEvents.first,
-               let lastArtifact = activeArtifactEvents.last {
+            if let firstArtifact = activeArtifactEvents.first {
                 rows.append(TimelineRow(
-                    id: "artifacts-run-\(activeRunID ?? "unknown")-\(firstArtifact.seq)-\(lastArtifact.seq)",
+                    id: "artifacts-run-\(activeRunID ?? "unknown")-\(firstArtifact.id)",
                     kind: .artifacts(activeArtifactEvents),
                     eventIDs: activeArtifactEvents.map(\.id)
                 ))
@@ -2115,12 +2156,25 @@ private enum TimelineRows {
         func flushJobRuns() {
             guard !pendingJobRuns.isEmpty else { return }
             if pendingJobRuns.count == 1, let run = pendingJobRuns.first {
-                rows.append(TimelineRow(id: "job-\(run.id)-\(run.lastSeq)", kind: .job(run)))
+                rows.append(TimelineRow(
+                    id: jobSeriesRowID(for: pendingJobRuns),
+                    kind: .job(run),
+                    eventIDs: [run.runEvent.id]
+                ))
             } else {
                 let group = JobRunGroupRow(runs: pendingJobRuns)
-                rows.append(TimelineRow(id: "job-group-\(group.id)", kind: .jobGroup(group)))
+                rows.append(TimelineRow(
+                    id: jobSeriesRowID(for: pendingJobRuns),
+                    kind: .jobGroup(group),
+                    eventIDs: pendingJobRuns.map(\.runEvent.id)
+                ))
             }
             pendingJobRuns.removeAll(keepingCapacity: true)
+        }
+
+        func jobSeriesRowID(for runs: [JobRunRow]) -> String {
+            guard let first = runs.first else { return "job-series-empty" }
+            return "job-series-\(first.job.id)-\(first.runEvent.id)"
         }
 
         func appendJobRun(_ run: JobRunRow) {
@@ -2232,9 +2286,9 @@ private enum TimelineRows {
                 let end = min(pendingEvents.endIndex, start + compactedTraceEventLimit)
                 let chunk = Array(pendingEvents[start..<end])
                 let chunkIDs = Array(pendingEventIDs[start..<end])
-                if let first = chunk.first, let last = chunk.last {
+                if let first = chunk.first {
                     compacted.append(TimelineRow(
-                        id: "trace-compact-\(first.seq)-\(last.seq)",
+                        id: "trace-compact-\(first.id)",
                         kind: .trace(chunk),
                         eventIDs: chunkIDs
                     ))
@@ -2386,7 +2440,7 @@ private enum TimelineRows {
         guard let first = events.first, let last = events.last else {
             return "empty" as NSString
         }
-        let middle = events.count > 2 ? events[events.count / 2] : last
+        let middle = events[events.count / 2]
         return "\(events.count):\(first.seq):\(first.id):\(middle.seq):\(middle.id):\(last.seq):\(last.id)" as NSString
     }
 }
@@ -2411,8 +2465,7 @@ struct JobRunGroupRow: Identifiable, Hashable {
     init(runs: [JobRunRow]) {
         self.runs = runs
         let first = runs.first
-        let last = runs.last
-        self.id = "\(last?.job.id ?? "job")-\(first?.runEvent.seq ?? 0)-\(last?.lastSeq ?? 0)-\(runs.count)"
+        self.id = "\(first?.job.id ?? "job")-\(first?.runEvent.id ?? "empty")"
     }
 
     var latest: JobRunRow {
@@ -2427,6 +2480,7 @@ struct JobRunGroupRow: Identifiable, Hashable {
 private struct TimelineHistoryLoader: View {
     @EnvironmentObject private var store: AppStore
     let hiddenRenderedRowCount: Int
+    var isLoadingOverride: Bool? = nil
     let onShowOlderRows: () -> Void
     let onLoadOlder: () -> Void
 
@@ -2445,7 +2499,7 @@ private struct TimelineHistoryLoader: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Show the previous rendered page")
-            } else if store.isLoadingOlderHistory {
+            } else if isLoadingOverride ?? store.isLoadingOlderHistory {
                 ProgressView()
                     .controlSize(.small)
                 Text("Loading")

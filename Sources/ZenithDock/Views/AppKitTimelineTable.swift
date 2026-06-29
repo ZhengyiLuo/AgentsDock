@@ -23,13 +23,22 @@ struct AppKitTimelineItem: Identifiable {
     let id: String
     let version: Int
     let eventIDs: [String]
-    let content: AnyView
+    private let contentFactory: () -> AnyView
 
-    init(id: String, version: Int, eventIDs: [String] = [], content: AnyView) {
+    init(
+        id: String,
+        version: Int,
+        eventIDs: [String] = [],
+        content: @autoclosure @escaping () -> AnyView
+    ) {
         self.id = id
         self.version = version
         self.eventIDs = eventIDs
-        self.content = content
+        self.contentFactory = content
+    }
+
+    func makeContent() -> AnyView {
+        contentFactory()
     }
 }
 
@@ -39,8 +48,6 @@ private enum AppKitTimelineDiagnostics {
     static var updateCount = 0
     static var sameSessionFallbackReloadCount = 0
     static var bottomRequestCount = 0
-    static var deferredAnchorRequestCount = 0
-    static var deferredAnchorApplyCount = 0
     static var lastAnchorID: String?
     static var lastAnchorTargetY: CGFloat?
     static var lastAnchorVisibleY: CGFloat?
@@ -88,15 +95,19 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private weak var tableView: NSTableView?
         private var boundsObserver: NSObjectProtocol?
         private var tableFrameObserver: NSObjectProtocol?
-        private var liveScrollObserver: NSObjectProtocol?
+        private var liveScrollStartObserver: NSObjectProtocol?
+        private var liveScrollEndObserver: NSObjectProtocol?
         private var reportWorkItem: DispatchWorkItem?
+        private var reportWorkGeneration = 0
+        private var lastMetricsReportUptime: TimeInterval?
         private var lastMetrics: TimelineScrollMetrics?
-        private var bottomSettleGeneration = 0
-        private var anchorRestoreGeneration = 0
+        private let metricsThrottleInterval: TimeInterval = 0.08
 
         private(set) var fullReloadCount = 0
         private(set) var structuralUpdateCount = 0
         private(set) var cellConfigurationCount = 0
+        private(set) var clipOriginWriteCount = 0
+        private(set) var isLiveScrolling = false
 
         private let cellIdentifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineHostingCell")
 
@@ -119,6 +130,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             tableView.intercellSpacing = .zero
             tableView.rowHeight = 120
             tableView.usesAutomaticRowHeights = true
+            tableView.style = .plain
             tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
             tableView.allowsColumnReordering = false
             tableView.allowsColumnResizing = false
@@ -179,16 +191,26 @@ struct AppKitTimelineTable: NSViewRepresentable {
         ) {
             guard tableView != nil else { return }
             AppKitTimelineDiagnostics.updateCount += 1
-            cancelDeferredAnchorRestore()
 
             let previousItems = items
             let sessionChanged = sessionID != nextSessionID
             if sessionChanged {
-                cancelBottomSettles()
+                // Momentum belongs to the old document. A chat switch is an
+                // explicit navigation and must position the new document once.
+                isLiveScrolling = false
             }
-            let anchor = sessionChanged ? nil : captureAnchor()
             let commandChanged = hasReceivedUpdate && scrollCommand.revision != lastScrollCommandRevision
             let forcedBottomChanged = hasReceivedUpdate && forcedBottomRevision != lastForcedBottomRevision
+            let commandChangesPosition = commandChanged && scrollCommand.destination != .none
+            let anchor = !sessionChanged &&
+                !isLiveScrolling &&
+                !commandChangesPosition &&
+                !forcedBottomChanged
+                ? captureAnchor()
+                : nil
+            let shouldRestoreAnchor = anchor.map {
+                geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
+            } ?? false
 
             sessionID = nextSessionID
             let itemsChanged = applyItems(
@@ -196,14 +218,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 previousItems: previousItems,
                 sessionChanged: sessionChanged
             )
-            let anchorMovedByPrepend: Bool = {
-                guard let anchor,
-                      let previousIndex = index(of: anchor, in: previousItems),
-                      let nextIndex = index(of: anchor, in: nextItems) else {
-                    return false
-                }
-                return nextIndex > previousIndex
-            }()
 
             if commandChanged {
                 lastScrollCommandRevision = scrollCommand.revision
@@ -222,20 +236,18 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 return
             }
 
-            // Position in the same update transaction as the row mutation. An
-            // async restore allows AppKit to display one frame at its temporary
-            // position, which is the visible "jump" seen on chat open/prepend.
-            if commandChanged {
+            if commandChangesPosition {
                 apply(scrollCommand.destination)
             } else if forcedBottomChanged {
-                scrollToBottom()
-            } else if sessionChanged || (previousItems.isEmpty && !nextItems.isEmpty) {
-                scrollToBottom()
-            } else if let anchor {
-                restore(anchor)
-                if anchorMovedByPrepend {
-                    deferAnchorRestore(anchor, expectedSessionID: nextSessionID)
+                if !isLiveScrolling {
+                    scrollToBottom()
                 }
+            } else if sessionChanged || (previousItems.isEmpty && !nextItems.isEmpty) {
+                if !isLiveScrolling {
+                    scrollToBottom()
+                }
+            } else if shouldRestoreAnchor, let anchor {
+                restore(anchor)
             }
             scheduleMetricsReport()
         }
@@ -258,13 +270,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
             if oldIDs == newIDs {
                 items = nextItems
-                let changed = IndexSet(nextItems.indices.filter {
-                    previousItems[$0].version != nextItems[$0].version
-                })
-                refreshVisibleCells(in: tableView, limitingTo: changed)
-                if !changed.isEmpty {
-                    tableView.noteHeightOfRows(withIndexesChanged: changed)
-                }
+                let changed = refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return !changed.isEmpty
             }
 
@@ -273,6 +283,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 let inserted = IndexSet(oldIDs.count..<newIDs.count)
                 structuralUpdateCount += 1
                 tableView.insertRows(at: inserted, withAnimation: [])
+                refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return true
             }
 
@@ -281,6 +296,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 let inserted = IndexSet(0..<(newIDs.count - oldIDs.count))
                 structuralUpdateCount += 1
                 tableView.insertRows(at: inserted, withAnimation: [])
+                refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return true
             }
 
@@ -289,6 +309,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 let removed = IndexSet(newIDs.count..<oldIDs.count)
                 structuralUpdateCount += 1
                 tableView.removeRows(at: removed, withAnimation: [])
+                refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return true
             }
 
@@ -297,6 +322,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 let removed = IndexSet(0..<(oldIDs.count - newIDs.count))
                 structuralUpdateCount += 1
                 tableView.removeRows(at: removed, withAnimation: [])
+                refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return true
             }
 
@@ -321,6 +351,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     )
                 }
                 tableView.endUpdates()
+                refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return true
             }
 
@@ -337,6 +372,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     withAnimation: []
                 )
                 tableView.endUpdates()
+                refreshRetainedRows(
+                    in: tableView,
+                    previousItems: previousItems,
+                    nextItems: nextItems
+                )
                 return true
             }
 
@@ -360,12 +400,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 return true
             }
 
-            var previousVersionsByID: [String: Int] = [:]
-            previousVersionsByID.reserveCapacity(previousItems.count)
-            for item in previousItems {
-                previousVersionsByID[item.id] = item.version
-            }
-
             items = nextItems
             structuralUpdateCount += 1
             tableView.beginUpdates()
@@ -376,16 +410,42 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 tableView.insertRows(at: insertions, withAnimation: [])
             }
             tableView.endUpdates()
-
-            let retainedChanges = IndexSet(nextItems.indices.filter { index in
-                !insertions.contains(index) &&
-                    previousVersionsByID[nextItems[index].id] != nextItems[index].version
-            })
-            refreshVisibleCells(in: tableView, limitingTo: retainedChanges)
-            if !retainedChanges.isEmpty {
-                tableView.noteHeightOfRows(withIndexesChanged: retainedChanges)
-            }
+            refreshRetainedRows(
+                in: tableView,
+                previousItems: previousItems,
+                nextItems: nextItems
+            )
             return true
+        }
+
+        @discardableResult
+        private func refreshRetainedRows(
+            in tableView: NSTableView,
+            previousItems: [AppKitTimelineItem],
+            nextItems: [AppKitTimelineItem]
+        ) -> IndexSet {
+            var previousVersionsByID: [String: Int] = [:]
+            previousVersionsByID.reserveCapacity(previousItems.count)
+            for item in previousItems {
+                previousVersionsByID[item.id] = item.version
+            }
+            let changed = IndexSet(nextItems.indices.filter { index in
+                guard let previousVersion = previousVersionsByID[nextItems[index].id] else {
+                    return false
+                }
+                return previousVersion != nextItems[index].version
+            })
+            refreshVisibleCells(in: tableView, limitingTo: changed)
+            invalidateHeights(of: changed, in: tableView)
+            return changed
+        }
+
+        private func invalidateHeights(of rows: IndexSet, in tableView: NSTableView) {
+            guard !rows.isEmpty else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                tableView.noteHeightOfRows(withIndexesChanged: rows)
+            }
         }
 
         private func refreshVisibleCells(in tableView: NSTableView, limitingTo limit: IndexSet? = nil) {
@@ -436,7 +496,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard let row = index(of: anchor, in: items),
                   let scrollView,
                   let tableView else { return }
-            tableView.scrollRowToVisible(row)
             tableView.layoutSubtreeIfNeeded()
             let rowRect = tableView.rect(ofRow: row)
             let targetY = rowRect.minY + anchor.offset
@@ -453,22 +512,23 @@ struct AppKitTimelineTable: NSViewRepresentable {
             return candidates.firstIndex(where: { $0.eventIDs.contains(eventID) })
         }
 
-        private func deferAnchorRestore(_ anchor: VisibleAnchor, expectedSessionID: String?) {
-            AppKitTimelineDiagnostics.deferredAnchorRequestCount += 1
-            anchorRestoreGeneration &+= 1
-            let generation = anchorRestoreGeneration
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.anchorRestoreGeneration == generation,
-                      self.sessionID == expectedSessionID else { return }
-                AppKitTimelineDiagnostics.deferredAnchorApplyCount += 1
-                self.restore(anchor)
-                self.scheduleMetricsReport()
+        private func geometryChangesAffectAnchor(
+            _ anchor: VisibleAnchor,
+            previousItems: [AppKitTimelineItem],
+            nextItems: [AppKitTimelineItem]
+        ) -> Bool {
+            guard let previousAnchorIndex = index(of: anchor, in: previousItems),
+                  let nextAnchorIndex = index(of: anchor, in: nextItems) else {
+                return false
             }
-        }
-
-        private func cancelDeferredAnchorRestore() {
-            anchorRestoreGeneration &+= 1
+            guard previousAnchorIndex == nextAnchorIndex else { return true }
+            for row in 0...previousAnchorIndex {
+                if previousItems[row].id != nextItems[row].id ||
+                    previousItems[row].version != nextItems[row].version {
+                    return true
+                }
+            }
+            return false
         }
 
         private func apply(_ destination: AppKitTimelineScrollCommand.Destination) {
@@ -478,43 +538,23 @@ struct AppKitTimelineTable: NSViewRepresentable {
             case .bottom:
                 scrollToBottom()
             case .row(let id, let anchor):
-                cancelBottomSettles()
                 scroll(to: id, anchor: anchor)
             }
         }
 
         private func scrollToBottom() {
-            guard !items.isEmpty else { return }
-            AppKitTimelineDiagnostics.bottomRequestCount += 1
-            bottomSettleGeneration &+= 1
-            let generation = bottomSettleGeneration
-            let expectedSessionID = sessionID
-            performBottomScroll(generation: generation, expectedSessionID: expectedSessionID)
-        }
-
-        private func performBottomScroll(generation: Int, expectedSessionID: String?) {
             guard let scrollView, let tableView, !items.isEmpty else { return }
-            guard bottomSettleGeneration == generation,
-                  sessionID == expectedSessionID else { return }
-            tableView.scrollRowToVisible(items.count - 1)
+            AppKitTimelineDiagnostics.bottomRequestCount += 1
             tableView.layoutSubtreeIfNeeded()
-            for _ in 0..<2 {
-                let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
-                scroll(toY: targetY, in: scrollView, tableView: tableView)
-                tableView.layoutSubtreeIfNeeded()
-            }
+            let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
+            scroll(toY: targetY, in: scrollView, tableView: tableView)
             scheduleMetricsReport()
-        }
-
-        private func cancelBottomSettles() {
-            bottomSettleGeneration &+= 1
         }
 
         private func scroll(to itemID: String, anchor: AppKitTimelineAnchor) {
             guard let row = items.firstIndex(where: { $0.id == itemID }),
                   let scrollView,
                   let tableView else { return }
-            tableView.scrollRowToVisible(row)
             tableView.layoutSubtreeIfNeeded()
             let rowRect = tableView.rect(ofRow: row)
             let viewportHeight = scrollView.contentView.bounds.height
@@ -534,7 +574,12 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private func scroll(toY proposedY: CGFloat, in scrollView: NSScrollView, tableView: NSTableView) {
             let maxY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
             let point = NSPoint(x: scrollView.contentView.bounds.minX, y: min(max(0, proposedY), maxY))
-            scrollView.contentView.scroll(to: point)
+            guard scrollView.contentView.bounds.origin != point else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                scrollView.contentView.scroll(to: point)
+            }
+            clipOriginWriteCount += 1
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
@@ -561,14 +606,24 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     self?.scheduleMetricsReport()
                 }
             }
-            liveScrollObserver = center.addObserver(
+            liveScrollStartObserver = center.addObserver(
                 forName: NSScrollView.willStartLiveScrollNotification,
                 object: scrollView,
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.cancelBottomSettles()
-                    self?.cancelDeferredAnchorRestore()
+                    self?.isLiveScrolling = true
+                    self?.scheduleMetricsReport()
+                }
+            }
+            liveScrollEndObserver = center.addObserver(
+                forName: NSScrollView.didEndLiveScrollNotification,
+                object: scrollView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.isLiveScrolling = false
+                    self?.scheduleMetricsReport()
                 }
             }
         }
@@ -577,27 +632,46 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let center = NotificationCenter.default
             if let boundsObserver { center.removeObserver(boundsObserver) }
             if let tableFrameObserver { center.removeObserver(tableFrameObserver) }
-            if let liveScrollObserver { center.removeObserver(liveScrollObserver) }
+            if let liveScrollStartObserver { center.removeObserver(liveScrollStartObserver) }
+            if let liveScrollEndObserver { center.removeObserver(liveScrollEndObserver) }
             boundsObserver = nil
             tableFrameObserver = nil
-            liveScrollObserver = nil
-            reportWorkItem?.cancel()
-            reportWorkItem = nil
-            cancelDeferredAnchorRestore()
+            liveScrollStartObserver = nil
+            liveScrollEndObserver = nil
+            isLiveScrolling = false
+            cancelScheduledMetricsReport()
         }
 
         private func scheduleMetricsReport() {
-            reportWorkItem?.cancel()
+            let now = ProcessInfo.processInfo.systemUptime
+            let nextAllowedUptime = (lastMetricsReportUptime ?? now - metricsThrottleInterval) + metricsThrottleInterval
+            let delay = max(0, nextAllowedUptime - now)
+            guard reportWorkItem == nil else { return }
+
+            reportWorkGeneration &+= 1
+            let generation = reportWorkGeneration
             let item = DispatchWorkItem { [weak self] in
                 MainActor.assumeIsolated {
-                    self?.reportMetrics()
+                    guard let self, self.reportWorkGeneration == generation else { return }
+                    self.reportWorkItem = nil
+                    self.reportMetrics(at: ProcessInfo.processInfo.systemUptime)
                 }
             }
             reportWorkItem = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: item)
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + delay,
+                execute: item
+            )
         }
 
-        private func reportMetrics() {
+        private func cancelScheduledMetricsReport() {
+            reportWorkGeneration &+= 1
+            reportWorkItem?.cancel()
+            reportWorkItem = nil
+        }
+
+        private func reportMetrics(at uptime: TimeInterval) {
+            lastMetricsReportUptime = uptime
             guard let scrollView, let tableView else { return }
             let viewportHeight = max(0, scrollView.contentView.bounds.height)
             let contentHeight = max(0, tableView.bounds.height)
@@ -618,142 +692,318 @@ struct AppKitTimelineTable: NSViewRepresentable {
 @MainActor
 enum AppKitTimelineHarness {
     static func run() -> Bool {
-        var latestMetrics: TimelineScrollMetrics?
-        let coordinator = AppKitTimelineTable.Coordinator { metrics in
-            latestMetrics = metrics
+        let scenarios: [(String, () -> Bool)] = [
+            ("stream-below-viewport", checkStreamingBelowViewport),
+            ("height-change-above-viewport", checkHeightChangeAboveViewport),
+            ("prepend-single-page", checkPrependSinglePage),
+            ("active-momentum-priority", checkActiveMomentumPriority),
+            ("chat-switch-isolation", checkChatSwitchIsolation),
+        ]
+        for (name, check) in scenarios {
+            guard check() else { return false }
+            print("AppKitTimelineHarness passed scenario=\(name)")
         }
-        let scrollView = coordinator.makeScrollView()
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 920, height: 720),
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = scrollView
-        window.orderOut(nil)
-
-        var items = (0..<320).map { item(index: $0, version: 0) }
-        coordinator.update(
-            sessionID: "harness",
-            items: items,
-            scrollCommand: AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
-        )
-        settleLayout(window: window)
-
-        guard let tableView = scrollView.documentView as? NSTableView,
-              tableView.numberOfRows == items.count else {
-            fputs("AppKitTimelineHarness: initial row load failed\n", stderr)
-            return false
-        }
-
-        let initialVisibleCells = instantiatedCellCount(in: tableView)
-        guard initialVisibleCells > 0, initialVisibleCells < 80 else {
-            fputs("AppKitTimelineHarness: row recycling failed cells=\(initialVisibleCells)\n", stderr)
-            return false
-        }
-
-        for revision in 1...120 {
-            let index = items.count - 1
-            items[index] = item(index: index, version: revision)
-            coordinator.update(
-                sessionID: "harness",
-                items: items,
-                scrollCommand: AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
-            )
-        }
-        settleLayout(window: window)
-
-        items.insert(historyLoaderItem(), at: 0)
-        coordinator.update(
-            sessionID: "harness",
-            items: items,
-            scrollCommand: AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
-        )
-        settleLayout(window: window)
-        scrollView.contentView.scroll(to: .zero)
-        scrollView.reflectScrolledClipView(scrollView.contentView)
-        settleLayout(window: window)
-        let anchoredItemID = items[1].id
-        let anchoredRowBefore = items.firstIndex(where: { $0.id == anchoredItemID }) ?? 1
-        let anchorOffsetBefore = tableView.rect(ofRow: anchoredRowBefore).minY - scrollView.documentVisibleRect.minY
-
-        let prepended = (0..<24).map { item(index: -24 + $0, version: 0) }
-        items.insert(contentsOf: prepended, at: 1)
-        coordinator.update(
-            sessionID: "harness",
-            items: items,
-            scrollCommand: AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
-        )
-        settleLayout(window: window)
-        let anchoredRowAfter = items.firstIndex(where: { $0.id == anchoredItemID }) ?? 25
-        let anchorOffsetAfter = tableView.rect(ofRow: anchoredRowAfter).minY - scrollView.documentVisibleRect.minY
-        guard abs(anchorOffsetAfter - anchorOffsetBefore) < 12 else {
-            fputs(
-                "AppKitTimelineHarness: prepend anchor moved before=\(anchorOffsetBefore) after=\(anchorOffsetAfter)\n",
-                stderr
-            )
-            fputs(
-                "anchor_id=\(AppKitTimelineDiagnostics.lastAnchorID ?? "-") " +
-                "requests=\(AppKitTimelineDiagnostics.deferredAnchorRequestCount) " +
-                "applies=\(AppKitTimelineDiagnostics.deferredAnchorApplyCount) " +
-                "target_y=\(AppKitTimelineDiagnostics.lastAnchorTargetY ?? -1) " +
-                "visible_y=\(AppKitTimelineDiagnostics.lastAnchorVisibleY ?? -1)\n",
-                stderr
-            )
-            return false
-        }
-
-        items = Array(items.suffix(320)) + (320..<324).map { item(index: $0, version: 0) }
-        items = Array(items.suffix(320))
-        coordinator.update(
-            sessionID: "harness",
-            items: items,
-            scrollCommand: AppKitTimelineScrollCommand(revision: 2, destination: .bottom)
-        )
-        settleLayout(window: window)
-
-        // Exercise the generic ID diff used when compaction changes a row in the
-        // middle of an otherwise stable timeline. This must not reload the table.
-        items[items.count / 2] = item(index: 10_000, version: 0)
-        coordinator.update(
-            sessionID: "harness",
-            items: items,
-            scrollCommand: AppKitTimelineScrollCommand(revision: 2, destination: .bottom)
-        )
-        settleLayout(window: window)
-
-        let finalVisibleCells = instantiatedCellCount(in: tableView)
-        guard tableView.numberOfRows == items.count,
-              finalVisibleCells > 0,
-              finalVisibleCells < 80,
-              coordinator.fullReloadCount == 1,
-              coordinator.structuralUpdateCount >= 3,
-              latestMetrics?.distanceFromBottom ?? .greatestFiniteMagnitude < 4 else {
-            fputs(
-                "AppKitTimelineHarness: invariant failed rows=\(tableView.numberOfRows) " +
-                "cells=\(finalVisibleCells) reloads=\(coordinator.fullReloadCount) " +
-                "structural=\(coordinator.structuralUpdateCount) " +
-                "bottom=\(latestMetrics?.distanceFromBottom ?? -1)\n",
-                stderr
-            )
-            return false
-        }
-
-        coordinator.stopObserving()
-        window.contentView = nil
-        print(
-            "AppKitTimelineHarness passed rows=\(items.count) " +
-            "visible_cells=\(finalVisibleCells) reloads=\(coordinator.fullReloadCount) " +
-            "structural=\(coordinator.structuralUpdateCount)"
-        )
         return true
     }
 
-    private static func item(index: Int, version: Int) -> AppKitTimelineItem {
-        let paragraphCount = 1 + abs(index % 7)
+    private static func checkStreamingBelowViewport() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let initialVisibleCells = instantiatedCellCount(in: fixture.tableView)
+        guard fixture.tableView.style == NSTableView.Style.plain,
+              fixture.scrollView.verticalScrollElasticity == NSScrollView.Elasticity.none,
+              initialVisibleCells > 0,
+              initialVisibleCells < 80,
+              fixture.metrics.contentBuildCount > 0,
+              fixture.metrics.contentBuildCount < 80 else {
+            return fail(
+                "stream-below-viewport",
+                "lazy recycling/style invariant failed cells=\(initialVisibleCells) " +
+                    "builds=\(fixture.metrics.contentBuildCount)"
+            )
+        }
+
+        let retainedTailIndex = fixture.items.count - 1
+        let appendWrites = fixture.coordinator.clipOriginWriteCount
+        fixture.items[retainedTailIndex] = item(index: retainedTailIndex, version: 1)
+        fixture.items.append(item(index: 320, version: 0))
+        fixture.update()
+        fixture.settle()
+        guard fixture.coordinator.clipOriginWriteCount == appendWrites,
+              let retainedTailCell = fixture.tableView.view(
+                  atColumn: 0,
+                  row: retainedTailIndex,
+                  makeIfNecessary: false
+              ) as? TimelineHostingCellView,
+              retainedTailCell.renderedVersion == 1 else {
+            return fail("stream-below-viewport", "append fast path missed the retained tail")
+        }
+
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("row-160", .top)
+        ))
+        fixture.settle()
+        let origin = fixture.scrollView.contentView.bounds.origin
+        let writes = fixture.coordinator.clipOriginWriteCount
+        fixture.items[fixture.items.count - 1] = item(
+            index: 320,
+            version: 2,
+            paragraphCount: 18
+        )
+        fixture.update()
+        fixture.settle()
+        guard originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
+              fixture.coordinator.clipOriginWriteCount == writes else {
+            return fail("stream-below-viewport", "offscreen streaming changed the origin")
+        }
+        return true
+    }
+
+    private static func checkHeightChangeAboveViewport() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.items.insert(historyLoaderItem(), at: 0)
+        fixture.update()
+        fixture.settle()
+        fixture.scrollView.contentView.scroll(to: NSPoint.zero)
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+
+        let anchorID = fixture.items[1].id
+        guard let offsetBefore = visibleOffset(of: anchorID, in: fixture) else {
+            return fail("height-change-above-viewport", "anchor was not found")
+        }
+        let writes = fixture.coordinator.clipOriginWriteCount
+        fixture.items[0] = historyLoaderItem(version: 1, lineCount: 14)
+        fixture.update()
+        fixture.settle()
+        let offsetAfter = visibleOffset(of: anchorID, in: fixture)
+        guard let offsetAfter,
+              abs(offsetAfter - offsetBefore) < 2,
+              fixture.coordinator.clipOriginWriteCount == writes + 1 else {
+            return fail(
+                "height-change-above-viewport",
+                "anchor before=\(offsetBefore) after=\(offsetAfter ?? -1) " +
+                    "writes=\(fixture.coordinator.clipOriginWriteCount - writes)"
+            )
+        }
+        return true
+    }
+
+    private static func checkPrependSinglePage() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let anchorID = "row-80"
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row(anchorID, .top)
+        ))
+        fixture.settle()
+        guard let offsetBefore = visibleOffset(of: anchorID, in: fixture) else {
+            return fail("prepend-single-page", "anchor was not found")
+        }
+        let writes = fixture.coordinator.clipOriginWriteCount
+        fixture.items.insert(
+            contentsOf: (0..<24).map { item(index: -24 + $0, version: 0) },
+            at: 0
+        )
+        fixture.update()
+        fixture.settle()
+        let offsetAfter = visibleOffset(of: anchorID, in: fixture)
+        guard let offsetAfter,
+              abs(offsetAfter - offsetBefore) < 2,
+              fixture.coordinator.clipOriginWriteCount == writes + 1 else {
+            return fail(
+                "prepend-single-page",
+                "anchor before=\(offsetBefore) after=\(offsetAfter ?? -1) " +
+                    "writes=\(fixture.coordinator.clipOriginWriteCount - writes)"
+            )
+        }
+        return true
+    }
+
+    private static func checkActiveMomentumPriority() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("row-160", .top)
+        ))
+        fixture.settle()
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        guard fixture.coordinator.isLiveScrolling else {
+            return fail("active-momentum-priority", "live scroll did not start")
+        }
+        fixture.scrollView.contentView.scroll(to: NSPoint(
+            x: fixture.scrollView.contentView.bounds.minX,
+            y: fixture.scrollView.contentView.bounds.minY + 37
+        ))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let origin = fixture.scrollView.contentView.bounds.origin
+        let writes = fixture.coordinator.clipOriginWriteCount
+        let tailIndex = fixture.items.count - 1
+        fixture.items[tailIndex] = item(index: tailIndex, version: 1, paragraphCount: 18)
+        fixture.update(forcedBottomRevision: 1)
+        fixture.settle()
+        guard originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
+              fixture.coordinator.clipOriginWriteCount == writes else {
+            return fail("active-momentum-priority", "forced bottom displaced live scrolling")
+        }
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.settle()
+        guard !fixture.coordinator.isLiveScrolling,
+              originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
+              fixture.coordinator.clipOriginWriteCount == writes else {
+            return fail("active-momentum-priority", "suppressed positioning replayed after momentum")
+        }
+        return true
+    }
+
+    private static func checkChatSwitchIsolation() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("row-160", .top)
+        ))
+        fixture.settle()
+        let writes = fixture.coordinator.clipOriginWriteCount
+        fixture.items = (1_000..<1_096).map { item(index: $0, version: 0) }
+        fixture.update(sessionID: "harness-b")
+        fixture.settle()
+        let distanceFromBottom = max(
+            0,
+            fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
+        )
+        guard fixture.tableView.numberOfRows == fixture.items.count,
+              fixture.coordinator.fullReloadCount == 2,
+              fixture.coordinator.clipOriginWriteCount == writes + 1,
+              distanceFromBottom < 4 else {
+            return fail(
+                "chat-switch-isolation",
+                "reloads=\(fixture.coordinator.fullReloadCount) " +
+                    "writes=\(fixture.coordinator.clipOriginWriteCount - writes) " +
+                    "bottom=\(distanceFromBottom)"
+            )
+        }
+        return true
+    }
+
+    @MainActor
+    private final class Fixture {
+        final class Metrics {
+            var latest: TimelineScrollMetrics?
+            var contentBuildCount = 0
+        }
+
+        let metrics: Metrics
+        let coordinator: AppKitTimelineTable.Coordinator
+        let scrollView: NSScrollView
+        let tableView: NSTableView
+        let window: NSWindow
+        var items: [AppKitTimelineItem]
+        private var sessionID = "harness"
+        private var command = AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
+        private var forcedBottomRevision = 0
+
+        init() {
+            let metrics = Metrics()
+            self.metrics = metrics
+            coordinator = AppKitTimelineTable.Coordinator { value in
+                metrics.latest = value
+            }
+            scrollView = coordinator.makeScrollView()
+            tableView = scrollView.documentView as! NSTableView
+            window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 920, height: 720),
+                styleMask: .borderless,
+                backing: .buffered,
+                defer: false
+            )
+            items = (0..<320).map { index in
+                item(index: index, version: 0) {
+                    metrics.contentBuildCount += 1
+                }
+            }
+            window.contentView = scrollView
+            window.orderOut(nil)
+            coordinator.update(
+                sessionID: sessionID,
+                items: items,
+                scrollCommand: command,
+                forcedBottomRevision: forcedBottomRevision
+            )
+            settle()
+        }
+
+        func update(
+            sessionID nextSessionID: String? = nil,
+            command nextCommand: AppKitTimelineScrollCommand? = nil,
+            forcedBottomRevision nextForcedBottomRevision: Int? = nil
+        ) {
+            if let nextSessionID {
+                sessionID = nextSessionID
+            }
+            if let nextCommand {
+                command = nextCommand
+            }
+            if let nextForcedBottomRevision {
+                forcedBottomRevision = nextForcedBottomRevision
+            }
+            coordinator.update(
+                sessionID: sessionID,
+                items: items,
+                scrollCommand: command,
+                forcedBottomRevision: forcedBottomRevision
+            )
+        }
+
+        func settle() {
+            settleLayout(window: window)
+        }
+
+        func stop() {
+            coordinator.stopObserving()
+            window.contentView = nil
+        }
+    }
+
+    private static func item(
+        index: Int,
+        version: Int,
+        paragraphCount: Int? = nil,
+        onBuild: @escaping () -> Void = {}
+    ) -> AppKitTimelineItem {
+        AppKitTimelineItem(
+            id: "row-\(index)",
+            version: version,
+            eventIDs: ["event-\(index)"],
+            content: itemContent(
+                index: index,
+                paragraphCount: paragraphCount ?? (1 + abs(index % 7)),
+                onBuild: onBuild
+            )
+        )
+    }
+
+    private static func itemContent(
+        index: Int,
+        paragraphCount: Int,
+        onBuild: () -> Void
+    ) -> AnyView {
+        onBuild()
         let text = Array(repeating: "Row \(index) keeps a stable identity while its variable-height content is recycled.", count: paragraphCount)
             .joined(separator: "\n")
-        let content = AnyView(
+        return AnyView(
             VStack(alignment: .leading, spacing: 6) {
                 Text("Assistant")
                     .font(.caption.bold())
@@ -765,23 +1015,24 @@ enum AppKitTimelineHarness {
             .padding(.horizontal, 20)
             .padding(.vertical, 7)
         )
-        return AppKitTimelineItem(
-            id: "row-\(index)",
+    }
+
+    private static func historyLoaderItem(version: Int = 0, lineCount: Int = 1) -> AppKitTimelineItem {
+        AppKitTimelineItem(
+            id: "history-loader",
             version: version,
-            eventIDs: ["event-\(index)"],
-            content: content
+            content: historyLoaderContent(lineCount: lineCount)
         )
     }
 
-    private static func historyLoaderItem() -> AppKitTimelineItem {
-        AppKitTimelineItem(
-            id: "history-loader",
-            version: 0,
-            content: AnyView(
-                Text("Showing latest messages - load older")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            )
+    private static func historyLoaderContent(lineCount: Int) -> AnyView {
+        let text = Array(repeating: "Showing latest messages - load older", count: lineCount)
+            .joined(separator: "\n")
+        return AnyView(
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
         )
     }
 
@@ -798,6 +1049,23 @@ enum AppKitTimelineHarness {
                 count += 1
             }
         }
+    }
+
+    private static func visibleOffset(
+        of itemID: String,
+        in fixture: Fixture
+    ) -> CGFloat? {
+        guard let row = fixture.items.firstIndex(where: { $0.id == itemID }) else { return nil }
+        return fixture.tableView.rect(ofRow: row).minY - fixture.scrollView.documentVisibleRect.minY
+    }
+
+    private static func originsMatch(_ lhs: NSPoint, _ rhs: NSPoint) -> Bool {
+        abs(lhs.x - rhs.x) < 0.5 && abs(lhs.y - rhs.y) < 0.5
+    }
+
+    private static func fail(_ scenario: String, _ message: String) -> Bool {
+        fputs("AppKitTimelineHarness failed scenario=\(scenario) \(message)\n", stderr)
+        return false
     }
 }
 
@@ -927,7 +1195,7 @@ enum AppKitTimelineIntegrationHarness {
 private final class TimelineHostingCellView: NSTableCellView {
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private var renderedItemID: String?
-    private var renderedVersion: Int?
+    private(set) var renderedVersion: Int?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -953,8 +1221,9 @@ private final class TimelineHostingCellView: NSTableCellView {
         guard renderedItemID != item.id || renderedVersion != item.version else { return }
         renderedItemID = item.id
         renderedVersion = item.version
-        hostingView.rootView = item.content
+        hostingView.rootView = item.makeContent()
         hostingView.invalidateIntrinsicContentSize()
+        hostingView.layoutSubtreeIfNeeded()
     }
 }
 #endif
