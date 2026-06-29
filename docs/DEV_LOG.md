@@ -5704,3 +5704,26 @@ Third follow-up:
   created `NSScrollView`, not row rendering. The test timeline now uses a
   48-point discrete mouse-wheel step while preserving native precise trackpad
   deltas.
+
+## 2026-06-29 - Single-Owner Chat Opening And Native History Paging
+
+- Traced chat-open jumps to three competing position owners: the native table,
+  the normal SwiftUI bottom revision, and the forced SwiftUI bottom revision.
+  Immediate requests now publish only the forced revision, and ordinary chat
+  selection leaves initial positioning entirely to `NSTableView`.
+- Routed forced send/reconciliation revisions directly into the table update so
+  new rows and their requested bottom position are applied in one transaction.
+  Removed delayed 80/200 ms bottom chases that visibly tugged the timeline after
+  a chat was already open.
+- Keyed the AppKit render window to the selected session. A chat with expanded
+  history can no longer lend its large row budget to the first frame of the next
+  chat before SwiftUI's `onChange` reset runs.
+- Replaced the AppKit path's events-per-row projection heuristic with a dedicated
+  incremental event window. Each top reach reveals one local row page, expands
+  one event page, or requests one server page, in that order.
+- Older-page prepends now anchor the first real message rather than the history
+  loader control. The current content stays fixed while newly revealed rows land
+  above the viewport, naturally rearming the next top-triggered page.
+- Added stale-load generation checks and recycler/guardrail coverage for loader
+  anchoring, single bottom revisions, session-keyed row windows, synchronous
+  positioning, and native one-page history loading.

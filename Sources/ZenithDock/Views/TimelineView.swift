@@ -26,6 +26,10 @@ struct TimelineView: View {
     @State private var timelinePositioningOverlayTask: Task<Void, Never>?
 #if AGENTSDOCK_APPKIT_TIMELINE
     @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
+    @State private var appKitWindowSessionID: String?
+    @State private var appKitProjectionEventLimit = 300
+    @State private var appKitHistoryLoadInFlight = false
+    @State private var appKitHistoryLoadRevision = 0
 #endif
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
@@ -54,23 +58,28 @@ struct TimelineView: View {
             store.loadedSessionID != store.selectedSessionID
         )
 #if AGENTSDOCK_APPKIT_TIMELINE
-        // The native table applies the fresh snapshot in-place. Keep warm rows
-        // mounted while a cached tail reconciles instead of flashing empty data.
-        let timelineRowsStructurallySuspended = timelineRowsSuspended
+        // NSTableView applies each session snapshot and its initial position in
+        // one transaction. Masking it here adds a second visibility/position
+        // owner and produces a visible flash on every chat switch.
+        let timelineRowsStructurallySuspended = false
+        let renderedVisibleRowLimit = appKitWindowSessionID == store.selectedSessionID
+            ? visibleRowLimit
+            : defaultVisibleRowLimit
 #else
         let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
+        let renderedVisibleRowLimit = visibleRowLimit
 #endif
         let shouldMaskTimeline = timelineRowsStructurallySuspended
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
-        let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)
+        let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: renderedVisibleRowLimit)
         let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
         let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
         let projection = TimelineRows.project(from: projectedDisplayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
-        let hiddenRenderedRowCount = max(0, allRows.count - visibleRowLimit) + projectedHiddenEventCount
-        let rows = Array(allRows.suffix(visibleRowLimit))
+        let hiddenRenderedRowCount = max(0, allRows.count - renderedVisibleRowLimit) + projectedHiddenEventCount
+        let rows = Array(allRows.suffix(renderedVisibleRowLimit))
         let firstUnreadRowID = firstUnreadRowID(in: rows, unreadSeq: store.selectedSessionFirstUnreadSeq)
         let linkContext = store.selectedSessionID.map { store.markdownLinkContext(sessionID: $0) }
 
@@ -131,20 +140,30 @@ struct TimelineView: View {
                     acceptTimelineFileDrop(providers)
                 }
                 .onChange(of: store.scrollToBottomRevision) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+                    guard shouldFollowBottomRequest else { return }
+                    scrollToBottom(proxy)
+#else
                     let sessionID = store.selectedSessionID
                     if shouldFollowBottomRequest {
                         scrollToBottom(proxy)
                         settleBottomAfterLayout(proxy, sessionID: sessionID)
                     }
                     settleInitialTimelinePosition(proxy)
+#endif
                 }
                 .onChange(of: store.forcedScrollToBottomRevision) {
+#if !AGENTSDOCK_APPKIT_TIMELINE
                     forceOpenThreadToLatest(proxy)
+#endif
                 }
                 .onChange(of: store.scrollToEventRevision) {
                     scrollToRequestedEvent(proxy)
                 }
                 .onChange(of: store.selectedSessionID) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+                    resetAppKitTimelineForSelectedSession()
+#else
                     beginInitialTimelineMask()
                     pendingOpenBottomSessionID = store.selectedSessionID
                     isAtBottom = true
@@ -158,6 +177,7 @@ struct TimelineView: View {
                     store.markSelectedSessionRead()
                     settleOpenThreadAtLatest(proxy)
                     settleInitialTimelinePosition(proxy)
+#endif
                 }
                 .onChange(of: shouldMaskTimeline) { _, masked in
                     updateTimelinePositioningOverlay(masked: masked)
@@ -172,13 +192,19 @@ struct TimelineView: View {
                         store.setSelectedTimelineAtBottom(true)
                         isTimelineScrollable = false
                         setVisibleRowLimit(defaultVisibleRowLimit)
+#if AGENTSDOCK_APPKIT_TIMELINE
+                    } else if isAtBottom {
+                        setVisibleRowLimit(min(rowCount, max(visibleRowLimit, defaultVisibleRowLimit)))
+#else
                     } else if isAtBottom {
                         setVisibleRowLimit(cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
+#endif
                     }
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
+#if !AGENTSDOCK_APPKIT_TIMELINE
                     if settleOpenThreadAtLatest(proxy) {
                         return
                     } else if shouldFollowLiveEvent {
@@ -188,28 +214,37 @@ struct TimelineView: View {
                     } else {
                         settleInitialTimelinePosition(proxy)
                     }
+#endif
                 }
                 .onChange(of: store.loadedSessionID) {
+#if !AGENTSDOCK_APPKIT_TIMELINE
                     _ = settleOpenThreadAtLatest(proxy)
                     settleInitialTimelinePosition(proxy)
+#endif
                 }
                 .onChange(of: store.isSelectingSession) {
+#if !AGENTSDOCK_APPKIT_TIMELINE
                     if !store.isSelectingSession {
                         _ = settleOpenThreadAtLatest(proxy)
                         settleInitialTimelinePosition(proxy)
                     }
+#endif
                 }
                 .onChange(of: store.isRefreshingCachedDelta) {
+#if !AGENTSDOCK_APPKIT_TIMELINE
                     if !store.isRefreshingCachedDelta {
                         _ = settleOpenThreadAtLatest(proxy)
                         settleInitialTimelinePosition(proxy)
                     }
+#endif
                 }
                 .onChange(of: store.isApplyingLargeTimelineBatch) {
+#if !AGENTSDOCK_APPKIT_TIMELINE
                     if !store.isApplyingLargeTimelineBatch {
                         _ = settleOpenThreadAtLatest(proxy)
                         settleInitialTimelinePosition(proxy)
                     }
+#endif
                 }
                 .onChange(of: store.hiddenDisplayEventCount) {
                     if store.hiddenDisplayEventCount <= 0 {
@@ -228,6 +263,11 @@ struct TimelineView: View {
             }
         }
         .onAppear {
+#if AGENTSDOCK_APPKIT_TIMELINE
+            if appKitWindowSessionID != store.selectedSessionID {
+                resetAppKitTimelineForSelectedSession()
+            }
+#endif
             lastObservedEventSeq = maxEventSeq(store.displayEvents)
             if isAtBottom {
                 store.markSelectedSessionRead()
@@ -349,7 +389,8 @@ struct TimelineView: View {
                 hiddenRenderedRowCount: hiddenRenderedRowCount,
                 suspended: suspended
             ),
-            scrollCommand: appKitScrollCommand
+            scrollCommand: appKitScrollCommand,
+            forcedBottomRevision: store.forcedScrollToBottomRevision
         ) { metrics in
             updateBottomVisibility(metrics)
             handleHistoryTopDistance(
@@ -610,6 +651,13 @@ struct TimelineView: View {
         guard let sessionID = store.selectedSessionID else {
             return
         }
+#if AGENTSDOCK_APPKIT_TIMELINE
+        suppressHistoryLoading(for: 0.45)
+        disarmAutomaticOlderHistoryLoad()
+        store.markSelectedSessionRead(force: true)
+        scrollToBottom(proxy)
+        AppLogger.info("force latest requested session=\(sessionID) events=\(store.displayEvents.count)")
+#else
         pendingOpenBottomSessionID = sessionID
         suppressHistoryLoading(for: 2.4)
         disarmAutomaticOlderHistoryLoad()
@@ -627,7 +675,30 @@ struct TimelineView: View {
         }
         settleBottomAfterLayout(proxy, sessionID: sessionID)
         AppLogger.info("force latest settled session=\(sessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
+#endif
     }
+
+#if AGENTSDOCK_APPKIT_TIMELINE
+    private func resetAppKitTimelineForSelectedSession() {
+        appKitWindowSessionID = store.selectedSessionID
+        visibleRowLimit = defaultVisibleRowLimit
+        appKitProjectionEventLimit = projectionBaseEventLimit
+        appKitHistoryLoadInFlight = false
+        appKitHistoryLoadRevision &+= 1
+        pendingOpenBottomSessionID = nil
+        isInitialTimelineMasked = false
+        maskedSessionID = nil
+        hideTimelinePositioningOverlay()
+        isAtBottom = true
+        isNearBottom = true
+        isTimelineScrollable = false
+        store.setSelectedTimelineAtBottom(true)
+        disarmAutomaticOlderHistoryLoad()
+        suppressHistoryLoading(for: 0.45)
+        lastObservedEventSeq = maxEventSeq(store.displayEvents)
+        store.markSelectedSessionRead()
+    }
+#endif
 
     private func initialTimelineMaskIsCurrent(revision: Int, sessionID: String) -> Bool {
         isInitialTimelineMasked &&
@@ -809,6 +880,12 @@ struct TimelineView: View {
               Date() >= historyLoadSuppressedUntil else {
             return
         }
+#if AGENTSDOCK_APPKIT_TIMELINE
+        guard !appKitHistoryLoadInFlight else { return }
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
+        loadOneOlderAppKitPage()
+#else
         if revealOlderRowsShowingNewPage(proxy) {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
@@ -818,6 +895,7 @@ struct TimelineView: View {
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
         loadOlderHistoryPreservingPosition(proxy)
+#endif
     }
 
     private func disarmAutomaticOlderHistoryLoad() {
@@ -826,6 +904,12 @@ struct TimelineView: View {
     }
 
     private func loadOlderHistoryFromIntent(_ proxy: ScrollViewProxy) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        guard !appKitHistoryLoadInFlight else { return }
+        olderHistoryLoadArmed = false
+        suppressScrollHistoryLoadUntilTopLeaves = true
+        loadOneOlderAppKitPage()
+#else
         if revealOlderRowsShowingNewPage(proxy) {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
@@ -835,7 +919,53 @@ struct TimelineView: View {
         olderHistoryLoadArmed = false
         suppressScrollHistoryLoadUntilTopLeaves = true
         loadOlderHistoryShowingNewPage(proxy)
+#endif
     }
+
+#if AGENTSDOCK_APPKIT_TIMELINE
+    private func loadOneOlderAppKitPage() {
+        let projectedRows = renderedRows()
+        if projectedRows.count > visibleRowLimit {
+            setVisibleRowLimit(min(projectedRows.count, visibleRowLimit + rowPageSize))
+            AppLogger.info("AppKit older page revealed local rows visible_limit=\(visibleRowLimit)")
+            return
+        }
+
+        if store.displayEvents.count > appKitProjectionEventLimit {
+            appKitProjectionEventLimit = min(
+                store.displayEvents.count,
+                appKitProjectionEventLimit + olderHistoryProjectionPageSize
+            )
+            let expandedRows = renderedRows()
+            setVisibleRowLimit(min(expandedRows.count, visibleRowLimit + rowPageSize))
+            AppLogger.info("AppKit older page expanded projection events=\(appKitProjectionEventLimit) visible_limit=\(visibleRowLimit)")
+            return
+        }
+
+        guard store.canLoadOlderHistory else { return }
+        appKitHistoryLoadInFlight = true
+        appKitHistoryLoadRevision &+= 1
+        let loadRevision = appKitHistoryLoadRevision
+        let sessionID = store.selectedSessionID
+        Task {
+            let result = await store.loadOlderHistory()
+            guard loadRevision == appKitHistoryLoadRevision,
+                  sessionID == store.selectedSessionID else { return }
+            appKitHistoryLoadInFlight = false
+            guard result.addedCount > 0 else { return }
+            appKitProjectionEventLimit = min(
+                store.displayEvents.count,
+                appKitProjectionEventLimit + max(result.addedCount, olderHistoryProjectionPageSize)
+            )
+            let expandedRows = renderedRows()
+            setVisibleRowLimit(min(expandedRows.count, visibleRowLimit + rowPageSize))
+            AppLogger.info(
+                "AppKit older page loaded added_events=\(result.addedCount) " +
+                "projection_events=\(appKitProjectionEventLimit) visible_limit=\(visibleRowLimit)"
+            )
+        }
+    }
+#endif
 
     @discardableResult
     private func revealOlderRows(preservingPositionWith proxy: ScrollViewProxy) -> Bool {
@@ -1087,8 +1217,20 @@ struct TimelineView: View {
     }
 
     private func projectionEventBudget(visibleLimit: Int) -> Int {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        let eventLimit = appKitWindowSessionID == store.selectedSessionID
+            ? appKitProjectionEventLimit
+            : projectionBaseEventLimit
+        min(sourceEventCount, max(projectionBaseEventLimit, eventLimit))
+#else
         min(store.displayEvents.count, max(projectionBaseEventLimit, visibleLimit * projectionEventsPerVisibleRow))
+#endif
     }
+
+#if AGENTSDOCK_APPKIT_TIMELINE
+    private var sourceEventCount: Int { store.displayEvents.count }
+    private var olderHistoryProjectionPageSize: Int { 400 }
+#endif
 
     private func setVisibleRowLimit(_ nextLimit: Int) {
         withTransaction(noAnimationTransaction) {

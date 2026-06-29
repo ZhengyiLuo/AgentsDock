@@ -1666,7 +1666,6 @@ final class AppStore: ObservableObject {
                 setStatus("Loaded memory chat")
             }
             selectedSessionID = sessionID
-            requestScrollToBottom(immediate: true)
             markSessionRead(sessionID)
             syncSelectedRunningState()
             return
@@ -1713,9 +1712,7 @@ final class AppStore: ObservableObject {
         if tmuxCapture != nil { tmuxCapture = nil }
         markSessionRead(sessionID)
         AppLogger.info("select session=\(sessionID)")
-        if loadedFromCache {
-            requestScrollToBottom(immediate: true)
-        } else {
+        if !loadedFromCache {
             events = []
             rebuildDisplayEvents()
             if !uploads.isEmpty { uploads = [] }
@@ -1739,7 +1736,6 @@ final class AppStore: ObservableObject {
                 loadedFromCache = true
                 setStatus("Loaded cached chat")
                 AppLogger.info("loaded disk cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
-                requestScrollToBottom(immediate: true)
             }
         }
         if loadedFromCache {
@@ -1806,13 +1802,14 @@ final class AppStore: ObservableObject {
                 return
             }
             let previousSeq = lastSeq
+            let responseLatestSeq = res.events.map(\.seq).max() ?? cachedLastSeq
+            if responseLatestSeq > cachedLastSeq {
+                requestScrollToBottom(immediate: true)
+            }
             let changedTimeline = applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
             markSessionRead(sessionID)
             loadedSessionID = sessionID
             saveSelectedChatCache()
-            if changedTimeline && lastSeq > cachedLastSeq {
-                requestScrollToBottom(immediate: true)
-            }
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
             AppLogger.info("loaded cached latest tail session=\(sessionID) previous=\(previousSeq) cached=\(cachedLastSeq) latest=\(lastSeq) events=\(events.count) changed=\(changedTimeline) omitted_before=\(omittedHistoryEventCount)")
@@ -1866,7 +1863,6 @@ final class AppStore: ObservableObject {
                 connectEvents(sessionID: sessionID, after: lastSeq)
             }
             syncSelectedRunningState()
-            requestScrollToBottom(immediate: true)
         } catch {
             AppLogger.error("select failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
             if reportErrors {
@@ -2662,6 +2658,7 @@ final class AppStore: ObservableObject {
         }
         guard event.session_id == sessionID, event.session_id == selectedSessionID else { return }
         ingest(event)
+        requestScrollToBottom(immediate: true)
     }
 
     private func clearSubmittedPromptIfCurrent(submittedPrompt: String?, trimmed: String) {
@@ -3271,9 +3268,10 @@ final class AppStore: ObservableObject {
             pendingScrollRequest?.cancel()
             pendingScrollRequest = nil
             lastScrollRequestAt = now
-            scrollToBottomRevision += 1
             if immediate {
                 forcedScrollToBottomRevision += 1
+            } else {
+                scrollToBottomRevision += 1
             }
             return
         }

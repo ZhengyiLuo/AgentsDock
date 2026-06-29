@@ -554,7 +554,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(timeline.contains("hideTimelinePositioningOverlay()"), "Mac timeline must clear stale opening spinners when switching chats")
     try assert(timeline.contains(".onChange(of: store.isApplyingLargeTimelineBatch)"), "Mac timeline must retry latest-position settling after the large-batch mask drops")
     try assert(timeline.contains("timelineRowsStructurallySuspended ? [] : store.displayEvents"), "Mac timeline must not build rows while a large sync batch is masked")
-    try assert(timeline.contains("let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)"), "Mac timeline must project only the currently visible event budget while keeping loaded history in store")
+    try assert(timeline.contains("let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: renderedVisibleRowLimit)"), "Mac timeline must project only the current session's visible event budget while keeping loaded history in store")
     try assert(timeline.contains("projectionEventsPerVisibleRow"), "Mac timeline projection budget must expand as the visible row budget expands")
     try assert(timeline.contains("private let defaultVisibleRowLimit = 64"), "Mac timeline must keep the default rendered row window small enough for smooth scrolling")
     try assert(timeline.contains("private let projectionBaseEventLimit = 300"), "Mac timeline event projection must avoid rebuilding too many hidden events while scrolling")
@@ -1320,10 +1320,14 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("renderedItemID != item.id || renderedVersion != item.version"), "Recycled cells must key content by row identity and version")
     try assert(!timeline.contains("ObjectIdentifier(row)"), "Streaming must not invalidate every visible row through projection object identity")
     try assert(appKitTimeline.contains("captureAnchor()") && appKitTimeline.contains("restore(anchor)"), "AppKit timeline updates must preserve the visible row anchor")
+    try assert(appKitTimeline.contains("items[row].id == \"history-loader\""), "Older-history prepends must anchor the first real message instead of the loader control")
     try assert(appKitTimeline.contains("withAnimation: []"), "AppKit timeline structural updates must remain non-animated")
     try assert(appKitTimeline.contains("newIDs.difference(from: oldIDs)"), "Arbitrary same-chat row changes must use an ID diff instead of a full reload")
     try assert(appKitTimeline.contains("sameSessionFallbackReloadCount == 0"), "Real-chat stress runs must reject same-chat full table reloads")
     try assert(appKitTimeline.contains("bottomSettleGeneration") && appKitTimeline.contains("willStartLiveScrollNotification"), "Stale bottom settles must be cancelled across chat changes and user scrolling")
+    try assert(!appKitTimeline.contains("for delay in [0.08, 0.20]"), "Chat opening must not visibly chase the bottom across delayed layout passes")
+    try assert(appKitTimeline.contains("Position in the same update transaction as the row mutation"), "AppKit session changes and prepends must settle in the same table update")
+    try assert(appKitTimeline.contains("forcedBottomRevision") && timeline.contains("forcedBottomRevision: store.forcedScrollToBottomRevision"), "Send and reconciliation bottom requests must enter the native table in the same render update as their rows")
     try assert(appKitTimeline.contains("scrollView.verticalLineScroll = 48"), "AppKit timeline must not regress to the unusably small 10-point mouse-wheel default")
     try assert(appKitTimeline.contains("min(64, oldIDs.count)"), "AppKit timeline must delta-update a full bounded visible-window shift")
     try assert(appKitTimeline.contains("oldIDs.suffix($0).elementsEqual(newIDs.prefix($0))"), "AppKit timeline must delta-update mixed head-removal and tail-insertion windows")
@@ -1333,6 +1337,20 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("AppKitTimelineIntegrationHarness") && appKitTimeline.contains("store.select(sessionID: session.id)"), "AppKit timeline must include a hidden real-chat switching harness")
     try assert(testBuild.contains("com.zhengyiluo.AgentsDockTest") && testBuild.contains("AgentsDock-test.app"), "Virtualized test build must stay isolated from the production bundle")
     try assert(core.contains("usesIsolatedTestCredential") && testBuild.contains("agentAccessToken"), "Test app must not request access to the production app's Keychain ACL")
+    try assert(timeline.contains("appKitProjectionEventLimit") && timeline.contains("loadOneOlderAppKitPage()"), "AppKit history paging must own a dedicated incremental event window")
+    try assert(timeline.contains("appKitWindowSessionID == store.selectedSessionID"), "The first frame of a new chat must not inherit the previous chat's expanded row window")
+    try assert(timeline.contains("appKitHistoryLoadRevision"), "AppKit history paging must reject stale page completions after a chat switch")
+    try assert(timeline.contains("let timelineRowsStructurallySuspended = false"), "AppKit chat opening must not add a second SwiftUI mask/visibility owner")
+    try assert(!macStore.contains("requestOpenThreadToLatest()"), "Chat selection must leave initial positioning to the timeline instead of publishing duplicate bottom commands")
+    try assert(macStore.contains("if responseLatestSeq > cachedLastSeq {\n                requestScrollToBottom(immediate: true)"), "A changed cached tail must publish its one bottom command before the reconciled rows")
+    try assert(!macStore.contains("scrollToBottomRevision += 1\n            if immediate"), "One immediate scroll request must not publish both normal and forced revisions")
+
+    guard let appKitPagingStart = timeline.range(of: "private func loadOneOlderAppKitPage()"),
+          let appKitPagingEnd = timeline.range(of: "#endif", range: appKitPagingStart.upperBound..<timeline.endIndex) else {
+        throw GuardrailFailure.failed("AppKit older-history paging block not found")
+    }
+    let appKitPagingBlock = timeline[appKitPagingStart.lowerBound..<appKitPagingEnd.lowerBound]
+    try assert(!appKitPagingBlock.contains("scrollToOlderPageTarget"), "Native older-history prepends must preserve the table anchor instead of issuing target-scroll chases")
 
     guard let boundsStart = timeline.range(of: "forName: NSView.boundsDidChangeNotification"),
           let boundsEnd = timeline.range(of: "scrollView.postsFrameChangedNotifications", range: boundsStart.upperBound..<timeline.endIndex) else {
