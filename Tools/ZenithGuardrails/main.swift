@@ -1338,6 +1338,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(testBuild.contains("AGENTSDOCK_APPKIT_TIMELINE"), "Test build must explicitly opt into the AppKit timeline code")
     try assert(testBuild.contains("--timeline-harness") && appKitTimeline.contains("AppKitTimelineHarness"), "Test builds must pass the headless AppKit recycler stress harness")
     try assert(appKitTimeline.contains("AppKitTimelineIntegrationHarness") && appKitTimeline.contains("store.select(sessionID: session.id)"), "AppKit timeline must include a hidden real-chat switching harness")
+    try assert(appKitTimeline.contains("AgentsDockTimelineScrollView") && appKitTimeline.contains("AppKit integration older page stalled"), "Real-chat stress runs must exercise repeated native top-edge history paging")
     try assert(testBuild.contains("com.zhengyiluo.AgentsDockTest") && testBuild.contains("AgentsDock-test.app"), "Virtualized test build must stay isolated from the production bundle")
     try assert(core.contains("usesIsolatedTestCredential") && testBuild.contains("agentAccessToken"), "Test app must not request access to the production app's Keychain ACL")
     try assert(timeline.contains("appKitProjectionEventLimit") && timeline.contains("loadOneOlderAppKitPage()"), "AppKit history paging must own a dedicated incremental event window")

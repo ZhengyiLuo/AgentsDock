@@ -119,6 +119,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             tableView.focusRingType = .none
 
             let scrollView = NSScrollView(frame: .zero)
+            scrollView.identifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineScrollView")
             scrollView.documentView = tableView
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = false
@@ -823,6 +824,42 @@ enum AppKitTimelineIntegrationHarness {
         }
         try? await Task.sleep(for: .milliseconds(500))
 
+        guard let timelineScrollView = findTimelineScrollView(in: hostingView),
+              let timelineTableView = timelineScrollView.documentView as? NSTableView else {
+            AppLogger.error("AppKit integration harness could not locate native timeline")
+            exit(EXIT_FAILURE)
+        }
+
+        if store.canLoadOlderHistory {
+            try? await Task.sleep(for: .milliseconds(550))
+            for page in 1...2 {
+                let beforeRows = timelineTableView.numberOfRows
+                let beforeEvents = store.displayEvents.count
+                let beforeHidden = store.hiddenDisplayEventCount
+                timelineScrollView.contentView.scroll(to: .zero)
+                timelineScrollView.reflectScrolledClipView(timelineScrollView.contentView)
+
+                let pageDeadline = Date().addingTimeInterval(6)
+                while Date() < pageDeadline,
+                      timelineTableView.numberOfRows <= beforeRows,
+                      store.displayEvents.count <= beforeEvents,
+                      store.hiddenDisplayEventCount >= beforeHidden {
+                    try? await Task.sleep(for: .milliseconds(80))
+                }
+                let advanced = timelineTableView.numberOfRows > beforeRows ||
+                    store.displayEvents.count > beforeEvents ||
+                    store.hiddenDisplayEventCount < beforeHidden
+                guard advanced else {
+                    AppLogger.error(
+                        "AppKit integration older page stalled page=\(page) " +
+                        "rows=\(beforeRows) events=\(beforeEvents) hidden=\(beforeHidden)"
+                    )
+                    exit(EXIT_FAILURE)
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+
         guard AppKitTimelineDiagnostics.coordinatorCount > 0,
               AppKitTimelineDiagnostics.updateCount >= sessions.count,
               AppKitTimelineDiagnostics.sameSessionFallbackReloadCount == 0,
@@ -848,6 +885,19 @@ enum AppKitTimelineIntegrationHarness {
         fflush(stdout)
         fflush(stderr)
         exit(EXIT_SUCCESS)
+    }
+
+    private static func findTimelineScrollView(in view: NSView) -> NSScrollView? {
+        if let scrollView = view as? NSScrollView,
+           scrollView.identifier?.rawValue == "AgentsDockTimelineScrollView" {
+            return scrollView
+        }
+        for subview in view.subviews {
+            if let match = findTimelineScrollView(in: subview) {
+                return match
+            }
+        }
+        return nil
     }
 }
 

@@ -71,7 +71,11 @@ struct TimelineView: View {
         let renderedVisibleRowLimit = visibleRowLimit
 #endif
         let shouldMaskTimeline = timelineRowsStructurallySuspended
+#if AGENTSDOCK_APPKIT_TIMELINE
+        let displayEvents = store.displayEvents
+#else
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
+#endif
         let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: renderedVisibleRowLimit)
         let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
         let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
