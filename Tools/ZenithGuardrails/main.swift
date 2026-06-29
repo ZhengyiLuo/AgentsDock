@@ -1324,6 +1324,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("newIDs.difference(from: oldIDs)"), "Arbitrary same-chat row changes must use an ID diff instead of a full reload")
     try assert(appKitTimeline.contains("sameSessionFallbackReloadCount == 0"), "Real-chat stress runs must reject same-chat full table reloads")
     try assert(appKitTimeline.contains("bottomSettleGeneration") && appKitTimeline.contains("willStartLiveScrollNotification"), "Stale bottom settles must be cancelled across chat changes and user scrolling")
+    try assert(appKitTimeline.contains("scrollView.verticalLineScroll = 48"), "AppKit timeline must not regress to the unusably small 10-point mouse-wheel default")
     try assert(appKitTimeline.contains("min(64, oldIDs.count)"), "AppKit timeline must delta-update a full bounded visible-window shift")
     try assert(appKitTimeline.contains("oldIDs.suffix($0).elementsEqual(newIDs.prefix($0))"), "AppKit timeline must delta-update mixed head-removal and tail-insertion windows")
     try assert(!appKitTimeline.contains("List {"), "Rejected SwiftUI List timeline must not return")

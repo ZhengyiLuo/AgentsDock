@@ -5699,3 +5699,8 @@ Third follow-up:
   real-chat switching.
 - The stress harness now runs in invisible offscreen windows and can no longer
   flash its rapid automated chat switching into the user's visible app.
+- Live profiling of reported slow scrolling showed the process essentially idle.
+  The cause was AppKit's 10-point default line-scroll increment on the manually
+  created `NSScrollView`, not row rendering. The test timeline now uses a
+  48-point discrete mouse-wheel step while preserving native precise trackpad
+  deltas.

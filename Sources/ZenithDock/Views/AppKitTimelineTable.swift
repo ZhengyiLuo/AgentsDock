@@ -114,6 +114,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scrollView.autohidesScrollers = true
             scrollView.drawsBackground = false
             scrollView.automaticallyAdjustsContentInsets = false
+            // A programmatic NSScrollView defaults to a 10-point wheel step,
+            // which is far too small for tall chat cards. This affects discrete
+            // mouse-wheel events only; precise trackpad deltas remain native.
+            scrollView.verticalLineScroll = 48
             let zeroInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
             scrollView.contentInsets = zeroInsets
             scrollView.scrollerInsets = zeroInsets
