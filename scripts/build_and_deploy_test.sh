@@ -1,37 +1,63 @@
 #!/usr/bin/env bash
-# Build the Mac app via direct swiftc (sandbox-safe) and deploy to an ISOLATED
-# bundle on the Air so experiments never touch the working app.
-#   ZenithDock.app       <- stable, what the user runs
-#   AgentsDock.app  <- candidate under test
 set -euo pipefail
-ROOT="/Users/zen/agi/ZenithDock"
-cd "$ROOT"
 
-TMPDIR_BASE="/tmp/claude/zd_test_build"
-rm -rf "$TMPDIR_BASE"; mkdir -p "$TMPDIR_BASE/cmc"
-export TMPDIR="$TMPDIR_BASE"
-export CLANG_MODULE_CACHE_PATH="$TMPDIR_BASE/cmc"
-SDK=$(xcrun --show-sdk-path 2>/dev/null); export SDKROOT="$SDK"
-FLAGS=(-sdk "$SDK" -module-cache-path "$TMPDIR_BASE/cmc" -swift-version 6 -target arm64-apple-macosx14.0 -O -wmo)
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DERIVED_DATA="${ROOT}/build/DerivedDataAgentsDockTest"
+BUILT_APP="${DERIVED_DATA}/Build/Products/Release/AgentsDock.app"
+DIST_APP="${ROOT}/dist/AgentsDock-test.app"
+TEST_BUNDLE_ID="com.zhengyiluo.AgentsDockTest"
 
-swiftc "${FLAGS[@]}" -emit-module -emit-object -parse-as-library -module-name ZenithCore \
-  -emit-module-path "$TMPDIR_BASE/ZenithCore.swiftmodule" -o "$TMPDIR_BASE/ZenithCore.o" \
-  Sources/ZenithCore/*.swift 2>&1 | grep -vE "xcrun_db|swiftpm|DVTFilePath|user-level cache" || true
-swiftc "${FLAGS[@]}" -module-name ZenithDock -I "$TMPDIR_BASE" -framework AVKit \
-  -o "$TMPDIR_BASE/ZenithDock" "$TMPDIR_BASE/ZenithCore.o" \
-  $(find Sources/ZenithDock -name '*.swift') 2>&1 | grep -vE "xcrun_db|swiftpm|DVTFilePath|user-level cache" || true
+cd "${ROOT}"
 
-if [ ! -f "$TMPDIR_BASE/ZenithDock" ]; then echo "BUILD FAILED"; exit 1; fi
+xcodebuild \
+  -project ZenithDock.xcodeproj \
+  -scheme AgentsDockMac \
+  -configuration Release \
+  -destination platform=macOS \
+  -derivedDataPath "${DERIVED_DATA}" \
+  PRODUCT_BUNDLE_IDENTIFIER="${TEST_BUNDLE_ID}" \
+  'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) AGENTSDOCK_APPKIT_TIMELINE' \
+  CODE_SIGN_IDENTITY=- \
+  CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= \
+  build \
+  -quiet
 
-# Stage into a copy of the stable bundle layout, then ship to the test path.
-STAGE="$TMPDIR_BASE/AgentsDock.app"
-rm -rf "$STAGE"
-cp -R "$ROOT/dist/AgentsDock.app" "$STAGE"
-cp "$TMPDIR_BASE/ZenithDock" "$STAGE/Contents/MacOS/ZenithDock"
-codesign --remove-signature "$STAGE" 2>/dev/null || true
-codesign --force --deep --sign - "$STAGE" >/dev/null 2>&1
-HASH=$(shasum -a 256 "$STAGE/Contents/MacOS/ZenithDock" | awk '{print $1}')
-echo "BUILD OK hash=$HASH"
+rm -rf "${DIST_APP}"
+mkdir -p "${ROOT}/dist"
+ditto "${BUILT_APP}" "${DIST_APP}"
 
-rsync -a --delete "$STAGE/" air:/Users/zen/agi/AgentsDock.app/ 2>&1 | tail -1
-echo "DEPLOYED to air:/Users/zen/agi/AgentsDock.app  hash=$HASH"
+mv \
+  "${DIST_APP}/Contents/MacOS/AgentsDock" \
+  "${DIST_APP}/Contents/MacOS/AgentsDock-test"
+plutil -replace CFBundleDisplayName -string "AgentsDock-test" "${DIST_APP}/Contents/Info.plist"
+plutil -replace CFBundleName -string "AgentsDock-test" "${DIST_APP}/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string "AgentsDock-test" "${DIST_APP}/Contents/Info.plist"
+
+if [[ -d "${DIST_APP}/Contents/Frameworks" ]]; then
+  while IFS= read -r -d '' framework; do
+    codesign --force --sign - "${framework}"
+  done < <(find "${DIST_APP}/Contents/Frameworks" -maxdepth 1 -name "*.framework" -print0)
+fi
+codesign --force --sign - "${DIST_APP}"
+codesign --verify --deep --strict --verbose=2 "${DIST_APP}"
+
+"${DIST_APP}/Contents/MacOS/AgentsDock-test" --timeline-harness
+
+if server_url="$(defaults read com.zhengyiluo.ZenithDock serverURL 2>/dev/null)"; then
+  defaults write "${TEST_BUNDLE_ID}" serverURL "${server_url}"
+fi
+if access_token="$(security find-generic-password -s com.zhengyiluo.ZenithDock -a agent-access-token -w 2>/dev/null)"; then
+  defaults write "${TEST_BUNDLE_ID}" agentAccessToken "${access_token}"
+fi
+
+MBA_HOST="${ZENITHDOCK_MBA_HOST:-zens-macbook-air}"
+MBA_DEST="${ZENITHDOCK_MBA_DEST:-/Users/zen/agi}"
+if ssh -o BatchMode=yes -o ConnectTimeout=5 "${MBA_HOST}" "mkdir -p '${MBA_DEST}'" >/dev/null 2>&1; then
+  rsync -a --delete "${DIST_APP}" "${MBA_HOST}:${MBA_DEST}/"
+  echo "Synced MBA test build: ${MBA_HOST}:${MBA_DEST}/AgentsDock-test.app"
+else
+  echo "Skipped MBA test sync: ${MBA_HOST} is not reachable over SSH" >&2
+fi
+
+echo "${DIST_APP}"

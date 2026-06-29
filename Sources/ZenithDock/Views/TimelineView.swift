@@ -24,6 +24,9 @@ struct TimelineView: View {
     @State private var showTimelinePositioningOverlay = false
     @State private var timelinePositioningOverlayRevision = 0
     @State private var timelinePositioningOverlayTask: Task<Void, Never>?
+#if AGENTSDOCK_APPKIT_TIMELINE
+    @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
+#endif
     private let bottomID = "timeline-bottom"
     private let coordinateSpaceName = "timelineScroll"
     private let defaultVisibleRowLimit = 64
@@ -38,17 +41,30 @@ struct TimelineView: View {
         let eventID: String?
     }
 
+    private enum TimelineRequestedAnchor {
+        case top
+        case center
+        case bottom
+    }
+
     var body: some View {
         let hasWarmSelectedTimeline = store.loadedSessionID == store.selectedSessionID && !store.displayEvents.isEmpty
         let timelineRowsSuspended = isInitialTimelineMasked && !hasWarmSelectedTimeline && (
             store.isSelectingSession ||
             store.loadedSessionID != store.selectedSessionID
         )
+#if AGENTSDOCK_APPKIT_TIMELINE
+        // The native table applies the fresh snapshot in-place. Keep warm rows
+        // mounted while a cached tail reconciles instead of flashing empty data.
+        let timelineRowsStructurallySuspended = timelineRowsSuspended
+#else
         let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
+#endif
         let shouldMaskTimeline = timelineRowsStructurallySuspended
         let displayEvents = timelineRowsStructurallySuspended ? [] : store.displayEvents
         let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: visibleRowLimit)
+        let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
         let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
         let projection = TimelineRows.project(from: projectedDisplayEvents)
         let allRows = projection.rows
@@ -72,6 +88,7 @@ struct TimelineView: View {
                         rows: rows,
                         firstUnreadRowID: firstUnreadRowID,
                         jobsByRunID: jobsByRunID,
+                        promptFilesByEventID: promptFilesByEventID,
                         linkContext: linkContext,
                         hiddenRenderedRowCount: hiddenRenderedRowCount,
                         suspended: timelineRowsStructurallySuspended,
@@ -226,19 +243,34 @@ struct TimelineView: View {
         }
     }
 
-    // The timeline scroll container — the stable eager VStack. Extracted from
-    // body so the type-checker doesn't choke on it inline.
+    // Production keeps the proven eager stack. The isolated performance build
+    // compiles an explicit view-based NSTableView row recycler.
     @ViewBuilder
     private func timelineScrollRegion(
         proxy: ScrollViewProxy,
         rows: [TimelineRow],
         firstUnreadRowID: String?,
         jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
         linkContext: ZMarkdownLinkContext?,
         hiddenRenderedRowCount: Int,
         suspended: Bool,
         shouldMask: Bool
     ) -> some View {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        appKitTimelineTable(
+            proxy: proxy,
+            rows: rows,
+            firstUnreadRowID: firstUnreadRowID,
+            jobsByRunID: jobsByRunID,
+            promptFilesByEventID: promptFilesByEventID,
+            linkContext: linkContext,
+            hiddenRenderedRowCount: hiddenRenderedRowCount,
+            suspended: suspended
+        )
+        .opacity(shouldMask ? 0 : 1)
+        .coordinateSpace(name: coordinateSpaceName)
+#else
         ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if store.selectedSession == nil {
@@ -260,7 +292,12 @@ struct TimelineView: View {
                                 TimelineUnreadMarker()
                                     .id("unread-marker-\(row.id)")
                             }
-                            timelineCard(row, jobsByRunID: jobsByRunID, linkContext: linkContext)
+                            timelineCard(
+                                row,
+                                jobsByRunID: jobsByRunID,
+                                promptFilesByEventID: promptFilesByEventID,
+                                linkContext: linkContext
+                            )
                         }
                         Color.clear
                             .frame(height: 1)
@@ -286,19 +323,173 @@ struct TimelineView: View {
             }
             .opacity(shouldMask ? 0 : 1)
             .coordinateSpace(name: coordinateSpaceName)
+#endif
     }
+
+#if AGENTSDOCK_APPKIT_TIMELINE
+    private func appKitTimelineTable(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool
+    ) -> some View {
+        AppKitTimelineTable(
+            sessionID: store.selectedSessionID,
+            items: appKitTimelineItems(
+                proxy: proxy,
+                rows: rows,
+                firstUnreadRowID: firstUnreadRowID,
+                jobsByRunID: jobsByRunID,
+                promptFilesByEventID: promptFilesByEventID,
+                linkContext: linkContext,
+                hiddenRenderedRowCount: hiddenRenderedRowCount,
+                suspended: suspended
+            ),
+            scrollCommand: appKitScrollCommand
+        ) { metrics in
+            updateBottomVisibility(metrics)
+            handleHistoryTopDistance(
+                metrics.distanceFromTop,
+                hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
+                proxy: proxy
+            )
+        }
+    }
+
+    private func appKitTimelineItems(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool
+    ) -> [AppKitTimelineItem] {
+        var items: [AppKitTimelineItem] = []
+
+        if store.selectedSession == nil {
+            items.append(AppKitTimelineItem(
+                id: "empty-state",
+                version: 0,
+                content: appKitRowContent(EmptyStateView())
+            ))
+            return items
+        }
+
+        if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
+            let loader = TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
+                revealOlderRowsShowingNewPage(proxy)
+            } onLoadOlder: {
+                loadOlderHistoryFromIntent(proxy)
+            }
+            items.append(AppKitTimelineItem(
+                id: "history-loader",
+                version: hiddenRenderedRowCount ^ store.hiddenDisplayEventCount,
+                content: appKitRowContent(loader)
+            ))
+        }
+
+        for row in rows {
+            if row.id == firstUnreadRowID {
+                items.append(AppKitTimelineItem(
+                    id: "unread-marker-\(row.id)",
+                    version: row.maxSeq,
+                    content: appKitRowContent(TimelineUnreadMarker())
+                ))
+            }
+            items.append(AppKitTimelineItem(
+                id: row.id,
+                version: appKitRowVersion(row, promptFilesByEventID: promptFilesByEventID),
+                content: appKitRowContent(
+                    timelineCard(
+                        row,
+                        jobsByRunID: jobsByRunID,
+                        promptFilesByEventID: promptFilesByEventID,
+                        linkContext: linkContext
+                    )
+                )
+            ))
+        }
+        return items
+    }
+
+    private func appKitRowContent<Content: View>(_ content: Content) -> AnyView {
+        AnyView(
+            content
+                .environmentObject(store)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 7)
+        )
+    }
+
+    private func appKitRowVersion(
+        _ row: TimelineRow,
+        promptFilesByEventID: [String: [ZFile]]
+    ) -> Int {
+        var hasher = Hasher()
+        // Timeline projection rebuilds row objects when the newest event changes.
+        // Object identity therefore invalidated every visible cell during streaming,
+        // even when that row's content was unchanged. Keep the version semantic so
+        // the recycler only rehosts rows whose underlying events actually changed.
+        hasher.combine(row.id)
+        hasher.combine(row.maxSeq)
+        hasher.combine(row.eventIDs.count)
+        hasher.combine(row.eventIDs.first)
+        hasher.combine(row.eventIDs.last)
+        hasher.combine(store.showDebugEvents)
+        switch row.kind {
+        case .event(let event):
+            hasher.combine(store.isPinned(event))
+            for file in promptFilesByEventID[event.id] ?? [] {
+                hasher.combine(file.id)
+            }
+            switch queueStatus(for: event) {
+            case .none:
+                hasher.combine(0)
+            case .pending(let position):
+                hasher.combine(1)
+                hasher.combine(position)
+            case .started:
+                hasher.combine(2)
+            case .cancelled:
+                hasher.combine(3)
+            }
+        case .artifacts(let events):
+            for event in events {
+                hasher.combine(event.artifact?.id)
+                if let file = event.artifact {
+                    hasher.combine(store.isPinned(file))
+                }
+            }
+        case .job, .jobGroup, .trace:
+            break
+        }
+        return hasher.finalize()
+    }
+#endif
 
     // Per-row renderer for the timeline VStack (pure extraction of the former
     // inline switch).
     @ViewBuilder
-    private func timelineCard(_ row: TimelineRow, jobsByRunID: [String: ZJob], linkContext: ZMarkdownLinkContext?) -> some View {
+    private func timelineCard(
+        _ row: TimelineRow,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?
+    ) -> some View {
         switch row.kind {
         case .event(let event):
             EventCard(
                 event: event,
                 showDebugEvents: store.showDebugEvents,
                 queueStatus: queueStatus(for: event),
-                attachments: store.promptFiles(for: event).map {
+                attachments: (promptFilesByEventID[event.id] ?? []).map {
                     MessageAttachment(file: $0, url: store.fileURL($0))
                 },
                 artifactURL: event.artifact.map { store.fileURL($0) },
@@ -378,7 +569,7 @@ struct TimelineView: View {
             guard initialTimelineMaskIsCurrent(revision: revision, sessionID: sessionID) else { return }
             if !store.displayEvents.isEmpty {
                 withTransaction(noAnimationTransaction) {
-                    proxy.scrollTo(bottomID, anchor: .bottom)
+                    requestTimelineBottomScroll(proxy)
                     isAtBottom = true
                     isNearBottom = true
                     store.setSelectedTimelineAtBottom(true)
@@ -450,7 +641,7 @@ struct TimelineView: View {
         suppressHistoryLoading(for: 0.45)
         disarmAutomaticOlderHistoryLoad()
         let action = {
-            proxy.scrollTo(bottomID, anchor: .bottom)
+            requestTimelineBottomScroll(proxy)
             isAtBottom = true
             isNearBottom = true
             store.setSelectedTimelineAtBottom(true)
@@ -473,6 +664,10 @@ struct TimelineView: View {
 
     private func settleBottomAfterLayout(_ proxy: ScrollViewProxy, sessionID: String?) {
         guard let sessionID else { return }
+#if AGENTSDOCK_APPKIT_TIMELINE
+        // The AppKit coordinator performs its own height-aware settle passes.
+        return
+#else
         for delay in [0.04, 0.14, 0.28] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 guard store.selectedSessionID == sessionID else { return }
@@ -481,6 +676,43 @@ struct TimelineView: View {
                 }
             }
         }
+#endif
+    }
+
+    private func requestTimelineBottomScroll(_ proxy: ScrollViewProxy) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        appKitScrollCommand = AppKitTimelineScrollCommand(
+            revision: appKitScrollCommand.revision &+ 1,
+            destination: .bottom
+        )
+#else
+        proxy.scrollTo(bottomID, anchor: .bottom)
+#endif
+    }
+
+    private func requestTimelineRowScroll(
+        _ rowID: String,
+        anchor: TimelineRequestedAnchor,
+        proxy: ScrollViewProxy
+    ) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        let appKitAnchor: AppKitTimelineAnchor = switch anchor {
+        case .top: .top
+        case .center: .center
+        case .bottom: .bottom
+        }
+        appKitScrollCommand = AppKitTimelineScrollCommand(
+            revision: appKitScrollCommand.revision &+ 1,
+            destination: .row(rowID, appKitAnchor)
+        )
+#else
+        let unitPoint: UnitPoint = switch anchor {
+        case .top: .top
+        case .center: .center
+        case .bottom: .bottom
+        }
+        proxy.scrollTo(rowID, anchor: unitPoint)
+#endif
     }
 
     private var shouldFollowBottomRequest: Bool {
@@ -517,7 +749,7 @@ struct TimelineView: View {
         }
         DispatchQueue.main.async {
             withAnimation(.snappy) {
-                proxy.scrollTo(target.id, anchor: .center)
+                requestTimelineRowScroll(target.id, anchor: .center, proxy: proxy)
             }
             isAtBottom = false
             isNearBottom = false
@@ -670,7 +902,7 @@ struct TimelineView: View {
         for delay in [0.0, 0.06, 0.18] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 withTransaction(noAnimationTransaction) {
-                    proxy.scrollTo(rowID, anchor: .top)
+                    requestTimelineRowScroll(rowID, anchor: .top, proxy: proxy)
                 }
                 isAtBottom = false
                 isNearBottom = false
@@ -807,7 +1039,7 @@ struct TimelineView: View {
         let rowID = restoredRowID(for: anchor)
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
         withTransaction(noAnimationTransaction) {
-            proxy.scrollTo(rowID, anchor: .top)
+            requestTimelineRowScroll(rowID, anchor: .top, proxy: proxy)
             isAtBottom = false
             isNearBottom = false
             store.setSelectedTimelineAtBottom(false)
@@ -815,7 +1047,7 @@ struct TimelineView: View {
         for delay in [0.0, 0.06, 0.18] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 withTransaction(noAnimationTransaction) {
-                    proxy.scrollTo(rowID, anchor: .top)
+                    requestTimelineRowScroll(rowID, anchor: .top, proxy: proxy)
                 }
                 isAtBottom = false
                 isNearBottom = false
@@ -1045,7 +1277,7 @@ enum TimelineFileDrop {
     }
 }
 
-private struct TimelineScrollMetrics: Equatable {
+struct TimelineScrollMetrics: Equatable {
     var viewportHeight: CGFloat
     var contentHeight: CGFloat
     var distanceFromBottom: CGFloat
@@ -1683,8 +1915,7 @@ private enum TimelineRows {
                 let end = min(activeAssistantEvents.endIndex, start + assistantRowChunkSize)
                 let chunk = Array(activeAssistantEvents[start..<end])
                 if let assistant = mergedAssistantEvent(from: chunk),
-                   let first = chunk.first,
-                   let last = chunk.last {
+                   let first = chunk.first {
                     rows.append(TimelineRow(
                         // Stable per-chunk identity: do NOT include last.seq. The
                         // active streaming chunk grows (last.seq increments every

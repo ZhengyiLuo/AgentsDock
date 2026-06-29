@@ -991,7 +991,18 @@ public enum ZenithTokenStore {
     private static let account = "agent-access-token"
     private static let fallbackKey = "agentAccessToken"
 
+#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+    private static var usesIsolatedTestCredential: Bool {
+        Bundle.main.bundleIdentifier == "com.zhengyiluo.AgentsDockTest"
+    }
+#endif
+
     public static func load() -> String {
+#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+        if usesIsolatedTestCredential {
+            return UserDefaults.standard.string(forKey: fallbackKey) ?? ""
+        }
+#endif
         var query = baseQuery()
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecReturnData as String] = true
@@ -1008,6 +1019,12 @@ public enum ZenithTokenStore {
 
     public static func save(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+        if usesIsolatedTestCredential {
+            UserDefaults.standard.set(trimmed, forKey: fallbackKey)
+            return
+        }
+#endif
         if trimmed.isEmpty {
             clear()
             return
@@ -1033,6 +1050,12 @@ public enum ZenithTokenStore {
     }
 
     public static func clear() {
+#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+        if usesIsolatedTestCredential {
+            UserDefaults.standard.removeObject(forKey: fallbackKey)
+            return
+        }
+#endif
         SecItemDelete(baseQuery() as CFDictionary)
         UserDefaults.standard.removeObject(forKey: fallbackKey)
     }

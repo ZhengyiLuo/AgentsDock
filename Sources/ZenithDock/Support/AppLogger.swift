@@ -13,10 +13,12 @@ enum AppLogger {
     nonisolated(unsafe) private static var installed = false
 
     static let logURL: URL = {
+        let productionBundleID = "com.zhengyiluo.ZenithDock"
+        let logNamespace = Bundle.main.bundleIdentifier == productionBundleID ? "ZenithDock" : "AgentsDock-test"
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent("ZenithDock", isDirectory: true)
+            .appendingPathComponent(logNamespace, isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root.appendingPathComponent("ZenithDock.log")
     }()

@@ -19,6 +19,51 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-29 - Isolated NSTableView Timeline Experiment
+
+Goal:
+- Revisit Mac timeline virtualization without repeating the known
+  `ScrollView + LazyVStack` 100% CPU layout spiral.
+
+Architecture:
+- Production `AgentsDock.app` still compiles the proven eager
+  `ScrollView + VStack` timeline. Do not remove that fallback during the
+  experiment.
+- `scripts/build_and_deploy_test.sh` builds a separate `AgentsDock-test.app`
+  with bundle ID `com.zhengyiluo.AgentsDockTest` and compilation condition
+  `AGENTSDOCK_APPKIT_TIMELINE`.
+- The active experiment uses an explicit view-based `NSTableView` with recycled
+  `NSHostingView` cells instead of any SwiftUI lazy container. This bypasses
+  the `LazyLayoutViewCache` layout-loop class found in every failed lazy-stack
+  attempt and gives us direct control over row updates and scroll anchoring.
+- Test and production apps use separate single-instance locks and log folders,
+  so both can run together. The test app logs to
+  `~/Library/Logs/AgentsDock-test/ZenithDock.log`.
+- The build script seeds the test domain with the configured server URL and a
+  test-only defaults copy of the token. The experimental ad-hoc executable
+  never queries the production app's Keychain item, avoiding access prompts.
+- The test bundle is emitted only to `dist/AgentsDock-test.app` and
+  `/Users/zen/agi/AgentsDock-test.app` on the MacBook Air. It must never
+  overwrite `dist/AgentsDock.app`.
+
+Required acceptance test before considering this for production:
+- Long-chat switching, continuous scrolling near both ends, streaming output,
+  repeated window resizing, older-history paging, and bottom-position restore.
+- Run long enough to catch the latent failure, inspect CPU over time, and take
+  a process sample while busy. A short launch is not evidence of stability.
+- Reject the experiment if samples contain recurring `LazySubviewPlacements`
+  or `LazyLayoutViewCache`, if CPU remains pinned, or if scroll anchoring and
+  pagination regress.
+
+Rejected intermediate approach:
+- A SwiftUI `List` attached as `SwiftUIOutlineListView`. Initial row layout
+  briefly reached high CPU but returned to idle; a five-second sample contained
+  neither `LazySubviewPlacements` nor `LazyLayoutViewCache`.
+- It still flickered badly during cache reconciliation and disturbed split-view
+  presentation even after empty intermediate snapshots and implicit animations
+  were removed. `SwiftUI.List` is rejected for the chat timeline; do not retry
+  it. The next prototype is the explicit AppKit table described above.
+
 ## 2026-06-29 - AgentsDock TestFlight Build 55
 
 Release scope:
@@ -5629,3 +5674,28 @@ Third follow-up:
   visible error into the chat.
 - Added guardrails so future Claude launches keep the cwd-scoped resume preflight
   and cwd metadata save.
+
+## 2026-06-29 - Isolated AppKit Timeline Recycler
+
+- Kept the production `ScrollView`/`VStack` timeline unchanged and built the
+  virtualization work only in `AgentsDock-test` behind
+  `AGENTSDOCK_APPKIT_TIMELINE`.
+- Rejected SwiftUI `List` after it disturbed split-view presentation and visibly
+  flickered. The replacement is an explicit `NSTableView` recycler containing
+  reusable `NSHostingView` row cells.
+- Fixed two recycler invalidation bugs found during real-chat stress testing:
+  cells now key their content by row ID plus semantic version, and projection
+  object identity no longer invalidates every visible row during streaming.
+- Replaced the last same-chat `reloadData()` fallback with an ID-based row diff.
+  A 40-switch real-chat stress run performed 198 recycler updates with zero
+  same-chat fallback reloads.
+- Cancelled delayed bottom-settle work when the chat changes or the user begins
+  a live scroll, preventing stale scroll work from tugging the next timeline.
+- The synthetic harness covers 320 variable-height rows, 120 streaming updates,
+  prepends, rolling-window shifts, and middle replacements. It instantiates only
+  8 visible cells and performs one initial full reload.
+- A five-second CPU sample showed no `LazySubviewPlacements` or
+  `LazyLayoutViewCache` recursion. Peak memory was about 90.5 MB during rapid
+  real-chat switching.
+- The stress harness now runs in invisible offscreen windows and can no longer
+  flash its rapid automated chat switching into the user's visible app.

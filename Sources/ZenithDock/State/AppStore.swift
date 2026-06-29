@@ -2970,6 +2970,16 @@ final class AppStore: ObservableObject {
         return fileIDs.compactMap { filesByID[$0] }
     }
 
+    func promptFilesByEventID(for timelineEvents: [ZEvent]) -> [String: [ZFile]] {
+        let eventsWithFiles = timelineEvents.filter { $0.file_ids?.isEmpty == false }
+        guard !eventsWithFiles.isEmpty else { return [:] }
+        let knownFiles = mergedFiles(sessionFiles + sessionVideoFiles + uploads + files(from: events))
+        let filesByID = Dictionary(uniqueKeysWithValues: knownFiles.map { ($0.id, $0) })
+        return Dictionary(uniqueKeysWithValues: eventsWithFiles.map { event in
+            (event.id, (event.file_ids ?? []).compactMap { filesByID[$0] })
+        })
+    }
+
     func markdownLinkContext(sessionID: String) -> ZMarkdownLinkContext {
         ZMarkdownLinkContext(sessionID: sessionID, baseURL: api.baseURL, accessToken: accessToken)
     }

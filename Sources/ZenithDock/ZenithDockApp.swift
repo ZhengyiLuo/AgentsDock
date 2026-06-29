@@ -4,19 +4,22 @@ import SwiftUI
 @main
 struct ZenithDockApp: App {
     @NSApplicationDelegateAdaptor(ZenithDockAppDelegate.self) private var appDelegate
-    @StateObject private var store = AppStore()
+    @StateObject private var store: AppStore
     @AppStorage("rightInspectorVisible") private var inspectorVisible = true
 
     init() {
+        let store = AppStore()
+        _store = StateObject(wrappedValue: store)
+#if AGENTSDOCK_APPKIT_TIMELINE
+        AppKitTimelineIntegrationBridge.store = store
+#endif
         AppLogger.install()
         AppLogger.info("ZenithDock launch")
     }
 
     var body: some Scene {
         Window("AgentsDock", id: "main") {
-            RootView()
-                .environmentObject(store)
-                .frame(minWidth: 1180, minHeight: 760)
+            windowContent
         }
         .windowStyle(.titleBar)
         .commands {
@@ -54,7 +57,34 @@ struct ZenithDockApp: App {
             }
         }
     }
+
+    @ViewBuilder
+    private var windowContent: some View {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        if CommandLine.arguments.contains("--timeline-integration-harness") {
+            Color.clear
+                .frame(width: 1, height: 1)
+        } else {
+            mainAppContent
+        }
+#else
+        mainAppContent
+#endif
+    }
+
+    private var mainAppContent: some View {
+        RootView()
+            .environmentObject(store)
+            .frame(minWidth: 1180, minHeight: 760)
+    }
 }
+
+#if AGENTSDOCK_APPKIT_TIMELINE
+@MainActor
+private enum AppKitTimelineIntegrationBridge {
+    static var store: AppStore?
+}
+#endif
 
 private struct ShowZenithDockWindowCommand: View {
     @Environment(\.openWindow) private var openWindow
@@ -75,13 +105,73 @@ private struct ShowZenithDockWindowCommand: View {
 final class ZenithDockAppDelegate: NSObject, NSApplicationDelegate {
     private let singleInstanceGuard = ZenithDockSingleInstanceGuard()
 
+#if AGENTSDOCK_APPKIT_TIMELINE
+    private var integrationHarnessTask: Task<Void, Never>?
+    private var integrationHarnessKeepAliveWindow: NSWindow?
+
+    private var isTimelineHarness: Bool {
+        CommandLine.arguments.contains("--timeline-harness")
+    }
+
+    private var isTimelineIntegrationHarness: Bool {
+        CommandLine.arguments.contains("--timeline-integration-harness")
+    }
+#endif
+
     func applicationWillFinishLaunching(_ notification: Notification) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        if isTimelineHarness || isTimelineIntegrationHarness {
+            NSApp.setActivationPolicy(.prohibited)
+            return
+        }
+#endif
         if singleInstanceGuard.shouldTerminateDuplicateLaunch() {
             NSApp.terminate(nil)
         }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+#if AGENTSDOCK_APPKIT_TIMELINE
+        if isTimelineHarness {
+            let passed = AppKitTimelineHarness.run()
+            fflush(stdout)
+            fflush(stderr)
+            exit(passed ? EXIT_SUCCESS : EXIT_FAILURE)
+        }
+        if isTimelineIntegrationHarness {
+            let keepAliveWindow = NSWindow(
+                contentRect: NSRect(x: -20_000, y: -20_000, width: 1, height: 1),
+                styleMask: .borderless,
+                backing: .buffered,
+                defer: false
+            )
+            keepAliveWindow.alphaValue = 0
+            keepAliveWindow.ignoresMouseEvents = true
+            keepAliveWindow.orderFrontRegardless()
+            integrationHarnessKeepAliveWindow = keepAliveWindow
+
+            NSApp.windows.forEach {
+                $0.alphaValue = 0
+                $0.ignoresMouseEvents = true
+                $0.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+            }
+            DispatchQueue.main.async {
+                NSApp.windows.forEach {
+                    $0.alphaValue = 0
+                    $0.ignoresMouseEvents = true
+                    $0.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+                }
+            }
+            guard let store = AppKitTimelineIntegrationBridge.store else {
+                AppLogger.error("AppKit integration harness store unavailable")
+                exit(EXIT_FAILURE)
+            }
+            integrationHarnessTask = Task { @MainActor in
+                await AppKitTimelineIntegrationHarness.run(store: store)
+            }
+            return
+        }
+#endif
         ZenithDockWindowController.cullDuplicateMainWindowsSoon()
     }
 
@@ -168,7 +258,11 @@ private final class ZenithDockSingleInstanceGuard {
         do {
             let directory = try lockDirectory()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = directory.appendingPathComponent("ZenithDock.lock")
+            let productionBundleID = "com.zhengyiluo.ZenithDock"
+            let lockName = Bundle.main.bundleIdentifier == productionBundleID
+                ? "ZenithDock.lock"
+                : "\(Bundle.main.bundleIdentifier ?? "AgentsDock-test").lock"
+            let url = directory.appendingPathComponent(lockName)
             let fd = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
             guard fd >= 0 else {
                 AppLogger.error("single instance lock open failed errno=\(errno)")

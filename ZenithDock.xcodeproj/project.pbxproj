@@ -40,6 +40,7 @@
 		B0000000000000000000001D /* SessionManagementSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* SessionManagementSheets.swift */; };
 		B0000000000000000000001E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* SidebarView.swift */; };
 		B0000000000000000000001F /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* TimelineView.swift */; };
+		B00000000000000000000025 /* AppKitTimelineTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000023 /* AppKitTimelineTable.swift */; };
 		B00000000000000000000020 /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
 		B00000000000000000000021 /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -119,6 +120,7 @@
 		F0000000000000000000001D /* SessionManagementSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManagementSheets.swift; sourceTree = "<group>"; };
 		F0000000000000000000001E /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001F /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
+		F00000000000000000000023 /* AppKitTimelineTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppKitTimelineTable.swift; sourceTree = "<group>"; };
 		F00000000000000000000020 /* ZenithDockMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZenithDockMac.entitlements; sourceTree = "<group>"; };
 		P00000000000000000000001 /* AgentsDock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentsDock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		P00000000000000000000002 /* ZenithCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = ZenithCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -331,6 +333,7 @@
 				F0000000000000000000001C /* RootView.swift */,
 				F0000000000000000000001D /* SessionManagementSheets.swift */,
 				F0000000000000000000001E /* SidebarView.swift */,
+				F00000000000000000000023 /* AppKitTimelineTable.swift */,
 				F0000000000000000000001F /* TimelineView.swift */,
 			);
 			path = Views;
@@ -510,6 +513,7 @@
 				B0000000000000000000001C /* RootView.swift in Sources */,
 				B0000000000000000000001D /* SessionManagementSheets.swift in Sources */,
 				B0000000000000000000001E /* SidebarView.swift in Sources */,
+				B00000000000000000000025 /* AppKitTimelineTable.swift in Sources */,
 				B0000000000000000000001F /* TimelineView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
