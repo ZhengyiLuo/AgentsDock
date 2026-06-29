@@ -1321,6 +1321,8 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!timeline.contains("ObjectIdentifier(row)"), "Streaming must not invalidate every visible row through projection object identity")
     try assert(appKitTimeline.contains("captureAnchor()") && appKitTimeline.contains("restore(anchor)"), "AppKit timeline updates must preserve the visible row anchor")
     try assert(appKitTimeline.contains("items[row].id == \"history-loader\""), "Older-history prepends must anchor the first real message instead of the loader control")
+    try assert(appKitTimeline.contains("anchorMovedByPrepend") && appKitTimeline.contains("deferAnchorRestore(anchor"), "Only true head prepends may request a next-pass anchor correction")
+    try assert(appKitTimeline.contains("cancelDeferredAnchorRestore()"), "Deferred prepend corrections must be cancellable on another update or user scroll")
     try assert(appKitTimeline.contains("withAnimation: []"), "AppKit timeline structural updates must remain non-animated")
     try assert(appKitTimeline.contains("newIDs.difference(from: oldIDs)"), "Arbitrary same-chat row changes must use an ID diff instead of a full reload")
     try assert(appKitTimeline.contains("sameSessionFallbackReloadCount == 0"), "Real-chat stress runs must reject same-chat full table reloads")

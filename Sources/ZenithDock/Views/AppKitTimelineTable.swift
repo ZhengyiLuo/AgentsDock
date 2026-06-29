@@ -79,6 +79,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var reportWorkItem: DispatchWorkItem?
         private var lastMetrics: TimelineScrollMetrics?
         private var bottomSettleGeneration = 0
+        private var anchorRestoreGeneration = 0
 
         private(set) var fullReloadCount = 0
         private(set) var structuralUpdateCount = 0
@@ -164,6 +165,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         ) {
             guard tableView != nil else { return }
             AppKitTimelineDiagnostics.updateCount += 1
+            cancelDeferredAnchorRestore()
 
             let previousItems = items
             let sessionChanged = sessionID != nextSessionID
@@ -180,6 +182,14 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 previousItems: previousItems,
                 sessionChanged: sessionChanged
             )
+            let anchorMovedByPrepend: Bool = {
+                guard let anchor,
+                      let previousIndex = previousItems.firstIndex(where: { $0.id == anchor.itemID }),
+                      let nextIndex = nextItems.firstIndex(where: { $0.id == anchor.itemID }) else {
+                    return false
+                }
+                return nextIndex > previousIndex
+            }()
 
             if commandChanged {
                 lastScrollCommandRevision = scrollCommand.revision
@@ -209,6 +219,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 scrollToBottom()
             } else if let anchor {
                 restore(anchor)
+                if anchorMovedByPrepend {
+                    deferAnchorRestore(anchor, expectedSessionID: nextSessionID)
+                }
             }
             scheduleMetricsReport()
         }
@@ -410,6 +423,22 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scroll(toY: rowRect.minY + anchor.offset, in: scrollView, tableView: tableView)
         }
 
+        private func deferAnchorRestore(_ anchor: VisibleAnchor, expectedSessionID: String?) {
+            anchorRestoreGeneration &+= 1
+            let generation = anchorRestoreGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.anchorRestoreGeneration == generation,
+                      self.sessionID == expectedSessionID else { return }
+                self.restore(anchor)
+                self.scheduleMetricsReport()
+            }
+        }
+
+        private func cancelDeferredAnchorRestore() {
+            anchorRestoreGeneration &+= 1
+        }
+
         private func apply(_ destination: AppKitTimelineScrollCommand.Destination) {
             switch destination {
             case .none:
@@ -507,6 +536,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.cancelBottomSettles()
+                    self?.cancelDeferredAnchorRestore()
                 }
             }
         }
@@ -521,6 +551,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollObserver = nil
             reportWorkItem?.cancel()
             reportWorkItem = nil
+            cancelDeferredAnchorRestore()
         }
 
         private func scheduleMetricsReport() {
