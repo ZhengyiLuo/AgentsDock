@@ -1228,9 +1228,9 @@ struct TimelineView: View {
         let eventLimit = appKitWindowSessionID == store.selectedSessionID
             ? appKitProjectionEventLimit
             : projectionBaseEventLimit
-        min(sourceEventCount, max(projectionBaseEventLimit, eventLimit))
+        return min(sourceEventCount, max(projectionBaseEventLimit, eventLimit))
 #else
-        min(store.displayEvents.count, max(projectionBaseEventLimit, visibleLimit * projectionEventsPerVisibleRow))
+        return min(store.displayEvents.count, max(projectionBaseEventLimit, visibleLimit * projectionEventsPerVisibleRow))
 #endif
     }
 
