@@ -19,6 +19,17 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-29 - AgentsDock TestFlight Build 55
+
+Release scope:
+- Bumped the shared iOS/iPadOS and macOS build number from `53` to `55`; App
+  Store Connect had already assigned `54` to the previous upload.
+- Includes GPT-5.6 model-specific effort options and canonical priority-tier
+  launches, plus automatic bounded-memory recovery when a resumed Codex thread
+  can no longer complete remote compaction.
+- The matching standalone server commit is deployed and pushed with the client
+  release so runtime contracts do not drift.
+
 ## 2026-06-28 - Automatic Codex Provider-Thread Rollover
 
 Context:
