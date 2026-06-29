@@ -19,6 +19,34 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-28 - Automatic Codex Provider-Thread Rollover
+
+Context:
+- `Validator - SONIC Teleoperation Data` kept failing after the GPT-5.6 service
+  tier fix. Its saved provider thread `019e71ab-6d42-7fc3-99b7-fed9ce112909`
+  was large enough that both GPT-5.6 Sol and GPT-5.5 died in Codex's remote
+  compact task before producing a response.
+- The AgentsDock timeline and local event history were intact; only the
+  provider-level thread had become unusable.
+
+Change:
+- A resumed Codex turn that fails specifically in the remote compact task now
+  rolls over once to a fresh provider thread with the existing bounded fork
+  memory, while preserving the same AgentsDock chat and visible history.
+- Recovery is allowed only before assistant text, reasoning, tools, or
+  artifacts appear. It never retries a partial or side-effecting turn.
+- The failed run is excluded from the memory seed so the current prompt is not
+  duplicated. The old provider ID and rollover reason remain in a compact
+  audit event.
+- A saved memory seed is reapplied when a fresh provider thread failed before
+  obtaining an ID, preventing context loss on a transient retry failure.
+
+Verification:
+- Both server copies compile and remain synchronized apart from the app repo's
+  intentional archived-session creation fields.
+- `ZenithGuardrails` covers the one-retry limit, no-partial-output gate, failed
+  run exclusion, and memory reapplication behavior.
+
 ## 2026-06-28 - GPT-5.6 Priority Tier Root Cause
 
 Context:
