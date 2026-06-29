@@ -228,6 +228,9 @@ func checkClaudeResumeFailureDoesNotPoisonSession() throws {
     try assert(server.contains("CODEX_STREAM_FALLBACK_MODELS") && server.contains("is_codex_stream_disconnect_error"), "Server must recognize the known GPT-5.6-Sol stream failure path")
     try assert(server.contains("and not text_parts\n        and not started_tool_ids"), "Automatic model fallback must never retry after partial assistant output or tool execution")
     try assert(server.contains("fallback_attempt=1"), "Automatic model fallback must be bounded to one retry")
+    try assert(server.contains("ZENITHBOT_CODEX_STREAM_FALLBACK_MODEL\", \"gpt-5.6-terra"), "Failed GPT-5.6 Sol streams must fall back within the GPT-5.6 family")
+    try assert(server.contains("retry_sess[\"model\"] = CODEX_STREAM_FALLBACK_MODEL"), "Codex stream fallback must use the configured fallback model")
+    try assert(server.contains("sess.get(\"effort\") or CODEX_DEFAULT_EFFORT"), "Codex stream fallback must preserve a valid requested effort")
     try assert(server.contains("cmd.extend([\"--disable\", \"image_generation\"])"), "Server-launched Codex turns must disable the currently broken image_generation tool")
     try assert(server.contains("Codex exited {proc.returncode} without error output."), "Codex nonzero exits without stderr must still show a visible error")
 }

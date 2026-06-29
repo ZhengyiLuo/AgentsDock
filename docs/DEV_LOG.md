@@ -19,6 +19,28 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-28 - GPT-5.6 Preview Isolation
+
+Context:
+- GPT-5.6-Sol appeared in the refreshed authenticated Codex model catalog but
+  every request ended in `stream disconnected before completion`.
+- The failure reproduced outside AgentsDock with clean `codex exec` commands on
+  both the server and Mac: ephemeral state, ignored user config/rules, empty
+  thread, read-only sandbox, and both `medium` and `xhigh` effort.
+- GPT-5.5 succeeded under the same server auth/network. GPT-5.6-Terra and
+  GPT-5.6-Luna also succeeded immediately, proving the AgentsDock launch path
+  and GPT-5.6 family access work; Sol alone is rejected upstream.
+
+Decision:
+- Keep Sol discoverable because it comes from the authenticated live catalog,
+  but bound its terminal pre-output stream failure to one transparent retry on
+  GPT-5.6-Terra at the same validated effort.
+- Never retry after assistant text or a tool starts. Persist the actual Terra
+  runtime so the UI does not claim that Sol handled the turn.
+- Sol access itself cannot be repaired client-side. During the limited preview,
+  verify the approved Codex workspace/account with OpenAI and report a request
+  ID if Sol remains unavailable.
+
 ## 2026-06-28 - Backend-Specific Effort Validation Hotfix
 
 Context:
