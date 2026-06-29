@@ -144,6 +144,7 @@ func checkRuntimeDefaultLabels() throws {
     try assert(server.contains("CODEX_DEFAULT_EFFORT = \"xhigh\""), "Server Codex catalog must not regress GPT-5.5 default effort below XHigh")
     try assert(server.contains("\"max\", \"ultra\""), "Server must preserve GPT-5.6 Max and Ultra effort options")
     try assert(server.contains("\"gpt-5.6-sol\": \"priority\""), "Server must launch GPT-5.6 Sol on the required priority service tier")
+    try assert(server.contains("except ModuleNotFoundError:  # Python 3.10 agent hosts") && server.contains("load_codex_user_config(path)"), "Server config discovery must remain compatible with Python 3.10 agent hosts")
     try assert(server.contains("normalize_runtime_effort(backend, req.effort, strict=True)"), "New sessions must validate effort against the selected backend")
     try assert(server.contains("normalized_effort = normalize_runtime_effort(") && server.contains("sess.get(\"effort\") or configured_effort or CODEX_DEFAULT_EFFORT"), "Codex launch must normalize persisted effort and explicitly apply its advertised default")
     try assert(!server.contains("f\"model_reasoning_effort={sess['effort']}\""), "Codex launch must not pass unvalidated session effort directly to the CLI")

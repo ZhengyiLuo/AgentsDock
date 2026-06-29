@@ -42,6 +42,15 @@ Decision:
 - This entry supersedes the fallback decision in the older preview-isolation
   notes below.
 
+Deployment follow-up:
+- The first deploy exposed that the active `sonic` service venv runs Python
+  3.10, where the standard-library `tomllib` module is unavailable. The server
+  now uses `tomllib` on Python 3.11+ and a bounded top-level scalar reader on
+  Python 3.10 for `model`, `model_reasoning_effort`, and `service_tier` only.
+- The candidate module and `service_tier=priority` config were imported and
+  parsed successfully under the exact production Python 3.10 venv before the
+  service was redeployed.
+
 ## 2026-06-28 - GPT-5.6 Preview Isolation
 
 Context:
