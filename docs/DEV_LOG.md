@@ -43,6 +43,14 @@ Change:
 - Codex `Reconnecting... N/5` packets are now treated as transient transport
   telemetry instead of fatal timeline errors. A structured terminal failure is
   authoritative and suppresses duplicate stderr/RMCP error cards.
+- Live A/B verification on the active host showed a fresh GPT-5.5/XHigh turn
+  completing successfully while GPT-5.6-Sol/XHigh failed after all five stream
+  reconnects, including on a brand-new provider thread. This ruled out the
+  app/server transport and old transcript size as the sole cause.
+- Added a bounded GPT-5.6-Sol failover: only when a terminal stream disconnect
+  occurs before any assistant text or tool starts, switch that session to the
+  advertised GPT-5.5/XHigh default and retry the same run once. Never retry
+  after partial work, and never recurse beyond one fallback attempt.
 - Added guardrails that prohibit passing raw persisted effort values directly
   into the Codex CLI.
 
