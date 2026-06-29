@@ -31,6 +31,11 @@ private enum AppKitTimelineDiagnostics {
     static var updateCount = 0
     static var sameSessionFallbackReloadCount = 0
     static var bottomRequestCount = 0
+    static var deferredAnchorRequestCount = 0
+    static var deferredAnchorApplyCount = 0
+    static var lastAnchorID: String?
+    static var lastAnchorTargetY: CGFloat?
+    static var lastAnchorVisibleY: CGFloat?
 }
 
 struct AppKitTimelineTable: NSViewRepresentable {
@@ -408,6 +413,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 row += 1
             }
             guard items.indices.contains(row) else { return nil }
+            AppKitTimelineDiagnostics.lastAnchorID = items[row].id
             return VisibleAnchor(
                 itemID: items[row].id,
                 offset: visibleRect.minY - tableView.rect(ofRow: row).minY
@@ -421,16 +427,21 @@ struct AppKitTimelineTable: NSViewRepresentable {
             tableView.scrollRowToVisible(row)
             tableView.layoutSubtreeIfNeeded()
             let rowRect = tableView.rect(ofRow: row)
-            scroll(toY: rowRect.minY + anchor.offset, in: scrollView, tableView: tableView)
+            let targetY = rowRect.minY + anchor.offset
+            AppKitTimelineDiagnostics.lastAnchorTargetY = targetY
+            scroll(toY: targetY, in: scrollView, tableView: tableView)
+            AppKitTimelineDiagnostics.lastAnchorVisibleY = scrollView.documentVisibleRect.minY
         }
 
         private func deferAnchorRestore(_ anchor: VisibleAnchor, expectedSessionID: String?) {
+            AppKitTimelineDiagnostics.deferredAnchorRequestCount += 1
             anchorRestoreGeneration &+= 1
             let generation = anchorRestoreGeneration
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.anchorRestoreGeneration == generation,
                       self.sessionID == expectedSessionID else { return }
+                AppKitTimelineDiagnostics.deferredAnchorApplyCount += 1
                 self.restore(anchor)
                 self.scheduleMetricsReport()
             }
@@ -659,6 +670,14 @@ enum AppKitTimelineHarness {
         guard abs(anchorOffsetAfter - anchorOffsetBefore) < 12 else {
             fputs(
                 "AppKitTimelineHarness: prepend anchor moved before=\(anchorOffsetBefore) after=\(anchorOffsetAfter)\n",
+                stderr
+            )
+            fputs(
+                "anchor_id=\(AppKitTimelineDiagnostics.lastAnchorID ?? "-") " +
+                "requests=\(AppKitTimelineDiagnostics.deferredAnchorRequestCount) " +
+                "applies=\(AppKitTimelineDiagnostics.deferredAnchorApplyCount) " +
+                "target_y=\(AppKitTimelineDiagnostics.lastAnchorTargetY ?? -1) " +
+                "visible_y=\(AppKitTimelineDiagnostics.lastAnchorVisibleY ?? -1)\n",
                 stderr
             )
             return false
