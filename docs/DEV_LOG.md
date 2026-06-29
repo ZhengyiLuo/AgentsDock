@@ -30,6 +30,20 @@ Release scope:
 - The matching standalone server commit is deployed and pushed with the client
   release so runtime contracts do not drift.
 
+Upload verification:
+- `AgentsDockIOS-55.xcarchive` archived with `CFBundleVersion = 55`; App Store
+  Connect accepted `AgentsDockIOS`, reports `uploadedBuildNumber = 55`, and the
+  archive upload event is `success`.
+- `AgentsDockMac-55.xcarchive` archived with `CFBundleVersion = 55`; App Store
+  Connect accepted `AgentsDockMac`, reports `uploadedBuildNumber = 55`, and the
+  archive upload event is `success`.
+- Both exports used the configured App Store Connect API key and an upload
+  options plist with automatic signing, internal TestFlight distribution, and
+  build-number preservation.
+- `swift run ZenithGuardrails` passed before archiving. Both archives passed
+  strict deep codesign verification; the Mac archive retained the existing
+  non-blocking unused-`last` warning in `TimelineView.swift`.
+
 ## 2026-06-28 - Automatic Codex Provider-Thread Rollover
 
 Context:
