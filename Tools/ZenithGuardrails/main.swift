@@ -1320,6 +1320,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("renderedItemID != item.id || renderedVersion != item.version"), "Recycled cells must key content by row identity and version")
     try assert(!timeline.contains("ObjectIdentifier(row)"), "Streaming must not invalidate every visible row through projection object identity")
     try assert(appKitTimeline.contains("captureAnchor()") && appKitTimeline.contains("restore(anchor)"), "AppKit timeline updates must preserve the visible row anchor")
+    try assert(appKitTimeline.contains("let visibleRows = tableView.rows(in: visibleRect)"), "Anchor capture must tolerate NSTableView's empty top inset instead of point-probing a gap")
     try assert(appKitTimeline.contains("items[row].id == \"history-loader\""), "Older-history prepends must anchor the first real message instead of the loader control")
     try assert(appKitTimeline.contains("anchorMovedByPrepend") && appKitTimeline.contains("deferAnchorRestore(anchor"), "Only true head prepends may request a next-pass anchor correction")
     try assert(appKitTimeline.contains("cancelDeferredAnchorRestore()"), "Deferred prepend corrections must be cancellable on another update or user scroll")

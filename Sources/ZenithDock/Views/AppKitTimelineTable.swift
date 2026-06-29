@@ -402,8 +402,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private func captureAnchor() -> VisibleAnchor? {
             guard let scrollView, let tableView, !items.isEmpty else { return nil }
             let visibleRect = scrollView.documentVisibleRect
-            let probe = NSPoint(x: max(1, visibleRect.midX), y: visibleRect.minY + 1)
-            var row = tableView.row(at: probe)
+            let visibleRows = tableView.rows(in: visibleRect)
+            guard visibleRows.location != NSNotFound else { return nil }
+            var row = visibleRows.location
             // The loader is a control, not timeline content. When an older page
             // is inserted after it, pin the first real row so the newly revealed
             // messages land above the viewport and upward scrolling can continue.
