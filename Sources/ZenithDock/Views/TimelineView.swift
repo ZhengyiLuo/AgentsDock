@@ -457,6 +457,7 @@ struct TimelineView: View {
             items.append(AppKitTimelineItem(
                 id: row.id,
                 version: appKitRowVersion(row, promptFilesByEventID: promptFilesByEventID),
+                eventIDs: row.eventIDs,
                 content: appKitRowContent(
                     timelineCard(
                         row,

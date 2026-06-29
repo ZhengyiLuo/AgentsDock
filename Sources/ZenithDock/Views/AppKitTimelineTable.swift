@@ -22,7 +22,15 @@ struct AppKitTimelineScrollCommand: Equatable {
 struct AppKitTimelineItem: Identifiable {
     let id: String
     let version: Int
+    let eventIDs: [String]
     let content: AnyView
+
+    init(id: String, version: Int, eventIDs: [String] = [], content: AnyView) {
+        self.id = id
+        self.version = version
+        self.eventIDs = eventIDs
+        self.content = content
+    }
 }
 
 @MainActor
@@ -190,8 +198,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             )
             let anchorMovedByPrepend: Bool = {
                 guard let anchor,
-                      let previousIndex = previousItems.firstIndex(where: { $0.id == anchor.itemID }),
-                      let nextIndex = nextItems.firstIndex(where: { $0.id == anchor.itemID }) else {
+                      let previousIndex = index(of: anchor, in: previousItems),
+                      let nextIndex = index(of: anchor, in: nextItems) else {
                     return false
                 }
                 return nextIndex > previousIndex
@@ -397,6 +405,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private struct VisibleAnchor {
             let itemID: String
+            let eventID: String?
             let offset: CGFloat
         }
 
@@ -409,21 +418,22 @@ struct AppKitTimelineTable: NSViewRepresentable {
             // The loader is a control, not timeline content. When an older page
             // is inserted after it, pin the first real row so the newly revealed
             // messages land above the viewport and upward scrolling can continue.
-            if items.indices.contains(row),
-               items[row].id == "history-loader",
-               items.indices.contains(row + 1) {
+            while items.indices.contains(row),
+                  items[row].eventIDs.isEmpty,
+                  items.indices.contains(row + 1) {
                 row += 1
             }
             guard items.indices.contains(row) else { return nil }
             AppKitTimelineDiagnostics.lastAnchorID = items[row].id
             return VisibleAnchor(
                 itemID: items[row].id,
+                eventID: items[row].eventIDs.first,
                 offset: visibleRect.minY - tableView.rect(ofRow: row).minY
             )
         }
 
         private func restore(_ anchor: VisibleAnchor) {
-            guard let row = items.firstIndex(where: { $0.id == anchor.itemID }),
+            guard let row = index(of: anchor, in: items),
                   let scrollView,
                   let tableView else { return }
             tableView.scrollRowToVisible(row)
@@ -433,6 +443,14 @@ struct AppKitTimelineTable: NSViewRepresentable {
             AppKitTimelineDiagnostics.lastAnchorTargetY = targetY
             scroll(toY: targetY, in: scrollView, tableView: tableView)
             AppKitTimelineDiagnostics.lastAnchorVisibleY = scrollView.documentVisibleRect.minY
+        }
+
+        private func index(of anchor: VisibleAnchor, in candidates: [AppKitTimelineItem]) -> Int? {
+            if let exact = candidates.firstIndex(where: { $0.id == anchor.itemID }) {
+                return exact
+            }
+            guard let eventID = anchor.eventID else { return nil }
+            return candidates.firstIndex(where: { $0.eventIDs.contains(eventID) })
         }
 
         private func deferAnchorRestore(_ anchor: VisibleAnchor, expectedSessionID: String?) {
@@ -747,7 +765,12 @@ enum AppKitTimelineHarness {
             .padding(.horizontal, 20)
             .padding(.vertical, 7)
         )
-        return AppKitTimelineItem(id: "row-\(index)", version: version, content: content)
+        return AppKitTimelineItem(
+            id: "row-\(index)",
+            version: version,
+            eventIDs: ["event-\(index)"],
+            content: content
+        )
     }
 
     private static func historyLoaderItem() -> AppKitTimelineItem {
