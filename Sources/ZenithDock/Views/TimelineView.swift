@@ -186,22 +186,29 @@ struct TimelineView: View {
                     let previousObservedSeq = lastObservedEventSeq
                     let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
                     let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
+#if AGENTSDOCK_APPKIT_TIMELINE
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
                         store.setSelectedTimelineAtBottom(true)
                         isTimelineScrollable = false
                         setVisibleRowLimit(defaultVisibleRowLimit)
-#if AGENTSDOCK_APPKIT_TIMELINE
                     } else if isAtBottom {
                         setVisibleRowLimit(min(rowCount, max(visibleRowLimit, defaultVisibleRowLimit)))
+                    }
 #else
+                    if newCount == 0 {
+                        isAtBottom = true
+                        isNearBottom = true
+                        store.setSelectedTimelineAtBottom(true)
+                        isTimelineScrollable = false
+                        setVisibleRowLimit(defaultVisibleRowLimit)
                     } else if isAtBottom {
                         setVisibleRowLimit(cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
-#endif
                     }
+#endif
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
 #if !AGENTSDOCK_APPKIT_TIMELINE
