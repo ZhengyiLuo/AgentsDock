@@ -1494,10 +1494,17 @@ enum AppKitTimelineHarness {
         items.append(contentsOf: (1..<48).map { item(index: $0, version: 0) })
         let fixture = Fixture(items: items)
         defer { fixture.stop() }
-        fixture.update(command: AppKitTimelineScrollCommand(
-            revision: 2,
-            destination: .row("oversized-estimate", .top)
-        ))
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.scrollView.contentView.scroll(to: .zero)
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
         fixture.settle()
         let visibleHeight = fixture.tableView.rect(ofRow: 0).height
         guard visibleHeight >= 419 else {
