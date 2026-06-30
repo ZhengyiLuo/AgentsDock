@@ -5874,3 +5874,22 @@ Follow-up from the cold-cache profile:
   when ready without blocking AppKit row creation or the scroll gesture.
 - Added regression guards preventing synchronous diff extraction from returning
   to collapsed trace construction.
+
+## 2026-06-29 - Explicit Timeline Row Heights
+
+- Captured another user-driven up/down scroll at a 44.7 percent CPU trigger
+  after moving diff extraction off the main thread. The parser disappeared from
+  the hot main-thread stack; the remaining work was AppKit's
+  `_automaticRowHeightsUpdateVisibleRowViews`, SwiftUI hosting constraints, and
+  repeated row preparation inside `NSTableView`.
+- Disabled AppKit automatic row heights. Recycled rows now report their measured
+  height into a bounded cache keyed by session, stable row ID, content version,
+  and half-point width bucket. A version-only fallback keeps resize geometry
+  stable while the visible rows are remeasured at their new width.
+- Live trackpad scrolling disables measurement callbacks and cancels pending
+  height invalidations. Once momentum ends, visible rows measure once and all
+  resulting corrections are coalesced into one non-animated table update with a
+  semantic anchor restore only when changed rows precede the viewport.
+- Added the `explicit-height-cache` native harness scenario and static guards
+  that reject automatic heights, synchronous measurement, or live-scroll height
+  invalidation.

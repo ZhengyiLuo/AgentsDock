@@ -53,6 +53,37 @@ private enum AppKitTimelineDiagnostics {
     static var lastAnchorVisibleY: CGFloat?
 }
 
+private final class AppKitTimelineRowHeightKey: NSObject {
+    let sessionID: String
+    let itemID: String
+    let version: Int
+    let widthBucket: Int
+    private let cachedHash: Int
+
+    init(sessionID: String, itemID: String, version: Int, widthBucket: Int) {
+        self.sessionID = sessionID
+        self.itemID = itemID
+        self.version = version
+        self.widthBucket = widthBucket
+        var hasher = Hasher()
+        hasher.combine(sessionID)
+        hasher.combine(itemID)
+        hasher.combine(version)
+        hasher.combine(widthBucket)
+        cachedHash = hasher.finalize()
+    }
+
+    override var hash: Int { cachedHash }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? AppKitTimelineRowHeightKey else { return false }
+        return sessionID == other.sessionID &&
+            itemID == other.itemID &&
+            version == other.version &&
+            widthBucket == other.widthBucket
+    }
+}
+
 struct AppKitTimelineTable: NSViewRepresentable {
     let sessionID: String?
     let items: [AppKitTimelineItem]
@@ -106,18 +137,28 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var isRefreshingColumnWidth = false
         private var deferredItems: [AppKitTimelineItem]?
         private var deferredColumnWidthRefresh = false
+        private let rowHeightCache = NSCache<AppKitTimelineRowHeightKey, NSNumber>()
+        private let fallbackRowHeightCache = NSCache<AppKitTimelineRowHeightKey, NSNumber>()
+        private var pendingHeightUpdates = Set<PendingHeightUpdate>()
+        private var heightUpdateWorkItem: DispatchWorkItem?
+        private var heightUpdateGeneration = 0
         private let metricsThrottleInterval: TimeInterval = 0.08
+        private let estimatedRowHeight: CGFloat = 120
 
         private(set) var fullReloadCount = 0
         private(set) var structuralUpdateCount = 0
         private(set) var cellConfigurationCount = 0
         private(set) var clipOriginWriteCount = 0
+        private(set) var heightInvalidationCount = 0
+        private(set) var heightMeasurementCount = 0
         private(set) var isLiveScrolling = false
 
         private let cellIdentifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineHostingCell")
 
         init(onMetrics: @escaping (TimelineScrollMetrics) -> Void) {
             self.onMetrics = onMetrics
+            rowHeightCache.countLimit = 40_000
+            fallbackRowHeightCache.countLimit = 40_000
         }
 
         func makeScrollView() -> NSScrollView {
@@ -133,8 +174,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             tableView.backgroundColor = .clear
             tableView.gridStyleMask = []
             tableView.intercellSpacing = .zero
-            tableView.rowHeight = 120
-            tableView.usesAutomaticRowHeights = true
+            tableView.rowHeight = estimatedRowHeight
+            tableView.usesAutomaticRowHeights = false
             tableView.style = .plain
             tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
             tableView.allowsColumnReordering = false
@@ -176,6 +217,19 @@ struct AppKitTimelineTable: NSViewRepresentable {
             items.count
         }
 
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            guard items.indices.contains(row) else { return estimatedRowHeight }
+            let item = items[row]
+            let width = actualColumnWidth(nil, in: tableView)
+            if let exact = rowHeightCache.object(forKey: heightKey(for: item, width: width)) {
+                return max(1, CGFloat(exact.doubleValue))
+            }
+            if let fallback = fallbackRowHeightCache.object(forKey: fallbackHeightKey(for: item)) {
+                return max(1, CGFloat(fallback.doubleValue))
+            }
+            return estimatedRowHeight
+        }
+
         func tableView(
             _ tableView: NSTableView,
             viewFor tableColumn: NSTableColumn?,
@@ -184,9 +238,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard items.indices.contains(row) else { return nil }
             let cell = tableView.makeView(withIdentifier: cellIdentifier, owner: self) as? TimelineHostingCellView
                 ?? TimelineHostingCellView(identifier: cellIdentifier)
-            cell.configure(
+            configure(
+                cell,
                 with: items[row],
-                forWidth: actualColumnWidth(tableColumn, in: tableView)
+                width: actualColumnWidth(tableColumn, in: tableView)
             )
             cellConfigurationCount += 1
             return cell
@@ -209,6 +264,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 isLiveScrolling = false
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
+                cancelScheduledHeightUpdate(clearPending: true)
             }
             let commandChanged = hasReceivedUpdate && scrollCommand.revision != lastScrollCommandRevision
             let forcedBottomChanged = hasReceivedUpdate && forcedBottomRevision != lastForcedBottomRevision
@@ -461,16 +517,194 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 return previousVersion != nextItems[index].version
             })
             refreshVisibleCells(in: tableView, limitingTo: changed)
-            invalidateHeights(of: changed, in: tableView)
             return changed
         }
 
         private func invalidateHeights(of rows: IndexSet, in tableView: NSTableView) {
             guard !rows.isEmpty else { return }
+            heightInvalidationCount += 1
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0
                 tableView.noteHeightOfRows(withIndexesChanged: rows)
             }
+        }
+
+        private struct PendingHeightUpdate: Hashable {
+            let sessionID: String
+            let itemID: String
+            let version: Int
+            let widthBucket: Int
+        }
+
+        private static let fallbackWidthBucket = Int.min
+
+        private func cacheSessionID(_ value: String? = nil) -> String {
+            value ?? sessionID ?? "<no-session>"
+        }
+
+        private func widthBucket(_ width: CGFloat) -> Int {
+            Int((max(1, width) * 2).rounded())
+        }
+
+        private func heightKey(
+            for item: AppKitTimelineItem,
+            width: CGFloat,
+            sessionID value: String? = nil
+        ) -> AppKitTimelineRowHeightKey {
+            AppKitTimelineRowHeightKey(
+                sessionID: cacheSessionID(value),
+                itemID: item.id,
+                version: item.version,
+                widthBucket: widthBucket(width)
+            )
+        }
+
+        private func fallbackHeightKey(
+            for item: AppKitTimelineItem,
+            sessionID value: String? = nil
+        ) -> AppKitTimelineRowHeightKey {
+            AppKitTimelineRowHeightKey(
+                sessionID: cacheSessionID(value),
+                itemID: item.id,
+                version: item.version,
+                widthBucket: Self.fallbackWidthBucket
+            )
+        }
+
+        private func configure(
+            _ cell: TimelineHostingCellView,
+            with item: AppKitTimelineItem,
+            width: CGFloat
+        ) {
+            let configuredSessionID = cacheSessionID()
+            cell.configure(
+                with: item,
+                forWidth: width,
+                heightReportingEnabled: !isLiveScrolling
+            ) { [weak self] itemID, version, measuredWidth, measuredHeight in
+                self?.recordMeasuredHeight(
+                    measuredHeight,
+                    itemID: itemID,
+                    version: version,
+                    width: measuredWidth,
+                    sessionID: configuredSessionID
+                )
+            }
+        }
+
+        private func recordMeasuredHeight(
+            _ measuredHeight: CGFloat,
+            itemID: String,
+            version: Int,
+            width: CGFloat,
+            sessionID measuredSessionID: String
+        ) {
+            guard measuredHeight.isFinite,
+                  measuredHeight > 0,
+                  measuredSessionID == cacheSessionID(),
+                  let row = items.firstIndex(where: { $0.id == itemID }),
+                  items[row].version == version,
+                  let tableView else { return }
+
+            let currentWidth = actualColumnWidth(nil, in: tableView)
+            let measuredWidthBucket = widthBucket(width)
+            guard measuredWidthBucket == widthBucket(currentWidth) else { return }
+
+            let item = items[row]
+            let height = ceil(measuredHeight)
+            let exactKey = heightKey(for: item, width: width, sessionID: measuredSessionID)
+            rowHeightCache.setObject(NSNumber(value: Double(height)), forKey: exactKey)
+            fallbackRowHeightCache.setObject(
+                NSNumber(value: Double(height)),
+                forKey: fallbackHeightKey(for: item, sessionID: measuredSessionID)
+            )
+            heightMeasurementCount += 1
+
+            guard abs(tableView.rect(ofRow: row).height - height) > 0.5 else { return }
+            pendingHeightUpdates.insert(PendingHeightUpdate(
+                sessionID: measuredSessionID,
+                itemID: itemID,
+                version: version,
+                widthBucket: measuredWidthBucket
+            ))
+            guard !isLiveScrolling else { return }
+            scheduleHeightUpdate()
+        }
+
+        private func scheduleHeightUpdate() {
+            guard heightUpdateWorkItem == nil, !pendingHeightUpdates.isEmpty else { return }
+            heightUpdateGeneration &+= 1
+            let generation = heightUpdateGeneration
+            let workItem = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.heightUpdateGeneration == generation else { return }
+                    self.heightUpdateWorkItem = nil
+                    self.flushPendingHeightUpdates()
+                }
+            }
+            heightUpdateWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        private func cancelScheduledHeightUpdate(clearPending: Bool) {
+            heightUpdateGeneration &+= 1
+            heightUpdateWorkItem?.cancel()
+            heightUpdateWorkItem = nil
+            if clearPending {
+                pendingHeightUpdates.removeAll(keepingCapacity: true)
+            }
+        }
+
+        private func flushPendingHeightUpdates() {
+            guard !isLiveScrolling,
+                  let tableView,
+                  let scrollView,
+                  !pendingHeightUpdates.isEmpty else { return }
+
+            let currentSessionID = cacheSessionID()
+            let currentWidthBucket = widthBucket(actualColumnWidth(nil, in: tableView))
+            let updates = pendingHeightUpdates
+            pendingHeightUpdates.removeAll(keepingCapacity: true)
+            let rows = IndexSet(updates.compactMap { update in
+                guard update.sessionID == currentSessionID,
+                      update.widthBucket == currentWidthBucket,
+                      let row = items.firstIndex(where: { $0.id == update.itemID }),
+                      items[row].version == update.version else { return nil }
+                return row
+            })
+            guard !rows.isEmpty else { return }
+
+            let anchor = captureAnchor()
+            let anchorRow = anchor.flatMap { index(of: $0, in: items) }
+            let affectsRowsAboveAnchor = anchorRow.map { anchorRow in
+                rows.contains(where: { $0 < anchorRow })
+            } ?? false
+            let wasAtBottom = tableView.bounds.height - scrollView.documentVisibleRect.maxY <= 4
+
+            invalidateHeights(of: rows, in: tableView)
+            tableView.layoutSubtreeIfNeeded()
+
+            if wasAtBottom {
+                restoreKnownBottom(in: scrollView, tableView: tableView)
+            } else if affectsRowsAboveAnchor, let anchor {
+                restoreKnown(anchor, in: scrollView, tableView: tableView)
+            }
+            scheduleMetricsReport()
+        }
+
+        private func restoreKnown(
+            _ anchor: VisibleAnchor,
+            in scrollView: NSScrollView,
+            tableView: NSTableView
+        ) {
+            guard let row = index(of: anchor, in: items) else { return }
+            let targetY = tableView.rect(ofRow: row).minY + anchor.offset
+            scroll(toY: targetY, in: scrollView, tableView: tableView)
+        }
+
+        private func restoreKnownBottom(in scrollView: NSScrollView, tableView: NSTableView) {
+            let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
+            scroll(toY: targetY, in: scrollView, tableView: tableView)
         }
 
         private func refreshVisibleCells(in tableView: NSTableView, limitingTo limit: IndexSet? = nil) {
@@ -484,9 +718,20 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 if let limit, !limit.contains(row) { continue }
                 guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
                     as? TimelineHostingCellView else { continue }
-                cell.configure(with: items[row], forWidth: width)
-                cell.prepareForAutomaticHeightMeasurement()
+                configure(cell, with: items[row], width: width)
                 cellConfigurationCount += 1
+            }
+        }
+
+        private func setVisibleHeightReporting(_ enabled: Bool, in tableView: NSTableView) {
+            let visibleRange = tableView.rows(in: tableView.visibleRect)
+            guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return }
+            let upperBound = min(items.count, visibleRange.location + visibleRange.length)
+            guard visibleRange.location < upperBound else { return }
+            for row in visibleRange.location..<upperBound {
+                guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                    as? TimelineHostingCellView else { continue }
+                cell.setHeightReportingEnabled(enabled)
             }
         }
 
@@ -706,8 +951,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.isLiveScrolling = true
-                    self?.scheduleMetricsReport()
+                    guard let self else { return }
+                    self.isLiveScrolling = true
+                    self.cancelScheduledHeightUpdate(clearPending: false)
+                    if let tableView = self.tableView {
+                        self.setVisibleHeightReporting(false, in: tableView)
+                    }
+                    self.scheduleMetricsReport()
                 }
             }
             liveScrollEndObserver = center.addObserver(
@@ -719,6 +969,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     guard let self else { return }
                     self.isLiveScrolling = false
                     self.flushDeferredScrollWork()
+                    if let tableView = self.tableView {
+                        self.setVisibleHeightReporting(true, in: tableView)
+                    }
+                    self.scheduleHeightUpdate()
                     self.scheduleMetricsReport()
                 }
             }
@@ -766,6 +1020,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             isLiveScrolling = false
             deferredItems = nil
             deferredColumnWidthRefresh = false
+            cancelScheduledHeightUpdate(clearPending: true)
             cancelScheduledMetricsReport()
         }
 
@@ -826,6 +1081,7 @@ enum AppKitTimelineHarness {
             ("active-momentum-priority", checkActiveMomentumPriority),
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
+            ("explicit-height-cache", checkExplicitHeightCache),
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
         ]
@@ -841,6 +1097,7 @@ enum AppKitTimelineHarness {
         defer { fixture.stop() }
         let initialVisibleCells = instantiatedCellCount(in: fixture.tableView)
         guard fixture.tableView.style == NSTableView.Style.plain,
+              fixture.tableView.usesAutomaticRowHeights == false,
               fixture.scrollView.verticalScrollElasticity == NSScrollView.Elasticity.none,
               initialVisibleCells > 0,
               initialVisibleCells < 80,
@@ -886,6 +1143,48 @@ enum AppKitTimelineHarness {
         guard originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
               fixture.coordinator.clipOriginWriteCount == writes else {
             return fail("stream-below-viewport", "offscreen streaming changed the origin")
+        }
+        return true
+    }
+
+    private static func checkExplicitHeightCache() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let initialMeasurements = fixture.coordinator.heightMeasurementCount
+        let initialInvalidations = fixture.coordinator.heightInvalidationCount
+        let initialBuilds = fixture.metrics.contentBuildCount
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.tableView.scrollRowToVisible(160)
+        fixture.settle()
+        guard fixture.coordinator.isLiveScrolling,
+              fixture.coordinator.heightInvalidationCount == initialInvalidations else {
+            return fail(
+                "explicit-height-cache",
+                "live scroll performed height invalidation " +
+                    "before=\(initialInvalidations) after=\(fixture.coordinator.heightInvalidationCount)"
+            )
+        }
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.settle()
+        let addedBuilds = fixture.metrics.contentBuildCount - initialBuilds
+        guard !fixture.coordinator.isLiveScrolling,
+              fixture.coordinator.heightMeasurementCount > initialMeasurements,
+              fixture.coordinator.heightInvalidationCount > initialInvalidations,
+              addedBuilds < 80 else {
+            return fail(
+                "explicit-height-cache",
+                "settled measurements=\(fixture.coordinator.heightMeasurementCount - initialMeasurements) " +
+                    "invalidations=\(fixture.coordinator.heightInvalidationCount - initialInvalidations) " +
+                    "builds=\(addedBuilds)"
+            )
         }
         return true
     }
@@ -1527,14 +1826,22 @@ private final class TimelineHostingCellView: NSTableCellView {
     private var renderedItemID: String?
     private(set) var renderedVersion: Int?
     private(set) var renderedWidth: CGFloat = 0
+    private var heightReportingEnabled = true
+    private var heightMeasurementWorkItem: DispatchWorkItem?
+    private var onHeightMeasured: ((String, Int, CGFloat, CGFloat) -> Void)?
+    private var lastReportedItemID: String?
+    private var lastReportedVersion: Int?
+    private var lastReportedWidth: CGFloat?
+    private var lastReportedHeight: CGFloat?
 
     var exactMeasuredContentHeight: CGFloat {
         let intrinsicHeight = hostingView.intrinsicContentSize.height
         return intrinsicHeight > 0 ? intrinsicHeight : hostingView.fittingSize.height
     }
 
-    func prepareForAutomaticHeightMeasurement() {
-        hostingView.layoutSubtreeIfNeeded()
+    override func layout() {
+        super.layout()
+        requestHeightMeasurement()
     }
 
     init(identifier: NSUserInterfaceItemIdentifier) {
@@ -1549,8 +1856,7 @@ private final class TimelineHostingCellView: NSTableCellView {
         NSLayoutConstraint.activate([
             hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
             hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hostingView.topAnchor.constraint(equalTo: topAnchor),
-            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            hostingView.topAnchor.constraint(equalTo: topAnchor)
         ])
     }
 
@@ -1559,7 +1865,14 @@ private final class TimelineHostingCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(with item: AppKitTimelineItem, forWidth width: CGFloat) {
+    func configure(
+        with item: AppKitTimelineItem,
+        forWidth width: CGFloat,
+        heightReportingEnabled: Bool,
+        onHeightMeasured: @escaping (String, Int, CGFloat, CGFloat) -> Void
+    ) {
+        self.onHeightMeasured = onHeightMeasured
+        self.heightReportingEnabled = heightReportingEnabled
         let contentChanged = renderedItemID != item.id || renderedVersion != item.version
         if contentChanged {
             renderedItemID = item.id
@@ -1568,8 +1881,16 @@ private final class TimelineHostingCellView: NSTableCellView {
         }
 
         let width = max(1, width)
-        guard contentChanged || renderedWidth != width, let renderedContent else { return }
+        let widthChanged = abs(renderedWidth - width) > 0.5
+        guard contentChanged || widthChanged, let renderedContent else {
+            requestHeightMeasurement()
+            return
+        }
         renderedWidth = width
+        lastReportedItemID = nil
+        lastReportedVersion = nil
+        lastReportedWidth = nil
+        lastReportedHeight = nil
         hostingView.rootView = AnyView(
             renderedContent
                 // Each recycled row is an independent SwiftUI hosting root, so
@@ -1579,6 +1900,56 @@ private final class TimelineHostingCellView: NSTableCellView {
                 .frame(width: width, alignment: .topLeading)
         )
         hostingView.invalidateIntrinsicContentSize()
+        requestHeightMeasurement()
+    }
+
+    func setHeightReportingEnabled(_ enabled: Bool) {
+        heightReportingEnabled = enabled
+        if enabled {
+            requestHeightMeasurement()
+        } else {
+            heightMeasurementWorkItem?.cancel()
+            heightMeasurementWorkItem = nil
+        }
+    }
+
+    private func requestHeightMeasurement() {
+        guard heightReportingEnabled,
+              heightMeasurementWorkItem == nil,
+              renderedItemID != nil,
+              renderedVersion != nil,
+              renderedWidth > 0 else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.measureAndReportHeight()
+            }
+        }
+        heightMeasurementWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
+    }
+
+    private func measureAndReportHeight() {
+        heightMeasurementWorkItem = nil
+        guard heightReportingEnabled,
+              let itemID = renderedItemID,
+              let version = renderedVersion,
+              renderedWidth > 0 else { return }
+        hostingView.layoutSubtreeIfNeeded()
+        let measuredHeight = ceil(max(1, exactMeasuredContentHeight))
+        guard measuredHeight.isFinite else { return }
+        if lastReportedItemID == itemID,
+           lastReportedVersion == version,
+           let lastReportedWidth,
+           let lastReportedHeight,
+           abs(lastReportedWidth - renderedWidth) <= 0.5,
+           abs(lastReportedHeight - measuredHeight) <= 0.5 {
+            return
+        }
+        lastReportedItemID = itemID
+        lastReportedVersion = version
+        lastReportedWidth = renderedWidth
+        lastReportedHeight = measuredHeight
+        onHeightMeasured?(itemID, version, renderedWidth, measuredHeight)
     }
 }
 #endif

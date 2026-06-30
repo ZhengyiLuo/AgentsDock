@@ -1407,21 +1407,18 @@ func checkMacTimelineScrollPerformanceGuards() throws {
         ["rowHeightCache", "rowHeights", "heightCache", "cachedRowHeight", "cachedHeight"].contains {
             appKitTimeline.contains($0)
         }
-    let hasWidthConstrainedMeasurement = reusableCellSource.map { cellSource in
-        (cellSource.contains("fittingSize") || cellSource.contains("systemLayoutSizeFitting")) &&
-            ["forWidth", "for width:", "frame.size.width", "NSSize(width:", "widthAnchor.constraint"].contains {
-                cellSource.contains($0)
-            }
-    } ?? false
     try assert(
-        hasExplicitRowHeightDelegationAndCache || hasWidthConstrainedMeasurement,
-        "AppKit timeline must explicitly delegate/cache row heights or measure reusable content at the table width"
+        hasExplicitRowHeightDelegationAndCache,
+        "AppKit timeline must explicitly delegate and cache row heights"
     )
     try assert(
-        !appKitTimeline.contains("usesAutomaticRowHeights = true") ||
-            hasExplicitRowHeightDelegationAndCache || hasWidthConstrainedMeasurement,
-        "AppKit timeline must not rely solely on usesAutomaticRowHeights for wrapped content"
+        appKitTimeline.contains("usesAutomaticRowHeights = false") &&
+            !appKitTimeline.contains("usesAutomaticRowHeights = true"),
+        "AppKit timeline must keep AppKit automatic row-height work out of live scrolling"
     )
+    try assert(appKitTimeline.contains("cancelScheduledHeightUpdate(clearPending: false)") && appKitTimeline.contains("setVisibleHeightReporting(false"), "Live scrolling must suspend row measurement and height invalidation")
+    try assert(appKitTimeline.contains("PendingHeightUpdate") && appKitTimeline.contains("widthBucket"), "Row height corrections must be keyed by session, version, and width")
+    try assert(!appKitTimeline.contains("prepareForAutomaticHeightMeasurement"), "Recycled cells must not synchronously force automatic height measurement")
     let clipsReusableContent = reusableCellSource.map { cellSource in
         cellSource.contains("clipsToBounds = true") ||
             cellSource.contains("masksToBounds = true") ||
