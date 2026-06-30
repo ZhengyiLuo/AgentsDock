@@ -35,6 +35,9 @@ painful to rediscover later.
     document does not install `TimelineScrollObserver` or replace `NSClipView`.
 - The AppKit source remains dormant temporarily so unrelated notification,
   cache, and sidebar fixes can be preserved while the lazy test is validated.
+- Test credential isolation now keys only off the test bundle identifier. It no
+  longer depends on the retired AppKit compilation condition; otherwise the
+  LazyVStack build blocks in `SecItemCopyMatching` before creating its window.
 
 ## 2026-06-29 - Isolated NSTableView Timeline Experiment
 

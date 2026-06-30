@@ -991,14 +991,14 @@ public enum ZenithTokenStore {
     private static let account = "agent-access-token"
     private static let fallbackKey = "agentAccessToken"
 
-#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+#if os(macOS)
     private static var usesIsolatedTestCredential: Bool {
         Bundle.main.bundleIdentifier == "com.zhengyiluo.AgentsDockTest"
     }
 #endif
 
     public static func load() -> String {
-#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+#if os(macOS)
         if usesIsolatedTestCredential {
             return UserDefaults.standard.string(forKey: fallbackKey) ?? ""
         }
@@ -1019,7 +1019,7 @@ public enum ZenithTokenStore {
 
     public static func save(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+#if os(macOS)
         if usesIsolatedTestCredential {
             UserDefaults.standard.set(trimmed, forKey: fallbackKey)
             return
@@ -1050,7 +1050,7 @@ public enum ZenithTokenStore {
     }
 
     public static func clear() {
-#if AGENTSDOCK_APPKIT_TIMELINE && os(macOS)
+#if os(macOS)
         if usesIsolatedTestCredential {
             UserDefaults.standard.removeObject(forKey: fallbackKey)
             return
