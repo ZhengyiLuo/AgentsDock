@@ -9,6 +9,7 @@ final class UnreadNotificationController: NSObject {
     private let center = UNUserNotificationCenter.current()
     private var openSessionHandler: ((String) -> Void)?
     private var pendingSessionID: String?
+    private var unreadCount = 0
 
     private override init() {
         super.init()
@@ -17,6 +18,7 @@ final class UnreadNotificationController: NSObject {
 
     func configure(openSession: @escaping (String) -> Void) {
         openSessionHandler = openSession
+        applyBadge()
         if let pendingSessionID {
             self.pendingSessionID = nil
             openSession(pendingSessionID)
@@ -42,7 +44,8 @@ final class UnreadNotificationController: NSObject {
     }
 
     func updateBadge(unreadCount: Int) {
-        NSApp.dockTile.badgeLabel = unreadCount > 0 ? String(unreadCount) : nil
+        self.unreadCount = unreadCount
+        applyBadge()
     }
 
     func notify(
@@ -93,6 +96,11 @@ final class UnreadNotificationController: NSObject {
         } else {
             pendingSessionID = sessionID
         }
+    }
+
+    private func applyBadge() {
+        guard let application = NSApp else { return }
+        application.dockTile.badgeLabel = unreadCount > 0 ? String(unreadCount) : nil
     }
 
     private static func notificationIdentifier(sessionID: String) -> String {

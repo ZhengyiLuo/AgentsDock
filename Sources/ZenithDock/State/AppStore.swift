@@ -129,6 +129,7 @@ final class AppStore: ObservableObject {
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
     private var unreadNotificationTracker = ZUnreadNotificationTracker()
+    private var unreadNotificationsConfigured = false
     private var pendingReadSyncBySessionID: [String: Int] = [:]
     private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
     private var draftPromptsBySessionID: [String: String] = [:]
@@ -226,13 +227,6 @@ final class AppStore: ObservableObject {
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
         pinnedItemsBySessionID = loadPinnedItems()
-        UnreadNotificationController.shared.configure { [weak self] sessionID in
-            Task { @MainActor [weak self] in
-                await self?.select(sessionID: sessionID)
-            }
-        }
-        UnreadNotificationController.shared.requestAuthorizationIfNeeded()
-        UnreadNotificationController.shared.updateBadge(unreadCount: 0)
     }
 
     var api: APIClient {
@@ -1456,6 +1450,7 @@ final class AppStore: ObservableObject {
     }
 
     func startLiveTracking() async {
+        configureUnreadNotificationsIfNeeded()
         guard !liveTrackingStarted else {
             AppLogger.info("start live tracking skipped existing loop")
             return
@@ -1482,6 +1477,18 @@ final class AppStore: ObservableObject {
                 connectEvents(sessionID: sid, after: lastSeq)
             }
         }
+    }
+
+    private func configureUnreadNotificationsIfNeeded() {
+        guard !unreadNotificationsConfigured else { return }
+        unreadNotificationsConfigured = true
+        UnreadNotificationController.shared.configure { [weak self] sessionID in
+            Task { @MainActor [weak self] in
+                await self?.select(sessionID: sessionID)
+            }
+        }
+        UnreadNotificationController.shared.requestAuthorizationIfNeeded()
+        UnreadNotificationController.shared.updateBadge(unreadCount: unreadAgentSessionIDs.count)
     }
 
     func refresh(showErrors: Bool = true) async {
