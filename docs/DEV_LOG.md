@@ -5911,3 +5911,9 @@ Follow-up from direct user input testing:
 - Added the `discrete-scroll-isolation` scenario for wheel movement without
   live-scroll notifications. It rejects both mid-gesture height invalidation and
   post-gesture bottom snapping.
+## 2026-06-29 - Native timeline owns vertical wheel routing
+
+- Live sampling showed the test timeline idle while trackpad gestures produced no clip-view origin changes. The gesture was being consumed below `NSScrollView`, commonly by hosted selectable or horizontally scrollable SwiftUI content.
+- `AgentsDock-test` now uses a dedicated AppKit scroll view that owns vertical wheel events whenever the pointer is inside the timeline and delegates them to AppKit's native scrolling implementation.
+- Horizontal gestures remain with code blocks and other nested horizontal content. Text selection and link hit testing are unchanged.
+- Bottom following remains explicit only; this does not restore any delayed or automatic bottom snap.

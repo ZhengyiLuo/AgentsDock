@@ -84,6 +84,57 @@ private final class AppKitTimelineRowHeightKey: NSObject {
     }
 }
 
+@MainActor
+private final class AppKitTimelineOwningScrollView: NSScrollView {
+    var onVerticalWheel: (() -> Void)?
+    private var wheelMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopRoutingWheelEvents()
+        guard window != nil else { return }
+        wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.routeWheelEventIfNeeded(event) ?? event
+            }
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        onVerticalWheel?()
+        super.scrollWheel(with: event)
+    }
+
+    func stopRoutingWheelEvents() {
+        guard let wheelMonitor else { return }
+        NSEvent.removeMonitor(wheelMonitor)
+        self.wheelMonitor = nil
+    }
+
+    private func routeWheelEventIfNeeded(_ event: NSEvent) -> NSEvent? {
+        guard let window,
+              event.windowNumber == window.windowNumber,
+              !isHidden,
+              alphaValue > 0 else { return event }
+
+        let verticalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
+        let horizontalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : event.deltaX
+        guard abs(verticalDelta) > 0.01,
+              abs(verticalDelta) >= abs(horizontalDelta) else { return event }
+
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point),
+              let contentView = window.contentView else { return event }
+        let contentPoint = contentView.convert(event.locationInWindow, from: nil)
+        guard let hitView = contentView.hitTest(contentPoint),
+              hitView === self || hitView.isDescendant(of: self) else { return event }
+
+        onVerticalWheel?()
+        super.scrollWheel(with: event)
+        return nil
+    }
+}
+
 struct AppKitTimelineTable: NSViewRepresentable {
     let sessionID: String?
     let items: [AppKitTimelineItem]
@@ -160,6 +211,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private(set) var clipOriginWriteCount = 0
         private(set) var heightInvalidationCount = 0
         private(set) var heightMeasurementCount = 0
+        private(set) var wheelInputCount = 0
         private(set) var isLiveScrolling = false
 
         private var isScrollInteractionActive: Bool {
@@ -202,8 +254,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
             tableView.selectionHighlightStyle = .none
             tableView.focusRingType = .none
 
-            let scrollView = NSScrollView(frame: .zero)
+            let scrollView = AppKitTimelineOwningScrollView(frame: .zero)
             scrollView.identifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineScrollView")
+            scrollView.onVerticalWheel = { [weak self] in
+                self?.noteWheelInput()
+            }
             scrollView.documentView = tableView
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = false
@@ -1034,6 +1089,14 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scheduleDiscreteScrollSettle()
         }
 
+        private func noteWheelInput() {
+            guard geometryMutationDepth == 0 else { return }
+            wheelInputCount += 1
+            isDiscreteScrolling = true
+            beginScrollIsolationIfNeeded()
+            scheduleDiscreteScrollSettle()
+        }
+
         private func scheduleDiscreteScrollSettle() {
             discreteScrollGeneration &+= 1
             let generation = discreteScrollGeneration
@@ -1150,6 +1213,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         func stopObserving() {
             let center = NotificationCenter.default
+            (scrollView as? AppKitTimelineOwningScrollView)?.stopRoutingWheelEvents()
             if let boundsObserver { center.removeObserver(boundsObserver) }
             if let tableFrameObserver { center.removeObserver(tableFrameObserver) }
             if let tableColumnResizeObserver { center.removeObserver(tableColumnResizeObserver) }
@@ -1231,6 +1295,7 @@ enum AppKitTimelineHarness {
             ("explicit-height-cache", checkExplicitHeightCache),
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
+            ("native-wheel-ownership", checkNativeWheelOwnership),
         ]
         for (name, check) in scenarios {
             guard check() else { return false }
@@ -1363,6 +1428,38 @@ enum AppKitTimelineHarness {
         )
         guard let hit = fixture.tableView.hitTest(pointInTable), hit !== fixture.tableView else {
             return fail("selectable-message-content", "hosted content did not receive pointer hit testing")
+        }
+        return true
+    }
+
+    private static func checkNativeWheelOwnership() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 4_000))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let originBefore = fixture.scrollView.documentVisibleRect.minY
+        let inputCountBefore = fixture.coordinator.wheelInputCount
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 1,
+            wheel1: 120,
+            wheel2: 0,
+            wheel3: 0
+        ).flatMap(NSEvent.init(cgEvent:)) else {
+            return fail("native-wheel-ownership", "could not construct a wheel event")
+        }
+        fixture.scrollView.scrollWheel(with: event)
+        fixture.settle()
+        guard fixture.coordinator.wheelInputCount == inputCountBefore + 1,
+              abs(fixture.scrollView.documentVisibleRect.minY - originBefore) > 0.5 else {
+            return fail(
+                "native-wheel-ownership",
+                "wheel was not owned by the timeline origin=\(originBefore)" +
+                    "->\(fixture.scrollView.documentVisibleRect.minY) " +
+                    "inputs=\(fixture.coordinator.wheelInputCount - inputCountBefore)"
+            )
         }
         return true
     }
