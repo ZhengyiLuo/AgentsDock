@@ -289,8 +289,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 !forcedBottomChanged
                 ? captureAnchor()
                 : nil
+            let rowIdentityOrderUnchanged = previousItems.count == nextItems.count &&
+                zip(previousItems, nextItems).allSatisfy { $0.id == $1.id }
             let shouldRestoreAnchor = anchor.map {
-                geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
+                !rowIdentityOrderUnchanged &&
+                    geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
             } ?? false
 
             sessionID = nextSessionID

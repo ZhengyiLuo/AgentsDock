@@ -1418,6 +1418,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     )
     try assert(appKitTimeline.contains("cancelScheduledHeightUpdate(clearPending: false)") && appKitTimeline.contains("setVisibleHeightReporting(false"), "Live scrolling must suspend row measurement and height invalidation")
     try assert(appKitTimeline.contains("PendingHeightUpdate") && appKitTimeline.contains("widthBucket"), "Row height corrections must be keyed by session, version, and width")
+    try assert(appKitTimeline.contains("rowIdentityOrderUnchanged") && appKitTimeline.contains("!rowIdentityOrderUnchanged"), "Content-only row updates must wait for measured geometry before restoring the anchor")
     try assert(!appKitTimeline.contains("prepareForAutomaticHeightMeasurement"), "Recycled cells must not synchronously force automatic height measurement")
     let clipsReusableContent = reusableCellSource.map { cellSource in
         cellSource.contains("clipsToBounds = true") ||
