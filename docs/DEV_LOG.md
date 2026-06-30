@@ -19,6 +19,17 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Keep Archived Chats Out Of Timeline Caches
+
+- Archived session metadata remains in `sessions`, so sidebar rows, search,
+  ordering, unarchive, and deliberate opening continue to work.
+- Mac now evicts archived timeline/media snapshots from both its 32-chat memory
+  cache and `Application Support/ZenithDock/ChatCache`. It will not restore or
+  rewrite an archived chat cache; opening one fetches its current tail on demand.
+- iOS/iPadOS applies the same rule to its eight-chat memory cache.
+- This reduces warm-cache churn and retained long-chat media. It does not change
+  `/api/sessions`, which was already a metadata-only session-list request.
+
 ## 2026-06-30 - Fix Stable Cmd-P Chat Search Results
 
 - Reproduced against the build-55 stable app: the query field changed and the

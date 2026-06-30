@@ -32,7 +32,10 @@ final class AppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
     @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = [] {
-        didSet { invalidateSidebarDerived() }
+        didSet {
+            invalidateSidebarDerived()
+            evictArchivedChatCaches()
+        }
     }
     @Published var selectedSessionID: String?
     private(set) var events: [ZEvent] = []
@@ -126,6 +129,7 @@ final class AppStore: ObservableObject {
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
+    private var purgedArchivedCacheKeys: Set<String> = []
     private struct VerifiedTimelineTail {
         let latestSeq: Int
         let eventIDs: [String]
@@ -1801,7 +1805,8 @@ final class AppStore: ObservableObject {
             loadedSessionID = nil
             latestSeenSeq = 0
             let cacheURL = chatCacheURL(sessionID)
-            if let cached = await Self.loadCachedChat(from: cacheURL) {
+            if !isSessionArchived(sessionID),
+               let cached = await Self.loadCachedChat(from: cacheURL) {
                 guard selectedSessionID == sessionID, selectionGeneration == generation else {
                     AppLogger.info("drop stale cache response session=\(sessionID)")
                     return
@@ -3845,6 +3850,10 @@ final class AppStore: ObservableObject {
     }
 
     private func memoryCachedChat(_ sessionID: String) -> CachedChat? {
+        guard !isSessionArchived(sessionID) else {
+            evictCachedChat(sessionID, removeDisk: true)
+            return nil
+        }
         let key = chatCacheKey(sessionID)
         guard let cached = memoryChatCache[key] else { return nil }
         touchMemoryChatCache(key)
@@ -3852,6 +3861,11 @@ final class AppStore: ObservableObject {
     }
 
     private func rememberChatCache(_ cached: CachedChat) {
+        guard cached.session.archived != true,
+              !isSessionArchived(cached.session.id) else {
+            evictCachedChat(cached.session.id, removeDisk: true)
+            return
+        }
         let key = chatCacheKey(cached.session.id)
         memoryChatCache[key] = cached
         touchMemoryChatCache(key)
@@ -3867,7 +3881,9 @@ final class AppStore: ObservableObject {
     }
 
     private func rememberSelectedChatInMemory() {
-        guard let session = selectedSession, !events.isEmpty else { return }
+        guard let session = selectedSession,
+              session.archived != true,
+              !events.isEmpty else { return }
         let cacheWindow = selectedChatCacheWindow()
         guard !cacheWindow.events.isEmpty else { return }
         let cached = CachedChat(
@@ -3899,6 +3915,11 @@ final class AppStore: ObservableObject {
     }
 
     private func saveSelectedChatCache() {
+        guard selectedSession?.archived != true else {
+            pendingCacheWrite?.cancel()
+            pendingCacheWrite = nil
+            return
+        }
         let sessionID = selectedSessionID
         let generation = selectionGeneration
         pendingCacheWrite?.cancel()
@@ -3915,7 +3936,7 @@ final class AppStore: ObservableObject {
     }
 
     private func writeSelectedChatCacheSnapshot() {
-        guard let session = selectedSession else { return }
+        guard let session = selectedSession, session.archived != true else { return }
         let directory = chatCacheDirectory
         let url = chatCacheURL(session.id)
         let cacheWindow = selectedChatCacheWindow()
@@ -3949,12 +3970,57 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func deleteCachedChat(_ sessionID: String) {
-        pendingCacheWrite?.cancel()
+    private func isSessionArchived(_ sessionID: String) -> Bool {
+        sessions.first(where: { $0.id == sessionID })?.archived == true
+    }
+
+    private func evictArchivedChatCaches() {
+        let archivedSessionIDs = sessions.compactMap { session in
+            session.archived == true ? session.id : nil
+        }
+        let archivedKeys = Set(archivedSessionIDs.map(chatCacheKey))
+
+        for key in archivedKeys {
+            memoryChatCache.removeValue(forKey: key)
+        }
+        memoryChatCacheOrder.removeAll { archivedKeys.contains($0) }
+
+        if let selectedSessionID, archivedKeys.contains(chatCacheKey(selectedSessionID)) {
+            pendingCacheWrite?.cancel()
+            pendingCacheWrite = nil
+        }
+
+        let newlyArchivedSessionIDs = archivedSessionIDs.filter {
+            !purgedArchivedCacheKeys.contains(chatCacheKey($0))
+        }
+        purgedArchivedCacheKeys = archivedKeys
+        guard !newlyArchivedSessionIDs.isEmpty else { return }
+
+        let urls = newlyArchivedSessionIDs.map(chatCacheURL)
+        Task.detached(priority: .utility) {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    private func evictCachedChat(_ sessionID: String, removeDisk: Bool) {
+        if selectedSessionID == sessionID {
+            pendingCacheWrite?.cancel()
+            pendingCacheWrite = nil
+        }
         let key = chatCacheKey(sessionID)
         memoryChatCache.removeValue(forKey: key)
         memoryChatCacheOrder.removeAll { $0 == key }
-        try? FileManager.default.removeItem(at: chatCacheURL(sessionID))
+        guard removeDisk else { return }
+        let url = chatCacheURL(sessionID)
+        Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func deleteCachedChat(_ sessionID: String) {
+        evictCachedChat(sessionID, removeDisk: true)
     }
 
     private static func loadServerIdentity(for serverURL: String) -> String? {

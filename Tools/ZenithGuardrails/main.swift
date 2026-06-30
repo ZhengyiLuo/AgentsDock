@@ -340,6 +340,10 @@ func checkArchiveSessionBehavior() throws {
 
     try assert(macStore.contains("sessions.filter { $0.archived != true }"), "Mac active session lists must filter archived chats")
     try assert(mobileStore.contains("sessions.filter { $0.archived != true }"), "iOS active session lists must filter archived chats")
+    try assert(macStore.contains("evictArchivedChatCaches()") && mobileStore.contains("evictArchivedChatCaches()"), "Archived session metadata refreshes must evict warm chat caches on Mac and iOS")
+    try assert(macStore.contains("guard !isSessionArchived(sessionID) else") && mobileStore.contains("guard !isSessionArchived(sessionID) else"), "Archived chats must never restore from memory cache")
+    try assert(macStore.contains("if !isSessionArchived(sessionID),\n               let cached = await Self.loadCachedChat"), "Mac archived chats must never restore a persisted timeline cache")
+    try assert(macStore.contains("guard let session = selectedSession, session.archived != true else { return }") && mobileStore.contains("guard let session = selectedSession, session.archived != true else { return }"), "Archived chats must never write new cache snapshots")
     try assert(!macSidebar.contains("pieces.append(\"archived\")"), "Mac sidebar archived rows must not repeat archived in every subtitle")
     try assert(!mobileSidebar.contains("pieces.append(\"archived\")"), "iOS sidebar archived rows must not repeat archived in every subtitle")
     try assert(macStore.contains("orderedSessions("), "Mac session rows must use stable explicit ordering")

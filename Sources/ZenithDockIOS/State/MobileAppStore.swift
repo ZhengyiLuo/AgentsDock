@@ -20,7 +20,10 @@ final class MobileAppStore: ObservableObject {
     @Published var serverPort = UserDefaults.standard.string(forKey: "serverPort") ?? defaultAgentServerPort
     @Published var accessToken = ZenithTokenStore.load()
     @Published var sessions: [ZSession] = [] {
-        didSet { invalidateSidebarDerived() }
+        didSet {
+            invalidateSidebarDerived()
+            evictArchivedChatCaches()
+        }
     }
     @Published var selectedSessionID: String?
     private(set) var events: [ZEvent] = []
@@ -2268,7 +2271,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func rememberSelectedChat() {
-        guard let session = selectedSession else { return }
+        guard let session = selectedSession, session.archived != true else { return }
         let overflow = max(events.count - maxMemoryCachedEvents, 0)
         let cachedEvents = Array(events.suffix(maxMemoryCachedEvents))
         let cached = CachedChat(
@@ -2281,6 +2284,10 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func memoryCachedChat(_ sessionID: String) -> CachedChat? {
+        guard !isSessionArchived(sessionID) else {
+            forgetMemoryChatCache(sessionID)
+            return nil
+        }
         let key = chatCacheKey(sessionID)
         guard let cached = memoryChatCache[key] else { return nil }
         touchMemoryChatCache(key)
@@ -2288,6 +2295,11 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func rememberChatCache(_ cached: CachedChat) {
+        guard cached.session.archived != true,
+              !isSessionArchived(cached.session.id) else {
+            forgetMemoryChatCache(cached.session.id)
+            return
+        }
         let key = chatCacheKey(cached.session.id)
         memoryChatCache[key] = cached
         touchMemoryChatCache(key)
@@ -2306,6 +2318,20 @@ final class MobileAppStore: ObservableObject {
         let key = chatCacheKey(sessionID)
         memoryChatCache.removeValue(forKey: key)
         memoryChatCacheOrder.removeAll { $0 == key }
+    }
+
+    private func isSessionArchived(_ sessionID: String) -> Bool {
+        sessions.first(where: { $0.id == sessionID })?.archived == true
+    }
+
+    private func evictArchivedChatCaches() {
+        let archivedKeys = Set(sessions.compactMap { session in
+            session.archived == true ? chatCacheKey(session.id) : nil
+        })
+        for key in archivedKeys {
+            memoryChatCache.removeValue(forKey: key)
+        }
+        memoryChatCacheOrder.removeAll { archivedKeys.contains($0) }
     }
 
     private var serverCacheNamespace: String {
