@@ -5936,9 +5936,10 @@ Follow-up from direct user input testing:
   delayed native scroll reached the outer clip view. The same physical trackpad
   delta was then applied twice, producing unnaturally fast movement and apparent
   direction jumps.
-- Vertical wheel events under the timeline now have exactly one owner. The local
-  monitor sends the original event through the native `NSScrollView` once and
-  removes it from normal dispatch; no synthetic or delayed delta remains.
+- Vertical wheel events under the timeline now have exactly one owner. Precise
+  trackpad and momentum deltas move the clip view one-to-one; non-precise mouse
+  wheels use a fixed 24-point step. The event is then removed from normal
+  dispatch, so AppKit cannot apply a second acceleration pass.
 - A cache was previously considered fresh when its maximum sequence matched the
   session list. That did not prove the middle of the cached window was complete.
   Each process now records an authoritative tail verification, including the
