@@ -39,6 +39,7 @@ required_scenarios=(
   active-momentum-priority
   coalesced-live-updates
   chat-switch-isolation
+  selectable-message-content
 )
 
 for scenario in "${required_scenarios[@]}"; do

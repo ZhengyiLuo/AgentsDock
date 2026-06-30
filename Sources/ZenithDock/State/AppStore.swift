@@ -2753,7 +2753,6 @@ final class AppStore: ObservableObject {
         }
         guard event.session_id == sessionID, event.session_id == selectedSessionID else { return }
         ingest(event)
-        requestScrollToBottom(immediate: true)
     }
 
     private func clearSubmittedPromptIfCurrent(submittedPrompt: String?, trimmed: String) {

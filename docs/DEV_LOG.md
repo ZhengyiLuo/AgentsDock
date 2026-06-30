@@ -5810,3 +5810,21 @@ Third follow-up:
   with the same viewport after the gesture. The origin-write assertion permits
   AppKit's own pixel-perfect anchor preservation to make our guarded restore a
   no-op, but never permits more than one explicit origin correction.
+
+## 2026-06-29 - Native Timeline Selection And Scroll Ownership
+
+- Fixed normal drag-to-select and Command-C inside recycled timeline rows. The
+  native table no longer rejects row selection before the hosted SwiftUI text
+  receives the pointer gesture, keeps row highlighting invisible, and installs
+  text selection at every independent recycled hosting root.
+- Removed the second forced-bottom publication emitted when the server
+  acknowledges a user send. Sending still moves to the bottom immediately, but
+  a later acknowledgement cannot yank the viewport after the user has started
+  reading elsewhere.
+- Running-agent state no longer qualifies passive updates for bottom following.
+  Older-history paging now requires a deliberate 160-point departure from the
+  top before another page can load, preventing anchor restoration from chaining
+  several expensive page loads.
+- Added the `selectable-message-content` native regression plus source
+  guardrails for selection ownership, passive bottom behavior, and one-page
+  history rearming.

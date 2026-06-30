@@ -1428,6 +1428,9 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(clipsReusableContent, "Recycled AppKit timeline cells must clip hosted content to their row bounds")
     try assert(appKitTimeline.contains("makeView(withIdentifier: cellIdentifier"), "AppKit timeline must recycle visible hosting cells")
     try assert(appKitTimeline.contains("renderedItemID != item.id || renderedVersion != item.version"), "Recycled cells must key content by row identity and version")
+    try assert(appKitTimeline.contains("tableView.selectionHighlightStyle = .none"), "Native timeline table selection must remain visually neutral")
+    try assert(!appKitTimeline.contains("shouldSelectRow row: Int"), "Native timeline must not reject row selection and swallow hosted text gestures")
+    try assert(reusableCellSource?.contains(".textSelection(.enabled)") == true, "Every recycled hosting root must install selectable text")
     try assert(!timeline.contains("ObjectIdentifier(row)"), "Streaming must not invalidate every visible row through projection object identity")
     try assert(appKitTimeline.contains("captureAnchor()") && appKitTimeline.contains("restore(anchor)"), "AppKit timeline updates must preserve the visible row anchor")
     try assert(appKitTimeline.contains("let visibleRows = tableView.rows(in: visibleRect)"), "Anchor capture must tolerate NSTableView's empty top inset instead of point-probing a gap")
@@ -1459,6 +1462,14 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!macStore.contains("requestOpenThreadToLatest()"), "Chat selection must leave initial positioning to the timeline instead of publishing duplicate bottom commands")
     try assert(!macStore.contains("if responseLatestSeq > cachedLastSeq {\n                requestScrollToBottom(immediate: true)"), "A passive cached-tail refresh must not force the viewport to bottom")
     try assert(!macStore.contains("scrollToBottomRevision += 1\n            if immediate"), "One immediate scroll request must not publish both normal and forced revisions")
+    try assert(!timeline.contains("store.selectedTimelineAtBottom || store.isRunning"), "A running agent must not force passive timeline updates to the bottom")
+    try assert(timeline.contains("if distanceFromTop > 160"), "Native history paging must require a deliberate departure from the top before rearming")
+    guard let acceptedTurnStart = macStore.range(of: "private func applyAcceptedTurnEvent"),
+          let acceptedTurnEnd = macStore.range(of: "private func clearSubmittedPromptIfCurrent", range: acceptedTurnStart.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Accepted-turn reconciliation block not found")
+    }
+    let acceptedTurnBlock = macStore[acceptedTurnStart.lowerBound..<acceptedTurnEnd.lowerBound]
+    try assert(!acceptedTurnBlock.contains("requestScrollToBottom"), "Turn acknowledgement must not issue a second delayed bottom jump after send")
 
     guard let appKitPagingStart = timeline.range(of: "private func loadOneOlderAppKitPage()"),
           let appKitPagingEnd = timeline.range(of: "#endif", range: appKitPagingStart.upperBound..<timeline.endIndex) else {

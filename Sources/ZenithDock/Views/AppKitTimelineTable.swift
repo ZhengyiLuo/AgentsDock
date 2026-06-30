@@ -141,6 +141,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
             tableView.allowsColumnResizing = false
             tableView.allowsMultipleSelection = false
             tableView.allowsEmptySelection = true
+            // Keep the table visually selection-neutral, but do not reject row
+            // selection in the delegate. Rejecting it causes NSTableView to win
+            // the mouse gesture before SwiftUI's selectable text can establish
+            // a range inside the hosted row.
+            tableView.selectionHighlightStyle = .none
             tableView.focusRingType = .none
 
             let scrollView = NSScrollView(frame: .zero)
@@ -185,10 +190,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             )
             cellConfigurationCount += 1
             return cell
-        }
-
-        func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-            false
         }
 
         func update(
@@ -826,6 +827,7 @@ enum AppKitTimelineHarness {
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("variable-height-containment", checkVariableHeightContainment),
+            ("selectable-message-content", checkSelectableMessageContent),
         ]
         for (name, check) in scenarios {
             guard check() else { return false }
@@ -884,6 +886,37 @@ enum AppKitTimelineHarness {
         guard originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
               fixture.coordinator.clipOriginWriteCount == writes else {
             return fail("stream-below-viewport", "offscreen streaming changed the origin")
+        }
+        return true
+    }
+
+    private static func checkSelectableMessageContent() -> Bool {
+        let fixture = Fixture(items: [item(index: 0, version: 0)])
+        defer { fixture.stop() }
+        guard fixture.tableView.selectionHighlightStyle == .none else {
+            return fail("selectable-message-content", "table selection must stay visually neutral")
+        }
+        let delegateAllowsSelection = fixture.tableView.delegate?.tableView?(
+            fixture.tableView,
+            shouldSelectRow: 0
+        ) ?? true
+        guard delegateAllowsSelection else {
+            return fail("selectable-message-content", "table delegate swallowed the text-selection gesture")
+        }
+        guard let cell = fixture.tableView.view(
+            atColumn: 0,
+            row: 0,
+            makeIfNecessary: true
+        ) as? TimelineHostingCellView else {
+            return fail("selectable-message-content", "selectable hosted row was not materialized")
+        }
+        cell.layoutSubtreeIfNeeded()
+        let pointInTable = cell.convert(
+            NSPoint(x: min(120, max(1, cell.bounds.midX)), y: max(1, cell.bounds.midY)),
+            to: fixture.tableView
+        )
+        guard let hit = fixture.tableView.hitTest(pointInTable), hit !== fixture.tableView else {
+            return fail("selectable-message-content", "hosted content did not receive pointer hit testing")
         }
         return true
     }
@@ -1538,7 +1571,12 @@ private final class TimelineHostingCellView: NSTableCellView {
         guard contentChanged || renderedWidth != width, let renderedContent else { return }
         renderedWidth = width
         hostingView.rootView = AnyView(
-            renderedContent.frame(width: width, alignment: .topLeading)
+            renderedContent
+                // Each recycled row is an independent SwiftUI hosting root, so
+                // text selection must be installed here. Child-level modifiers
+                // alone are not sufficient when NSTableView owns the gesture.
+                .textSelection(.enabled)
+                .frame(width: width, alignment: .topLeading)
         )
         hostingView.invalidateIntrinsicContentSize()
     }

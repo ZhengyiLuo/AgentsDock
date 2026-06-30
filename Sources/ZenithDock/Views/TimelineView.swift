@@ -847,7 +847,7 @@ struct TimelineView: View {
     }
 
     private var shouldFollowBottomRequest: Bool {
-        isAtBottom || isNearBottom || store.selectedTimelineAtBottom || store.isRunning
+        isAtBottom || isNearBottom || store.selectedTimelineAtBottom
     }
 
     private var hasWarmSelectedTimeline: Bool {
@@ -931,7 +931,10 @@ struct TimelineView: View {
         // Native history advances only at the actual scroll boundary. Once a
         // page starts, the table's snapshot anchor keeps the visible row fixed;
         // leaving the top after that prepend is what arms the next user visit.
-        if distanceFromTop > 1 {
+        // Restoring the viewport after a prepend naturally moves us a few
+        // points away from zero. Require a deliberate move away from the top
+        // before rearming, otherwise one visit can chain-load several pages.
+        if distanceFromTop > 160 {
             olderHistoryLoadArmed = true
             suppressScrollHistoryLoadUntilTopLeaves = false
             return
