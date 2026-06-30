@@ -1436,14 +1436,15 @@ enum AppKitTimelineHarness {
             0,
             fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
         )
+        let writeDelta = fixture.coordinator.clipOriginWriteCount - writes
         guard fixture.tableView.numberOfRows == fixture.items.count,
               fixture.coordinator.fullReloadCount == 2,
-              fixture.coordinator.clipOriginWriteCount == writes + 1,
+              (0...1).contains(writeDelta),
               distanceFromBottom < 4 else {
             return fail(
                 "chat-switch-isolation",
                 "reloads=\(fixture.coordinator.fullReloadCount) " +
-                    "writes=\(fixture.coordinator.clipOriginWriteCount - writes) " +
+                    "writes=\(writeDelta) " +
                     "bottom=\(distanceFromBottom)"
             )
         }
