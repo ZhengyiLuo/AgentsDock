@@ -127,9 +127,10 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if !applyVerticalWheel(event) {
-            super.scrollWheel(with: event)
+        if isPredominantlyVertical(event) {
+            onVerticalWheel?()
         }
+        super.scrollWheel(with: event)
     }
 
     func stopRoutingWheelEvents() {
@@ -157,32 +158,23 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
               hitView === self || hitView.isDescendant(of: self) else { return event }
 
         // SwiftUI hosting views can consume wheel events before the enclosing
-        // NSScrollView sees them. Consume the original hardware delta here so
-        // neither SwiftUI nor AppKit can reinterpret or accelerate it again.
-        _ = applyVerticalWheel(event)
+        // NSScrollView sees them. Hand the original event to the native scroll
+        // implementation exactly once so AppKit retains its normal trackpad
+        // phases, acceleration, and momentum.
+        routeVerticalWheel(event)
         return nil
     }
 
-    @discardableResult
-    fileprivate func applyVerticalWheel(_ event: NSEvent) -> Bool {
+    private func isPredominantlyVertical(_ event: NSEvent) -> Bool {
         let verticalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
         let horizontalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : event.deltaX
-        guard abs(verticalDelta) > 0.01,
-              abs(verticalDelta) >= abs(horizontalDelta),
-              let documentView else {
-            return false
-        }
+        return abs(verticalDelta) > 0.01 && abs(verticalDelta) >= abs(horizontalDelta)
+    }
 
+    fileprivate func routeVerticalWheel(_ event: NSEvent) {
         routedWheelCount += 1
         onVerticalWheel?()
-        let pointDelta = event.hasPreciseScrollingDeltas ? verticalDelta : verticalDelta * 24
-        let currentOrigin = contentView.bounds.origin
-        let maxY = max(0, documentView.bounds.maxY - contentView.bounds.height)
-        let targetY = min(max(0, currentOrigin.y - pointDelta), maxY)
-        guard abs(targetY - currentOrigin.y) > 0.01 else { return true }
-        contentView.scroll(to: NSPoint(x: currentOrigin.x, y: targetY))
-        reflectScrolledClipView(contentView)
-        return true
+        super.scrollWheel(with: event)
     }
 }
 
@@ -1618,17 +1610,18 @@ enum AppKitTimelineHarness {
         ).flatMap(NSEvent.init(cgEvent:)) else {
             return fail("hosted-wheel-single-dispatch", "could not construct a wheel event")
         }
-        let rawDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 24
-        owningScrollView.applyVerticalWheel(event)
+        let inputCountBefore = fixture.coordinator.wheelInputCount
+        owningScrollView.routeVerticalWheel(event)
         fixture.settle()
         let originAfter = fixture.scrollView.documentVisibleRect.minY
         guard owningScrollView.routedWheelCount == routedCountBefore + 1,
-              abs((originAfter - originBefore) + rawDelta) <= 1 else {
+              fixture.coordinator.wheelInputCount == inputCountBefore + 1,
+              abs(originAfter - originBefore) > 0.5 else {
             return fail(
                 "hosted-wheel-single-dispatch",
-                "hosted wheel did not preserve the raw delta origin=\(originBefore)->\(originAfter) " +
-                    "delta=\(rawDelta) " +
-                    "count=\(owningScrollView.routedWheelCount - routedCountBefore)"
+                "hosted wheel was not natively dispatched once origin=\(originBefore)->\(originAfter) " +
+                    "routes=\(owningScrollView.routedWheelCount - routedCountBefore) " +
+                    "inputs=\(fixture.coordinator.wheelInputCount - inputCountBefore)"
             )
         }
         return true

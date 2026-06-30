@@ -5974,3 +5974,14 @@ Follow-up from live history-boundary testing:
   measures only the materialized visible cells before its single origin write.
   This avoids a delayed bottom chase without measuring or constructing the full
   transcript.
+
+## 2026-06-30 - Restore native macOS trackpad physics
+
+- The AppKit timeline still intercepted every wheel event and directly assigned
+  the clip-view origin. That made the harness deterministic, but removed native
+  acceleration and momentum and left scrolling feeling synthetic.
+- Hosted SwiftUI rows still route through one owning `NSScrollView`, but the
+  owner now forwards the original event once to AppKit's native scroll
+  implementation. Row-height and live-update isolation remain unchanged.
+- Updated the timeline harness and guardrails to reject manual wheel-origin
+  assignment while preserving exact single dispatch.
