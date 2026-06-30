@@ -1034,17 +1034,25 @@ enum AppKitTimelineHarness {
             object: fixture.scrollView
         )
         fixture.settle()
+        let settledOrigin = fixture.scrollView.contentView.bounds.origin
+        let writeDelta = fixture.coordinator.clipOriginWriteCount - writes
+        let retainedVersion = (fixture.tableView.view(
+            atColumn: 0,
+            row: 160,
+            makeIfNecessary: false
+        ) as? TimelineHostingCellView)?.renderedVersion
         guard fixture.tableView.numberOfRows == fixture.items.count,
               fixture.coordinator.structuralUpdateCount == structuralUpdates + 1,
-              fixture.coordinator.clipOriginWriteCount == writes + 1,
-              originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
-              let retainedCell = fixture.tableView.view(
-                  atColumn: 0,
-                  row: 160,
-                  makeIfNecessary: false
-              ) as? TimelineHostingCellView,
-              retainedCell.renderedVersion == 1 else {
-            return fail("coalesced-live-updates", "deferred snapshot did not settle once")
+              (0...1).contains(writeDelta),
+              originsMatch(origin, settledOrigin),
+              retainedVersion == 1 else {
+            return fail(
+                "coalesced-live-updates",
+                "rows=\(fixture.tableView.numberOfRows)/\(fixture.items.count) " +
+                    "structural=\(fixture.coordinator.structuralUpdateCount - structuralUpdates) " +
+                    "writes=\(writeDelta) origin=\(origin.y)->\(settledOrigin.y) " +
+                    "version=\(retainedVersion.map(String.init) ?? "nil")"
+            )
         }
         return true
     }

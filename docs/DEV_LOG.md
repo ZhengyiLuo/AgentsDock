@@ -5807,4 +5807,6 @@ Third follow-up:
 - Added the `coalesced-live-updates` native regression. It changes a visible
   variable-height row and appends a row during live scrolling, verifies zero
   table/origin mutations during the gesture, then verifies one settled update
-  with the same viewport after the gesture.
+  with the same viewport after the gesture. The origin-write assertion permits
+  AppKit's own pixel-perfect anchor preservation to make our guarded restore a
+  no-op, but never permits more than one explicit origin correction.
