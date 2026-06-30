@@ -5893,3 +5893,21 @@ Follow-up from the cold-cache profile:
 - Added the `explicit-height-cache` native harness scenario and static guards
   that reject automatic heights, synchronous measurement, or live-scroll height
   invalidation.
+
+Follow-up from direct user input testing:
+
+- AppKit does not emit live-scroll notifications for every mouse wheel and
+  scrollbar path. The initial explicit-height implementation therefore applied
+  corrections during those gestures and inferred permission to snap from the
+  viewport merely being near the bottom. Live logs showed large origin rewrites
+  while the user was trying to move away from the tail.
+- Every user-driven clip-view bounds change now enters the same isolation used
+  for trackpad momentum and settles 180 ms after the final movement. Internal
+  table mutations are scoped so their bounds notifications cannot masquerade as
+  input.
+- Bottom pinning is now an explicit, short-lived navigation intent created only
+  by send/go-to-bottom/chat-open commands. Being geometrically near the bottom
+  is never enough to pull the viewport back.
+- Added the `discrete-scroll-isolation` scenario for wheel movement without
+  live-scroll notifications. It rejects both mid-gesture height invalidation and
+  post-gesture bottom snapping.

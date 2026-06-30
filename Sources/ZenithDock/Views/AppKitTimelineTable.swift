@@ -142,6 +142,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var pendingHeightUpdates = Set<PendingHeightUpdate>()
         private var heightUpdateWorkItem: DispatchWorkItem?
         private var heightUpdateGeneration = 0
+        private var discreteScrollSettleWorkItem: DispatchWorkItem?
+        private var discreteScrollGeneration = 0
+        private var isDiscreteScrolling = false
+        private var scrollIsolationInstalled = false
+        private var geometryMutationDepth = 0
+        private var bottomPinActive = false
+        private var bottomPinReleaseWorkItem: DispatchWorkItem?
         private var liveScrollStartOriginY: CGFloat?
         private var liveScrollStartUptime: TimeInterval?
         private var liveScrollUnknownHeightCount = 0
@@ -156,6 +163,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private(set) var heightInvalidationCount = 0
         private(set) var heightMeasurementCount = 0
         private(set) var isLiveScrolling = false
+
+        private var isScrollInteractionActive: Bool {
+            isLiveScrolling || isDiscreteScrolling
+        }
 
         private let cellIdentifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineHostingCell")
 
@@ -231,7 +242,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             if let fallback = fallbackRowHeightCache.object(forKey: fallbackHeightKey(for: item)) {
                 return max(1, CGFloat(fallback.doubleValue))
             }
-            if isLiveScrolling {
+            if isScrollInteractionActive {
                 liveScrollUnknownHeightCount += 1
             }
             return estimatedRowHeight
@@ -255,7 +266,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 item: items[row],
                 width: actualColumnWidth(tableColumn, in: tableView)
             )
-            if isLiveScrolling {
+            if isScrollInteractionActive {
                 liveScrollConfiguredCellCount += 1
             }
             cellConfigurationCount += 1
@@ -277,6 +288,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // Momentum belongs to the old document. A chat switch is an
                 // explicit navigation and must position the new document once.
                 isLiveScrolling = false
+                isDiscreteScrolling = false
+                scrollIsolationInstalled = false
+                cancelDiscreteScrollSettle()
+                releaseBottomPin()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
                 cancelScheduledHeightUpdate(clearPending: true)
@@ -290,7 +305,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             // trackpad gesture fights the clip view's momentum and produces the
             // characteristic up/down tug. Keep only the newest immutable snapshot
             // and apply it once momentum ends. Explicit navigation still wins.
-            if isLiveScrolling,
+            if isScrollInteractionActive,
                !sessionChanged,
                !commandChangesPosition,
                !forcedBottomChanged {
@@ -299,7 +314,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
             deferredItems = nil
             let anchor = !sessionChanged &&
-                !isLiveScrolling &&
+                !isScrollInteractionActive &&
                 !commandChangesPosition &&
                 !forcedBottomChanged
                 ? captureAnchor()
@@ -312,11 +327,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
             } ?? false
 
             sessionID = nextSessionID
-            let itemsChanged = applyItems(
-                nextItems,
-                previousItems: previousItems,
-                sessionChanged: sessionChanged
-            )
+            let itemsChanged = performGeometryMutation {
+                applyItems(
+                    nextItems,
+                    previousItems: previousItems,
+                    sessionChanged: sessionChanged
+                )
+            }
 
             if commandChanged {
                 lastScrollCommandRevision = scrollCommand.revision
@@ -338,11 +355,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
             if commandChangesPosition {
                 apply(scrollCommand.destination)
             } else if forcedBottomChanged {
-                if !isLiveScrolling {
+                if !isScrollInteractionActive {
                     scrollToBottom()
                 }
             } else if sessionChanged || (previousItems.isEmpty && !nextItems.isEmpty) {
-                if !isLiveScrolling {
+                if !isScrollInteractionActive {
                     scrollToBottom()
                 }
             } else if shouldRestoreAnchor, let anchor {
@@ -598,7 +615,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             cell.configure(
                 with: item,
                 forWidth: width,
-                heightReportingEnabled: !isLiveScrolling
+                heightReportingEnabled: !isScrollInteractionActive
             ) { [weak self] itemID, version, measuredWidth, measuredHeight in
                 self?.recordMeasuredHeight(
                     measuredHeight,
@@ -645,7 +662,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 version: version,
                 widthBucket: measuredWidthBucket
             ))
-            guard !isLiveScrolling else { return }
+            guard !isScrollInteractionActive else { return }
             scheduleHeightUpdate()
         }
 
@@ -665,12 +682,14 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 version: item.version,
                 widthBucket: widthBucket(width)
             ))
-            guard !isLiveScrolling else { return }
+            guard !isScrollInteractionActive else { return }
             scheduleHeightUpdate()
         }
 
         private func scheduleHeightUpdate() {
-            guard heightUpdateWorkItem == nil, !pendingHeightUpdates.isEmpty else { return }
+            guard !isScrollInteractionActive,
+                  heightUpdateWorkItem == nil,
+                  !pendingHeightUpdates.isEmpty else { return }
             heightUpdateGeneration &+= 1
             let generation = heightUpdateGeneration
             let workItem = DispatchWorkItem { [weak self] in
@@ -694,7 +713,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         }
 
         private func flushPendingHeightUpdates() {
-            guard !isLiveScrolling,
+            guard !isScrollInteractionActive,
                   let tableView,
                   let scrollView,
                   !pendingHeightUpdates.isEmpty else { return }
@@ -719,22 +738,24 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let affectsRowsAboveAnchor = anchorRow.map { anchorRow in
                 rows.contains(where: { $0 < anchorRow })
             } ?? false
-            let wasAtBottom = tableView.bounds.height - scrollView.documentVisibleRect.maxY <= 4
+            let shouldRestoreBottom = bottomPinActive
             let originBefore = scrollView.documentVisibleRect.minY
             let startedAt = ProcessInfo.processInfo.systemUptime
 
-            invalidateHeights(of: rows, in: tableView)
-            tableView.layoutSubtreeIfNeeded()
+            performGeometryMutation {
+                invalidateHeights(of: rows, in: tableView)
+                tableView.layoutSubtreeIfNeeded()
 
-            if wasAtBottom {
-                restoreKnownBottom(in: scrollView, tableView: tableView)
-            } else if affectsRowsAboveAnchor, let anchor {
-                restoreKnown(anchor, in: scrollView, tableView: tableView)
+                if shouldRestoreBottom {
+                    restoreKnownBottom(in: scrollView, tableView: tableView)
+                } else if affectsRowsAboveAnchor, let anchor {
+                    restoreKnown(anchor, in: scrollView, tableView: tableView)
+                }
             }
             let originAfter = scrollView.documentVisibleRect.minY
             AppLogger.info(
                 "PERF native height flush rows=\(rows.count) " +
-                    "above_anchor=\(affectsRowsAboveAnchor) at_bottom=\(wasAtBottom) " +
+                    "above_anchor=\(affectsRowsAboveAnchor) bottom_pin=\(shouldRestoreBottom) " +
                     "origin=\(Self.format(originBefore))->\(Self.format(originAfter)) " +
                     "ms=\(Self.format((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))"
             )
@@ -802,7 +823,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func refreshForColumnWidthChange(in tableView: NSTableView) {
             guard !isRefreshingColumnWidth else { return }
-            if isLiveScrolling {
+            if isScrollInteractionActive {
                 deferredColumnWidthRefresh = true
                 return
             }
@@ -812,18 +833,20 @@ struct AppKitTimelineTable: NSViewRepresentable {
             lastColumnWidth = width
             guard !items.isEmpty else { return }
 
-            let anchor = isLiveScrolling ? nil : captureAnchor()
+            let anchor = isScrollInteractionActive ? nil : captureAnchor()
             isRefreshingColumnWidth = true
             defer { isRefreshingColumnWidth = false }
 
-            refreshVisibleCells(in: tableView)
-            invalidateHeights(
-                of: IndexSet(integersIn: 0..<items.count),
-                in: tableView
-            )
-            tableView.layoutSubtreeIfNeeded()
-            if let anchor {
-                restore(anchor)
+            performGeometryMutation {
+                refreshVisibleCells(in: tableView)
+                invalidateHeights(
+                    of: IndexSet(integersIn: 0..<items.count),
+                    in: tableView
+                )
+                tableView.layoutSubtreeIfNeeded()
+                if let anchor {
+                    restore(anchor)
+                }
             }
         }
 
@@ -909,6 +932,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private func scrollToBottom() {
             guard let scrollView, let tableView, !items.isEmpty else { return }
             AppKitTimelineDiagnostics.bottomRequestCount += 1
+            activateBottomPin()
             prepareForPositioning(row: items.count - 1, in: tableView)
             let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
             scroll(toY: targetY, in: scrollView, tableView: tableView)
@@ -919,6 +943,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard let row = items.firstIndex(where: { $0.id == itemID }),
                   let scrollView,
                   let tableView else { return }
+            releaseBottomPin()
             prepareForPositioning(row: row, in: tableView)
             let rowRect = tableView.rect(ofRow: row)
             let viewportHeight = scrollView.contentView.bounds.height
@@ -937,33 +962,131 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func prepareForPositioning(row: Int, in tableView: NSTableView) {
             guard items.indices.contains(row) else { return }
-            tableView.scrollRowToVisible(row)
-            tableView.layoutSubtreeIfNeeded()
-            _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
-            refreshVisibleCells(in: tableView)
+            performGeometryMutation {
+                tableView.scrollRowToVisible(row)
+                tableView.layoutSubtreeIfNeeded()
+                _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+                refreshVisibleCells(in: tableView)
 
-            var rows = IndexSet(integer: row)
-            let visibleRows = tableView.rows(in: tableView.visibleRect)
-            if visibleRows.location != NSNotFound, visibleRows.length > 0 {
-                let upperBound = min(items.count, visibleRows.location + visibleRows.length)
-                if visibleRows.location < upperBound {
-                    rows.insert(integersIn: visibleRows.location..<upperBound)
+                var rows = IndexSet(integer: row)
+                let visibleRows = tableView.rows(in: tableView.visibleRect)
+                if visibleRows.location != NSNotFound, visibleRows.length > 0 {
+                    let upperBound = min(items.count, visibleRows.location + visibleRows.length)
+                    if visibleRows.location < upperBound {
+                        rows.insert(integersIn: visibleRows.location..<upperBound)
+                    }
                 }
+                invalidateHeights(of: rows, in: tableView)
+                tableView.layoutSubtreeIfNeeded()
             }
-            invalidateHeights(of: rows, in: tableView)
-            tableView.layoutSubtreeIfNeeded()
         }
 
         private func scroll(toY proposedY: CGFloat, in scrollView: NSScrollView, tableView: NSTableView) {
             let maxY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
             let point = NSPoint(x: scrollView.contentView.bounds.minX, y: min(max(0, proposedY), maxY))
             guard scrollView.contentView.bounds.origin != point else { return }
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0
-                scrollView.contentView.scroll(to: point)
+            performGeometryMutation {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0
+                    scrollView.contentView.scroll(to: point)
+                }
+                scrollView.reflectScrolledClipView(scrollView.contentView)
             }
             clipOriginWriteCount += 1
-            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
+        private func performGeometryMutation<T>(_ body: () -> T) -> T {
+            geometryMutationDepth += 1
+            defer { geometryMutationDepth -= 1 }
+            return body()
+        }
+
+        private func activateBottomPin() {
+            bottomPinActive = true
+            bottomPinReleaseWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.bottomPinActive = false
+                    self?.bottomPinReleaseWorkItem = nil
+                }
+            }
+            bottomPinReleaseWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.25, execute: workItem)
+        }
+
+        private func releaseBottomPin() {
+            bottomPinActive = false
+            bottomPinReleaseWorkItem?.cancel()
+            bottomPinReleaseWorkItem = nil
+        }
+
+        private func beginScrollIsolationIfNeeded() {
+            guard !scrollIsolationInstalled else { return }
+            scrollIsolationInstalled = true
+            liveScrollStartOriginY = scrollView?.documentVisibleRect.minY
+            liveScrollStartUptime = ProcessInfo.processInfo.systemUptime
+            liveScrollUnknownHeightCount = 0
+            liveScrollConfiguredCellCount = 0
+            cancelScheduledHeightUpdate(clearPending: false)
+            if let tableView {
+                setVisibleHeightReporting(false, in: tableView)
+            }
+        }
+
+        private func finishScrollIsolationIfIdle() {
+            guard scrollIsolationInstalled, !isScrollInteractionActive else { return }
+            scrollIsolationInstalled = false
+            let originBeforeSettle = scrollView?.documentVisibleRect.minY ?? 0
+            let duration = liveScrollStartUptime.map {
+                ProcessInfo.processInfo.systemUptime - $0
+            } ?? 0
+            flushDeferredScrollWork()
+            if let tableView {
+                setVisibleHeightReporting(true, in: tableView)
+            }
+            scheduleHeightUpdate()
+            AppLogger.info(
+                "PERF native scroll settle " +
+                    "origin=\(Self.format(liveScrollStartOriginY ?? originBeforeSettle))" +
+                    "->\(Self.format(originBeforeSettle)) " +
+                    "duration_ms=\(Self.format(duration * 1_000)) " +
+                    "unknown_heights=\(liveScrollUnknownHeightCount) " +
+                    "configured_cells=\(liveScrollConfiguredCellCount) " +
+                    "pending_heights=\(pendingHeightUpdates.count)"
+            )
+            liveScrollStartOriginY = nil
+            liveScrollStartUptime = nil
+            scheduleMetricsReport()
+        }
+
+        private func noteUserBoundsChange() {
+            guard geometryMutationDepth == 0 else { return }
+            releaseBottomPin()
+            isDiscreteScrolling = true
+            beginScrollIsolationIfNeeded()
+            scheduleDiscreteScrollSettle()
+        }
+
+        private func scheduleDiscreteScrollSettle() {
+            discreteScrollGeneration &+= 1
+            let generation = discreteScrollGeneration
+            discreteScrollSettleWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.discreteScrollGeneration == generation else { return }
+                    self.discreteScrollSettleWorkItem = nil
+                    self.isDiscreteScrolling = false
+                    self.finishScrollIsolationIfIdle()
+                }
+            }
+            discreteScrollSettleWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: workItem)
+        }
+
+        private func cancelDiscreteScrollSettle() {
+            discreteScrollGeneration &+= 1
+            discreteScrollSettleWorkItem?.cancel()
+            discreteScrollSettleWorkItem = nil
         }
 
         private func observe(scrollView: NSScrollView, tableView: NSTableView) {
@@ -975,6 +1098,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.noteUserBoundsChange()
                     self?.scheduleMetricsReport()
                 }
             }
@@ -1011,14 +1135,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.isLiveScrolling = true
-                    self.liveScrollStartOriginY = self.scrollView?.documentVisibleRect.minY
-                    self.liveScrollStartUptime = ProcessInfo.processInfo.systemUptime
-                    self.liveScrollUnknownHeightCount = 0
-                    self.liveScrollConfiguredCellCount = 0
-                    self.cancelScheduledHeightUpdate(clearPending: false)
-                    if let tableView = self.tableView {
-                        self.setVisibleHeightReporting(false, in: tableView)
-                    }
+                    self.releaseBottomPin()
+                    self.beginScrollIsolationIfNeeded()
                     self.scheduleMetricsReport()
                 }
             }
@@ -1029,28 +1147,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    let originBeforeSettle = self.scrollView?.documentVisibleRect.minY ?? 0
-                    let duration = self.liveScrollStartUptime.map {
-                        ProcessInfo.processInfo.systemUptime - $0
-                    } ?? 0
                     self.isLiveScrolling = false
-                    self.flushDeferredScrollWork()
-                    if let tableView = self.tableView {
-                        self.setVisibleHeightReporting(true, in: tableView)
-                    }
-                    self.scheduleHeightUpdate()
-                    AppLogger.info(
-                        "PERF native scroll end " +
-                            "origin=\(Self.format(self.liveScrollStartOriginY ?? originBeforeSettle))" +
-                            "->\(Self.format(originBeforeSettle)) " +
-                            "duration_ms=\(Self.format(duration * 1_000)) " +
-                            "unknown_heights=\(self.liveScrollUnknownHeightCount) " +
-                            "configured_cells=\(self.liveScrollConfiguredCellCount) " +
-                            "pending_heights=\(self.pendingHeightUpdates.count)"
-                    )
-                    self.liveScrollStartOriginY = nil
-                    self.liveScrollStartUptime = nil
-                    self.scheduleMetricsReport()
+                    self.finishScrollIsolationIfIdle()
                 }
             }
         }
@@ -1068,11 +1166,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
                         nextItems: deferredItems
                     )
                 } ?? false
-                _ = applyItems(
-                    deferredItems,
-                    previousItems: previousItems,
-                    sessionChanged: false
-                )
+                _ = performGeometryMutation {
+                    applyItems(
+                        deferredItems,
+                        previousItems: previousItems,
+                        sessionChanged: false
+                    )
+                }
                 if shouldRestoreAnchor, let anchor {
                     restore(anchor)
                 }
@@ -1095,8 +1195,12 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollStartObserver = nil
             liveScrollEndObserver = nil
             isLiveScrolling = false
+            isDiscreteScrolling = false
+            scrollIsolationInstalled = false
             deferredItems = nil
             deferredColumnWidthRefresh = false
+            cancelDiscreteScrollSettle()
+            releaseBottomPin()
             cancelScheduledHeightUpdate(clearPending: true)
             cancelScheduledMetricsReport()
         }
@@ -1156,6 +1260,7 @@ enum AppKitTimelineHarness {
             ("height-change-above-viewport", checkHeightChangeAboveViewport),
             ("prepend-single-page", checkPrependSinglePage),
             ("active-momentum-priority", checkActiveMomentumPriority),
+            ("discrete-scroll-isolation", checkDiscreteScrollIsolation),
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("explicit-height-cache", checkExplicitHeightCache),
@@ -1461,6 +1566,43 @@ enum AppKitTimelineHarness {
                     "structural=\(fixture.coordinator.structuralUpdateCount - structuralUpdates) " +
                     "writes=\(writeDelta) origin=\(origin.y)->\(settledOrigin.y) " +
                     "version=\(retainedVersion.map(String.init) ?? "nil")"
+            )
+        }
+        return true
+    }
+
+    private static func checkDiscreteScrollIsolation() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let viewportHeight = fixture.scrollView.contentView.bounds.height
+        let bottomY = max(0, fixture.tableView.bounds.maxY - viewportHeight)
+        let targetY = max(0, bottomY - 420)
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+
+        let visibleRows = fixture.tableView.rows(in: fixture.tableView.visibleRect)
+        guard visibleRows.location != NSNotFound,
+              fixture.items.indices.contains(visibleRows.location) else {
+            return fail("discrete-scroll-isolation", "no visible row after wheel movement")
+        }
+        let changedRow = visibleRows.location
+        let invalidations = fixture.coordinator.heightInvalidationCount
+        fixture.items[changedRow] = item(index: changedRow, version: 1, paragraphCount: 18)
+        fixture.update()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+        guard fixture.coordinator.heightInvalidationCount == invalidations else {
+            return fail("discrete-scroll-isolation", "height changed during wheel activity")
+        }
+
+        fixture.settle()
+        let settledDistanceFromBottom = max(
+            0,
+            fixture.tableView.bounds.maxY - fixture.scrollView.documentVisibleRect.maxY
+        )
+        guard settledDistanceFromBottom > 100 else {
+            return fail(
+                "discrete-scroll-isolation",
+                "height correction snapped back to bottom distance=\(settledDistanceFromBottom)"
             )
         }
         return true
