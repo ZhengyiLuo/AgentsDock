@@ -142,6 +142,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var pendingHeightUpdates = Set<PendingHeightUpdate>()
         private var heightUpdateWorkItem: DispatchWorkItem?
         private var heightUpdateGeneration = 0
+        private var liveScrollStartOriginY: CGFloat?
+        private var liveScrollStartUptime: TimeInterval?
+        private var liveScrollUnknownHeightCount = 0
+        private var liveScrollConfiguredCellCount = 0
         private let metricsThrottleInterval: TimeInterval = 0.08
         private let estimatedRowHeight: CGFloat = 120
 
@@ -227,6 +231,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             if let fallback = fallbackRowHeightCache.object(forKey: fallbackHeightKey(for: item)) {
                 return max(1, CGFloat(fallback.doubleValue))
             }
+            if isLiveScrolling {
+                liveScrollUnknownHeightCount += 1
+            }
             return estimatedRowHeight
         }
 
@@ -248,6 +255,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 item: items[row],
                 width: actualColumnWidth(tableColumn, in: tableView)
             )
+            if isLiveScrolling {
+                liveScrollConfiguredCellCount += 1
+            }
             cellConfigurationCount += 1
             return cell
         }
@@ -710,6 +720,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 rows.contains(where: { $0 < anchorRow })
             } ?? false
             let wasAtBottom = tableView.bounds.height - scrollView.documentVisibleRect.maxY <= 4
+            let originBefore = scrollView.documentVisibleRect.minY
+            let startedAt = ProcessInfo.processInfo.systemUptime
 
             invalidateHeights(of: rows, in: tableView)
             tableView.layoutSubtreeIfNeeded()
@@ -719,7 +731,22 @@ struct AppKitTimelineTable: NSViewRepresentable {
             } else if affectsRowsAboveAnchor, let anchor {
                 restoreKnown(anchor, in: scrollView, tableView: tableView)
             }
+            let originAfter = scrollView.documentVisibleRect.minY
+            AppLogger.info(
+                "PERF native height flush rows=\(rows.count) " +
+                    "above_anchor=\(affectsRowsAboveAnchor) at_bottom=\(wasAtBottom) " +
+                    "origin=\(Self.format(originBefore))->\(Self.format(originAfter)) " +
+                    "ms=\(Self.format((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))"
+            )
             scheduleMetricsReport()
+        }
+
+        private static func format(_ value: CGFloat) -> String {
+            String(format: "%.1f", Double(value))
+        }
+
+        private static func format(_ value: TimeInterval) -> String {
+            String(format: "%.1f", value)
         }
 
         private func restoreKnown(
@@ -984,6 +1011,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.isLiveScrolling = true
+                    self.liveScrollStartOriginY = self.scrollView?.documentVisibleRect.minY
+                    self.liveScrollStartUptime = ProcessInfo.processInfo.systemUptime
+                    self.liveScrollUnknownHeightCount = 0
+                    self.liveScrollConfiguredCellCount = 0
                     self.cancelScheduledHeightUpdate(clearPending: false)
                     if let tableView = self.tableView {
                         self.setVisibleHeightReporting(false, in: tableView)
@@ -998,12 +1029,27 @@ struct AppKitTimelineTable: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    let originBeforeSettle = self.scrollView?.documentVisibleRect.minY ?? 0
+                    let duration = self.liveScrollStartUptime.map {
+                        ProcessInfo.processInfo.systemUptime - $0
+                    } ?? 0
                     self.isLiveScrolling = false
                     self.flushDeferredScrollWork()
                     if let tableView = self.tableView {
                         self.setVisibleHeightReporting(true, in: tableView)
                     }
                     self.scheduleHeightUpdate()
+                    AppLogger.info(
+                        "PERF native scroll end " +
+                            "origin=\(Self.format(self.liveScrollStartOriginY ?? originBeforeSettle))" +
+                            "->\(Self.format(originBeforeSettle)) " +
+                            "duration_ms=\(Self.format(duration * 1_000)) " +
+                            "unknown_heights=\(self.liveScrollUnknownHeightCount) " +
+                            "configured_cells=\(self.liveScrollConfiguredCellCount) " +
+                            "pending_heights=\(self.pendingHeightUpdates.count)"
+                    )
+                    self.liveScrollStartOriginY = nil
+                    self.liveScrollStartUptime = nil
                     self.scheduleMetricsReport()
                 }
             }
