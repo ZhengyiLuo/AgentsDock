@@ -699,7 +699,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                       update.widthBucket == currentWidthBucket,
                       let row = items.firstIndex(where: { $0.id == update.itemID }),
                       items[row].version == update.version,
-                      tableView.rect(ofRow: row).maxY >= visibleTop - 0.5 else { return nil }
+                      tableView.rect(ofRow: row).maxY > visibleTop + 0.5 else { return nil }
                 return row
             })
             guard !rows.isEmpty else { return }
