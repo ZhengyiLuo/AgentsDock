@@ -912,12 +912,7 @@ final class AppStore: ObservableObject {
     }
 
     func setSelectedTimelineAtBottom(_ atBottom: Bool) {
-        guard selectedTimelineAtBottom != atBottom else {
-            if atBottom {
-                markSelectedSessionRead()
-            }
-            return
-        }
+        guard selectedTimelineAtBottom != atBottom else { return }
         selectedTimelineAtBottom = atBottom
         if atBottom {
             markSelectedSessionRead()
@@ -961,7 +956,13 @@ final class AppStore: ObservableObject {
     }
 
     func canMarkSessionUnread(_ session: ZSession) -> Bool {
-        latestAgentEventSeq(for: session.id) != nil
+        if session.latest_agent_event_seq != nil {
+            return true
+        }
+        guard session.id == selectedSessionID else { return false }
+        return events.reversed().contains {
+            $0.session_id == session.id && isAgentVisibleMessage($0)
+        }
     }
 
     func markAgentUnread(sessionID: String, firstSeq: Int? = nil) {
@@ -1150,16 +1151,21 @@ final class AppStore: ObservableObject {
     }
 
     private func setLastReadAgentSeq(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
-        guard allowDecrease || seq > (lastReadAgentSeqBySessionID[sessionID] ?? 0) else { return }
+        let current = lastReadAgentSeqBySessionID[sessionID] ?? 0
+        if allowDecrease {
+            guard seq != current else { return }
+        } else {
+            guard seq > current else { return }
+        }
         lastReadAgentSeqBySessionID[sessionID] = seq
         saveReadState()
     }
 
-    private func adoptServerReadCursor(_ seq: Int, for sessionID: String) {
+    private func adoptServerReadCursor(_ seq: Int, for sessionID: String, allowDecrease: Bool = false) {
         if let pending = pendingReadSyncBySessionID[sessionID], pending > seq {
             return
         }
-        setLastReadAgentSeq(seq, for: sessionID, allowDecrease: true)
+        setLastReadAgentSeq(seq, for: sessionID, allowDecrease: allowDecrease)
     }
 
     private struct ReadSessionResponse: Codable {
@@ -1233,10 +1239,11 @@ final class AppStore: ObservableObject {
 
     private func latestAgentEventSeq(for sessionID: String) -> Int? {
         let sessionSeq = sessions.first(where: { $0.id == sessionID })?.latest_agent_event_seq
-        let eventSeq = events
-            .filter { $0.session_id == sessionID && isAgentVisibleMessage($0) }
-            .map(\.seq)
-            .max()
+        let eventSeq = sessionID == selectedSessionID
+            ? events.reversed().first {
+                $0.session_id == sessionID && isAgentVisibleMessage($0)
+            }?.seq
+            : nil
         return [sessionSeq, eventSeq].compactMap { $0 }.max()
     }
 
@@ -1250,7 +1257,11 @@ final class AppStore: ObservableObject {
             guard let latestSeq = session.latest_agent_event_seq else { continue }
             let serverManualUnread = session.manual_unread == true
             if let serverReadSeq = session.last_read_agent_event_seq {
-                adoptServerReadCursor(serverReadSeq, for: session.id)
+                adoptServerReadCursor(
+                    serverReadSeq,
+                    for: session.id,
+                    allowDecrease: serverManualUnread
+                )
             }
             if serverManualUnread, session.id != selectedSessionID {
                 nextManualUnread.insert(session.id)

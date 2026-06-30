@@ -5828,3 +5828,21 @@ Third follow-up:
 - Added the `selectable-message-content` native regression plus source
   guardrails for selection ownership, passive bottom behavior, and one-page
   history rearming.
+
+## 2026-06-29 - Live Scroll Polling Isolation
+
+- Captured a 15-second live sample while the user was actively scrolling the
+  isolated AppKit timeline. The periodic hitch was not row recycling: a session
+  poll rebuilt every sidebar row, and each row's context menu copied and scanned
+  the complete selected timeline to decide whether Mark Unread was available.
+- Sidebar unread availability now uses server session metadata first and only
+  reverse-scans the selected timeline as a narrow fallback. The shared latest
+  event lookup also stops at the first newest visible agent event instead of
+  allocating `filter` and `map` arrays.
+- Repeated identical bottom-state reports are true no-ops. Equal read cursors no
+  longer rewrite `UserDefaults`, and ordinary server polling cannot lower a
+  newer local read cursor unless the server explicitly carries a manual-unread
+  state from another device.
+- Added source guardrails for all three hot paths so sidebar polling and scroll
+  metrics cannot silently reintroduce whole-timeline copies or preference-write
+  invalidation during scrolling.

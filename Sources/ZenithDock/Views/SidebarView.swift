@@ -294,6 +294,8 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func sessionRow(_ session: ZSession) -> some View {
+        let isUnread = store.unreadAgentSessionIDs.contains(session.id)
+        let canMarkUnread = isUnread || store.canMarkSessionUnread(session)
         let row = SessionRow(session: session, reorderMode: reorderMode)
             .tag(session.id)
             .opacity(reorderMode ? 0.9 : 1)
@@ -329,11 +331,11 @@ struct SidebarView: View {
                     store.toggleSessionUnread(session)
                 } label: {
                     Label(
-                        store.unreadAgentSessionIDs.contains(session.id) ? "Mark as Read" : "Mark as Unread",
-                        systemImage: store.unreadAgentSessionIDs.contains(session.id) ? "envelope.open" : "envelope.badge"
+                        isUnread ? "Mark as Read" : "Mark as Unread",
+                        systemImage: isUnread ? "envelope.open" : "envelope.badge"
                     )
                 }
-                .disabled(!store.unreadAgentSessionIDs.contains(session.id) && !store.canMarkSessionUnread(session))
+                .disabled(!canMarkUnread)
                 Divider()
                 Button {
                     Task { await store.fork(session) }

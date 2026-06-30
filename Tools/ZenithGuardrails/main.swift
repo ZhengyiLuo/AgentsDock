@@ -930,7 +930,7 @@ func checkUnreadMessageMarker() throws {
     try assert(macStore.contains("lastReadAgentSeqBySessionID"), "Mac unread state must compare server latest seq against local last-read seq")
     try assert(macStore.contains("manuallyUnreadSessionIDs"), "Mac store must preserve manual unread marks while the selected chat is open")
     try assert(macStore.contains("private func adoptServerReadCursor"), "Mac session refresh must treat the server read cursor as authoritative")
-    try assert(macStore.contains("setLastReadAgentSeq(seq, for: sessionID, allowDecrease: true)"), "Mac server read cursor adoption must allow cross-device cursor decreases")
+    try assert(macStore.contains("allowDecrease: serverManualUnread"), "Mac server read cursor adoption must only decrease for an explicit cross-device manual-unread state")
     try assert(macStore.contains("markSessionUnread"), "Mac store must support manually marking a chat unread")
     try assert(macStore.contains("allowDecrease: true"), "Manual unread must be able to move the local read cursor backward")
     try assert(macStore.contains("reconcileUnreadFromSessions()"), "Mac session refresh must reconcile unread state for non-selected scheduled-job output")
@@ -1383,6 +1383,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     let appKitTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/AppKitTimelineTable.swift"), encoding: .utf8)
     let testBuild = try String(contentsOf: cwd.appendingPathComponent("scripts/build_and_deploy_test.sh"), encoding: .utf8)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
+    let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
 
     try assert(macStore.contains("@Published private(set) var sessionVideos: [ZFile] = []"), "Mac store must cache selected-session videos instead of deriving them during render")
     try assert(!macStore.contains("var sessionVideos: [ZFile] {\n        mergedFiles"), "Mac sessionVideos must not be a merge/sort computed getter")
@@ -1464,6 +1465,32 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!macStore.contains("scrollToBottomRevision += 1\n            if immediate"), "One immediate scroll request must not publish both normal and forced revisions")
     try assert(!timeline.contains("store.selectedTimelineAtBottom || store.isRunning"), "A running agent must not force passive timeline updates to the bottom")
     try assert(timeline.contains("if distanceFromTop > 160"), "Native history paging must require a deliberate departure from the top before rearming")
+
+    guard let bottomStateStart = macStore.range(of: "func setSelectedTimelineAtBottom"),
+          let bottomStateEnd = macStore.range(of: "func markSessionRead", range: bottomStateStart.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Selected timeline bottom-state block not found")
+    }
+    let bottomStateBlock = macStore[bottomStateStart.lowerBound..<bottomStateEnd.lowerBound]
+    try assert(bottomStateBlock.contains("guard selectedTimelineAtBottom != atBottom else { return }"), "Repeated bottom metrics must be a true no-op")
+    try assert(bottomStateBlock.components(separatedBy: "markSelectedSessionRead()").count == 2, "Bottom state may mark read only on the transition into bottom")
+
+    guard let latestSeqStart = macStore.range(of: "private func latestAgentEventSeq"),
+          let latestSeqEnd = macStore.range(of: "private func reconcileUnreadFromSessions", range: latestSeqStart.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Latest agent-event lookup block not found")
+    }
+    let latestSeqBlock = macStore[latestSeqStart.lowerBound..<latestSeqEnd.lowerBound]
+    try assert(latestSeqBlock.contains("events.reversed().first"), "Latest agent-event lookup must stop at the newest matching event")
+    try assert(!latestSeqBlock.contains(".filter") && !latestSeqBlock.contains(".map(\\.seq)"), "Latest agent-event lookup must not copy the full timeline")
+
+    guard let readCursorStart = macStore.range(of: "private func setLastReadAgentSeq"),
+          let readCursorEnd = macStore.range(of: "private struct ReadSessionResponse", range: readCursorStart.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Read-cursor persistence block not found")
+    }
+    let readCursorBlock = macStore[readCursorStart.lowerBound..<readCursorEnd.lowerBound]
+    try assert(readCursorBlock.contains("guard seq != current else { return }"), "Equal manual/server read cursors must not rewrite UserDefaults")
+    try assert(readCursorBlock.contains("allowDecrease: allowDecrease"), "Server read-cursor adoption must preserve explicit decrease semantics")
+    try assert(macStore.contains("allowDecrease: serverManualUnread"), "Ordinary session polling must not lower the local read cursor")
+    try assert(sidebar.contains("let canMarkUnread = isUnread || store.canMarkSessionUnread(session)"), "Sidebar rows must compute unread menu availability once per rebuild")
     guard let acceptedTurnStart = macStore.range(of: "private func applyAcceptedTurnEvent"),
           let acceptedTurnEnd = macStore.range(of: "private func clearSubmittedPromptIfCurrent", range: acceptedTurnStart.upperBound..<macStore.endIndex) else {
         throw GuardrailFailure.failed("Accepted-turn reconciliation block not found")
