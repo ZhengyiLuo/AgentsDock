@@ -88,13 +88,14 @@ private final class AppKitTimelineRowHeightKey: NSObject {
 private final class AppKitTimelineOwningScrollView: NSScrollView {
     var onVerticalWheel: (() -> Void)?
     private var wheelMonitor: Any?
+    fileprivate private(set) var fallbackWheelCount = 0
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         stopRoutingWheelEvents()
         guard window != nil else { return }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            self?.routeWheelEventIfNeeded(event) ?? event
+            self?.observeWheelEventIfNeeded(event) ?? event
         }
     }
 
@@ -109,7 +110,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         self.wheelMonitor = nil
     }
 
-    private func routeWheelEventIfNeeded(_ event: NSEvent) -> NSEvent? {
+    private func observeWheelEventIfNeeded(_ event: NSEvent) -> NSEvent {
         guard let window,
               event.windowNumber == window.windowNumber,
               !isHidden,
@@ -127,9 +128,37 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         guard let hitView = contentView.hitTest(contentPoint),
               hitView === self || hitView.isDescendant(of: self) else { return event }
 
-        onVerticalWheel?()
-        super.scrollWheel(with: event)
-        return nil
+        scheduleFallbackWheel(
+            verticalDelta: verticalDelta,
+            isPrecise: event.hasPreciseScrollingDeltas,
+            originBeforeDispatch: self.contentView.bounds.origin
+        )
+        return event
+    }
+
+    fileprivate func scheduleFallbackWheel(
+        verticalDelta: CGFloat,
+        isPrecise: Bool,
+        originBeforeDispatch: NSPoint
+    ) {
+        let workItem = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let documentView = self.documentView else { return }
+                let currentOrigin = self.contentView.bounds.origin
+                guard abs(currentOrigin.y - originBeforeDispatch.y) <= 0.5 else { return }
+
+                let pointDelta = isPrecise ? verticalDelta : verticalDelta * 16
+                let maxY = max(0, documentView.bounds.maxY - self.contentView.bounds.height)
+                let targetY = min(max(0, currentOrigin.y - pointDelta), maxY)
+                guard abs(targetY - currentOrigin.y) > 0.5 else { return }
+
+                self.onVerticalWheel?()
+                self.contentView.scroll(to: NSPoint(x: currentOrigin.x, y: targetY))
+                self.reflectScrolledClipView(self.contentView)
+                self.fallbackWheelCount += 1
+            }
+        }
+        DispatchQueue.main.async(execute: workItem)
     }
 }
 
@@ -263,10 +292,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scrollView.autohidesScrollers = true
             scrollView.drawsBackground = false
             scrollView.automaticallyAdjustsContentInsets = false
-            // A programmatic NSScrollView defaults to a 10-point wheel step,
-            // which is far too small for tall chat cards. This affects discrete
-            // mouse-wheel events only; precise trackpad deltas remain native.
-            scrollView.verticalLineScroll = 48
             let zeroInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
             scrollView.contentInsets = zeroInsets
             scrollView.scrollerInsets = zeroInsets
@@ -1294,6 +1319,7 @@ enum AppKitTimelineHarness {
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
             ("native-wheel-ownership", checkNativeWheelOwnership),
+            ("swallowed-wheel-fallback", checkSwallowedWheelFallback),
         ]
         for (name, check) in scenarios {
             guard check() else { return false }
@@ -1457,6 +1483,35 @@ enum AppKitTimelineHarness {
                 "wheel was not owned by the timeline origin=\(originBefore)" +
                     "->\(fixture.scrollView.documentVisibleRect.minY) " +
                     "inputs=\(fixture.coordinator.wheelInputCount - inputCountBefore)"
+            )
+        }
+        return true
+    }
+
+    private static func checkSwallowedWheelFallback() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        guard let owningScrollView = fixture.scrollView as? AppKitTimelineOwningScrollView else {
+            return fail("swallowed-wheel-fallback", "timeline does not own its scroll view")
+        }
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 4_000))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let originBefore = fixture.scrollView.documentVisibleRect.minY
+        let fallbackCountBefore = owningScrollView.fallbackWheelCount
+        owningScrollView.scheduleFallbackWheel(
+            verticalDelta: 80,
+            isPrecise: true,
+            originBeforeDispatch: fixture.scrollView.contentView.bounds.origin
+        )
+        fixture.settle()
+        let distance = originBefore - fixture.scrollView.documentVisibleRect.minY
+        guard owningScrollView.fallbackWheelCount == fallbackCountBefore + 1,
+              abs(distance - 80) <= 1 else {
+            return fail(
+                "swallowed-wheel-fallback",
+                "fallback speed was not one-to-one distance=\(distance) " +
+                    "count=\(owningScrollView.fallbackWheelCount - fallbackCountBefore)"
             )
         }
         return true

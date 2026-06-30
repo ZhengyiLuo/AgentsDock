@@ -5917,3 +5917,9 @@ Follow-up from direct user input testing:
 - `AgentsDock-test` now uses a dedicated AppKit scroll view that owns vertical wheel events whenever the pointer is inside the timeline and delegates them to AppKit's native scrolling implementation.
 - Horizontal gestures remain with code blocks and other nested horizontal content. Text selection and link hit testing are unchanged.
 - Bottom following remains explicit only; this does not restore any delayed or automatic bottom snap.
+
+## 2026-06-30 - Preserve native wheel speed
+
+- Directly replaying every intercepted wheel event through the outer scroll view fixed swallowed gestures but made fast trackpad movement unnaturally aggressive.
+- Vertical wheel events now take the normal AppKit responder path first. The timeline applies a one-run-loop fallback only when its clip origin proves that the nested hosted content swallowed the event.
+- Removed the custom 48-point discrete wheel step. Native scrolling uses AppKit's standard speed; fallback mouse-wheel events use a restrained 16-point step while precise trackpad deltas stay one-to-one.
