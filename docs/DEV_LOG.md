@@ -5962,3 +5962,7 @@ Follow-up from live history-boundary testing:
 - Automatic history pages are capped at 180 raw events instead of 400. The
   existing primary-message loop can still walk past trace-only pages, but each
   individual prepend has a much smaller geometry change.
+- Exact measurements may grow a visible row, but they cannot shrink it while it
+  intersects the viewport. Shrink corrections remain pending until the row is
+  offscreen, then settle with the existing semantic anchor. This removes the
+  observed 207-point bottom clamp while preserving accurate final geometry.

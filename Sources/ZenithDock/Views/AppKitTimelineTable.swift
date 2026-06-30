@@ -819,17 +819,32 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
             let currentSessionID = cacheSessionID()
             let currentWidthBucket = widthBucket(actualColumnWidth(nil, in: tableView))
-            let visibleTop = scrollView.documentVisibleRect.minY
+            let visibleRect = scrollView.documentVisibleRect
             let updates = pendingHeightUpdates
             pendingHeightUpdates.removeAll(keepingCapacity: true)
+            var deferredVisibleShrinks = Set<PendingHeightUpdate>()
             let rows = IndexSet(updates.compactMap { update in
                 guard update.sessionID == currentSessionID,
                       update.widthBucket == currentWidthBucket,
                       let row = items.firstIndex(where: { $0.id == update.itemID }),
                       items[row].version == update.version,
-                      tableView.rect(ofRow: row).maxY > visibleTop + 0.5 else { return nil }
+                      let targetHeight = rowHeightCache.object(
+                          forKey: heightKey(
+                              for: items[row],
+                              width: actualColumnWidth(nil, in: tableView)
+                          )
+                      ).map({ CGFloat($0.doubleValue) }) else { return nil }
+                let rowRect = tableView.rect(ofRow: row)
+                let isShrinking = targetHeight < rowRect.height - 0.5
+                let intersectsViewport = rowRect.maxY > visibleRect.minY + 0.5 &&
+                    rowRect.minY < visibleRect.maxY - 0.5
+                if isShrinking && intersectsViewport {
+                    deferredVisibleShrinks.insert(update)
+                    return nil
+                }
                 return row
             })
+            pendingHeightUpdates.formUnion(deferredVisibleShrinks)
             guard !rows.isEmpty else { return }
 
             let anchor = captureAnchor()
@@ -852,6 +867,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             AppLogger.info(
                 "PERF native height flush rows=\(rows.count) " +
                     "above_anchor=\(affectsRowsAboveAnchor) " +
+                    "deferred_visible_shrinks=\(deferredVisibleShrinks.count) " +
                     "origin=\(Self.format(originBefore))->\(Self.format(originAfter)) " +
                     "ms=\(Self.format((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))"
             )
@@ -1340,6 +1356,7 @@ enum AppKitTimelineHarness {
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("explicit-height-cache", checkExplicitHeightCache),
+            ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
             ("native-wheel-ownership", checkNativeWheelOwnership),
@@ -1444,6 +1461,50 @@ enum AppKitTimelineHarness {
                 "settled measurements=\(fixture.coordinator.heightMeasurementCount - initialMeasurements) " +
                     "invalidations=\(fixture.coordinator.heightInvalidationCount - initialInvalidations) " +
                     "builds=\(addedBuilds)"
+            )
+        }
+        return true
+    }
+
+    private static func checkVisibleShrinkDeferral() -> Bool {
+        var items = [AppKitTimelineItem(
+            id: "oversized-estimate",
+            version: 0,
+            eventIDs: ["oversized-estimate-event"],
+            heightEstimate: .fixed(420),
+            content: itemContent(index: 0, paragraphCount: 1, onBuild: {})
+        )]
+        items.append(contentsOf: (1..<48).map { item(index: $0, version: 0) })
+        let fixture = Fixture(items: items)
+        defer { fixture.stop() }
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("oversized-estimate", .top)
+        ))
+        fixture.settle()
+        let visibleHeight = fixture.tableView.rect(ofRow: 0).height
+        guard visibleHeight >= 419 else {
+            return fail(
+                "visible-shrink-deferral",
+                "visible estimate shrank before leaving viewport height=\(visibleHeight)"
+            )
+        }
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.tableView.scrollRowToVisible(40)
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.settle()
+        let offscreenHeight = fixture.tableView.rect(ofRow: 0).height
+        guard offscreenHeight < visibleHeight - 1 else {
+            return fail(
+                "visible-shrink-deferral",
+                "offscreen deferred shrink did not settle visible=\(visibleHeight) offscreen=\(offscreenHeight)"
             )
         }
         return true

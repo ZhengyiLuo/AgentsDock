@@ -1424,7 +1424,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("cancelScheduledHeightUpdate(clearPending: false)") && appKitTimeline.contains("setVisibleHeightReporting(false"), "Live scrolling must suspend row measurement and height invalidation")
     try assert(appKitTimeline.contains("PendingHeightUpdate") && appKitTimeline.contains("widthBucket"), "Row height corrections must be keyed by session, version, and width")
     try assert(appKitTimeline.contains("rowIdentityOrderUnchanged") && appKitTimeline.contains("!rowIdentityOrderUnchanged"), "Content-only row updates must wait for measured geometry before restoring the anchor")
-    try assert(appKitTimeline.contains("queueCachedHeightCorrectionIfNeeded") && appKitTimeline.contains("maxY > visibleTop"), "Measured rows above the viewport must remain cached until they truly intersect the viewport")
+    try assert(appKitTimeline.contains("queueCachedHeightCorrectionIfNeeded") && appKitTimeline.contains("pendingHeightUpdates.formUnion(deferredVisibleShrinks)"), "Visible shrink corrections must remain pending until they can settle offscreen")
     try assert(!appKitTimeline.contains("prepareForAutomaticHeightMeasurement"), "Recycled cells must not synchronously force automatic height measurement")
     let clipsReusableContent = reusableCellSource.map { cellSource in
         cellSource.contains("clipsToBounds = true") ||
@@ -1459,6 +1459,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("event.hasPreciseScrollingDeltas ? verticalDelta : verticalDelta * 24"), "Trackpad deltas must stay one-to-one while discrete mouse wheels use a restrained fixed step")
     try assert(appKitTimeline.contains("enum AppKitTimelineHeightEstimate") && appKitTimeline.contains("item.heightEstimate.height(forWidth: width)"), "Unknown native rows must start from type-aware geometry instead of one uniform placeholder height")
     try assert(timeline.contains("heightEstimate: appKitHeightEstimate(") && timeline.contains("case .trace:") && timeline.contains("return .fixed(74)"), "Timeline rows must provide stable type-aware initial height estimates")
+    try assert(appKitTimeline.contains("deferredVisibleShrinks") && appKitTimeline.contains("isShrinking && intersectsViewport"), "Visible native rows must never shrink underneath the user's viewport")
     try assert(appKitTimeline.contains("min(64, oldIDs.count)"), "AppKit timeline must delta-update a full bounded visible-window shift")
     try assert(appKitTimeline.contains("oldIDs.suffix($0).elementsEqual(newIDs.prefix($0))"), "AppKit timeline must delta-update mixed head-removal and tail-insertion windows")
     try assert(!appKitTimeline.contains("List {"), "Rejected SwiftUI List timeline must not return")
