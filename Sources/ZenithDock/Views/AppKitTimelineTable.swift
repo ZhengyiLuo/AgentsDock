@@ -94,9 +94,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         stopRoutingWheelEvents()
         guard window != nil else { return }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            MainActor.assumeIsolated {
-                self?.routeWheelEventIfNeeded(event) ?? event
-            }
+            self?.routeWheelEventIfNeeded(event) ?? event
         }
     }
 
