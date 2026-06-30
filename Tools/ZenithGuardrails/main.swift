@@ -1345,6 +1345,29 @@ func checkMacChatKeyboardNavigation() throws {
     try assert(macStore.contains("await select(sessionID: visibleSessions[nextIndex].id)"), "Adjacent chat selection must reuse the normal select path")
 }
 
+func checkMacChatSearchPalette() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let root = try String(
+        contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/RootView.swift"),
+        encoding: .utf8
+    )
+    guard let paletteStart = root.range(of: "private struct ChatSearchPalette"),
+          let paletteEnd = root.range(
+              of: "private struct PaletteRow",
+              range: paletteStart.upperBound..<root.endIndex
+          ) else {
+        throw GuardrailFailure.failed("Mac chat-search palette block not found")
+    }
+    let palette = root[paletteStart.lowerBound..<paletteEnd.lowerBound]
+
+    try assert(palette.contains(".id(session.id)"), "Filtered chat-search rows must use stable session identity")
+    try assert(!palette.contains(".id(index)"), "Chat-search rows must not reuse stale views by result index")
+    try assert(
+        palette.contains("proxy.scrollTo(results[selection].id, anchor: .center)"),
+        "Chat-search keyboard selection must scroll using the same session identity as its rows"
+    )
+}
+
 func checkHandoffDigestUsesLLM() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
@@ -1590,6 +1613,7 @@ do {
     try checkAgentHTTPTransportPlists()
     try checkInspectorCollapseAndPins()
     try checkMacChatKeyboardNavigation()
+    try checkMacChatSearchPalette()
     try checkHandoffDigestUsesLLM()
     try checkMacTimelineScrollPerformanceGuards()
     try checkAgentsDockScrollingRegressions()

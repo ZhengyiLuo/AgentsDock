@@ -19,6 +19,16 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Fix Stable Cmd-P Chat Search Results
+
+- Reproduced against the build-55 stable app: the query field changed and the
+  result count shrank, but the visible rows remained the original first chats.
+- Root cause was the palette's explicit `.id(index)`. `LazyVStack` correctly
+  reduced its child count but reused the cached views at indexes 0...N instead
+  of displaying the matched sessions.
+- Search rows and keyboard scrolling now share `session.id` identity. Added a
+  guardrail rejecting index-based palette row identity.
+
 ## 2026-06-30 - Retire AppKit Test Path; Test LazyVStack As Requested
 
 - The isolated `AgentsDock-test` experiment had drifted away from its requested

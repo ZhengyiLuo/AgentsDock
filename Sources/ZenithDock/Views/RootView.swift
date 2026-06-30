@@ -244,7 +244,7 @@ private struct ChatSearchPalette: View {
                             LazyVStack(spacing: 2) {
                                 ForEach(Array(results.enumerated()), id: \.element.id) { index, session in
                                     PaletteRow(session: session, selected: index == selection)
-                                        .id(index)
+                                        .id(session.id)
                                         .contentShape(Rectangle())
                                         .onTapGesture {
                                             selection = index
@@ -256,8 +256,9 @@ private struct ChatSearchPalette: View {
                         }
                         .frame(maxHeight: 340)
                         .onChange(of: selection) {
+                            guard results.indices.contains(selection) else { return }
                             withAnimation(.linear(duration: 0.08)) {
-                                proxy.scrollTo(selection, anchor: .center)
+                                proxy.scrollTo(results[selection].id, anchor: .center)
                             }
                         }
                     }
