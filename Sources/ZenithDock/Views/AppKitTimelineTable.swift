@@ -243,6 +243,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 with: items[row],
                 width: actualColumnWidth(tableColumn, in: tableView)
             )
+            queueCachedHeightCorrectionIfNeeded(
+                forRow: row,
+                item: items[row],
+                width: actualColumnWidth(tableColumn, in: tableView)
+            )
             cellConfigurationCount += 1
             return cell
         }
@@ -634,6 +639,26 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scheduleHeightUpdate()
         }
 
+        private func queueCachedHeightCorrectionIfNeeded(
+            forRow row: Int,
+            item: AppKitTimelineItem,
+            width: CGFloat
+        ) {
+            guard let tableView,
+                  let cached = rowHeightCache.object(forKey: heightKey(for: item, width: width)),
+                  abs(tableView.rect(ofRow: row).height - CGFloat(cached.doubleValue)) > 0.5 else {
+                return
+            }
+            pendingHeightUpdates.insert(PendingHeightUpdate(
+                sessionID: cacheSessionID(),
+                itemID: item.id,
+                version: item.version,
+                widthBucket: widthBucket(width)
+            ))
+            guard !isLiveScrolling else { return }
+            scheduleHeightUpdate()
+        }
+
         private func scheduleHeightUpdate() {
             guard heightUpdateWorkItem == nil, !pendingHeightUpdates.isEmpty else { return }
             heightUpdateGeneration &+= 1
@@ -666,13 +691,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
             let currentSessionID = cacheSessionID()
             let currentWidthBucket = widthBucket(actualColumnWidth(nil, in: tableView))
+            let visibleTop = scrollView.documentVisibleRect.minY
             let updates = pendingHeightUpdates
             pendingHeightUpdates.removeAll(keepingCapacity: true)
             let rows = IndexSet(updates.compactMap { update in
                 guard update.sessionID == currentSessionID,
                       update.widthBucket == currentWidthBucket,
                       let row = items.firstIndex(where: { $0.id == update.itemID }),
-                      items[row].version == update.version else { return nil }
+                      items[row].version == update.version,
+                      tableView.rect(ofRow: row).maxY >= visibleTop - 0.5 else { return nil }
                 return row
             })
             guard !rows.isEmpty else { return }
@@ -722,6 +749,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
                     as? TimelineHostingCellView else { continue }
                 configure(cell, with: items[row], width: width)
+                queueCachedHeightCorrectionIfNeeded(forRow: row, item: items[row], width: width)
                 cellConfigurationCount += 1
             }
         }
