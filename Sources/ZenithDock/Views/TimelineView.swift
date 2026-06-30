@@ -437,6 +437,7 @@ struct TimelineView: View {
             items.append(AppKitTimelineItem(
                 id: "empty-state",
                 version: 0,
+                heightEstimate: .fixed(240),
                 content: appKitRowContent(EmptyStateView())
             ))
             return items
@@ -462,6 +463,7 @@ struct TimelineView: View {
             items.append(AppKitTimelineItem(
                 id: "history-loader",
                 version: appKitHistoryLoaderVersion(isLoading: historyIsLoading),
+                heightEstimate: .fixed(62),
                 content: appKitRowContent(loader)
             ))
         }
@@ -471,6 +473,7 @@ struct TimelineView: View {
                 items.append(AppKitTimelineItem(
                     id: "unread-marker-\(row.id)",
                     version: row.maxSeq,
+                    heightEstimate: .fixed(34),
                     content: appKitRowContent(TimelineUnreadMarker())
                 ))
             }
@@ -481,6 +484,10 @@ struct TimelineView: View {
                     promptFilesByEventID: promptFilesByEventID
                 ),
                 eventIDs: row.eventIDs,
+                heightEstimate: appKitHeightEstimate(
+                    for: row,
+                    attachmentCount: row.anchorEventID.flatMap { promptFilesByEventID[$0]?.count } ?? 0
+                ),
                 content: appKitRowContent(
                     timelineCard(
                         row,
@@ -574,6 +581,112 @@ struct TimelineView: View {
             hasher.combine(events.last?.id)
         }
         return hasher.finalize()
+    }
+
+    private func appKitHeightEstimate(
+        for row: TimelineRow,
+        attachmentCount: Int
+    ) -> AppKitTimelineHeightEstimate {
+        switch row.kind {
+        case .trace:
+            return .fixed(74)
+        case .artifacts(let events):
+            let files = events.compactMap(\.artifact)
+            let visible = Array(files.prefix(4))
+            let previewCount = visible.filter(\.isPreviewableArtifact).count
+            let fileCount = visible.count - previewCount
+            let previewHeight: CGFloat = previewCount > 0 ? 166 : 0
+            let fileHeight = CGFloat(fileCount) * 42
+            let disclosureHeight: CGFloat = files.count > 4 ? 34 : 0
+            return .fixed(64 + previewHeight + fileHeight + disclosureHeight)
+        case .job(let jobRun):
+            return appKitMessageHeightEstimate(
+                jobRun.resultText ?? jobRun.errorText ?? jobRun.runEvent.message ?? "Scheduled job started.",
+                attachmentCount: 0
+            )
+        case .jobGroup(let group):
+            let latest = group.latest
+            let extra: CGFloat = group.runs.count > 1 ? 34 : 0
+            return appKitMessageHeightEstimate(
+                latest.resultText ?? latest.errorText ?? latest.runEvent.message ?? "Scheduled job started.",
+                attachmentCount: 0,
+                extra: extra
+            )
+        case .event(let event):
+            switch event.type {
+            case "turn_started", "turn_queued":
+                return appKitMessageHeightEstimate(event.prompt ?? "", attachmentCount: attachmentCount)
+            case "assistant_text":
+                return appKitMessageHeightEstimate(event.text ?? "", attachmentCount: 0)
+            case "turn_finished":
+                return appKitMessageHeightEstimate(event.result_text ?? "", attachmentCount: 0)
+            case "artifact_created":
+                return .fixed(230)
+            case "file_uploaded":
+                return .fixed(92)
+            case "error", "handoff_digest_started", "handoff_digest_ready", "handoff_digest_sent", "handoff_digest_error":
+                return appKitTextHeightEstimate(
+                    event.message ?? event.error ?? event.text ?? event.type,
+                    maximumCharacters: 1_200,
+                    maximumLines: 12,
+                    chrome: 72,
+                    extra: 0
+                )
+            default:
+                return .fixed(86)
+            }
+        }
+    }
+
+    private func appKitMessageHeightEstimate(
+        _ text: String,
+        attachmentCount: Int,
+        extra: CGFloat = 0
+    ) -> AppKitTimelineHeightEstimate {
+        let isDigest = text.hasPrefix("# ZenithDock Context Digest")
+        let maximumCharacters = isDigest ? 1_800 : 4_200
+        let maximumLines = isDigest ? 18 : 48
+        let byteCount = text.utf8.count
+        let explicitLineCount = boundedLineCount(in: text, maximumCharacters: maximumCharacters)
+        let isFolded = byteCount > maximumCharacters || explicitLineCount > maximumLines
+        let attachmentHeight: CGFloat = attachmentCount > 0 ? 132 : 0
+        return .text(
+            characters: min(byteCount, maximumCharacters),
+            explicitLines: min(explicitLineCount, maximumLines),
+            maximumLines: maximumLines,
+            chrome: 62,
+            extra: extra + attachmentHeight + (isFolded ? 38 : 0)
+        )
+    }
+
+    private func appKitTextHeightEstimate(
+        _ text: String,
+        maximumCharacters: Int,
+        maximumLines: Int,
+        chrome: CGFloat,
+        extra: CGFloat
+    ) -> AppKitTimelineHeightEstimate {
+        .text(
+            characters: min(text.utf8.count, maximumCharacters),
+            explicitLines: min(
+                boundedLineCount(in: text, maximumCharacters: maximumCharacters),
+                maximumLines
+            ),
+            maximumLines: maximumLines,
+            chrome: chrome,
+            extra: extra
+        )
+    }
+
+    private func boundedLineCount(in text: String, maximumCharacters: Int) -> Int {
+        var count = 1
+        var visited = 0
+        for byte in text.utf8 {
+            if visited >= maximumCharacters { break }
+            if byte == 10 { count += 1 }
+            visited += 1
+        }
+        return count
     }
 #endif
 

@@ -5949,3 +5949,16 @@ Follow-up from direct user input testing:
   across an invisible gap.
 - Added guardrails for single-dispatch wheel routing, full-window reconciliation,
   event-ID freshness verification, and disconnected-window replacement.
+
+Follow-up from live history-boundary testing:
+
+- The remaining jump was document geometry, not duplicated input. Older-history
+  prepends inserted every unknown row at 120 points, even though a collapsed
+  trace is roughly 74 points while a folded Markdown response can be hundreds.
+  The table then corrected each row as it approached the viewport.
+- Native rows now start with type-aware estimates. Message estimates use bounded
+  visible text, wrapping width, explicit lines, fold notices, and attachment
+  space; trace, media, upload, and status rows use their known compact geometry.
+- Automatic history pages are capped at 180 raw events instead of 400. The
+  existing primary-message loop can still walk past trace-only pages, but each
+  individual prepend has a much smaller geometry change.

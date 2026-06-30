@@ -106,7 +106,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var queuedTurnsBySessionID: [String: [ZQueuedTurn]] = [:]
 
     private let initialSessionEventLimit = 240
-    private let olderHistoryPageLimit = 400
+    private let olderHistoryPageLimit = 180
     private let maxLoadedTimelineEvents = 2_000
     private let maxCachedTimelineEvents = 720
     private let cachedTailFreshnessWindow: TimeInterval = 45

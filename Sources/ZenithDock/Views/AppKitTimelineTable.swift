@@ -19,21 +19,48 @@ struct AppKitTimelineScrollCommand: Equatable {
     var destination: Destination = .none
 }
 
+enum AppKitTimelineHeightEstimate {
+    case fixed(CGFloat)
+    case text(
+        characters: Int,
+        explicitLines: Int,
+        maximumLines: Int,
+        chrome: CGFloat,
+        extra: CGFloat
+    )
+
+    func height(forWidth width: CGFloat) -> CGFloat {
+        switch self {
+        case .fixed(let height):
+            return height
+        case .text(let characters, let explicitLines, let maximumLines, let chrome, let extra):
+            let usableWidth = max(220, width - 104)
+            let charactersPerLine = max(28, Int(usableWidth / 7.4))
+            let wrappedLines = Int(ceil(Double(max(1, characters)) / Double(charactersPerLine)))
+            let lineCount = min(maximumLines, max(1, explicitLines, wrappedLines))
+            return min(1_180, max(72, chrome + extra + CGFloat(lineCount) * 21))
+        }
+    }
+}
+
 struct AppKitTimelineItem: Identifiable {
     let id: String
     let version: Int
     let eventIDs: [String]
+    let heightEstimate: AppKitTimelineHeightEstimate
     private let contentFactory: () -> AnyView
 
     init(
         id: String,
         version: Int,
         eventIDs: [String] = [],
+        heightEstimate: AppKitTimelineHeightEstimate = .fixed(120),
         content: @autoclosure @escaping () -> AnyView
     ) {
         self.id = id
         self.version = version
         self.eventIDs = eventIDs
+        self.heightEstimate = heightEstimate
         self.contentFactory = content
     }
 
@@ -318,7 +345,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             if isScrollInteractionActive {
                 liveScrollUnknownHeightCount += 1
             }
-            return estimatedRowHeight
+            return item.heightEstimate.height(forWidth: width)
         }
 
         func tableView(
