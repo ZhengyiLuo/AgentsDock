@@ -19,6 +19,23 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Retire AppKit Test Path; Test LazyVStack As Requested
+
+- The isolated `AgentsDock-test` experiment had drifted away from its requested
+  goal: it compiled an `NSTableView` recycler instead of testing `LazyVStack`.
+  The resulting manual row-height and scroll-position machinery introduced a
+  large new behavioral surface and is no longer active in the test build.
+- `scripts/build_and_deploy_test.sh` now compiles
+  `AGENTSDOCK_LAZY_TIMELINE`. Production remains on the proven eager `VStack`.
+- The test path uses a real `LazyVStack` with two structural differences from
+  the failed 2026-06-21 attempt:
+  - The stack receives a definite width directly from an outer
+    `GeometryReader`, without publishing width back through `@State`.
+  - Scroll metrics use SwiftUI's native `onScrollGeometryChange`; the lazy
+    document does not install `TimelineScrollObserver` or replace `NSClipView`.
+- The AppKit source remains dormant temporarily so unrelated notification,
+  cache, and sidebar fixes can be preserved while the lazy test is validated.
+
 ## 2026-06-29 - Isolated NSTableView Timeline Experiment
 
 Goal:

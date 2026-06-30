@@ -16,7 +16,7 @@ xcodebuild \
   -destination platform=macOS \
   -derivedDataPath "${DERIVED_DATA}" \
   PRODUCT_BUNDLE_IDENTIFIER="${TEST_BUNDLE_ID}" \
-  'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) AGENTSDOCK_APPKIT_TIMELINE' \
+  'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) AGENTSDOCK_LAZY_TIMELINE' \
   CODE_SIGN_IDENTITY=- \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM= \
@@ -42,7 +42,7 @@ fi
 codesign --force --sign - "${DIST_APP}"
 codesign --verify --deep --strict --verbose=2 "${DIST_APP}"
 
-"${DIST_APP}/Contents/MacOS/AgentsDock-test" --timeline-harness
+swift run ZenithGuardrails
 
 if server_url="$(defaults read com.zhengyiluo.ZenithDock serverURL 2>/dev/null)"; then
   defaults write "${TEST_BUNDLE_ID}" serverURL "${server_url}"

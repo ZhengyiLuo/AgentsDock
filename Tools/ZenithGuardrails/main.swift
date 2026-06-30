@@ -1401,9 +1401,14 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!timeline.contains("content\n                .environmentObject(store)"), "Recycled timeline rows must not observe unrelated global AppStore publications")
     try assert(timeline.contains("let totalOlderCount: Int") && timeline.contains("let canLoadOlder: Bool"), "History loader rows must receive immutable values instead of observing AppStore")
     try assert(timeline.contains("let minimumInterval = 0.14"), "Timeline scroll observer reports must be throttled enough to avoid bottom-scroll churn")
-    try assert(!timeline.contains("LazyVStack("), "Mac timeline must never reintroduce the known 100% CPU LazyVStack layout spiral")
+    try assert(
+        timeline.contains("#if AGENTSDOCK_LAZY_TIMELINE") &&
+            timeline.contains("private func eagerTimelineScrollRegion") &&
+            timeline.contains("VStack(alignment: .leading, spacing: 14)"),
+        "Production must retain the eager Mac timeline while LazyVStack remains isolated to AgentsDock-test"
+    )
     try assert(timeline.contains("#if AGENTSDOCK_APPKIT_TIMELINE") && timeline.contains("AppKitTimelineTable("), "Isolated performance builds must use the explicit AppKit row recycler")
-    try assert(timeline.contains("#else\n        ScrollView {") && timeline.contains("VStack(alignment: .leading, spacing: 14)"), "Production Mac timeline must retain the proven eager ScrollView/VStack path")
+    try assert(timeline.contains("private func eagerTimelineScrollRegion") && timeline.contains("VStack(alignment: .leading, spacing: 14)"), "Production Mac timeline must retain the proven eager ScrollView/VStack path")
     let reusableCellSource = appKitTimeline.range(of: "private final class TimelineHostingCellView").map {
         appKitTimeline[$0.lowerBound...]
     }
@@ -1465,8 +1470,9 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("min(64, oldIDs.count)"), "AppKit timeline must delta-update a full bounded visible-window shift")
     try assert(appKitTimeline.contains("oldIDs.suffix($0).elementsEqual(newIDs.prefix($0))"), "AppKit timeline must delta-update mixed head-removal and tail-insertion windows")
     try assert(!appKitTimeline.contains("List {"), "Rejected SwiftUI List timeline must not return")
-    try assert(testBuild.contains("AGENTSDOCK_APPKIT_TIMELINE"), "Test build must explicitly opt into the AppKit timeline code")
-    try assert(testBuild.contains("--timeline-harness") && appKitTimeline.contains("AppKitTimelineHarness"), "Test builds must pass the headless AppKit recycler stress harness")
+    try assert(testBuild.contains("AGENTSDOCK_LAZY_TIMELINE") && !testBuild.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) AGENTSDOCK_APPKIT_TIMELINE"), "Test build must explicitly exercise LazyVStack rather than the retired AppKit recycler")
+    try assert(timeline.contains("#if AGENTSDOCK_LAZY_TIMELINE") && timeline.contains("LazyVStack(alignment: .leading, spacing: 14)"), "The isolated Mac performance build must contain a real LazyVStack timeline")
+    try assert(timeline.contains("onScrollGeometryChange(for: TimelineScrollMetrics.self)") && timeline.contains("viewport.size.width - 40"), "The lazy timeline must use native SwiftUI geometry and a definite viewport-derived width")
     try assert(sidebar.contains("SidebarFolderDragSurfaceNSView") && sidebar.contains("SidebarReorderHarness"), "Folder reorder must use and test a full native drag surface")
     try assert(sidebar.contains("registerForDraggedTypes([.string])") && sidebar.contains("performDragOperation"), "Folder reorder drag sources must also own their native drop destination")
     try assert(appKitTimeline.contains("AppKitTimelineIntegrationHarness") && appKitTimeline.contains("store.select(sessionID: session.id)"), "AppKit timeline must include a hidden real-chat switching harness")

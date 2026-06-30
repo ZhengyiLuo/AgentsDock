@@ -299,8 +299,9 @@ struct TimelineView: View {
         }
     }
 
-    // Production keeps the proven eager stack. The isolated performance build
-    // compiles an explicit view-based NSTableView row recycler.
+    // Production keeps the proven eager stack. Isolated builds can exercise a
+    // lazy SwiftUI timeline or the retired AppKit recycler without changing the
+    // production code path.
     @ViewBuilder
     private func timelineScrollRegion(
         proxy: ScrollViewProxy,
@@ -325,64 +326,205 @@ struct TimelineView: View {
         .opacity(shouldMask ? 0 : 1)
         .coordinateSpace(name: coordinateSpaceName)
 #else
+#if AGENTSDOCK_LAZY_TIMELINE
+        if #available(macOS 15.0, *) {
+            lazyTimelineScrollRegion(
+                proxy: proxy,
+                rows: rows,
+                firstUnreadRowID: firstUnreadRowID,
+                jobsByRunID: jobsByRunID,
+                promptFilesByEventID: promptFilesByEventID,
+                linkContext: linkContext,
+                hiddenRenderedRowCount: hiddenRenderedRowCount,
+                suspended: suspended,
+                shouldMask: shouldMask
+            )
+        } else {
+            eagerTimelineScrollRegion(
+                proxy: proxy,
+                rows: rows,
+                firstUnreadRowID: firstUnreadRowID,
+                jobsByRunID: jobsByRunID,
+                promptFilesByEventID: promptFilesByEventID,
+                linkContext: linkContext,
+                hiddenRenderedRowCount: hiddenRenderedRowCount,
+                suspended: suspended,
+                shouldMask: shouldMask
+            )
+        }
+#else
+        eagerTimelineScrollRegion(
+            proxy: proxy,
+            rows: rows,
+            firstUnreadRowID: firstUnreadRowID,
+            jobsByRunID: jobsByRunID,
+            promptFilesByEventID: promptFilesByEventID,
+            linkContext: linkContext,
+            hiddenRenderedRowCount: hiddenRenderedRowCount,
+            suspended: suspended,
+            shouldMask: shouldMask
+        )
+#endif
+#endif
+    }
+
+    private func eagerTimelineScrollRegion(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool,
+        shouldMask: Bool
+    ) -> some View {
         ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if store.selectedSession == nil {
-                        EmptyStateView()
-                    } else {
-                        if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
-                            TimelineHistoryLoader(
-                                totalOlderCount: store.hiddenDisplayEventCount + hiddenRenderedRowCount,
-                                isLoading: store.isLoadingOlderHistory,
-                                canLoadOlder: store.canLoadOlderHistory,
-                                hasHiddenRenderedRows: hiddenRenderedRowCount > 0
-                            ) {
-                                revealOlderRowsShowingNewPage(proxy)
-                            } onLoadOlder: {
-                                loadOlderHistoryFromIntent(proxy)
-                            }
-                            .onDisappear {
-                                olderHistoryLoadArmed = true
-                                suppressScrollHistoryLoadUntilTopLeaves = false
-                            }
-                        }
-                        ForEach(rows) { row in
-                            if row.id == firstUnreadRowID {
-                                TimelineUnreadMarker()
-                                    .id("unread-marker-\(row.id)")
-                            }
-                            timelineCard(
-                                row,
-                                jobsByRunID: jobsByRunID,
-                                promptFilesByEventID: promptFilesByEventID,
-                                linkContext: linkContext
-                            )
-                        }
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomID)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    TimelineScrollObserver(
-                        forceBottomRevision: store.forcedScrollToBottomRevision,
-                        preservePositionRevision: store.preserveTimelineScrollRevision
-                    ) { metrics in
-                        updateBottomVisibility(metrics)
-                        handleHistoryTopDistance(
-                            metrics.distanceFromTop,
-                            hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
-                            proxy: proxy
-                        )
-                    }
+            VStack(alignment: .leading, spacing: 14) {
+                timelineRowsContent(
+                    proxy: proxy,
+                    rows: rows,
+                    firstUnreadRowID: firstUnreadRowID,
+                    jobsByRunID: jobsByRunID,
+                    promptFilesByEventID: promptFilesByEventID,
+                    linkContext: linkContext,
+                    hiddenRenderedRowCount: hiddenRenderedRowCount,
+                    suspended: suspended
                 )
             }
-            .opacity(shouldMask ? 0 : 1)
-            .coordinateSpace(name: coordinateSpaceName)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                TimelineScrollObserver(
+                    forceBottomRevision: store.forcedScrollToBottomRevision,
+                    preservePositionRevision: store.preserveTimelineScrollRevision
+                ) { metrics in
+                    consumeTimelineScrollMetrics(
+                        metrics,
+                        hiddenRenderedRowCount: hiddenRenderedRowCount,
+                        proxy: proxy
+                    )
+                }
+            )
+        }
+        .opacity(shouldMask ? 0 : 1)
+        .coordinateSpace(name: coordinateSpaceName)
+    }
+
+#if AGENTSDOCK_LAZY_TIMELINE
+    @available(macOS 15.0, *)
+    private func lazyTimelineScrollRegion(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool,
+        shouldMask: Bool
+    ) -> some View {
+        GeometryReader { viewport in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    timelineRowsContent(
+                        proxy: proxy,
+                        rows: rows,
+                        firstUnreadRowID: firstUnreadRowID,
+                        jobsByRunID: jobsByRunID,
+                        promptFilesByEventID: promptFilesByEventID,
+                        linkContext: linkContext,
+                        hiddenRenderedRowCount: hiddenRenderedRowCount,
+                        suspended: suspended
+                    )
+                }
+                // A definite width from outside the scroll document prevents
+                // long code blocks from feeding their intrinsic width back into
+                // LazyVStack's placement cache.
+                .frame(width: max(1, viewport.size.width - 40), alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+            }
+            .onScrollGeometryChange(for: TimelineScrollMetrics.self) { geometry in
+                TimelineScrollMetrics(
+                    viewportHeight: max(0, geometry.containerSize.height),
+                    contentHeight: max(0, geometry.contentSize.height),
+                    distanceFromBottom: max(0, geometry.contentSize.height - geometry.visibleRect.maxY),
+                    distanceFromTop: max(0, geometry.visibleRect.minY)
+                )
+            } action: { _, metrics in
+                consumeTimelineScrollMetrics(
+                    metrics,
+                    hiddenRenderedRowCount: hiddenRenderedRowCount,
+                    proxy: proxy
+                )
+            }
+        }
+        .opacity(shouldMask ? 0 : 1)
+        .coordinateSpace(name: coordinateSpaceName)
+    }
 #endif
+
+    @ViewBuilder
+    private func timelineRowsContent(
+        proxy: ScrollViewProxy,
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool
+    ) -> some View {
+        if store.selectedSession == nil {
+            EmptyStateView()
+        } else {
+            if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
+                TimelineHistoryLoader(
+                    totalOlderCount: store.hiddenDisplayEventCount + hiddenRenderedRowCount,
+                    isLoading: store.isLoadingOlderHistory,
+                    canLoadOlder: store.canLoadOlderHistory,
+                    hasHiddenRenderedRows: hiddenRenderedRowCount > 0
+                ) {
+                    revealOlderRowsShowingNewPage(proxy)
+                } onLoadOlder: {
+                    loadOlderHistoryFromIntent(proxy)
+                }
+                .onDisappear {
+                    olderHistoryLoadArmed = true
+                    suppressScrollHistoryLoadUntilTopLeaves = false
+                }
+            }
+            ForEach(rows) { row in
+                if row.id == firstUnreadRowID {
+                    TimelineUnreadMarker()
+                        .id("unread-marker-\(row.id)")
+                }
+                timelineCard(
+                    row,
+                    jobsByRunID: jobsByRunID,
+                    promptFilesByEventID: promptFilesByEventID,
+                    linkContext: linkContext
+                )
+            }
+            Color.clear
+                .frame(height: 1)
+                .id(bottomID)
+        }
+    }
+
+    private func consumeTimelineScrollMetrics(
+        _ metrics: TimelineScrollMetrics,
+        hiddenRenderedRowCount: Int,
+        proxy: ScrollViewProxy
+    ) {
+        updateBottomVisibility(metrics)
+        handleHistoryTopDistance(
+            metrics.distanceFromTop,
+            hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
+            proxy: proxy
+        )
     }
 
 #if AGENTSDOCK_APPKIT_TIMELINE
