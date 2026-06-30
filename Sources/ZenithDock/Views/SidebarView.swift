@@ -523,58 +523,6 @@ private struct SidebarInsertionRule: View {
     }
 }
 
-private struct SidebarFolderDropDelegate: DropDelegate {
-    let targetFolder: String
-    @Binding var activePayload: SidebarDragPayload?
-    @Binding var dropTarget: SidebarDropTarget?
-    let clearDragState: () -> Void
-    let performMove: (SidebarDragPayload, SidebarDropPlacement) -> Bool
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        updateTarget(info: info)
-        return DropProposal(operation: .move)
-    }
-
-    func dropEntered(info: DropInfo) {
-        updateTarget(info: info)
-    }
-
-    func dropExited(info: DropInfo) {
-        withoutSidebarAnimation {
-            dropTarget = nil
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        defer {
-            DispatchQueue.main.async {
-                clearDragState()
-            }
-        }
-        guard case let .folder(sourceFolder)? = activePayload,
-              sourceFolder != targetFolder else {
-            return false
-        }
-        return performMove(.folder(sourceFolder), sidebarPlacement(for: info))
-    }
-
-    private func updateTarget(info: DropInfo) {
-        guard case let .folder(sourceFolder)? = activePayload,
-              sourceFolder != targetFolder else {
-            withoutSidebarAnimation {
-                dropTarget = nil
-            }
-            return
-        }
-        let placement = sidebarPlacement(for: info)
-        if dropTarget != .folder(targetFolder, placement) {
-            withoutSidebarAnimation {
-                dropTarget = .folder(targetFolder, placement)
-            }
-        }
-    }
-}
-
 private struct SidebarSessionDropDelegate: DropDelegate {
     let targetSession: ZSession
     @Binding var activePayload: SidebarDragPayload?
@@ -673,10 +621,9 @@ private struct FolderSectionHeader: View {
     var body: some View {
         let header = HStack(spacing: 6) {
             if reorderMode {
-                SidebarFolderDragHandle(
-                    folder: folder,
-                    beginDrag: beginDrag
-                )
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
             } else {
                 Button {
                     store.toggleFolderCollapsed(folder)
@@ -724,21 +671,28 @@ private struct FolderSectionHeader: View {
 
         if reorderMode {
             header
-                .onDrop(
-                    of: [.text],
-                    delegate: SidebarFolderDropDelegate(
-                        targetFolder: folder,
-                        activePayload: $activeDragPayload,
-                        dropTarget: $dropTarget,
-                        clearDragState: {
-                            activeDragPayload = nil
-                            dropTarget = nil
+                .contentShape(Rectangle())
+                .overlay {
+                    SidebarFolderDragSurface(
+                        folder: folder,
+                        beginDrag: { beginDrag(.folder(folder)) },
+                        updateDropTarget: { placement in
+                            withoutSidebarAnimation {
+                                dropTarget = placement.map { .folder(folder, $0) }
+                            }
                         },
-                        performMove: { providers, placement in
-                            onDropFolder(providers, folder, placement)
+                        performDrop: { sourceFolder, placement in
+                            onDropFolder(.folder(sourceFolder), folder, placement)
+                        },
+                        endDrag: {
+                            withoutSidebarAnimation {
+                                activeDragPayload = nil
+                                dropTarget = nil
+                            }
                         }
                     )
-                )
+                }
+                .help("Drag \(folder) to reorder folders")
         } else {
             header
         }
@@ -764,43 +718,35 @@ private struct FolderSectionHeader: View {
     }
 }
 
-private struct SidebarFolderDragHandle: View {
-    let folder: String
-    let beginDrag: (SidebarDragPayload) -> Void
-
-    var body: some View {
-        SidebarFolderDragHandleView(
-            folder: folder,
-            payloadText: SidebarDragPayload.folder(folder).rawValue,
-            beginDrag: { beginDrag(.folder(folder)) }
-        )
-        .frame(width: 18, height: 18)
-        .help("Drag to reorder \(folder)")
-    }
-}
-
 #if os(macOS)
-private struct SidebarFolderDragHandleView: NSViewRepresentable {
+private struct SidebarFolderDragSurface: NSViewRepresentable {
     let folder: String
-    let payloadText: String
     let beginDrag: () -> Void
+    let updateDropTarget: (SidebarDropPlacement?) -> Void
+    let performDrop: (String, SidebarDropPlacement) -> Bool
+    let endDrag: () -> Void
 
-    func makeNSView(context: Context) -> SidebarFolderDragHandleNSView {
-        let view = SidebarFolderDragHandleNSView()
-        view.folder = folder
-        view.payloadText = payloadText
-        view.beginDrag = beginDrag
+    func makeNSView(context: Context) -> SidebarFolderDragSurfaceNSView {
+        let view = SidebarFolderDragSurfaceNSView(frame: .zero)
+        configure(view)
         return view
     }
 
-    func updateNSView(_ nsView: SidebarFolderDragHandleNSView, context: Context) {
-        nsView.folder = folder
-        nsView.payloadText = payloadText
-        nsView.beginDrag = beginDrag
+    func updateNSView(_ nsView: SidebarFolderDragSurfaceNSView, context: Context) {
+        configure(nsView)
+    }
+
+    private func configure(_ view: SidebarFolderDragSurfaceNSView) {
+        view.folder = folder
+        view.payloadText = SidebarDragPayload.folder(folder).rawValue
+        view.beginDrag = beginDrag
+        view.updateDropTarget = updateDropTarget
+        view.performDrop = performDrop
+        view.endDrag = endDrag
     }
 }
 
-private final class SidebarFolderDragHandleNSView: NSView, NSDraggingSource {
+private final class SidebarFolderDragSurfaceNSView: NSView, NSDraggingSource {
     var folder = "" {
         didSet {
             toolTip = "Drag to reorder \(folder)"
@@ -808,47 +754,182 @@ private final class SidebarFolderDragHandleNSView: NSView, NSDraggingSource {
     }
     var payloadText = ""
     var beginDrag: (() -> Void)?
-
-    private let imageView = NSImageView()
+    var updateDropTarget: ((SidebarDropPlacement?) -> Void)?
+    var performDrop: ((String, SidebarDropPlacement) -> Bool)?
+    var endDrag: (() -> Void)?
+    private var mouseDownPoint: NSPoint?
+    private var dragSessionActive = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
-        imageView.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Reorder folder")
-        imageView.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
-        imageView.contentTintColor = .secondaryLabelColor
-        imageView.imageScaling = .scaleProportionallyDown
-        addSubview(imageView)
+        registerForDraggedTypes([.string])
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: 18, height: 18)
+    override var isFlipped: Bool {
+        true
     }
 
-    override func layout() {
-        super.layout()
-        imageView.frame = bounds.insetBy(dx: 2, dy: 2)
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        dragSessionActive = false
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !dragSessionActive,
+              let mouseDownPoint else { return }
+        let currentPoint = convert(event.locationInWindow, from: nil)
+        guard hypot(currentPoint.x - mouseDownPoint.x, currentPoint.y - mouseDownPoint.y) >= 3 else {
+            return
+        }
+        dragSessionActive = true
         beginDrag?()
         let item = NSPasteboardItem()
         item.setString(payloadText, forType: .string)
         let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        draggingItem.setDraggingFrame(bounds, contents: imageView.image)
+        let preview = dragPreviewImage()
+        let previewRect = NSRect(
+            x: currentPoint.x - 12,
+            y: currentPoint.y - preview.size.height / 2,
+            width: preview.size.width,
+            height: preview.size.height
+        )
+        draggingItem.setDraggingFrame(previewRect, contents: preview)
         beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownPoint = nil
+        if !dragSessionActive {
+            endDrag?()
+        }
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         .move
     }
 
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        mouseDownPoint = nil
+        dragSessionActive = false
+        updateDropTarget?(nil)
+        endDrag?()
+    }
+
     func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
         true
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateDestination(for: sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateDestination(for: sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        updateDropTarget?(nil)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        decodedSourceFolder(from: sender) != nil
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let sourceFolder = decodedSourceFolder(from: sender),
+              sourceFolder != folder else { return false }
+        return performDrop?(sourceFolder, placement(for: sender)) ?? false
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        updateDropTarget?(nil)
+    }
+
+    private func updateDestination(for sender: NSDraggingInfo) -> NSDragOperation {
+        guard let sourceFolder = decodedSourceFolder(from: sender),
+              sourceFolder != folder else {
+            updateDropTarget?(nil)
+            return []
+        }
+        updateDropTarget?(placement(for: sender))
+        return .move
+    }
+
+    private func decodedSourceFolder(from sender: NSDraggingInfo) -> String? {
+        guard let payload = sender.draggingPasteboard.string(forType: .string),
+              payload.hasPrefix("folder:") else { return nil }
+        return String(payload.dropFirst("folder:".count))
+    }
+
+    private func placement(for sender: NSDraggingInfo) -> SidebarDropPlacement {
+        let point = convert(sender.draggingLocation, from: nil)
+        return placementForTesting(localY: point.y)
+    }
+
+    fileprivate func placementForTesting(localY: CGFloat) -> SidebarDropPlacement {
+        localY < bounds.midY ? .before : .after
+    }
+
+    private func dragPreviewImage() -> NSImage {
+        let width = min(max(150, CGFloat(folder.count * 7 + 42)), 260)
+        let size = NSSize(width: width, height: 28)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.windowBackgroundColor.withAlphaComponent(0.96).setFill()
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 6, yRadius: 6).fill()
+        NSColor.separatorColor.setStroke()
+        let border = NSBezierPath(roundedRect: NSRect(x: 0.5, y: 0.5, width: width - 1, height: 27), xRadius: 6, yRadius: 6)
+        border.lineWidth = 1
+        border.stroke()
+        if let icon = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) {
+            icon.draw(in: NSRect(x: 9, y: 6, width: 16, height: 16))
+        }
+        (folder as NSString).draw(
+            in: NSRect(x: 32, y: 6, width: width - 40, height: 18),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: NSColor.labelColor
+            ]
+        )
+        image.unlockFocus()
+        return image
+    }
+}
+
+@MainActor
+enum SidebarReorderHarness {
+    static func run() -> Bool {
+        let surface = SidebarFolderDragSurfaceNSView(
+            frame: NSRect(x: 0, y: 0, width: 240, height: 24)
+        )
+        surface.folder = "Harness Folder"
+        surface.payloadText = SidebarDragPayload.folder("Harness Folder").rawValue
+        guard surface.subviews.isEmpty,
+              surface.hitTest(NSPoint(x: 4, y: 12)) === surface,
+              surface.hitTest(NSPoint(x: 236, y: 12)) === surface,
+              surface.placementForTesting(localY: 2) == .before,
+              surface.placementForTesting(localY: 22) == .after else {
+            fputs("SidebarReorderHarness failed: folder header is not one native drag surface\n", stderr)
+            return false
+        }
+        print("SidebarReorderHarness passed scenario=full-folder-header-drag-surface")
+        return true
     }
 }
 #endif

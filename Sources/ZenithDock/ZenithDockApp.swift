@@ -133,7 +133,7 @@ final class ZenithDockAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
 #if AGENTSDOCK_APPKIT_TIMELINE
         if isTimelineHarness {
-            let passed = AppKitTimelineHarness.run()
+            let passed = AppKitTimelineHarness.run() && SidebarReorderHarness.run()
             fflush(stdout)
             fflush(stderr)
             exit(passed ? EXIT_SUCCESS : EXIT_FAILURE)

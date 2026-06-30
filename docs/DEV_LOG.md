@@ -5923,3 +5923,9 @@ Follow-up from direct user input testing:
 - Directly replaying every intercepted wheel event through the outer scroll view fixed swallowed gestures but made fast trackpad movement unnaturally aggressive.
 - Vertical wheel events now take the normal AppKit responder path first. The timeline applies a one-run-loop fallback only when its clip origin proves that the nested hosted content swallowed the event.
 - Removed the custom 48-point discrete wheel step. Native scrolling uses AppKit's standard speed; fallback mouse-wheel events use a restrained 16-point step while precise trackpad deltas stay one-to-one.
+
+## 2026-06-30 - Repair folder reorder drag ownership
+
+- The reorder UI exposed an 18-point AppKit drag handle whose child image view won hit testing, so `mouseDragged` never reliably reached the drag source.
+- In reorder mode, each complete folder header is now one transparent native drag source and destination. The same view starts the drag, computes before/after placement, drives the blue insertion rule, performs the drop, and clears state when the session ends or is canceled.
+- Added a release-build harness proving that both edges of the full-width folder header hit the native drag surface and that top/bottom placement is deterministic.
