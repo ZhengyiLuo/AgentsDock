@@ -1236,7 +1236,14 @@ struct ToolBody: View {
 struct TraceGroupCard: View, Equatable {
     let events: [ZEvent]
     let linkContext: ZMarkdownLinkContext?
+    private let summary: TraceGroupComputedSummary
     @State private var expanded = false
+
+    init(events: [ZEvent], linkContext: ZMarkdownLinkContext?) {
+        self.events = events
+        self.linkContext = linkContext
+        summary = TraceGroupSummaryCache.summary(for: events)
+    }
 
     nonisolated static func == (lhs: TraceGroupCard, rhs: TraceGroupCard) -> Bool {
         signature(for: lhs.events) == signature(for: rhs.events) &&
@@ -1244,7 +1251,6 @@ struct TraceGroupCard: View, Equatable {
     }
 
     var body: some View {
-        let summary = TraceGroupSummaryCache.summary(for: events)
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "chevron.left.forwardslash.chevron.right")
                 .foregroundStyle(.secondary)
@@ -1306,8 +1312,8 @@ private final class TraceGroupSummaryEntry: NSObject {
 private enum TraceGroupSummaryCache {
     nonisolated(unsafe) private static let cache: NSCache<NSString, TraceGroupSummaryEntry> = {
         let cache = NSCache<NSString, TraceGroupSummaryEntry>()
-        cache.countLimit = 500
-        cache.totalCostLimit = 3_000
+        cache.countLimit = 2_000
+        cache.totalCostLimit = 64 * 1_024 * 1_024
         return cache
     }()
 
@@ -1317,8 +1323,26 @@ private enum TraceGroupSummaryCache {
             return cached.summary
         }
         let summary = makeSummary(for: events)
-        cache.setObject(TraceGroupSummaryEntry(summary), forKey: key, cost: max(1, events.count))
+        cache.setObject(
+            TraceGroupSummaryEntry(summary),
+            forKey: key,
+            cost: estimatedCost(of: summary)
+        )
         return summary
+    }
+
+    private static func estimatedCost(of summary: TraceGroupComputedSummary) -> Int {
+        var cost = 512
+        cost += summary.title.utf8.count
+        cost += summary.detail.utf8.count
+        cost += summary.previewText?.utf8.count ?? 0
+        if let changeSummary = summary.changeSummary {
+            cost += changeSummary.reviewText.utf8.count
+            cost += changeSummary.files.reduce(into: 0) { partial, file in
+                partial += file.path.utf8.count + 32
+            }
+        }
+        return max(1, cost)
     }
 
     private static func makeSummary(for events: [ZEvent]) -> TraceGroupComputedSummary {

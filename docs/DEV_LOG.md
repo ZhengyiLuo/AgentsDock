@@ -5846,3 +5846,18 @@ Third follow-up:
 - Added source guardrails for all three hot paths so sidebar polling and scroll
   metrics cannot silently reintroduce whole-timeline copies or preference-write
   invalidation during scrolling.
+
+## 2026-06-29 - Collapsed Trace Summary Working Set
+
+- Captured a second 20-second live profile while repeatedly scrolling up and
+  down. The app reached roughly 65 percent CPU, with more than a thousand main-
+  thread samples inside `TraceGroupSummaryCache.makeSummary`: recycled collapsed
+  trace rows were repeatedly reparsing large tool outputs and diff text.
+- The old cache mixed event-count units with a `3_000` total-cost limit, so a
+  long transcript containing 96-event trace groups retained only about thirty
+  summaries and thrashed immediately when scrolling backward.
+- Trace summaries are now retained with a 64 MB byte-based budget and a 2,000-
+  entry ceiling. Each `TraceGroupCard` captures its summary when configured;
+  subsequent SwiftUI row-height and layout body passes do not query or rebuild
+  it.
+- Added guardrails for summary lifetime, cache capacity, and byte-based costing.

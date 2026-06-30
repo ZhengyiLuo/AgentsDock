@@ -1384,6 +1384,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     let testBuild = try String(contentsOf: cwd.appendingPathComponent("scripts/build_and_deploy_test.sh"), encoding: .utf8)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
     let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
+    let eventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
 
     try assert(macStore.contains("@Published private(set) var sessionVideos: [ZFile] = []"), "Mac store must cache selected-session videos instead of deriving them during render")
     try assert(!macStore.contains("var sessionVideos: [ZFile] {\n        mergedFiles"), "Mac sessionVideos must not be a merge/sort computed getter")
@@ -1491,6 +1492,11 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(readCursorBlock.contains("allowDecrease: allowDecrease"), "Server read-cursor adoption must preserve explicit decrease semantics")
     try assert(macStore.contains("allowDecrease: serverManualUnread"), "Ordinary session polling must not lower the local read cursor")
     try assert(sidebar.contains("let canMarkUnread = isUnread || store.canMarkSessionUnread(session)"), "Sidebar rows must compute unread menu availability once per rebuild")
+    try assert(eventViews.contains("private let summary: TraceGroupComputedSummary"), "Collapsed trace cards must retain their computed summary across body layout passes")
+    try assert(eventViews.contains("summary = TraceGroupSummaryCache.summary(for: events)"), "Collapsed trace summaries must be captured when the recycled card is configured")
+    try assert(!eventViews.contains("var body: some View {\n        let summary = TraceGroupSummaryCache.summary(for: events)"), "Collapsed trace body layout must not recompute or re-query its summary")
+    try assert(eventViews.contains("cache.totalCostLimit = 64 * 1_024 * 1_024"), "Trace summary cache must retain a useful long-chat working set")
+    try assert(eventViews.contains("cost: estimatedCost(of: summary)"), "Trace summary cache cost must describe retained summary bytes, not source event count")
     guard let acceptedTurnStart = macStore.range(of: "private func applyAcceptedTurnEvent"),
           let acceptedTurnEnd = macStore.range(of: "private func clearSubmittedPromptIfCurrent", range: acceptedTurnStart.upperBound..<macStore.endIndex) else {
         throw GuardrailFailure.failed("Accepted-turn reconciliation block not found")
