@@ -34,6 +34,7 @@ print -r -- "${output}"
 required_scenarios=(
   stream-below-viewport
   height-change-above-viewport
+  variable-height-containment
   prepend-single-page
   active-momentum-priority
   chat-switch-isolation

@@ -1321,7 +1321,35 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!timeline.contains("LazyVStack("), "Mac timeline must never reintroduce the known 100% CPU LazyVStack layout spiral")
     try assert(timeline.contains("#if AGENTSDOCK_APPKIT_TIMELINE") && timeline.contains("AppKitTimelineTable("), "Isolated performance builds must use the explicit AppKit row recycler")
     try assert(timeline.contains("#else\n        ScrollView {") && timeline.contains("VStack(alignment: .leading, spacing: 14)"), "Production Mac timeline must retain the proven eager ScrollView/VStack path")
-    try assert(appKitTimeline.contains("usesAutomaticRowHeights = true"), "AppKit timeline must self-size variable-height chat rows")
+    let reusableCellSource = appKitTimeline.range(of: "private final class TimelineHostingCellView").map {
+        appKitTimeline[$0.lowerBound...]
+    }
+    let hasExplicitRowHeightDelegationAndCache =
+        appKitTimeline.contains("heightOfRow row: Int") &&
+        ["rowHeightCache", "rowHeights", "heightCache", "cachedRowHeight", "cachedHeight"].contains {
+            appKitTimeline.contains($0)
+        }
+    let hasWidthConstrainedMeasurement = reusableCellSource.map { cellSource in
+        (cellSource.contains("fittingSize") || cellSource.contains("systemLayoutSizeFitting")) &&
+            ["forWidth", "for width:", "frame.size.width", "NSSize(width:", "widthAnchor.constraint"].contains {
+                cellSource.contains($0)
+            }
+    } ?? false
+    try assert(
+        hasExplicitRowHeightDelegationAndCache || hasWidthConstrainedMeasurement,
+        "AppKit timeline must explicitly delegate/cache row heights or measure reusable content at the table width"
+    )
+    try assert(
+        !appKitTimeline.contains("usesAutomaticRowHeights = true") ||
+            hasExplicitRowHeightDelegationAndCache || hasWidthConstrainedMeasurement,
+        "AppKit timeline must not rely solely on usesAutomaticRowHeights for wrapped content"
+    )
+    let clipsReusableContent = reusableCellSource.map { cellSource in
+        cellSource.contains("clipsToBounds = true") ||
+            cellSource.contains("masksToBounds = true") ||
+            cellSource.contains("wantsDefaultClipping")
+    } ?? false
+    try assert(clipsReusableContent, "Recycled AppKit timeline cells must clip hosted content to their row bounds")
     try assert(appKitTimeline.contains("makeView(withIdentifier: cellIdentifier"), "AppKit timeline must recycle visible hosting cells")
     try assert(appKitTimeline.contains("renderedItemID != item.id || renderedVersion != item.version"), "Recycled cells must key content by row identity and version")
     try assert(!timeline.contains("ObjectIdentifier(row)"), "Streaming must not invalidate every visible row through projection object identity")

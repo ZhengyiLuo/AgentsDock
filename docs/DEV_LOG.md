@@ -5754,3 +5754,19 @@ Third follow-up:
   height above the viewport, one-page prepends, momentum priority, and rapid
   chat-switch isolation. The runner also requires one machine-readable pass
   record per scenario.
+
+## 2026-06-29 - Width-Aware Native Row Containment
+
+- Reproduced the real overlap failure with long wrapped messages at narrow,
+  wide, reused, and re-narrowed table widths. Automatic row heights alone used
+  an unconstrained SwiftUI intrinsic height, so a wrapped message could paint
+  beyond the shorter AppKit row allocated for it.
+- Constrained each recycled `NSHostingView` root to the actual table-column
+  width before AppKit measures it, and clipped both the cell and hosted view so
+  content cannot paint into adjacent rows during reuse or resize.
+- Width changes now remeasure visible content, invalidate row heights once, and
+  restore one semantic viewport anchor. Subpixel width noise is ignored to
+  avoid resize feedback and flicker.
+- Added the `variable-height-containment` native regression scenario. It checks
+  row geometry and measured hosted-content height across scrolling reuse and
+  multiple window widths.

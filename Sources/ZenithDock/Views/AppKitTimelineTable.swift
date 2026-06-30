@@ -95,12 +95,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private weak var tableView: NSTableView?
         private var boundsObserver: NSObjectProtocol?
         private var tableFrameObserver: NSObjectProtocol?
+        private var tableColumnResizeObserver: NSObjectProtocol?
         private var liveScrollStartObserver: NSObjectProtocol?
         private var liveScrollEndObserver: NSObjectProtocol?
         private var reportWorkItem: DispatchWorkItem?
         private var reportWorkGeneration = 0
         private var lastMetricsReportUptime: TimeInterval?
         private var lastMetrics: TimelineScrollMetrics?
+        private var lastColumnWidth: CGFloat?
+        private var isRefreshingColumnWidth = false
         private let metricsThrottleInterval: TimeInterval = 0.08
 
         private(set) var fullReloadCount = 0
@@ -174,7 +177,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard items.indices.contains(row) else { return nil }
             let cell = tableView.makeView(withIdentifier: cellIdentifier, owner: self) as? TimelineHostingCellView
                 ?? TimelineHostingCellView(identifier: cellIdentifier)
-            cell.configure(with: items[row])
+            cell.configure(
+                with: items[row],
+                forWidth: actualColumnWidth(tableColumn, in: tableView)
+            )
             cellConfigurationCount += 1
             return cell
         }
@@ -453,13 +459,44 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return }
             let upperBound = min(items.count, visibleRange.location + visibleRange.length)
             guard visibleRange.location < upperBound else { return }
+            let width = actualColumnWidth(nil, in: tableView)
 
             for row in visibleRange.location..<upperBound {
                 if let limit, !limit.contains(row) { continue }
                 guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
                     as? TimelineHostingCellView else { continue }
-                cell.configure(with: items[row])
+                cell.configure(with: items[row], forWidth: width)
+                cell.prepareForAutomaticHeightMeasurement()
                 cellConfigurationCount += 1
+            }
+        }
+
+        private func actualColumnWidth(
+            _ tableColumn: NSTableColumn?,
+            in tableView: NSTableView
+        ) -> CGFloat {
+            max(1, tableColumn?.width ?? tableView.tableColumns.first?.width ?? tableView.bounds.width)
+        }
+
+        private func refreshForColumnWidthChange(in tableView: NSTableView) {
+            guard !isRefreshingColumnWidth else { return }
+            let width = actualColumnWidth(nil, in: tableView)
+            if let lastColumnWidth, abs(width - lastColumnWidth) <= 0.5 { return }
+            lastColumnWidth = width
+            guard !items.isEmpty else { return }
+
+            let anchor = isLiveScrolling ? nil : captureAnchor()
+            isRefreshingColumnWidth = true
+            defer { isRefreshingColumnWidth = false }
+
+            refreshVisibleCells(in: tableView)
+            invalidateHeights(
+                of: IndexSet(integersIn: 0..<items.count),
+                in: tableView
+            )
+            tableView.layoutSubtreeIfNeeded()
+            if let anchor {
+                restore(anchor)
             }
         }
 
@@ -496,7 +533,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard let row = index(of: anchor, in: items),
                   let scrollView,
                   let tableView else { return }
-            tableView.layoutSubtreeIfNeeded()
+            prepareForPositioning(row: row, in: tableView)
             let rowRect = tableView.rect(ofRow: row)
             let targetY = rowRect.minY + anchor.offset
             AppKitTimelineDiagnostics.lastAnchorTargetY = targetY
@@ -545,7 +582,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private func scrollToBottom() {
             guard let scrollView, let tableView, !items.isEmpty else { return }
             AppKitTimelineDiagnostics.bottomRequestCount += 1
-            tableView.layoutSubtreeIfNeeded()
+            prepareForPositioning(row: items.count - 1, in: tableView)
             let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
             scroll(toY: targetY, in: scrollView, tableView: tableView)
             scheduleMetricsReport()
@@ -555,7 +592,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard let row = items.firstIndex(where: { $0.id == itemID }),
                   let scrollView,
                   let tableView else { return }
-            tableView.layoutSubtreeIfNeeded()
+            prepareForPositioning(row: row, in: tableView)
             let rowRect = tableView.rect(ofRow: row)
             let viewportHeight = scrollView.contentView.bounds.height
             let targetY: CGFloat
@@ -569,6 +606,25 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
             scroll(toY: targetY, in: scrollView, tableView: tableView)
             scheduleMetricsReport()
+        }
+
+        private func prepareForPositioning(row: Int, in tableView: NSTableView) {
+            guard items.indices.contains(row) else { return }
+            tableView.scrollRowToVisible(row)
+            tableView.layoutSubtreeIfNeeded()
+            _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            refreshVisibleCells(in: tableView)
+
+            var rows = IndexSet(integer: row)
+            let visibleRows = tableView.rows(in: tableView.visibleRect)
+            if visibleRows.location != NSNotFound, visibleRows.length > 0 {
+                let upperBound = min(items.count, visibleRows.location + visibleRows.length)
+                if visibleRows.location < upperBound {
+                    rows.insert(integersIn: visibleRows.location..<upperBound)
+                }
+            }
+            invalidateHeights(of: rows, in: tableView)
+            tableView.layoutSubtreeIfNeeded()
         }
 
         private func scroll(toY proposedY: CGFloat, in scrollView: NSScrollView, tableView: NSTableView) {
@@ -601,9 +657,23 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 forName: NSView.frameDidChangeNotification,
                 object: tableView,
                 queue: .main
-            ) { [weak self] _ in
+            ) { [weak self, weak tableView] _ in
                 MainActor.assumeIsolated {
+                    if let tableView {
+                        self?.refreshForColumnWidthChange(in: tableView)
+                    }
                     self?.scheduleMetricsReport()
+                }
+            }
+            tableColumnResizeObserver = center.addObserver(
+                forName: NSTableView.columnDidResizeNotification,
+                object: tableView,
+                queue: .main
+            ) { [weak self, weak tableView] _ in
+                MainActor.assumeIsolated {
+                    if let tableView {
+                        self?.refreshForColumnWidthChange(in: tableView)
+                    }
                 }
             }
             liveScrollStartObserver = center.addObserver(
@@ -632,10 +702,12 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let center = NotificationCenter.default
             if let boundsObserver { center.removeObserver(boundsObserver) }
             if let tableFrameObserver { center.removeObserver(tableFrameObserver) }
+            if let tableColumnResizeObserver { center.removeObserver(tableColumnResizeObserver) }
             if let liveScrollStartObserver { center.removeObserver(liveScrollStartObserver) }
             if let liveScrollEndObserver { center.removeObserver(liveScrollEndObserver) }
             boundsObserver = nil
             tableFrameObserver = nil
+            tableColumnResizeObserver = nil
             liveScrollStartObserver = nil
             liveScrollEndObserver = nil
             isLiveScrolling = false
@@ -698,6 +770,7 @@ enum AppKitTimelineHarness {
             ("prepend-single-page", checkPrependSinglePage),
             ("active-momentum-priority", checkActiveMomentumPriority),
             ("chat-switch-isolation", checkChatSwitchIsolation),
+            ("variable-height-containment", checkVariableHeightContainment),
         ]
         for (name, check) in scenarios {
             guard check() else { return false }
@@ -898,6 +971,43 @@ enum AppKitTimelineHarness {
         return true
     }
 
+    private static func checkVariableHeightContainment() -> Bool {
+        let wrappingItems = (0..<64).map { wrappingItem(index: $0) }
+        let fixture = Fixture(width: 360, items: wrappingItems)
+        defer { fixture.stop() }
+
+        fixture.settle()
+        if let failure = containmentFailure(in: fixture, phase: "initial-narrow") {
+            return fail("variable-height-containment", failure)
+        }
+
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("wrapping-row-48", .top)
+        ))
+        fixture.settle()
+        if let failure = containmentFailure(in: fixture, phase: "reused-narrow") {
+            return fail("variable-height-containment", failure)
+        }
+
+        fixture.resize(width: 760)
+        fixture.settle()
+        if let failure = containmentFailure(in: fixture, phase: "wide") {
+            return fail("variable-height-containment", failure)
+        }
+
+        fixture.resize(width: 320)
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 3,
+            destination: .row("wrapping-row-8", .top)
+        ))
+        fixture.settle()
+        if let failure = containmentFailure(in: fixture, phase: "renarrowed") {
+            return fail("variable-height-containment", failure)
+        }
+        return true
+    }
+
     @MainActor
     private final class Fixture {
         final class Metrics {
@@ -915,7 +1025,10 @@ enum AppKitTimelineHarness {
         private var command = AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
         private var forcedBottomRevision = 0
 
-        init() {
+        init(
+            width: CGFloat = 920,
+            items initialItems: [AppKitTimelineItem]? = nil
+        ) {
             let metrics = Metrics()
             self.metrics = metrics
             coordinator = AppKitTimelineTable.Coordinator { value in
@@ -924,14 +1037,18 @@ enum AppKitTimelineHarness {
             scrollView = coordinator.makeScrollView()
             tableView = scrollView.documentView as! NSTableView
             window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 920, height: 720),
+                contentRect: NSRect(x: 0, y: 0, width: width, height: 720),
                 styleMask: .borderless,
                 backing: .buffered,
                 defer: false
             )
-            items = (0..<320).map { index in
-                item(index: index, version: 0) {
-                    metrics.contentBuildCount += 1
+            if let initialItems {
+                items = initialItems
+            } else {
+                items = (0..<320).map { index in
+                    item(index: index, version: 0) {
+                        metrics.contentBuildCount += 1
+                    }
                 }
             }
             window.contentView = scrollView
@@ -969,6 +1086,10 @@ enum AppKitTimelineHarness {
 
         func settle() {
             settleLayout(window: window)
+        }
+
+        func resize(width: CGFloat) {
+            window.setContentSize(NSSize(width: width, height: window.contentLayoutRect.height))
         }
 
         func stop() {
@@ -1034,6 +1155,65 @@ enum AppKitTimelineHarness {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
         )
+    }
+
+    private static func wrappingItem(index: Int) -> AppKitTimelineItem {
+        let sentence = "Width constrained timeline content wraps naturally across many visual lines without explicit line breaks."
+        let text = Array(repeating: sentence, count: 28 + index % 5).joined(separator: " ")
+        return AppKitTimelineItem(
+            id: "wrapping-row-\(index)",
+            version: 0,
+            eventIDs: ["wrapping-event-\(index)"],
+            content: AnyView(
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Assistant")
+                        .font(.caption.bold())
+                    Text(text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 7)
+            )
+        )
+    }
+
+    private static func containmentFailure(in fixture: Fixture, phase: String) -> String? {
+        fixture.tableView.layoutSubtreeIfNeeded()
+        let columnWidth = fixture.tableView.tableColumns.first?.width ?? fixture.tableView.bounds.width
+        var instantiatedCount = 0
+        var maximumMeasuredHeight: CGFloat = 0
+        var previousRect: NSRect?
+
+        for row in 0..<fixture.tableView.numberOfRows {
+            let rowRect = fixture.tableView.rect(ofRow: row)
+            if let previousRect, previousRect.maxY > rowRect.minY + 0.5 {
+                return "phase=\(phase) rows=\(row - 1),\(row) overlap=\(previousRect.maxY - rowRect.minY)"
+            }
+            previousRect = rowRect
+
+            guard let cell = fixture.tableView.view(
+                atColumn: 0,
+                row: row,
+                makeIfNecessary: false
+            ) as? TimelineHostingCellView else { continue }
+            instantiatedCount += 1
+            let measuredHeight = cell.exactMeasuredContentHeight
+            maximumMeasuredHeight = max(maximumMeasuredHeight, measuredHeight)
+            if rowRect.intersects(fixture.tableView.visibleRect),
+               abs(cell.renderedWidth - columnWidth) > 0.5 {
+                return "phase=\(phase) row=\(row) width=\(cell.renderedWidth) column=\(columnWidth)"
+            }
+            if rowRect.height < measuredHeight - 1 {
+                return "phase=\(phase) row=\(row) rect=\(rowRect.height) measured=\(measuredHeight)"
+            }
+        }
+
+        guard instantiatedCount > 0, maximumMeasuredHeight > 240 else {
+            return "phase=\(phase) cells=\(instantiatedCount) tallest=\(maximumMeasuredHeight)"
+        }
+        return nil
     }
 
     private static func settleLayout(window: NSWindow) {
@@ -1194,12 +1374,25 @@ enum AppKitTimelineIntegrationHarness {
 
 private final class TimelineHostingCellView: NSTableCellView {
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
+    private var renderedContent: AnyView?
     private var renderedItemID: String?
     private(set) var renderedVersion: Int?
+    private(set) var renderedWidth: CGFloat = 0
+
+    var exactMeasuredContentHeight: CGFloat {
+        let intrinsicHeight = hostingView.intrinsicContentSize.height
+        return intrinsicHeight > 0 ? intrinsicHeight : hostingView.fittingSize.height
+    }
+
+    func prepareForAutomaticHeightMeasurement() {
+        hostingView.layoutSubtreeIfNeeded()
+    }
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
+        clipsToBounds = true
+        hostingView.clipsToBounds = true
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         hostingView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         hostingView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1217,13 +1410,21 @@ private final class TimelineHostingCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(with item: AppKitTimelineItem) {
-        guard renderedItemID != item.id || renderedVersion != item.version else { return }
-        renderedItemID = item.id
-        renderedVersion = item.version
-        hostingView.rootView = item.makeContent()
+    func configure(with item: AppKitTimelineItem, forWidth width: CGFloat) {
+        let contentChanged = renderedItemID != item.id || renderedVersion != item.version
+        if contentChanged {
+            renderedItemID = item.id
+            renderedVersion = item.version
+            renderedContent = item.makeContent()
+        }
+
+        let width = max(1, width)
+        guard contentChanged || renderedWidth != width, let renderedContent else { return }
+        renderedWidth = width
+        hostingView.rootView = AnyView(
+            renderedContent.frame(width: width, alignment: .topLeading)
+        )
         hostingView.invalidateIntrinsicContentSize()
-        hostingView.layoutSubtreeIfNeeded()
     }
 }
 #endif

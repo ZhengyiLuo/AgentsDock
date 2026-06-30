@@ -3,6 +3,7 @@ import Foundation
 private let nativeScrollingRegressionScenarios = [
     (name: "stream-below-viewport", entryPoint: "checkStreamingBelowViewport"),
     (name: "height-change-above-viewport", entryPoint: "checkHeightChangeAboveViewport"),
+    (name: "variable-height-containment", entryPoint: "checkVariableHeightContainment"),
     (name: "prepend-single-page", entryPoint: "checkPrependSinglePage"),
     (name: "active-momentum-priority", entryPoint: "checkActiveMomentumPriority"),
     (name: "chat-switch-isolation", entryPoint: "checkChatSwitchIsolation"),
