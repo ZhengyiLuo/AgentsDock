@@ -147,8 +147,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var isDiscreteScrolling = false
         private var scrollIsolationInstalled = false
         private var geometryMutationDepth = 0
-        private var bottomPinActive = false
-        private var bottomPinReleaseWorkItem: DispatchWorkItem?
         private var liveScrollStartOriginY: CGFloat?
         private var liveScrollStartUptime: TimeInterval?
         private var liveScrollUnknownHeightCount = 0
@@ -291,7 +289,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 isDiscreteScrolling = false
                 scrollIsolationInstalled = false
                 cancelDiscreteScrollSettle()
-                releaseBottomPin()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
                 cancelScheduledHeightUpdate(clearPending: true)
@@ -738,7 +735,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let affectsRowsAboveAnchor = anchorRow.map { anchorRow in
                 rows.contains(where: { $0 < anchorRow })
             } ?? false
-            let shouldRestoreBottom = bottomPinActive
             let originBefore = scrollView.documentVisibleRect.minY
             let startedAt = ProcessInfo.processInfo.systemUptime
 
@@ -746,16 +742,14 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 invalidateHeights(of: rows, in: tableView)
                 tableView.layoutSubtreeIfNeeded()
 
-                if shouldRestoreBottom {
-                    restoreKnownBottom(in: scrollView, tableView: tableView)
-                } else if affectsRowsAboveAnchor, let anchor {
+                if affectsRowsAboveAnchor, let anchor {
                     restoreKnown(anchor, in: scrollView, tableView: tableView)
                 }
             }
             let originAfter = scrollView.documentVisibleRect.minY
             AppLogger.info(
                 "PERF native height flush rows=\(rows.count) " +
-                    "above_anchor=\(affectsRowsAboveAnchor) bottom_pin=\(shouldRestoreBottom) " +
+                    "above_anchor=\(affectsRowsAboveAnchor) " +
                     "origin=\(Self.format(originBefore))->\(Self.format(originAfter)) " +
                     "ms=\(Self.format((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))"
             )
@@ -777,11 +771,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
         ) {
             guard let row = index(of: anchor, in: items) else { return }
             let targetY = tableView.rect(ofRow: row).minY + anchor.offset
-            scroll(toY: targetY, in: scrollView, tableView: tableView)
-        }
-
-        private func restoreKnownBottom(in scrollView: NSScrollView, tableView: NSTableView) {
-            let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
             scroll(toY: targetY, in: scrollView, tableView: tableView)
         }
 
@@ -932,7 +921,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private func scrollToBottom() {
             guard let scrollView, let tableView, !items.isEmpty else { return }
             AppKitTimelineDiagnostics.bottomRequestCount += 1
-            activateBottomPin()
             prepareForPositioning(row: items.count - 1, in: tableView)
             let targetY = max(0, tableView.bounds.maxY - scrollView.contentView.bounds.height)
             scroll(toY: targetY, in: scrollView, tableView: tableView)
@@ -943,7 +931,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             guard let row = items.firstIndex(where: { $0.id == itemID }),
                   let scrollView,
                   let tableView else { return }
-            releaseBottomPin()
             prepareForPositioning(row: row, in: tableView)
             let rowRect = tableView.rect(ofRow: row)
             let viewportHeight = scrollView.contentView.bounds.height
@@ -1001,25 +988,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             return body()
         }
 
-        private func activateBottomPin() {
-            bottomPinActive = true
-            bottomPinReleaseWorkItem?.cancel()
-            let workItem = DispatchWorkItem { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.bottomPinActive = false
-                    self?.bottomPinReleaseWorkItem = nil
-                }
-            }
-            bottomPinReleaseWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.25, execute: workItem)
-        }
-
-        private func releaseBottomPin() {
-            bottomPinActive = false
-            bottomPinReleaseWorkItem?.cancel()
-            bottomPinReleaseWorkItem = nil
-        }
-
         private func beginScrollIsolationIfNeeded() {
             guard !scrollIsolationInstalled else { return }
             scrollIsolationInstalled = true
@@ -1061,7 +1029,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func noteUserBoundsChange() {
             guard geometryMutationDepth == 0 else { return }
-            releaseBottomPin()
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
             scheduleDiscreteScrollSettle()
@@ -1135,7 +1102,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.isLiveScrolling = true
-                    self.releaseBottomPin()
                     self.beginScrollIsolationIfNeeded()
                     self.scheduleMetricsReport()
                 }
@@ -1200,7 +1166,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             deferredItems = nil
             deferredColumnWidthRefresh = false
             cancelDiscreteScrollSettle()
-            releaseBottomPin()
             cancelScheduledHeightUpdate(clearPending: true)
             cancelScheduledMetricsReport()
         }

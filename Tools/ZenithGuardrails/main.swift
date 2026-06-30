@@ -1444,7 +1444,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("sameSessionFallbackReloadCount == 0"), "Real-chat stress runs must reject same-chat full table reloads")
     try assert(appKitTimeline.contains("willStartLiveScrollNotification") && appKitTimeline.contains("didEndLiveScrollNotification"), "Forced positioning must remain suppressed through the full live/momentum scroll interval")
     try assert(appKitTimeline.contains("noteUserBoundsChange()") && appKitTimeline.contains("scheduleDiscreteScrollSettle()"), "Mouse-wheel and scrollbar movement must receive the same isolation as trackpad momentum")
-    try assert(appKitTimeline.contains("bottomPinActive") && !appKitTimeline.contains("let wasAtBottom"), "Only explicit navigation may pin measured rows to the bottom")
+    try assert(!appKitTimeline.contains("bottomPinActive") && !appKitTimeline.contains("restoreKnownBottom"), "Measured row heights must never perform delayed bottom snapping")
     try assert(appKitTimeline.contains("deadline: .now() + 0.18"), "Discrete scrolling must debounce settling without making the UI feel sticky")
     try assert(!appKitTimeline.contains("for delay in [0.08, 0.20]"), "Chat opening must not visibly chase the bottom across delayed layout passes")
     try assert(appKitTimeline.contains("commandChangesPosition") && appKitTimeline.contains("shouldRestoreAnchor"), "AppKit row mutation and any required positioning must share one coordinator update")

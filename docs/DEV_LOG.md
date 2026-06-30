@@ -5905,9 +5905,9 @@ Follow-up from direct user input testing:
   for trackpad momentum and settles 180 ms after the final movement. Internal
   table mutations are scoped so their bounds notifications cannot masquerade as
   input.
-- Bottom pinning is now an explicit, short-lived navigation intent created only
-  by send/go-to-bottom/chat-open commands. Being geometrically near the bottom
-  is never enough to pull the viewport back.
+- Bottom navigation is now a single explicit operation. Row measurement never
+  retains or infers a bottom-following state, so a later correction cannot pull
+  the viewport back after send, chat open, or go-to-bottom completes.
 - Added the `discrete-scroll-isolation` scenario for wheel movement without
   live-scroll notifications. It rejects both mid-gesture height invalidation and
   post-gesture bottom snapping.
