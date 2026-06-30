@@ -5970,3 +5970,7 @@ Follow-up from live history-boundary testing:
   measurements immediately, but cannot invalidate table heights during the
   half-second anchor-restore pass; their cached correction is reconsidered when
   the user actually reaches those rows.
+- Explicit navigation (chat open, go-to-bottom, find-in-chat) synchronously
+  measures only the materialized visible cells before its single origin write.
+  This avoids a delayed bottom chase without measuring or constructing the full
+  transcript.

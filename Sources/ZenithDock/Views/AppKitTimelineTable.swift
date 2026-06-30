@@ -1076,6 +1076,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 tableView.layoutSubtreeIfNeeded()
                 _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
                 refreshVisibleCells(in: tableView)
+                measureVisibleHeightsNow(in: tableView)
 
                 var rows = IndexSet(integer: row)
                 let visibleRows = tableView.rows(in: tableView.visibleRect)
@@ -1087,6 +1088,18 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 }
                 invalidateHeights(of: rows, in: tableView)
                 tableView.layoutSubtreeIfNeeded()
+            }
+        }
+
+        private func measureVisibleHeightsNow(in tableView: NSTableView) {
+            let visibleRange = tableView.rows(in: tableView.visibleRect)
+            guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return }
+            let upperBound = min(items.count, visibleRange.location + visibleRange.length)
+            guard visibleRange.location < upperBound else { return }
+            for row in visibleRange.location..<upperBound {
+                guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                    as? TimelineHostingCellView else { continue }
+                cell.measureAndReportHeightNow()
             }
         }
 
@@ -2343,6 +2356,12 @@ private final class TimelineHostingCellView: NSTableCellView {
             heightMeasurementWorkItem?.cancel()
             heightMeasurementWorkItem = nil
         }
+    }
+
+    func measureAndReportHeightNow() {
+        heightMeasurementWorkItem?.cancel()
+        heightMeasurementWorkItem = nil
+        measureAndReportHeight()
     }
 
     private func requestHeightMeasurement() {
