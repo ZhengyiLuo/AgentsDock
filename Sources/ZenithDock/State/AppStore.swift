@@ -126,6 +126,12 @@ final class AppStore: ObservableObject {
     private var selectionGeneration = 0
     private var memoryChatCache: [String: CachedChat] = [:]
     private var memoryChatCacheOrder: [String] = []
+    private struct VerifiedTimelineTail {
+        let latestSeq: Int
+        let eventIDs: [String]
+        let verifiedAt: Date
+    }
+    private var verifiedTimelineTailsBySessionID: [String: VerifiedTimelineTail] = [:]
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
     private var unreadNotificationTracker = ZUnreadNotificationTracker()
@@ -1397,6 +1403,7 @@ final class AppStore: ObservableObject {
         omittedHistoryEventCount = 0
         memoryChatCache = [:]
         memoryChatCacheOrder = []
+        verifiedTimelineTailsBySessionID = [:]
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
         pinnedItemsBySessionID = loadPinnedItems()
@@ -1843,7 +1850,29 @@ final class AppStore: ObservableObject {
               let knownLatestSeq = sessions.first(where: { $0.id == sessionID })?.latest_event_seq else {
             return false
         }
-        return knownLatestSeq <= cachedLastSeq
+        guard knownLatestSeq <= cachedLastSeq,
+              let verified = verifiedTimelineTailsBySessionID[sessionID],
+              verified.latestSeq == cachedLastSeq,
+              Date().timeIntervalSince(verified.verifiedAt) <= cachedTailFreshnessWindow else {
+            return false
+        }
+        return verified.eventIDs == timelineTailEventIDs(sessionID: sessionID)
+    }
+
+    private func markTimelineTailVerified(sessionID: String) {
+        verifiedTimelineTailsBySessionID[sessionID] = VerifiedTimelineTail(
+            latestSeq: lastSeq,
+            eventIDs: timelineTailEventIDs(sessionID: sessionID),
+            verifiedAt: Date()
+        )
+    }
+
+    private func timelineTailEventIDs(sessionID: String) -> [String] {
+        events
+            .lazy
+            .filter { $0.session_id == sessionID }
+            .suffix(maxCachedTimelineEvents)
+            .map(\.id)
     }
 
     private func refreshCachedSessionLatestTail(sessionID: String, generation: Int, cachedLastSeq: Int) async {
@@ -1861,7 +1890,7 @@ final class AppStore: ObservableObject {
             let res: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: [
-                    URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
+                    URLQueryItem(name: "limit", value: "\(maxCachedTimelineEvents)"),
                     URLQueryItem(name: "tail", value: "true"),
                     URLQueryItem(name: "visible", value: "true")
                 ]
@@ -1874,6 +1903,7 @@ final class AppStore: ObservableObject {
             let changedTimeline = applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
             markSessionRead(sessionID)
             loadedSessionID = sessionID
+            markTimelineTailVerified(sessionID: sessionID)
             saveSelectedChatCache()
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
@@ -1918,6 +1948,7 @@ final class AppStore: ObservableObject {
             setStatus("Loaded latest chat")
             refreshSessionFilesFromLoadedEvents()
             loadedSessionID = sessionID
+            markTimelineTailVerified(sessionID: sessionID)
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
             saveSelectedChatCache()
             if refreshFiles {
@@ -3477,7 +3508,19 @@ final class AppStore: ObservableObject {
         }
         let oldCount = events.count
         let oldTextWeight = timelineDisplayWeight(displayEvents)
-        let preservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []
+        let candidatePreservedEvents = preserveExisting ? events.filter { $0.session_id == sessionID } : []
+        let candidatePreservedIDs = Set(candidatePreservedEvents.map(\.id))
+        let snapshotIDs = Set(snapshotEvents.map(\.id))
+        let disconnectedSnapshot = !candidatePreservedEvents.isEmpty &&
+            !snapshotEvents.isEmpty &&
+            candidatePreservedIDs.isDisjoint(with: snapshotIDs)
+        let preservedEvents = disconnectedSnapshot ? [] : candidatePreservedEvents
+        if disconnectedSnapshot {
+            AppLogger.warning(
+                "replaced disconnected cached timeline session=\(sessionID) " +
+                    "cached=\(candidatePreservedEvents.count) authoritative=\(snapshotEvents.count)"
+            )
+        }
         let preservedIDs = Set(preservedEvents.map(\.id))
         let newSnapshotEventCount = preserveExisting
             ? snapshotEvents.filter { !preservedIDs.contains($0.id) }.count

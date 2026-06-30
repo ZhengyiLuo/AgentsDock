@@ -88,14 +88,14 @@ private final class AppKitTimelineRowHeightKey: NSObject {
 private final class AppKitTimelineOwningScrollView: NSScrollView {
     var onVerticalWheel: (() -> Void)?
     private var wheelMonitor: Any?
-    fileprivate private(set) var fallbackWheelCount = 0
+    fileprivate private(set) var routedWheelCount = 0
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         stopRoutingWheelEvents()
         guard window != nil else { return }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            self?.observeWheelEventIfNeeded(event) ?? event
+            self?.routeWheelEventIfNeeded(event) ?? event
         }
     }
 
@@ -110,7 +110,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         self.wheelMonitor = nil
     }
 
-    private func observeWheelEventIfNeeded(_ event: NSEvent) -> NSEvent {
+    private func routeWheelEventIfNeeded(_ event: NSEvent) -> NSEvent? {
         guard let window,
               event.windowNumber == window.windowNumber,
               !isHidden,
@@ -128,37 +128,17 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         guard let hitView = contentView.hitTest(contentPoint),
               hitView === self || hitView.isDescendant(of: self) else { return event }
 
-        scheduleFallbackWheel(
-            verticalDelta: verticalDelta,
-            isPrecise: event.hasPreciseScrollingDeltas,
-            originBeforeDispatch: self.contentView.bounds.origin
-        )
-        return event
+        // SwiftUI hosting views can consume wheel events before the enclosing
+        // NSScrollView sees them. Route the event here and remove it from normal
+        // dispatch so one physical delta can never be applied twice.
+        routeVerticalWheel(event)
+        return nil
     }
 
-    fileprivate func scheduleFallbackWheel(
-        verticalDelta: CGFloat,
-        isPrecise: Bool,
-        originBeforeDispatch: NSPoint
-    ) {
-        let workItem = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, let documentView = self.documentView else { return }
-                let currentOrigin = self.contentView.bounds.origin
-                guard abs(currentOrigin.y - originBeforeDispatch.y) <= 0.5 else { return }
-
-                let pointDelta = isPrecise ? verticalDelta : verticalDelta * 16
-                let maxY = max(0, documentView.bounds.maxY - self.contentView.bounds.height)
-                let targetY = min(max(0, currentOrigin.y - pointDelta), maxY)
-                guard abs(targetY - currentOrigin.y) > 0.5 else { return }
-
-                self.onVerticalWheel?()
-                self.contentView.scroll(to: NSPoint(x: currentOrigin.x, y: targetY))
-                self.reflectScrolledClipView(self.contentView)
-                self.fallbackWheelCount += 1
-            }
-        }
-        DispatchQueue.main.async(execute: workItem)
+    fileprivate func routeVerticalWheel(_ event: NSEvent) {
+        routedWheelCount += 1
+        onVerticalWheel?()
+        super.scrollWheel(with: event)
     }
 }
 
@@ -1319,7 +1299,7 @@ enum AppKitTimelineHarness {
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
             ("native-wheel-ownership", checkNativeWheelOwnership),
-            ("swallowed-wheel-fallback", checkSwallowedWheelFallback),
+            ("hosted-wheel-single-dispatch", checkHostedWheelSingleDispatch),
         ]
         for (name, check) in scenarios {
             guard check() else { return false }
@@ -1488,30 +1468,36 @@ enum AppKitTimelineHarness {
         return true
     }
 
-    private static func checkSwallowedWheelFallback() -> Bool {
+    private static func checkHostedWheelSingleDispatch() -> Bool {
         let fixture = Fixture()
         defer { fixture.stop() }
         guard let owningScrollView = fixture.scrollView as? AppKitTimelineOwningScrollView else {
-            return fail("swallowed-wheel-fallback", "timeline does not own its scroll view")
+            return fail("hosted-wheel-single-dispatch", "timeline does not own its scroll view")
         }
         fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 4_000))
         fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
         fixture.settle()
         let originBefore = fixture.scrollView.documentVisibleRect.minY
-        let fallbackCountBefore = owningScrollView.fallbackWheelCount
-        owningScrollView.scheduleFallbackWheel(
-            verticalDelta: 80,
-            isPrecise: true,
-            originBeforeDispatch: fixture.scrollView.contentView.bounds.origin
-        )
+        let routedCountBefore = owningScrollView.routedWheelCount
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 1,
+            wheel1: 80,
+            wheel2: 0,
+            wheel3: 0
+        ).flatMap(NSEvent.init(cgEvent:)) else {
+            return fail("hosted-wheel-single-dispatch", "could not construct a wheel event")
+        }
+        owningScrollView.routeVerticalWheel(event)
         fixture.settle()
-        let distance = originBefore - fixture.scrollView.documentVisibleRect.minY
-        guard owningScrollView.fallbackWheelCount == fallbackCountBefore + 1,
-              abs(distance - 80) <= 1 else {
+        let originAfter = fixture.scrollView.documentVisibleRect.minY
+        guard owningScrollView.routedWheelCount == routedCountBefore + 1,
+              abs(originAfter - originBefore) > 0.5 else {
             return fail(
-                "swallowed-wheel-fallback",
-                "fallback speed was not one-to-one distance=\(distance) " +
-                    "count=\(owningScrollView.fallbackWheelCount - fallbackCountBefore)"
+                "hosted-wheel-single-dispatch",
+                "hosted wheel was not dispatched exactly once origin=\(originBefore)->\(originAfter) " +
+                    "count=\(owningScrollView.routedWheelCount - routedCountBefore)"
             )
         }
         return true

@@ -5929,3 +5929,22 @@ Follow-up from direct user input testing:
 - The reorder UI exposed an 18-point AppKit drag handle whose child image view won hit testing, so `mouseDragged` never reliably reached the drag source.
 - In reorder mode, each complete folder header is now one transparent native drag source and destination. The same view starts the drag, computes before/after placement, drives the blue insertion rule, performs the drop, and clears state when the session ends or is canceled.
 - Added a release-build harness proving that both edges of the full-width folder header hit the native drag surface and that top/bottom placement is deterministic.
+
+## 2026-06-30 - Single-owner timeline input and verified cache tails
+
+- The one-run-loop wheel fallback could run before a hosted SwiftUI control's
+  delayed native scroll reached the outer clip view. The same physical trackpad
+  delta was then applied twice, producing unnaturally fast movement and apparent
+  direction jumps.
+- Vertical wheel events under the timeline now have exactly one owner. The local
+  monitor sends the original event through the native `NSScrollView` once and
+  removes it from normal dispatch; no synthetic or delayed delta remains.
+- A cache was previously considered fresh when its maximum sequence matched the
+  session list. That did not prove the middle of the cached window was complete.
+  Each process now records an authoritative tail verification, including the
+  local event-ID suffix, before a warm-cache refresh may be skipped.
+- The first cached open in a process reconciles the complete 720-event persisted
+  tail. Disconnected cache and server windows are replaced instead of merged
+  across an invisible gap.
+- Added guardrails for single-dispatch wheel routing, full-window reconciliation,
+  event-ID freshness verification, and disconnected-window replacement.
