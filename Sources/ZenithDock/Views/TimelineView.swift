@@ -331,7 +331,12 @@ struct TimelineView: View {
                         EmptyStateView()
                     } else {
                         if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
-                            TimelineHistoryLoader(hiddenRenderedRowCount: hiddenRenderedRowCount) {
+                            TimelineHistoryLoader(
+                                totalOlderCount: store.hiddenDisplayEventCount + hiddenRenderedRowCount,
+                                isLoading: store.isLoadingOlderHistory,
+                                canLoadOlder: store.canLoadOlderHistory,
+                                hasHiddenRenderedRows: hiddenRenderedRowCount > 0
+                            ) {
                                 revealOlderRowsShowingNewPage(proxy)
                             } onLoadOlder: {
                                 loadOlderHistoryFromIntent(proxy)
@@ -443,8 +448,10 @@ struct TimelineView: View {
             appKitHistoryLoadInFlight
         if store.hiddenDisplayEventCount > 0 || historyIsLoading {
             let loader = TimelineHistoryLoader(
-                hiddenRenderedRowCount: 0,
-                isLoadingOverride: historyIsLoading
+                totalOlderCount: store.hiddenDisplayEventCount,
+                isLoading: historyIsLoading,
+                canLoadOlder: store.canLoadOlderHistory,
+                hasHiddenRenderedRows: false
             ) {
 #if DEBUG
                 assertionFailure("AppKit timeline must not expose local row paging")
@@ -500,7 +507,6 @@ struct TimelineView: View {
     private func appKitRowContent<Content: View>(_ content: Content) -> AnyView {
         AnyView(
             content
-                .environmentObject(store)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 7)
@@ -2478,9 +2484,10 @@ struct JobRunGroupRow: Identifiable, Hashable {
 }
 
 private struct TimelineHistoryLoader: View {
-    @EnvironmentObject private var store: AppStore
-    let hiddenRenderedRowCount: Int
-    var isLoadingOverride: Bool? = nil
+    let totalOlderCount: Int
+    let isLoading: Bool
+    let canLoadOlder: Bool
+    let hasHiddenRenderedRows: Bool
     let onShowOlderRows: () -> Void
     let onLoadOlder: () -> Void
 
@@ -2491,7 +2498,7 @@ private struct TimelineHistoryLoader: View {
             Text("\(totalOlderCount) older hidden")
                 .foregroundStyle(.secondary)
             Spacer()
-            if hiddenRenderedRowCount > 0 {
+            if hasHiddenRenderedRows {
                 Button {
                     onShowOlderRows()
                 } label: {
@@ -2499,7 +2506,7 @@ private struct TimelineHistoryLoader: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Show the previous rendered page")
-            } else if isLoadingOverride ?? store.isLoadingOlderHistory {
+            } else if isLoading {
                 ProgressView()
                     .controlSize(.small)
                 Text("Loading")
@@ -2511,7 +2518,7 @@ private struct TimelineHistoryLoader: View {
                     Label("Load Older", systemImage: "arrow.up.circle")
                 }
                 .buttonStyle(.bordered)
-                .disabled(!store.canLoadOlderHistory)
+                .disabled(!canLoadOlder)
                 .help("Load the previous page of chat history")
             }
         }
@@ -2523,9 +2530,6 @@ private struct TimelineHistoryLoader: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
     }
 
-    private var totalOlderCount: Int {
-        store.hiddenDisplayEventCount + hiddenRenderedRowCount
-    }
 }
 
 struct HeaderView: View {

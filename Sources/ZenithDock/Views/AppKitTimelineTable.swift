@@ -104,6 +104,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var lastMetrics: TimelineScrollMetrics?
         private var lastColumnWidth: CGFloat?
         private var isRefreshingColumnWidth = false
+        private var deferredItems: [AppKitTimelineItem]?
+        private var deferredColumnWidthRefresh = false
         private let metricsThrottleInterval: TimeInterval = 0.08
 
         private(set) var fullReloadCount = 0
@@ -204,10 +206,26 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // Momentum belongs to the old document. A chat switch is an
                 // explicit navigation and must position the new document once.
                 isLiveScrolling = false
+                deferredItems = nil
+                deferredColumnWidthRefresh = false
             }
             let commandChanged = hasReceivedUpdate && scrollCommand.revision != lastScrollCommandRevision
             let forcedBottomChanged = hasReceivedUpdate && forcedBottomRevision != lastForcedBottomRevision
             let commandChangesPosition = commandChanged && scrollCommand.destination != .none
+
+            // AppKit's automatic row-height pass mutates the document geometry as
+            // rows are inserted or reconfigured. Doing that in the middle of a
+            // trackpad gesture fights the clip view's momentum and produces the
+            // characteristic up/down tug. Keep only the newest immutable snapshot
+            // and apply it once momentum ends. Explicit navigation still wins.
+            if isLiveScrolling,
+               !sessionChanged,
+               !commandChangesPosition,
+               !forcedBottomChanged {
+                deferredItems = nextItems
+                return
+            }
+            deferredItems = nil
             let anchor = !sessionChanged &&
                 !isLiveScrolling &&
                 !commandChangesPosition &&
@@ -480,8 +498,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func refreshForColumnWidthChange(in tableView: NSTableView) {
             guard !isRefreshingColumnWidth else { return }
+            if isLiveScrolling {
+                deferredColumnWidthRefresh = true
+                return
+            }
             let width = actualColumnWidth(nil, in: tableView)
             if let lastColumnWidth, abs(width - lastColumnWidth) <= 0.5 { return }
+            deferredColumnWidthRefresh = false
             lastColumnWidth = width
             guard !items.isEmpty else { return }
 
@@ -692,9 +715,38 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.isLiveScrolling = false
-                    self?.scheduleMetricsReport()
+                    guard let self else { return }
+                    self.isLiveScrolling = false
+                    self.flushDeferredScrollWork()
+                    self.scheduleMetricsReport()
                 }
+            }
+        }
+
+        private func flushDeferredScrollWork() {
+            guard let tableView else { return }
+            if let deferredItems {
+                self.deferredItems = nil
+                let previousItems = items
+                let anchor = captureAnchor()
+                let shouldRestoreAnchor = anchor.map {
+                    geometryChangesAffectAnchor(
+                        $0,
+                        previousItems: previousItems,
+                        nextItems: deferredItems
+                    )
+                } ?? false
+                _ = applyItems(
+                    deferredItems,
+                    previousItems: previousItems,
+                    sessionChanged: false
+                )
+                if shouldRestoreAnchor, let anchor {
+                    restore(anchor)
+                }
+            }
+            if deferredColumnWidthRefresh {
+                refreshForColumnWidthChange(in: tableView)
             }
         }
 
@@ -711,6 +763,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollStartObserver = nil
             liveScrollEndObserver = nil
             isLiveScrolling = false
+            deferredItems = nil
+            deferredColumnWidthRefresh = false
             cancelScheduledMetricsReport()
         }
 
@@ -769,6 +823,7 @@ enum AppKitTimelineHarness {
             ("height-change-above-viewport", checkHeightChangeAboveViewport),
             ("prepend-single-page", checkPrependSinglePage),
             ("active-momentum-priority", checkActiveMomentumPriority),
+            ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("variable-height-containment", checkVariableHeightContainment),
         ]
@@ -937,6 +992,59 @@ enum AppKitTimelineHarness {
               originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
               fixture.coordinator.clipOriginWriteCount == writes else {
             return fail("active-momentum-priority", "suppressed positioning replayed after momentum")
+        }
+        return true
+    }
+
+    private static func checkCoalescedLiveUpdates() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("row-160", .top)
+        ))
+        fixture.settle()
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        guard fixture.coordinator.isLiveScrolling else {
+            return fail("coalesced-live-updates", "live scroll did not start")
+        }
+
+        let rowCount = fixture.tableView.numberOfRows
+        let structuralUpdates = fixture.coordinator.structuralUpdateCount
+        let writes = fixture.coordinator.clipOriginWriteCount
+        let origin = fixture.scrollView.contentView.bounds.origin
+        fixture.items[160] = item(index: 160, version: 1, paragraphCount: 18)
+        fixture.items.append(item(index: 320, version: 0))
+        fixture.update()
+        fixture.settle()
+
+        guard fixture.tableView.numberOfRows == rowCount,
+              fixture.coordinator.structuralUpdateCount == structuralUpdates,
+              fixture.coordinator.clipOriginWriteCount == writes,
+              originsMatch(origin, fixture.scrollView.contentView.bounds.origin) else {
+            return fail("coalesced-live-updates", "snapshot mutated during live scroll")
+        }
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        fixture.settle()
+        guard fixture.tableView.numberOfRows == fixture.items.count,
+              fixture.coordinator.structuralUpdateCount == structuralUpdates + 1,
+              fixture.coordinator.clipOriginWriteCount == writes + 1,
+              originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
+              let retainedCell = fixture.tableView.view(
+                  atColumn: 0,
+                  row: 160,
+                  makeIfNecessary: false
+              ) as? TimelineHostingCellView,
+              retainedCell.renderedVersion == 1 else {
+            return fail("coalesced-live-updates", "deferred snapshot did not settle once")
         }
         return true
     }

@@ -6,6 +6,7 @@ private let nativeScrollingRegressionScenarios = [
     (name: "variable-height-containment", entryPoint: "checkVariableHeightContainment"),
     (name: "prepend-single-page", entryPoint: "checkPrependSinglePage"),
     (name: "active-momentum-priority", entryPoint: "checkActiveMomentumPriority"),
+    (name: "coalesced-live-updates", entryPoint: "checkCoalescedLiveUpdates"),
     (name: "chat-switch-isolation", entryPoint: "checkChatSwitchIsolation"),
 ]
 
@@ -62,6 +63,11 @@ func checkAgentsDockScrollingRegressions() throws {
         appKitTimeline.contains("NSScrollView.willStartLiveScrollNotification") &&
             appKitTimeline.contains("NSScrollView.didEndLiveScrollNotification"),
         "Native scrolling must track the full live/momentum interval before honoring forced positioning"
+    )
+    try assert(
+        coordinatorUpdate.contains("deferredItems = nextItems") &&
+            appKitTimeline.contains("flushDeferredScrollWork()"),
+        "Native scrolling must coalesce row snapshots while live momentum owns the viewport"
     )
 
     let appKitPaging = try sourceBlock(

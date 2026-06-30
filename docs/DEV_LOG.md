@@ -5788,3 +5788,23 @@ Third follow-up:
 - These are client-side local notifications. Reliable iOS delivery after the
   app has been suspended or terminated still requires a future APNs-backed
   server push path.
+
+## 2026-06-29 - Momentum-Isolated Timeline Updates
+
+- Captured two live process samples from the reported cursed-scroll build. The
+  process was mostly idle, but update bursts entered `NSTableView.endUpdates`,
+  automatic row-height work, SwiftUI accessibility propagation, and root graph
+  refreshes while the timeline owned an active scroll gesture.
+- Recycled timeline rows no longer receive the global `AppStore` as an
+  environment object. Their content is immutable and action-driven, so unrelated
+  session/sidebar polling can no longer invalidate every visible row host.
+- The history-loader row now receives plain loading/count/capability values,
+  removing its last dependency on the global store inside the recycler.
+- Native row snapshots and width remeasurement are coalesced while trackpad
+  momentum is active. The newest snapshot is applied once after momentum ends,
+  with one semantic anchor restore only when changed geometry precedes or
+  contains the visible anchor.
+- Added the `coalesced-live-updates` native regression. It changes a visible
+  variable-height row and appends a row during live scrolling, verifies zero
+  table/origin mutations during the gesture, then verifies one settled update
+  with the same viewport after the gesture.

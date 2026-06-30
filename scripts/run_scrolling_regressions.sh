@@ -37,6 +37,7 @@ required_scenarios=(
   variable-height-containment
   prepend-single-page
   active-momentum-priority
+  coalesced-live-updates
   chat-switch-isolation
 )
 
