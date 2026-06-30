@@ -1,4 +1,5 @@
 import Combine
+import AppKit
 import Foundation
 import ZenithCore
 
@@ -89,7 +90,11 @@ final class AppStore: ObservableObject {
     @Published var tmuxSnapshot: ZTmuxSnapshot?
     @Published var tmuxCapture: ZTmuxCapture?
     @Published var isLoadingTmux = false
-    @Published private(set) var unreadAgentSessionIDs: Set<String> = []
+    @Published private(set) var unreadAgentSessionIDs: Set<String> = [] {
+        didSet {
+            UnreadNotificationController.shared.updateBadge(unreadCount: unreadAgentSessionIDs.count)
+        }
+    }
     @Published private(set) var firstUnreadAgentSeqBySessionID: [String: Int] = [:]
     @Published private(set) var selectedTimelineAtBottom = true
     @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "folderOrder") ?? [] {
@@ -123,6 +128,7 @@ final class AppStore: ObservableObject {
     private var memoryChatCacheOrder: [String] = []
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
+    private var unreadNotificationTracker = ZUnreadNotificationTracker()
     private var pendingReadSyncBySessionID: [String: Int] = [:]
     private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
     private var draftPromptsBySessionID: [String: String] = [:]
@@ -220,6 +226,13 @@ final class AppStore: ObservableObject {
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
         pinnedItemsBySessionID = loadPinnedItems()
+        UnreadNotificationController.shared.configure { [weak self] sessionID in
+            Task { @MainActor [weak self] in
+                await self?.select(sessionID: sessionID)
+            }
+        }
+        UnreadNotificationController.shared.requestAuthorizationIfNeeded()
+        UnreadNotificationController.shared.updateBadge(unreadCount: 0)
     }
 
     var api: APIClient {
@@ -930,6 +943,7 @@ final class AppStore: ObservableObject {
             firstUnreadAgentSeqBySessionID.removeValue(forKey: sessionID)
         }
         manuallyUnreadSessionIDs.remove(sessionID)
+        UnreadNotificationController.shared.clear(sessionID: sessionID)
     }
 
     func markSessionUnread(_ sessionID: String?) {
@@ -1247,7 +1261,7 @@ final class AppStore: ObservableObject {
             if serverManualUnread, session.id != selectedSessionID {
                 nextManualUnread.insert(session.id)
             }
-            if session.id == selectedSessionID, selectedTimelineAtBottom {
+            if session.id == selectedSessionID, selectedTimelineAtBottom, NSApp.isActive {
                 markSessionRead(session.id)
                 nextUnread.remove(session.id)
                 nextFirstUnread.removeValue(forKey: session.id)
@@ -1276,6 +1290,38 @@ final class AppStore: ObservableObject {
             firstUnreadAgentSeqBySessionID = nextFirstUnread
         }
         manuallyUnreadSessionIDs = nextManualUnread
+    }
+
+    private func reconcileUnreadNotifications(previousUnreadSessionIDs: Set<String>) {
+        let candidates = unreadNotificationTracker.reconcile(
+            sessions: sessions,
+            previousUnreadSessionIDs: previousUnreadSessionIDs,
+            unreadSessionIDs: unreadAgentSessionIDs
+        )
+        guard !NSApp.isActive else { return }
+        for candidate in candidates {
+            deliverUnreadNotification(candidate)
+        }
+    }
+
+    private func notificationCandidate(for event: ZEvent) -> ZUnreadNotificationCandidate? {
+        unreadNotificationTracker.observeLiveEvent(
+            event,
+            session: sessions.first { $0.id == event.session_id },
+            wasUnread: unreadAgentSessionIDs.contains(event.session_id)
+        )
+    }
+
+    private func deliverUnreadNotification(_ candidate: ZUnreadNotificationCandidate) {
+        guard !NSApp.isActive else { return }
+        UnreadNotificationController.shared.notify(
+            sessionID: candidate.sessionID,
+            title: candidate.title,
+            backend: candidate.backend,
+            eventType: candidate.eventType,
+            eventSeq: candidate.eventSeq,
+            unreadCount: unreadAgentSessionIDs.count
+        )
     }
 
     func isAgentVisibleMessage(_ event: ZEvent) -> Bool {
@@ -1352,6 +1398,8 @@ final class AppStore: ObservableObject {
         unreadAgentSessionIDs = []
         firstUnreadAgentSeqBySessionID = [:]
         manuallyUnreadSessionIDs = []
+        unreadNotificationTracker.reset()
+        UnreadNotificationController.shared.clearAll()
         selectedTimelineAtBottom = true
         connectionProblemText = nil
     }
@@ -1541,6 +1589,7 @@ final class AppStore: ObservableObject {
         do {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.get("/api/sessions")
+            let previousUnreadSessionIDs = unreadAgentSessionIDs
             setServerReachable(true)
             if !socketLive {
                 setStatus("Server connected")
@@ -1553,6 +1602,7 @@ final class AppStore: ObservableObject {
                 AppLogger.info("loaded sessions count=\(sessions.count)")
             }
             reconcileUnreadFromSessions()
+            reconcileUnreadNotifications(previousUnreadSessionIDs: previousUnreadSessionIDs)
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
                 selectedSessionID = sessions.first?.id
                 if let selectedSessionID {
@@ -3181,13 +3231,17 @@ final class AppStore: ObservableObject {
             applyQueuedTurnState(from: event)
             clearLaunchDeferredIfResolved(by: event)
             if isAgentVisibleMessage(event) {
+                let notificationCandidate = notificationCandidate(for: event)
                 if event.session_id != selectedSessionID {
                     markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
-                } else if !selectedTimelineAtBottom {
+                } else if !selectedTimelineAtBottom || !NSApp.isActive {
                     markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
                 } else {
                     setLastReadAgentSeq(event.seq, for: event.session_id)
                     syncServerReadState(sessionID: event.session_id, seq: event.seq)
+                }
+                if let notificationCandidate {
+                    deliverUnreadNotification(notificationCandidate)
                 }
             }
             if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {
@@ -3256,12 +3310,16 @@ final class AppStore: ObservableObject {
             rebuildDisplayEvents()
         }
         if isAgentVisibleMessage(event) {
+            let notificationCandidate = notificationCandidate(for: event)
             if event.session_id != selectedSessionID {
                 markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
-            } else if !selectedTimelineAtBottom {
+            } else if !selectedTimelineAtBottom || !NSApp.isActive {
                 markAgentUnread(sessionID: event.session_id, firstSeq: event.seq)
             } else {
                 setLastReadAgentSeq(event.seq, for: event.session_id)
+            }
+            if let notificationCandidate {
+                deliverUnreadNotification(notificationCandidate)
             }
         }
         if ["turn_started", "turn_queued", "turn_unqueued", "assistant_text", "turn_finished", "error"].contains(event.type) {

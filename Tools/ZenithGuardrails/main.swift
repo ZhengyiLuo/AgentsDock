@@ -908,6 +908,9 @@ func checkUnreadMessageMarker() throws {
     let macSidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
     let macEventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/EventViews.swift"), encoding: .utf8)
     let mobileEventViews = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
+    let macNotifications = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Support/UnreadNotificationController.swift"), encoding: .utf8)
+    let mobileNotifications = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Support/UnreadNotificationController.swift"), encoding: .utf8)
+    let mobileApp = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/App/ZenithDockIOSApp.swift"), encoding: .utf8)
     let server = try String(contentsOf: cwd.appendingPathComponent("server/agent_server.py"), encoding: .utf8)
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
 
@@ -940,6 +943,10 @@ func checkUnreadMessageMarker() throws {
     try assert(macStore.contains("case \"job_ran\", \"job_error\""), "Scheduled job failures must count as visible agent messages")
     try assert(macEventViews.contains("case \"job_created\", \"job_ran\", \"job_deferred\"") && macEventViews.contains("case \"job_deferred\": \"Job Deferred\""), "Mac job-deferred events must render as orange job timeline cards")
     try assert(macStore.contains("else if !selectedTimelineAtBottom"), "Selected-chat live agent messages must mark unread when the user is away from bottom")
+    try assert(macStore.contains("unreadNotificationTracker") && macStore.contains("reconcileUnreadNotifications(previousUnreadSessionIDs:"), "Mac notifications must use the shared silent-baseline unread transition tracker")
+    try assert(macStore.contains("selectedTimelineAtBottom, NSApp.isActive"), "Mac background polling must not silently mark the selected chat read")
+    try assert(macNotifications.contains("UNUserNotificationCenter") && macNotifications.contains("NSApp.dockTile.badgeLabel"), "Mac must deliver local agent notifications and an unread-chat Dock badge")
+    try assert(macNotifications.contains("threadIdentifier = sessionID") && macNotifications.contains("\"session_id\": sessionID"), "Mac notification taps must retain their source chat identity")
     try assert(mobileStore.contains("unreadAgentSessionIDs"), "iOS must keep unread state for session rows")
     try assert(mobileStore.contains("lastReadAgentSeqBySessionID"), "iOS unread state must compare server latest seq against local last-read seq")
     try assert(mobileStore.contains("manuallyUnreadSessionIDs"), "iOS store must preserve manual unread marks while the selected chat is open")
@@ -950,6 +957,11 @@ func checkUnreadMessageMarker() throws {
     try assert(mobileStore.contains("/api/sessions/\\(sessionID)/read"), "iOS read marks must sync to the server")
     try assert(mobileStore.contains("/api/sessions/\\(sessionID)/unread"), "iOS manual unread marks must sync to the server")
     try assert(mobileStore.contains("[sessionSeq, eventSeq].compactMap"), "iOS read marks must use the max of server metadata and loaded visible events")
+    try assert(mobileStore.contains("unreadNotificationTracker") && mobileStore.contains("reconcileUnreadNotifications(previousUnreadSessionIDs:"), "iOS notifications must use the shared silent-baseline unread transition tracker")
+    try assert(mobileStore.contains("session.id == selectedSessionID, applicationIsActive"), "iOS background polling must not silently mark the selected chat read")
+    try assert(mobileNotifications.contains("UNUserNotificationCenter") && mobileNotifications.contains("setBadgeCount(unreadCount)"), "iOS must deliver local agent notifications and an unread-chat app badge")
+    try assert(mobileNotifications.contains("threadIdentifier = sessionID") && mobileNotifications.contains("\"session_id\": sessionID"), "iOS notification taps must retain their source chat identity")
+    try assert(mobileApp.contains("onChange(of: scenePhase, initial: true)") && mobileApp.contains("setApplicationActive(phase == .active)"), "iOS notification/read behavior must follow scene activation")
     try assert(macSidebar.contains("Mark as Unread"), "Mac sidebar must expose a mark-as-unread chat action")
     try assert(macSidebar.contains("Mark as Read"), "Mac sidebar must expose a mark-as-read chat action")
     try assert(mobileSidebar.contains("Mark as Unread"), "iOS sidebar must expose a mark-as-unread chat action")
@@ -966,6 +978,68 @@ func checkUnreadMessageMarker() throws {
     try assert(timeline.contains("distanceFromTop"), "Mac scroll observer must report top distance for older-history loading")
     try assert(timeline.contains("bottomBucket(lhs.distanceFromBottom) == bottomBucket(rhs.distanceFromBottom)"), "Mac scroll observer must bucket bottom distance instead of publishing every pixel")
     try assert(timeline.contains("topBucket(lhs.distanceFromTop) == topBucket(rhs.distanceFromTop)"), "Mac scroll observer must bucket top distance instead of publishing every pixel")
+}
+
+func checkUnreadNotificationTransitions() throws {
+    func session(seq: Int) throws -> ZSession {
+        let json = """
+        {
+          "id": "session-1",
+          "title": "Training",
+          "backend": "codex",
+          "latest_agent_event_seq": \(seq),
+          "latest_agent_event_type": "assistant_text"
+        }
+        """
+        return try JSONDecoder().decode(ZSession.self, from: Data(json.utf8))
+    }
+
+    var tracker = ZUnreadNotificationTracker()
+    let existingUnread = tracker.reconcile(
+        sessions: [try session(seq: 10)],
+        previousUnreadSessionIDs: [],
+        unreadSessionIDs: ["session-1"]
+    )
+    try assert(existingUnread.isEmpty, "Initial unread sync must establish a baseline without notifying")
+
+    _ = tracker.reconcile(
+        sessions: [try session(seq: 10)],
+        previousUnreadSessionIDs: ["session-1"],
+        unreadSessionIDs: []
+    )
+    let manualUnread = tracker.reconcile(
+        sessions: [try session(seq: 10)],
+        previousUnreadSessionIDs: [],
+        unreadSessionIDs: ["session-1"]
+    )
+    try assert(manualUnread.isEmpty, "Marking an existing message unread must not emit an agent notification")
+
+    _ = tracker.reconcile(
+        sessions: [try session(seq: 10)],
+        previousUnreadSessionIDs: ["session-1"],
+        unreadSessionIDs: []
+    )
+    let newAgentMessage = tracker.reconcile(
+        sessions: [try session(seq: 11)],
+        previousUnreadSessionIDs: [],
+        unreadSessionIDs: ["session-1"]
+    )
+    try assert(newAgentMessage.count == 1 && newAgentMessage.first?.eventSeq == 11, "A read-to-unread transition with a newer agent seq must emit exactly one notification")
+
+    let stillUnread = tracker.reconcile(
+        sessions: [try session(seq: 12)],
+        previousUnreadSessionIDs: ["session-1"],
+        unreadSessionIDs: ["session-1"]
+    )
+    try assert(stillUnread.isEmpty, "Additional messages in an already unread chat must not spam notifications")
+
+    tracker.reset()
+    let postReset = tracker.reconcile(
+        sessions: [try session(seq: 12)],
+        previousUnreadSessionIDs: [],
+        unreadSessionIDs: ["session-1"]
+    )
+    try assert(postReset.isEmpty, "Changing servers must reset the notification baseline without replaying old unread alerts")
 }
 
 func checkTimelineHistoryPaging() throws {
@@ -1433,6 +1507,7 @@ do {
     try checkInlineVideoPlayAutoplays()
     try checkCodeReviewSurfaceIsStructured()
     try checkUnreadMessageMarker()
+    try checkUnreadNotificationTransitions()
     try checkTimelineHistoryPaging()
     try checkLiveTimelineAutoFollow()
     try checkQueuedRemovalDisappears()

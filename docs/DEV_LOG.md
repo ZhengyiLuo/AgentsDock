@@ -5770,3 +5770,21 @@ Third follow-up:
 - Added the `variable-height-containment` native regression scenario. It checks
   row geometry and measured hosted-content height across scrolling reuse and
   multiple window widths.
+
+## 2026-06-29 - Unread Notifications And App Badges
+
+- Added local agent-response notifications on macOS and iOS/iPadOS. A
+  notification is emitted only when a chat transitions from read to unread with
+  a newer agent event; initial sync, manual mark-unread, and later messages in an
+  already unread chat do not produce duplicate alerts.
+- The macOS Dock badge and iOS/iPadOS app badge now show the number of unread
+  chats. Reading a chat clears its delivered notification, and tapping a
+  notification opens the originating chat.
+- Background reconciliation no longer marks the selected chat read merely
+  because it was last visible before the app became inactive.
+- Added a shared, deterministic unread-notification transition tracker plus
+  guardrail coverage for baseline, manual-unread, deduplication, and server
+  reset behavior.
+- These are client-side local notifications. Reliable iOS delivery after the
+  app has been suspended or terminated still requires a future APNs-backed
+  server push path.

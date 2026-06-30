@@ -41,6 +41,9 @@
 		B0000000000000000000001E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* SidebarView.swift */; };
 		B0000000000000000000001F /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* TimelineView.swift */; };
 		B00000000000000000000025 /* AppKitTimelineTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000023 /* AppKitTimelineTable.swift */; };
+		B10000000000000000000001 /* UnreadNotificationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* UnreadNotificationController.swift */; };
+		B10000000000000000000002 /* UnreadNotificationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* UnreadNotificationController.swift */; };
+		B10000000000000000000003 /* UnreadNotificationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* UnreadNotificationState.swift */; };
 		B00000000000000000000020 /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
 		B00000000000000000000021 /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -121,6 +124,9 @@
 		F0000000000000000000001E /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001F /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
 		F00000000000000000000023 /* AppKitTimelineTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppKitTimelineTable.swift; sourceTree = "<group>"; };
+		F10000000000000000000001 /* UnreadNotificationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadNotificationController.swift; sourceTree = "<group>"; };
+		F10000000000000000000002 /* UnreadNotificationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadNotificationController.swift; sourceTree = "<group>"; };
+		F10000000000000000000003 /* UnreadNotificationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadNotificationState.swift; sourceTree = "<group>"; };
 		F00000000000000000000020 /* ZenithDockMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZenithDockMac.entitlements; sourceTree = "<group>"; };
 		P00000000000000000000001 /* AgentsDock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentsDock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		P00000000000000000000002 /* ZenithCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = ZenithCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -213,6 +219,7 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000001 /* ZenithCore.swift */,
+				F10000000000000000000003 /* UnreadNotificationState.swift */,
 			);
 			path = ZenithCore;
 			sourceTree = "<group>";
@@ -258,6 +265,7 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000005 /* MobileFormatting.swift */,
+				F10000000000000000000002 /* UnreadNotificationController.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -317,6 +325,7 @@
 			children = (
 				F00000000000000000000013 /* AppLogger.swift */,
 				F00000000000000000000014 /* Formatting.swift */,
+				F10000000000000000000001 /* UnreadNotificationController.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -482,6 +491,7 @@
 				B0000000000000000000000A /* MobileSidebarView.swift in Sources */,
 				B0000000000000000000000B /* MobileTimelineView.swift in Sources */,
 				B00000000000000000000023 /* MobileChatOptionsView.swift in Sources */,
+				B10000000000000000000002 /* UnreadNotificationController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -490,6 +500,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000001 /* ZenithCore.swift in Sources */,
+				B10000000000000000000003 /* UnreadNotificationState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -515,6 +526,7 @@
 				B0000000000000000000001E /* SidebarView.swift in Sources */,
 				B00000000000000000000025 /* AppKitTimelineTable.swift in Sources */,
 				B0000000000000000000001F /* TimelineView.swift in Sources */,
+				B10000000000000000000001 /* UnreadNotificationController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

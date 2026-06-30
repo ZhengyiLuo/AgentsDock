@@ -47,7 +47,11 @@ final class MobileAppStore: ObservableObject {
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
-    @Published private(set) var unreadAgentSessionIDs: Set<String> = []
+    @Published private(set) var unreadAgentSessionIDs: Set<String> = [] {
+        didSet {
+            UnreadNotificationController.shared.updateBadge(unreadCount: unreadAgentSessionIDs.count)
+        }
+    }
     @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "mobileFolderOrder") ?? [] {
         didSet { invalidateSidebarDerived() }
     }
@@ -69,6 +73,8 @@ final class MobileAppStore: ObservableObject {
     private var memoryChatCacheOrder: [String] = []
     private var lastReadAgentSeqBySessionID: [String: Int] = [:]
     private var manuallyUnreadSessionIDs: Set<String> = []
+    private var unreadNotificationTracker = ZUnreadNotificationTracker()
+    private var applicationIsActive = false
     private var pendingReadSyncBySessionID: [String: Int] = [:]
     private var pendingRuntimeBySessionID: [String: PendingRuntimePatch] = [:]
     private var draftPromptsBySessionID: [String: String] = [:]
@@ -161,6 +167,17 @@ final class MobileAppStore: ObservableObject {
         serverIdentity = Self.loadServerIdentity(for: serverURLString)
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
+        UnreadNotificationController.shared.configure { [weak self] sessionID in
+            Task { @MainActor [weak self] in
+                await self?.select(sessionID: sessionID)
+            }
+        }
+        UnreadNotificationController.shared.requestAuthorizationIfNeeded()
+        UnreadNotificationController.shared.updateBadge(unreadCount: 0)
+    }
+
+    func setApplicationActive(_ active: Bool) {
+        applicationIsActive = active
     }
 
     var api: APIClient {
@@ -536,6 +553,7 @@ final class MobileAppStore: ObservableObject {
         }
         unreadAgentSessionIDs.remove(sessionID)
         manuallyUnreadSessionIDs.remove(sessionID)
+        UnreadNotificationController.shared.clear(sessionID: sessionID)
     }
 
     func markSessionUnread(_ sessionID: String?) {
@@ -734,7 +752,7 @@ final class MobileAppStore: ObservableObject {
             if serverManualUnread, session.id != selectedSessionID {
                 manuallyUnreadSessionIDs.insert(session.id)
             }
-            if session.id == selectedSessionID {
+            if session.id == selectedSessionID, applicationIsActive {
                 markSessionRead(session.id)
                 continue
             }
@@ -746,6 +764,38 @@ final class MobileAppStore: ObservableObject {
                 manuallyUnreadSessionIDs.remove(session.id)
             }
         }
+    }
+
+    private func reconcileUnreadNotifications(previousUnreadSessionIDs: Set<String>) {
+        let candidates = unreadNotificationTracker.reconcile(
+            sessions: sessions,
+            previousUnreadSessionIDs: previousUnreadSessionIDs,
+            unreadSessionIDs: unreadAgentSessionIDs
+        )
+        guard !applicationIsActive else { return }
+        for candidate in candidates {
+            deliverUnreadNotification(candidate)
+        }
+    }
+
+    private func notificationCandidate(for event: ZEvent) -> ZUnreadNotificationCandidate? {
+        unreadNotificationTracker.observeLiveEvent(
+            event,
+            session: sessions.first { $0.id == event.session_id },
+            wasUnread: unreadAgentSessionIDs.contains(event.session_id)
+        )
+    }
+
+    private func deliverUnreadNotification(_ candidate: ZUnreadNotificationCandidate) {
+        guard !applicationIsActive else { return }
+        UnreadNotificationController.shared.notify(
+            sessionID: candidate.sessionID,
+            title: candidate.title,
+            backend: candidate.backend,
+            eventType: candidate.eventType,
+            eventSeq: candidate.eventSeq,
+            unreadCount: unreadAgentSessionIDs.count
+        )
     }
 
     func isAgentVisibleMessage(_ event: ZEvent) -> Bool {
@@ -788,6 +838,8 @@ final class MobileAppStore: ObservableObject {
         draftPromptsBySessionID = loadDraftPrompts()
         unreadAgentSessionIDs = []
         manuallyUnreadSessionIDs = []
+        unreadNotificationTracker.reset()
+        UnreadNotificationController.shared.clearAll()
         await refresh(showErrors: true)
     }
 
@@ -810,6 +862,8 @@ final class MobileAppStore: ObservableObject {
         draftPromptsBySessionID = loadDraftPrompts()
         unreadAgentSessionIDs = []
         manuallyUnreadSessionIDs = []
+        unreadNotificationTracker.reset()
+        UnreadNotificationController.shared.clearAll()
     }
 
     private func migrateLocalServerState(from oldNamespace: String, to newNamespace: String) {
@@ -927,10 +981,12 @@ final class MobileAppStore: ObservableObject {
         do {
             struct Response: Codable { let sessions: [ZSession] }
             let res: Response = try await api.get("/api/sessions")
+            let previousUnreadSessionIDs = unreadAgentSessionIDs
             if sessions != res.sessions {
                 sessions = sessionsWithPendingRuntime(res.sessions)
             }
             reconcileUnreadFromSessions()
+            reconcileUnreadNotifications(previousUnreadSessionIDs: previousUnreadSessionIDs)
             if let selectedSessionID, !sessions.contains(where: { $0.id == selectedSessionID }) {
                 clearSelection()
             }
@@ -1963,7 +2019,11 @@ final class MobileAppStore: ObservableObject {
         guard event.session_id == selectedSessionID else {
             updateRunningState(from: event)
             if isAgentVisibleMessage(event) {
+                let notificationCandidate = notificationCandidate(for: event)
                 unreadAgentSessionIDs.insert(event.session_id)
+                if let notificationCandidate {
+                    deliverUnreadNotification(notificationCandidate)
+                }
             }
             return
         }
@@ -1973,9 +2033,17 @@ final class MobileAppStore: ObservableObject {
         rebuildDisplayEvents()
         updateRunningState(from: event)
         if isAgentVisibleMessage(event) {
-            setLastReadAgentSeq(event.seq, for: event.session_id)
-            syncServerReadState(sessionID: event.session_id, seq: event.seq)
-            unreadAgentSessionIDs.remove(event.session_id)
+            let notificationCandidate = notificationCandidate(for: event)
+            if applicationIsActive {
+                setLastReadAgentSeq(event.seq, for: event.session_id)
+                syncServerReadState(sessionID: event.session_id, seq: event.seq)
+                unreadAgentSessionIDs.remove(event.session_id)
+            } else {
+                unreadAgentSessionIDs.insert(event.session_id)
+            }
+            if let notificationCandidate {
+                deliverUnreadNotification(notificationCandidate)
+            }
         }
         if let file = event.file {
             addPendingUpload(file)
