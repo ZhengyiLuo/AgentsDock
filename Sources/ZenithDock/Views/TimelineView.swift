@@ -593,7 +593,10 @@ struct TimelineView: View {
         case .artifacts(let events):
             let files = events.compactMap(\.artifact)
             let visible = Array(files.prefix(4))
-            let previewCount = visible.filter(\.isPreviewableArtifact).count
+            let previewCount = visible.filter { file in
+                file.content_type?.hasPrefix("image/") == true ||
+                    file.content_type?.hasPrefix("video/") == true
+            }.count
             let fileCount = visible.count - previewCount
             let previewHeight: CGFloat = previewCount > 0 ? 166 : 0
             let fileHeight = CGFloat(fileCount) * 42
