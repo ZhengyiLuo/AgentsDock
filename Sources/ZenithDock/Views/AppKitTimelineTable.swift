@@ -244,6 +244,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var pendingHeightUpdates = Set<PendingHeightUpdate>()
         private var heightUpdateWorkItem: DispatchWorkItem?
         private var heightUpdateGeneration = 0
+        private var heightCorrectionSuppressedUntil = Date.distantPast
         private var discreteScrollSettleWorkItem: DispatchWorkItem?
         private var discreteScrollGeneration = 0
         private var isDiscreteScrolling = false
@@ -507,6 +508,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
 
             if newIDs.suffix(oldIDs.count).elementsEqual(oldIDs) {
+                heightCorrectionSuppressedUntil = Date().addingTimeInterval(0.5)
                 items = nextItems
                 let inserted = IndexSet(0..<(newIDs.count - oldIDs.count))
                 structuralUpdateCount += 1
@@ -754,6 +756,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             )
             heightMeasurementCount += 1
 
+            guard Date() >= heightCorrectionSuppressedUntil else { return }
             guard abs(tableView.rect(ofRow: row).height - height) > 0.5 else { return }
             pendingHeightUpdates.insert(PendingHeightUpdate(
                 sessionID: measuredSessionID,
@@ -770,7 +773,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             item: AppKitTimelineItem,
             width: CGFloat
         ) {
-            guard let tableView,
+            guard Date() >= heightCorrectionSuppressedUntil,
+                  let tableView,
                   let cached = rowHeightCache.object(forKey: heightKey(for: item, width: width)),
                   abs(tableView.rect(ofRow: row).height - CGFloat(cached.doubleValue)) > 0.5 else {
                 return

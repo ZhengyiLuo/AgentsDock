@@ -1460,6 +1460,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("enum AppKitTimelineHeightEstimate") && appKitTimeline.contains("item.heightEstimate.height(forWidth: width)"), "Unknown native rows must start from type-aware geometry instead of one uniform placeholder height")
     try assert(timeline.contains("heightEstimate: appKitHeightEstimate(") && timeline.contains("case .trace:") && timeline.contains("return .fixed(74)"), "Timeline rows must provide stable type-aware initial height estimates")
     try assert(appKitTimeline.contains("deferredVisibleShrinks") && appKitTimeline.contains("isShrinking && intersectsViewport"), "Visible native rows must never shrink underneath the user's viewport")
+    try assert(appKitTimeline.contains("heightCorrectionSuppressedUntil = Date().addingTimeInterval(0.5)"), "History prepends must restore their anchor before offscreen measurements can schedule a second geometry pass")
     try assert(appKitTimeline.contains("min(64, oldIDs.count)"), "AppKit timeline must delta-update a full bounded visible-window shift")
     try assert(appKitTimeline.contains("oldIDs.suffix($0).elementsEqual(newIDs.prefix($0))"), "AppKit timeline must delta-update mixed head-removal and tail-insertion windows")
     try assert(!appKitTimeline.contains("List {"), "Rejected SwiftUI List timeline must not return")

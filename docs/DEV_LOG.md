@@ -5966,3 +5966,7 @@ Follow-up from live history-boundary testing:
   intersects the viewport. Shrink corrections remain pending until the row is
   offscreen, then settle with the existing semantic anchor. This removes the
   observed 207-point bottom clamp while preserving accurate final geometry.
+- A prepend is one geometry transaction. Newly inserted offscreen rows may cache
+  measurements immediately, but cannot invalidate table heights during the
+  half-second anchor-restore pass; their cached correction is reconsidered when
+  the user actually reaches those rows.
