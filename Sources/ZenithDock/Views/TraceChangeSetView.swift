@@ -471,14 +471,14 @@ private struct TraceReviewLine: Identifiable, Equatable {
     }
 }
 
-struct TraceChangedFile: Identifiable, Hashable {
+struct TraceChangedFile: Identifiable, Hashable, Sendable {
     let path: String
     var status: TraceChangeStatus
 
     var id: String { path }
 }
 
-enum TraceChangeStatus: Hashable {
+enum TraceChangeStatus: Hashable, Sendable {
     case added
     case modified
     case deleted
@@ -516,7 +516,7 @@ enum TraceChangeStatus: Hashable {
     }
 }
 
-struct TraceChangeSummary: Equatable {
+struct TraceChangeSummary: Equatable, Sendable {
     let files: [TraceChangedFile]
     let insertions: Int
     let deletions: Int

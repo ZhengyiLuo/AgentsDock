@@ -1237,12 +1237,16 @@ struct TraceGroupCard: View, Equatable {
     let events: [ZEvent]
     let linkContext: ZMarkdownLinkContext?
     private let summary: TraceGroupComputedSummary
+    private let summaryKey: String
     @State private var expanded = false
+    @State private var changeSummary: TraceChangeSummary?
 
     init(events: [ZEvent], linkContext: ZMarkdownLinkContext?) {
         self.events = events
         self.linkContext = linkContext
+        summaryKey = TraceGroupSummaryCache.cacheKey(for: events)
         summary = TraceGroupSummaryCache.summary(for: events)
+        _changeSummary = State(initialValue: nil)
     }
 
     nonisolated static func == (lhs: TraceGroupCard, rhs: TraceGroupCard) -> Bool {
@@ -1256,7 +1260,7 @@ struct TraceGroupCard: View, Equatable {
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 8) {
-                if let changeSummary = summary.changeSummary {
+                if let changeSummary {
                     TraceChangeSetCard(summary: changeSummary)
                         .padding(.bottom, 2)
                 }
@@ -1283,6 +1287,14 @@ struct TraceGroupCard: View, Equatable {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.softLine))
         }
+        .task(id: summaryKey) {
+            let loaded = await TraceGroupChangeSummaryCache.shared.summary(
+                forKey: summaryKey,
+                events: events
+            )
+            guard !Task.isCancelled else { return }
+            changeSummary = loaded
+        }
     }
 
     private var signature: String {
@@ -1298,7 +1310,6 @@ private struct TraceGroupComputedSummary: Equatable {
     let title: String
     let detail: String
     let previewText: String?
-    let changeSummary: TraceChangeSummary?
 }
 
 private final class TraceGroupSummaryEntry: NSObject {
@@ -1318,7 +1329,7 @@ private enum TraceGroupSummaryCache {
     }()
 
     static func summary(for events: [ZEvent]) -> TraceGroupComputedSummary {
-        let key = cacheKey(for: events)
+        let key = cacheKey(for: events) as NSString
         if let cached = cache.object(forKey: key) {
             return cached.summary
         }
@@ -1336,12 +1347,6 @@ private enum TraceGroupSummaryCache {
         cost += summary.title.utf8.count
         cost += summary.detail.utf8.count
         cost += summary.previewText?.utf8.count ?? 0
-        if let changeSummary = summary.changeSummary {
-            cost += changeSummary.reviewText.utf8.count
-            cost += changeSummary.files.reduce(into: 0) { partial, file in
-                partial += file.path.utf8.count + 32
-            }
-        }
         return max(1, cost)
     }
 
@@ -1372,12 +1377,10 @@ private enum TraceGroupSummaryCache {
         }
 
         let previewText = tracePreviewText(for: events)
-        let changeSummary = TraceChangeSummary.extract(from: events)
         return TraceGroupComputedSummary(
             title: title,
             detail: parts.joined(separator: " · "),
-            previewText: previewText,
-            changeSummary: changeSummary
+            previewText: previewText
         )
     }
 
@@ -1409,12 +1412,62 @@ private enum TraceGroupSummaryCache {
         return event.tool_id
     }
 
-    private static func cacheKey(for events: [ZEvent]) -> NSString {
+    static func cacheKey(for events: [ZEvent]) -> String {
         guard let first = events.first, let last = events.last else {
-            return "empty" as NSString
+            return "empty"
         }
         let middle = events.count > 2 ? events[events.count / 2] : last
-        return "\(events.count):\(first.seq):\(first.id):\(middle.seq):\(middle.id):\(last.seq):\(last.id)" as NSString
+        return "\(events.count):\(first.seq):\(first.id):\(middle.seq):\(middle.id):\(last.seq):\(last.id)"
+    }
+}
+
+private actor TraceGroupChangeSummaryCache {
+    struct Entry: Sendable {
+        let summary: TraceChangeSummary?
+        let cost: Int
+    }
+
+    static let shared = TraceGroupChangeSummaryCache()
+
+    private var entries: [String: Entry] = [:]
+    private var insertionOrder: [String] = []
+    private var totalCost = 0
+    private let countLimit = 2_000
+    private let totalCostLimit = 64 * 1_024 * 1_024
+
+    func summary(forKey key: String, events: [ZEvent]) -> TraceChangeSummary? {
+        if let cached = entries[key] {
+            return cached.summary
+        }
+        guard !Task.isCancelled else { return nil }
+
+        let summary = TraceChangeSummary.extract(from: events)
+        guard !Task.isCancelled else { return summary }
+        insert(summary, forKey: key)
+        return summary
+    }
+
+    private func insert(_ summary: TraceChangeSummary?, forKey key: String) {
+        let cost = estimatedCost(of: summary)
+        entries[key] = Entry(summary: summary, cost: cost)
+        insertionOrder.append(key)
+        totalCost += cost
+
+        while entries.count > countLimit || totalCost > totalCostLimit {
+            guard !insertionOrder.isEmpty else { break }
+            let oldest = insertionOrder.removeFirst()
+            if let removed = entries.removeValue(forKey: oldest) {
+                totalCost -= removed.cost
+            }
+        }
+    }
+
+    private func estimatedCost(of summary: TraceChangeSummary?) -> Int {
+        guard let summary else { return 64 }
+        let paths = summary.files.reduce(into: 0) { partial, file in
+            partial += file.path.utf8.count + 32
+        }
+        return max(1, 256 + paths + summary.reviewText.utf8.count)
     }
 }
 

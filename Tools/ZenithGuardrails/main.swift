@@ -1497,6 +1497,10 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!eventViews.contains("var body: some View {\n        let summary = TraceGroupSummaryCache.summary(for: events)"), "Collapsed trace body layout must not recompute or re-query its summary")
     try assert(eventViews.contains("cache.totalCostLimit = 64 * 1_024 * 1_024"), "Trace summary cache must retain a useful long-chat working set")
     try assert(eventViews.contains("cost: estimatedCost(of: summary)"), "Trace summary cache cost must describe retained summary bytes, not source event count")
+    try assert(eventViews.contains("private actor TraceGroupChangeSummaryCache"), "Trace diff extraction must run outside the main actor")
+    try assert(eventViews.contains("let loaded = await TraceGroupChangeSummaryCache.shared.summary"), "Trace cards must load code-change summaries asynchronously")
+    try assert(!eventViews.contains("let changeSummary = TraceChangeSummary.extract(from: events)"), "Collapsed trace header construction must not parse diffs synchronously")
+    try assert(eventViews.contains("guard !Task.isCancelled else { return nil }"), "Offscreen trace change work must cancel before parsing")
     guard let acceptedTurnStart = macStore.range(of: "private func applyAcceptedTurnEvent"),
           let acceptedTurnEnd = macStore.range(of: "private func clearSubmittedPromptIfCurrent", range: acceptedTurnStart.upperBound..<macStore.endIndex) else {
         throw GuardrailFailure.failed("Accepted-turn reconciliation block not found")

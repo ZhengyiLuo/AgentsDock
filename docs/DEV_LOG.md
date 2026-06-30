@@ -5861,3 +5861,16 @@ Third follow-up:
   subsequent SwiftUI row-height and layout body passes do not query or rebuild
   it.
 - Added guardrails for summary lifetime, cache capacity, and byte-based costing.
+
+Follow-up from the cold-cache profile:
+
+- A newly inserted long-chat window still had hundreds of unique trace groups,
+  so its first traversal legitimately missed the cache. Almost all sampled time
+  inside summary construction came from `TraceChangeSummary.extract`, which
+  scans large tool outputs for patch and diff markers.
+- Collapsed trace title/detail/preview construction remains synchronous and
+  bounded. Diff extraction now runs through a serialized background actor with
+  cancellation and its own 64 MB / 2,000-entry cache. Code-change cards appear
+  when ready without blocking AppKit row creation or the scroll gesture.
+- Added regression guards preventing synchronous diff extraction from returning
+  to collapsed trace construction.
