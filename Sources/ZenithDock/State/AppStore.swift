@@ -1760,7 +1760,7 @@ final class AppStore: ObservableObject {
         isSelectingSession = true
         isRefreshingCachedDelta = false
         defer {
-            if loadingSessionID == sessionID {
+            if loadingSessionID == sessionID, selectionGeneration == generation {
                 loadingSessionID = nil
             }
             if selectedSessionID == sessionID, selectionGeneration == generation {
@@ -1939,14 +1939,14 @@ final class AppStore: ObservableObject {
                     URLQueryItem(name: "visible", value: "true")
                 ]
             )
+            guard selectedSessionID == sessionID, selectionGeneration == generation else {
+                AppLogger.info("drop stale selection response session=\(sessionID)")
+                return
+            }
             let netMs = Double(DispatchTime.now().uptimeNanoseconds - netStart.uptimeNanoseconds) / 1_000_000
             AppLogger.info("PERF snapshotFetch session=\(sessionID) events=\(res.events.count) ms=\(String(format: "%.0f", netMs))")
             if let idx = sessions.firstIndex(where: { $0.id == sessionID }) {
                 replaceSessionFromServer(res.session, at: idx)
-            }
-            guard selectedSessionID == sessionID, selectionGeneration == generation else {
-                AppLogger.info("drop stale selection response session=\(sessionID)")
-                return
             }
             applySessionEventSnapshot(res, sessionID: sessionID)
             markSessionRead(sessionID)
@@ -1966,7 +1966,9 @@ final class AppStore: ObservableObject {
             syncSelectedRunningState()
         } catch {
             AppLogger.error("select failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
-            if reportErrors {
+            if reportErrors,
+               selectedSessionID == sessionID,
+               selectionGeneration == generation {
                 reportServerError(error)
             }
         }

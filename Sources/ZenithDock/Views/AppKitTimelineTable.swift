@@ -1373,6 +1373,7 @@ enum AppKitTimelineHarness {
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("chat-switch-metrics-reset", checkChatSwitchMetricsReset),
+            ("exact-top-metrics", checkExactTopMetrics),
             ("first-content-bottom-position", checkFirstContentBottomPosition),
             ("explicit-height-cache", checkExplicitHeightCache),
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
@@ -1909,6 +1910,26 @@ enum AppKitTimelineHarness {
             return fail(
                 "first-content-bottom-position",
                 "placeholder-to-transcript transition stayed at the top distance=\(distanceFromBottom)"
+            )
+        }
+        return true
+    }
+
+    private static func checkExactTopMetrics() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 80))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let reportsNearTop = fixture.metrics.reportCount
+        fixture.scrollView.contentView.scroll(to: .zero)
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        guard fixture.metrics.reportCount > reportsNearTop,
+              (fixture.metrics.latest?.distanceFromTop ?? .infinity) <= 0.5 else {
+            return fail(
+                "exact-top-metrics",
+                "reaching zero was deduplicated after entering the near-top zone"
             )
         }
         return true

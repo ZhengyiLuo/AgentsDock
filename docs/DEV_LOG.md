@@ -41,6 +41,12 @@ painful to rediscover later.
   the first arrival of event-backed rows as the document's initial content and
   positions it once at the latest message. `first-content-bottom-position`
   reproduces this exact placeholder-to-transcript transition.
+- The top metric equality now distinguishes the exact `<= 0.5` boundary from
+  the broader near-top zone. Gradually scrolling through 96 points can no
+  longer deduplicate the later zero-point report that starts one history page.
+- Selection cleanup is generation-owned. A stale first A request in an
+  `A -> B -> A` sequence cannot clear the newer A load marker, mutate current
+  session metadata, or publish a stale error after its network await.
 
 ## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
 

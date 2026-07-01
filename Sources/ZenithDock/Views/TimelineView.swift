@@ -2071,9 +2071,10 @@ struct TimelineScrollMetrics: Equatable {
     }
 
     private static func topBucket(_ distance: CGFloat) -> Int {
-        if distance <= 96 { return 0 }
-        if distance <= 160 { return 1 }
-        return 2
+        if distance <= 0.5 { return 0 }
+        if distance <= 96 { return 1 }
+        if distance <= 160 { return 2 }
+        return 3
     }
 }
 
