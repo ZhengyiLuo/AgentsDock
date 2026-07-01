@@ -19,6 +19,23 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
+
+- Retiring `LazyVStack` is not retiring timeline performance work. The dormant
+  `AppKitTimelineTable` is a real `NSTableView` recycler: stable row identity,
+  reusable SwiftUI hosting cells, session/version/width height caches, native
+  inertial scrolling, deferred row updates during momentum, and explicit
+  anchor preservation.
+- Its in-repo harness already covers tail appends, head prepends, mixed window
+  shifts, variable-height containment, explicit height caching, wheel ownership,
+  discrete/live scroll isolation, bottom navigation, and integration discovery.
+- `AgentsDock-test` now compiles `AGENTSDOCK_APPKIT_TIMELINE` and explicitly
+  excludes `AGENTSDOCK_LAZY_TIMELINE`. Production remains on the bounded eager
+  renderer until sustained real-app testing proves the native recycler is both
+  smoother and behaviorally correct.
+- This pass will change native behavior only in response to measured real-app
+  failures. Do not add another parallel scroll owner or generic delayed retry.
+
 ## 2026-06-30 - Retire LazyVStack From AgentsDock-test After Third Live Spiral
 
 - The fully anchor-free build still reached `99.8%` CPU after ordinary use.

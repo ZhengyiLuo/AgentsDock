@@ -16,6 +16,7 @@ xcodebuild \
   -destination platform=macOS \
   -derivedDataPath "${DERIVED_DATA}" \
   PRODUCT_BUNDLE_IDENTIFIER="${TEST_BUNDLE_ID}" \
+  'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) AGENTSDOCK_APPKIT_TIMELINE' \
   CODE_SIGN_IDENTITY=- \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM= \
