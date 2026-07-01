@@ -26,6 +26,7 @@ struct TimelineView: View {
     @State private var timelinePositioningOverlayTask: Task<Void, Never>?
     @State private var lazyTopZone = TimelineTopZone.away
     @State private var pendingLazyScrollTask: Task<Void, Never>?
+    @State private var pendingLazyHistoryArmTask: Task<Void, Never>?
 #if AGENTSDOCK_APPKIT_TIMELINE
     @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
     @State private var appKitTimelineSessionID: String?
@@ -87,16 +88,23 @@ struct TimelineView: View {
         let hiddenRenderedRowCount = 0
         let rows = allRows
 #elseif AGENTSDOCK_LAZY_TIMELINE
-        // LazyVStack is the only virtualization owner in the experiment. A
-        // moving event/row suffix re-keyed otherwise unchanged rows whenever
-        // its boundary advanced, invalidating LazyLayoutViewCache placements.
-        let projectedDisplayEvents = displayEvents
+        // Keep the complete chat in AppStore's cache, but give LazyVStack a
+        // stable rendered tail. Establishing a bottom offset over hundreds of
+        // variable-height rows blocks chat switching before laziness can help.
+        // The limit grows in place when paging or while reading above bottom,
+        // so visible row identities are not evicted by incoming events.
+        let renderedVisibleRowLimit = visibleRowLimit
+        let projectedDisplayEvents = timelineProjectionEvents(
+            from: displayEvents,
+            visibleLimit: renderedVisibleRowLimit
+        )
         let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
+        let projectedHiddenEventCount = max(0, displayEvents.count - projectedDisplayEvents.count)
         let projection = TimelineRows.project(from: projectedDisplayEvents)
         let allRows = projection.rows
         let jobsByRunID = projection.jobsByRunID
-        let hiddenRenderedRowCount = 0
-        let rows = allRows
+        let hiddenRenderedRowCount = max(0, allRows.count - renderedVisibleRowLimit) + projectedHiddenEventCount
+        let rows = Array(allRows.suffix(renderedVisibleRowLimit))
 #else
         let projectedDisplayEvents = timelineProjectionEvents(from: displayEvents, visibleLimit: renderedVisibleRowLimit)
         let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
@@ -193,6 +201,7 @@ struct TimelineView: View {
 #else
 #if AGENTSDOCK_LAZY_TIMELINE
                     cancelPendingLazyScroll()
+                    cancelPendingLazyHistoryArm()
                     lazyTopZone = .away
 #endif
                     beginInitialTimelineMask()
@@ -224,14 +233,6 @@ struct TimelineView: View {
                         isTimelineScrollable = false
                     }
 #else
-#if AGENTSDOCK_LAZY_TIMELINE
-                    if newCount == 0 {
-                        isAtBottom = true
-                        isNearBottom = true
-                        store.setSelectedTimelineAtBottom(true)
-                        isTimelineScrollable = false
-                    }
-#else
                     let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
                     if newCount == 0 {
                         isAtBottom = true
@@ -244,7 +245,6 @@ struct TimelineView: View {
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
                     }
-#endif
 #endif
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
@@ -325,6 +325,7 @@ struct TimelineView: View {
             timelinePositioningOverlayTask?.cancel()
             timelinePositioningOverlayTask = nil
             cancelPendingLazyScroll()
+            cancelPendingLazyHistoryArm()
         }
     }
 
@@ -1103,6 +1104,7 @@ struct TimelineView: View {
         isAtBottom = true
         isNearBottom = true
         store.setSelectedTimelineAtBottom(true)
+        scheduleLazyHistoryRearm(for: pendingSessionID, proxy: proxy)
 #else
         scrollToBottom(proxy)
 #endif
@@ -1289,6 +1291,27 @@ struct TimelineView: View {
         pendingLazyScrollTask = nil
     }
 
+    private func scheduleLazyHistoryRearm(for sessionID: String, proxy: ScrollViewProxy) {
+#if AGENTSDOCK_LAZY_TIMELINE
+        cancelPendingLazyHistoryArm()
+        pendingLazyHistoryArmTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled, store.selectedSessionID == sessionID else { return }
+            olderHistoryLoadArmed = true
+            suppressScrollHistoryLoadUntilTopLeaves = false
+            if lazyTopZone == .near {
+                handleLazyTopZone(.near, hasHiddenRenderedRows: true, proxy: proxy)
+            }
+            pendingLazyHistoryArmTask = nil
+        }
+#endif
+    }
+
+    private func cancelPendingLazyHistoryArm() {
+        pendingLazyHistoryArmTask?.cancel()
+        pendingLazyHistoryArmTask = nil
+    }
+
     private var shouldFollowBottomRequest: Bool {
         isAtBottom || isNearBottom || store.selectedTimelineAtBottom
     }
@@ -1418,7 +1441,11 @@ struct TimelineView: View {
               Date() >= historyLoadSuppressedUntil else {
             return
         }
+#if AGENTSDOCK_LAZY_TIMELINE
+        if revealOlderRows(preservingPositionWith: proxy) {
+#else
         if revealOlderRowsShowingNewPage(proxy) {
+#endif
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
             return
@@ -1565,16 +1592,6 @@ struct TimelineView: View {
     }
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
-#if AGENTSDOCK_LAZY_TIMELINE
-        let anchor = renderedRows().first.map {
-            TimelineScrollAnchor(rowID: $0.id, eventID: $0.anchorEventID)
-        }
-        Task {
-            let result = await store.loadOlderHistory()
-            guard result.addedCount > 0 else { return }
-            restoreScrollPosition(to: anchor, proxy: proxy)
-        }
-#else
         let anchor = firstRenderedAnchor()
         let oldLimit = visibleRowLimit
         let beforeRowCount = renderedRows().count
@@ -1603,19 +1620,9 @@ struct TimelineView: View {
             }
             restoreScrollPosition(to: anchor, proxy: proxy)
         }
-#endif
     }
 
     private func loadOlderHistoryShowingNewPage(_ proxy: ScrollViewProxy) {
-#if AGENTSDOCK_LAZY_TIMELINE
-        Task {
-            let result = await store.loadOlderHistory()
-            guard result.addedCount > 0 else { return }
-            let rows = renderedRows()
-            let target = result.firstAddedEventID.flatMap { row(containingEventID: $0, in: rows) }
-            scrollToOlderPageTarget(target?.id ?? rows.first?.id, proxy: proxy)
-        }
-#else
         let beforeRowCount = renderedRows().count
         Task {
             let result = await store.loadOlderHistory()
@@ -1641,7 +1648,6 @@ struct TimelineView: View {
             AppLogger.info("load older intent added_events=\(result.addedCount) first_added=\(result.firstAddedEventID ?? "-") added_rows=\(addedRows) old_rows=\(beforeRowCount) rendered_rows=\(allRows.count) next_limit=\(nextLimit) target=\(target?.id ?? "-")")
             scrollToOlderPageTarget(target?.id, proxy: proxy)
         }
-#endif
     }
 
     private func olderHistoryTarget(
@@ -1750,19 +1756,11 @@ struct TimelineView: View {
     }
 
     private func renderedRows(visibleLimit: Int? = nil) -> [TimelineRow] {
-#if AGENTSDOCK_LAZY_TIMELINE
-        TimelineRows.build(from: store.displayEvents)
-#else
         TimelineRows.build(from: timelineProjectionEvents(from: store.displayEvents, visibleLimit: visibleLimit ?? visibleRowLimit))
-#endif
     }
 
     private func hasHiddenProjectedEvents(visibleLimit: Int) -> Bool {
-#if AGENTSDOCK_LAZY_TIMELINE
-        false
-#else
         store.displayEvents.count > projectionEventBudget(visibleLimit: visibleLimit)
-#endif
     }
 
     private func timelineProjectionEvents(from source: [ZEvent], visibleLimit: Int) -> [ZEvent] {

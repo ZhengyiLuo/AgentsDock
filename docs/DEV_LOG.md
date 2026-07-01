@@ -6077,3 +6077,21 @@ Follow-up from live history-boundary testing:
   the bottom.
 - Added a guardrail rejecting the all-role bottom anchor in the isolated lazy
   timeline build.
+
+Follow-up from rapid-switch stress:
+
+- The all-role anchor no longer pegged a core, but a 720-event chat could still
+  delay subsequent keyboard events for tens of seconds while SwiftUI found the
+  initial bottom of hundreds of variable-height rows. Lazy construction alone
+  does not make that initial placement search cheap.
+- AppStore continues to cache the complete 720-event tail. The LazyVStack now
+  receives a stable 64-row rendered tail backed by a bounded event projection.
+  Older pages expand that tail in place; incoming events expand it while the
+  user is above the bottom so currently visible row identities are retained.
+- Automatic top-edge paging preserves the first visible row instead of jumping
+  to the newly inserted page. A session-scoped delayed arm prevents opening at
+  the top from chaining pages and guarantees that reaching the top during the
+  initial suppression window still triggers exactly one page afterward.
+- History load helpers now use the same bounded projection as the rendered
+  LazyVStack, so loading server history does not silently rebuild all cached
+  rows behind the viewport.
