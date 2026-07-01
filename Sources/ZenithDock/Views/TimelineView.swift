@@ -455,6 +455,7 @@ struct TimelineView: View {
         shouldMask: Bool
     ) -> some View {
         GeometryReader { viewport in
+            let documentIdentity = "\(store.selectedSessionID ?? "none"):\(store.loadedSessionID == store.selectedSessionID ? "ready" : "loading")"
             let items = lazyTimelineItems(
                 rows: rows,
                 firstUnreadRowID: firstUnreadRowID,
@@ -481,6 +482,13 @@ struct TimelineView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
             }
+            // Recreate the native scroll document once per selected/loaded
+            // session and let SwiftUI establish its initial bottom anchor.
+            // Calling ScrollViewReader.scrollTo(bottom) while LazyVStack is
+            // still refining long-row estimates can leave ScrollActionDispatcher
+            // chasing a moving target indefinitely.
+            .defaultScrollAnchor(.bottom)
+            .id(documentIdentity)
             .onScrollGeometryChange(for: TimelineScrollMetrics.self) { geometry in
                 TimelineScrollMetrics(
                     viewportHeight: max(0, geometry.containerSize.height),
@@ -1026,6 +1034,18 @@ struct TimelineView: View {
               sessionID == store.selectedSessionID else {
             return
         }
+#if AGENTSDOCK_LAZY_TIMELINE
+        guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }
+        let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
+        guard canSettle else { return }
+        withTransaction(noAnimationTransaction) {
+            isAtBottom = true
+            isNearBottom = true
+            store.setSelectedTimelineAtBottom(true)
+            isInitialTimelineMasked = false
+        }
+        return
+#else
         let hasWarmSelectedTimeline = store.loadedSessionID == sessionID && !store.displayEvents.isEmpty
         if hasWarmSelectedTimeline {
             scrollToBottom(proxy)
@@ -1057,6 +1077,7 @@ struct TimelineView: View {
                 }
             }
         }
+#endif
     }
 
     @discardableResult
@@ -1070,13 +1091,24 @@ struct TimelineView: View {
         suppressHistoryLoading(for: 2.4)
         disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
+#if AGENTSDOCK_LAZY_TIMELINE
+        // The session-scoped ScrollView uses defaultScrollAnchor(.bottom).
+        // Consuming the pending open here must not create a scroll action while
+        // the lazy document is still converging on row heights.
+        isAtBottom = true
+        isNearBottom = true
+        store.setSelectedTimelineAtBottom(true)
+#else
         scrollToBottom(proxy)
+#endif
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
                 isInitialTimelineMasked = false
             }
         }
+#if !AGENTSDOCK_LAZY_TIMELINE
         settleBottomAfterLayout(proxy, sessionID: pendingSessionID)
+#endif
         AppLogger.info("open latest settled session=\(pendingSessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
         return true
     }

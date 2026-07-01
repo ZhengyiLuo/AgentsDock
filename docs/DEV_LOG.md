@@ -41,6 +41,13 @@ painful to rediscover later.
   row wrapper, `_FlexFrameLayout` from `frame(maxWidth: .infinity)`. The lazy
   stack already owns a finite viewport width, so lazy rows no longer install a
   competing infinite-width proposal.
+- A long-chat switch still reproduced the spiral after both row wrappers were
+  gone. That sample added `ScrollActionDispatcher` to the hot placement stack,
+  and the log tied it to `open latest settled`: one programmatic
+  `ScrollViewReader.scrollTo(bottom)` kept chasing changing lazy height
+  estimates. The lazy test now recreates one session-scoped scroll document
+  with `defaultScrollAnchor(.bottom)` and consumes chat-open positioning without
+  issuing a scroll action.
 - Production `AgentsDock.app` remains on eager `VStack`. Do not promote this
   experiment until long scroll, resize, switching, streaming, and paging runs
   stay responsive and repeated samples do not show a persistent lazy layout
