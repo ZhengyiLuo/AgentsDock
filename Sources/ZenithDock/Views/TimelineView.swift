@@ -687,15 +687,16 @@ struct TimelineView: View {
                 linkContext: linkContext
             ),
             scrollCommand: appKitScrollCommand,
-            forcedBottomRevision: store.forcedScrollToBottomRevision
-        ) { metrics in
-            updateBottomVisibility(metrics)
-            handleHistoryTopDistance(
-                metrics.distanceFromTop,
-                hasHiddenRenderedRows: false,
-                proxy: proxy
-            )
-        }
+            forcedBottomRevision: store.forcedScrollToBottomRevision,
+            canLoadOlder: store.canLoadOlderHistory,
+            isLoadingOlder: appKitHistoryLoadInFlight || store.isLoadingOlderHistory,
+            onMetrics: { metrics in
+                updateBottomVisibility(metrics)
+            },
+            onLoadOlder: {
+                loadOneOlderAppKitPage()
+            }
+        )
     }
 
     private func appKitTimelineItems(
@@ -1449,39 +1450,7 @@ struct TimelineView: View {
     }
 
     private func handleHistoryTopDistance(_ distanceFromTop: CGFloat, hasHiddenRenderedRows: Bool, proxy: ScrollViewProxy) {
-#if AGENTSDOCK_APPKIT_TIMELINE
-        guard store.hiddenDisplayEventCount > 0 else {
-            olderHistoryLoadArmed = false
-            suppressScrollHistoryLoadUntilTopLeaves = false
-            return
-        }
-
-        // Native history advances only at the actual scroll boundary. Once a
-        // page starts, the table's snapshot anchor keeps the visible row fixed;
-        // leaving the top after that prepend is what arms the next user visit.
-        // Restoring the viewport after a prepend naturally moves us a few
-        // points away from zero. Require a deliberate move away from the top
-        // before rearming, otherwise one visit can chain-load several pages.
-        if distanceFromTop > 160 {
-            olderHistoryLoadArmed = true
-            suppressScrollHistoryLoadUntilTopLeaves = false
-            return
-        }
-
-        guard !appKitHistoryLoadInFlight else { return }
-        guard distanceFromTop <= 0.5,
-              !isAtBottom,
-              olderHistoryLoadArmed,
-              !suppressScrollHistoryLoadUntilTopLeaves,
-              Date() >= historyLoadSuppressedUntil,
-              !store.isLoadingOlderHistory,
-              store.canLoadOlderHistory else {
-            return
-        }
-        guard loadOneOlderAppKitPage() else { return }
-        olderHistoryLoadArmed = false
-        suppressScrollHistoryLoadUntilTopLeaves = true
-#else
+#if !AGENTSDOCK_APPKIT_TIMELINE
         guard store.hiddenDisplayEventCount > 0 || hasHiddenRenderedRows else {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = false

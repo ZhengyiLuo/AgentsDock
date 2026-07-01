@@ -19,6 +19,27 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-01 - Give Native Scrolling Sole Ownership Of Older-History Paging
+
+- The latest native recycler was stable, but pulling upward could still fail to
+  load the first older page. Paging remained split between AppKit metrics and
+  `TimelineView` state (`olderHistoryLoadArmed`, top suppression, in-flight
+  state, and `isAtBottom`). A short or heavily collapsed transcript can be at
+  both the top and bottom, so the old `top && !isAtBottom` condition made its
+  first page impossible to request.
+- `AppKitTimelineTable` now owns paging intent with an explicit state machine.
+  Initial layout and opening metrics never load history; a real wheel/trackpad
+  gesture at the top requests exactly one page; completion requires a new
+  gesture before another page; exhausted history disables the state machine.
+- Paging intent is observed directly by the native scroll owner, so it also
+  works when the document is too short for AppKit to emit a bounds change.
+  SwiftUI supplies only immutable availability/loading state and the one-page
+  callback. The explicit `Show Older` control remains available.
+- Added pure state-machine coverage and a coordinator-level short-document
+  regression. The live integration harness now reaches the top through the
+  same synthetic native gesture used by the production callback path instead
+  of relying on a programmatic bounds write to masquerade as user intent.
+
 ## 2026-06-30 - Rearm Native History Paging Per Chat
 
 - Instrumented integration runs found an ownership-only update race. Cached

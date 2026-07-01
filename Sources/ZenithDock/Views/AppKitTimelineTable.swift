@@ -80,6 +80,89 @@ private enum AppKitTimelineDiagnostics {
     static var lastAnchorVisibleY: CGFloat?
 }
 
+private struct AppKitTimelinePagingController {
+    enum Phase: String {
+        case unavailable
+        case armed
+        case loading
+        case waitingForNextGesture
+    }
+
+    private(set) var phase: Phase = .unavailable
+    private(set) var canLoadOlder = false
+    private(set) var isLoading = false
+    private(set) var pendingGestureID: Int?
+    private(set) var lastRequestedGestureID: Int?
+
+    mutating func reset(canLoadOlder: Bool, isLoading: Bool) {
+        self.canLoadOlder = canLoadOlder
+        self.isLoading = isLoading
+        pendingGestureID = nil
+        lastRequestedGestureID = nil
+        phase = !canLoadOlder ? .unavailable : (isLoading ? .loading : .armed)
+    }
+
+    mutating func update(
+        canLoadOlder: Bool,
+        isLoading: Bool,
+        distanceFromTop: CGFloat
+    ) {
+        let wasLoading = self.isLoading
+        self.canLoadOlder = canLoadOlder
+        self.isLoading = isLoading
+
+        guard canLoadOlder else {
+            phase = .unavailable
+            pendingGestureID = nil
+            return
+        }
+        if isLoading {
+            phase = .loading
+            return
+        }
+        if wasLoading {
+            phase = .waitingForNextGesture
+        } else if phase == .unavailable {
+            phase = .armed
+        }
+        if distanceFromTop > 160, phase != .loading {
+            phase = .armed
+        }
+    }
+
+    mutating func noteUserGesture(_ gestureID: Int) {
+        guard canLoadOlder, !isLoading else { return }
+        if phase == .waitingForNextGesture,
+           gestureID != lastRequestedGestureID {
+            phase = .armed
+        }
+        pendingGestureID = gestureID
+    }
+
+    mutating func consumeRequestIfNeeded(distanceFromTop: CGFloat) -> Bool {
+        guard canLoadOlder,
+              !isLoading,
+              phase == .armed,
+              distanceFromTop <= 0.5,
+              let gestureID = pendingGestureID,
+              gestureID != lastRequestedGestureID else {
+            return false
+        }
+        lastRequestedGestureID = gestureID
+        pendingGestureID = nil
+        phase = .loading
+        return true
+    }
+
+    mutating func rejectRequest() {
+        guard canLoadOlder else {
+            phase = .unavailable
+            return
+        }
+        phase = .armed
+    }
+}
+
 private final class AppKitTimelineRowHeightKey: NSObject {
     let sessionID: String
     let itemID: String
@@ -113,7 +196,7 @@ private final class AppKitTimelineRowHeightKey: NSObject {
 
 @MainActor
 private final class AppKitTimelineOwningScrollView: NSScrollView {
-    var onVerticalWheel: (() -> Void)?
+    var onVerticalWheel: ((Bool) -> Void)?
     private var wheelMonitor: Any?
     fileprivate private(set) var routedWheelCount = 0
 
@@ -128,7 +211,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
 
     override func scrollWheel(with event: NSEvent) {
         if isPredominantlyVertical(event) {
-            onVerticalWheel?()
+            onVerticalWheel?(event.phase.contains(.began))
         }
         super.scrollWheel(with: event)
     }
@@ -173,8 +256,12 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
 
     fileprivate func routeVerticalWheel(_ event: NSEvent) {
         routedWheelCount += 1
-        onVerticalWheel?()
+        onVerticalWheel?(event.phase.contains(.began))
         super.scrollWheel(with: event)
+    }
+
+    fileprivate func simulateTopPagingGestureForTesting() {
+        onVerticalWheel?(true)
     }
 }
 
@@ -184,10 +271,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
     let items: [AppKitTimelineItem]
     let scrollCommand: AppKitTimelineScrollCommand
     let forcedBottomRevision: Int
+    let canLoadOlder: Bool
+    let isLoadingOlder: Bool
     let onMetrics: (TimelineScrollMetrics) -> Void
+    let onLoadOlder: () -> Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onMetrics: onMetrics)
+        Coordinator(onMetrics: onMetrics, onLoadOlder: onLoadOlder)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -196,12 +286,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.onMetrics = onMetrics
+        context.coordinator.onLoadOlder = onLoadOlder
         context.coordinator.update(
             sessionID: sessionID,
             contentSessionID: contentSessionID,
             items: items,
             scrollCommand: scrollCommand,
-            forcedBottomRevision: forcedBottomRevision
+            forcedBottomRevision: forcedBottomRevision,
+            canLoadOlder: canLoadOlder,
+            isLoadingOlder: isLoadingOlder
         )
     }
 
@@ -212,6 +305,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var onMetrics: (TimelineScrollMetrics) -> Void
+        var onLoadOlder: () -> Bool
 
         private var items: [AppKitTimelineItem] = []
         private var sessionID: String?
@@ -245,6 +339,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var initialBottomWorkItems: [DispatchWorkItem] = []
         private var initialBottomGeneration = 0
         private var initialBottomPendingSessionID: String?
+        private var paging = AppKitTimelinePagingController()
+        private var wheelGestureID = 0
+        private var wheelGestureActive = false
+        private var wheelGestureEndWorkItem: DispatchWorkItem?
+        private var topPagingEvaluationWorkItem: DispatchWorkItem?
         private var scrollIsolationInstalled = false
         private var geometryMutationDepth = 0
         private var liveScrollStartOriginY: CGFloat?
@@ -269,8 +368,12 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private let cellIdentifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineHostingCell")
 
-        init(onMetrics: @escaping (TimelineScrollMetrics) -> Void) {
+        init(
+            onMetrics: @escaping (TimelineScrollMetrics) -> Void,
+            onLoadOlder: @escaping () -> Bool
+        ) {
             self.onMetrics = onMetrics
+            self.onLoadOlder = onLoadOlder
             rowHeightCache.countLimit = 40_000
             fallbackRowHeightCache.countLimit = 40_000
         }
@@ -305,8 +408,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
             let scrollView = AppKitTimelineOwningScrollView(frame: .zero)
             scrollView.identifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineScrollView")
-            scrollView.onVerticalWheel = { [weak self] in
-                self?.noteWheelInput()
+            scrollView.onVerticalWheel = { [weak self] beginsGesture in
+                self?.noteWheelInput(beginsGesture: beginsGesture)
             }
             scrollView.documentView = tableView
             scrollView.hasVerticalScroller = true
@@ -376,7 +479,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             contentSessionID nextContentSessionID: String?,
             items nextItems: [AppKitTimelineItem],
             scrollCommand: AppKitTimelineScrollCommand,
-            forcedBottomRevision: Int = 0
+            forcedBottomRevision: Int = 0,
+            canLoadOlder: Bool = false,
+            isLoadingOlder: Bool = false
         ) {
             guard tableView != nil else { return }
             AppKitTimelineDiagnostics.updateCount += 1
@@ -400,6 +505,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
                 cancelScheduledHeightUpdate(clearPending: true)
+                paging.reset(canLoadOlder: canLoadOlder, isLoading: isLoadingOlder)
+                cancelTopPagingEvaluation()
+                cancelWheelGestureEnd()
+            } else {
+                paging.update(
+                    canLoadOlder: canLoadOlder,
+                    isLoading: isLoadingOlder,
+                    distanceFromTop: currentDistanceFromTop()
+                )
             }
             let commandChanged = hasReceivedUpdate && scrollCommand.revision != lastScrollCommandRevision
             let forcedBottomChanged = hasReceivedUpdate && forcedBottomRevision != lastForcedBottomRevision
@@ -1266,15 +1380,87 @@ struct AppKitTimelineTable: NSViewRepresentable {
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
             scheduleDiscreteScrollSettle()
+            scheduleTopPagingEvaluation()
         }
 
-        private func noteWheelInput() {
+        private func noteWheelInput(beginsGesture: Bool) {
             guard geometryMutationDepth == 0 else { return }
             cancelInitialBottomVerification(reason: "wheel-input")
             wheelInputCount += 1
+            if beginsGesture || !wheelGestureActive {
+                wheelGestureID &+= 1
+                wheelGestureActive = true
+            }
+            paging.noteUserGesture(wheelGestureID)
+            scheduleWheelGestureEnd()
+            scheduleTopPagingEvaluation()
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
             scheduleDiscreteScrollSettle()
+        }
+
+        private func scheduleWheelGestureEnd() {
+            wheelGestureEndWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.wheelGestureEndWorkItem = nil
+                    self?.wheelGestureActive = false
+                }
+            }
+            wheelGestureEndWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32, execute: workItem)
+        }
+
+        private func cancelWheelGestureEnd() {
+            wheelGestureEndWorkItem?.cancel()
+            wheelGestureEndWorkItem = nil
+            wheelGestureActive = false
+        }
+
+        private func scheduleTopPagingEvaluation() {
+            guard topPagingEvaluationWorkItem == nil else { return }
+            let workItem = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.topPagingEvaluationWorkItem = nil
+                    self.evaluateTopPagingIntent()
+                }
+            }
+            topPagingEvaluationWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        private func cancelTopPagingEvaluation() {
+            topPagingEvaluationWorkItem?.cancel()
+            topPagingEvaluationWorkItem = nil
+        }
+
+        private func evaluateTopPagingIntent() {
+            guard deferredItems == nil else { return }
+            let distanceFromTop = currentDistanceFromTop()
+            paging.update(
+                canLoadOlder: paging.canLoadOlder,
+                isLoading: paging.isLoading,
+                distanceFromTop: distanceFromTop
+            )
+            guard paging.consumeRequestIfNeeded(distanceFromTop: distanceFromTop) else { return }
+            let accepted = onLoadOlder()
+            if accepted {
+                AppLogger.info(
+                    "native older-page intent session=\(sessionID ?? "-") " +
+                        "gesture=\(wheelGestureID) top=\(Self.format(distanceFromTop))"
+                )
+            } else {
+                paging.rejectRequest()
+                AppLogger.warning(
+                    "native older-page intent rejected session=\(sessionID ?? "-")"
+                )
+            }
+        }
+
+        private func currentDistanceFromTop() -> CGFloat {
+            guard let scrollView else { return .infinity }
+            return max(0, scrollView.documentVisibleRect.minY)
         }
 
         private func scheduleDiscreteScrollSettle() {
@@ -1385,6 +1571,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 if shouldRestoreAnchor, let anchor {
                     restore(anchor)
                 }
+                scheduleTopPagingEvaluation()
             }
             if deferredColumnWidthRefresh {
                 refreshForColumnWidthChange(in: tableView)
@@ -1410,6 +1597,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             deferredItems = nil
             deferredColumnWidthRefresh = false
             cancelInitialBottomVerification(reason: "dismantle")
+            cancelTopPagingEvaluation()
+            cancelWheelGestureEnd()
             cancelDiscreteScrollSettle()
             cancelScheduledHeightUpdate(clearPending: true)
             cancelScheduledMetricsReport()
@@ -1477,6 +1666,8 @@ enum AppKitTimelineHarness {
             ("exact-top-metrics", checkExactTopMetrics),
             ("first-content-bottom-position", checkFirstContentBottomPosition),
             ("ownership-only-bottom-position", checkOwnershipOnlyBottomPosition),
+            ("native-top-paging-state-machine", checkNativeTopPagingStateMachine),
+            ("native-top-paging-coordinator", checkNativeTopPagingCoordinator),
             ("explicit-height-cache", checkExplicitHeightCache),
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
@@ -2052,6 +2243,87 @@ enum AppKitTimelineHarness {
         return true
     }
 
+    private static func checkNativeTopPagingStateMachine() -> Bool {
+        var paging = AppKitTimelinePagingController()
+        paging.reset(canLoadOlder: true, isLoading: false)
+
+        guard !paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "opening metrics loaded without user intent")
+        }
+
+        paging.noteUserGesture(1)
+        guard paging.consumeRequestIfNeeded(distanceFromTop: 0),
+              !paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "first top gesture was not exactly-once")
+        }
+
+        paging.update(canLoadOlder: true, isLoading: true, distanceFromTop: 0)
+        paging.update(canLoadOlder: true, isLoading: false, distanceFromTop: 0)
+        paging.noteUserGesture(1)
+        guard !paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "same gesture chained a second page")
+        }
+
+        paging.noteUserGesture(2)
+        guard paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "new pull at a short document did not load")
+        }
+
+        paging.reset(canLoadOlder: true, isLoading: false)
+        paging.noteUserGesture(3)
+        guard !paging.consumeRequestIfNeeded(distanceFromTop: 240),
+              paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "gesture reaching the top did not load")
+        }
+
+        paging.update(canLoadOlder: false, isLoading: false, distanceFromTop: 0)
+        paging.noteUserGesture(4)
+        guard !paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "exhausted history still requested a page")
+        }
+        return true
+    }
+
+    private static func checkNativeTopPagingCoordinator() -> Bool {
+        let shortItems = (0..<2).map { item(index: $0, version: 0) }
+        let fixture = Fixture(items: shortItems)
+        defer { fixture.stop() }
+
+        fixture.setHistoryState(canLoadOlder: true, isLoadingOlder: false)
+        fixture.settle()
+        guard fixture.metrics.olderLoadRequestCount == 0 else {
+            return fail("native-top-paging-coordinator", "opening at the top loaded without a gesture")
+        }
+
+        fixture.simulateTopPagingGesture()
+        fixture.settle()
+        guard fixture.metrics.olderLoadRequestCount == 1 else {
+            return fail("native-top-paging-coordinator", "short timeline did not request its first page")
+        }
+
+        fixture.simulateTopPagingGesture()
+        fixture.settle()
+        guard fixture.metrics.olderLoadRequestCount == 1 else {
+            return fail("native-top-paging-coordinator", "loading state accepted a duplicate page")
+        }
+
+        fixture.setHistoryState(canLoadOlder: true, isLoadingOlder: true)
+        fixture.setHistoryState(canLoadOlder: true, isLoadingOlder: false)
+        fixture.simulateTopPagingGesture()
+        fixture.settle()
+        guard fixture.metrics.olderLoadRequestCount == 2 else {
+            return fail("native-top-paging-coordinator", "a new gesture did not request the next page")
+        }
+
+        fixture.setHistoryState(canLoadOlder: false, isLoadingOlder: false)
+        fixture.simulateTopPagingGesture()
+        fixture.settle()
+        guard fixture.metrics.olderLoadRequestCount == 2 else {
+            return fail("native-top-paging-coordinator", "exhausted history accepted another page")
+        }
+        return true
+    }
+
     private static func checkExactTopMetrics() -> Bool {
         let fixture = Fixture()
         defer { fixture.stop() }
@@ -2115,6 +2387,7 @@ enum AppKitTimelineHarness {
             var latest: TimelineScrollMetrics?
             var reportCount = 0
             var contentBuildCount = 0
+            var olderLoadRequestCount = 0
         }
 
         let metrics: Metrics
@@ -2127,6 +2400,8 @@ enum AppKitTimelineHarness {
         private var contentSessionID: String? = "harness"
         private var command = AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
         private var forcedBottomRevision = 0
+        private var canLoadOlder = false
+        private var isLoadingOlder = false
 
         init(
             width: CGFloat = 920,
@@ -2134,10 +2409,16 @@ enum AppKitTimelineHarness {
         ) {
             let metrics = Metrics()
             self.metrics = metrics
-            coordinator = AppKitTimelineTable.Coordinator { value in
-                metrics.latest = value
-                metrics.reportCount += 1
-            }
+            coordinator = AppKitTimelineTable.Coordinator(
+                onMetrics: { value in
+                    metrics.latest = value
+                    metrics.reportCount += 1
+                },
+                onLoadOlder: {
+                    metrics.olderLoadRequestCount += 1
+                    return true
+                }
+            )
             scrollView = coordinator.makeScrollView()
             tableView = scrollView.documentView as! NSTableView
             window = NSWindow(
@@ -2162,7 +2443,9 @@ enum AppKitTimelineHarness {
                 contentSessionID: contentSessionID,
                 items: items,
                 scrollCommand: command,
-                forcedBottomRevision: forcedBottomRevision
+                forcedBottomRevision: forcedBottomRevision,
+                canLoadOlder: canLoadOlder,
+                isLoadingOlder: isLoadingOlder
             )
             settle()
         }
@@ -2190,8 +2473,20 @@ enum AppKitTimelineHarness {
                 contentSessionID: contentSessionID,
                 items: items,
                 scrollCommand: command,
-                forcedBottomRevision: forcedBottomRevision
+                forcedBottomRevision: forcedBottomRevision,
+                canLoadOlder: canLoadOlder,
+                isLoadingOlder: isLoadingOlder
             )
+        }
+
+        func setHistoryState(canLoadOlder: Bool, isLoadingOlder: Bool) {
+            self.canLoadOlder = canLoadOlder
+            self.isLoadingOlder = isLoadingOlder
+            update()
+        }
+
+        func simulateTopPagingGesture() {
+            (scrollView as? AppKitTimelineOwningScrollView)?.simulateTopPagingGestureForTesting()
         }
 
         func setContentSessionID(_ value: String?) {
@@ -2435,6 +2730,8 @@ enum AppKitTimelineIntegrationHarness {
                 let beforeRows = timelineTableView.numberOfRows
                 let beforeEvents = store.displayEvents.count
                 let beforeHidden = store.hiddenDisplayEventCount
+                (timelineScrollView as? AppKitTimelineOwningScrollView)?
+                    .simulateTopPagingGestureForTesting()
                 timelineScrollView.contentView.scroll(to: .zero)
                 timelineScrollView.reflectScrolledClipView(timelineScrollView.contentView)
 
