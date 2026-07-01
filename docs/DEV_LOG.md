@@ -50,10 +50,10 @@ painful to rediscover later.
 - Real-window cold opens exposed a layout-timing edge that the fixed harness
   viewport did not: the initial native bottom move could run before SwiftUI had
   installed the table's final viewport. The coordinator now performs one
-  cancellable post-layout native positioning pass. AppKit makes no origin write
-  when the first pass already landed; otherwise the second pass reaches the
-  now-laid-out last row. User wheel input, a new session, or an explicit
-  navigation command cancels it.
+  three cancellable post-layout native positioning passes at 50, 160, and 350
+  ms. AppKit makes no origin write when an earlier pass already landed; later
+  passes absorb only row-height settlement during opening. User wheel input, a
+  new session, or an explicit navigation command cancels the set.
 - The live integration harness now verifies the actual bottom distance after
   every one of its 40 chat switches instead of checking only recycler counts.
 - Initial positioning ownership is now explicit and session-scoped. SwiftUI may

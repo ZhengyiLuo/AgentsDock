@@ -240,7 +240,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var discreteScrollSettleWorkItem: DispatchWorkItem?
         private var discreteScrollGeneration = 0
         private var isDiscreteScrolling = false
-        private var initialBottomWorkItem: DispatchWorkItem?
+        private var initialBottomWorkItems: [DispatchWorkItem] = []
         private var initialBottomGeneration = 0
         private var initialBottomPendingSessionID: String?
         private var scrollIsolationInstalled = false
@@ -1062,45 +1062,49 @@ struct AppKitTimelineTable: NSViewRepresentable {
         }
 
         private func scheduleInitialBottomVerification() {
-            guard initialBottomWorkItem == nil else { return }
+            guard initialBottomWorkItems.isEmpty else { return }
             initialBottomGeneration &+= 1
             let generation = initialBottomGeneration
             let targetSessionID = sessionID
             let wheelCount = wheelInputCount
-            initialBottomWorkItem?.cancel()
-            let workItem = DispatchWorkItem { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self,
-                          self.initialBottomGeneration == generation,
-                          self.sessionID == targetSessionID,
-                          self.initialBottomPendingSessionID == targetSessionID,
-                          self.wheelInputCount == wheelCount,
-                          let scrollView = self.scrollView,
-                          let tableView = self.tableView else { return }
-                    self.initialBottomWorkItem = nil
-                    tableView.layoutSubtreeIfNeeded()
-                    let distanceFromBottom = max(
-                        0,
-                        tableView.bounds.height - scrollView.documentVisibleRect.maxY
-                    )
-                    self.scrollToBottom()
-                    self.initialBottomPendingSessionID = nil
-                    if distanceFromBottom > 28 {
-                        AppLogger.info(
-                            "native initial bottom corrected session=\(targetSessionID ?? "-") " +
-                                "distance=\(Self.format(distanceFromBottom))"
+            let delays: [TimeInterval] = [0.05, 0.16, 0.35]
+            initialBottomWorkItems = delays.enumerated().map { attempt, delay in
+                let workItem = DispatchWorkItem { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self,
+                              self.initialBottomGeneration == generation,
+                              self.sessionID == targetSessionID,
+                              self.initialBottomPendingSessionID == targetSessionID,
+                              self.wheelInputCount == wheelCount,
+                              let scrollView = self.scrollView,
+                              let tableView = self.tableView else { return }
+                        tableView.layoutSubtreeIfNeeded()
+                        let distanceFromBottom = max(
+                            0,
+                            tableView.bounds.height - scrollView.documentVisibleRect.maxY
                         )
+                        self.scrollToBottom()
+                        if distanceFromBottom > 28 {
+                            AppLogger.info(
+                                "native initial bottom corrected session=\(targetSessionID ?? "-") " +
+                                    "attempt=\(attempt + 1) distance=\(Self.format(distanceFromBottom))"
+                            )
+                        }
+                        if attempt == delays.count - 1 {
+                            self.initialBottomPendingSessionID = nil
+                            self.initialBottomWorkItems.removeAll()
+                        }
                     }
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+                return workItem
             }
-            initialBottomWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         }
 
         private func cancelInitialBottomVerification() {
             initialBottomGeneration &+= 1
-            initialBottomWorkItem?.cancel()
-            initialBottomWorkItem = nil
+            initialBottomWorkItems.forEach { $0.cancel() }
+            initialBottomWorkItems.removeAll()
             initialBottomPendingSessionID = nil
         }
 
@@ -2319,7 +2323,7 @@ enum AppKitTimelineIntegrationHarness {
                 hostingView.layoutSubtreeIfNeeded()
                 let elapsed = selectionStarted.duration(to: clock.now)
                 slowest = max(slowest, elapsed)
-                try? await Task.sleep(for: .milliseconds(180))
+                try? await Task.sleep(for: .milliseconds(480))
                 hostingView.layoutSubtreeIfNeeded()
                 let distanceFromBottom = max(
                     0,
@@ -2369,7 +2373,7 @@ enum AppKitTimelineIntegrationHarness {
         guard AppKitTimelineDiagnostics.coordinatorCount > 0,
               AppKitTimelineDiagnostics.updateCount >= sessions.count,
               AppKitTimelineDiagnostics.sameSessionFallbackReloadCount == 0,
-              AppKitTimelineDiagnostics.bottomRequestCount <= sessions.count * 8 + 5 else {
+              AppKitTimelineDiagnostics.bottomRequestCount <= sessions.count * 16 + 5 else {
             AppLogger.error(
                 "AppKit integration harness recycler invariant failed " +
                 "coordinators=\(AppKitTimelineDiagnostics.coordinatorCount) " +
