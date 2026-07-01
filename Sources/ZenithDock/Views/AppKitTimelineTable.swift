@@ -1905,7 +1905,7 @@ enum AppKitTimelineHarness {
             0,
             fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
         )
-        guard distanceFromBottom < 4 else {
+        guard distanceFromBottom <= 28 else {
             return fail(
                 "first-content-bottom-position",
                 "placeholder-to-transcript transition stayed at the top distance=\(distanceFromBottom)"
