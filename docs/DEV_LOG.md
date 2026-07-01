@@ -48,6 +48,13 @@ painful to rediscover later.
   `/tmp/zenithdock_restart_when_idle.py` polls authenticated `active_count` and
   restarts `zenithbot-agent.service` only after it reaches zero; its audit log
   is `/home/zen/.zenithbot-agent/idle_restart.log`.
+- The 30-minute idle watcher timed out because the server remained continuously
+  busy. On the user's explicit instruction to update immediately, restarted
+  `zenithbot-agent.service` at 15:54 PDT with three active turns; those provider
+  processes may have been interrupted. Authenticated health returned `ok: true`
+  with zero active runs afterward, systemd reported PID `1524298`, and the
+  deployed source contains the blocking `TaskOutput` join rule. Removed the
+  expired temporary watcher script.
 
 ## 2026-07-01 - Bound Native Trackpad Speed Without Replacing Momentum
 
