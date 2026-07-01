@@ -1522,6 +1522,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(timeline.contains("#if !AGENTSDOCK_LAZY_TIMELINE\n                    if !shouldMaskTimeline"), "The lazy test timeline must rely on native fast scrolling instead of a floating bottom button")
     try assert(!timeline.contains(".defaultScrollAnchor(") && timeline.contains(".id(documentIdentity)"), "Lazy chat opening must not ask SwiftUI to resolve a bottom anchor over variable-height rows")
     try assert(timeline.contains("lazyNativeRevealRevision = requestLazyNativeBottomScroll()") && timeline.contains("lazyNativeBottomScrollDidApply"), "Lazy chat opening must reveal only after its one native bottom movement lands")
+    try assert(timeline.contains("Coordinator(initialRevision: revision") && timeline.contains("appliedRevision = initialRevision"), "A recreated lazy scroll bridge must not replay a stale bottom revision")
     try assert(timeline.contains("scheduleLazyHistoryRearm(for: pendingSessionID") && timeline.contains("cancelPendingLazyHistoryArm()"), "Lazy history paging must rearm once per settled chat and cancel stale session work")
     try assert(timeline.contains("TimelineRows.build(from: timelineProjectionEvents(from: store.displayEvents"), "Lazy history anchoring must use the same bounded row projection as rendering")
     try assert(eventViews.contains("#if AGENTSDOCK_LAZY_TIMELINE\n        Grid(") && eventViews.contains("eagerGridRows(mediaArtifacts"), "Lazy timeline rows must replace nested lazy media grids with bounded eager grids")

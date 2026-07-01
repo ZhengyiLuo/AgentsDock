@@ -44,6 +44,11 @@ painful to rediscover later.
 - The isolated lazy path now has no `defaultScrollAnchor` at all. Chat opening
   stays masked, performs the same single native clip-view movement, and reveals
   only from the bridge's applied callback. Empty chats reveal immediately.
+- Stress logs exposed a harmless but visible duplicate: recreating the
+  session-scoped scroll document also recreated the bridge coordinator, which
+  initially replayed the previous global revision. Coordinators now seed their
+  applied/pending baseline from the revision at creation, so only the new
+  session's explicit opening revision moves the clip view.
 - Production `AgentsDock.app` remains unchanged on the eager timeline path.
 
 ## 2026-06-30 - LazyVStack Test Architecture, Second Pass

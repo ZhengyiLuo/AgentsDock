@@ -2079,7 +2079,7 @@ private struct LazyTimelineNativeBottomScroller: NSViewRepresentable {
     var onApplied: (Int) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onApplied: onApplied)
+        Coordinator(initialRevision: revision, onApplied: onApplied)
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -2094,11 +2094,13 @@ private struct LazyTimelineNativeBottomScroller: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         var onApplied: (Int) -> Void
-        private var appliedRevision = 0
-        private var pendingRevision = 0
+        private var appliedRevision: Int
+        private var pendingRevision: Int
         private var deliveryScheduled = false
 
-        init(onApplied: @escaping (Int) -> Void) {
+        init(initialRevision: Int, onApplied: @escaping (Int) -> Void) {
+            appliedRevision = initialRevision
+            pendingRevision = initialRevision
             self.onApplied = onApplied
         }
 
