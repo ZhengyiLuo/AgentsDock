@@ -148,7 +148,7 @@ struct TimelineView: View {
                             .allowsHitTesting(false)
                     }
 #if !AGENTSDOCK_LAZY_TIMELINE
-                    if !shouldMaskTimeline && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
+                    if shouldShowFloatingBottomButton && !shouldMaskTimeline && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
                             store.markSelectedSessionRead(force: true)
@@ -1357,6 +1357,10 @@ struct TimelineView: View {
 
     private var shouldFollowBottomRequest: Bool {
         isAtBottom || isNearBottom || store.selectedTimelineAtBottom
+    }
+
+    private var shouldShowFloatingBottomButton: Bool {
+        Bundle.main.bundleIdentifier != "com.zhengyiluo.AgentsDockTest"
     }
 
     private var hasWarmSelectedTimeline: Bool {

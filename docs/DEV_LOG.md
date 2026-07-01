@@ -19,6 +19,27 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Retire LazyVStack From AgentsDock-test After Third Live Spiral
+
+- The fully anchor-free build still reached `99.8%` CPU after ordinary use.
+  The live sample is
+  `/private/tmp/AgentsDock-test-repeg-no-anchor-20260630.sample.txt`.
+- This sample contains no `ScrollActionDispatcher`, no bottom anchor, and no
+  custom scroll observer. The main thread loops directly through
+  `GraphHost.flushTransactions`, `LazySubviewPlacements`, `ForEachState`, and
+  `StyledTextLayoutEngine` while measuring the bounded 64-row rich timeline.
+- The failure appeared after switching among cached chats and could take
+  several minutes, which explains why short stress passes repeatedly looked
+  healthy. Trigger patches cannot make this SwiftUI primitive safe for this
+  variable-height Markdown/media row tree on the current macOS runtime.
+- `scripts/build_and_deploy_test.sh` no longer defines
+  `AGENTSDOCK_LAZY_TIMELINE`. Both production and `AgentsDock-test` now use the
+  proven eager `VStack` over the bounded rendered tail. The lazy code remains
+  quarantined in source for forensic comparison, and guardrails reject enabling
+  either experimental virtualizer in the test build.
+- The test bundle still hides the floating go-to-bottom button. This UX choice
+  is keyed by its bundle identifier and is independent of timeline rendering.
+
 ## 2026-06-30 - Remove LazyVStack Bottom Scroll Dispatcher Loop
 
 - Confirmed a persistent test-app death spiral at `98.7%` CPU for more than 15
