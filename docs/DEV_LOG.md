@@ -56,6 +56,10 @@ painful to rediscover later.
   navigation command cancels it.
 - The live integration harness now verifies the actual bottom distance after
   every one of its 40 chat switches instead of checking only recycler counts.
+- Initial positioning ownership is now explicit and session-scoped. SwiftUI may
+  coalesce away an intermediate empty snapshot, so the recycler no longer tries
+  to infer first content by comparing adjacent item arrays. A new session keeps
+  one pending intent until its first non-control timeline row is installed.
 
 ## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
 

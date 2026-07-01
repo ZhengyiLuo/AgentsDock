@@ -242,6 +242,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var isDiscreteScrolling = false
         private var initialBottomWorkItem: DispatchWorkItem?
         private var initialBottomGeneration = 0
+        private var initialBottomPendingSessionID: String?
         private var scrollIsolationInstalled = false
         private var geometryMutationDepth = 0
         private var liveScrollStartOriginY: CGFloat?
@@ -391,6 +392,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 lastMetrics = nil
                 lastMetricsReportUptime = nil
                 cancelInitialBottomVerification()
+                initialBottomPendingSessionID = nextSessionID
                 cancelDiscreteScrollSettle()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
@@ -421,11 +423,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 : nil
             let rowIdentityOrderUnchanged = previousItems.count == nextItems.count &&
                 zip(previousItems, nextItems).allSatisfy { $0.id == $1.id }
-            let previousHadTimelineRows = previousItems.contains { !$0.eventIDs.isEmpty }
-            let nextHasTimelineRows = nextItems.contains { !$0.eventIDs.isEmpty }
-            let firstTimelineContentArrived = !previousHadTimelineRows && nextHasTimelineRows
+            let nextHasTimelineRows = nextItems.contains { item in
+                item.id != "empty-state" &&
+                    item.id != "history-loader" &&
+                    !item.id.hasPrefix("unread-marker-")
+            }
             let shouldPositionInitialBottom = nextHasTimelineRows &&
-                (sessionChanged || firstTimelineContentArrived)
+                initialBottomPendingSessionID == nextSessionID
             let shouldRestoreAnchor = anchor.map {
                 !rowIdentityOrderUnchanged &&
                     geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
@@ -1058,6 +1062,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         }
 
         private func scheduleInitialBottomVerification() {
+            guard initialBottomWorkItem == nil else { return }
             initialBottomGeneration &+= 1
             let generation = initialBottomGeneration
             let targetSessionID = sessionID
@@ -1068,6 +1073,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     guard let self,
                           self.initialBottomGeneration == generation,
                           self.sessionID == targetSessionID,
+                          self.initialBottomPendingSessionID == targetSessionID,
                           self.wheelInputCount == wheelCount,
                           let scrollView = self.scrollView,
                           let tableView = self.tableView else { return }
@@ -1078,6 +1084,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                         tableView.bounds.height - scrollView.documentVisibleRect.maxY
                     )
                     self.scrollToBottom()
+                    self.initialBottomPendingSessionID = nil
                     if distanceFromBottom > 28 {
                         AppLogger.info(
                             "native initial bottom corrected session=\(targetSessionID ?? "-") " +
@@ -1094,6 +1101,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             initialBottomGeneration &+= 1
             initialBottomWorkItem?.cancel()
             initialBottomWorkItem = nil
+            initialBottomPendingSessionID = nil
         }
 
         private func scroll(to itemID: String, anchor: AppKitTimelineAnchor) {
