@@ -36,6 +36,14 @@ painful to rediscover later.
   scrolling for navigation and jumps to the latest row only for an explicit
   send/forced-latest intent. Incoming agent messages continue to hold the
   current viewport steady.
+- A second live spiral disproved the remaining initial-anchor assumption. The
+  sample `/private/tmp/AgentsDock-test-repeg-native-bottom-20260630.sample.txt`
+  contains no `ScrollActionDispatcher`; it loops directly in
+  `LazySubviewPlacements` after switching into a cached 64-row chat. The log
+  shows the peg beginning at chat open, before any explicit bottom command.
+- The isolated lazy path now has no `defaultScrollAnchor` at all. Chat opening
+  stays masked, performs the same single native clip-view movement, and reveals
+  only from the bridge's applied callback. Empty chats reveal immediately.
 - Production `AgentsDock.app` remains unchanged on the eager timeline path.
 
 ## 2026-06-30 - LazyVStack Test Architecture, Second Pass

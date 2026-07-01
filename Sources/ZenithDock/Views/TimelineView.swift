@@ -29,6 +29,7 @@ struct TimelineView: View {
     @State private var pendingLazyHistoryArmTask: Task<Void, Never>?
 #if AGENTSDOCK_LAZY_TIMELINE
     @State private var lazyNativeBottomScrollRevision = 0
+    @State private var lazyNativeRevealRevision: Int?
 #endif
 #if AGENTSDOCK_APPKIT_TIMELINE
     @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
@@ -488,21 +489,17 @@ struct TimelineView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
                 .background {
-                    LazyTimelineNativeBottomScroller(revision: lazyNativeBottomScrollRevision)
+                    LazyTimelineNativeBottomScroller(
+                        revision: lazyNativeBottomScrollRevision,
+                        onApplied: lazyNativeBottomScrollDidApply
+                    )
                         .frame(width: 0, height: 0)
                 }
             }
-            // Recreate the native scroll document once per selected/loaded
-            // session and let SwiftUI establish its initial bottom anchor.
-            // Calling ScrollViewReader.scrollTo(bottom) while LazyVStack is
-            // still refining long-row estimates can leave ScrollActionDispatcher
-            // chasing a moving target indefinitely.
-            // Bottom is only the initial position for a newly-created chat
-            // document. Applying the legacy all-role anchor here also anchors
-            // content-size changes, so a growing streaming row can tug the
-            // viewport and repeatedly invalidate LazyVStack placements while
-            // the user is scrolling elsewhere in the transcript.
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            // Recreate the native scroll document per selected/loaded session.
+            // Do not install any SwiftUI bottom anchor: even the initial-only
+            // role can make LazySubviewPlacements chase estimated Markdown row
+            // heights forever while opening a cached chat.
             .id(documentIdentity)
             .onScrollGeometryChange(for: TimelineScrollMetrics.self) { geometry in
                 TimelineScrollMetrics(
@@ -1039,7 +1036,12 @@ struct TimelineView: View {
         initialTimelineRevealRevision += 1
         maskedSessionID = store.selectedSessionID
         hideTimelinePositioningOverlay()
+#if AGENTSDOCK_LAZY_TIMELINE
+        lazyNativeRevealRevision = nil
+        isInitialTimelineMasked = store.selectedSessionID != nil
+#else
         isInitialTimelineMasked = store.selectedSessionID != nil && !hasWarmSelectedTimeline
+#endif
         updateTimelinePositioningOverlay(masked: isInitialTimelineMasked)
     }
 
@@ -1053,11 +1055,14 @@ struct TimelineView: View {
         guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }
         let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
         guard canSettle else { return }
-        withTransaction(noAnimationTransaction) {
-            isAtBottom = true
-            isNearBottom = true
-            store.setSelectedTimelineAtBottom(true)
-            isInitialTimelineMasked = false
+        if store.displayEvents.isEmpty {
+            pendingOpenBottomSessionID = nil
+            withTransaction(noAnimationTransaction) {
+                isAtBottom = true
+                isNearBottom = true
+                store.setSelectedTimelineAtBottom(true)
+                isInitialTimelineMasked = false
+            }
         }
         return
 #else
@@ -1107,21 +1112,21 @@ struct TimelineView: View {
         disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
 #if AGENTSDOCK_LAZY_TIMELINE
-        // The session-scoped ScrollView uses an initial-only bottom anchor.
-        // Consuming the pending open here must not create a scroll action while
-        // the lazy document is still converging on row heights.
+        // Keep the timeline masked until one native clip-view movement lands.
+        // SwiftUI must not own either the initial anchor or a scroll action.
         isAtBottom = true
         isNearBottom = true
         store.setSelectedTimelineAtBottom(true)
+        lazyNativeRevealRevision = requestLazyNativeBottomScroll()
         scheduleLazyHistoryRearm(for: pendingSessionID, proxy: proxy)
 #else
         scrollToBottom(proxy)
-#endif
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
                 isInitialTimelineMasked = false
             }
         }
+#endif
 #if !AGENTSDOCK_LAZY_TIMELINE
         settleBottomAfterLayout(proxy, sessionID: pendingSessionID)
 #endif
@@ -1152,11 +1157,17 @@ struct TimelineView: View {
         }
         store.markSelectedSessionRead(force: true)
         scrollToBottom(proxy)
+#if AGENTSDOCK_LAZY_TIMELINE
+        if isInitialTimelineMasked {
+            lazyNativeRevealRevision = lazyNativeBottomScrollRevision
+        }
+#else
         if isInitialTimelineMasked {
             withTransaction(noAnimationTransaction) {
                 isInitialTimelineMasked = false
             }
         }
+#endif
         settleBottomAfterLayout(proxy, sessionID: sessionID)
         AppLogger.info("force latest settled session=\(sessionID) events=\(store.displayEvents.count) visible_limit=\(visibleRowLimit)")
 #endif
@@ -1243,8 +1254,7 @@ struct TimelineView: View {
         // Never route a bottom jump through ScrollViewReader on a changing
         // LazyVStack. ScrollActionDispatcher can keep invalidating estimated
         // placements forever; the native bridge performs one bounds update.
-        cancelPendingLazyScroll()
-        lazyNativeBottomScrollRevision &+= 1
+        _ = requestLazyNativeBottomScroll()
 #else
         proxy.scrollTo(bottomID, anchor: .bottom)
 #endif
@@ -1303,6 +1313,26 @@ struct TimelineView: View {
         pendingLazyScrollTask?.cancel()
         pendingLazyScrollTask = nil
     }
+
+#if AGENTSDOCK_LAZY_TIMELINE
+    @discardableResult
+    private func requestLazyNativeBottomScroll() -> Int {
+        cancelPendingLazyScroll()
+        lazyNativeBottomScrollRevision &+= 1
+        return lazyNativeBottomScrollRevision
+    }
+
+    private func lazyNativeBottomScrollDidApply(_ revision: Int) {
+        guard lazyNativeRevealRevision == revision,
+              maskedSessionID == store.selectedSessionID else {
+            return
+        }
+        lazyNativeRevealRevision = nil
+        withTransaction(noAnimationTransaction) {
+            isInitialTimelineMasked = false
+        }
+    }
+#endif
 
     private func scheduleLazyHistoryRearm(for sessionID: String, proxy: ScrollViewProxy) {
 #if AGENTSDOCK_LAZY_TIMELINE
@@ -2046,9 +2076,10 @@ struct TimelineScrollMetrics: Equatable {
 #if AGENTSDOCK_LAZY_TIMELINE
 private struct LazyTimelineNativeBottomScroller: NSViewRepresentable {
     var revision: Int
+    var onApplied: (Int) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(onApplied: onApplied)
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -2056,14 +2087,20 @@ private struct LazyTimelineNativeBottomScroller: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.onApplied = onApplied
         context.coordinator.requestBottom(revision: revision, from: view)
     }
 
     @MainActor
     final class Coordinator {
+        var onApplied: (Int) -> Void
         private var appliedRevision = 0
         private var pendingRevision = 0
         private var deliveryScheduled = false
+
+        init(onApplied: @escaping (Int) -> Void) {
+            self.onApplied = onApplied
+        }
 
         func requestBottom(revision: Int, from view: NSView) {
             guard revision > appliedRevision else { return }
@@ -2101,7 +2138,10 @@ private struct LazyTimelineNativeBottomScroller: NSViewRepresentable {
                     clipView.scroll(to: target)
                     scrollView.reflectScrolledClipView(clipView)
                 }
-                self.appliedRevision = self.pendingRevision
+                let appliedRevision = self.pendingRevision
+                self.appliedRevision = appliedRevision
+                AppLogger.info("lazy native bottom applied revision=\(appliedRevision)")
+                self.onApplied(appliedRevision)
             }
         }
     }
