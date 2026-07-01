@@ -224,24 +224,27 @@ struct TimelineView: View {
                         isTimelineScrollable = false
                     }
 #else
-#if !AGENTSDOCK_LAZY_TIMELINE
-                    let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
-#endif
+#if AGENTSDOCK_LAZY_TIMELINE
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
                         store.setSelectedTimelineAtBottom(true)
                         isTimelineScrollable = false
-#if !AGENTSDOCK_LAZY_TIMELINE
+                    }
+#else
+                    let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
+                    if newCount == 0 {
+                        isAtBottom = true
+                        isNearBottom = true
+                        store.setSelectedTimelineAtBottom(true)
+                        isTimelineScrollable = false
                         setVisibleRowLimit(defaultVisibleRowLimit)
-#endif
-#if !AGENTSDOCK_LAZY_TIMELINE
                     } else if isAtBottom {
                         setVisibleRowLimit(cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
-#endif
                     }
+#endif
 #endif
                     updateUnreadState(after: previousObservedSeq)
                     lastObservedEventSeq = maxEventSeq(displayEvents)
