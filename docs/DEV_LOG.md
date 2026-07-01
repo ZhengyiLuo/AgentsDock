@@ -19,6 +19,30 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-01 - Join Native Claude Monitor Subagents Before Turn Completion
+
+- Claude reported that a render completion monitor was armed, ended the
+  provider turn, and promised to compose/send grids later. A shell/tmux watcher
+  may survive, but the exited `claude -p` parent cannot receive its result or
+  make the already-finished server run ingest a later manifest.
+- Verified the deployed Claude Code `2.1.198` native subagent path directly. A
+  print-mode parent launched a `general-purpose` Agent task, waited for its
+  completion, received `SUBAGENT_OK`, and then returned
+  `PARENT_RECEIVED_SUBAGENT_OK`. The streamed lifecycle included
+  `task_started`, `task_updated`, `task_notification`, and the final tool result.
+- The provider prompt now explicitly permits native Agent subagents for bounded
+  parallel work, requires every background child to be joined through blocking
+  `TaskOutput`, and requires requested renders/sweeps/files to complete,
+  validate, and enter the manifest before the parent turn exits.
+- Future-tense claims such as "monitor armed" or "when the watcher fires I'll
+  send it" are forbidden. Tmux can preserve computation, but automatic later
+  delivery requires a mechanism that starts another agent turn, such as a
+  ZenithDock scheduled job.
+- Also verified Claude Code's durable top-level `--bg` service and structured
+  session discovery (`claude agents --json --all`). That is a viable future
+  server-managed job surface, but it is intentionally not confused with a
+  child task owned by the current turn.
+
 ## 2026-07-01 - Bound Native Trackpad Speed Without Replacing Momentum
 
 - Live scroll-settle logs showed that the renewed fast/uncontrollable feeling
