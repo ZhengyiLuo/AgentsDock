@@ -37,6 +37,10 @@ painful to rediscover later.
   `LazySubviewPlacements` re-entering a row-level `_FixedSizeLayout`. Lazy rows
   now accept the stack's finite width proposal directly; a guardrail prevents
   that outer `fixedSize(horizontal: false, vertical: true)` from returning.
+- The follow-up top-edge stress exposed the same recursion through the next
+  row wrapper, `_FlexFrameLayout` from `frame(maxWidth: .infinity)`. The lazy
+  stack already owns a finite viewport width, so lazy rows no longer install a
+  competing infinite-width proposal.
 - Production `AgentsDock.app` remains on eager `VStack`. Do not promote this
   experiment until long scroll, resize, switching, streaming, and paging runs
   stay responsive and repeated samples do not show a persistent lazy layout

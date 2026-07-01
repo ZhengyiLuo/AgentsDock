@@ -564,7 +564,6 @@ struct TimelineView: View {
                 promptFilesByEventID: promptFilesByEventID,
                 linkContext: linkContext
             )
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .bottom:
             Color.clear.frame(height: 1)
         }
