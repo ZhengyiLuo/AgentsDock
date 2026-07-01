@@ -240,6 +240,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var discreteScrollSettleWorkItem: DispatchWorkItem?
         private var discreteScrollGeneration = 0
         private var isDiscreteScrolling = false
+        private var initialBottomWorkItem: DispatchWorkItem?
+        private var initialBottomGeneration = 0
         private var scrollIsolationInstalled = false
         private var geometryMutationDepth = 0
         private var liveScrollStartOriginY: CGFloat?
@@ -388,6 +390,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // leave top-edge history paging permanently disarmed.
                 lastMetrics = nil
                 lastMetricsReportUptime = nil
+                cancelInitialBottomVerification()
                 cancelDiscreteScrollSettle()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
@@ -421,6 +424,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let previousHadTimelineRows = previousItems.contains { !$0.eventIDs.isEmpty }
             let nextHasTimelineRows = nextItems.contains { !$0.eventIDs.isEmpty }
             let firstTimelineContentArrived = !previousHadTimelineRows && nextHasTimelineRows
+            let shouldPositionInitialBottom = nextHasTimelineRows &&
+                (sessionChanged || firstTimelineContentArrived)
             let shouldRestoreAnchor = anchor.map {
                 !rowIdentityOrderUnchanged &&
                     geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
@@ -453,15 +458,18 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
 
             if commandChangesPosition {
+                cancelInitialBottomVerification()
                 apply(scrollCommand.destination)
             } else if forcedBottomChanged {
+                cancelInitialBottomVerification()
                 if !isScrollInteractionActive {
                     scrollToBottom()
                 }
-            } else if sessionChanged || firstTimelineContentArrived {
+            } else if shouldPositionInitialBottom {
                 if !isScrollInteractionActive {
                     scrollToBottom()
                 }
+                scheduleInitialBottomVerification()
             } else if shouldRestoreAnchor, let anchor {
                 restore(anchor)
             }
@@ -1049,6 +1057,44 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scheduleMetricsReport()
         }
 
+        private func scheduleInitialBottomVerification() {
+            initialBottomGeneration &+= 1
+            let generation = initialBottomGeneration
+            let targetSessionID = sessionID
+            let wheelCount = wheelInputCount
+            initialBottomWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self,
+                          self.initialBottomGeneration == generation,
+                          self.sessionID == targetSessionID,
+                          self.wheelInputCount == wheelCount,
+                          let scrollView = self.scrollView,
+                          let tableView = self.tableView else { return }
+                    self.initialBottomWorkItem = nil
+                    tableView.layoutSubtreeIfNeeded()
+                    let distanceFromBottom = max(
+                        0,
+                        tableView.bounds.height - scrollView.documentVisibleRect.maxY
+                    )
+                    guard distanceFromBottom > 28 else { return }
+                    self.scrollToBottom()
+                    AppLogger.info(
+                        "native initial bottom corrected session=\(targetSessionID ?? "-") " +
+                            "distance=\(Self.format(distanceFromBottom))"
+                    )
+                }
+            }
+            initialBottomWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        private func cancelInitialBottomVerification() {
+            initialBottomGeneration &+= 1
+            initialBottomWorkItem?.cancel()
+            initialBottomWorkItem = nil
+        }
+
         private func scroll(to itemID: String, anchor: AppKitTimelineAnchor) {
             guard let row = items.firstIndex(where: { $0.id == itemID }),
                   let scrollView,
@@ -1171,6 +1217,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func noteWheelInput() {
             guard geometryMutationDepth == 0 else { return }
+            cancelInitialBottomVerification()
             wheelInputCount += 1
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
@@ -1309,6 +1356,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scrollIsolationInstalled = false
             deferredItems = nil
             deferredColumnWidthRefresh = false
+            cancelInitialBottomVerification()
             cancelDiscreteScrollSettle()
             cancelScheduledHeightUpdate(clearPending: true)
             cancelScheduledMetricsReport()
@@ -2246,6 +2294,12 @@ enum AppKitTimelineIntegrationHarness {
             exit(EXIT_FAILURE)
         }
 
+        guard let timelineScrollView = findTimelineScrollView(in: hostingView),
+              let timelineTableView = timelineScrollView.documentView as? NSTableView else {
+            AppLogger.error("AppKit integration harness could not locate native timeline")
+            exit(EXIT_FAILURE)
+        }
+
         let clock = ContinuousClock()
         let started = clock.now
         var slowest: Duration = .zero
@@ -2257,15 +2311,21 @@ enum AppKitTimelineIntegrationHarness {
                 let elapsed = selectionStarted.duration(to: clock.now)
                 slowest = max(slowest, elapsed)
                 try? await Task.sleep(for: .milliseconds(90))
+                hostingView.layoutSubtreeIfNeeded()
+                let distanceFromBottom = max(
+                    0,
+                    timelineTableView.bounds.height - timelineScrollView.documentVisibleRect.maxY
+                )
+                guard distanceFromBottom <= 28 else {
+                    AppLogger.error(
+                        "AppKit integration switch missed bottom session=\(session.id) " +
+                            "distance=\(distanceFromBottom)"
+                    )
+                    exit(EXIT_FAILURE)
+                }
             }
         }
         try? await Task.sleep(for: .milliseconds(500))
-
-        guard let timelineScrollView = findTimelineScrollView(in: hostingView),
-              let timelineTableView = timelineScrollView.documentView as? NSTableView else {
-            AppLogger.error("AppKit integration harness could not locate native timeline")
-            exit(EXIT_FAILURE)
-        }
 
         if store.canLoadOlderHistory {
             try? await Task.sleep(for: .milliseconds(550))

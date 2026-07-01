@@ -47,6 +47,14 @@ painful to rediscover later.
 - Selection cleanup is generation-owned. A stale first A request in an
   `A -> B -> A` sequence cannot clear the newer A load marker, mutate current
   session metadata, or publish a stale error after its network await.
+- Real-window cold opens exposed a layout-timing edge that the fixed harness
+  viewport did not: the initial native bottom move could run before SwiftUI had
+  installed the table's final viewport. The coordinator now performs one
+  cancellable next-run-loop verification and corrects only when the new
+  document remains more than the normal 28-point bottom threshold away. User
+  wheel input, a new session, or an explicit navigation command cancels it.
+- The live integration harness now verifies the actual bottom distance after
+  every one of its 40 chat switches instead of checking only recycler counts.
 
 ## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
 
