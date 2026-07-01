@@ -50,9 +50,10 @@ painful to rediscover later.
 - Real-window cold opens exposed a layout-timing edge that the fixed harness
   viewport did not: the initial native bottom move could run before SwiftUI had
   installed the table's final viewport. The coordinator now performs one
-  cancellable post-layout verification and corrects only when the new
-  document remains more than the normal 28-point bottom threshold away. User
-  wheel input, a new session, or an explicit navigation command cancels it.
+  cancellable post-layout native positioning pass. AppKit makes no origin write
+  when the first pass already landed; otherwise the second pass reaches the
+  now-laid-out last row. User wheel input, a new session, or an explicit
+  navigation command cancels it.
 - The live integration harness now verifies the actual bottom distance after
   every one of its 40 chat switches instead of checking only recycler counts.
 

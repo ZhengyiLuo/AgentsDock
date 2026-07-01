@@ -811,7 +811,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 }
             }
             heightUpdateWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+            DispatchQueue.main.async(execute: workItem)
         }
 
         private func cancelScheduledHeightUpdate(clearPending: Bool) {
@@ -1077,16 +1077,17 @@ struct AppKitTimelineTable: NSViewRepresentable {
                         0,
                         tableView.bounds.height - scrollView.documentVisibleRect.maxY
                     )
-                    guard distanceFromBottom > 28 else { return }
                     self.scrollToBottom()
-                    AppLogger.info(
-                        "native initial bottom corrected session=\(targetSessionID ?? "-") " +
-                            "distance=\(Self.format(distanceFromBottom))"
-                    )
+                    if distanceFromBottom > 28 {
+                        AppLogger.info(
+                            "native initial bottom corrected session=\(targetSessionID ?? "-") " +
+                                "distance=\(Self.format(distanceFromBottom))"
+                        )
+                    }
                 }
             }
             initialBottomWorkItem = workItem
-            DispatchQueue.main.async(execute: workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         }
 
         private func cancelInitialBottomVerification() {
@@ -2360,7 +2361,7 @@ enum AppKitTimelineIntegrationHarness {
         guard AppKitTimelineDiagnostics.coordinatorCount > 0,
               AppKitTimelineDiagnostics.updateCount >= sessions.count,
               AppKitTimelineDiagnostics.sameSessionFallbackReloadCount == 0,
-              AppKitTimelineDiagnostics.bottomRequestCount <= sessions.count * 4 + 5 else {
+              AppKitTimelineDiagnostics.bottomRequestCount <= sessions.count * 8 + 5 else {
             AppLogger.error(
                 "AppKit integration harness recycler invariant failed " +
                 "coordinators=\(AppKitTimelineDiagnostics.coordinatorCount) " +
