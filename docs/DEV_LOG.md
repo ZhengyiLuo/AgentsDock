@@ -34,6 +34,13 @@ painful to rediscover later.
 - Added `chat-switch-metrics-reset` to the native timeline harness. It requires
   a fresh viewport report after a session reload even when the geometry buckets
   match the previous chat.
+- A cold chat exposed a second first-load edge: the table received an
+  event-free empty-state row, then the cached transcript under the same session
+  ID. That was not a session change and the placeholder made `previousItems`
+  nonempty, so initial bottom positioning was skipped. The recycler now treats
+  the first arrival of event-backed rows as the document's initial content and
+  positions it once at the latest message. `first-content-bottom-position`
+  reproduces this exact placeholder-to-transcript transition.
 
 ## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
 

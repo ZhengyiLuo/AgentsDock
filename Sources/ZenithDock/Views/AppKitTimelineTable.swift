@@ -418,6 +418,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 : nil
             let rowIdentityOrderUnchanged = previousItems.count == nextItems.count &&
                 zip(previousItems, nextItems).allSatisfy { $0.id == $1.id }
+            let previousHadTimelineRows = previousItems.contains { !$0.eventIDs.isEmpty }
+            let nextHasTimelineRows = nextItems.contains { !$0.eventIDs.isEmpty }
+            let firstTimelineContentArrived = !previousHadTimelineRows && nextHasTimelineRows
             let shouldRestoreAnchor = anchor.map {
                 !rowIdentityOrderUnchanged &&
                     geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
@@ -455,7 +458,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 if !isScrollInteractionActive {
                     scrollToBottom()
                 }
-            } else if sessionChanged || (previousItems.isEmpty && !nextItems.isEmpty) {
+            } else if sessionChanged || firstTimelineContentArrived {
                 if !isScrollInteractionActive {
                     scrollToBottom()
                 }
@@ -1370,6 +1373,7 @@ enum AppKitTimelineHarness {
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("chat-switch-metrics-reset", checkChatSwitchMetricsReset),
+            ("first-content-bottom-position", checkFirstContentBottomPosition),
             ("explicit-height-cache", checkExplicitHeightCache),
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
@@ -1880,6 +1884,31 @@ enum AppKitTimelineHarness {
             return fail(
                 "chat-switch-metrics-reset",
                 "new session reused the previous document's viewport metrics"
+            )
+        }
+        return true
+    }
+
+    private static func checkFirstContentBottomPosition() -> Bool {
+        let placeholder = AppKitTimelineItem(
+            id: "empty-state",
+            version: 0,
+            heightEstimate: .fixed(240),
+            content: AnyView(Text("Loading chat"))
+        )
+        let fixture = Fixture(items: [placeholder])
+        defer { fixture.stop() }
+        fixture.items = (0..<96).map { item(index: $0, version: 0) }
+        fixture.update()
+        fixture.settle()
+        let distanceFromBottom = max(
+            0,
+            fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
+        )
+        guard distanceFromBottom < 4 else {
+            return fail(
+                "first-content-bottom-position",
+                "placeholder-to-transcript transition stayed at the top distance=\(distanceFromBottom)"
             )
         }
         return true
