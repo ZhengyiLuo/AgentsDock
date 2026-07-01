@@ -467,7 +467,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 lastForcedBottomRevision = forcedBottomRevision
             }
 
-            guard itemsChanged || commandChanged || forcedBottomChanged else {
+            // Cached rows can render before AppStore publishes loadedSessionID.
+            // The later ownership-only update has identical row identities, but
+            // it is still the moment the new document becomes eligible for its
+            // one-shot initial positioning.
+            guard itemsChanged || commandChanged || forcedBottomChanged || shouldPositionInitialBottom else {
                 scheduleMetricsReport()
                 return
             }
@@ -1466,6 +1470,7 @@ enum AppKitTimelineHarness {
             ("chat-switch-metrics-reset", checkChatSwitchMetricsReset),
             ("exact-top-metrics", checkExactTopMetrics),
             ("first-content-bottom-position", checkFirstContentBottomPosition),
+            ("ownership-only-bottom-position", checkOwnershipOnlyBottomPosition),
             ("explicit-height-cache", checkExplicitHeightCache),
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
@@ -2006,6 +2011,36 @@ enum AppKitTimelineHarness {
         return true
     }
 
+    private static func checkOwnershipOnlyBottomPosition() -> Bool {
+        let placeholder = AppKitTimelineItem(
+            id: "empty-state",
+            version: 0,
+            heightEstimate: .fixed(240),
+            content: AnyView(Text("Loading chat"))
+        )
+        let fixture = Fixture(items: [placeholder])
+        defer { fixture.stop() }
+
+        fixture.setContentSessionID(nil)
+        fixture.items = (0..<96).map { item(index: $0, version: 0) }
+        fixture.update()
+        fixture.settle()
+        fixture.setContentSessionID("harness")
+        fixture.settle()
+
+        let distanceFromBottom = max(
+            0,
+            fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
+        )
+        guard distanceFromBottom <= 28 else {
+            return fail(
+                "ownership-only-bottom-position",
+                "content ownership update with unchanged rows stayed at the top distance=\(distanceFromBottom)"
+            )
+        }
+        return true
+    }
+
     private static func checkExactTopMetrics() -> Bool {
         let fixture = Fixture()
         defer { fixture.stop() }
@@ -2078,6 +2113,7 @@ enum AppKitTimelineHarness {
         let window: NSWindow
         var items: [AppKitTimelineItem]
         private var sessionID = "harness"
+        private var contentSessionID: String? = "harness"
         private var command = AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
         private var forcedBottomRevision = 0
 
@@ -2112,7 +2148,7 @@ enum AppKitTimelineHarness {
             window.orderOut(nil)
             coordinator.update(
                 sessionID: sessionID,
-                contentSessionID: sessionID,
+                contentSessionID: contentSessionID,
                 items: items,
                 scrollCommand: command,
                 forcedBottomRevision: forcedBottomRevision
@@ -2136,11 +2172,16 @@ enum AppKitTimelineHarness {
             }
             coordinator.update(
                 sessionID: sessionID,
-                contentSessionID: sessionID,
+                contentSessionID: contentSessionID,
                 items: items,
                 scrollCommand: command,
                 forcedBottomRevision: forcedBottomRevision
             )
+        }
+
+        func setContentSessionID(_ value: String?) {
+            contentSessionID = value
+            update()
         }
 
         func settle() {

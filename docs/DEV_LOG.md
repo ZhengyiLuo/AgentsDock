@@ -21,6 +21,13 @@ painful to rediscover later.
 
 ## 2026-06-30 - Rearm Native History Paging Per Chat
 
+- Instrumented integration runs found an ownership-only update race. Cached
+  rows can arrive before `loadedSessionID`; when that identity arrives on the
+  next SwiftUI update, all row IDs and versions can be unchanged. The native
+  coordinator used to return early before consuming the pending initial-bottom
+  intent, leaving some cold chats at the oldest loaded row. Initial positioning
+  is now a reason to continue even when geometry did not change, and
+  `ownership-only-bottom-position` reproduces the exact sequence.
 - The first live native integration run completed 40 cached chat switches
   without a recycler fallback, then correctly failed when the first automatic
   older-history page did not start.
