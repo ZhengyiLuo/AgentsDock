@@ -1441,11 +1441,13 @@ struct TimelineView: View {
               Date() >= historyLoadSuppressedUntil else {
             return
         }
+        let revealedOlderRows: Bool
 #if AGENTSDOCK_LAZY_TIMELINE
-        if revealOlderRows(preservingPositionWith: proxy) {
+        revealedOlderRows = revealOlderRows(preservingPositionWith: proxy)
 #else
-        if revealOlderRowsShowingNewPage(proxy) {
+        revealedOlderRows = revealOlderRowsShowingNewPage(proxy)
 #endif
+        if revealedOlderRows {
             olderHistoryLoadArmed = false
             suppressScrollHistoryLoadUntilTopLeaves = true
             return
