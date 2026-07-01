@@ -36,6 +36,11 @@ painful to rediscover later.
 - Added `legacy-wheel-pixel-normalization`, which dispatches a synthetic
   five-line legacy event through the real native scroll owner and requires the
   resulting movement to remain between 10 and 80 points.
+- Verification: Xcode Mac build, `ZenithGuardrails`, and every lightweight
+  native timeline scenario passed. The dispatch-level regression converted a
+  five-line event to a 22-pixel movement. Refreshed and launched
+  `/Users/zen/agi/ZenithDock/dist/AgentsDock-test.app` and synced the same bundle
+  to the MacBook Air; no heavy integration harness was run beside the user app.
 
 ## 2026-07-01 - Join Native Claude Monitor Subagents Before Turn Completion
 
