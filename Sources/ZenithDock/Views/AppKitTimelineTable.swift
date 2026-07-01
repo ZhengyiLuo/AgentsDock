@@ -163,6 +163,64 @@ private struct AppKitTimelinePagingController {
     }
 }
 
+private struct AppKitTimelineWheelSample {
+    let beginsGesture: Bool
+    let rawDeltaY: CGFloat
+    let deliveredDeltaY: CGFloat
+}
+
+private enum AppKitTimelineScrollTuning {
+    static func tunedDelta(_ delta: CGFloat) -> CGFloat {
+        let magnitude = abs(delta)
+        guard magnitude > 0 else { return 0 }
+        let progress = min(1, magnitude / 80)
+        let smoothProgress = progress * progress * (3 - (2 * progress))
+        let scale = 0.92 - (0.46 * smoothProgress)
+        return delta * scale
+    }
+
+    static func controlledEvent(_ event: NSEvent) -> (event: NSEvent, deliveredDeltaY: CGFloat) {
+        let rawDeltaY = event.scrollingDeltaY
+        guard event.hasPreciseScrollingDeltas,
+              abs(rawDeltaY) > 0.01,
+              let copiedEvent = event.cgEvent?.copy() else {
+            return (event, rawDeltaY)
+        }
+
+        let deliveredDeltaY = tunedDelta(rawDeltaY)
+        let scale = abs(deliveredDeltaY / rawDeltaY)
+        let fields: [CGEventField] = [
+            .scrollWheelEventDeltaAxis1,
+            .scrollWheelEventFixedPtDeltaAxis1,
+            .scrollWheelEventPointDeltaAxis1,
+            .scrollWheelEventDeltaAxis2,
+            .scrollWheelEventFixedPtDeltaAxis2,
+            .scrollWheelEventPointDeltaAxis2,
+        ]
+        for field in fields {
+            scaleIntegerField(field, in: copiedEvent, by: scale)
+        }
+        guard let controlledEvent = NSEvent(cgEvent: copiedEvent) else {
+            return (event, rawDeltaY)
+        }
+        return (controlledEvent, controlledEvent.scrollingDeltaY)
+    }
+
+    private static func scaleIntegerField(
+        _ field: CGEventField,
+        in event: CGEvent,
+        by scale: CGFloat
+    ) {
+        let original = event.getIntegerValueField(field)
+        guard original != 0 else { return }
+        let scaled = Int64((Double(original) * Double(scale)).rounded())
+        event.setIntegerValueField(
+            field,
+            value: scaled == 0 ? (original > 0 ? 1 : -1) : scaled
+        )
+    }
+}
+
 private final class AppKitTimelineRowHeightKey: NSObject {
     let sessionID: String
     let itemID: String
@@ -196,7 +254,7 @@ private final class AppKitTimelineRowHeightKey: NSObject {
 
 @MainActor
 private final class AppKitTimelineOwningScrollView: NSScrollView {
-    var onVerticalWheel: ((Bool) -> Void)?
+    var onVerticalWheel: ((AppKitTimelineWheelSample) -> Void)?
     private var wheelMonitor: Any?
     fileprivate private(set) var routedWheelCount = 0
 
@@ -210,10 +268,11 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if isPredominantlyVertical(event) {
-            onVerticalWheel?(event.phase.contains(.began))
+        guard isPredominantlyVertical(event) else {
+            super.scrollWheel(with: event)
+            return
         }
-        super.scrollWheel(with: event)
+        dispatchVerticalWheel(event)
     }
 
     func stopRoutingWheelEvents() {
@@ -241,9 +300,9 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
               hitView === self || hitView.isDescendant(of: self) else { return event }
 
         // SwiftUI hosting views can consume wheel events before the enclosing
-        // NSScrollView sees them. Hand the original event to the native scroll
-        // implementation exactly once so AppKit retains its normal trackpad
-        // phases, acceleration, and momentum.
+        // NSScrollView sees them. Hand the event to the native scroll owner
+        // exactly once; it preserves phases and momentum while damping only
+        // the precise pixel deltas.
         routeVerticalWheel(event)
         return nil
     }
@@ -256,12 +315,25 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
 
     fileprivate func routeVerticalWheel(_ event: NSEvent) {
         routedWheelCount += 1
-        onVerticalWheel?(event.phase.contains(.began))
-        super.scrollWheel(with: event)
+        dispatchVerticalWheel(event)
     }
 
     fileprivate func simulateTopPagingGestureForTesting() {
-        onVerticalWheel?(true)
+        onVerticalWheel?(AppKitTimelineWheelSample(
+            beginsGesture: true,
+            rawDeltaY: 1,
+            deliveredDeltaY: 1
+        ))
+    }
+
+    private func dispatchVerticalWheel(_ event: NSEvent) {
+        let controlled = AppKitTimelineScrollTuning.controlledEvent(event)
+        onVerticalWheel?(AppKitTimelineWheelSample(
+            beginsGesture: event.phase.contains(.began),
+            rawDeltaY: event.scrollingDeltaY,
+            deliveredDeltaY: controlled.deliveredDeltaY
+        ))
+        super.scrollWheel(with: controlled.event)
     }
 }
 
@@ -350,6 +422,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var liveScrollStartUptime: TimeInterval?
         private var liveScrollUnknownHeightCount = 0
         private var liveScrollConfiguredCellCount = 0
+        private var liveScrollRawDeltaTotal: CGFloat = 0
+        private var liveScrollDeliveredDeltaTotal: CGFloat = 0
         private let metricsThrottleInterval: TimeInterval = 0.08
         private let estimatedRowHeight: CGFloat = 120
 
@@ -408,8 +482,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
             let scrollView = AppKitTimelineOwningScrollView(frame: .zero)
             scrollView.identifier = NSUserInterfaceItemIdentifier("AgentsDockTimelineScrollView")
-            scrollView.onVerticalWheel = { [weak self] beginsGesture in
-                self?.noteWheelInput(beginsGesture: beginsGesture)
+            scrollView.onVerticalWheel = { [weak self] sample in
+                self?.noteWheelInput(sample)
             }
             scrollView.documentView = tableView
             scrollView.hasVerticalScroller = true
@@ -1343,6 +1417,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollStartUptime = ProcessInfo.processInfo.systemUptime
             liveScrollUnknownHeightCount = 0
             liveScrollConfiguredCellCount = 0
+            liveScrollRawDeltaTotal = 0
+            liveScrollDeliveredDeltaTotal = 0
             cancelScheduledHeightUpdate(clearPending: false)
             if let tableView {
                 setVisibleHeightReporting(false, in: tableView)
@@ -1366,6 +1442,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     "origin=\(Self.format(liveScrollStartOriginY ?? originBeforeSettle))" +
                     "->\(Self.format(originBeforeSettle)) " +
                     "duration_ms=\(Self.format(duration * 1_000)) " +
+                    "wheel_delta=\(Self.format(liveScrollRawDeltaTotal))" +
+                    "->\(Self.format(liveScrollDeliveredDeltaTotal)) " +
                     "unknown_heights=\(liveScrollUnknownHeightCount) " +
                     "configured_cells=\(liveScrollConfiguredCellCount) " +
                     "pending_heights=\(pendingHeightUpdates.count)"
@@ -1383,19 +1461,21 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scheduleTopPagingEvaluation()
         }
 
-        private func noteWheelInput(beginsGesture: Bool) {
+        private func noteWheelInput(_ sample: AppKitTimelineWheelSample) {
             guard geometryMutationDepth == 0 else { return }
             cancelInitialBottomVerification(reason: "wheel-input")
             wheelInputCount += 1
-            if beginsGesture || !wheelGestureActive {
+            isDiscreteScrolling = true
+            beginScrollIsolationIfNeeded()
+            liveScrollRawDeltaTotal += abs(sample.rawDeltaY)
+            liveScrollDeliveredDeltaTotal += abs(sample.deliveredDeltaY)
+            if sample.beginsGesture || !wheelGestureActive {
                 wheelGestureID &+= 1
                 wheelGestureActive = true
             }
             paging.noteUserGesture(wheelGestureID)
             scheduleWheelGestureEnd()
             scheduleTopPagingEvaluation()
-            isDiscreteScrolling = true
-            beginScrollIsolationIfNeeded()
             scheduleDiscreteScrollSettle()
         }
 
@@ -1672,6 +1752,7 @@ enum AppKitTimelineHarness {
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
+            ("adaptive-wheel-control", checkAdaptiveWheelControl),
             ("native-wheel-ownership", checkNativeWheelOwnership),
             ("hosted-wheel-single-dispatch", checkHostedWheelSingleDispatch),
         ]
@@ -1857,6 +1938,27 @@ enum AppKitTimelineHarness {
         )
         guard let hit = fixture.tableView.hitTest(pointInTable), hit !== fixture.tableView else {
             return fail("selectable-message-content", "hosted content did not receive pointer hit testing")
+        }
+        return true
+    }
+
+    private static func checkAdaptiveWheelControl() -> Bool {
+        let small = AppKitTimelineScrollTuning.tunedDelta(4)
+        let medium = AppKitTimelineScrollTuning.tunedDelta(32)
+        let fast = AppKitTimelineScrollTuning.tunedDelta(120)
+        let reverse = AppKitTimelineScrollTuning.tunedDelta(-120)
+        guard small > 0,
+              medium > small,
+              fast > medium,
+              reverse == -fast,
+              small / 4 > medium / 32,
+              medium / 32 > fast / 120,
+              fast < 60 else {
+            return fail(
+                "adaptive-wheel-control",
+                "scroll curve is not monotonic and progressively damped " +
+                    "small=\(small) medium=\(medium) fast=\(fast) reverse=\(reverse)"
+            )
         }
         return true
     }

@@ -19,6 +19,22 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-01 - Bound Native Trackpad Speed Without Replacing Momentum
+
+- Live scroll-settle logs showed that the renewed fast/uncontrollable feeling
+  was not anchor correction or row-height settlement: individual gestures moved
+  the native origin by roughly 3,000-8,000 points while height flushes changed
+  it by approximately zero.
+- The native scroll owner now applies one smooth adaptive curve to precise
+  trackpad/Magic Mouse deltas before its single `super.scrollWheel` dispatch.
+  Small deltas remain close to native for precise control, while large flicks
+  receive progressively stronger damping. Mouse-wheel events remain untouched.
+- This does not assign clip origins, synthesize delayed deltas, snap, or replace
+  AppKit momentum. Gesture diagnostics now report raw and delivered delta totals
+  alongside the actual origin movement so future tuning is evidence-based.
+- Added `adaptive-wheel-control` coverage for sign preservation, monotonic
+  movement, and stronger damping at higher velocity.
+
 ## 2026-07-01 - Give Native Scrolling Sole Ownership Of Older-History Paging
 
 - The latest native recycler was stable, but pulling upward could still fail to
