@@ -28,6 +28,11 @@ painful to rediscover later.
   intent, leaving some cold chats at the oldest loaded row. Initial positioning
   is now a reason to continue even when geometry did not change, and
   `ownership-only-bottom-position` reproduces the exact sequence.
+- The strengthened live harness then exposed duplicate opening-scroll owners:
+  `TimelineView` emitted a SwiftUI bottom command while the native coordinator
+  was already performing its one immediate position plus bounded height-settle
+  checks. The AppKit build now lets the recycler own opening position entirely;
+  SwiftUI only clears its transition mask once matching content is ready.
 - The first live native integration run completed 40 cached chat switches
   without a recycler fallback, then correctly failed when the first automatic
   older-history page did not start.

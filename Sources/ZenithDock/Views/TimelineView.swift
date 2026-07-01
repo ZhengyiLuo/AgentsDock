@@ -1052,7 +1052,21 @@ struct TimelineView: View {
               sessionID == store.selectedSessionID else {
             return
         }
-#if AGENTSDOCK_LAZY_TIMELINE
+#if AGENTSDOCK_APPKIT_TIMELINE
+        // The native table owns initial positioning. Issuing a second command
+        // from SwiftUI duplicates every open-time bounds update and can make a
+        // correctly positioned document visibly flicker.
+        let hasWarmSelectedTimeline = store.loadedSessionID == sessionID && !store.displayEvents.isEmpty
+        guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }
+        guard !store.displayEvents.isEmpty || store.loadedSessionID == sessionID else { return }
+        withTransaction(noAnimationTransaction) {
+            isAtBottom = true
+            isNearBottom = true
+            store.setSelectedTimelineAtBottom(true)
+            isInitialTimelineMasked = false
+        }
+        return
+#elseif AGENTSDOCK_LAZY_TIMELINE
         guard !store.isSelectingSession || hasWarmSelectedTimeline else { return }
         let canSettle = !store.displayEvents.isEmpty || store.loadedSessionID == sessionID
         guard canSettle else { return }
