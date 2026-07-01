@@ -19,6 +19,25 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - LazyVStack Test Architecture, Second Pass
+
+- The first `AgentsDock-test` LazyVStack build reproduced high scroll cost and
+  the known latent layout-loop risk. Its outer lazy stack still sat on top of a
+  moving 64-row/event suffix, geometry-triggered paging, repeated delayed
+  `scrollTo` chases, and nested lazy media grids.
+- The isolated test path now makes LazyVStack the only virtualization owner:
+  it receives the complete bounded store event window, flattens loader/unread/
+  rows/bottom into one stable `ForEach`, and removes nested `.id(row.id)` keys.
+- Scroll geometry now compares only scrollable/top/bottom threshold zones.
+  Structural history work runs after a zone transition, and each positioning
+  intent owns one cancellable next-runloop `scrollTo` instead of three retries.
+- Attachment and artifact grids use eager `Grid` only under
+  `AGENTSDOCK_LAZY_TIMELINE`; production remains unchanged.
+- Production `AgentsDock.app` remains on eager `VStack`. Do not promote this
+  experiment until long scroll, resize, switching, streaming, and paging runs
+  stay responsive and repeated samples do not show a persistent lazy layout
+  stack.
+
 ## 2026-06-30 - Keep Archived Chats Out Of Timeline Caches
 
 - Archived session metadata remains in `sessions`, so sidebar rows, search,

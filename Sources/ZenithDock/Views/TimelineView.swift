@@ -24,6 +24,8 @@ struct TimelineView: View {
     @State private var showTimelinePositioningOverlay = false
     @State private var timelinePositioningOverlayRevision = 0
     @State private var timelinePositioningOverlayTask: Task<Void, Never>?
+    @State private var lazyTopZone = TimelineTopZone.away
+    @State private var pendingLazyScrollTask: Task<Void, Never>?
 #if AGENTSDOCK_APPKIT_TIMELINE
     @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
     @State private var appKitTimelineSessionID: String?
@@ -64,7 +66,9 @@ struct TimelineView: View {
 #else
         let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
+#if !AGENTSDOCK_LAZY_TIMELINE
         let renderedVisibleRowLimit = visibleRowLimit
+#endif
 #endif
         let shouldMaskTimeline = timelineRowsStructurallySuspended
 #if AGENTSDOCK_APPKIT_TIMELINE
@@ -75,6 +79,17 @@ struct TimelineView: View {
 #if AGENTSDOCK_APPKIT_TIMELINE
         // NSTableView already virtualizes views. Keep the complete loaded model
         // available so paging is exclusively a server concern on the native path.
+        let projectedDisplayEvents = displayEvents
+        let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
+        let projection = TimelineRows.project(from: projectedDisplayEvents)
+        let allRows = projection.rows
+        let jobsByRunID = projection.jobsByRunID
+        let hiddenRenderedRowCount = 0
+        let rows = allRows
+#elseif AGENTSDOCK_LAZY_TIMELINE
+        // LazyVStack is the only virtualization owner in the experiment. A
+        // moving event/row suffix re-keyed otherwise unchanged rows whenever
+        // its boundary advanced, invalidating LazyLayoutViewCache placements.
         let projectedDisplayEvents = displayEvents
         let promptFilesByEventID = store.promptFilesByEventID(for: projectedDisplayEvents)
         let projection = TimelineRows.project(from: projectedDisplayEvents)
@@ -176,6 +191,10 @@ struct TimelineView: View {
 #if AGENTSDOCK_APPKIT_TIMELINE
                     resetAppKitTimelineForSelectedSession()
 #else
+#if AGENTSDOCK_LAZY_TIMELINE
+                    cancelPendingLazyScroll()
+                    lazyTopZone = .away
+#endif
                     beginInitialTimelineMask()
                     pendingOpenBottomSessionID = store.selectedSessionID
                     isAtBottom = true
@@ -205,17 +224,23 @@ struct TimelineView: View {
                         isTimelineScrollable = false
                     }
 #else
+#if !AGENTSDOCK_LAZY_TIMELINE
                     let rowCount = max(allRows.count, min(displayEvents.count, visibleRowLimit))
+#endif
                     if newCount == 0 {
                         isAtBottom = true
                         isNearBottom = true
                         store.setSelectedTimelineAtBottom(true)
                         isTimelineScrollable = false
+#if !AGENTSDOCK_LAZY_TIMELINE
                         setVisibleRowLimit(defaultVisibleRowLimit)
+#endif
+#if !AGENTSDOCK_LAZY_TIMELINE
                     } else if isAtBottom {
                         setVisibleRowLimit(cappedLiveVisibleRowLimit(rowCount: rowCount, oldCount: oldCount, newCount: newCount))
                     } else if newCount > oldCount {
                         setVisibleRowLimit(min(rowCount, visibleRowLimit + min(rowPageSize, max(1, newCount - oldCount))))
+#endif
                     }
 #endif
                     updateUnreadState(after: previousObservedSeq)
@@ -296,6 +321,7 @@ struct TimelineView: View {
         .onDisappear {
             timelinePositioningOverlayTask?.cancel()
             timelinePositioningOverlayTask = nil
+            cancelPendingLazyScroll()
         }
     }
 
@@ -426,18 +452,24 @@ struct TimelineView: View {
         shouldMask: Bool
     ) -> some View {
         GeometryReader { viewport in
+            let items = lazyTimelineItems(
+                rows: rows,
+                firstUnreadRowID: firstUnreadRowID,
+                hiddenRenderedRowCount: hiddenRenderedRowCount,
+                suspended: suspended
+            )
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    timelineRowsContent(
-                        proxy: proxy,
-                        rows: rows,
-                        firstUnreadRowID: firstUnreadRowID,
-                        jobsByRunID: jobsByRunID,
-                        promptFilesByEventID: promptFilesByEventID,
-                        linkContext: linkContext,
-                        hiddenRenderedRowCount: hiddenRenderedRowCount,
-                        suspended: suspended
-                    )
+                    ForEach(items) { item in
+                        lazyTimelineItem(
+                            item,
+                            proxy: proxy,
+                            jobsByRunID: jobsByRunID,
+                            promptFilesByEventID: promptFilesByEventID,
+                            linkContext: linkContext,
+                            hiddenRenderedRowCount: hiddenRenderedRowCount
+                        )
+                    }
                 }
                 // A definite width from outside the scroll document prevents
                 // long code blocks from feeding their intrinsic width back into
@@ -454,15 +486,101 @@ struct TimelineView: View {
                     distanceFromTop: max(0, geometry.visibleRect.minY)
                 )
             } action: { _, metrics in
-                consumeTimelineScrollMetrics(
-                    metrics,
-                    hiddenRenderedRowCount: hiddenRenderedRowCount,
+                updateBottomVisibility(metrics)
+                let nextTopZone = TimelineTopZone(distanceFromTop: metrics.distanceFromTop)
+                if lazyTopZone != nextTopZone {
+                    lazyTopZone = nextTopZone
+                }
+            }
+            .onChange(of: lazyTopZone) { _, zone in
+                handleLazyTopZone(
+                    zone,
+                    hasHiddenRenderedRows: hiddenRenderedRowCount > 0,
                     proxy: proxy
                 )
             }
         }
         .opacity(shouldMask ? 0 : 1)
         .coordinateSpace(name: coordinateSpaceName)
+    }
+
+    private func lazyTimelineItems(
+        rows: [TimelineRow],
+        firstUnreadRowID: String?,
+        hiddenRenderedRowCount: Int,
+        suspended: Bool
+    ) -> [LazyTimelineItem] {
+        guard store.selectedSession != nil else { return [.empty] }
+        var items: [LazyTimelineItem] = []
+        if !suspended && (store.hiddenDisplayEventCount > 0 || hiddenRenderedRowCount > 0) {
+            items.append(.historyLoader)
+        }
+        for row in rows {
+            if row.id == firstUnreadRowID {
+                items.append(.unreadMarker(row.id))
+            }
+            items.append(.row(row))
+        }
+        items.append(.bottom)
+        let itemIDs = items.map(\.id)
+        if Set(itemIDs).count != itemIDs.count {
+            AppLogger.error("lazy timeline duplicate item IDs count=\(itemIDs.count) unique=\(Set(itemIDs).count)")
+        }
+        return items
+    }
+
+    @ViewBuilder
+    private func lazyTimelineItem(
+        _ item: LazyTimelineItem,
+        proxy: ScrollViewProxy,
+        jobsByRunID: [String: ZJob],
+        promptFilesByEventID: [String: [ZFile]],
+        linkContext: ZMarkdownLinkContext?,
+        hiddenRenderedRowCount: Int
+    ) -> some View {
+        switch item {
+        case .empty:
+            EmptyStateView()
+        case .historyLoader:
+            TimelineHistoryLoader(
+                totalOlderCount: store.hiddenDisplayEventCount + hiddenRenderedRowCount,
+                isLoading: store.isLoadingOlderHistory,
+                canLoadOlder: store.canLoadOlderHistory,
+                hasHiddenRenderedRows: hiddenRenderedRowCount > 0
+            ) {
+                revealOlderRowsShowingNewPage(proxy)
+            } onLoadOlder: {
+                loadOlderHistoryFromIntent(proxy)
+            }
+        case .unreadMarker:
+            TimelineUnreadMarker()
+        case .row(let row):
+            timelineCard(
+                row,
+                jobsByRunID: jobsByRunID,
+                promptFilesByEventID: promptFilesByEventID,
+                linkContext: linkContext
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+        case .bottom:
+            Color.clear.frame(height: 1)
+        }
+    }
+
+    private func handleLazyTopZone(
+        _ zone: TimelineTopZone,
+        hasHiddenRenderedRows: Bool,
+        proxy: ScrollViewProxy
+    ) {
+        switch zone {
+        case .away:
+            handleHistoryTopDistance(161, hasHiddenRenderedRows: hasHiddenRenderedRows, proxy: proxy)
+        case .near:
+            handleHistoryTopDistance(0, hasHiddenRenderedRows: hasHiddenRenderedRows, proxy: proxy)
+        case .middle:
+            break
+        }
     }
 #endif
 
@@ -866,7 +984,6 @@ struct TimelineView: View {
                 }
             )
             .equatable()
-            .id(row.id)
         case .artifacts(let events):
             ArtifactGridCard(
                 artifacts: events.compactMap { event in
@@ -881,19 +998,15 @@ struct TimelineView: View {
                 }
             )
             .equatable()
-            .id(row.id)
         case .job(let jobRun):
             JobRunBubble(jobRun: jobRun, linkContext: linkContext)
                 .equatable()
-                .id(row.id)
         case .jobGroup(let group):
             JobRunGroupBubble(group: group, linkContext: linkContext)
                 .equatable()
-                .id(row.id)
         case .trace(let events):
             TraceGroupCard(events: events, linkContext: linkContext)
                 .equatable()
-                .id(row.id)
         }
     }
 
@@ -981,7 +1094,9 @@ struct TimelineView: View {
         pendingOpenBottomSessionID = sessionID
         suppressHistoryLoading(for: 2.4)
         disarmAutomaticOlderHistoryLoad()
+#if !AGENTSDOCK_LAZY_TIMELINE
         visibleRowLimit = defaultVisibleRowLimit
+#endif
         guard canSettleOpenThreadRows else {
             AppLogger.info("force latest deferred session=\(sessionID) events=\(store.displayEvents.count) applying_batch=\(store.isApplyingLargeTimelineBatch) masked=\(isInitialTimelineMasked)")
             return
@@ -1053,8 +1168,9 @@ struct TimelineView: View {
 
     private func settleBottomAfterLayout(_ proxy: ScrollViewProxy, sessionID: String?) {
         guard let sessionID else { return }
-#if AGENTSDOCK_APPKIT_TIMELINE
-        // The AppKit coordinator performs its own height-aware settle passes.
+#if AGENTSDOCK_APPKIT_TIMELINE || AGENTSDOCK_LAZY_TIMELINE
+        // Native and lazy paths each own a single height-aware positioning
+        // command. Repeated delayed scrollTo calls destabilize lazy placement.
         return
 #else
         for delay in [0.04, 0.14, 0.28] {
@@ -1074,6 +1190,8 @@ struct TimelineView: View {
             revision: appKitScrollCommand.revision &+ 1,
             destination: .bottom
         )
+#elseif AGENTSDOCK_LAZY_TIMELINE
+        scheduleLazyScroll(to: bottomID, anchor: .bottom, proxy: proxy)
 #else
         proxy.scrollTo(bottomID, anchor: .bottom)
 #endif
@@ -1094,14 +1212,43 @@ struct TimelineView: View {
             revision: appKitScrollCommand.revision &+ 1,
             destination: .row(rowID, appKitAnchor)
         )
+#elseif AGENTSDOCK_LAZY_TIMELINE
+        scheduleLazyScroll(to: rowID, anchor: unitPoint(for: anchor), proxy: proxy)
 #else
-        let unitPoint: UnitPoint = switch anchor {
+        proxy.scrollTo(rowID, anchor: unitPoint(for: anchor))
+#endif
+    }
+
+    private func unitPoint(for anchor: TimelineRequestedAnchor) -> UnitPoint {
+        switch anchor {
         case .top: .top
         case .center: .center
         case .bottom: .bottom
         }
-        proxy.scrollTo(rowID, anchor: unitPoint)
+    }
+
+    private func scheduleLazyScroll(
+        to targetID: String,
+        anchor: UnitPoint,
+        proxy: ScrollViewProxy
+    ) {
+#if AGENTSDOCK_LAZY_TIMELINE
+        cancelPendingLazyScroll()
+        let sessionID = store.selectedSessionID
+        pendingLazyScrollTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled, store.selectedSessionID == sessionID else { return }
+            withTransaction(noAnimationTransaction) {
+                proxy.scrollTo(targetID, anchor: anchor)
+            }
+            pendingLazyScrollTask = nil
+        }
 #endif
+    }
+
+    private func cancelPendingLazyScroll() {
+        pendingLazyScrollTask?.cancel()
+        pendingLazyScrollTask = nil
     }
 
     private var shouldFollowBottomRequest: Bool {
@@ -1132,7 +1279,7 @@ struct TimelineView: View {
         guard let eventID = store.scrollToEventID else { return }
         let rows = TimelineRows.build(from: store.displayEvents)
         guard let target = row(containingEventID: eventID, in: rows) else { return }
-#if !AGENTSDOCK_APPKIT_TIMELINE
+#if !AGENTSDOCK_APPKIT_TIMELINE && !AGENTSDOCK_LAZY_TIMELINE
         let rowsNeeded = rows.count - target.index
         if visibleRowLimit < rowsNeeded {
             visibleRowLimit = min(rows.count, rowsNeeded + 8)
@@ -1356,6 +1503,12 @@ struct TimelineView: View {
     private func scrollToOlderPageTarget(_ rowID: String?, proxy: ScrollViewProxy) {
         guard let rowID else { return }
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
+#if AGENTSDOCK_LAZY_TIMELINE
+        requestTimelineRowScroll(rowID, anchor: .top, proxy: proxy)
+        isAtBottom = false
+        isNearBottom = false
+        store.setSelectedTimelineAtBottom(false)
+#else
         for delay in [0.0, 0.06, 0.18] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 withTransaction(noAnimationTransaction) {
@@ -1370,9 +1523,20 @@ struct TimelineView: View {
             olderHistoryLoadArmed = true
             suppressScrollHistoryLoadUntilTopLeaves = false
         }
+#endif
     }
 
     private func loadOlderHistoryPreservingPosition(_ proxy: ScrollViewProxy) {
+#if AGENTSDOCK_LAZY_TIMELINE
+        let anchor = renderedRows().first.map {
+            TimelineScrollAnchor(rowID: $0.id, eventID: $0.anchorEventID)
+        }
+        Task {
+            let result = await store.loadOlderHistory()
+            guard result.addedCount > 0 else { return }
+            restoreScrollPosition(to: anchor, proxy: proxy)
+        }
+#else
         let anchor = firstRenderedAnchor()
         let oldLimit = visibleRowLimit
         let beforeRowCount = renderedRows().count
@@ -1401,9 +1565,19 @@ struct TimelineView: View {
             }
             restoreScrollPosition(to: anchor, proxy: proxy)
         }
+#endif
     }
 
     private func loadOlderHistoryShowingNewPage(_ proxy: ScrollViewProxy) {
+#if AGENTSDOCK_LAZY_TIMELINE
+        Task {
+            let result = await store.loadOlderHistory()
+            guard result.addedCount > 0 else { return }
+            let rows = renderedRows()
+            let target = result.firstAddedEventID.flatMap { row(containingEventID: $0, in: rows) }
+            scrollToOlderPageTarget(target?.id ?? rows.first?.id, proxy: proxy)
+        }
+#else
         let beforeRowCount = renderedRows().count
         Task {
             let result = await store.loadOlderHistory()
@@ -1429,6 +1603,7 @@ struct TimelineView: View {
             AppLogger.info("load older intent added_events=\(result.addedCount) first_added=\(result.firstAddedEventID ?? "-") added_rows=\(addedRows) old_rows=\(beforeRowCount) rendered_rows=\(allRows.count) next_limit=\(nextLimit) target=\(target?.id ?? "-")")
             scrollToOlderPageTarget(target?.id, proxy: proxy)
         }
+#endif
     }
 
     private func olderHistoryTarget(
@@ -1495,6 +1670,12 @@ struct TimelineView: View {
         guard let anchor else { return }
         let rowID = restoredRowID(for: anchor)
         historyLoadSuppressedUntil = Date().addingTimeInterval(0.45)
+#if AGENTSDOCK_LAZY_TIMELINE
+        requestTimelineRowScroll(rowID, anchor: .top, proxy: proxy)
+        isAtBottom = false
+        isNearBottom = false
+        store.setSelectedTimelineAtBottom(false)
+#else
         withTransaction(noAnimationTransaction) {
             requestTimelineRowScroll(rowID, anchor: .top, proxy: proxy)
             isAtBottom = false
@@ -1515,6 +1696,7 @@ struct TimelineView: View {
             olderHistoryLoadArmed = true
             suppressScrollHistoryLoadUntilTopLeaves = false
         }
+#endif
     }
 
     private func restoredRowID(for anchor: TimelineScrollAnchor) -> String {
@@ -1530,11 +1712,19 @@ struct TimelineView: View {
     }
 
     private func renderedRows(visibleLimit: Int? = nil) -> [TimelineRow] {
+#if AGENTSDOCK_LAZY_TIMELINE
+        TimelineRows.build(from: store.displayEvents)
+#else
         TimelineRows.build(from: timelineProjectionEvents(from: store.displayEvents, visibleLimit: visibleLimit ?? visibleRowLimit))
+#endif
     }
 
     private func hasHiddenProjectedEvents(visibleLimit: Int) -> Bool {
+#if AGENTSDOCK_LAZY_TIMELINE
+        false
+#else
         store.displayEvents.count > projectionEventBudget(visibleLimit: visibleLimit)
+#endif
     }
 
     private func timelineProjectionEvents(from source: [ZEvent], visibleLimit: Int) -> [ZEvent] {
@@ -1630,6 +1820,45 @@ struct TimelineView: View {
             await store.upload(urls: urls)
         }
         return true
+    }
+}
+
+private enum TimelineTopZone: Equatable {
+    case near
+    case middle
+    case away
+
+    init(distanceFromTop: CGFloat) {
+        if distanceFromTop <= 96 {
+            self = .near
+        } else if distanceFromTop > 160 {
+            self = .away
+        } else {
+            self = .middle
+        }
+    }
+}
+
+private enum LazyTimelineItem: Identifiable {
+    case empty
+    case historyLoader
+    case unreadMarker(String)
+    case row(TimelineRow)
+    case bottom
+
+    var id: String {
+        switch self {
+        case .empty:
+            "timeline-empty"
+        case .historyLoader:
+            "timeline-history-loader"
+        case .unreadMarker(let rowID):
+            "unread-marker-\(rowID)"
+        case .row(let row):
+            row.id
+        case .bottom:
+            "timeline-bottom"
+        }
     }
 }
 
@@ -1745,8 +1974,7 @@ struct TimelineScrollMetrics: Equatable {
     }
 
     static func == (lhs: TimelineScrollMetrics, rhs: TimelineScrollMetrics) -> Bool {
-        abs(lhs.viewportHeight - rhs.viewportHeight) < 0.5 &&
-            abs(lhs.contentHeight - rhs.contentHeight) < 0.5 &&
+        lhs.isScrollable == rhs.isScrollable &&
             bottomBucket(lhs.distanceFromBottom) == bottomBucket(rhs.distanceFromBottom) &&
             topBucket(lhs.distanceFromTop) == topBucket(rhs.distanceFromTop)
     }

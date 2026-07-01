@@ -785,6 +785,25 @@ private struct MessageAttachmentStrip: View {
     private let columns = Array(repeating: GridItem(.flexible(minimum: 120, maximum: 190), spacing: 8), count: 4)
 
     var body: some View {
+#if AGENTSDOCK_LAZY_TIMELINE
+        Grid(
+            alignment: isUser ? .trailing : .leading,
+            horizontalSpacing: 8,
+            verticalSpacing: 8
+        ) {
+            ForEach(eagerGridRows(attachments, columnCount: columns.count), id: \.first?.file.id) { row in
+                GridRow {
+                    ForEach(row, id: \.file.id) { attachment in
+                        MessageAttachmentPreview(attachment: attachment)
+                            .frame(minWidth: 120, idealWidth: 190, maxWidth: 190)
+                    }
+                    eagerGridPlaceholders(count: columns.count - row.count, minWidth: 120, maxWidth: 190)
+                }
+            }
+        }
+        .frame(maxWidth: 792, alignment: isUser ? .trailing : .leading)
+        .padding(.vertical, 1)
+#else
         LazyVGrid(columns: columns, alignment: isUser ? .trailing : .leading, spacing: 8) {
             ForEach(attachments, id: \.file.id) { attachment in
                 MessageAttachmentPreview(attachment: attachment)
@@ -792,6 +811,7 @@ private struct MessageAttachmentStrip: View {
         }
         .frame(maxWidth: 792, alignment: isUser ? .trailing : .leading)
         .padding(.vertical, 1)
+#endif
     }
 }
 
@@ -897,6 +917,29 @@ struct ArtifactGridCard: View, Equatable {
                 let mediaArtifacts = visibleArtifacts.filter { $0.file.isPreviewableArtifact }
                 let fileArtifacts = visibleArtifacts.filter { !$0.file.isPreviewableArtifact }
                 if !mediaArtifacts.isEmpty {
+#if AGENTSDOCK_LAZY_TIMELINE
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                        ForEach(eagerGridRows(mediaArtifacts, columnCount: columns.count), id: \.first?.id) { row in
+                            GridRow {
+                                ForEach(row) { artifact in
+                                    ArtifactGridTile(
+                                        file: artifact.file,
+                                        url: artifact.url,
+                                        linkContext: linkContext,
+                                        isPinned: isPinned(artifact.file),
+                                        onTogglePin: { onTogglePin(artifact.file) }
+                                    )
+                                    .frame(minWidth: 150, idealWidth: 210, maxWidth: 210)
+                                }
+                                eagerGridPlaceholders(
+                                    count: columns.count - row.count,
+                                    minWidth: 150,
+                                    maxWidth: 210
+                                )
+                            }
+                        }
+                    }
+#else
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                         ForEach(mediaArtifacts) { artifact in
                             ArtifactGridTile(
@@ -908,6 +951,7 @@ struct ArtifactGridCard: View, Equatable {
                             )
                         }
                     }
+#endif
                 }
                 if !fileArtifacts.isEmpty {
                     VStack(spacing: 6) {
@@ -946,6 +990,24 @@ struct ArtifactGridCard: View, Equatable {
         }
     }
 }
+
+#if AGENTSDOCK_LAZY_TIMELINE
+private func eagerGridRows<Element>(_ elements: [Element], columnCount: Int) -> [[Element]] {
+    stride(from: 0, to: elements.count, by: columnCount).map { startIndex in
+        Array(elements[startIndex..<min(startIndex + columnCount, elements.count)])
+    }
+}
+
+@ViewBuilder
+private func eagerGridPlaceholders(count: Int, minWidth: CGFloat, maxWidth: CGFloat) -> some View {
+    ForEach(0..<count, id: \.self) { _ in
+        Color.clear
+            .frame(minWidth: minWidth, idealWidth: maxWidth, maxWidth: maxWidth)
+            .gridCellUnsizedAxes(.vertical)
+            .accessibilityHidden(true)
+    }
+}
+#endif
 
 private struct ArtifactGridTile: View {
     let file: ZFile
