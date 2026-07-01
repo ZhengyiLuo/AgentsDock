@@ -37,6 +37,14 @@ painful to rediscover later.
   proven eager `VStack` over the bounded rendered tail. The lazy code remains
   quarantined in source for forensic comparison, and guardrails reject enabling
   either experimental virtualizer in the test build.
+- Verification on the restored eager test build: 20 rapid chat switches caused
+  a transient burst while queued cache/network loads settled, but the live
+  sample `/private/tmp/AgentsDock-test-eager-switch-peg-20260630.sample.txt` was
+  already 3,558/3,865 samples idle and process CPU returned to 1 percent without
+  intervention. Hard bidirectional scrolling peaked briefly around 46 percent
+  and repeatedly returned to 0 percent. This is categorically different from
+  the lazy runs, which remained at 99-100 percent for 11-15 minutes and sampled
+  continuously inside `LazySubviewPlacements`.
 - The test bundle still hides the floating go-to-bottom button. This UX choice
   is keyed by its bundle identifier and is independent of timeline rendering.
 
