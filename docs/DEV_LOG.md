@@ -34,6 +34,11 @@ painful to rediscover later.
   alongside the actual origin movement so future tuning is evidence-based.
 - Added `adaptive-wheel-control` coverage for sign preservation, monotonic
   movement, and stronger damping at higher velocity.
+- The first verification build compiled, but a new guardrail searched the
+  entire recycler file for manual origin writes and falsely matched a harness
+  positioning helper. The assertion is now scoped to
+  `dispatchVerticalWheel`; production wheel delivery still contains no manual
+  clip-origin mutation.
 
 ## 2026-07-01 - Give Native Scrolling Sole Ownership Of Older-History Paging
 

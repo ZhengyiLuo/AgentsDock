@@ -1500,7 +1500,15 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("routeWheelEventIfNeeded") && appKitTimeline.contains("routeVerticalWheel(event)") && appKitTimeline.contains("return nil"), "Hosted timeline wheel input must be routed through one scroll owner exactly once")
     try assert(appKitTimeline.contains("dispatchVerticalWheel") && appKitTimeline.contains("super.scrollWheel(with: controlled.event)"), "Timeline wheel input must retain one native AppKit dispatch after adaptive tuning")
     try assert(appKitTimeline.contains("event.hasPreciseScrollingDeltas") && appKitTimeline.contains("AppKitTimelineScrollTuning"), "Trackpad and Magic Mouse deltas must use the bounded adaptive scroll curve")
-    try assert(!appKitTimeline.contains("contentView.scroll(to: NSPoint(x: 0, y: target"), "Wheel tuning must not replace native momentum with manual clip-origin writes")
+    guard let wheelDispatchStart = appKitTimeline.range(of: "private func dispatchVerticalWheel"),
+          let wheelDispatchEnd = appKitTimeline.range(
+              of: "\n    }\n}",
+              range: wheelDispatchStart.upperBound..<appKitTimeline.endIndex
+          ) else {
+        throw GuardrailFailure.failed("Native wheel dispatch block not found")
+    }
+    let wheelDispatchBlock = appKitTimeline[wheelDispatchStart.lowerBound..<wheelDispatchEnd.upperBound]
+    try assert(!wheelDispatchBlock.contains("contentView.scroll"), "Wheel tuning must not replace native momentum with manual clip-origin writes")
     try assert(appKitTimeline.contains("enum AppKitTimelineHeightEstimate") && appKitTimeline.contains("item.heightEstimate.height(forWidth: width)"), "Unknown native rows must start from type-aware geometry instead of one uniform placeholder height")
     try assert(timeline.contains("heightEstimate: appKitHeightEstimate(") && timeline.contains("case .trace:") && timeline.contains("return .fixed(74)"), "Timeline rows must provide stable type-aware initial height estimates")
     try assert(appKitTimeline.contains("deferredVisibleShrinks") && appKitTimeline.contains("isShrinking && intersectsViewport"), "Visible native rows must never shrink underneath the user's viewport")
