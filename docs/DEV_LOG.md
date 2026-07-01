@@ -19,6 +19,24 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-01 - Normalize Smooth Legacy Wheel Events To Pixels
+
+- User reported the native timeline visually blurbing/flickering during scroll.
+  Live logs ruled out data reloads: one eight-event gesture reported only 40.8
+  input units but moved the document from 9,836 to 4,935 points, while the row
+  height flush changed the origin by zero. The perceived flicker was a nearly
+  5,000-point line jump across recycled rows.
+- The input driver marks its smooth events as non-precise. AppKit therefore
+  interprets them as line/row scrolling; scaling their legacy fields still
+  leaves the wrong unit semantics.
+- Non-precise deltas above an ordinary one-tick threshold are now converted to
+  continuous pixel events with a bounded square-root curve (maximum 48 pixels
+  per event). True precise events keep the adaptive curve, and ordinary small
+  discrete mouse ticks retain native behavior.
+- Added `legacy-wheel-pixel-normalization`, which dispatches a synthetic
+  five-line legacy event through the real native scroll owner and requires the
+  resulting movement to remain between 10 and 80 points.
+
 ## 2026-07-01 - Join Native Claude Monitor Subagents Before Turn Completion
 
 - Claude reported that a render completion monitor was armed, ended the

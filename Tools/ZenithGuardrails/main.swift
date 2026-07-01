@@ -1503,7 +1503,8 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!appKitTimeline.contains("scrollView.verticalLineScroll = 48") && !appKitTimeline.contains("scheduleFallbackWheel"), "AppKit timeline must not synthesize delayed wheel deltas")
     try assert(appKitTimeline.contains("routeWheelEventIfNeeded") && appKitTimeline.contains("routeVerticalWheel(event)") && appKitTimeline.contains("return nil"), "Hosted timeline wheel input must be routed through one scroll owner exactly once")
     try assert(appKitTimeline.contains("dispatchVerticalWheel") && appKitTimeline.contains("super.scrollWheel(with: controlled.event)"), "Timeline wheel input must retain one native AppKit dispatch after adaptive tuning")
-    try assert(appKitTimeline.contains("event.hasPreciseScrollingDeltas") && appKitTimeline.contains("abs(delta) > 12") && appKitTimeline.contains("AppKitTimelineScrollTuning"), "Precise and abnormally large driver deltas must use the bounded adaptive scroll curve")
+    try assert(appKitTimeline.contains("event.hasPreciseScrollingDeltas") && appKitTimeline.contains("shouldNormalizeLegacyDelta") && appKitTimeline.contains("AppKitTimelineScrollTuning"), "Precise and smooth legacy driver deltas must use bounded scroll tuning")
+    try assert(appKitTimeline.contains("scrollWheelEventIsContinuous") && appKitTimeline.contains("legacy-wheel-pixel-normalization"), "Smooth legacy wheel events must be normalized and tested as bounded pixel input")
     guard let wheelDispatchStart = appKitTimeline.range(of: "private func dispatchVerticalWheel"),
           let wheelDispatchEnd = appKitTimeline.range(
               of: "\n    }\n}",
