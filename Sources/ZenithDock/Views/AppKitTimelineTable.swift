@@ -167,6 +167,8 @@ private struct AppKitTimelineWheelSample {
     let beginsGesture: Bool
     let rawDeltaY: CGFloat
     let deliveredDeltaY: CGFloat
+    let isPrecise: Bool
+    let wasControlled: Bool
 }
 
 private enum AppKitTimelineScrollTuning {
@@ -179,12 +181,18 @@ private enum AppKitTimelineScrollTuning {
         return delta * scale
     }
 
-    static func controlledEvent(_ event: NSEvent) -> (event: NSEvent, deliveredDeltaY: CGFloat) {
+    static func shouldControl(isPrecise: Bool, delta: CGFloat) -> Bool {
+        isPrecise || abs(delta) > 12
+    }
+
+    static func controlledEvent(
+        _ event: NSEvent
+    ) -> (event: NSEvent, deliveredDeltaY: CGFloat, wasControlled: Bool) {
         let rawDeltaY = event.scrollingDeltaY
-        guard event.hasPreciseScrollingDeltas,
+        guard shouldControl(isPrecise: event.hasPreciseScrollingDeltas, delta: rawDeltaY),
               abs(rawDeltaY) > 0.01,
               let copiedEvent = event.cgEvent?.copy() else {
-            return (event, rawDeltaY)
+            return (event, rawDeltaY, false)
         }
 
         let deliveredDeltaY = tunedDelta(rawDeltaY)
@@ -201,9 +209,9 @@ private enum AppKitTimelineScrollTuning {
             scaleIntegerField(field, in: copiedEvent, by: scale)
         }
         guard let controlledEvent = NSEvent(cgEvent: copiedEvent) else {
-            return (event, rawDeltaY)
+            return (event, rawDeltaY, false)
         }
-        return (controlledEvent, controlledEvent.scrollingDeltaY)
+        return (controlledEvent, controlledEvent.scrollingDeltaY, true)
     }
 
     private static func scaleIntegerField(
@@ -322,7 +330,9 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: true,
             rawDeltaY: 1,
-            deliveredDeltaY: 1
+            deliveredDeltaY: 1,
+            isPrecise: true,
+            wasControlled: false
         ))
     }
 
@@ -331,7 +341,9 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: event.phase.contains(.began),
             rawDeltaY: event.scrollingDeltaY,
-            deliveredDeltaY: controlled.deliveredDeltaY
+            deliveredDeltaY: controlled.deliveredDeltaY,
+            isPrecise: event.hasPreciseScrollingDeltas,
+            wasControlled: controlled.wasControlled
         ))
         super.scrollWheel(with: controlled.event)
     }
@@ -424,6 +436,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var liveScrollConfiguredCellCount = 0
         private var liveScrollRawDeltaTotal: CGFloat = 0
         private var liveScrollDeliveredDeltaTotal: CGFloat = 0
+        private var liveScrollWheelEventCount = 0
+        private var liveScrollPreciseEventCount = 0
+        private var liveScrollControlledEventCount = 0
         private let metricsThrottleInterval: TimeInterval = 0.08
         private let estimatedRowHeight: CGFloat = 120
 
@@ -1419,6 +1434,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollConfiguredCellCount = 0
             liveScrollRawDeltaTotal = 0
             liveScrollDeliveredDeltaTotal = 0
+            liveScrollWheelEventCount = 0
+            liveScrollPreciseEventCount = 0
+            liveScrollControlledEventCount = 0
             cancelScheduledHeightUpdate(clearPending: false)
             if let tableView {
                 setVisibleHeightReporting(false, in: tableView)
@@ -1444,6 +1462,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     "duration_ms=\(Self.format(duration * 1_000)) " +
                     "wheel_delta=\(Self.format(liveScrollRawDeltaTotal))" +
                     "->\(Self.format(liveScrollDeliveredDeltaTotal)) " +
+                    "wheel_events=\(liveScrollControlledEventCount)" +
+                    "/\(liveScrollWheelEventCount) " +
+                    "precise=\(liveScrollPreciseEventCount) " +
                     "unknown_heights=\(liveScrollUnknownHeightCount) " +
                     "configured_cells=\(liveScrollConfiguredCellCount) " +
                     "pending_heights=\(pendingHeightUpdates.count)"
@@ -1469,6 +1490,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
             beginScrollIsolationIfNeeded()
             liveScrollRawDeltaTotal += abs(sample.rawDeltaY)
             liveScrollDeliveredDeltaTotal += abs(sample.deliveredDeltaY)
+            liveScrollWheelEventCount += 1
+            if sample.isPrecise {
+                liveScrollPreciseEventCount += 1
+            }
+            if sample.wasControlled {
+                liveScrollControlledEventCount += 1
+            }
             if sample.beginsGesture || !wheelGestureActive {
                 wheelGestureID &+= 1
                 wheelGestureActive = true
@@ -1953,7 +1981,10 @@ enum AppKitTimelineHarness {
               reverse == -fast,
               small / 4 > medium / 32,
               medium / 32 > fast / 120,
-              fast < 60 else {
+              fast < 60,
+              AppKitTimelineScrollTuning.shouldControl(isPrecise: true, delta: 4),
+              !AppKitTimelineScrollTuning.shouldControl(isPrecise: false, delta: 4),
+              AppKitTimelineScrollTuning.shouldControl(isPrecise: false, delta: 120) else {
             return fail(
                 "adaptive-wheel-control",
                 "scroll curve is not monotonic and progressively damped " +

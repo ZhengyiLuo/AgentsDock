@@ -39,6 +39,16 @@ painful to rediscover later.
   positioning helper. The assertion is now scoped to
   `dispatchVerticalWheel`; production wheel delivery still contains no manual
   clip-origin mutation.
+- The first real post-build gesture logged `120.2 -> 120.2`: the input driver
+  labeled a very large delta as non-precise, so the initial trackpad-only gate
+  skipped it. Large non-precise deltas above 12 now use the same curve, while
+  ordinary small mouse-wheel ticks remain native. Gesture logs also distinguish
+  precise and actually controlled event counts.
+- Do not run `--timeline-integration-harness` beside the user's interactive test
+  app. It intentionally hammers 40 chat switches under the same process name
+  and can appear as an app CPU peg in Activity Monitor. After stopping it, the
+  interactive process fell to 4%; a five-second sample was over 92% idle and
+  showed no layout loop.
 
 ## 2026-07-01 - Give Native Scrolling Sole Ownership Of Older-History Paging
 
