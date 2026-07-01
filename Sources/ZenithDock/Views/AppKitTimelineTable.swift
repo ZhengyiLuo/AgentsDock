@@ -2389,6 +2389,7 @@ enum AppKitTimelineIntegrationHarness {
             AppLogger.error("AppKit integration harness could not locate native timeline")
             exit(EXIT_FAILURE)
         }
+        let bottomRequestBaseline = AppKitTimelineDiagnostics.bottomRequestCount
 
         let clock = ContinuousClock()
         let started = clock.now
@@ -2447,16 +2448,17 @@ enum AppKitTimelineIntegrationHarness {
             }
         }
 
+        let measuredBottomRequests = AppKitTimelineDiagnostics.bottomRequestCount - bottomRequestBaseline
         guard AppKitTimelineDiagnostics.coordinatorCount > 0,
               AppKitTimelineDiagnostics.updateCount >= sessions.count,
               AppKitTimelineDiagnostics.sameSessionFallbackReloadCount == 0,
-              AppKitTimelineDiagnostics.bottomRequestCount <= sessions.count * 16 + 5 else {
+              measuredBottomRequests <= sessions.count * 16 + 5 else {
             AppLogger.error(
                 "AppKit integration harness recycler invariant failed " +
                 "coordinators=\(AppKitTimelineDiagnostics.coordinatorCount) " +
                 "updates=\(AppKitTimelineDiagnostics.updateCount) " +
                 "fallback_reloads=\(AppKitTimelineDiagnostics.sameSessionFallbackReloadCount) " +
-                "bottom_requests=\(AppKitTimelineDiagnostics.bottomRequestCount)"
+                "bottom_requests=\(measuredBottomRequests)"
             )
             exit(EXIT_FAILURE)
         }
@@ -2466,7 +2468,7 @@ enum AppKitTimelineIntegrationHarness {
             "elapsed=\(started.duration(to: clock.now)) slowest=\(slowest) " +
             "recycler_updates=\(AppKitTimelineDiagnostics.updateCount) " +
             "fallback_reloads=\(AppKitTimelineDiagnostics.sameSessionFallbackReloadCount) " +
-            "bottom_requests=\(AppKitTimelineDiagnostics.bottomRequestCount)"
+            "bottom_requests=\(measuredBottomRequests)"
         )
         window.contentView = nil
         fflush(stdout)

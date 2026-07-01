@@ -33,6 +33,9 @@ painful to rediscover later.
   was already performing its one immediate position plus bounded height-settle
   checks. The AppKit build now lets the recycler own opening position entirely;
   SwiftUI only clears its transition mask once matching content is ready.
+- Native diagnostics are process-lifetime counters. The integration harness now
+  snapshots its bottom-request baseline before the 40-switch loop so startup
+  activity cannot falsely fail a per-run invariant.
 - The first live native integration run completed 40 cached chat switches
   without a recycler fallback, then correctly failed when the first automatic
   older-history page did not start.
