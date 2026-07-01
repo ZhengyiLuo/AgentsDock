@@ -493,7 +493,17 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("@Published var forcedScrollToBottomRevision"), "Mac store must separate forced open/reopen bottom scrolls from ordinary live scroll requests")
     try assert(timeline.contains(".onChange(of: store.forcedScrollToBottomRevision)"), "Mac timeline must always honor forced open/reopen bottom scroll requests")
     try assert(timeline.contains("private func forceOpenThreadToLatest"), "Mac timeline must force open/reopen positioning independent of near-bottom state")
-    try assert(timeline.contains("pendingOpenBottomSessionID = sessionID\n        suppressHistoryLoading(for: 2.4)\n        disarmAutomaticOlderHistoryLoad()\n        visibleRowLimit = defaultVisibleRowLimit\n        guard canSettleOpenThreadRows else"), "Forced latest-position requests must stay pending while large timeline batches are masked")
+    guard let forceLatestStart = timeline.range(of: "private func forceOpenThreadToLatest"),
+          let forceLatestEnd = timeline.range(of: "private func resetAppKitTimelineForSelectedSession", range: forceLatestStart.upperBound..<timeline.endIndex) else {
+        throw GuardrailFailure.failed("Mac timeline must keep the forced latest-position helper bounded")
+    }
+    let forceLatestBlock = timeline[forceLatestStart.lowerBound..<forceLatestEnd.lowerBound]
+    try assert(
+        forceLatestBlock.contains("pendingOpenBottomSessionID = sessionID") &&
+            forceLatestBlock.contains("disarmAutomaticOlderHistoryLoad()") &&
+            forceLatestBlock.contains("guard canSettleOpenThreadRows else"),
+        "Forced latest-position requests must stay pending while large timeline batches are masked"
+    )
     try assert(timeline.contains("forceBottomRevision: store.forcedScrollToBottomRevision"), "Mac timeline must pass forced open/reopen bottom requests into the NSScrollView observer")
     guard let openSettleRange = timeline.range(of: "private func settleOpenThreadAtLatest"),
           let forceSettleRange = timeline.range(of: "private func forceOpenThreadToLatest", range: openSettleRange.upperBound..<timeline.endIndex) else {
