@@ -394,7 +394,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // leave top-edge history paging permanently disarmed.
                 lastMetrics = nil
                 lastMetricsReportUptime = nil
-                cancelInitialBottomVerification()
+                cancelInitialBottomVerification(reason: "session-change")
                 initialBottomPendingSessionID = nextSessionID
                 cancelDiscreteScrollSettle()
                 deferredItems = nil
@@ -434,6 +434,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let shouldPositionInitialBottom = nextHasTimelineRows &&
                 nextContentSessionID == nextSessionID &&
                 initialBottomPendingSessionID == nextSessionID
+            if sessionChanged {
+                AppLogger.info(
+                    "native session snapshot selected=\(nextSessionID ?? "-") " +
+                        "content=\(nextContentSessionID ?? "-") rows=\(nextItems.count) " +
+                        "timeline_rows=\(nextHasTimelineRows) ready=\(shouldPositionInitialBottom)"
+                )
+            }
             let shouldRestoreAnchor = anchor.map {
                 !rowIdentityOrderUnchanged &&
                     geometryChangesAffectAnchor($0, previousItems: previousItems, nextItems: nextItems)
@@ -466,10 +473,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
 
             if commandChangesPosition {
-                cancelInitialBottomVerification()
+                cancelInitialBottomVerification(reason: "scroll-command")
                 apply(scrollCommand.destination)
             } else if forcedBottomChanged {
-                cancelInitialBottomVerification()
+                cancelInitialBottomVerification(reason: "forced-bottom")
                 if !isScrollInteractionActive {
                     scrollToBottom()
                 }
@@ -1072,6 +1079,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let targetSessionID = sessionID
             let wheelCount = wheelInputCount
             let delays: [TimeInterval] = [0.05, 0.16, 0.35]
+            AppLogger.info(
+                "native initial bottom scheduled session=\(targetSessionID ?? "-") " +
+                    "items=\(items.count) generation=\(generation)"
+            )
             initialBottomWorkItems = delays.enumerated().map { attempt, delay in
                 let workItem = DispatchWorkItem { [weak self] in
                     MainActor.assumeIsolated {
@@ -1088,6 +1099,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
                             tableView.bounds.height - scrollView.documentVisibleRect.maxY
                         )
                         self.scrollToBottom()
+                        let distanceAfter = max(
+                            0,
+                            tableView.bounds.height - scrollView.documentVisibleRect.maxY
+                        )
+                        AppLogger.info(
+                            "native initial bottom attempt session=\(targetSessionID ?? "-") " +
+                                "attempt=\(attempt + 1) before=\(Self.format(distanceFromBottom)) " +
+                                "after=\(Self.format(distanceAfter)) items=\(self.items.count)"
+                        )
                         if distanceFromBottom > 28 {
                             AppLogger.info(
                                 "native initial bottom corrected session=\(targetSessionID ?? "-") " +
@@ -1105,7 +1125,13 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
         }
 
-        private func cancelInitialBottomVerification() {
+        private func cancelInitialBottomVerification(reason: String) {
+            if initialBottomPendingSessionID != nil || !initialBottomWorkItems.isEmpty {
+                AppLogger.info(
+                    "native initial bottom canceled session=\(initialBottomPendingSessionID ?? "-") " +
+                        "reason=\(reason)"
+                )
+            }
             initialBottomGeneration &+= 1
             initialBottomWorkItems.forEach { $0.cancel() }
             initialBottomWorkItems.removeAll()
@@ -1234,7 +1260,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func noteWheelInput() {
             guard geometryMutationDepth == 0 else { return }
-            cancelInitialBottomVerification()
+            cancelInitialBottomVerification(reason: "wheel-input")
             wheelInputCount += 1
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
@@ -1373,7 +1399,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scrollIsolationInstalled = false
             deferredItems = nil
             deferredColumnWidthRefresh = false
-            cancelInitialBottomVerification()
+            cancelInitialBottomVerification(reason: "dismantle")
             cancelDiscreteScrollSettle()
             cancelScheduledHeightUpdate(clearPending: true)
             cancelScheduledMetricsReport()
