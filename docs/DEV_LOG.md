@@ -60,6 +60,11 @@ painful to rediscover later.
   coalesce away an intermediate empty snapshot, so the recycler no longer tries
   to infer first content by comparing adjacent item arrays. A new session keeps
   one pending intent until its first non-control timeline row is installed.
+- The recycler also receives `loadedSessionID` as content identity. Selection
+  can publish before a cold disk cache returns; rows from the previous chat are
+  therefore forbidden from consuming the destination chat's pending initial
+  position. Only a snapshot whose loaded and selected session IDs match can do
+  so.
 
 ## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
 

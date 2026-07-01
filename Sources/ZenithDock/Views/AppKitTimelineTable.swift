@@ -180,6 +180,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
 
 struct AppKitTimelineTable: NSViewRepresentable {
     let sessionID: String?
+    let contentSessionID: String?
     let items: [AppKitTimelineItem]
     let scrollCommand: AppKitTimelineScrollCommand
     let forcedBottomRevision: Int
@@ -197,6 +198,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         context.coordinator.onMetrics = onMetrics
         context.coordinator.update(
             sessionID: sessionID,
+            contentSessionID: contentSessionID,
             items: items,
             scrollCommand: scrollCommand,
             forcedBottomRevision: forcedBottomRevision
@@ -371,6 +373,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         func update(
             sessionID nextSessionID: String?,
+            contentSessionID nextContentSessionID: String?,
             items nextItems: [AppKitTimelineItem],
             scrollCommand: AppKitTimelineScrollCommand,
             forcedBottomRevision: Int = 0
@@ -429,6 +432,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     !item.id.hasPrefix("unread-marker-")
             }
             let shouldPositionInitialBottom = nextHasTimelineRows &&
+                nextContentSessionID == nextSessionID &&
                 initialBottomPendingSessionID == nextSessionID
             let shouldRestoreAnchor = anchor.map {
                 !rowIdentityOrderUnchanged &&
@@ -2082,6 +2086,7 @@ enum AppKitTimelineHarness {
             window.orderOut(nil)
             coordinator.update(
                 sessionID: sessionID,
+                contentSessionID: sessionID,
                 items: items,
                 scrollCommand: command,
                 forcedBottomRevision: forcedBottomRevision
@@ -2105,6 +2110,7 @@ enum AppKitTimelineHarness {
             }
             coordinator.update(
                 sessionID: sessionID,
+                contentSessionID: sessionID,
                 items: items,
                 scrollCommand: command,
                 forcedBottomRevision: forcedBottomRevision

@@ -677,6 +677,7 @@ struct TimelineView: View {
     ) -> some View {
         AppKitTimelineTable(
             sessionID: store.selectedSessionID,
+            contentSessionID: store.loadedSessionID,
             items: appKitTimelineItems(
                 proxy: proxy,
                 rows: rows,
