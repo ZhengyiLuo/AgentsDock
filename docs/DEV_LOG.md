@@ -42,6 +42,12 @@ painful to rediscover later.
   session discovery (`claude agents --json --all`). That is a viable future
   server-managed job surface, but it is intentionally not confused with a
   child task owned by the current turn.
+- Synced and pushed the standalone server as commit `d65ec8a`. The compiled
+  server file was staged on `sonic`, but two active user turns made an immediate
+  systemd restart unsafe. A one-shot watcher at
+  `/tmp/zenithdock_restart_when_idle.py` polls authenticated `active_count` and
+  restarts `zenithbot-agent.service` only after it reaches zero; its audit log
+  is `/home/zen/.zenithbot-agent/idle_restart.log`.
 
 ## 2026-07-01 - Bound Native Trackpad Speed Without Replacing Momentum
 
