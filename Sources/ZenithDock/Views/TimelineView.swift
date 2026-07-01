@@ -487,7 +487,12 @@ struct TimelineView: View {
             // Calling ScrollViewReader.scrollTo(bottom) while LazyVStack is
             // still refining long-row estimates can leave ScrollActionDispatcher
             // chasing a moving target indefinitely.
-            .defaultScrollAnchor(.bottom)
+            // Bottom is only the initial position for a newly-created chat
+            // document. Applying the legacy all-role anchor here also anchors
+            // content-size changes, so a growing streaming row can tug the
+            // viewport and repeatedly invalidate LazyVStack placements while
+            // the user is scrolling elsewhere in the transcript.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .id(documentIdentity)
             .onScrollGeometryChange(for: TimelineScrollMetrics.self) { geometry in
                 TimelineScrollMetrics(

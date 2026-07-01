@@ -6060,3 +6060,20 @@ Follow-up from live history-boundary testing:
   implementation. Row-height and live-update isolation remain unchanged.
 - Updated the timeline harness and guardrails to reject manual wheel-origin
   assignment while preserving exact single dispatch.
+
+## 2026-06-30 - Scope the LazyVStack bottom anchor to chat opening
+
+- A fresh live capture showed that the original permanent 100 percent
+  `LazySubviewPlacements` loop was gone, but a streaming long chat could still
+  produce intermittent layout bursts and an unstable-feeling viewport.
+- The test timeline used the legacy one-argument
+  `defaultScrollAnchor(.bottom)`. That applies the bottom anchor to initial
+  positioning and to later content-size changes. Every streamed text growth
+  could therefore compete with user scrolling and force LazyVStack to refine
+  placements around a moving bottom edge.
+- The bottom anchor is now scoped to `.initialOffset` only. A newly opened chat
+  still starts at its latest message, while later appends and row-height changes
+  preserve the current viewport unless an explicit send/jump command requests
+  the bottom.
+- Added a guardrail rejecting the all-role bottom anchor in the isolated lazy
+  timeline build.
