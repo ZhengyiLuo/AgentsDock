@@ -19,6 +19,25 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Remove LazyVStack Bottom Scroll Dispatcher Loop
+
+- Confirmed a persistent test-app death spiral at `98.7%` CPU for more than 15
+  minutes. The live sample is
+  `/private/tmp/AgentsDock-test-actual-repeg-20260630.sample.txt`.
+- This was not a large-cache or row-count problem: the rendered tail was only
+  64 rows. The main thread was cycling through `GraphHost.flushTransactions`,
+  `LazySubviewPlacements.placeSubviews`, and `ScrollActionDispatcher` after an
+  explicit send/queue advancement requested `ScrollViewReader.scrollTo(bottom)`.
+- The `AGENTSDOCK_LAZY_TIMELINE` path must never send a bottom destination
+  through `ScrollViewReader`. Explicit sends now increment a native bridge
+  revision; the bridge performs exactly one next-runloop `NSClipView` bounds
+  update and does not observe frames, animate, retry, or chase streamed growth.
+- The lazy test no longer shows a floating go-to-bottom button. It uses native
+  scrolling for navigation and jumps to the latest row only for an explicit
+  send/forced-latest intent. Incoming agent messages continue to hold the
+  current viewport steady.
+- Production `AgentsDock.app` remains unchanged on the eager timeline path.
+
 ## 2026-06-30 - LazyVStack Test Architecture, Second Pass
 
 - The first `AgentsDock-test` LazyVStack build reproduced high scroll cost and

@@ -27,6 +27,9 @@ struct TimelineView: View {
     @State private var lazyTopZone = TimelineTopZone.away
     @State private var pendingLazyScrollTask: Task<Void, Never>?
     @State private var pendingLazyHistoryArmTask: Task<Void, Never>?
+#if AGENTSDOCK_LAZY_TIMELINE
+    @State private var lazyNativeBottomScrollRevision = 0
+#endif
 #if AGENTSDOCK_APPKIT_TIMELINE
     @State private var appKitScrollCommand = AppKitTimelineScrollCommand()
     @State private var appKitTimelineSessionID: String?
@@ -143,6 +146,7 @@ struct TimelineView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .allowsHitTesting(false)
                     }
+#if !AGENTSDOCK_LAZY_TIMELINE
                     if !shouldMaskTimeline && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
@@ -165,6 +169,7 @@ struct TimelineView: View {
                         .help(store.selectedSessionHasUnread ? "Jump to unread agent message" : "Jump to latest message")
                         .accessibilityLabel("Jump to bottom")
                     }
+#endif
                     if isFileDropTargeted {
                         TimelineFileDropOverlay()
                             .padding(18)
@@ -482,6 +487,10 @@ struct TimelineView: View {
                 .frame(width: max(1, viewport.size.width - 40), alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
+                .background {
+                    LazyTimelineNativeBottomScroller(revision: lazyNativeBottomScrollRevision)
+                        .frame(width: 0, height: 0)
+                }
             }
             // Recreate the native scroll document once per selected/loaded
             // session and let SwiftUI establish its initial bottom anchor.
@@ -1098,7 +1107,7 @@ struct TimelineView: View {
         disarmAutomaticOlderHistoryLoad()
         store.markSelectedSessionRead(force: true)
 #if AGENTSDOCK_LAZY_TIMELINE
-        // The session-scoped ScrollView uses defaultScrollAnchor(.bottom).
+        // The session-scoped ScrollView uses an initial-only bottom anchor.
         // Consuming the pending open here must not create a scroll action while
         // the lazy document is still converging on row heights.
         isAtBottom = true
@@ -1231,7 +1240,11 @@ struct TimelineView: View {
             destination: .bottom
         )
 #elseif AGENTSDOCK_LAZY_TIMELINE
-        scheduleLazyScroll(to: bottomID, anchor: .bottom, proxy: proxy)
+        // Never route a bottom jump through ScrollViewReader on a changing
+        // LazyVStack. ScrollActionDispatcher can keep invalidating estimated
+        // placements forever; the native bridge performs one bounds update.
+        cancelPendingLazyScroll()
+        lazyNativeBottomScrollRevision &+= 1
 #else
         proxy.scrollTo(bottomID, anchor: .bottom)
 #endif
@@ -2029,6 +2042,71 @@ struct TimelineScrollMetrics: Equatable {
         return 2
     }
 }
+
+#if AGENTSDOCK_LAZY_TIMELINE
+private struct LazyTimelineNativeBottomScroller: NSViewRepresentable {
+    var revision: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.requestBottom(revision: revision, from: view)
+    }
+
+    @MainActor
+    final class Coordinator {
+        private var appliedRevision = 0
+        private var pendingRevision = 0
+        private var deliveryScheduled = false
+
+        func requestBottom(revision: Int, from view: NSView) {
+            guard revision > appliedRevision else { return }
+            pendingRevision = max(pendingRevision, revision)
+            guard !deliveryScheduled else { return }
+            deliveryScheduled = true
+
+            // One next-runloop delivery lets the optimistic user row join the
+            // document before we read its bounds. There are deliberately no
+            // retries or frame observers: this is a command, not scroll state.
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self else { return }
+                self.deliveryScheduled = false
+                guard let view,
+                      let scrollView = view.enclosingScrollView,
+                      let documentView = scrollView.documentView else {
+                    return
+                }
+
+                let clipView = scrollView.contentView
+                let targetY: CGFloat
+                if documentView.isFlipped {
+                    targetY = max(documentView.bounds.minY, documentView.bounds.maxY - clipView.bounds.height)
+                } else {
+                    targetY = documentView.bounds.minY
+                }
+                let proposedBounds = NSRect(
+                    x: clipView.bounds.minX,
+                    y: targetY,
+                    width: clipView.bounds.width,
+                    height: clipView.bounds.height
+                )
+                let target = clipView.constrainBoundsRect(proposedBounds).origin
+                if clipView.bounds.origin != target {
+                    clipView.scroll(to: target)
+                    scrollView.reflectScrolledClipView(clipView)
+                }
+                self.appliedRevision = self.pendingRevision
+            }
+        }
+    }
+}
+#endif
 
 private struct TimelineScrollObserver: NSViewRepresentable {
     var forceBottomRevision: Int
