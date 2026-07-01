@@ -39,6 +39,14 @@ painful to rediscover later.
   regression. The live integration harness now reaches the top through the
   same synthetic native gesture used by the production callback path instead
   of relying on a programmatic bounds write to masquerade as user intent.
+- Verification: `ZenithGuardrails` passed; every native recycler scenario
+  passed, including the new state/coordinator paging checks; the live harness
+  completed 40 chat switches and two separately initiated 180-event older-page
+  loads with zero same-chat fallback reloads. The refreshed test app launched
+  at 0% idle CPU and roughly 167 MB RSS.
+- Built and signed `/Users/zen/agi/ZenithDock/dist/AgentsDock-test.app`, then
+  synced the same app bundle to
+  `zens-macbook-air:/Users/zen/agi/AgentsDock-test.app`.
 
 ## 2026-06-30 - Rearm Native History Paging Per Chat
 
