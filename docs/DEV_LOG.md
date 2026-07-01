@@ -36,6 +36,11 @@ painful to rediscover later.
 - Native diagnostics are process-lifetime counters. The integration harness now
   snapshots its bottom-request baseline before the 40-switch loop so startup
   activity cannot falsely fail a per-run invariant.
+- The pending three-pass opening verification is also the idempotency lease.
+  Repeated SwiftUI snapshots during those 350 ms no longer repeat the immediate
+  bottom movement; only the first matching snapshot may start and position the
+  lease. The ownership regression publishes duplicate identical snapshots and
+  caps the complete opening sequence at four native requests.
 - The first live native integration run completed 40 cached chat switches
   without a recycler fallback, then correctly failed when the first automatic
   older-history page did not start.

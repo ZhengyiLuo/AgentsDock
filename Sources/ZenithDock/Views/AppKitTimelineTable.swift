@@ -485,10 +485,16 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     scrollToBottom()
                 }
             } else if shouldPositionInitialBottom {
-                if !isScrollInteractionActive {
-                    scrollToBottom()
+                // SwiftUI may publish several identical snapshots while the
+                // opening rows settle. The verification work-item set is the
+                // ownership lease; only its first update may perform the
+                // immediate positioning pass.
+                if initialBottomWorkItems.isEmpty {
+                    if !isScrollInteractionActive {
+                        scrollToBottom()
+                    }
+                    scheduleInitialBottomVerification()
                 }
-                scheduleInitialBottomVerification()
             } else if shouldRestoreAnchor, let anchor {
                 restore(anchor)
             }
@@ -2025,17 +2031,22 @@ enum AppKitTimelineHarness {
         fixture.items = (0..<96).map { item(index: $0, version: 0) }
         fixture.update()
         fixture.settle()
+        let bottomRequestsBeforeOwnership = AppKitTimelineDiagnostics.bottomRequestCount
         fixture.setContentSessionID("harness")
+        fixture.update()
+        fixture.update()
         fixture.settle()
 
         let distanceFromBottom = max(
             0,
             fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
         )
-        guard distanceFromBottom <= 28 else {
+        let openingBottomRequests = AppKitTimelineDiagnostics.bottomRequestCount - bottomRequestsBeforeOwnership
+        guard distanceFromBottom <= 28, openingBottomRequests <= 4 else {
             return fail(
                 "ownership-only-bottom-position",
-                "content ownership update with unchanged rows stayed at the top distance=\(distanceFromBottom)"
+                "content ownership update was not idempotent distance=\(distanceFromBottom) " +
+                    "bottom_requests=\(openingBottomRequests)"
             )
         }
         return true
