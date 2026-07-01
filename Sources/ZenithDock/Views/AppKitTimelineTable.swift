@@ -383,6 +383,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 isLiveScrolling = false
                 isDiscreteScrolling = false
                 scrollIsolationInstalled = false
+                // Metric buckets are document-scoped. Reusing the previous
+                // chat's last value can suppress the new bottom report and
+                // leave top-edge history paging permanently disarmed.
+                lastMetrics = nil
+                lastMetricsReportUptime = nil
                 cancelDiscreteScrollSettle()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
@@ -1364,6 +1369,7 @@ enum AppKitTimelineHarness {
             ("discrete-scroll-isolation", checkDiscreteScrollIsolation),
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
             ("chat-switch-isolation", checkChatSwitchIsolation),
+            ("chat-switch-metrics-reset", checkChatSwitchMetricsReset),
             ("explicit-height-cache", checkExplicitHeightCache),
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
@@ -1864,6 +1870,21 @@ enum AppKitTimelineHarness {
         return true
     }
 
+    private static func checkChatSwitchMetricsReset() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let reportsBeforeSwitch = fixture.metrics.reportCount
+        fixture.update(sessionID: "harness-b")
+        fixture.settle()
+        guard fixture.metrics.reportCount > reportsBeforeSwitch else {
+            return fail(
+                "chat-switch-metrics-reset",
+                "new session reused the previous document's viewport metrics"
+            )
+        }
+        return true
+    }
+
     private static func checkVariableHeightContainment() -> Bool {
         let wrappingItems = (0..<64).map { wrappingItem(index: $0) }
         let fixture = Fixture(width: 360, items: wrappingItems)
@@ -1905,6 +1926,7 @@ enum AppKitTimelineHarness {
     private final class Fixture {
         final class Metrics {
             var latest: TimelineScrollMetrics?
+            var reportCount = 0
             var contentBuildCount = 0
         }
 
@@ -1926,6 +1948,7 @@ enum AppKitTimelineHarness {
             self.metrics = metrics
             coordinator = AppKitTimelineTable.Coordinator { value in
                 metrics.latest = value
+                metrics.reportCount += 1
             }
             scrollView = coordinator.makeScrollView()
             tableView = scrollView.documentView as! NSTableView

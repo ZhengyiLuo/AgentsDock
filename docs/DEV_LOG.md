@@ -19,6 +19,22 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-06-30 - Rearm Native History Paging Per Chat
+
+- The first live native integration run completed 40 cached chat switches
+  without a recycler fallback, then correctly failed when the first automatic
+  older-history page did not start.
+- Root cause: `AppKitTimelineTable.Coordinator` deduplicated bucketed scroll
+  metrics across session boundaries. If the previous and next documents had
+  equivalent viewport buckets, the new chat did not publish its initial bottom
+  state, leaving top-edge history paging disarmed.
+- Native viewport metrics are now document-scoped. A session change clears the
+  prior metric identity and throttle timestamp before the new document is
+  positioned.
+- Added `chat-switch-metrics-reset` to the native timeline harness. It requires
+  a fresh viewport report after a session reload even when the geometry buckets
+  match the previous chat.
+
 ## 2026-06-30 - Resume Native Recycled Timeline In Isolated Test Build
 
 - Retiring `LazyVStack` is not retiring timeline performance work. The dormant
