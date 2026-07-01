@@ -2162,7 +2162,11 @@ enum AppKitTimelineHarness {
             forcedBottomRevision nextForcedBottomRevision: Int? = nil
         ) {
             if let nextSessionID {
+                let contentFollowedSelection = contentSessionID == sessionID
                 sessionID = nextSessionID
+                if contentFollowedSelection {
+                    contentSessionID = nextSessionID
+                }
             }
             if let nextCommand {
                 command = nextCommand
