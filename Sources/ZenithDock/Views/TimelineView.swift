@@ -565,7 +565,6 @@ struct TimelineView: View {
                 linkContext: linkContext
             )
             .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
         case .bottom:
             Color.clear.frame(height: 1)
         }

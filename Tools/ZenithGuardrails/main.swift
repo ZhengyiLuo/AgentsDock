@@ -1513,6 +1513,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(timeline.contains("// LazyVStack is the only virtualization owner in the experiment") && timeline.contains("let projectedDisplayEvents = displayEvents"), "The lazy timeline must consume the complete bounded store window instead of a moving local suffix")
     try assert(timeline.contains("ForEach(items) { item in") && timeline.contains("private enum LazyTimelineItem: Identifiable"), "Lazy timeline controls and rows must share one stable ForEach identity domain")
     try assert(!timeline.contains(".id(row.id)"), "ForEach row identity must not be duplicated by nested explicit row IDs")
+    try assert(!timeline.contains(".fixedSize(horizontal: false, vertical: true)"), "Lazy timeline rows must accept the stack's finite width proposal instead of recursively requesting ideal height")
     try assert(timeline.contains("lhs.isScrollable == rhs.isScrollable") && !timeline.contains("abs(lhs.contentHeight - rhs.contentHeight)"), "Lazy scroll geometry must publish threshold changes, not every content-height refinement")
     try assert(timeline.contains("pendingLazyScrollTask?.cancel()") && timeline.contains("scheduleLazyScroll(to: bottomID"), "Lazy positioning must use one cancellable command per intent")
     try assert(timeline.contains("#if AGENTSDOCK_LAZY_TIMELINE\n        TimelineRows.build(from: store.displayEvents)"), "Lazy history anchoring must use the complete loaded row projection")
