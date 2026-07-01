@@ -811,7 +811,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 }
             }
             heightUpdateWorkItem = workItem
-            DispatchQueue.main.async(execute: workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
         }
 
         private func cancelScheduledHeightUpdate(clearPending: Bool) {
@@ -2310,7 +2310,7 @@ enum AppKitTimelineIntegrationHarness {
                 hostingView.layoutSubtreeIfNeeded()
                 let elapsed = selectionStarted.duration(to: clock.now)
                 slowest = max(slowest, elapsed)
-                try? await Task.sleep(for: .milliseconds(90))
+                try? await Task.sleep(for: .milliseconds(180))
                 hostingView.layoutSubtreeIfNeeded()
                 let distanceFromBottom = max(
                     0,
