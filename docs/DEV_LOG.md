@@ -49,6 +49,20 @@ painful to rediscover later.
 - Added native harness coverage for streaming-height continuity and a two-step
   cache-plus-delta opening transaction. Heavy integration harnesses remain
   prohibited beside the interactive test app.
+- Verification: `ZenithGuardrails` passed; all 22 lightweight native timeline
+  scenarios and `SidebarReorderHarness` passed. A real cold-cache launch applied
+  287 events in 0.9 ms and recorded one semantic initial-bottom position rather
+  than the prior three retries. The final isolated process was idle at 0% CPU.
+- Rebuilt and signed `/Users/zen/agi/ZenithDock/dist/AgentsDock-test.app` and
+  synced `/Users/zen/agi/AgentsDock-test.app` to the MacBook Air. The unrelated
+  local CoreSimulator 1051.54/1051.55 warning remains, but the macOS build and
+  signature validation succeed.
+- The backward-delta reader passed an isolated regression in the live server's
+  `/home/zen/Zenithbot/.venv` runtime, was pushed to standalone server commit
+  `9354af4`, and was staged on `supersonic00`. Because three agent turns were
+  active, `zenithbot-agent-idle-restart.service` was armed as a one-shot watcher
+  to restart only after active count reaches zero; the current service was not
+  interrupted.
 - A live send exposed a separate ordering bug: the forced-bottom revision was
   published before the accepted user row existed, leaving the new bubble partly
   below the viewport. Sends now establish an explicit bottom-follow lease,
