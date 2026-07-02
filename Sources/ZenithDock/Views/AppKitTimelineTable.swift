@@ -465,6 +465,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var isDiscreteScrolling = false
         private var initialBottomPendingSessionID: String?
         private var initialBottomHasPositioned = false
+        private var initialBottomPositionedTail: TailSignature?
         private var paging = AppKitTimelinePagingController()
         private var wheelGestureID = 0
         private var wheelGestureActive = false
@@ -644,6 +645,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 cancelInitialBottomPositioning(reason: "session-change")
                 initialBottomPendingSessionID = nextSessionID
                 initialBottomHasPositioned = false
+                initialBottomPositionedTail = nil
                 cancelDiscreteScrollSettle()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
@@ -691,6 +693,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let shouldPositionInitialBottom = nextHasTimelineRows &&
                 nextContentSessionID == nextSessionID &&
                 initialBottomPendingSessionID == nextSessionID
+            let nextTailSignature = timelineTailSignature(in: nextItems)
             if sessionChanged {
                 AppLogger.info(
                     "native session snapshot selected=\(nextSessionID ?? "-") " +
@@ -747,9 +750,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // when that immutable snapshot actually changes. This replaces
                 // the old three-timer bottom chase with one synchronous owner.
                 if !isScrollInteractionActive,
-                   itemsChanged || !initialBottomHasPositioned {
+                   !initialBottomHasPositioned || nextTailSignature != initialBottomPositionedTail {
                     scrollToBottom()
                     initialBottomHasPositioned = true
+                    initialBottomPositionedTail = nextTailSignature
                     AppLogger.info(
                         "native initial bottom positioned session=\(nextSessionID ?? "-") " +
                             "items=\(nextItems.count) reconciling=\(isReconcilingLatestTail)"
@@ -1376,6 +1380,17 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
             initialBottomPendingSessionID = nil
             initialBottomHasPositioned = false
+            initialBottomPositionedTail = nil
+        }
+
+        private struct TailSignature: Equatable {
+            let id: String
+            let version: Int
+        }
+
+        private func timelineTailSignature(in candidates: [AppKitTimelineItem]) -> TailSignature? {
+            guard let tail = candidates.last(where: { !$0.eventIDs.isEmpty }) else { return nil }
+            return TailSignature(id: tail.id, version: tail.version)
         }
 
         private func scroll(to itemID: String, anchor: AppKitTimelineAnchor) {

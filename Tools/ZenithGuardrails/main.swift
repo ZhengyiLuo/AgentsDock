@@ -1506,6 +1506,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!appKitTimeline.contains("for delay in [0.08, 0.20]"), "Chat opening must not visibly chase the bottom across delayed layout passes")
     try assert(!appKitTimeline.contains("initialBottomWorkItems") && !appKitTimeline.contains("scheduleInitialBottomVerification"), "Native chat opening must not chase the bottom with delayed verification timers")
     try assert(appKitTimeline.contains("isReconcilingLatestTail") && appKitTimeline.contains("initialBottomHasPositioned"), "Native chat opening must keep one positioning lease across cached-tail reconciliation")
+    try assert(appKitTimeline.contains("timelineTailSignature(in: nextItems)") && appKitTimeline.contains("nextTailSignature != initialBottomPositionedTail"), "Opening must ignore loader and unread-control churn when deciding whether the semantic tail moved")
     try assert(appKitTimeline.contains("commandChangesPosition") && appKitTimeline.contains("shouldRestoreAnchor"), "AppKit row mutation and any required positioning must share one coordinator update")
     try assert(appKitTimeline.contains("forcedBottomRevision") && timeline.contains("forcedBottomRevision: store.forcedScrollToBottomRevision"), "Send and reconciliation bottom requests must enter the native table in the same render update as their rows")
     try assert(!appKitTimeline.contains("scrollView.verticalLineScroll = 48") && !appKitTimeline.contains("scheduleFallbackWheel"), "AppKit timeline must not synthesize delayed wheel deltas")

@@ -35,8 +35,9 @@ painful to rediscover later.
   version, so a growing streamed row cannot flash back to a generic estimate.
 - Removed the three delayed initial-bottom verification timers. Opening is now
   one lease spanning the immediate cached snapshot and its latest-tail delta.
-  It positions only when the immutable snapshot changes, and any user wheel
-  input cancels the lease.
+  It positions only when the semantic tail row's ID/version changes; loader and
+  unread-control churn cannot reposition the document. Any user wheel input
+  cancels the lease.
 - Warm cached opens now request only events after the cached sequence. They skip
   REST entirely when a fresh server session list reports the exact same latest
   sequence and authoritative queue state is already known, and retain a
