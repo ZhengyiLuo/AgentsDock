@@ -1169,6 +1169,8 @@ func checkLiveTimelineAutoFollow() throws {
     try assert(!macApplyStreamBlock.contains("requestScrollToBottom()"), "Mac streamed event batches must not request bottom scrolling")
     try assert(!macIngestBlock.contains("requestScrollToBottom()"), "Mac single streamed events must not request bottom scrolling")
     try assert(macStore.contains("requestScrollToBottom(immediate: true)\n            AppLogger.info(\"send prompt"), "Mac user sends must still scroll the timeline to the bottom")
+    try assert(macStore.contains("applyAcceptedTurnEvent(res.event, sessionID: sid)\n            if sid == selectedSessionID, selectedTimelineAtBottom {\n                requestScrollToBottom(immediate: true)"), "Mac accepted user rows must receive one final explicit-send bottom request")
+    try assert(macStore.contains("setSelectedTimelineAtBottom(true)\n            requestScrollToBottom(immediate: true)"), "Mac sends must establish a cancellable bottom-follow lease before awaiting the server")
     try assert(macStore.contains("pendingStreamEvents"), "Mac streaming catch-up must buffer burst events instead of publishing one-by-one flyby")
     try assert(macStore.contains("streamBackfillMaskThreshold"), "Mac streaming catch-up must mask large event bursts")
     try assert(macStore.contains("applyStreamEvents(buffered)"), "Mac streaming catch-up must apply buffered events as one batch")

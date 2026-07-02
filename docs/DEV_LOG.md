@@ -49,6 +49,12 @@ painful to rediscover later.
 - Added native harness coverage for streaming-height continuity and a two-step
   cache-plus-delta opening transaction. Heavy integration harnesses remain
   prohibited beside the interactive test app.
+- A live send exposed a separate ordering bug: the forced-bottom revision was
+  published before the accepted user row existed, leaving the new bubble partly
+  below the viewport. Sends now establish an explicit bottom-follow lease,
+  publish the immediate old-bottom request, then publish one final request after
+  the accepted row is ingested. Scrolling while the network request is in flight
+  cancels that lease, so this does not restore passive agent auto-follow.
 
 ## 2026-07-01 - Normalize Smooth Legacy Wheel Events To Pixels
 

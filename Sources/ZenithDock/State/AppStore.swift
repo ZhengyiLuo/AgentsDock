@@ -2674,6 +2674,7 @@ final class AppStore: ObservableObject {
             activeSessionIDs.insert(sessionID)
             if sessionID == selectedSessionID {
                 isRunning = true
+                setSelectedTimelineAtBottom(true)
                 requestScrollToBottom(immediate: true)
             }
             let res: Response = try await api.post(
@@ -2687,6 +2688,14 @@ final class AppStore: ObservableObject {
             )
             replaceSessionFromServer(res.session)
             applyAcceptedTurnEvent(res.event, sessionID: sessionID)
+            if sessionID == selectedSessionID, selectedTimelineAtBottom {
+                // The first request moves the existing document immediately.
+                // This second explicit-send request is published only after the
+                // accepted user row exists, so the real new bottom is visible.
+                // A user scroll during the request clears the bottom state and
+                // prevents this acknowledgement from pulling them back.
+                requestScrollToBottom(immediate: true)
+            }
             if res.queued == true {
                 AppLogger.info("turn queued session=\(sessionID) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
             } else {
@@ -2790,6 +2799,7 @@ final class AppStore: ObservableObject {
             if submittedPrompt == nil {
                 prompt = ""
             }
+            setSelectedTimelineAtBottom(true)
             requestScrollToBottom(immediate: true)
             AppLogger.info("send prompt session=\(sid) chars=\(trimmed.count) files=\(uploads.count)")
             let body = Body(
@@ -2809,6 +2819,9 @@ final class AppStore: ObservableObject {
             let res: Response = try await api.post("/api/sessions/\(sid)/turns", body: body)
             replaceSessionFromServer(res.session)
             applyAcceptedTurnEvent(res.event, sessionID: sid)
+            if sid == selectedSessionID, selectedTimelineAtBottom {
+                requestScrollToBottom(immediate: true)
+            }
             if res.queued == true {
                 AppLogger.info("turn queued session=\(sid) queued=\(res.queued_id ?? "-") position=\(res.position ?? 0)")
             } else {
