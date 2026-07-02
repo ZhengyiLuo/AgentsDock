@@ -1824,7 +1824,8 @@ final class AppStore: ObservableObject {
         if loadedFromCache {
             let cachedLastSeq = lastSeq
             syncSelectedRunningState()
-            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq) {
+            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq),
+               queuedTurnsBySessionID[sessionID] != nil {
                 isRefreshingCachedDelta = false
                 loadedSessionID = sessionID
                 connectEvents(sessionID: sessionID, after: lastSeq)

@@ -39,8 +39,9 @@ painful to rediscover later.
   input cancels the lease.
 - Warm cached opens now request only events after the cached sequence. They skip
   REST entirely when a fresh server session list reports the exact same latest
-  sequence, and retain a full-tail fallback if the delta exceeds one page or
-  the server sequence moved backward.
+  sequence and authoritative queue state is already known, and retain a
+  full-tail fallback if the delta exceeds one page or the server sequence moved
+  backward.
 - The server's `after` + `visible` path now reads the append-only JSONL backward
   with `mmap`, stopping at the cached sequence instead of rescanning very long
   transcripts from the beginning.
