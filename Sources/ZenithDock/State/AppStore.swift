@@ -1770,6 +1770,7 @@ final class AppStore: ObservableObject {
         var loadedFromCache = false
         if let warmCachedChat {
             noteSwitchPath(sessionID, "memory")
+            isRefreshingCachedDelta = true
             applyCachedChat(warmCachedChat)
             loadedFromCache = true
             setStatus("Loaded memory chat")
@@ -1812,6 +1813,7 @@ final class AppStore: ObservableObject {
                     return
                 }
                 noteSwitchPath(sessionID, "disk")
+                isRefreshingCachedDelta = true
                 rememberChatCache(cached)
                 applyCachedChat(cached)
                 loadedFromCache = true
@@ -1822,8 +1824,8 @@ final class AppStore: ObservableObject {
         if loadedFromCache {
             let cachedLastSeq = lastSeq
             syncSelectedRunningState()
-            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq),
-               queuedTurnsBySessionID[sessionID] != nil {
+            if cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq) {
+                isRefreshingCachedDelta = false
                 loadedSessionID = sessionID
                 connectEvents(sessionID: sessionID, after: lastSeq)
                 AppLogger.info("skip cached latest tail session=\(sessionID) cached_latest=\(cachedLastSeq)")
@@ -1855,13 +1857,16 @@ final class AppStore: ObservableObject {
               let knownLatestSeq = sessions.first(where: { $0.id == sessionID })?.latest_event_seq else {
             return false
         }
-        guard knownLatestSeq <= cachedLastSeq,
-              let verified = verifiedTimelineTailsBySessionID[sessionID],
-              verified.latestSeq == cachedLastSeq,
-              Date().timeIntervalSince(verified.verifiedAt) <= cachedTailFreshnessWindow else {
-            return false
+        guard knownLatestSeq == cachedLastSeq else { return false }
+        if let verified = verifiedTimelineTailsBySessionID[sessionID],
+           verified.latestSeq == cachedLastSeq,
+           Date().timeIntervalSince(verified.verifiedAt) <= cachedTailFreshnessWindow {
+            return verified.eventIDs == timelineTailEventIDs(sessionID: sessionID)
         }
-        return verified.eventIDs == timelineTailEventIDs(sessionID: sessionID)
+        // The session list and event append happen under the same server state.
+        // Equal sequence numbers are therefore enough to prove that this
+        // server-scoped local snapshot has no missing tail events.
+        return true
     }
 
     private func markTimelineTailVerified(sessionID: String) {
@@ -1885,18 +1890,18 @@ final class AppStore: ObservableObject {
               selectionGeneration == generation else {
             return
         }
-        isRefreshingCachedDelta = true
         defer {
             if selectedSessionID == sessionID, selectionGeneration == generation {
                 isRefreshingCachedDelta = false
             }
         }
         do {
-            let res: SessionEventsResponse = try await api.get(
+            let delta: SessionEventsResponse = try await api.get(
                 "/api/sessions/\(sessionID)",
                 queryItems: [
-                    URLQueryItem(name: "limit", value: "\(maxCachedTimelineEvents)"),
-                    URLQueryItem(name: "tail", value: "true"),
+                    URLQueryItem(name: "after", value: "\(cachedLastSeq)"),
+                    URLQueryItem(name: "limit", value: "\(initialSessionEventLimit)"),
+                    URLQueryItem(name: "tail", value: "false"),
                     URLQueryItem(name: "visible", value: "true")
                 ]
             )
@@ -1905,14 +1910,49 @@ final class AppStore: ObservableObject {
                 return
             }
             let previousSeq = lastSeq
-            let changedTimeline = applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)
+            let changedTimeline: Bool
+            let usedFullTail: Bool
+            if (delta.events_omitted_after ?? 0) > 0 || (delta.latest_seq ?? cachedLastSeq) < cachedLastSeq {
+                let fullTail: SessionEventsResponse = try await api.get(
+                    "/api/sessions/\(sessionID)",
+                    queryItems: [
+                        URLQueryItem(name: "limit", value: "\(maxCachedTimelineEvents)"),
+                        URLQueryItem(name: "tail", value: "true"),
+                        URLQueryItem(name: "visible", value: "true")
+                    ]
+                )
+                guard selectedSessionID == sessionID, selectionGeneration == generation else {
+                    AppLogger.info("drop stale full-tail fallback session=\(sessionID)")
+                    return
+                }
+                changedTimeline = applySessionEventSnapshot(
+                    fullTail,
+                    sessionID: sessionID,
+                    preserveExisting: true
+                )
+                usedFullTail = true
+            } else {
+                replaceSessionFromServer(delta.session)
+                let queueChanged = applyAuthoritativeQueuedTurns(delta.queued_turns, sessionID: sessionID)
+                let existingIDs = Set(events.map(\.id))
+                let hasNewTimelineEvents = delta.events.contains { !existingIDs.contains($0.id) }
+                mergeEvents(delta.events)
+                latestSeenSeq = max(latestSeenSeq, delta.latest_seq ?? 0)
+                changedTimeline = queueChanged || hasNewTimelineEvents
+                usedFullTail = false
+            }
             markSessionRead(sessionID)
             loadedSessionID = sessionID
             markTimelineTailVerified(sessionID: sessionID)
             saveSelectedChatCache()
             connectEvents(sessionID: sessionID, after: lastSeq)
             syncSelectedRunningState()
-            AppLogger.info("loaded cached latest tail session=\(sessionID) previous=\(previousSeq) cached=\(cachedLastSeq) latest=\(lastSeq) events=\(events.count) changed=\(changedTimeline) omitted_before=\(omittedHistoryEventCount)")
+            AppLogger.info(
+                "loaded cached latest delta session=\(sessionID) previous=\(previousSeq) " +
+                    "cached=\(cachedLastSeq) latest=\(lastSeq) received=\(delta.events.count) " +
+                    "full_tail=\(usedFullTail) events=\(events.count) changed=\(changedTimeline) " +
+                    "omitted_before=\(omittedHistoryEventCount)"
+            )
         } catch {
             AppLogger.warning("cached tail refresh failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
         }

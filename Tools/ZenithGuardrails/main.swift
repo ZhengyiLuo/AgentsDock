@@ -586,11 +586,13 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("applyCachedChat(warmCachedChat)"), "Mac memory-cache chat switches must apply the bounded cache window")
     try assert(macStore.contains("applyCachedChat(cached)"), "Mac duplicate-selection memory restores must apply the bounded cache window")
     try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
-    try assert(macStore.contains("cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq)"), "Mac warm-cache chat switches may skip REST only after the cached tail is verified")
+    try assert(macStore.contains("cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq)"), "Mac warm-cache chat switches may skip REST only after the fresh session list matches the cached sequence")
     try assert(macStore.contains("private let cachedTailFreshnessWindow"), "Mac cached-tail skip must have a bounded freshness window")
     try assert(macStore.contains("private struct VerifiedTimelineTail") && macStore.contains("verifiedTimelineTailsBySessionID"), "Mac cached-tail freshness must be backed by an in-process authoritative verification")
     try assert(macStore.contains("verified.eventIDs == timelineTailEventIDs(sessionID: sessionID)"), "Mac cached-tail verification must reject equal-max-seq caches with missing internal events")
-    try assert(macStore.contains("URLQueryItem(name: \"limit\", value: \"\\(maxCachedTimelineEvents)\")"), "Mac cached-tail reconciliation must request the full persisted tail window")
+    try assert(macStore.contains("URLQueryItem(name: \"after\", value: \"\\(cachedLastSeq)\")"), "Mac cached-tail reconciliation must request only events newer than the rendered cache")
+    try assert(macStore.contains("(delta.events_omitted_after ?? 0) > 0"), "Mac cached-tail reconciliation must detect a delta larger than one response page")
+    try assert(macStore.contains("URLQueryItem(name: \"limit\", value: \"\\(maxCachedTimelineEvents)\")"), "Mac cached-tail reconciliation must retain a full persisted-tail fallback for gaps")
     try assert(macStore.contains("candidatePreservedIDs.isDisjoint(with: snapshotIDs)"), "Mac cached-tail reconciliation must replace disconnected cache windows instead of preserving a gap")
     try assert(macStore.contains("let loadedAt = Date()") && macStore.contains("lastLoadedAt = loadedAt"), "Mac session-list freshness must update on every successful /api/sessions response")
     try assert(macStore.contains("guard let sessionListLoadedAt = lastLoadedAt"), "Mac cached-tail skip must require a recent server session list")
@@ -598,9 +600,9 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(!macStore.contains("connectEvents(sessionID: sessionID, after: cachedLastSeq)"), "Mac warm-cache chat switches must not replay the whole websocket gap before refreshing the latest tail")
     try assert(macStore.contains("refreshCachedSessionLatestTail"), "Mac warm-cache chat switches must refresh the server latest tail")
     try assert(!macStore.contains("Refreshing latest chat"), "Mac warm-cache chat switches must not present background tail refresh as foreground loading")
-    try assert(macStore.contains("URLQueryItem(name: \"tail\", value: \"true\")"), "Mac cached chat refresh must request the latest tail window")
+    try assert(macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac cached chat refresh must request an ordered delta page")
     try assert(macStore.contains("URLQueryItem(name: \"visible\", value: \"true\")"), "Mac session history fetches must page displayable events instead of raw trace noise")
-    try assert(macStore.contains("applySessionEventSnapshot(res, sessionID: sessionID, preserveExisting: true)"), "Mac cached chat refresh must merge the server latest tail without dropping loaded older pages")
+    try assert(macStore.contains("applySessionEventSnapshot(") && macStore.contains("fullTail,"), "Mac cached chat fallback must merge the server latest tail without dropping loaded older pages")
     try assert(macStore.contains("connectEvents(sessionID: sessionID, after: lastSeq)"), "Mac warm-cache chat switches must connect live streaming only after the latest tail is applied")
     try assert(macStore.contains("isRefreshingCachedDelta = true"), "Mac cached chat refresh must still mark its background refresh state")
     try assert(macStore.contains("let newSnapshotEventCount = preserveExisting"), "Mac cached tail refresh must count only actually new events for large-batch masking")
@@ -660,11 +662,12 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
         throw GuardrailFailure.failed("iOS store must keep an identifiable select/session history boundary")
     }
     try assert(!mobileStore[mobileSelectRange.lowerBound..<mobileLoadOlderRange.lowerBound].contains("scrollRevision += 1"), "iOS chat open must not fire the send-style bottom scroll revision after loading history")
-    try assert(!macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac chat open must not request a non-tail catch-up page")
+    try assert(macStore.contains("URLQueryItem(name: \"after\", value: \"\\(cachedLastSeq)\")") && macStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "Mac warm-cache chat open must use a bounded ordered delta instead of downloading the full tail")
     try assert(!mobileStore.contains("URLQueryItem(name: \"tail\", value: \"false\")"), "iOS chat open must not request a non-tail catch-up page")
     try assert(server.contains("API_CONTRACT_VERSION = 4"), "Server visible-history paging is a v4 API contract")
     try assert(server.contains("visible: bool = False") && server.contains("is_visible_timeline_event"), "Server session endpoint must support visible timeline event paging")
     try assert(server.contains("read_visible_events_page(") && server.contains("visible_count - len(events)"), "Server visible-history paging must report visible omitted counts, not raw seq gaps")
+    try assert(server.contains("read_visible_events_after_page(") && server.contains("mmap.mmap("), "Server cached-tail deltas must read backward from the append-only transcript instead of rescanning it")
 }
 
 func checkConnectionFailuresDoNotModal() throws {
@@ -1469,9 +1472,12 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     )
     try assert(appKitTimeline.contains("cancelScheduledHeightUpdate(clearPending: false)") && appKitTimeline.contains("setVisibleHeightReporting(false"), "Live scrolling must suspend row measurement and height invalidation")
     try assert(appKitTimeline.contains("PendingHeightUpdate") && appKitTimeline.contains("widthBucket"), "Row height corrections must be keyed by session, version, and width")
+    try assert(appKitTimeline.contains("stableHeightKey") && appKitTimeline.contains("previousVersion.doubleValue"), "Streaming rows must retain their last measured geometry across semantic version changes")
     try assert(appKitTimeline.contains("rowIdentityOrderUnchanged") && appKitTimeline.contains("!rowIdentityOrderUnchanged"), "Content-only row updates must wait for measured geometry before restoring the anchor")
     try assert(appKitTimeline.contains("queueCachedHeightCorrectionIfNeeded") && appKitTimeline.contains("pendingHeightUpdates.formUnion(deferredVisibleShrinks)"), "Visible shrink corrections must remain pending until they can settle offscreen")
     try assert(!appKitTimeline.contains("prepareForAutomaticHeightMeasurement"), "Recycled cells must not synchronously force automatic height measurement")
+    try assert(reusableCellSource?.contains("hostingView.sizingOptions = [.intrinsicContentSize]") == true, "Recycled hosting cells must use SwiftUI's standard intrinsic sizing contract")
+    try assert(reusableCellSource?.contains("hostingView.layoutSubtreeIfNeeded()") == true && reusableCellSource?.contains("measureAndReportHeight()") == true, "Newly configured visible rows must resolve their intrinsic height before the next display pass")
     let clipsReusableContent = reusableCellSource.map { cellSource in
         cellSource.contains("clipsToBounds = true") ||
             cellSource.contains("masksToBounds = true") ||
@@ -1498,6 +1504,8 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(!appKitTimeline.contains("bottomPinActive") && !appKitTimeline.contains("restoreKnownBottom"), "Measured row heights must never perform delayed bottom snapping")
     try assert(appKitTimeline.contains("deadline: .now() + 0.18"), "Discrete scrolling must debounce settling without making the UI feel sticky")
     try assert(!appKitTimeline.contains("for delay in [0.08, 0.20]"), "Chat opening must not visibly chase the bottom across delayed layout passes")
+    try assert(!appKitTimeline.contains("initialBottomWorkItems") && !appKitTimeline.contains("scheduleInitialBottomVerification"), "Native chat opening must not chase the bottom with delayed verification timers")
+    try assert(appKitTimeline.contains("isReconcilingLatestTail") && appKitTimeline.contains("initialBottomHasPositioned"), "Native chat opening must keep one positioning lease across cached-tail reconciliation")
     try assert(appKitTimeline.contains("commandChangesPosition") && appKitTimeline.contains("shouldRestoreAnchor"), "AppKit row mutation and any required positioning must share one coordinator update")
     try assert(appKitTimeline.contains("forcedBottomRevision") && timeline.contains("forcedBottomRevision: store.forcedScrollToBottomRevision"), "Send and reconciliation bottom requests must enter the native table in the same render update as their rows")
     try assert(!appKitTimeline.contains("scrollView.verticalLineScroll = 48") && !appKitTimeline.contains("scheduleFallbackWheel"), "AppKit timeline must not synthesize delayed wheel deltas")

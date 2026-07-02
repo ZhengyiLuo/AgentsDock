@@ -688,6 +688,7 @@ struct TimelineView: View {
             ),
             scrollCommand: appKitScrollCommand,
             forcedBottomRevision: store.forcedScrollToBottomRevision,
+            isReconcilingLatestTail: store.isRefreshingCachedDelta,
             canLoadOlder: store.canLoadOlderHistory,
             isLoadingOlder: appKitHistoryLoadInFlight || store.isLoadingOlderHistory,
             onMetrics: { metrics in

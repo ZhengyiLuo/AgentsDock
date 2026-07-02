@@ -396,6 +396,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
     let items: [AppKitTimelineItem]
     let scrollCommand: AppKitTimelineScrollCommand
     let forcedBottomRevision: Int
+    let isReconcilingLatestTail: Bool
     let canLoadOlder: Bool
     let isLoadingOlder: Bool
     let onMetrics: (TimelineScrollMetrics) -> Void
@@ -418,6 +419,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             items: items,
             scrollCommand: scrollCommand,
             forcedBottomRevision: forcedBottomRevision,
+            isReconcilingLatestTail: isReconcilingLatestTail,
             canLoadOlder: canLoadOlder,
             isLoadingOlder: isLoadingOlder
         )
@@ -461,9 +463,8 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var discreteScrollSettleWorkItem: DispatchWorkItem?
         private var discreteScrollGeneration = 0
         private var isDiscreteScrolling = false
-        private var initialBottomWorkItems: [DispatchWorkItem] = []
-        private var initialBottomGeneration = 0
         private var initialBottomPendingSessionID: String?
+        private var initialBottomHasPositioned = false
         private var paging = AppKitTimelinePagingController()
         private var wheelGestureID = 0
         private var wheelGestureActive = false
@@ -571,6 +572,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
             if let exact = rowHeightCache.object(forKey: heightKey(for: item, width: width)) {
                 return max(1, CGFloat(exact.doubleValue))
             }
+            if let previousVersion = rowHeightCache.object(forKey: stableHeightKey(for: item, width: width)) {
+                // A streamed row usually grows while retaining its stable ID.
+                // Never collapse it back to a generic estimate for the frame
+                // between a semantic version change and its fresh measurement.
+                return max(
+                    CGFloat(previousVersion.doubleValue),
+                    item.heightEstimate.height(forWidth: width)
+                )
+            }
             if let fallback = fallbackRowHeightCache.object(forKey: fallbackHeightKey(for: item)) {
                 return max(1, CGFloat(fallback.doubleValue))
             }
@@ -611,6 +621,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             items nextItems: [AppKitTimelineItem],
             scrollCommand: AppKitTimelineScrollCommand,
             forcedBottomRevision: Int = 0,
+            isReconcilingLatestTail: Bool = false,
             canLoadOlder: Bool = false,
             isLoadingOlder: Bool = false
         ) {
@@ -630,8 +641,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // leave top-edge history paging permanently disarmed.
                 lastMetrics = nil
                 lastMetricsReportUptime = nil
-                cancelInitialBottomVerification(reason: "session-change")
+                cancelInitialBottomPositioning(reason: "session-change")
                 initialBottomPendingSessionID = nextSessionID
+                initialBottomHasPositioned = false
                 cancelDiscreteScrollSettle()
                 deferredItems = nil
                 deferredColumnWidthRefresh = false
@@ -722,23 +734,29 @@ struct AppKitTimelineTable: NSViewRepresentable {
             }
 
             if commandChangesPosition {
-                cancelInitialBottomVerification(reason: "scroll-command")
+                cancelInitialBottomPositioning(reason: "scroll-command")
                 apply(scrollCommand.destination)
             } else if forcedBottomChanged {
-                cancelInitialBottomVerification(reason: "forced-bottom")
+                cancelInitialBottomPositioning(reason: "forced-bottom")
                 if !isScrollInteractionActive {
                     scrollToBottom()
                 }
             } else if shouldPositionInitialBottom {
-                // SwiftUI may publish several identical snapshots while the
-                // opening rows settle. The verification work-item set is the
-                // ownership lease; only its first update may perform the
-                // immediate positioning pass.
-                if initialBottomWorkItems.isEmpty {
-                    if !isScrollInteractionActive {
-                        scrollToBottom()
-                    }
-                    scheduleInitialBottomVerification()
+                // Cached content paints immediately. If a latest-tail delta is
+                // still in flight, keep the lease open and reposition only
+                // when that immutable snapshot actually changes. This replaces
+                // the old three-timer bottom chase with one synchronous owner.
+                if !isScrollInteractionActive,
+                   itemsChanged || !initialBottomHasPositioned {
+                    scrollToBottom()
+                    initialBottomHasPositioned = true
+                    AppLogger.info(
+                        "native initial bottom positioned session=\(nextSessionID ?? "-") " +
+                            "items=\(nextItems.count) reconciling=\(isReconcilingLatestTail)"
+                    )
+                }
+                if !isReconcilingLatestTail {
+                    initialBottomPendingSessionID = nil
                 }
             } else if shouldRestoreAnchor, let anchor {
                 restore(anchor)
@@ -951,6 +969,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         }
 
         private static let fallbackWidthBucket = Int.min
+        private static let stableVersion = Int.min
 
         private func cacheSessionID(_ value: String? = nil) -> String {
             value ?? sessionID ?? "<no-session>"
@@ -982,6 +1001,19 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 itemID: item.id,
                 version: item.version,
                 widthBucket: Self.fallbackWidthBucket
+            )
+        }
+
+        private func stableHeightKey(
+            for item: AppKitTimelineItem,
+            width: CGFloat,
+            sessionID value: String? = nil
+        ) -> AppKitTimelineRowHeightKey {
+            AppKitTimelineRowHeightKey(
+                sessionID: cacheSessionID(value),
+                itemID: item.id,
+                version: Self.stableVersion,
+                widthBucket: widthBucket(width)
             )
         }
 
@@ -1028,6 +1060,14 @@ struct AppKitTimelineTable: NSViewRepresentable {
             let height = ceil(measuredHeight)
             let exactKey = heightKey(for: item, width: width, sessionID: measuredSessionID)
             rowHeightCache.setObject(NSNumber(value: Double(height)), forKey: exactKey)
+            rowHeightCache.setObject(
+                NSNumber(value: Double(height)),
+                forKey: stableHeightKey(
+                    for: item,
+                    width: width,
+                    sessionID: measuredSessionID
+                )
+            )
             fallbackRowHeightCache.setObject(
                 NSNumber(value: Double(height)),
                 forKey: fallbackHeightKey(for: item, sessionID: measuredSessionID)
@@ -1327,70 +1367,15 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scheduleMetricsReport()
         }
 
-        private func scheduleInitialBottomVerification() {
-            guard initialBottomWorkItems.isEmpty else { return }
-            initialBottomGeneration &+= 1
-            let generation = initialBottomGeneration
-            let targetSessionID = sessionID
-            let wheelCount = wheelInputCount
-            let delays: [TimeInterval] = [0.05, 0.16, 0.35]
-            AppLogger.info(
-                "native initial bottom scheduled session=\(targetSessionID ?? "-") " +
-                    "items=\(items.count) generation=\(generation)"
-            )
-            initialBottomWorkItems = delays.enumerated().map { attempt, delay in
-                let workItem = DispatchWorkItem { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self,
-                              self.initialBottomGeneration == generation,
-                              self.sessionID == targetSessionID,
-                              self.initialBottomPendingSessionID == targetSessionID,
-                              self.wheelInputCount == wheelCount,
-                              let scrollView = self.scrollView,
-                              let tableView = self.tableView else { return }
-                        tableView.layoutSubtreeIfNeeded()
-                        let distanceFromBottom = max(
-                            0,
-                            tableView.bounds.height - scrollView.documentVisibleRect.maxY
-                        )
-                        self.scrollToBottom()
-                        let distanceAfter = max(
-                            0,
-                            tableView.bounds.height - scrollView.documentVisibleRect.maxY
-                        )
-                        AppLogger.info(
-                            "native initial bottom attempt session=\(targetSessionID ?? "-") " +
-                                "attempt=\(attempt + 1) before=\(Self.format(distanceFromBottom)) " +
-                                "after=\(Self.format(distanceAfter)) items=\(self.items.count)"
-                        )
-                        if distanceFromBottom > 28 {
-                            AppLogger.info(
-                                "native initial bottom corrected session=\(targetSessionID ?? "-") " +
-                                    "attempt=\(attempt + 1) distance=\(Self.format(distanceFromBottom))"
-                            )
-                        }
-                        if attempt == delays.count - 1 {
-                            self.initialBottomPendingSessionID = nil
-                            self.initialBottomWorkItems.removeAll()
-                        }
-                    }
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-                return workItem
-            }
-        }
-
-        private func cancelInitialBottomVerification(reason: String) {
-            if initialBottomPendingSessionID != nil || !initialBottomWorkItems.isEmpty {
+        private func cancelInitialBottomPositioning(reason: String) {
+            if initialBottomPendingSessionID != nil {
                 AppLogger.info(
                     "native initial bottom canceled session=\(initialBottomPendingSessionID ?? "-") " +
                         "reason=\(reason)"
                 )
             }
-            initialBottomGeneration &+= 1
-            initialBottomWorkItems.forEach { $0.cancel() }
-            initialBottomWorkItems.removeAll()
             initialBottomPendingSessionID = nil
+            initialBottomHasPositioned = false
         }
 
         private func scroll(to itemID: String, anchor: AppKitTimelineAnchor) {
@@ -1528,7 +1513,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
 
         private func noteWheelInput(_ sample: AppKitTimelineWheelSample) {
             guard geometryMutationDepth == 0 else { return }
-            cancelInitialBottomVerification(reason: "wheel-input")
+            cancelInitialBottomPositioning(reason: "wheel-input")
             wheelInputCount += 1
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
@@ -1751,7 +1736,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scrollIsolationInstalled = false
             deferredItems = nil
             deferredColumnWidthRefresh = false
-            cancelInitialBottomVerification(reason: "dismantle")
+            cancelInitialBottomPositioning(reason: "dismantle")
             cancelTopPagingEvaluation()
             cancelWheelGestureEnd()
             cancelDiscreteScrollSettle()
@@ -1824,6 +1809,7 @@ enum AppKitTimelineHarness {
             ("native-top-paging-state-machine", checkNativeTopPagingStateMachine),
             ("native-top-paging-coordinator", checkNativeTopPagingCoordinator),
             ("explicit-height-cache", checkExplicitHeightCache),
+            ("streaming-height-continuity", checkStreamingHeightContinuity),
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
@@ -1932,6 +1918,46 @@ enum AppKitTimelineHarness {
                     "invalidations=\(fixture.coordinator.heightInvalidationCount - initialInvalidations) " +
                     "builds=\(addedBuilds)"
             )
+        }
+        return true
+    }
+
+    private static func checkStreamingHeightContinuity() -> Bool {
+        let initial = AppKitTimelineItem(
+            id: "streaming-row",
+            version: 0,
+            eventIDs: ["streaming-event"],
+            heightEstimate: .fixed(72),
+            content: itemContent(index: 0, paragraphCount: 18, onBuild: {})
+        )
+        let fixture = Fixture(items: [initial])
+        defer { fixture.stop() }
+        let measuredHeight = fixture.tableView.rect(ofRow: 0).height
+        guard measuredHeight > 240 else {
+            return fail(
+                "streaming-height-continuity",
+                "initial visible row did not resolve intrinsic height=\(measuredHeight)"
+            )
+        }
+
+        fixture.items[0] = AppKitTimelineItem(
+            id: "streaming-row",
+            version: 1,
+            eventIDs: ["streaming-event"],
+            heightEstimate: .fixed(72),
+            content: itemContent(index: 0, paragraphCount: 20, onBuild: {})
+        )
+        fixture.update()
+        let immediateHeight = fixture.tableView.rect(ofRow: 0).height
+        guard immediateHeight >= measuredHeight - 1 else {
+            return fail(
+                "streaming-height-continuity",
+                "semantic update collapsed row before measurement old=\(measuredHeight) new=\(immediateHeight)"
+            )
+        }
+        fixture.settle()
+        guard fixture.tableView.rect(ofRow: 0).height >= measuredHeight - 1 else {
+            return fail("streaming-height-continuity", "settled row clipped appended content")
         }
         return true
     }
@@ -2435,13 +2461,15 @@ enum AppKitTimelineHarness {
         defer { fixture.stop() }
 
         fixture.setContentSessionID(nil)
+        fixture.update(isReconcilingLatestTail: true)
         fixture.items = (0..<96).map { item(index: $0, version: 0) }
         fixture.update()
         fixture.settle()
         let bottomRequestsBeforeOwnership = AppKitTimelineDiagnostics.bottomRequestCount
         fixture.setContentSessionID("harness")
+        fixture.items.append(item(index: 96, version: 0))
         fixture.update()
-        fixture.update()
+        fixture.update(isReconcilingLatestTail: false)
         fixture.settle()
 
         let distanceFromBottom = max(
@@ -2449,10 +2477,10 @@ enum AppKitTimelineHarness {
             fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
         )
         let openingBottomRequests = AppKitTimelineDiagnostics.bottomRequestCount - bottomRequestsBeforeOwnership
-        guard distanceFromBottom <= 28, openingBottomRequests <= 4 else {
+        guard distanceFromBottom <= 28, openingBottomRequests == 2 else {
             return fail(
                 "ownership-only-bottom-position",
-                "content ownership update was not idempotent distance=\(distanceFromBottom) " +
+                "cache plus delta opening was not single-owner distance=\(distanceFromBottom) " +
                     "bottom_requests=\(openingBottomRequests)"
             )
         }
@@ -2616,6 +2644,7 @@ enum AppKitTimelineHarness {
         private var contentSessionID: String? = "harness"
         private var command = AppKitTimelineScrollCommand(revision: 1, destination: .bottom)
         private var forcedBottomRevision = 0
+        private var isReconcilingLatestTail = false
         private var canLoadOlder = false
         private var isLoadingOlder = false
 
@@ -2660,6 +2689,7 @@ enum AppKitTimelineHarness {
                 items: items,
                 scrollCommand: command,
                 forcedBottomRevision: forcedBottomRevision,
+                isReconcilingLatestTail: isReconcilingLatestTail,
                 canLoadOlder: canLoadOlder,
                 isLoadingOlder: isLoadingOlder
             )
@@ -2669,7 +2699,8 @@ enum AppKitTimelineHarness {
         func update(
             sessionID nextSessionID: String? = nil,
             command nextCommand: AppKitTimelineScrollCommand? = nil,
-            forcedBottomRevision nextForcedBottomRevision: Int? = nil
+            forcedBottomRevision nextForcedBottomRevision: Int? = nil,
+            isReconcilingLatestTail nextIsReconcilingLatestTail: Bool? = nil
         ) {
             if let nextSessionID {
                 let contentFollowedSelection = contentSessionID == sessionID
@@ -2684,12 +2715,16 @@ enum AppKitTimelineHarness {
             if let nextForcedBottomRevision {
                 forcedBottomRevision = nextForcedBottomRevision
             }
+            if let nextIsReconcilingLatestTail {
+                isReconcilingLatestTail = nextIsReconcilingLatestTail
+            }
             coordinator.update(
                 sessionID: sessionID,
                 contentSessionID: contentSessionID,
                 items: items,
                 scrollCommand: command,
                 forcedBottomRevision: forcedBottomRevision,
+                isReconcilingLatestTail: isReconcilingLatestTail,
                 canLoadOlder: canLoadOlder,
                 isLoadingOlder: isLoadingOlder
             )
@@ -3030,7 +3065,8 @@ private final class TimelineHostingCellView: NSTableCellView {
 
     var exactMeasuredContentHeight: CGFloat {
         let intrinsicHeight = hostingView.intrinsicContentSize.height
-        return intrinsicHeight > 0 ? intrinsicHeight : hostingView.fittingSize.height
+        let fittingHeight = hostingView.fittingSize.height
+        return max(1, max(intrinsicHeight, fittingHeight))
     }
 
     override func layout() {
@@ -3043,6 +3079,8 @@ private final class TimelineHostingCellView: NSTableCellView {
         self.identifier = identifier
         clipsToBounds = true
         hostingView.clipsToBounds = true
+        hostingView.sizingOptions = [.intrinsicContentSize]
+        hostingView.safeAreaRegions = []
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         hostingView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         hostingView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -3094,7 +3132,16 @@ private final class TimelineHostingCellView: NSTableCellView {
                 .frame(width: width, alignment: .topLeading)
         )
         hostingView.invalidateIntrinsicContentSize()
-        requestHeightMeasurement()
+        // `NSHostingView` exposes a standard intrinsic sizing contract. Resolve
+        // it before the next display pass for newly configured visible rows so
+        // AppKit does not paint one frame at an estimate and clip the content.
+        // Offscreen rows remain estimated and recycled as before.
+        heightMeasurementWorkItem?.cancel()
+        heightMeasurementWorkItem = nil
+        hostingView.layoutSubtreeIfNeeded()
+        if heightReportingEnabled {
+            measureAndReportHeight()
+        }
     }
 
     func setHeightReportingEnabled(_ enabled: Bool) {

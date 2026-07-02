@@ -19,6 +19,35 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-02 - Stable Native Row Sizing And Incremental Chat Open
+
+- User reported that native timeline rows could briefly fold/clip and then fix
+  themselves, and that opening a cached chat with unread messages still felt
+  slow. Logs showed cache application itself took only 2-13 ms. The visible
+  delay came from asynchronous row-height correction, three delayed bottom
+  retries, and downloading the complete 720-event tail for reconciliation.
+- Kept the standard `NSTableView` recycler and explicit row-height cache. Do not
+  restore AppKit automatic row heights: prior live profiles showed that path in
+  the 100% CPU feedback loop.
+- Recycled `NSHostingView` cells now use SwiftUI's intrinsic sizing contract and
+  resolve a newly configured visible row before the next display pass. Measured
+  heights are also cached by stable row ID and width independent of semantic
+  version, so a growing streamed row cannot flash back to a generic estimate.
+- Removed the three delayed initial-bottom verification timers. Opening is now
+  one lease spanning the immediate cached snapshot and its latest-tail delta.
+  It positions only when the immutable snapshot changes, and any user wheel
+  input cancels the lease.
+- Warm cached opens now request only events after the cached sequence. They skip
+  REST entirely when a fresh server session list reports the exact same latest
+  sequence, and retain a full-tail fallback if the delta exceeds one page or
+  the server sequence moved backward.
+- The server's `after` + `visible` path now reads the append-only JSONL backward
+  with `mmap`, stopping at the cached sequence instead of rescanning very long
+  transcripts from the beginning.
+- Added native harness coverage for streaming-height continuity and a two-step
+  cache-plus-delta opening transaction. Heavy integration harnesses remain
+  prohibited beside the interactive test app.
+
 ## 2026-07-01 - Normalize Smooth Legacy Wheel Events To Pixels
 
 - User reported the native timeline visually blurbing/flickering during scroll.
