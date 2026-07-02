@@ -69,6 +69,9 @@ painful to rediscover later.
   publish the immediate old-bottom request, then publish one final request after
   the accepted row is ingested. Scrolling while the network request is in flight
   cancels that lease, so this does not restore passive agent auto-follow.
+- Added `forced-bottom-with-appended-row`, which applies a new variable-height
+  user row and the forced revision in one recycler update and requires the
+  viewport to land at the true new bottom.
 
 ## 2026-07-01 - Normalize Smooth Legacy Wheel Events To Pixels
 

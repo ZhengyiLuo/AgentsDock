@@ -1813,6 +1813,7 @@ enum AppKitTimelineHarness {
             ("stream-below-viewport", checkStreamingBelowViewport),
             ("height-change-above-viewport", checkHeightChangeAboveViewport),
             ("prepend-single-page", checkPrependSinglePage),
+            ("forced-bottom-with-appended-row", checkForcedBottomWithAppendedRow),
             ("active-momentum-priority", checkActiveMomentumPriority),
             ("discrete-scroll-isolation", checkDiscreteScrollIsolation),
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
@@ -2292,6 +2293,31 @@ enum AppKitTimelineHarness {
               originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
               fixture.coordinator.clipOriginWriteCount == writes else {
             return fail("active-momentum-priority", "suppressed positioning replayed after momentum")
+        }
+        return true
+    }
+
+    private static func checkForcedBottomWithAppendedRow() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .row("row-160", .top)
+        ))
+        fixture.settle()
+
+        fixture.items.append(item(index: 320, version: 0, paragraphCount: 14))
+        fixture.update(forcedBottomRevision: 1)
+        fixture.settle()
+        let distanceFromBottom = max(
+            0,
+            fixture.tableView.bounds.height - fixture.scrollView.documentVisibleRect.maxY
+        )
+        guard distanceFromBottom <= 1 else {
+            return fail(
+                "forced-bottom-with-appended-row",
+                "accepted row remained below viewport distance=\(distanceFromBottom)"
+            )
         }
         return true
     }
