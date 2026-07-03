@@ -26,8 +26,26 @@ painful to rediscover later.
   rows measured during explicit positioning no longer receive a redundant
   second invalidation on the next main-loop pass. This removes the fragmented
   refresh visible while opening chats or accepting live row updates.
-- Release verification and App Store Connect upload results are recorded here
-  after both archives complete.
+- `swift run ZenithGuardrails` passed. The final production bundle passed all
+  24 native timeline scenarios plus `SidebarReorderHarness`, including the new
+  single-pass height regression.
+- `AgentsDockIOS-57.xcarchive` contains arm64 build `57`; App Store Connect
+  reports `uploadedBuildNumber = 57` and `uploadEvent.state = success` with no
+  warnings or errors (`Uploaded AgentsDockIOS`).
+- `AgentsDockMac-57.xcarchive` contains universal arm64/x86_64 build `57` and
+  the compiled `AppKitTimelineHarness`; App Store Connect reports
+  `uploadedBuildNumber = 57` and `uploadEvent.state = success` with no warnings
+  or errors (`Uploaded AgentsDockMac`). Both app plists retain
+  `ITSAppUsesNonExemptEncryption = false`.
+- Rebuilt and signed `/Users/zen/agi/ZenithDock/dist/AgentsDock.app`, synced it
+  directly to `/Users/zen/agi/AgentsDock.app` on the MacBook Air, and verified
+  both bundles report build `57`.
+- Standalone server HEAD, public GitHub `main`, the app repository's server
+  source, and the live `supersonic00` source all match commit `9354af4` / SHA-256
+  `f6ac04e40848372d9ad2e2008091478fecc7a65753f3d4f5252048dc5bbfb94a`.
+  The live service had two active turns, so it was not interrupted;
+  `zenithbot-agent-idle-restart.service` is armed to restart only after two
+  consecutive zero-active samples.
 
 ## 2026-07-03 - Remove The Native Timeline's Second Layout Pass
 
