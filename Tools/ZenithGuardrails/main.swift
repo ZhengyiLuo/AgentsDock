@@ -1432,6 +1432,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     let inspector = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/InspectorView.swift"), encoding: .utf8)
     let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/TimelineView.swift"), encoding: .utf8)
     let appKitTimeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/AppKitTimelineTable.swift"), encoding: .utf8)
+    let xcodeProject = try String(contentsOf: cwd.appendingPathComponent("ZenithDock.xcodeproj/project.pbxproj"), encoding: .utf8)
     let testBuild = try String(contentsOf: cwd.appendingPathComponent("scripts/build_and_deploy_test.sh"), encoding: .utf8)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
     let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDock/Views/SidebarView.swift"), encoding: .utf8)
@@ -1451,10 +1452,13 @@ func checkMacTimelineScrollPerformanceGuards() throws {
         timeline.contains("#if AGENTSDOCK_LAZY_TIMELINE") &&
             timeline.contains("private func eagerTimelineScrollRegion") &&
             timeline.contains("VStack(alignment: .leading, spacing: 14)"),
-        "Production must retain the eager Mac timeline while LazyVStack remains isolated to AgentsDock-test"
+        "Timeline source must retain the eager fallback while LazyVStack remains isolated"
     )
-    try assert(timeline.contains("#if AGENTSDOCK_APPKIT_TIMELINE") && timeline.contains("AppKitTimelineTable("), "Isolated performance builds must use the explicit AppKit row recycler")
-    try assert(timeline.contains("private func eagerTimelineScrollRegion") && timeline.contains("VStack(alignment: .leading, spacing: 14)"), "Production Mac timeline must retain the proven eager ScrollView/VStack path")
+    try assert(timeline.contains("#if AGENTSDOCK_APPKIT_TIMELINE") && timeline.contains("AppKitTimelineTable("), "Mac builds must contain the explicit AppKit row recycler")
+    let productionNativeTimelineFlag = "SWIFT_ACTIVE_COMPILATION_CONDITIONS = \"$(inherited) AGENTSDOCK_APPKIT_TIMELINE\";"
+    let productionNativeTimelineFlagCount = xcodeProject.components(separatedBy: productionNativeTimelineFlag).count - 1
+    try assert(productionNativeTimelineFlagCount == 2, "Production Mac Debug and Release must both compile the verified native timeline, without enabling it for iOS")
+    try assert(timeline.contains("private func eagerTimelineScrollRegion") && timeline.contains("VStack(alignment: .leading, spacing: 14)"), "Mac timeline source must retain the eager ScrollView/VStack fallback")
     let reusableCellSource = appKitTimeline.range(of: "private final class TimelineHostingCellView").map {
         appKitTimeline[$0.lowerBound...]
     }

@@ -19,6 +19,21 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-02 - Production Native Timeline Release 56
+
+- Release audit found that the verified `NSTableView` recycler was still gated
+  behind the isolated `AgentsDock-test` build flag. A production archive would
+  therefore have shipped the older eager SwiftUI timeline despite the native
+  test app passing the long-chat and scrolling acceptance work.
+- Enabled `AGENTSDOCK_APPKIT_TIMELINE` in exactly the macOS target's Debug and
+  Release configurations. iOS/iPadOS keep their existing timeline path.
+- Added a guardrail that requires exactly those two production Xcode flags, so
+  a future TestFlight archive cannot silently drift back to the fallback or
+  accidentally enable the AppKit implementation on iOS.
+- Bumped the shared iOS/iPadOS and macOS build number from `55` to `56`.
+- Release verification and TestFlight upload results follow after the archives
+  complete; do not treat this entry alone as upload confirmation.
+
 ## 2026-07-02 - Stable Native Row Sizing And Incremental Chat Open
 
 - User reported that native timeline rows could briefly fold/clip and then fix
