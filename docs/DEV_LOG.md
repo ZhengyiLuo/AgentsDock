@@ -57,8 +57,10 @@ Verification and release:
   The staged live source has the same SHA-256 as that commit, the user service
   is active, and its safe idle-restart watcher remains armed so currently
   running agent turns are not interrupted.
-- The normal MacBook Air sync attempt was skipped because the host was not
-  reachable over SSH during this build.
+- The build script's older `zens-macbook-air` hostname was unreachable, but the
+  established `air` SSH alias succeeded. Sent the production app directly to
+  `/Users/zen/agi/AgentsDock.app` on the MacBook Air and verified its bundle
+  reports build `56`.
 
 ## 2026-07-02 - Stable Native Row Sizing And Incremental Chat Open
 
