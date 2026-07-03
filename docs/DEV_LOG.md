@@ -31,8 +31,34 @@ painful to rediscover later.
   a future TestFlight archive cannot silently drift back to the fallback or
   accidentally enable the AppKit implementation on iOS.
 - Bumped the shared iOS/iPadOS and macOS build number from `55` to `56`.
-- Release verification and TestFlight upload results follow after the archives
-  complete; do not treat this entry alone as upload confirmation.
+
+Verification and release:
+- `swift run ZenithGuardrails` passed. The production
+  `/Users/zen/agi/ZenithDock/dist/AgentsDock.app` built and signed, then its own
+  hidden harness passed all 23 native timeline scenarios plus the sidebar
+  reorder scenario. This verifies the main app binary, not only the isolated
+  test bundle.
+- The generic iPhone/iPad Release build compiled and passed Xcode's store
+  validation. Both app plists retain
+  `ITSAppUsesNonExemptEncryption = false`.
+- `AgentsDockIOS-56.xcarchive` contains arm64 build `56`. App Store Connect
+  reports `uploadedBuildNumber = 56`, no preparation/upload warnings or errors,
+  and `uploadEvent.state = success` (`Uploaded AgentsDockIOS`).
+- `AgentsDockMac-56.xcarchive` contains universal arm64/x86_64 build `56`. Its
+  compiler command includes `-DAGENTSDOCK_APPKIT_TIMELINE` for both
+  architectures. App Store Connect reports `uploadedBuildNumber = 56`, no
+  preparation/upload warnings or errors, and `uploadEvent.state = success`
+  (`Uploaded AgentsDockMac`).
+- Direct sandboxed archiving could see the valid development identity but was
+  denied interactive private-key access (`errSecInternalComponent`). Running
+  the same commands through the normal Terminal security context succeeded;
+  exports used the configured App Store Connect API key.
+- Standalone server HEAD and public GitHub `main` both resolve to `9354af4`.
+  The staged live source has the same SHA-256 as that commit, the user service
+  is active, and its safe idle-restart watcher remains armed so currently
+  running agent turns are not interrupted.
+- The normal MacBook Air sync attempt was skipped because the host was not
+  reachable over SSH during this build.
 
 ## 2026-07-02 - Stable Native Row Sizing And Incremental Chat Open
 
