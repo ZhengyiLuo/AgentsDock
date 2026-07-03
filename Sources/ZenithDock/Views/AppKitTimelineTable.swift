@@ -1161,6 +1161,12 @@ struct AppKitTimelineTable: NSViewRepresentable {
                           )
                       ).map({ CGFloat($0.doubleValue) }) else { return nil }
                 let rowRect = tableView.rect(ofRow: row)
+                // Explicit positioning settles visible rows synchronously.
+                // Their measurement callbacks can still be present in this
+                // queue on the next main-loop pass; invalidating an already
+                // exact row again causes a visible second refresh with no
+                // geometry benefit.
+                guard abs(rowRect.height - targetHeight) > 0.5 else { return nil }
                 let isShrinking = targetHeight < rowRect.height - 0.5
                 let intersectsViewport = rowRect.maxY > visibleRect.minY + 0.5 &&
                     rowRect.minY < visibleRect.maxY - 0.5
@@ -1822,6 +1828,7 @@ enum AppKitTimelineHarness {
             ("exact-top-metrics", checkExactTopMetrics),
             ("first-content-bottom-position", checkFirstContentBottomPosition),
             ("ownership-only-bottom-position", checkOwnershipOnlyBottomPosition),
+            ("single-pass-positioning-heights", checkSinglePassPositioningHeights),
             ("native-top-paging-state-machine", checkNativeTopPagingStateMachine),
             ("native-top-paging-coordinator", checkNativeTopPagingCoordinator),
             ("explicit-height-cache", checkExplicitHeightCache),
@@ -2523,6 +2530,34 @@ enum AppKitTimelineHarness {
                 "ownership-only-bottom-position",
                 "cache plus delta opening was not single-owner distance=\(distanceFromBottom) " +
                     "bottom_requests=\(openingBottomRequests)"
+            )
+        }
+        return true
+    }
+
+    private static func checkSinglePassPositioningHeights() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let tail = fixture.items.count - 1
+        fixture.items[tail] = item(
+            index: tail,
+            version: 1,
+            paragraphCount: 18
+        )
+        let invalidationsBefore = fixture.coordinator.heightInvalidationCount
+        fixture.update(command: AppKitTimelineScrollCommand(
+            revision: 2,
+            destination: .bottom
+        ))
+        let invalidationsAfterPositioning = fixture.coordinator.heightInvalidationCount
+        fixture.settle()
+        guard invalidationsAfterPositioning > invalidationsBefore,
+              fixture.coordinator.heightInvalidationCount == invalidationsAfterPositioning else {
+            return fail(
+                "single-pass-positioning-heights",
+                "positioning repeated an already-applied height correction " +
+                    "before=\(invalidationsBefore) positioned=\(invalidationsAfterPositioning) " +
+                    "settled=\(fixture.coordinator.heightInvalidationCount)"
             )
         }
         return true

@@ -19,6 +19,21 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-03 - Remove The Native Timeline's Second Layout Pass
+
+- Production build 56 no longer pegged CPU, but the timeline could still look
+  fragmented while opening a chat or accepting a live row update.
+- Live logs showed visible rows being measured and corrected synchronously for
+  explicit positioning, followed by another `native height flush` for those
+  same rows on the next main-loop pass. The queued callback was stale: the row
+  already matched its cached exact height, but the flush invalidated it again.
+- Pending height updates now re-check current row geometry and discard exact
+  matches before calling `noteHeightOfRows`. Real growth/shrink corrections
+  still run, including anchor restoration for rows above the viewport.
+- Added `single-pass-positioning-heights`, which changes the visible tail row,
+  positions at bottom, and requires settling to perform no second height
+  invalidation.
+
 ## 2026-07-02 - Production Native Timeline Release 56
 
 - Release audit found that the verified `NSTableView` recycler was still gated
