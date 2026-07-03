@@ -19,6 +19,16 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-03 - TestFlight Build 57
+
+- Bumped the shared iOS/iPadOS and macOS build number from `56` to `57`.
+- This release promotes the native macOS timeline's single-pass height update:
+  rows measured during explicit positioning no longer receive a redundant
+  second invalidation on the next main-loop pass. This removes the fragmented
+  refresh visible while opening chats or accepting live row updates.
+- Release verification and App Store Connect upload results are recorded here
+  after both archives complete.
+
 ## 2026-07-03 - Remove The Native Timeline's Second Layout Pass
 
 - Production build 56 no longer pegged CPU, but the timeline could still look
