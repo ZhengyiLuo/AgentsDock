@@ -207,6 +207,21 @@ private final class AppKitTimelineRowHeightKey: NSObject {
     }
 }
 
+private final class AppKitTimelineClampingClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var bounds = super.constrainBoundsRect(proposedBounds)
+        guard let documentView else { return bounds }
+        let documentBounds = documentView.bounds
+        let minX = documentBounds.minX
+        let minY = documentBounds.minY
+        let maxX = max(minX, documentBounds.maxX - bounds.width)
+        let maxY = max(minY, documentBounds.maxY - bounds.height)
+        bounds.origin.x = min(max(bounds.origin.x, minX), maxX)
+        bounds.origin.y = min(max(bounds.origin.y, minY), maxY)
+        return bounds
+    }
+}
+
 @MainActor
 private final class AppKitTimelineOwningScrollView: NSScrollView {
     var onVerticalWheel: ((AppKitTimelineWheelSample) -> Void)?
@@ -443,6 +458,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scrollView.onVerticalWheel = { [weak self] sample in
                 self?.noteWheelInput(sample)
             }
+            let clipView = AppKitTimelineClampingClipView(frame: .zero)
+            clipView.drawsBackground = false
+            scrollView.contentView = clipView
             scrollView.documentView = tableView
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = false
@@ -541,6 +559,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 // leave top-edge history paging permanently disarmed.
                 lastMetrics = nil
                 lastMetricsReportUptime = nil
+                cancelScheduledMetricsReport()
                 cancelInitialBottomPositioning(reason: "session-change")
                 initialBottomPendingSessionID = nextSessionID
                 initialBottomHasPositioned = false
@@ -1724,6 +1743,7 @@ enum AppKitTimelineHarness {
             ("selectable-message-content", checkSelectableMessageContent),
             ("native-wheel-passthrough", checkNativeWheelPassthrough),
             ("native-legacy-wheel-behavior", checkNativeLegacyWheelBehavior),
+            ("native-overscroll-clamping", checkNativeOverscrollClamping),
             ("native-wheel-ownership", checkNativeWheelOwnership),
             ("hosted-wheel-single-dispatch", checkHostedWheelSingleDispatch),
         ]
@@ -2011,6 +2031,33 @@ enum AppKitTimelineHarness {
             return fail(
                 "native-legacy-wheel-behavior",
                 "native legacy line event did not move movement=\(movement)"
+            )
+        }
+        return true
+    }
+
+    private static func checkNativeOverscrollClamping() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: -500))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let topOrigin = fixture.scrollView.documentVisibleRect.minY
+
+        let maximumOrigin = max(
+            0,
+            fixture.tableView.bounds.maxY - fixture.scrollView.contentView.bounds.height
+        )
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: maximumOrigin + 500))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let bottomOrigin = fixture.scrollView.documentVisibleRect.minY
+        guard fixture.scrollView.contentView is AppKitTimelineClampingClipView,
+              topOrigin >= -0.5,
+              bottomOrigin <= maximumOrigin + 0.5 else {
+            return fail(
+                "native-overscroll-clamping",
+                "clip origin escaped document top=\(topOrigin) bottom=\(bottomOrigin) max=\(maximumOrigin)"
             )
         }
         return true

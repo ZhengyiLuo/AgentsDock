@@ -19,6 +19,25 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-04 - Atomic Chat Switching And Stable Bottom Controls
+
+- After restoring native wheel speed, live logs exposed an existing switch
+  transaction bug: disk-cached chats published the new selected session with
+  `rows=0`, then decoded/applied 720 cached events on a later frame. The native
+  table and composer visibly rebuilt twice.
+- Disk cache decoding now finishes before `selectedSessionID` is published,
+  matching the already-smooth memory-cache path. Rapid stale cache responses
+  remain generation-checked and archived chats still bypass cache restoration.
+- Native viewport metrics scheduled by the previous document are canceled on
+  session change. Timeline bottom state and the floating bottom button ignore
+  metrics until `loadedSessionID` owns the selected session.
+- Native bottom navigation now updates its AppKit command in a no-animation
+  SwiftUI transaction, preventing the control and representable from animating
+  against each other.
+- Added a clamping `NSClipView` and harness coverage for both document edges.
+  Wheel deltas remain untouched; only invalid negative/past-end origins are
+  rejected.
+
 ## 2026-07-04 - Restore Native macOS Scrolling Speed
 
 - User reported that timeline scrolling felt capped. The native timeline was

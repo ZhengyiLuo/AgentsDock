@@ -1747,15 +1747,18 @@ final class AppStore: ObservableObject {
                 applyCachedChat(cached)
                 setStatus("Loaded memory chat")
             }
-            selectedSessionID = sessionID
-            markSessionRead(sessionID)
-            syncSelectedRunningState()
+            if loadedSessionID == sessionID {
+                selectedSessionID = sessionID
+                markSessionRead(sessionID)
+                syncSelectedRunningState()
+            }
             return
         }
         if selectedSessionID != sessionID {
             rememberSelectedChatInMemory()
         }
-        let warmCachedChat = memoryCachedChat(sessionID)
+        var warmCachedChat = memoryCachedChat(sessionID)
+        var warmCachePath = warmCachedChat == nil ? nil : "memory"
         selectionGeneration += 1
         let generation = selectionGeneration
         loadingSessionID = sessionID
@@ -1769,14 +1772,28 @@ final class AppStore: ObservableObject {
                 isSelectingSession = false
             }
         }
+        // Resolve the persisted cache before publishing selectedSessionID so
+        // SwiftUI receives one coherent session + timeline transaction instead
+        // of rendering an empty document and replacing it one frame later.
+        if warmCachedChat == nil,
+           !isSessionArchived(sessionID),
+           let cached = await Self.loadCachedChat(from: chatCacheURL(sessionID)) {
+            guard loadingSessionID == sessionID, selectionGeneration == generation else {
+                AppLogger.info("drop stale cache response session=\(sessionID)")
+                return
+            }
+            rememberChatCache(cached)
+            warmCachedChat = cached
+            warmCachePath = "disk"
+        }
         var loadedFromCache = false
         if let warmCachedChat {
-            noteSwitchPath(sessionID, "memory")
+            noteSwitchPath(sessionID, warmCachePath ?? "memory")
             isRefreshingCachedDelta = true
             applyCachedChat(warmCachedChat)
             loadedFromCache = true
-            setStatus("Loaded memory chat")
-            AppLogger.info("loaded memory cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
+            setStatus(warmCachePath == "disk" ? "Loaded cached chat" : "Loaded memory chat")
+            AppLogger.info("loaded \(warmCachePath ?? "memory") cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
         }
         selectedSessionID = sessionID
         syncSelectedRunningState()
@@ -1807,21 +1824,6 @@ final class AppStore: ObservableObject {
             if omittedHistoryEventCount != 0 { omittedHistoryEventCount = 0 }
             loadedSessionID = nil
             latestSeenSeq = 0
-            let cacheURL = chatCacheURL(sessionID)
-            if !isSessionArchived(sessionID),
-               let cached = await Self.loadCachedChat(from: cacheURL) {
-                guard selectedSessionID == sessionID, selectionGeneration == generation else {
-                    AppLogger.info("drop stale cache response session=\(sessionID)")
-                    return
-                }
-                noteSwitchPath(sessionID, "disk")
-                isRefreshingCachedDelta = true
-                rememberChatCache(cached)
-                applyCachedChat(cached)
-                loadedFromCache = true
-                setStatus("Loaded cached chat")
-                AppLogger.info("loaded disk cache session=\(sessionID) events=\(cached.events.count) omitted_before=\(cached.omittedHistoryEventCount)")
-            }
         }
         if loadedFromCache {
             let cachedLastSeq = lastSeq

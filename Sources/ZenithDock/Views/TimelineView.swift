@@ -148,7 +148,12 @@ struct TimelineView: View {
                             .allowsHitTesting(false)
                     }
 #if !AGENTSDOCK_LAZY_TIMELINE
-                    if shouldShowFloatingBottomButton && !shouldMaskTimeline && isTimelineScrollable && (!isNearBottom || store.selectedSessionHasUnread) && !displayEvents.isEmpty {
+                    if shouldShowFloatingBottomButton &&
+                        store.loadedSessionID == store.selectedSessionID &&
+                        !shouldMaskTimeline &&
+                        isTimelineScrollable &&
+                        (!isNearBottom || store.selectedSessionHasUnread) &&
+                        !displayEvents.isEmpty {
                         Button {
                             scrollToBottom(proxy, animated: true)
                             store.markSelectedSessionRead(force: true)
@@ -229,6 +234,9 @@ struct TimelineView: View {
                     updateTimelinePositioningOverlay(masked: masked)
                 }
                 .onChange(of: displayEvents.count) { oldCount, newCount in
+#if AGENTSDOCK_APPKIT_TIMELINE
+                    guard store.loadedSessionID == store.selectedSessionID else { return }
+#endif
                     let previousObservedSeq = lastObservedEventSeq
                     let shouldFollowLiveEvent = shouldAutoFollowLiveEvent(after: previousObservedSeq)
 #if AGENTSDOCK_APPKIT_TIMELINE
@@ -692,6 +700,7 @@ struct TimelineView: View {
             canLoadOlder: store.canLoadOlderHistory,
             isLoadingOlder: appKitHistoryLoadInFlight || store.isLoadingOlderHistory,
             onMetrics: { metrics in
+                guard store.loadedSessionID == store.selectedSessionID else { return }
                 updateBottomVisibility(metrics)
             },
             onLoadOlder: {
@@ -1227,6 +1236,11 @@ struct TimelineView: View {
             isNearBottom = true
             store.setSelectedTimelineAtBottom(true)
         }
+        #if AGENTSDOCK_APPKIT_TIMELINE
+        withTransaction(noAnimationTransaction) {
+            action()
+        }
+        #else
         if animated {
             withAnimation(.snappy) {
                 action()
@@ -1234,6 +1248,7 @@ struct TimelineView: View {
         } else {
             action()
         }
+        #endif
     }
 
     private func suppressHistoryLoading(for interval: TimeInterval) {
@@ -1430,6 +1445,10 @@ struct TimelineView: View {
     }
 
     private func updateBottomVisibility(_ metrics: TimelineScrollMetrics) {
+        guard store.selectedSessionID != nil,
+              store.loadedSessionID == store.selectedSessionID else {
+            return
+        }
         guard metrics.viewportHeight > 1, !store.displayEvents.isEmpty else {
             if !isAtBottom { isAtBottom = true }
             store.setSelectedTimelineAtBottom(true)

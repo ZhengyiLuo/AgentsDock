@@ -346,7 +346,7 @@ func checkArchiveSessionBehavior() throws {
     try assert(mobileStore.contains("sessions.filter { $0.archived != true }"), "iOS active session lists must filter archived chats")
     try assert(macStore.contains("evictArchivedChatCaches()") && mobileStore.contains("evictArchivedChatCaches()"), "Archived session metadata refreshes must evict warm chat caches on Mac and iOS")
     try assert(macStore.contains("guard !isSessionArchived(sessionID) else") && mobileStore.contains("guard !isSessionArchived(sessionID) else"), "Archived chats must never restore from memory cache")
-    try assert(macStore.contains("if !isSessionArchived(sessionID),\n               let cached = await Self.loadCachedChat"), "Mac archived chats must never restore a persisted timeline cache")
+    try assert(macStore.contains("if warmCachedChat == nil,\n           !isSessionArchived(sessionID),\n           let cached = await Self.loadCachedChat"), "Mac archived chats must never restore a persisted timeline cache")
     try assert(macStore.contains("guard let session = selectedSession, session.archived != true else { return }") && mobileStore.contains("guard let session = selectedSession, session.archived != true else { return }"), "Archived chats must never write new cache snapshots")
     try assert(!macSidebar.contains("pieces.append(\"archived\")"), "Mac sidebar archived rows must not repeat archived in every subtitle")
     try assert(!mobileSidebar.contains("pieces.append(\"archived\")"), "iOS sidebar archived rows must not repeat archived in every subtitle")
@@ -475,7 +475,7 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("isSelectingSession = true"), "Mac session select must mark the latest snapshot as loading")
     try assert(macStore.contains("private let maxMemoryCachedChats = 32"), "Mac store must keep enough warm chats to avoid recent-chat spinner regressions")
     try assert(macStore.contains("rememberSelectedChatInMemory()"), "Mac store must snapshot the current chat before switching away")
-    guard let warmCacheRange = macStore.range(of: "let warmCachedChat = memoryCachedChat(sessionID)"),
+    guard let warmCacheRange = macStore.range(of: "var warmCachedChat = memoryCachedChat(sessionID)"),
           let selectedRange = macStore.range(of: "selectedSessionID = sessionID", range: warmCacheRange.upperBound..<macStore.endIndex) else {
         throw GuardrailFailure.failed("Mac session select must prepare warm cache before publishing selectedSessionID")
     }
@@ -584,6 +584,12 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
     try assert(macStore.contains("private(set) var events: [ZEvent] = []"), "Mac raw event storage must not be @Published; displayEvents is the timeline publication boundary")
     try assert(macStore.contains("private let streamFlushDelayNanos"), "Mac websocket stream updates must be coalesced before publishing timeline changes")
     try assert(macStore.contains("applyCachedChat(warmCachedChat)"), "Mac memory-cache chat switches must apply the bounded cache window")
+    guard let selectionCacheStart = macStore.range(of: "// Resolve the persisted cache before publishing selectedSessionID"),
+          let selectionCacheLoad = macStore.range(of: "let cached = await Self.loadCachedChat", range: selectionCacheStart.upperBound..<macStore.endIndex),
+          let selectionPublish = macStore.range(of: "selectedSessionID = sessionID", range: selectionCacheLoad.upperBound..<macStore.endIndex) else {
+        throw GuardrailFailure.failed("Mac chat selection must expose its atomic disk-cache transaction")
+    }
+    try assert(selectionCacheLoad.lowerBound < selectionPublish.lowerBound, "Mac disk-cached chats must load before publishing their selected session")
     try assert(macStore.contains("applyCachedChat(cached)"), "Mac duplicate-selection memory restores must apply the bounded cache window")
     try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
     try assert(macStore.contains("cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq)"), "Mac warm-cache chat switches may skip REST only after the fresh session list matches the cached sequence")
@@ -1520,6 +1526,10 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("AppKitTimelineWheelRouting.delivery") && appKitTimeline.contains("super.scrollWheel(with: delivery.event)"), "Timeline wheel input must retain one unchanged native AppKit dispatch")
     try assert(appKitTimeline.contains("return (event, deltaY)") && !appKitTimeline.contains("tunedDelta") && !appKitTimeline.contains("normalizedLegacyDelta") && !appKitTimeline.contains("scrollWheelEventFixedPtDeltaAxis"), "Timeline wheel input must not scale, cap, copy, or synthesize scroll deltas")
     try assert(appKitTimeline.contains("native-wheel-passthrough") && appKitTimeline.contains("native-legacy-wheel-behavior"), "Precise and legacy wheel events must retain native pass-through coverage")
+    try assert(appKitTimeline.contains("AppKitTimelineClampingClipView") && appKitTimeline.contains("native-overscroll-clamping"), "Native scrolling must clamp document bounds without changing wheel deltas")
+    try assert(appKitTimeline.contains("cancelScheduledMetricsReport()\n                cancelInitialBottomPositioning(reason: \"session-change\")"), "Chat switches must cancel viewport metrics scheduled by the previous document")
+    try assert(timeline.contains("guard store.loadedSessionID == store.selectedSessionID else { return }"), "Bottom-button metrics must only come from the selected chat's loaded timeline")
+    try assert(timeline.contains("#if AGENTSDOCK_APPKIT_TIMELINE\n        withTransaction(noAnimationTransaction)"), "Native bottom navigation must not animate the SwiftUI representable transaction")
     try assert(macStore.contains("CommandLine.arguments.contains(\"--timeline-harness\")") && macStore.contains("? \"\"") && macStore.contains(": ZenithTokenStore.load()"), "The hidden native timeline harness must not block on production Keychain authorization")
     guard let wheelDispatchStart = appKitTimeline.range(of: "private func dispatchVerticalWheel"),
           let wheelDispatchEnd = appKitTimeline.range(
@@ -1550,7 +1560,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(timeline.contains("lhs.isScrollable == rhs.isScrollable") && !timeline.contains("abs(lhs.contentHeight - rhs.contentHeight)"), "Lazy scroll geometry must publish threshold changes, not every content-height refinement")
     try assert(timeline.contains("pendingLazyScrollTask?.cancel()") && timeline.contains("scheduleLazyScroll(to: rowID"), "Lazy row positioning must use one cancellable command per intent")
     try assert(timeline.contains("LazyTimelineNativeBottomScroller") && timeline.contains("lazyNativeBottomScrollRevision &+= 1") && !timeline.contains("scheduleLazyScroll(to: bottomID"), "Lazy bottom navigation must bypass ScrollViewReader and use one native bounds update")
-    try assert(timeline.contains("shouldShowFloatingBottomButton && !shouldMaskTimeline") && timeline.contains("Bundle.main.bundleIdentifier != \"com.zhengyiluo.AgentsDockTest\""), "AgentsDock-test must rely on native fast scrolling instead of a floating bottom button")
+    try assert(timeline.contains("shouldShowFloatingBottomButton &&") && timeline.contains("Bundle.main.bundleIdentifier != \"com.zhengyiluo.AgentsDockTest\""), "AgentsDock-test must rely on native fast scrolling instead of a floating bottom button")
     try assert(!timeline.contains(".defaultScrollAnchor(") && timeline.contains(".id(documentIdentity)"), "Lazy chat opening must not ask SwiftUI to resolve a bottom anchor over variable-height rows")
     try assert(timeline.contains("lazyNativeRevealRevision = requestLazyNativeBottomScroll()") && timeline.contains("lazyNativeBottomScrollDidApply"), "Lazy chat opening must reveal only after its one native bottom movement lands")
     try assert(timeline.contains("Coordinator(initialRevision: revision") && timeline.contains("appliedRevision = initialRevision"), "A recreated lazy scroll bridge must not replay a stale bottom revision")
