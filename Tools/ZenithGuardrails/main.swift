@@ -1517,9 +1517,9 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("forcedBottomRevision") && timeline.contains("forcedBottomRevision: store.forcedScrollToBottomRevision"), "Send and reconciliation bottom requests must enter the native table in the same render update as their rows")
     try assert(!appKitTimeline.contains("scrollView.verticalLineScroll = 48") && !appKitTimeline.contains("scheduleFallbackWheel"), "AppKit timeline must not synthesize delayed wheel deltas")
     try assert(appKitTimeline.contains("routeWheelEventIfNeeded") && appKitTimeline.contains("routeVerticalWheel(event)") && appKitTimeline.contains("return nil"), "Hosted timeline wheel input must be routed through one scroll owner exactly once")
-    try assert(appKitTimeline.contains("dispatchVerticalWheel") && appKitTimeline.contains("super.scrollWheel(with: controlled.event)"), "Timeline wheel input must retain one native AppKit dispatch after adaptive tuning")
-    try assert(appKitTimeline.contains("event.hasPreciseScrollingDeltas") && appKitTimeline.contains("shouldNormalizeLegacyDelta") && appKitTimeline.contains("AppKitTimelineScrollTuning"), "Precise and smooth legacy driver deltas must use bounded scroll tuning")
-    try assert(appKitTimeline.contains("scrollWheelEventIsContinuous") && appKitTimeline.contains("legacy-wheel-pixel-normalization"), "Smooth legacy wheel events must be normalized and tested as bounded pixel input")
+    try assert(appKitTimeline.contains("AppKitTimelineWheelRouting.delivery") && appKitTimeline.contains("super.scrollWheel(with: delivery.event)"), "Timeline wheel input must retain one unchanged native AppKit dispatch")
+    try assert(appKitTimeline.contains("return (event, deltaY)") && !appKitTimeline.contains("tunedDelta") && !appKitTimeline.contains("normalizedLegacyDelta") && !appKitTimeline.contains("scrollWheelEventFixedPtDeltaAxis"), "Timeline wheel input must not scale, cap, copy, or synthesize scroll deltas")
+    try assert(appKitTimeline.contains("native-wheel-passthrough") && appKitTimeline.contains("native-legacy-wheel-behavior"), "Precise and legacy wheel events must retain native pass-through coverage")
     guard let wheelDispatchStart = appKitTimeline.range(of: "private func dispatchVerticalWheel"),
           let wheelDispatchEnd = appKitTimeline.range(
               of: "\n    }\n}",
@@ -1528,7 +1528,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
         throw GuardrailFailure.failed("Native wheel dispatch block not found")
     }
     let wheelDispatchBlock = appKitTimeline[wheelDispatchStart.lowerBound..<wheelDispatchEnd.upperBound]
-    try assert(!wheelDispatchBlock.contains("contentView.scroll"), "Wheel tuning must not replace native momentum with manual clip-origin writes")
+    try assert(!wheelDispatchBlock.contains("contentView.scroll"), "Wheel routing must not replace native momentum with manual clip-origin writes")
     try assert(appKitTimeline.contains("enum AppKitTimelineHeightEstimate") && appKitTimeline.contains("item.heightEstimate.height(forWidth: width)"), "Unknown native rows must start from type-aware geometry instead of one uniform placeholder height")
     try assert(timeline.contains("heightEstimate: appKitHeightEstimate(") && timeline.contains("case .trace:") && timeline.contains("return .fixed(74)"), "Timeline rows must provide stable type-aware initial height estimates")
     try assert(appKitTimeline.contains("deferredVisibleShrinks") && appKitTimeline.contains("isShrinking && intersectsViewport"), "Visible native rows must never shrink underneath the user's viewport")

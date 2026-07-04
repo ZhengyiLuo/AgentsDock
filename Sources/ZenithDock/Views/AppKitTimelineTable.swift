@@ -165,106 +165,14 @@ private struct AppKitTimelinePagingController {
 
 private struct AppKitTimelineWheelSample {
     let beginsGesture: Bool
-    let rawDeltaY: CGFloat
-    let deliveredDeltaY: CGFloat
+    let deltaY: CGFloat
     let isPrecise: Bool
-    let wasControlled: Bool
-    let normalizedLegacy: Bool
 }
 
-private enum AppKitTimelineScrollTuning {
-    static func tunedDelta(_ delta: CGFloat) -> CGFloat {
-        let magnitude = abs(delta)
-        guard magnitude > 0 else { return 0 }
-        let progress = min(1, magnitude / 80)
-        let smoothProgress = progress * progress * (3 - (2 * progress))
-        let scale = 0.92 - (0.46 * smoothProgress)
-        return delta * scale
-    }
-
-    static func shouldControl(isPrecise: Bool, delta: CGFloat) -> Bool {
-        isPrecise || shouldNormalizeLegacyDelta(delta)
-    }
-
-    static func shouldNormalizeLegacyDelta(_ delta: CGFloat) -> Bool {
-        abs(delta) > 1.25
-    }
-
-    static func normalizedLegacyDelta(_ delta: CGFloat) -> CGFloat {
-        let magnitude = abs(delta)
-        guard magnitude > 0 else { return 0 }
-        let pixelMagnitude = min(48, 4 + (8 * sqrt(magnitude)))
-        return delta < 0 ? -pixelMagnitude : pixelMagnitude
-    }
-
-    static func controlledEvent(
-        _ event: NSEvent
-    ) -> (event: NSEvent, deliveredDeltaY: CGFloat, wasControlled: Bool, normalizedLegacy: Bool) {
-        let rawDeltaY = event.scrollingDeltaY
-        guard shouldControl(isPrecise: event.hasPreciseScrollingDeltas, delta: rawDeltaY),
-              abs(rawDeltaY) > 0.01,
-              let copiedEvent = event.cgEvent?.copy() else {
-            return (event, rawDeltaY, false, false)
-        }
-
-        if !event.hasPreciseScrollingDeltas {
-            let deliveredDeltaY = normalizedLegacyDelta(rawDeltaY)
-            let ratio = deliveredDeltaY / rawDeltaY
-            let deliveredDeltaX = event.scrollingDeltaX * ratio
-            copiedEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-            setPixelDelta(deliveredDeltaY, axis: 1, in: copiedEvent)
-            setPixelDelta(deliveredDeltaX, axis: 2, in: copiedEvent)
-            guard let controlledEvent = NSEvent(cgEvent: copiedEvent) else {
-                return (event, rawDeltaY, false, false)
-            }
-            return (controlledEvent, controlledEvent.scrollingDeltaY, true, true)
-        }
-
-        let deliveredDeltaY = tunedDelta(rawDeltaY)
-        let scale = abs(deliveredDeltaY / rawDeltaY)
-        let fields: [CGEventField] = [
-            .scrollWheelEventDeltaAxis1,
-            .scrollWheelEventFixedPtDeltaAxis1,
-            .scrollWheelEventPointDeltaAxis1,
-            .scrollWheelEventDeltaAxis2,
-            .scrollWheelEventFixedPtDeltaAxis2,
-            .scrollWheelEventPointDeltaAxis2,
-        ]
-        for field in fields {
-            scaleIntegerField(field, in: copiedEvent, by: scale)
-        }
-        guard let controlledEvent = NSEvent(cgEvent: copiedEvent) else {
-            return (event, rawDeltaY, false, false)
-        }
-        return (controlledEvent, controlledEvent.scrollingDeltaY, true, false)
-    }
-
-    private static func setPixelDelta(_ value: CGFloat, axis: Int, in event: CGEvent) {
-        let pointValue = Int64(value.rounded())
-        let fixedValue = Int64((Double(value) * 65_536).rounded())
-        if axis == 1 {
-            event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: pointValue)
-            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: pointValue)
-            event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1, value: fixedValue)
-        } else {
-            event.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: pointValue)
-            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: pointValue)
-            event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis2, value: fixedValue)
-        }
-    }
-
-    private static func scaleIntegerField(
-        _ field: CGEventField,
-        in event: CGEvent,
-        by scale: CGFloat
-    ) {
-        let original = event.getIntegerValueField(field)
-        guard original != 0 else { return }
-        let scaled = Int64((Double(original) * Double(scale)).rounded())
-        event.setIntegerValueField(
-            field,
-            value: scaled == 0 ? (original > 0 ? 1 : -1) : scaled
-        )
+private enum AppKitTimelineWheelRouting {
+    static func delivery(for event: NSEvent) -> (event: NSEvent, deltaY: CGFloat) {
+        let deltaY = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
+        return (event, deltaY)
     }
 }
 
@@ -348,8 +256,8 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
 
         // SwiftUI hosting views can consume wheel events before the enclosing
         // NSScrollView sees them. Hand the event to the native scroll owner
-        // exactly once; it preserves phases and momentum while damping only
-        // the precise pixel deltas.
+        // exactly once. Deliver the original event so macOS owns acceleration,
+        // momentum, and the user's system scrolling-speed preference.
         routeVerticalWheel(event)
         return nil
     }
@@ -368,25 +276,19 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
     fileprivate func simulateTopPagingGestureForTesting() {
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: true,
-            rawDeltaY: 1,
-            deliveredDeltaY: 1,
-            isPrecise: true,
-            wasControlled: false,
-            normalizedLegacy: false
+            deltaY: 1,
+            isPrecise: true
         ))
     }
 
     private func dispatchVerticalWheel(_ event: NSEvent) {
-        let controlled = AppKitTimelineScrollTuning.controlledEvent(event)
+        let delivery = AppKitTimelineWheelRouting.delivery(for: event)
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: event.phase.contains(.began),
-            rawDeltaY: event.scrollingDeltaY,
-            deliveredDeltaY: controlled.deliveredDeltaY,
-            isPrecise: event.hasPreciseScrollingDeltas,
-            wasControlled: controlled.wasControlled,
-            normalizedLegacy: controlled.normalizedLegacy
+            deltaY: delivery.deltaY,
+            isPrecise: event.hasPreciseScrollingDeltas
         ))
-        super.scrollWheel(with: controlled.event)
+        super.scrollWheel(with: delivery.event)
     }
 }
 
@@ -477,12 +379,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var liveScrollStartUptime: TimeInterval?
         private var liveScrollUnknownHeightCount = 0
         private var liveScrollConfiguredCellCount = 0
-        private var liveScrollRawDeltaTotal: CGFloat = 0
-        private var liveScrollDeliveredDeltaTotal: CGFloat = 0
+        private var liveScrollDeltaTotal: CGFloat = 0
         private var liveScrollWheelEventCount = 0
         private var liveScrollPreciseEventCount = 0
-        private var liveScrollControlledEventCount = 0
-        private var liveScrollLegacyNormalizedCount = 0
         private let metricsThrottleInterval: TimeInterval = 0.08
         private let estimatedRowHeight: CGFloat = 120
 
@@ -1480,12 +1379,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollStartUptime = ProcessInfo.processInfo.systemUptime
             liveScrollUnknownHeightCount = 0
             liveScrollConfiguredCellCount = 0
-            liveScrollRawDeltaTotal = 0
-            liveScrollDeliveredDeltaTotal = 0
+            liveScrollDeltaTotal = 0
             liveScrollWheelEventCount = 0
             liveScrollPreciseEventCount = 0
-            liveScrollControlledEventCount = 0
-            liveScrollLegacyNormalizedCount = 0
             cancelScheduledHeightUpdate(clearPending: false)
             if let tableView {
                 setVisibleHeightReporting(false, in: tableView)
@@ -1509,12 +1405,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     "origin=\(Self.format(liveScrollStartOriginY ?? originBeforeSettle))" +
                     "->\(Self.format(originBeforeSettle)) " +
                     "duration_ms=\(Self.format(duration * 1_000)) " +
-                    "wheel_delta=\(Self.format(liveScrollRawDeltaTotal))" +
-                    "->\(Self.format(liveScrollDeliveredDeltaTotal)) " +
-                    "wheel_events=\(liveScrollControlledEventCount)" +
-                    "/\(liveScrollWheelEventCount) " +
+                    "wheel_delta=\(Self.format(liveScrollDeltaTotal)) " +
+                    "wheel_events=\(liveScrollWheelEventCount) " +
                     "precise=\(liveScrollPreciseEventCount) " +
-                    "legacy_pixels=\(liveScrollLegacyNormalizedCount) " +
                     "unknown_heights=\(liveScrollUnknownHeightCount) " +
                     "configured_cells=\(liveScrollConfiguredCellCount) " +
                     "pending_heights=\(pendingHeightUpdates.count)"
@@ -1538,17 +1431,10 @@ struct AppKitTimelineTable: NSViewRepresentable {
             wheelInputCount += 1
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
-            liveScrollRawDeltaTotal += abs(sample.rawDeltaY)
-            liveScrollDeliveredDeltaTotal += abs(sample.deliveredDeltaY)
+            liveScrollDeltaTotal += abs(sample.deltaY)
             liveScrollWheelEventCount += 1
             if sample.isPrecise {
                 liveScrollPreciseEventCount += 1
-            }
-            if sample.wasControlled {
-                liveScrollControlledEventCount += 1
-            }
-            if sample.normalizedLegacy {
-                liveScrollLegacyNormalizedCount += 1
             }
             if sample.beginsGesture || !wheelGestureActive {
                 wheelGestureID &+= 1
@@ -1836,8 +1722,8 @@ enum AppKitTimelineHarness {
             ("visible-shrink-deferral", checkVisibleShrinkDeferral),
             ("variable-height-containment", checkVariableHeightContainment),
             ("selectable-message-content", checkSelectableMessageContent),
-            ("adaptive-wheel-control", checkAdaptiveWheelControl),
-            ("legacy-wheel-pixel-normalization", checkLegacyWheelPixelNormalization),
+            ("native-wheel-passthrough", checkNativeWheelPassthrough),
+            ("native-legacy-wheel-behavior", checkNativeLegacyWheelBehavior),
             ("native-wheel-ownership", checkNativeWheelOwnership),
             ("hosted-wheel-single-dispatch", checkHostedWheelSingleDispatch),
         ]
@@ -2067,37 +1953,41 @@ enum AppKitTimelineHarness {
         return true
     }
 
-    private static func checkAdaptiveWheelControl() -> Bool {
-        let small = AppKitTimelineScrollTuning.tunedDelta(4)
-        let medium = AppKitTimelineScrollTuning.tunedDelta(32)
-        let fast = AppKitTimelineScrollTuning.tunedDelta(120)
-        let reverse = AppKitTimelineScrollTuning.tunedDelta(-120)
-        guard small > 0,
-              medium > small,
-              fast > medium,
-              reverse == -fast,
-              small / 4 > medium / 32,
-              medium / 32 > fast / 120,
-              fast < 60,
-              AppKitTimelineScrollTuning.shouldControl(isPrecise: true, delta: 4),
-              !AppKitTimelineScrollTuning.shouldControl(isPrecise: false, delta: 1),
-              AppKitTimelineScrollTuning.shouldControl(isPrecise: false, delta: 5),
-              AppKitTimelineScrollTuning.normalizedLegacyDelta(5) > 20,
-              AppKitTimelineScrollTuning.normalizedLegacyDelta(120) <= 48 else {
-            return fail(
-                "adaptive-wheel-control",
-                "scroll curve is not monotonic and progressively damped " +
-                    "small=\(small) medium=\(medium) fast=\(fast) reverse=\(reverse)"
-            )
+    private static func checkNativeWheelPassthrough() -> Bool {
+        guard let preciseEvent = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 1,
+            wheel1: 120,
+            wheel2: 0,
+            wheel3: 0
+        ).flatMap(NSEvent.init(cgEvent:)),
+              let legacyEvent = CGEvent(
+                  scrollWheelEvent2Source: nil,
+                  units: .line,
+                  wheelCount: 1,
+                  wheel1: 5,
+                  wheel2: 0,
+                  wheel3: 0
+              ).flatMap(NSEvent.init(cgEvent:)) else {
+            return fail("native-wheel-passthrough", "could not construct wheel events")
+        }
+        let preciseDelivery = AppKitTimelineWheelRouting.delivery(for: preciseEvent)
+        let legacyDelivery = AppKitTimelineWheelRouting.delivery(for: legacyEvent)
+        guard preciseDelivery.event === preciseEvent,
+              legacyDelivery.event === legacyEvent,
+              preciseDelivery.deltaY == preciseEvent.scrollingDeltaY,
+              legacyDelivery.deltaY == legacyEvent.deltaY else {
+            return fail("native-wheel-passthrough", "wheel input was copied or transformed")
         }
         return true
     }
 
-    private static func checkLegacyWheelPixelNormalization() -> Bool {
+    private static func checkNativeLegacyWheelBehavior() -> Bool {
         let fixture = Fixture()
         defer { fixture.stop() }
         guard let owningScrollView = fixture.scrollView as? AppKitTimelineOwningScrollView else {
-            return fail("legacy-wheel-pixel-normalization", "timeline does not own its scroll view")
+            return fail("native-legacy-wheel-behavior", "timeline does not own its scroll view")
         }
         fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 4_000))
         fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
@@ -2112,15 +2002,15 @@ enum AppKitTimelineHarness {
             wheel3: 0
         ).flatMap(NSEvent.init(cgEvent:)),
               !event.hasPreciseScrollingDeltas else {
-            return fail("legacy-wheel-pixel-normalization", "could not construct a legacy wheel event")
+            return fail("native-legacy-wheel-behavior", "could not construct a legacy wheel event")
         }
         owningScrollView.routeVerticalWheel(event)
         fixture.settle()
         let movement = abs(fixture.scrollView.documentVisibleRect.minY - originBefore)
-        guard movement >= 10, movement <= 80 else {
+        guard movement > 0.5 else {
             return fail(
-                "legacy-wheel-pixel-normalization",
-                "legacy line event escaped pixel bounds movement=\(movement)"
+                "native-legacy-wheel-behavior",
+                "native legacy line event did not move movement=\(movement)"
             )
         }
         return true

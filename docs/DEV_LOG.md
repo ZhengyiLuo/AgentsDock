@@ -19,6 +19,21 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-04 - Restore Native macOS Scrolling Speed
+
+- User reported that timeline scrolling felt capped. The native timeline was
+  still rewriting every precise trackpad event through a damping curve (about
+  92% at low deltas down to 46% at high deltas) and converting mouse-wheel line
+  events into synthetic pixel events capped at 48 points.
+- Removed both transformations. The owning `NSScrollView` still receives wheel
+  input exactly once when an embedded SwiftUI row would otherwise consume it,
+  but now receives the original `NSEvent` unchanged. macOS again owns speed,
+  acceleration, momentum, and the user's system scrolling preference.
+- Replaced damping-specific harness and static guardrail cases with regressions
+  that require exact event identity for precise and legacy input, native
+  legacy-wheel movement, native ownership, one dispatch through hosted row
+  content, and no delta scaling/synthesis code.
+
 ## 2026-07-03 - TestFlight Build 57
 
 - Bumped the shared iOS/iPadOS and macOS build number from `56` to `57`.
