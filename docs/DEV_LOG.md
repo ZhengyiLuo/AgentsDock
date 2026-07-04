@@ -37,6 +37,9 @@ painful to rediscover later.
   launched with `--timeline-harness`; the prior activation-prohibited harness
   could wait indefinitely inside `SecItemCopyMatching` because it could not
   present Keychain authorization UI. Normal app authentication is unchanged.
+- Verification: `swift run ZenithGuardrails` passed, then the rebuilt and
+  signed production bundle passed all 24 native timeline scenarios plus
+  `SidebarReorderHarness`. The bundle was synced to the MacBook Air.
 
 ## 2026-07-03 - TestFlight Build 57
 
