@@ -30,7 +30,9 @@ struct PinnedTimelineItem: Codable, Identifiable, Hashable, Sendable {
 @MainActor
 final class AppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
-    @Published var accessToken = ZenithTokenStore.load()
+    @Published var accessToken = CommandLine.arguments.contains("--timeline-harness")
+        ? ""
+        : ZenithTokenStore.load()
     @Published var sessions: [ZSession] = [] {
         didSet {
             invalidateSidebarDerived()

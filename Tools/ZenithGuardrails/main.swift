@@ -1520,6 +1520,7 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("AppKitTimelineWheelRouting.delivery") && appKitTimeline.contains("super.scrollWheel(with: delivery.event)"), "Timeline wheel input must retain one unchanged native AppKit dispatch")
     try assert(appKitTimeline.contains("return (event, deltaY)") && !appKitTimeline.contains("tunedDelta") && !appKitTimeline.contains("normalizedLegacyDelta") && !appKitTimeline.contains("scrollWheelEventFixedPtDeltaAxis"), "Timeline wheel input must not scale, cap, copy, or synthesize scroll deltas")
     try assert(appKitTimeline.contains("native-wheel-passthrough") && appKitTimeline.contains("native-legacy-wheel-behavior"), "Precise and legacy wheel events must retain native pass-through coverage")
+    try assert(macStore.contains("CommandLine.arguments.contains(\"--timeline-harness\")") && macStore.contains("? \"\"") && macStore.contains(": ZenithTokenStore.load()"), "The hidden native timeline harness must not block on production Keychain authorization")
     guard let wheelDispatchStart = appKitTimeline.range(of: "private func dispatchVerticalWheel"),
           let wheelDispatchEnd = appKitTimeline.range(
               of: "\n    }\n}",

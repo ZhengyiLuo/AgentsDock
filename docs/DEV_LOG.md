@@ -33,6 +33,10 @@ painful to rediscover later.
   that require exact event identity for precise and legacy input, native
   legacy-wheel movement, native ownership, one dispatch through hosted row
   content, and no delta scaling/synthesis code.
+- The production-bundle harness now bypasses Keychain token loading only when
+  launched with `--timeline-harness`; the prior activation-prohibited harness
+  could wait indefinitely inside `SecItemCopyMatching` because it could not
+  present Keychain authorization UI. Normal app authentication is unchanged.
 
 ## 2026-07-03 - TestFlight Build 57
 
