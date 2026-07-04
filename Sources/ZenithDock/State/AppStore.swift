@@ -1635,9 +1635,10 @@ final class AppStore: ObservableObject {
             reconcileUnreadFromSessions()
             reconcileUnreadNotifications(previousUnreadSessionIDs: previousUnreadSessionIDs)
             if selectedSessionID == nil || !sessions.contains(where: { $0.id == selectedSessionID }) {
-                selectedSessionID = sessions.first?.id
-                if let selectedSessionID {
-                    await select(sessionID: selectedSessionID)
+                if let fallbackSessionID = sessions.first?.id {
+                    await select(sessionID: fallbackSessionID)
+                } else if selectedSessionID != nil {
+                    selectedSessionID = nil
                 }
             }
         } catch {

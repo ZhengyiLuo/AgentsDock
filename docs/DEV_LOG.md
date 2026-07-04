@@ -28,6 +28,8 @@ painful to rediscover later.
 - Disk cache decoding now finishes before `selectedSessionID` is published,
   matching the already-smooth memory-cache path. Rapid stale cache responses
   remain generation-checked and archived chats still bypass cache restoration.
+- Startup and reconnect fallback selection now enters through the same atomic
+  selector instead of publishing an empty selected chat before cache restore.
 - Native viewport metrics scheduled by the previous document are canceled on
   session change. Timeline bottom state and the floating bottom button ignore
   metrics until `loadedSessionID` owns the selected session.

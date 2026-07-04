@@ -590,6 +590,8 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
         throw GuardrailFailure.failed("Mac chat selection must expose its atomic disk-cache transaction")
     }
     try assert(selectionCacheLoad.lowerBound < selectionPublish.lowerBound, "Mac disk-cached chats must load before publishing their selected session")
+    try assert(!macStore.contains("selectedSessionID = sessions.first?.id\n                if let selectedSessionID"), "Session refresh must not publish an empty fallback chat before the atomic selector restores its cache")
+    try assert(macStore.contains("if let fallbackSessionID = sessions.first?.id {\n                    await select(sessionID: fallbackSessionID)"), "Session refresh must restore fallback chats through the atomic selector")
     try assert(macStore.contains("applyCachedChat(cached)"), "Mac duplicate-selection memory restores must apply the bounded cache window")
     try assert(macStore.contains("let cachedLastSeq = lastSeq"), "Mac warm-cache chat switches must capture cached lastSeq before catch-up")
     try assert(macStore.contains("cachedTailIsKnownFresh(sessionID: sessionID, cachedLastSeq: cachedLastSeq)"), "Mac warm-cache chat switches may skip REST only after the fresh session list matches the cached sequence")
