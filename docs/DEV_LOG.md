@@ -6650,3 +6650,14 @@ Follow-up from rapid-switch stress:
   merging both windows into a 1,300-plus-event opening document. Older content
   remains available through server paging, while chat opening has one bounded
   authoritative tail and one visible commit.
+
+## 2026-07-05 - Preserve accelerated mouse-wheel travel
+
+- Live wheel diagnostics exposed a unit mismatch in the non-precise compatibility
+  path: a fast driver event reported roughly 180 accelerated line units and
+  1,800 native point units, but the bridge marked the 180 value as pixels. This
+  made fast scrolling feel capped at about one tenth of its native travel.
+- Legacy/smooth mouse-wheel events now use Core Graphics `PointDelta` as their
+  continuous pixel distance, preserving the driver's existing acceleration.
+  Precise trackpad events still pass through untouched, and every event remains
+  single-dispatched through AppKit with synchronous document-edge clamping.

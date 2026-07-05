@@ -191,6 +191,9 @@ private enum AppKitTimelineWheelRouting {
         let rawPointDeltaY = CGFloat(
             event.cgEvent?.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) ?? 0
         )
+        let rawPointDeltaX = CGFloat(
+            event.cgEvent?.getIntegerValueField(.scrollWheelEventPointDeltaAxis2) ?? 0
+        )
         let rawFixedDeltaY = CGFloat(
             Double(event.cgEvent?.getIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1) ?? 0) / 65_536
         )
@@ -207,12 +210,22 @@ private enum AppKitTimelineWheelRouting {
         }
 
         // A variable-height table cannot safely mix row-based and pixel-based
-        // input in one gesture. Some smooth-wheel drivers mark the first tiny
-        // events as legacy lines and the rest as accelerated pixel-like deltas.
-        // Preserve every magnitude exactly and normalize only the unit marker.
+        // input in one gesture. Some smooth-wheel drivers mark accelerated
+        // events as legacy lines while also publishing their real pixel travel
+        // through PointDelta. Preserve that driver acceleration when changing
+        // the event's unit marker; using scrollingDelta here makes fast wheels
+        // roughly ten times slower than the native macOS path.
         copiedEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        setPixelDelta(event.scrollingDeltaY, axis: 1, in: copiedEvent)
-        setPixelDelta(event.scrollingDeltaX, axis: 2, in: copiedEvent)
+        setPixelDelta(
+            preferredPixelDelta(rawPointDelta: rawPointDeltaY, fallback: event.scrollingDeltaY),
+            axis: 1,
+            in: copiedEvent
+        )
+        setPixelDelta(
+            preferredPixelDelta(rawPointDelta: rawPointDeltaX, fallback: event.scrollingDeltaX),
+            axis: 2,
+            in: copiedEvent
+        )
         guard let pixelEvent = NSEvent(cgEvent: copiedEvent) else {
             return (
                 event,
@@ -231,6 +244,10 @@ private enum AppKitTimelineWheelRouting {
             rawFixedDeltaY,
             true
         )
+    }
+
+    private static func preferredPixelDelta(rawPointDelta: CGFloat, fallback: CGFloat) -> CGFloat {
+        abs(rawPointDelta) > 0.01 ? rawPointDelta : fallback
     }
 
     private static func setPixelDelta(_ value: CGFloat, axis: Int, in event: CGEvent) {
@@ -2132,7 +2149,8 @@ enum AppKitTimelineHarness {
         guard preciseDelivery.event === preciseEvent,
               legacyDelivery.event !== legacyEvent,
               preciseDelivery.deltaY == preciseEvent.scrollingDeltaY,
-              legacyDelivery.deltaY == legacyEvent.scrollingDeltaY,
+              legacyDelivery.deltaY == legacyDelivery.rawPointDeltaY,
+              abs(legacyDelivery.deltaY) > abs(legacyEvent.scrollingDeltaY),
               legacyDelivery.usedLegacyPixelCompatibility else {
             return fail(
                 "native-wheel-passthrough",
@@ -2168,11 +2186,11 @@ enum AppKitTimelineHarness {
         fixture.settle()
         let movement = abs(fixture.scrollView.documentVisibleRect.minY - originBefore)
         guard owningScrollView.legacyPixelCompatibilityCount == compatibilityBefore + 1,
-              movement >= 0.5,
-              movement <= 4 else {
+              movement >= 8,
+              movement <= 14 else {
             return fail(
                 "native-legacy-wheel-behavior",
-                "tiny legacy input was not normalized to one pixel movement=\(movement)"
+                "legacy wheel input did not retain its native point travel movement=\(movement)"
             )
         }
         return true
@@ -2204,8 +2222,8 @@ enum AppKitTimelineHarness {
         fixture.settle()
         let movement = abs(fixture.scrollView.documentVisibleRect.minY - originBefore)
         guard owningScrollView.legacyPixelCompatibilityCount == compatibilityBefore + 1,
-              movement >= 80,
-              movement <= 180 else {
+              movement >= 900,
+              movement <= 1_500 else {
             return fail(
                 "legacy-smooth-pixel-compatibility",
                 "legacy smooth input was not delivered as uncapped pixels " +
@@ -2248,8 +2266,8 @@ enum AppKitTimelineHarness {
         let delayedOrigin = fixture.scrollView.documentVisibleRect.minY
         let movement = abs(settledOrigin - originBefore)
         guard owningScrollView.legacyPixelCompatibilityCount == compatibilityBefore + 3,
-              movement >= 118,
-              movement <= 130,
+              movement >= 1_180,
+              movement <= 1_260,
               abs(delayedOrigin - settledOrigin) <= 0.5 else {
             return fail(
                 "mixed-legacy-stream-stability",
