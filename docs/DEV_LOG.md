@@ -19,6 +19,25 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-04 - Restore Pixel Semantics For Mislabelled Smooth Wheel Input
+
+- User reported constant timeline flicker/corruption while scrolling after the
+  native wheel pass-through change. Live logs showed small non-precise gestures
+  moving the document by thousands of points (`1798 -> 5852`) while height
+  corrections were usually zero or subpixel. This ruled out backend refreshes
+  and identified line/row interpretation as the primary visual jump.
+- The current input driver emits accelerated fractional scroll values but marks
+  them non-precise. `NSTableView` interprets an unchanged event as variable-
+  height rows. The timeline now preserves the raw magnitude without a curve or
+  cap and changes only that smooth stream's unit marker to continuous pixels.
+  True precise input and ordinary one-tick legacy mouse input remain unchanged.
+- Pixel compatibility remains active through the short momentum tail so small
+  final deltas cannot fall back to line semantics halfway through a gesture.
+- Older-history paging no longer rearms at the top while the accepted prepend
+  is still deferred. A scrollable document must leave the top before another
+  page can load; genuinely short documents can still request another page on a
+  distinct gesture.
+
 ## 2026-07-04 - Atomic Chat Switching And Stable Bottom Controls
 
 - After restoring native wheel speed, live logs exposed an existing switch

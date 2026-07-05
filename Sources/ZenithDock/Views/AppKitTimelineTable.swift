@@ -130,10 +130,11 @@ private struct AppKitTimelinePagingController {
         }
     }
 
-    mutating func noteUserGesture(_ gestureID: Int) {
+    mutating func noteUserGesture(_ gestureID: Int, canRearmAtTop: Bool = false) {
         guard canLoadOlder, !isLoading else { return }
         if phase == .waitingForNextGesture,
-           gestureID != lastRequestedGestureID {
+           gestureID != lastRequestedGestureID,
+           canRearmAtTop {
             phase = .armed
         }
         pendingGestureID = gestureID
@@ -167,12 +168,55 @@ private struct AppKitTimelineWheelSample {
     let beginsGesture: Bool
     let deltaY: CGFloat
     let isPrecise: Bool
+    let usedLegacyPixelCompatibility: Bool
 }
 
 private enum AppKitTimelineWheelRouting {
-    static func delivery(for event: NSEvent) -> (event: NSEvent, deltaY: CGFloat) {
-        let deltaY = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
-        return (event, deltaY)
+    static let legacySmoothThreshold: CGFloat = 1.25
+
+    static func delivery(
+        for event: NSEvent,
+        useLegacyPixelCompatibility: Bool = false
+    ) -> (event: NSEvent, deltaY: CGFloat, usedLegacyPixelCompatibility: Bool) {
+        guard useLegacyPixelCompatibility,
+              !event.hasPreciseScrollingDeltas,
+              let copiedEvent = event.cgEvent?.copy() else {
+            let deltaY = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
+            return (event, deltaY, false)
+        }
+
+        // Some input drivers emit accelerated, fractional pixel-like deltas but
+        // leave the CGEvent marked as line based. NSTableView then interprets a
+        // small gesture as several variable-height rows and appears to flash.
+        // Preserve the driver's magnitude exactly; change only the unit marker.
+        copiedEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        setPixelDelta(event.scrollingDeltaY, axis: 1, in: copiedEvent)
+        setPixelDelta(event.scrollingDeltaX, axis: 2, in: copiedEvent)
+        guard let pixelEvent = NSEvent(cgEvent: copiedEvent) else {
+            return (event, event.deltaY, false)
+        }
+        return (pixelEvent, pixelEvent.scrollingDeltaY, true)
+    }
+
+    static func shouldStartLegacyPixelStream(for event: NSEvent) -> Bool {
+        guard !event.hasPreciseScrollingDeltas else { return false }
+        return abs(event.scrollingDeltaY) > legacySmoothThreshold ||
+            !event.phase.isEmpty ||
+            !event.momentumPhase.isEmpty
+    }
+
+    private static func setPixelDelta(_ value: CGFloat, axis: Int, in event: CGEvent) {
+        let pointValue = Int64(value.rounded())
+        let fixedValue = Int64((Double(value) * 65_536).rounded())
+        if axis == 1 {
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: pointValue)
+            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: pointValue)
+            event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1, value: fixedValue)
+        } else {
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: pointValue)
+            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: pointValue)
+            event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis2, value: fixedValue)
+        }
     }
 }
 
@@ -226,7 +270,9 @@ private final class AppKitTimelineClampingClipView: NSClipView {
 private final class AppKitTimelineOwningScrollView: NSScrollView {
     var onVerticalWheel: ((AppKitTimelineWheelSample) -> Void)?
     private var wheelMonitor: Any?
+    private var legacyPixelStreamDeadline: TimeInterval = 0
     fileprivate private(set) var routedWheelCount = 0
+    fileprivate private(set) var legacyPixelCompatibilityCount = 0
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -292,16 +338,33 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: true,
             deltaY: 1,
-            isPrecise: true
+            isPrecise: true,
+            usedLegacyPixelCompatibility: false
         ))
     }
 
     private func dispatchVerticalWheel(_ event: NSEvent) {
-        let delivery = AppKitTimelineWheelRouting.delivery(for: event)
+        let now = ProcessInfo.processInfo.systemUptime
+        let streamIsActive = now <= legacyPixelStreamDeadline
+        let shouldUseLegacyPixels = !event.hasPreciseScrollingDeltas &&
+            (streamIsActive || AppKitTimelineWheelRouting.shouldStartLegacyPixelStream(for: event))
+        if shouldUseLegacyPixels {
+            legacyPixelStreamDeadline = now + 0.38
+        } else if event.hasPreciseScrollingDeltas {
+            legacyPixelStreamDeadline = 0
+        }
+        let delivery = AppKitTimelineWheelRouting.delivery(
+            for: event,
+            useLegacyPixelCompatibility: shouldUseLegacyPixels
+        )
+        if delivery.usedLegacyPixelCompatibility {
+            legacyPixelCompatibilityCount += 1
+        }
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: event.phase.contains(.began),
             deltaY: delivery.deltaY,
-            isPrecise: event.hasPreciseScrollingDeltas
+            isPrecise: event.hasPreciseScrollingDeltas,
+            usedLegacyPixelCompatibility: delivery.usedLegacyPixelCompatibility
         ))
         super.scrollWheel(with: delivery.event)
     }
@@ -397,6 +460,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var liveScrollDeltaTotal: CGFloat = 0
         private var liveScrollWheelEventCount = 0
         private var liveScrollPreciseEventCount = 0
+        private var liveScrollLegacyPixelEventCount = 0
         private let metricsThrottleInterval: TimeInterval = 0.08
         private let estimatedRowHeight: CGFloat = 120
 
@@ -1401,6 +1465,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollDeltaTotal = 0
             liveScrollWheelEventCount = 0
             liveScrollPreciseEventCount = 0
+            liveScrollLegacyPixelEventCount = 0
             cancelScheduledHeightUpdate(clearPending: false)
             if let tableView {
                 setVisibleHeightReporting(false, in: tableView)
@@ -1427,6 +1492,7 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     "wheel_delta=\(Self.format(liveScrollDeltaTotal)) " +
                     "wheel_events=\(liveScrollWheelEventCount) " +
                     "precise=\(liveScrollPreciseEventCount) " +
+                    "legacy_pixels=\(liveScrollLegacyPixelEventCount) " +
                     "unknown_heights=\(liveScrollUnknownHeightCount) " +
                     "configured_cells=\(liveScrollConfiguredCellCount) " +
                     "pending_heights=\(pendingHeightUpdates.count)"
@@ -1455,11 +1521,17 @@ struct AppKitTimelineTable: NSViewRepresentable {
             if sample.isPrecise {
                 liveScrollPreciseEventCount += 1
             }
+            if sample.usedLegacyPixelCompatibility {
+                liveScrollLegacyPixelEventCount += 1
+            }
             if sample.beginsGesture || !wheelGestureActive {
                 wheelGestureID &+= 1
                 wheelGestureActive = true
             }
-            paging.noteUserGesture(wheelGestureID)
+            paging.noteUserGesture(
+                wheelGestureID,
+                canRearmAtTop: deferredItems == nil && !currentDocumentIsScrollable()
+            )
             scheduleWheelGestureEnd()
             scheduleTopPagingEvaluation()
             scheduleDiscreteScrollSettle()
@@ -1527,6 +1599,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private func currentDistanceFromTop() -> CGFloat {
             guard let scrollView else { return .infinity }
             return max(0, scrollView.documentVisibleRect.minY)
+        }
+
+        private func currentDocumentIsScrollable() -> Bool {
+            guard let scrollView, let tableView else { return false }
+            return tableView.bounds.height > scrollView.contentView.bounds.height + 0.5
         }
 
         private func scheduleDiscreteScrollSettle() {
@@ -1743,6 +1820,7 @@ enum AppKitTimelineHarness {
             ("selectable-message-content", checkSelectableMessageContent),
             ("native-wheel-passthrough", checkNativeWheelPassthrough),
             ("native-legacy-wheel-behavior", checkNativeLegacyWheelBehavior),
+            ("legacy-smooth-pixel-compatibility", checkLegacySmoothPixelCompatibility),
             ("native-overscroll-clamping", checkNativeOverscrollClamping),
             ("native-wheel-ownership", checkNativeWheelOwnership),
             ("hosted-wheel-single-dispatch", checkHostedWheelSingleDispatch),
@@ -2031,6 +2109,44 @@ enum AppKitTimelineHarness {
             return fail(
                 "native-legacy-wheel-behavior",
                 "native legacy line event did not move movement=\(movement)"
+            )
+        }
+        return true
+    }
+
+    private static func checkLegacySmoothPixelCompatibility() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        guard let owningScrollView = fixture.scrollView as? AppKitTimelineOwningScrollView else {
+            return fail("legacy-smooth-pixel-compatibility", "timeline does not own its scroll view")
+        }
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 4_000))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let originBefore = fixture.scrollView.documentVisibleRect.minY
+        let compatibilityBefore = owningScrollView.legacyPixelCompatibilityCount
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .line,
+            wheelCount: 1,
+            wheel1: 120,
+            wheel2: 0,
+            wheel3: 0
+        ).flatMap(NSEvent.init(cgEvent:)),
+              !event.hasPreciseScrollingDeltas else {
+            return fail("legacy-smooth-pixel-compatibility", "could not construct a mislabelled smooth event")
+        }
+        owningScrollView.routeVerticalWheel(event)
+        fixture.settle()
+        let movement = abs(fixture.scrollView.documentVisibleRect.minY - originBefore)
+        guard owningScrollView.legacyPixelCompatibilityCount == compatibilityBefore + 1,
+              movement >= 80,
+              movement <= 180 else {
+            return fail(
+                "legacy-smooth-pixel-compatibility",
+                "legacy smooth input was not delivered as uncapped pixels " +
+                    "movement=\(movement) compatibility=" +
+                    "\(owningScrollView.legacyPixelCompatibilityCount - compatibilityBefore)"
             )
         }
         return true
@@ -2522,8 +2638,13 @@ enum AppKitTimelineHarness {
         }
 
         paging.noteUserGesture(2)
+        guard !paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "top-only follow-up gesture chained before the prepended geometry settled")
+        }
+        paging.update(canLoadOlder: true, isLoading: false, distanceFromTop: 240)
+        paging.noteUserGesture(2)
         guard paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
-            return fail("native-top-paging-state-machine", "new pull at a short document did not load")
+            return fail("native-top-paging-state-machine", "leaving and returning to the top did not rearm paging")
         }
 
         paging.reset(canLoadOlder: true, isLoading: false)
@@ -2533,8 +2654,15 @@ enum AppKitTimelineHarness {
             return fail("native-top-paging-state-machine", "gesture reaching the top did not load")
         }
 
+        paging.update(canLoadOlder: true, isLoading: true, distanceFromTop: 0)
+        paging.update(canLoadOlder: true, isLoading: false, distanceFromTop: 0)
+        paging.noteUserGesture(4, canRearmAtTop: true)
+        guard paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
+            return fail("native-top-paging-state-machine", "a genuinely short document could not request its next page")
+        }
+
         paging.update(canLoadOlder: false, isLoading: false, distanceFromTop: 0)
-        paging.noteUserGesture(4)
+        paging.noteUserGesture(5)
         guard !paging.consumeRequestIfNeeded(distanceFromTop: 0) else {
             return fail("native-top-paging-state-machine", "exhausted history still requested a page")
         }
