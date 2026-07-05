@@ -64,10 +64,12 @@ struct TimelineView: View {
             store.loadedSessionID != store.selectedSessionID
         )
 #if AGENTSDOCK_APPKIT_TIMELINE
-        // NSTableView applies each session snapshot and its initial position in
-        // one transaction. Masking it here adds a second visibility/position
-        // owner and produces a visible flash on every chat switch.
-        let timelineRowsStructurallySuspended = false
+        // Routine native-table updates stay visible. A genuinely large cache
+        // reconciliation is different: keep its intermediate geometry covered
+        // and reveal the authoritative snapshot once instead of painting a
+        // stale cache followed by a visibly larger document.
+        let timelineRowsStructurallySuspended = store.isApplyingLargeTimelineBatch &&
+            store.selectedSessionID != nil
 #else
         let shouldHideLargeTimelineBatch = store.isApplyingLargeTimelineBatch
         let timelineRowsStructurallySuspended = timelineRowsSuspended || shouldHideLargeTimelineBatch
@@ -707,6 +709,7 @@ struct TimelineView: View {
                 loadOneOlderAppKitPage()
             }
         )
+        .equatable()
     }
 
     private func appKitTimelineItems(

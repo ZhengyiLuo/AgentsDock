@@ -6630,3 +6630,23 @@ Follow-up from rapid-switch stress:
 - History load helpers now use the same bounded projection as the rendered
   LazyVStack, so loading server history does not silently rebuild all cached
   rows behind the viewport.
+
+## 2026-07-05 - Isolate native timeline commits
+
+- Live sampling showed cache application and timeline projection completing in
+  milliseconds while the main thread still spent repeated frame time in
+  SwiftUI hosting/layout. The trigger was unrelated `AppStore` publication,
+  especially the five-second session-list refresh, re-entering the native table
+  update path even when every timeline row was unchanged.
+- `AppKitTimelineTable` now has a semantic equality boundary keyed by document
+  ownership, stable row ID/version pairs, paging state, and explicit scroll
+  commands. Session-list and status publications no longer reapply an unchanged
+  table snapshot or revisit hosted row geometry.
+- A materially stale warm cache is now covered before reconciliation. When the
+  server reports more than a large batch beyond the cached sequence, the table
+  may prepare its authoritative snapshot behind one neutral opening surface,
+  then reveal once.
+- Full-tail fallback replaces the stale 720-event cache window instead of
+  merging both windows into a 1,300-plus-event opening document. Older content
+  remains available through server paging, while chat opening has one bounded
+  authoritative tail and one visible commit.

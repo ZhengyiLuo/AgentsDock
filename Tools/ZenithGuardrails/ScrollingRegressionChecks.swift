@@ -111,8 +111,8 @@ func checkAgentsDockScrollingRegressions() throws {
         "The native timeline must clear SwiftUI mask ownership instead of starting a second loading cycle"
     )
     try assert(
-        timeline.contains("let timelineRowsStructurallySuspended = false"),
-        "The AppKit timeline must remain the sole owner of chat-switch positioning"
+        timeline.contains("let timelineRowsStructurallySuspended = store.isApplyingLargeTimelineBatch &&"),
+        "Routine AppKit chat switching must remain native while large stale-tail replacement stays atomic"
     )
 
     let olderHistoryLoad = try sourceBlock(

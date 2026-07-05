@@ -401,7 +401,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
     }
 }
 
-struct AppKitTimelineTable: NSViewRepresentable {
+struct AppKitTimelineTable: NSViewRepresentable, Equatable {
     let sessionID: String?
     let contentSessionID: String?
     let items: [AppKitTimelineItem]
@@ -412,6 +412,23 @@ struct AppKitTimelineTable: NSViewRepresentable {
     let isLoadingOlder: Bool
     let onMetrics: (TimelineScrollMetrics) -> Void
     let onLoadOlder: () -> Bool
+
+    static func == (lhs: AppKitTimelineTable, rhs: AppKitTimelineTable) -> Bool {
+        guard lhs.sessionID == rhs.sessionID,
+              lhs.contentSessionID == rhs.contentSessionID,
+              lhs.scrollCommand == rhs.scrollCommand,
+              lhs.forcedBottomRevision == rhs.forcedBottomRevision,
+              lhs.isReconcilingLatestTail == rhs.isReconcilingLatestTail,
+              lhs.canLoadOlder == rhs.canLoadOlder,
+              lhs.isLoadingOlder == rhs.isLoadingOlder,
+              lhs.items.count == rhs.items.count else {
+            return false
+        }
+
+        return zip(lhs.items, rhs.items).allSatisfy { previous, next in
+            previous.id == next.id && previous.version == next.version
+        }
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onMetrics: onMetrics, onLoadOlder: onLoadOlder)

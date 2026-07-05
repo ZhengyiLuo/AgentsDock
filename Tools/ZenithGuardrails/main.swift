@@ -1596,7 +1596,28 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("simulateTopPagingGestureForTesting"), "Native integration tests must initiate history paging through the scroll owner")
     try assert(timeline.contains("canLoadOlder: store.canLoadOlderHistory") && timeline.contains("onLoadOlder: {\n                loadOneOlderAppKitPage()"), "Native timeline must receive paging availability and request exactly one AppStore page")
     try assert(timeline.contains("private func handleHistoryTopDistance") && timeline.contains("#if !AGENTSDOCK_APPKIT_TIMELINE"), "SwiftUI top-distance gates must not own native history paging")
-    try assert(timeline.contains("let timelineRowsStructurallySuspended = false"), "AppKit chat opening must not add a second SwiftUI mask/visibility owner")
+    try assert(
+        timeline.contains("let timelineRowsStructurallySuspended = store.isApplyingLargeTimelineBatch &&"),
+        "AppKit must cover only large authoritative timeline reconciliation instead of painting an intermediate cache"
+    )
+    try assert(
+        appKitTimeline.contains("struct AppKitTimelineTable: NSViewRepresentable, Equatable") &&
+            timeline.contains(".equatable()"),
+        "Unrelated AppStore publications must not reapply an unchanged native timeline snapshot"
+    )
+    try assert(
+        appKitTimeline.contains("previous.id == next.id && previous.version == next.version"),
+        "Native timeline equality must follow stable row identity and semantic version"
+    )
+    try assert(
+        macStore.contains("cachedTimelineRequiresAtomicReconciliation") &&
+            macStore.contains("knownLatestSeq - cachedLastSeq >= largeTimelineBatchEventThreshold"),
+        "A materially stale warm cache must enter atomic reconciliation before it becomes visible"
+    )
+    try assert(
+        macStore.contains("fullTail,\n                    sessionID: sessionID,\n                    preserveExisting: false"),
+        "Latest-tail fallback must replace the stale cache window instead of inflating the opening document"
+    )
     try assert(!macStore.contains("requestOpenThreadToLatest()"), "Chat selection must leave initial positioning to the timeline instead of publishing duplicate bottom commands")
     try assert(!macStore.contains("if responseLatestSeq > cachedLastSeq {\n                requestScrollToBottom(immediate: true)"), "A passive cached-tail refresh must not force the viewport to bottom")
     try assert(!macStore.contains("scrollToBottomRevision += 1\n            if immediate"), "One immediate scroll request must not publish both normal and forced revisions")

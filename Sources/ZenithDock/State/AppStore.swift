@@ -1840,6 +1840,12 @@ final class AppStore: ObservableObject {
             noteSwitchPath(sessionID, warmCachePath ?? "memory")
             isRefreshingCachedDelta = true
             applyCachedChat(warmCachedChat)
+            if cachedTimelineRequiresAtomicReconciliation(
+                sessionID: sessionID,
+                cachedLastSeq: lastSeq
+            ) {
+                beginLargeTimelineBatchMask()
+            }
             loadedFromCache = true
             setStatus(warmCachePath == "disk" ? "Loaded cached chat" : "Loaded memory chat")
             AppLogger.info("loaded \(warmCachePath ?? "memory") cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
@@ -1934,6 +1940,19 @@ final class AppStore: ObservableObject {
         return true
     }
 
+    private func cachedTimelineRequiresAtomicReconciliation(
+        sessionID: String,
+        cachedLastSeq: Int
+    ) -> Bool {
+        guard let knownLatestSeq = sessions.first(where: { $0.id == sessionID })?.latest_event_seq else {
+            return false
+        }
+        if knownLatestSeq < cachedLastSeq {
+            return true
+        }
+        return knownLatestSeq - cachedLastSeq >= largeTimelineBatchEventThreshold
+    }
+
     private func markTimelineTailVerified(sessionID: String) {
         verifiedTimelineTailsBySessionID[sessionID] = VerifiedTimelineTail(
             latestSeq: lastSeq,
@@ -1958,6 +1977,9 @@ final class AppStore: ObservableObject {
         defer {
             if selectedSessionID == sessionID, selectionGeneration == generation {
                 isRefreshingCachedDelta = false
+                if isApplyingLargeTimelineBatch {
+                    scheduleLargeTimelineBatchReveal()
+                }
             }
         }
         do {
@@ -1993,7 +2015,7 @@ final class AppStore: ObservableObject {
                 changedTimeline = applySessionEventSnapshot(
                     fullTail,
                     sessionID: sessionID,
-                    preserveExisting: true
+                    preserveExisting: false
                 )
                 usedFullTail = true
             } else {
