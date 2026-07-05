@@ -30,6 +30,10 @@ painful to rediscover later.
   remain generation-checked and archived chats still bypass cache restoration.
 - Startup and reconnect fallback selection now enters through the same atomic
   selector instead of publishing an empty selected chat before cache restore.
+- The sidebar now publishes a separate immediate navigation intent before its
+  asynchronous cache restore. This satisfies SwiftUI `List(selection:)`'s
+  synchronous binding contract and prevents the clicked B row from flashing
+  back to A while B's local cache is decoded.
 - Native viewport metrics scheduled by the previous document are canceled on
   session change. Timeline bottom state and the floating bottom button ignore
   metrics until `loadedSessionID` owns the selected session.

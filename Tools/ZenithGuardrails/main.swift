@@ -590,6 +590,15 @@ func checkTimelineRevealWaitsForLatestSnapshot() throws {
         throw GuardrailFailure.failed("Mac chat selection must expose its atomic disk-cache transaction")
     }
     try assert(selectionCacheLoad.lowerBound < selectionPublish.lowerBound, "Mac disk-cached chats must load before publishing their selected session")
+    try assert(macStore.contains("@Published private(set) var pendingSessionSelectionID: String?") && macStore.contains("pendingSessionSelectionID ?? selectedSessionID"), "Mac sidebar selection must expose an immediate navigation intent while cached content is prepared")
+    try assert(macStore.contains("guard pendingSessionSelectionID == sessionID else {") && macStore.contains("drop superseded selection commit"), "Mac selection commits must reject a cache result superseded by a newer synchronous navigation intent")
+    try assert(macStore.contains("selectionGeneration == generation,\n                  pendingSessionSelectionID == sessionID"), "Mac disk-cache responses must check both async generation and the latest synchronous selection intent")
+    try assert(sidebar.contains("get: { store.sidebarSelectionID }") && sidebar.contains("store.stageSessionSelection(sessionID)") && sidebar.contains("navigationWasStaged: true"), "Mac sidebar must synchronously stage List selection before starting async cache restoration")
+    guard let stagedSelection = sidebar.range(of: "store.stageSessionSelection(sessionID)"),
+          let stagedTask = sidebar.range(of: "Task { await store.select(sessionID: sessionID, navigationWasStaged: true) }", range: stagedSelection.upperBound..<sidebar.endIndex) else {
+        throw GuardrailFailure.failed("Mac sidebar must stage selection before launching its async selector")
+    }
+    try assert(stagedSelection.lowerBound < stagedTask.lowerBound, "Mac sidebar selection intent must publish before its async selector can yield")
     try assert(!macStore.contains("selectedSessionID = sessions.first?.id\n                if let selectedSessionID"), "Session refresh must not publish an empty fallback chat before the atomic selector restores its cache")
     try assert(macStore.contains("if let fallbackSessionID = sessions.first?.id {\n                    await select(sessionID: fallbackSessionID)"), "Session refresh must restore fallback chats through the atomic selector")
     try assert(macStore.contains("applyCachedChat(cached)"), "Mac duplicate-selection memory restores must apply the bounded cache window")

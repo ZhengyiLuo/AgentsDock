@@ -209,14 +209,19 @@ struct SidebarView: View {
 
     private var sessionSelection: Binding<String?> {
         Binding(
-            get: { store.selectedSessionID },
+            get: { store.sidebarSelectionID },
             set: { newValue in
                 guard !reorderMode else { return }
                 guard let sessionID = newValue,
-                      sessionID != store.selectedSessionID else {
+                      sessionID != store.sidebarSelectionID else {
                     return
                 }
-                Task { await store.select(sessionID: sessionID) }
+                // A List selection setter must synchronously change the value
+                // returned by its getter. Cache restoration is asynchronous, so
+                // stage the navigation intent first or AppKit briefly restores
+                // the old row before the new timeline is ready.
+                store.stageSessionSelection(sessionID)
+                Task { await store.select(sessionID: sessionID, navigationWasStaged: true) }
             }
         )
     }

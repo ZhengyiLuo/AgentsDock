@@ -40,6 +40,7 @@ final class AppStore: ObservableObject {
         }
     }
     @Published var selectedSessionID: String?
+    @Published private(set) var pendingSessionSelectionID: String?
     private(set) var events: [ZEvent] = []
     @Published var uploads: [ZFile] = []
     @Published var sessionFiles: [ZFile] = [] {
@@ -252,6 +253,10 @@ final class AppStore: ObservableObject {
         sessions.first { $0.id == selectedSessionID }
     }
 
+    var sidebarSelectionID: String? {
+        pendingSessionSelectionID ?? selectedSessionID
+    }
+
     var selectedSessionHasUnread: Bool {
         guard let selectedSessionID else { return false }
         return unreadAgentSessionIDs.contains(selectedSessionID)
@@ -401,6 +406,12 @@ final class AppStore: ObservableObject {
             nextIndex = step > 0 ? 0 : visibleSessions.count - 1
         }
         await select(sessionID: visibleSessions[nextIndex].id)
+    }
+
+    func stageSessionSelection(_ sessionID: String) {
+        guard pendingSessionSelectionID != sessionID else { return }
+        pendingSessionSelectionID = sessionID
+        AppLogger.info("selection intent session=\(sessionID) committed=\(selectedSessionID ?? "-")")
     }
 
     func digestTargetSessions(excluding sourceSessionID: String) -> [ZSession] {
@@ -1389,6 +1400,7 @@ final class AppStore: ObservableObject {
         webSocket = nil
         webSocketSessionID = nil
         setSocketLive(false)
+        pendingSessionSelectionID = nil
         selectedSessionID = nil
         loadedSessionID = nil
         isSelectingSession = false
@@ -1736,7 +1748,15 @@ final class AppStore: ObservableObject {
         AppLogger.info("PERF switchReveal session=\(sessionID) path=\(p.path) ms=\(String(format: "%.0f", ms))")
     }
 
-    func select(sessionID: String) async {
+    func select(sessionID: String, navigationWasStaged: Bool = false) async {
+        if navigationWasStaged {
+            guard pendingSessionSelectionID == sessionID else {
+                AppLogger.info("drop stale staged selection session=\(sessionID) pending=\(pendingSessionSelectionID ?? "-")")
+                return
+            }
+        } else {
+            stageSessionSelection(sessionID)
+        }
         if sessionID != loadedSessionID {
             noteSwitchStart(sessionID)
         }
@@ -1749,7 +1769,7 @@ final class AppStore: ObservableObject {
                 setStatus("Loaded memory chat")
             }
             if loadedSessionID == sessionID {
-                selectedSessionID = sessionID
+                guard commitSessionSelection(sessionID) else { return }
                 markSessionRead(sessionID)
                 syncSelectedRunningState()
             }
@@ -1779,7 +1799,9 @@ final class AppStore: ObservableObject {
         if warmCachedChat == nil,
            !isSessionArchived(sessionID),
            let cached = await Self.loadCachedChat(from: chatCacheURL(sessionID)) {
-            guard loadingSessionID == sessionID, selectionGeneration == generation else {
+            guard loadingSessionID == sessionID,
+                  selectionGeneration == generation,
+                  pendingSessionSelectionID == sessionID else {
                 AppLogger.info("drop stale cache response session=\(sessionID)")
                 return
             }
@@ -1796,7 +1818,7 @@ final class AppStore: ObservableObject {
             setStatus(warmCachePath == "disk" ? "Loaded cached chat" : "Loaded memory chat")
             AppLogger.info("loaded \(warmCachePath ?? "memory") cache before selection session=\(sessionID) cached_events=\(warmCachedChat.events.count) rendered_events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
         }
-        selectedSessionID = sessionID
+        guard commitSessionSelection(sessionID) else { return }
         syncSelectedRunningState()
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
@@ -1854,6 +1876,17 @@ final class AppStore: ObservableObject {
             refreshFiles: true,
             connectStream: true
         )
+    }
+
+    @discardableResult
+    private func commitSessionSelection(_ sessionID: String) -> Bool {
+        guard pendingSessionSelectionID == sessionID else {
+            AppLogger.info("drop superseded selection commit session=\(sessionID) pending=\(pendingSessionSelectionID ?? "-")")
+            return false
+        }
+        selectedSessionID = sessionID
+        pendingSessionSelectionID = nil
+        return true
     }
 
     private func cachedTailIsKnownFresh(sessionID: String, cachedLastSeq: Int) -> Bool {
@@ -2569,6 +2602,7 @@ final class AppStore: ObservableObject {
             activeSessionIDs.remove(session.id)
             if selectedSessionID == session.id {
                 webSocket?.cancel(with: .goingAway, reason: nil)
+                pendingSessionSelectionID = nil
                 selectedSessionID = nil
                 loadedSessionID = nil
                 isSelectingSession = false
