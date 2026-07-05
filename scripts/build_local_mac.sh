@@ -24,7 +24,16 @@ rm -rf "${DIST_APP}"
 mkdir -p "${DIST_DIR}"
 ditto "${BUILT_APP}" "${DIST_APP}"
 
-SIGN_IDENTITY="${ZENITHDOCK_CODESIGN_IDENTITY:--}"
+SIGN_IDENTITY="${ZENITHDOCK_CODESIGN_IDENTITY:-}"
+if [[ -z "${SIGN_IDENTITY}" ]]; then
+  SIGN_IDENTITY="$(
+    security find-identity -v -p codesigning 2>/dev/null \
+      | awk '/"Apple Development:/ { print $2; exit }' \
+      || true
+  )"
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+echo "Local signing identity: ${SIGN_IDENTITY}"
 
 if [[ -n "${SIGN_IDENTITY}" ]]; then
   if [[ -d "${DIST_APP}/Contents/Frameworks" ]]; then

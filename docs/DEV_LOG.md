@@ -34,6 +34,11 @@ painful to rediscover later.
   late Keychain result, so a user-entered token always wins.
 - `ZenithGuardrails` rejects synchronous `ZenithTokenStore.load()` use in the
   Mac store initializer and requires the asynchronous load gate.
+- The local builder now auto-detects the first available Apple Development
+  identity and post-signs the app and embedded framework with it. This gives
+  successive local builds a stable designated requirement instead of a new
+  ad-hoc identity every time. Set `ZENITHDOCK_CODESIGN_IDENTITY=-` to request
+  ad-hoc signing explicitly on a machine without a usable development setup.
 
 ## 2026-07-04 - Never Mix Row And Pixel Wheel Units
 
