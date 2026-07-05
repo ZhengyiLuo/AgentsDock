@@ -1500,7 +1500,8 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("queueCachedHeightCorrectionIfNeeded") && appKitTimeline.contains("pendingHeightUpdates.formUnion(deferredVisibleShrinks)"), "Visible shrink corrections must remain pending until they can settle offscreen")
     try assert(!appKitTimeline.contains("prepareForAutomaticHeightMeasurement"), "Recycled cells must not synchronously force automatic height measurement")
     try assert(reusableCellSource?.contains("hostingView.sizingOptions = [.intrinsicContentSize]") == true, "Recycled hosting cells must use SwiftUI's standard intrinsic sizing contract")
-    try assert(reusableCellSource?.contains("hostingView.layoutSubtreeIfNeeded()") == true && reusableCellSource?.contains("measureAndReportHeight()") == true, "Newly configured visible rows must resolve their intrinsic height before the next display pass")
+    try assert(reusableCellSource?.contains("if heightReportingEnabled {\n            hostingView.layoutSubtreeIfNeeded()") == true && reusableCellSource?.contains("measureAndReportHeight()") == true, "Newly configured rows may resolve intrinsic height synchronously only while scrolling is idle")
+    try assert(appKitTimeline.contains("semantic-noop-update") && appKitTimeline.contains("timelineItemsSemanticallyEqual") && appKitTimeline.contains("semanticNoopCount += 1"), "Unchanged SwiftUI publications must be a true native-table no-op")
     let clipsReusableContent = reusableCellSource.map { cellSource in
         cellSource.contains("clipsToBounds = true") ||
             cellSource.contains("masksToBounds = true") ||

@@ -6661,3 +6661,18 @@ Follow-up from rapid-switch stress:
   continuous pixel distance, preserving the driver's existing acceleration.
   Precise trackpad events still pass through untouched, and every event remains
   single-dispatched through AppKit with synchronous document-edge clamping.
+
+## 2026-07-05 - Remove hosted-row work from active scrolling
+
+- A live 10-second sample on the MacBook Air showed 86
+  `NSViewRepresentable.updateNSView` entries despite an unchanged native
+  document. SwiftUI viewport state and unrelated store publications were still
+  reaching coordinator diffing even though the outer equality wrapper matched.
+- The coordinator now performs its own semantic gate over document ownership,
+  row ID/version pairs, paging state, reconciliation state, and explicit scroll
+  commands. Identical publications return before anchor capture, table diffing,
+  metrics scheduling, or hosted-row configuration.
+- Newly recycled `NSHostingView` rows no longer force intrinsic layout from the
+  wheel-event path. During motion they use cached or type-aware row geometry;
+  after the gesture, visible rows measure once and settle through the existing
+  anchor-preserving correction path.

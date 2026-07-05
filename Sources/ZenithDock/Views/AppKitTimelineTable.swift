@@ -481,6 +481,10 @@ struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable {
 
         private var items: [AppKitTimelineItem] = []
         private var sessionID: String?
+        private var appliedContentSessionID: String?
+        private var appliedIsReconcilingLatestTail = false
+        private var appliedCanLoadOlder = false
+        private var appliedIsLoadingOlder = false
         private var hasReceivedUpdate = false
         private var lastScrollCommandRevision = 0
         private var lastForcedBottomRevision = 0
@@ -539,6 +543,7 @@ struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable {
         private(set) var heightInvalidationCount = 0
         private(set) var heightMeasurementCount = 0
         private(set) var wheelInputCount = 0
+        private(set) var semanticNoopCount = 0
         private(set) var isLiveScrolling = false
 
         private var isScrollInteractionActive: Bool {
@@ -713,6 +718,24 @@ struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable {
             let commandChanged = hasReceivedUpdate && scrollCommand.revision != lastScrollCommandRevision
             let forcedBottomChanged = hasReceivedUpdate && forcedBottomRevision != lastForcedBottomRevision
             let commandChangesPosition = commandChanged && scrollCommand.destination != .none
+            let itemsUnchanged = timelineItemsSemanticallyEqual(nextItems)
+            let metadataUnchanged = appliedContentSessionID == nextContentSessionID &&
+                appliedIsReconcilingLatestTail == isReconcilingLatestTail &&
+                appliedCanLoadOlder == canLoadOlder &&
+                appliedIsLoadingOlder == isLoadingOlder
+
+            // SwiftUI can call updateNSView for unrelated AppStore publications
+            // and viewport metrics. Do not re-enter table diffing, anchor capture,
+            // or hosted-row layout when the native document is identical.
+            if hasReceivedUpdate,
+               !sessionChanged,
+               !commandChanged,
+               !forcedBottomChanged,
+               metadataUnchanged,
+               itemsUnchanged {
+                semanticNoopCount += 1
+                return
+            }
 
             // AppKit's automatic row-height pass mutates the document geometry as
             // rows are inserted or reconfigured. Doing that in the middle of a
@@ -722,11 +745,16 @@ struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable {
             if isScrollInteractionActive,
                !sessionChanged,
                !commandChangesPosition,
-               !forcedBottomChanged {
+               !forcedBottomChanged,
+               !itemsUnchanged {
                 deferredItems = nextItems
                 return
             }
             deferredItems = nil
+            appliedContentSessionID = nextContentSessionID
+            appliedIsReconcilingLatestTail = isReconcilingLatestTail
+            appliedCanLoadOlder = canLoadOlder
+            appliedIsLoadingOlder = isLoadingOlder
             let anchor = !sessionChanged &&
                 !isScrollInteractionActive &&
                 !commandChangesPosition &&
@@ -816,6 +844,12 @@ struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable {
                 restore(anchor)
             }
             scheduleMetricsReport()
+        }
+
+        private func timelineItemsSemanticallyEqual(_ candidates: [AppKitTimelineItem]) -> Bool {
+            items.count == candidates.count && zip(items, candidates).allSatisfy { current, candidate in
+                current.id == candidate.id && current.version == candidate.version
+            }
         }
 
         private func applyItems(
@@ -1878,6 +1912,7 @@ enum AppKitTimelineHarness {
             ("active-momentum-priority", checkActiveMomentumPriority),
             ("discrete-scroll-isolation", checkDiscreteScrollIsolation),
             ("coalesced-live-updates", checkCoalescedLiveUpdates),
+            ("semantic-noop-update", checkSemanticNoopUpdate),
             ("chat-switch-isolation", checkChatSwitchIsolation),
             ("chat-switch-metrics-reset", checkChatSwitchMetricsReset),
             ("exact-top-metrics", checkExactTopMetrics),
@@ -1957,6 +1992,31 @@ enum AppKitTimelineHarness {
         guard originsMatch(origin, fixture.scrollView.contentView.bounds.origin),
               fixture.coordinator.clipOriginWriteCount == writes else {
             return fail("stream-below-viewport", "offscreen streaming changed the origin")
+        }
+        return true
+    }
+
+    private static func checkSemanticNoopUpdate() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        let noopsBefore = fixture.coordinator.semanticNoopCount
+        let configurationsBefore = fixture.coordinator.cellConfigurationCount
+        let originWritesBefore = fixture.coordinator.clipOriginWriteCount
+
+        for _ in 0..<8 {
+            fixture.update()
+        }
+
+        guard fixture.coordinator.semanticNoopCount == noopsBefore + 8,
+              fixture.coordinator.cellConfigurationCount == configurationsBefore,
+              fixture.coordinator.clipOriginWriteCount == originWritesBefore else {
+            return fail(
+                "semantic-noop-update",
+                "unchanged parent publications reached native row work " +
+                    "noops=\(fixture.coordinator.semanticNoopCount - noopsBefore) " +
+                    "configurations=\(fixture.coordinator.cellConfigurationCount - configurationsBefore) " +
+                    "origin_writes=\(fixture.coordinator.clipOriginWriteCount - originWritesBefore)"
+            )
         }
         return true
     }
@@ -3413,14 +3473,15 @@ private final class TimelineHostingCellView: NSTableCellView {
                 .frame(width: width, alignment: .topLeading)
         )
         hostingView.invalidateIntrinsicContentSize()
-        // `NSHostingView` exposes a standard intrinsic sizing contract. Resolve
-        // it before the next display pass for newly configured visible rows so
-        // AppKit does not paint one frame at an estimate and clip the content.
-        // Offscreen rows remain estimated and recycled as before.
+        // During active scrolling, the table's cached/type-aware estimate owns
+        // geometry. Forcing a fresh SwiftUI layout here blocks the wheel event
+        // that requested this recycled cell and creates a visible hitch. Once
+        // scrolling settles, setHeightReportingEnabled schedules one measured
+        // correction through the existing anchor-preserving path.
         heightMeasurementWorkItem?.cancel()
         heightMeasurementWorkItem = nil
-        hostingView.layoutSubtreeIfNeeded()
         if heightReportingEnabled {
+            hostingView.layoutSubtreeIfNeeded()
             measureAndReportHeight()
         }
     }
