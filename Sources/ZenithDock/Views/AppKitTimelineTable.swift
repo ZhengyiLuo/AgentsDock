@@ -401,7 +401,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
     }
 }
 
-struct AppKitTimelineTable: NSViewRepresentable, Equatable {
+struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable {
     let sessionID: String?
     let contentSessionID: String?
     let items: [AppKitTimelineItem]

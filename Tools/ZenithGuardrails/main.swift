@@ -1601,9 +1601,9 @@ func checkMacTimelineScrollPerformanceGuards() throws {
         "AppKit must cover only large authoritative timeline reconciliation instead of painting an intermediate cache"
     )
     try assert(
-        appKitTimeline.contains("struct AppKitTimelineTable: NSViewRepresentable, Equatable") &&
+        appKitTimeline.contains("struct AppKitTimelineTable: NSViewRepresentable, @MainActor Equatable") &&
             timeline.contains(".equatable()"),
-        "Unrelated AppStore publications must not reapply an unchanged native timeline snapshot"
+        "Unrelated AppStore publications must not reapply an unchanged main-actor native timeline snapshot"
     )
     try assert(
         appKitTimeline.contains("previous.id == next.id && previous.version == next.version"),
