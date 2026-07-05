@@ -36,8 +36,9 @@ painful to rediscover later.
   interaction state, while bounds changes only update metrics and top paging.
 - Removing that feedback exposed that direct `NSClipView.scroll(to:)` calls had
   relied on a later height pass to return them to document bounds. The custom
-  clip view now constrains every `setBoundsOrigin` synchronously; clamping is no
-  longer an accidental side effect of the removed feedback loop.
+  clip view now constrains both `scroll(to:)` and `setBoundsOrigin`
+  synchronously; clamping is no longer an accidental side effect of the removed
+  feedback loop.
 - Added a mixed-stream regression (`1 -> 120 -> 1`) that requires all three
   events to move as pixels and forbids delayed document movement after settle.
 - A live eight-second sample showed the cache/projection path at 1-4 ms and the
