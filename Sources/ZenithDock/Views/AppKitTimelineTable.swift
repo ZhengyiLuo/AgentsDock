@@ -172,23 +172,18 @@ private struct AppKitTimelineWheelSample {
 }
 
 private enum AppKitTimelineWheelRouting {
-    static let legacySmoothThreshold: CGFloat = 1.25
-
     static func delivery(
-        for event: NSEvent,
-        useLegacyPixelCompatibility: Bool = false
+        for event: NSEvent
     ) -> (event: NSEvent, deltaY: CGFloat, usedLegacyPixelCompatibility: Bool) {
-        guard useLegacyPixelCompatibility,
-              !event.hasPreciseScrollingDeltas,
+        guard !event.hasPreciseScrollingDeltas,
               let copiedEvent = event.cgEvent?.copy() else {
-            let deltaY = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
-            return (event, deltaY, false)
+            return (event, event.scrollingDeltaY, false)
         }
 
-        // Some input drivers emit accelerated, fractional pixel-like deltas but
-        // leave the CGEvent marked as line based. NSTableView then interprets a
-        // small gesture as several variable-height rows and appears to flash.
-        // Preserve the driver's magnitude exactly; change only the unit marker.
+        // A variable-height table cannot safely mix row-based and pixel-based
+        // input in one gesture. Some smooth-wheel drivers mark the first tiny
+        // events as legacy lines and the rest as accelerated pixel-like deltas.
+        // Preserve every magnitude exactly and normalize only the unit marker.
         copiedEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         setPixelDelta(event.scrollingDeltaY, axis: 1, in: copiedEvent)
         setPixelDelta(event.scrollingDeltaX, axis: 2, in: copiedEvent)
@@ -196,13 +191,6 @@ private enum AppKitTimelineWheelRouting {
             return (event, event.deltaY, false)
         }
         return (pixelEvent, pixelEvent.scrollingDeltaY, true)
-    }
-
-    static func shouldStartLegacyPixelStream(for event: NSEvent) -> Bool {
-        guard !event.hasPreciseScrollingDeltas else { return false }
-        return abs(event.scrollingDeltaY) > legacySmoothThreshold ||
-            !event.phase.isEmpty ||
-            !event.momentumPhase.isEmpty
     }
 
     private static func setPixelDelta(_ value: CGFloat, axis: Int, in event: CGEvent) {
@@ -270,7 +258,6 @@ private final class AppKitTimelineClampingClipView: NSClipView {
 private final class AppKitTimelineOwningScrollView: NSScrollView {
     var onVerticalWheel: ((AppKitTimelineWheelSample) -> Void)?
     private var wheelMonitor: Any?
-    private var legacyPixelStreamDeadline: TimeInterval = 0
     fileprivate private(set) var routedWheelCount = 0
     fileprivate private(set) var legacyPixelCompatibilityCount = 0
 
@@ -303,8 +290,8 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
               !isHidden,
               alphaValue > 0 else { return event }
 
-        let verticalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
-        let horizontalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : event.deltaX
+        let verticalDelta = event.scrollingDeltaY
+        let horizontalDelta = event.scrollingDeltaX
         guard abs(verticalDelta) > 0.01,
               abs(verticalDelta) >= abs(horizontalDelta) else { return event }
 
@@ -317,15 +304,15 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
 
         // SwiftUI hosting views can consume wheel events before the enclosing
         // NSScrollView sees them. Hand the event to the native scroll owner
-        // exactly once. Deliver the original event so macOS owns acceleration,
-        // momentum, and the user's system scrolling-speed preference.
+        // exactly once. Precise events remain untouched. Legacy events retain
+        // their driver-provided magnitude but are marked as continuous pixels.
         routeVerticalWheel(event)
         return nil
     }
 
     private func isPredominantlyVertical(_ event: NSEvent) -> Bool {
-        let verticalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY
-        let horizontalDelta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : event.deltaX
+        let verticalDelta = event.scrollingDeltaY
+        let horizontalDelta = event.scrollingDeltaX
         return abs(verticalDelta) > 0.01 && abs(verticalDelta) >= abs(horizontalDelta)
     }
 
@@ -344,19 +331,7 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
     }
 
     private func dispatchVerticalWheel(_ event: NSEvent) {
-        let now = ProcessInfo.processInfo.systemUptime
-        let streamIsActive = now <= legacyPixelStreamDeadline
-        let shouldUseLegacyPixels = !event.hasPreciseScrollingDeltas &&
-            (streamIsActive || AppKitTimelineWheelRouting.shouldStartLegacyPixelStream(for: event))
-        if shouldUseLegacyPixels {
-            legacyPixelStreamDeadline = now + 0.38
-        } else if event.hasPreciseScrollingDeltas {
-            legacyPixelStreamDeadline = 0
-        }
-        let delivery = AppKitTimelineWheelRouting.delivery(
-            for: event,
-            useLegacyPixelCompatibility: shouldUseLegacyPixels
-        )
+        let delivery = AppKitTimelineWheelRouting.delivery(for: event)
         if delivery.usedLegacyPixelCompatibility {
             legacyPixelCompatibilityCount += 1
         }
@@ -1502,14 +1477,6 @@ struct AppKitTimelineTable: NSViewRepresentable {
             scheduleMetricsReport()
         }
 
-        private func noteUserBoundsChange() {
-            guard geometryMutationDepth == 0 else { return }
-            isDiscreteScrolling = true
-            beginScrollIsolationIfNeeded()
-            scheduleDiscreteScrollSettle()
-            scheduleTopPagingEvaluation()
-        }
-
         private func noteWheelInput(_ sample: AppKitTimelineWheelSample) {
             guard geometryMutationDepth == 0 else { return }
             cancelInitialBottomPositioning(reason: "wheel-input")
@@ -1637,7 +1604,11 @@ struct AppKitTimelineTable: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.noteUserBoundsChange()
+                    // Bounds notifications also fire for table diffs, row-height
+                    // corrections, and explicit navigation. User interaction is
+                    // owned by wheel delivery and live-scroll notifications; do
+                    // not feed programmatic movement back into that state machine.
+                    self?.scheduleTopPagingEvaluation()
                     self?.scheduleMetricsReport()
                 }
             }
@@ -1821,6 +1792,7 @@ enum AppKitTimelineHarness {
             ("native-wheel-passthrough", checkNativeWheelPassthrough),
             ("native-legacy-wheel-behavior", checkNativeLegacyWheelBehavior),
             ("legacy-smooth-pixel-compatibility", checkLegacySmoothPixelCompatibility),
+            ("mixed-legacy-stream-stability", checkMixedLegacyStreamStability),
             ("native-overscroll-clamping", checkNativeOverscrollClamping),
             ("native-wheel-ownership", checkNativeWheelOwnership),
             ("hosted-wheel-single-dispatch", checkHostedWheelSingleDispatch),
@@ -2073,10 +2045,14 @@ enum AppKitTimelineHarness {
         let preciseDelivery = AppKitTimelineWheelRouting.delivery(for: preciseEvent)
         let legacyDelivery = AppKitTimelineWheelRouting.delivery(for: legacyEvent)
         guard preciseDelivery.event === preciseEvent,
-              legacyDelivery.event === legacyEvent,
+              legacyDelivery.event !== legacyEvent,
               preciseDelivery.deltaY == preciseEvent.scrollingDeltaY,
-              legacyDelivery.deltaY == legacyEvent.deltaY else {
-            return fail("native-wheel-passthrough", "wheel input was copied or transformed")
+              legacyDelivery.deltaY == legacyEvent.scrollingDeltaY,
+              legacyDelivery.usedLegacyPixelCompatibility else {
+            return fail(
+                "native-wheel-passthrough",
+                "precise input changed or legacy input retained row units"
+            )
         }
         return true
     }
@@ -2091,11 +2067,12 @@ enum AppKitTimelineHarness {
         fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
         fixture.settle()
         let originBefore = fixture.scrollView.documentVisibleRect.minY
+        let compatibilityBefore = owningScrollView.legacyPixelCompatibilityCount
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .line,
             wheelCount: 1,
-            wheel1: 5,
+            wheel1: 1,
             wheel2: 0,
             wheel3: 0
         ).flatMap(NSEvent.init(cgEvent:)),
@@ -2105,10 +2082,12 @@ enum AppKitTimelineHarness {
         owningScrollView.routeVerticalWheel(event)
         fixture.settle()
         let movement = abs(fixture.scrollView.documentVisibleRect.minY - originBefore)
-        guard movement > 0.5 else {
+        guard owningScrollView.legacyPixelCompatibilityCount == compatibilityBefore + 1,
+              movement >= 0.5,
+              movement <= 4 else {
             return fail(
                 "native-legacy-wheel-behavior",
-                "native legacy line event did not move movement=\(movement)"
+                "tiny legacy input was not normalized to one pixel movement=\(movement)"
             )
         }
         return true
@@ -2147,6 +2126,50 @@ enum AppKitTimelineHarness {
                 "legacy smooth input was not delivered as uncapped pixels " +
                     "movement=\(movement) compatibility=" +
                     "\(owningScrollView.legacyPixelCompatibilityCount - compatibilityBefore)"
+            )
+        }
+        return true
+    }
+
+    private static func checkMixedLegacyStreamStability() -> Bool {
+        let fixture = Fixture()
+        defer { fixture.stop() }
+        guard let owningScrollView = fixture.scrollView as? AppKitTimelineOwningScrollView else {
+            return fail("mixed-legacy-stream-stability", "timeline does not own its scroll view")
+        }
+        fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 4_000))
+        fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        fixture.settle()
+        let originBefore = fixture.scrollView.documentVisibleRect.minY
+        let compatibilityBefore = owningScrollView.legacyPixelCompatibilityCount
+
+        for delta in [1, 120, 1] {
+            guard let event = CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: .line,
+                wheelCount: 1,
+                wheel1: Int32(delta),
+                wheel2: 0,
+                wheel3: 0
+            ).flatMap(NSEvent.init(cgEvent:)) else {
+                return fail("mixed-legacy-stream-stability", "could not construct mixed stream")
+            }
+            owningScrollView.routeVerticalWheel(event)
+        }
+
+        fixture.settle()
+        let settledOrigin = fixture.scrollView.documentVisibleRect.minY
+        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+        let delayedOrigin = fixture.scrollView.documentVisibleRect.minY
+        let movement = abs(settledOrigin - originBefore)
+        guard owningScrollView.legacyPixelCompatibilityCount == compatibilityBefore + 3,
+              movement >= 118,
+              movement <= 130,
+              abs(delayedOrigin - settledOrigin) <= 0.5 else {
+            return fail(
+                "mixed-legacy-stream-stability",
+                "mixed stream moved outside delivery or continued asynchronously " +
+                    "movement=\(movement) delayed=\(delayedOrigin - settledOrigin)"
             )
         }
         return true
@@ -2446,11 +2469,25 @@ enum AppKitTimelineHarness {
     private static func checkDiscreteScrollIsolation() -> Bool {
         let fixture = Fixture()
         defer { fixture.stop() }
+        guard let owningScrollView = fixture.scrollView as? AppKitTimelineOwningScrollView else {
+            return fail("discrete-scroll-isolation", "timeline does not own its scroll view")
+        }
         let viewportHeight = fixture.scrollView.contentView.bounds.height
         let bottomY = max(0, fixture.tableView.bounds.maxY - viewportHeight)
         let targetY = max(0, bottomY - 420)
         fixture.scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
         fixture.scrollView.reflectScrolledClipView(fixture.scrollView.contentView)
+        guard let wheelEvent = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 1,
+            wheel1: 1,
+            wheel2: 0,
+            wheel3: 0
+        ).flatMap(NSEvent.init(cgEvent:)) else {
+            return fail("discrete-scroll-isolation", "could not construct wheel event")
+        }
+        owningScrollView.routeVerticalWheel(wheelEvent)
 
         let visibleRows = fixture.tableView.rows(in: fixture.tableView.visibleRect)
         guard visibleRows.location != NSNotFound,

@@ -19,6 +19,28 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-04 - Never Mix Row And Pixel Wheel Units
+
+- The first pixel-compatibility pass was incomplete. Production logs showed a
+  16-event smooth gesture with only 14 events normalized. The first two small
+  non-precise events still entered `NSTableView` as legacy row units; with a
+  tall variable-height message, AppKit continued that row animation after the
+  gesture and produced viewport jumps with `wheel_delta=0`.
+- Every non-precise vertical wheel event is now copied as a continuous pixel
+  event with the driver's magnitude unchanged. There is no threshold, scale,
+  damping curve, or maximum delta. Precise events still pass through unchanged.
+- `NSView.boundsDidChangeNotification` is no longer treated as proof of user
+  input. Table diffs, row-height corrections, and explicit navigation all emit
+  that notification; feeding it back into scroll isolation created a second
+  scroll owner. Wheel delivery and AppKit live-scroll notifications now own
+  interaction state, while bounds changes only update metrics and top paging.
+- Added a mixed-stream regression (`1 -> 120 -> 1`) that requires all three
+  events to move as pixels and forbids delayed document movement after settle.
+- A live eight-second sample showed the cache/projection path at 1-4 ms and the
+  process mostly idle. The immediate corruption is therefore input/ownership,
+  not transcript decoding. SwiftUI hosted-row sizing remains the next rewrite
+  boundary only if spontaneous movement survives these invariants.
+
 ## 2026-07-04 - Restore Pixel Semantics For Mislabelled Smooth Wheel Input
 
 - User reported constant timeline flicker/corruption while scrolling after the
