@@ -19,6 +19,22 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-04 - Never Read Keychain During AppStore Initialization
+
+- A freshly rebuilt production bundle appeared not to launch and emitted no
+  new app log. A process sample showed the main thread blocked before SwiftUI
+  created a window: `AppStore.init -> ZenithTokenStore.load ->
+  SecItemCopyMatching`, waiting on Keychain authorization for the new signing
+  identity.
+- `AppStore` now starts with an empty in-memory token and launches the Keychain
+  lookup in a detached task. `startLiveTracking()` awaits that result before
+  its first server refresh, so authentication ordering is preserved without
+  blocking window creation or logging.
+- Applying server settings marks credential loading complete and discards any
+  late Keychain result, so a user-entered token always wins.
+- `ZenithGuardrails` rejects synchronous `ZenithTokenStore.load()` use in the
+  Mac store initializer and requires the asynchronous load gate.
+
 ## 2026-07-04 - Never Mix Row And Pixel Wheel Units
 
 - The first pixel-compatibility pass was incomplete. Production logs showed a

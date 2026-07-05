@@ -1544,7 +1544,8 @@ func checkMacTimelineScrollPerformanceGuards() throws {
     try assert(appKitTimeline.contains("cancelScheduledMetricsReport()\n                cancelInitialBottomPositioning(reason: \"session-change\")"), "Chat switches must cancel viewport metrics scheduled by the previous document")
     try assert(timeline.contains("guard store.loadedSessionID == store.selectedSessionID else { return }"), "Bottom-button metrics must only come from the selected chat's loaded timeline")
     try assert(timeline.contains("#if AGENTSDOCK_APPKIT_TIMELINE\n        withTransaction(noAnimationTransaction)"), "Native bottom navigation must not animate the SwiftUI representable transaction")
-    try assert(macStore.contains("CommandLine.arguments.contains(\"--timeline-harness\")") && macStore.contains("? \"\"") && macStore.contains(": ZenithTokenStore.load()"), "The hidden native timeline harness must not block on production Keychain authorization")
+    try assert(!macStore.contains("@Published var accessToken = ZenithTokenStore.load()") && !macStore.contains(": ZenithTokenStore.load()"), "AppStore initialization must never block the main thread on Keychain authorization")
+    try assert(macStore.contains("storedAccessTokenLoadTask = Task.detached") && macStore.contains("await loadStoredAccessTokenIfNeeded()"), "Production credentials must load off-main before the first server refresh")
     guard let wheelDispatchStart = appKitTimeline.range(of: "private func dispatchVerticalWheel"),
           let wheelDispatchEnd = appKitTimeline.range(
               of: "\n    }\n}",

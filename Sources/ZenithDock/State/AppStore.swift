@@ -30,9 +30,7 @@ struct PinnedTimelineItem: Codable, Identifiable, Hashable, Sendable {
 @MainActor
 final class AppStore: ObservableObject {
     @Published var serverURLString = UserDefaults.standard.string(forKey: "serverURL") ?? defaultAgentServerURLString
-    @Published var accessToken = CommandLine.arguments.contains("--timeline-harness")
-        ? ""
-        : ZenithTokenStore.load()
+    @Published var accessToken = ""
     @Published var sessions: [ZSession] = [] {
         didSet {
             invalidateSidebarDerived()
@@ -122,6 +120,8 @@ final class AppStore: ObservableObject {
     private var webSocketSessionID: String?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
+    private var storedAccessTokenLoaded = false
+    private var storedAccessTokenLoadTask: Task<String, Never>?
     private var latestSeenSeq = 0
     private var pendingCacheWrite: Task<Void, Never>?
     private var pendingScrollRequest: Task<Void, Never>?
@@ -240,6 +240,13 @@ final class AppStore: ObservableObject {
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
         pinnedItemsBySessionID = loadPinnedItems()
+        if CommandLine.arguments.contains("--timeline-harness") {
+            storedAccessTokenLoaded = true
+        } else {
+            storedAccessTokenLoadTask = Task.detached(priority: .userInitiated) {
+                ZenithTokenStore.load()
+            }
+        }
     }
 
     var api: APIClient {
@@ -1381,6 +1388,9 @@ final class AppStore: ObservableObject {
         let newEndpoint = ZenithServerURL.normalized(cleanURL, default: defaultAgentServerURLString)
         serverURLString = cleanURL
         serverIdentity = Self.loadServerIdentity(for: cleanURL)
+        storedAccessTokenLoaded = true
+        storedAccessTokenLoadTask?.cancel()
+        storedAccessTokenLoadTask = nil
         self.accessToken = accessToken
         rememberServerURL()
         rememberAccessToken()
@@ -1486,6 +1496,7 @@ final class AppStore: ObservableObject {
     }
 
     func startLiveTracking() async {
+        await loadStoredAccessTokenIfNeeded()
         configureUnreadNotificationsIfNeeded()
         guard !liveTrackingStarted else {
             AppLogger.info("start live tracking skipped existing loop")
@@ -1513,6 +1524,21 @@ final class AppStore: ObservableObject {
                 connectEvents(sessionID: sid, after: lastSeq)
             }
         }
+    }
+
+    private func loadStoredAccessTokenIfNeeded() async {
+        guard !storedAccessTokenLoaded else { return }
+        let task = storedAccessTokenLoadTask ?? Task.detached(priority: .userInitiated) {
+            ZenithTokenStore.load()
+        }
+        let token = await task.value
+        storedAccessTokenLoadTask = nil
+        guard !storedAccessTokenLoaded else { return }
+        storedAccessTokenLoaded = true
+        if accessToken.isEmpty {
+            accessToken = token
+        }
+        AppLogger.info("stored access token loaded asynchronously")
     }
 
     private func configureUnreadNotificationsIfNeeded() {
