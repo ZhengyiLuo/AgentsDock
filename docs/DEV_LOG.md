@@ -45,6 +45,17 @@ painful to rediscover later.
   archives retain their sandbox entitlements through the Xcode archive path.
   `ZENITHDOCK_LOCAL_ENTITLEMENTS` remains available for explicit sandbox tests.
 
+## 2026-07-04 - Measure Driver Units Before Tuning Scroll Feel
+
+- A production trace after the mixed-unit fix showed delivered wheel distance
+  and viewport movement matching 1:1 except at the document boundary. The user
+  still described the result as capped, so magnitude alone is insufficient to
+  identify whether the input driver intends line or point semantics.
+- Scroll-settle diagnostics now aggregate the original CGEvent line, point, and
+  fixed-point deltas alongside the delivered distance. Do not add another
+  multiplier, threshold, or speed curve until those fields are observed from
+  the actual device.
+
 ## 2026-07-04 - Never Mix Row And Pixel Wheel Units
 
 - The first pixel-compatibility pass was incomplete. Production logs showed a

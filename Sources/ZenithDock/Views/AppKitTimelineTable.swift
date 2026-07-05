@@ -167,6 +167,9 @@ private struct AppKitTimelinePagingController {
 private struct AppKitTimelineWheelSample {
     let beginsGesture: Bool
     let deltaY: CGFloat
+    let rawLineDeltaY: CGFloat
+    let rawPointDeltaY: CGFloat
+    let rawFixedDeltaY: CGFloat
     let isPrecise: Bool
     let usedLegacyPixelCompatibility: Bool
 }
@@ -174,10 +177,33 @@ private struct AppKitTimelineWheelSample {
 private enum AppKitTimelineWheelRouting {
     static func delivery(
         for event: NSEvent
-    ) -> (event: NSEvent, deltaY: CGFloat, usedLegacyPixelCompatibility: Bool) {
+    ) -> (
+        event: NSEvent,
+        deltaY: CGFloat,
+        rawLineDeltaY: CGFloat,
+        rawPointDeltaY: CGFloat,
+        rawFixedDeltaY: CGFloat,
+        usedLegacyPixelCompatibility: Bool
+    ) {
+        let rawLineDeltaY = CGFloat(
+            event.cgEvent?.getIntegerValueField(.scrollWheelEventDeltaAxis1) ?? 0
+        )
+        let rawPointDeltaY = CGFloat(
+            event.cgEvent?.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) ?? 0
+        )
+        let rawFixedDeltaY = CGFloat(
+            Double(event.cgEvent?.getIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1) ?? 0) / 65_536
+        )
         guard !event.hasPreciseScrollingDeltas,
               let copiedEvent = event.cgEvent?.copy() else {
-            return (event, event.scrollingDeltaY, false)
+            return (
+                event,
+                event.scrollingDeltaY,
+                rawLineDeltaY,
+                rawPointDeltaY,
+                rawFixedDeltaY,
+                false
+            )
         }
 
         // A variable-height table cannot safely mix row-based and pixel-based
@@ -188,9 +214,23 @@ private enum AppKitTimelineWheelRouting {
         setPixelDelta(event.scrollingDeltaY, axis: 1, in: copiedEvent)
         setPixelDelta(event.scrollingDeltaX, axis: 2, in: copiedEvent)
         guard let pixelEvent = NSEvent(cgEvent: copiedEvent) else {
-            return (event, event.deltaY, false)
+            return (
+                event,
+                event.deltaY,
+                rawLineDeltaY,
+                rawPointDeltaY,
+                rawFixedDeltaY,
+                false
+            )
         }
-        return (pixelEvent, pixelEvent.scrollingDeltaY, true)
+        return (
+            pixelEvent,
+            pixelEvent.scrollingDeltaY,
+            rawLineDeltaY,
+            rawPointDeltaY,
+            rawFixedDeltaY,
+            true
+        )
     }
 
     private static func setPixelDelta(_ value: CGFloat, axis: Int, in event: CGEvent) {
@@ -335,6 +375,9 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: true,
             deltaY: 1,
+            rawLineDeltaY: 1,
+            rawPointDeltaY: 1,
+            rawFixedDeltaY: 1,
             isPrecise: true,
             usedLegacyPixelCompatibility: false
         ))
@@ -348,6 +391,9 @@ private final class AppKitTimelineOwningScrollView: NSScrollView {
         onVerticalWheel?(AppKitTimelineWheelSample(
             beginsGesture: event.phase.contains(.began),
             deltaY: delivery.deltaY,
+            rawLineDeltaY: delivery.rawLineDeltaY,
+            rawPointDeltaY: delivery.rawPointDeltaY,
+            rawFixedDeltaY: delivery.rawFixedDeltaY,
             isPrecise: event.hasPreciseScrollingDeltas,
             usedLegacyPixelCompatibility: delivery.usedLegacyPixelCompatibility
         ))
@@ -443,6 +489,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
         private var liveScrollUnknownHeightCount = 0
         private var liveScrollConfiguredCellCount = 0
         private var liveScrollDeltaTotal: CGFloat = 0
+        private var liveScrollRawLineDeltaTotal: CGFloat = 0
+        private var liveScrollRawPointDeltaTotal: CGFloat = 0
+        private var liveScrollRawFixedDeltaTotal: CGFloat = 0
         private var liveScrollWheelEventCount = 0
         private var liveScrollPreciseEventCount = 0
         private var liveScrollLegacyPixelEventCount = 0
@@ -1448,6 +1497,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             liveScrollUnknownHeightCount = 0
             liveScrollConfiguredCellCount = 0
             liveScrollDeltaTotal = 0
+            liveScrollRawLineDeltaTotal = 0
+            liveScrollRawPointDeltaTotal = 0
+            liveScrollRawFixedDeltaTotal = 0
             liveScrollWheelEventCount = 0
             liveScrollPreciseEventCount = 0
             liveScrollLegacyPixelEventCount = 0
@@ -1475,6 +1527,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
                     "->\(Self.format(originBeforeSettle)) " +
                     "duration_ms=\(Self.format(duration * 1_000)) " +
                     "wheel_delta=\(Self.format(liveScrollDeltaTotal)) " +
+                    "raw_line=\(Self.format(liveScrollRawLineDeltaTotal)) " +
+                    "raw_point=\(Self.format(liveScrollRawPointDeltaTotal)) " +
+                    "raw_fixed=\(Self.format(liveScrollRawFixedDeltaTotal)) " +
                     "wheel_events=\(liveScrollWheelEventCount) " +
                     "precise=\(liveScrollPreciseEventCount) " +
                     "legacy_pixels=\(liveScrollLegacyPixelEventCount) " +
@@ -1494,6 +1549,9 @@ struct AppKitTimelineTable: NSViewRepresentable {
             isDiscreteScrolling = true
             beginScrollIsolationIfNeeded()
             liveScrollDeltaTotal += abs(sample.deltaY)
+            liveScrollRawLineDeltaTotal += abs(sample.rawLineDeltaY)
+            liveScrollRawPointDeltaTotal += abs(sample.rawPointDeltaY)
+            liveScrollRawFixedDeltaTotal += abs(sample.rawFixedDeltaY)
             liveScrollWheelEventCount += 1
             if sample.isPrecise {
                 liveScrollPreciseEventCount += 1
