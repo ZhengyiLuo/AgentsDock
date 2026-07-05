@@ -48,12 +48,15 @@ if [[ -n "${SIGN_IDENTITY}" ]]; then
   if [[ "${SIGN_IDENTITY}" == "-" ]]; then
     codesign --force --sign - "${DIST_APP}"
   else
-    codesign \
-      --force \
-      --sign "${SIGN_IDENTITY}" \
-      --options runtime \
-      --entitlements "${ROOT}/Apps/ZenithDockMac/ZenithDockMac.entitlements" \
-      "${DIST_APP}"
+    SIGN_ARGS=(
+      --force
+      --sign "${SIGN_IDENTITY}"
+      --options runtime
+    )
+    if [[ -n "${ZENITHDOCK_LOCAL_ENTITLEMENTS:-}" ]]; then
+      SIGN_ARGS+=(--entitlements "${ZENITHDOCK_LOCAL_ENTITLEMENTS}")
+    fi
+    codesign "${SIGN_ARGS[@]}" "${DIST_APP}"
   fi
 fi
 

@@ -39,6 +39,11 @@ painful to rediscover later.
   successive local builds a stable designated requirement instead of a new
   ad-hoc identity every time. Set `ZENITHDOCK_CODESIGN_IDENTITY=-` to request
   ad-hoc signing explicitly on a machine without a usable development setup.
+- Stable local signing intentionally does not apply the App Store sandbox
+  entitlements: doing so silently moves local settings, logs, and chat caches
+  into the container and makes the normal `dist` app appear reset. TestFlight
+  archives retain their sandbox entitlements through the Xcode archive path.
+  `ZENITHDOCK_LOCAL_ENTITLEMENTS` remains available for explicit sandbox tests.
 
 ## 2026-07-04 - Never Mix Row And Pixel Wheel Units
 
