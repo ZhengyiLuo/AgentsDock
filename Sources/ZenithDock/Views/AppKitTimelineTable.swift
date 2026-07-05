@@ -240,6 +240,11 @@ private final class AppKitTimelineRowHeightKey: NSObject {
 }
 
 private final class AppKitTimelineClampingClipView: NSClipView {
+    override func setBoundsOrigin(_ newOrigin: NSPoint) {
+        let proposedBounds = NSRect(origin: newOrigin, size: bounds.size)
+        super.setBoundsOrigin(constrainBoundsRect(proposedBounds).origin)
+    }
+
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
         guard let documentView else { return bounds }
