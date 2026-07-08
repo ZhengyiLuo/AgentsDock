@@ -200,6 +200,8 @@ public enum ZRuntimeCatalog {
         "claude": ZRuntimeBackendCatalog(
             models: [
                 ZRuntimeOption(value: "", label: "Sonnet"),
+                ZRuntimeOption(value: "fable", label: "Fable"),
+                ZRuntimeOption(value: "claude-fable-5", label: "Fable 5"),
                 ZRuntimeOption(value: "sonnet", label: "Sonnet"),
                 ZRuntimeOption(value: "opus", label: "Opus"),
                 ZRuntimeOption(value: "opus[1m]", label: "Opus 1M"),
