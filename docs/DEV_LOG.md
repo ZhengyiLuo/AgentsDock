@@ -6804,6 +6804,9 @@ Follow-up from rapid-switch stress:
 - Added a compact server-side semantic-turn index, cached by transcript file
   signature. Long conversations can expose their complete navigation map
   without sending or rendering every trace event and message body.
+- Active transcripts extend that in-memory index from the previous byte offset
+  under a per-session build lock, avoiding a full JSONL rescan after every new
+  streamed event or simultaneous request from two devices.
 - Selecting an unloaded landmark fetches a bounded history window around that
   sequence. Historical inspection is isolated from the live tail and offers an
   explicit return-to-latest action instead of merging distant ranges into the
@@ -6811,5 +6814,7 @@ Follow-up from rapid-switch stress:
 - Corrected two read/position regressions: opening a manually unread chat now
   clears that override, and a saved row missing from the cached tail falls back
   to the latest message instead of the top of the tail.
+- Replaced the boxed visible-range bracket with short white visible ticks and a
+  single longer current-position stroke, matching the lightweight Codex rail.
 - Regression suite: 44 tests across ten files, including invariant rail spacing,
   whole-index merging, manual-unread clearing, and missing-bookmark fallback.

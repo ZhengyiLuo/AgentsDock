@@ -91,6 +91,7 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
     const firstDrawn = clamp(Math.floor((offset - TRACK_TOP) / TIMELINE_TICK_PITCH) - 1, 0, Math.max(0, landmarks.length - 1))
     const lastDrawn = clamp(Math.ceil((offset + height - TRACK_TOP) / TIMELINE_TICK_PITCH) + 1, 0, Math.max(0, landmarks.length - 1))
     const visible = visiblePositions()
+    const currentPosition = visible ? Math.round((visible[0] + visible[1]) / 2) : -1
 
     for (let position = firstDrawn; position <= lastDrawn; position += 1) {
       const landmark = landmarks[position]
@@ -100,22 +101,10 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
       const isHovered = hoveredPositionRef.current === position
       const emphasized = inViewport || isHovered
       context.fillStyle = emphasized ? '#e8e8e5' : landmark.kind === 'error' ? '#94514d' : '#595957'
-      context.fillRect(emphasized ? 8 : 16, Math.round(y), emphasized ? isHovered ? 25 : 18 : 7, 1)
-    }
-
-    if (visible) {
-      const y1 = timelineTickY(visible[0], offset)
-      const y2 = timelineTickY(visible[1], offset)
-      context.strokeStyle = '#e8e8e5'
-      context.lineWidth = 1
-      context.beginPath()
-      context.moveTo(6.5, y1)
-      context.lineTo(6.5, y2)
-      context.moveTo(6.5, y1 + 0.5)
-      context.lineTo(31, y1 + 0.5)
-      context.moveTo(6.5, y2 + 0.5)
-      context.lineTo(31, y2 + 0.5)
-      context.stroke()
+      const isCurrent = position === currentPosition
+      const x = isHovered || isCurrent ? 6 : inViewport ? 10 : 16
+      const tickWidth = isHovered ? 29 : isCurrent ? 26 : inViewport ? 16 : 7
+      context.fillRect(x, Math.round(y), tickWidth, isCurrent ? 2 : 1)
     }
 
     if (offset > 0) {
