@@ -156,6 +156,8 @@ final class AppStore: ObservableObject {
     private var lastScrollRequestAt = Date.distantPast
     private var sessionFilesNextOffset = 0
     private var sessionMediaCacheRebuildScheduled = false
+    private var attachmentHydrationInFlight: Set<String> = []
+    private var attachmentHydrationMisses: Set<String> = []
     private var lastSeq: Int { max(latestSeenSeq, events.map(\.seq).max() ?? 0) }
     private let maxMemoryCachedChats = 32
     private let streamBackfillMaskThreshold = 18
@@ -1872,6 +1874,9 @@ final class AppStore: ObservableObject {
         if tmuxSnapshot != nil { tmuxSnapshot = nil }
         if tmuxCapture != nil { tmuxCapture = nil }
         markSessionRead(sessionID)
+        if loadedFromCache {
+            hydrateReferencedFilesIfNeeded(from: events)
+        }
         AppLogger.info("select session=\(sessionID)")
         if !loadedFromCache {
             events = []
@@ -2086,6 +2091,7 @@ final class AppStore: ObservableObject {
             markSessionRead(sessionID)
             setStatus("Loaded latest chat")
             refreshSessionFilesFromLoadedEvents()
+            hydrateReferencedFilesIfNeeded(from: events)
             loadedSessionID = sessionID
             markTimelineTailVerified(sessionID: sessionID)
             AppLogger.info("selected session=\(sessionID) events=\(events.count) omitted_before=\(omittedHistoryEventCount)")
@@ -2229,6 +2235,7 @@ final class AppStore: ObservableObject {
             }
             if !acceptedOlder.isEmpty {
                 refreshSessionFilesFromLoadedEvents()
+                hydrateReferencedFilesIfNeeded(from: acceptedOlder)
                 rebuildDisplayEvents()
             }
             if !acceptedOlder.isEmpty || omittedCountChanged {
@@ -3476,6 +3483,7 @@ final class AppStore: ObservableObject {
                 shouldSaveCache = true
             }
         }
+        hydrateReferencedFilesIfNeeded(from: newEvents)
         if shouldRebuildDisplayEvents(for: newEvents) {
             rebuildDisplayEvents()
         }
@@ -3550,6 +3558,7 @@ final class AppStore: ObservableObject {
         if let artifact = event.artifact {
             upsertSessionFile(artifact)
         }
+        hydrateReferencedFilesIfNeeded(from: [event])
         if event.type != "raw_event" {
             saveSelectedChatCache()
         }
@@ -3615,6 +3624,7 @@ final class AppStore: ObservableObject {
         }
         latestSeenSeq = max(latestSeenSeq, incoming.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
+        hydrateReferencedFilesIfNeeded(from: newEvents)
         if shouldRebuildDisplayEvents(for: newEvents) {
             rebuildDisplayEvents()
         }
@@ -3640,6 +3650,7 @@ final class AppStore: ObservableObject {
         }
         latestSeenSeq = max(latestSeenSeq, incoming.seq)
         refreshSessionFilesFromLoadedEvents()
+        hydrateReferencedFilesIfNeeded(from: incomingEvents)
         if shouldRebuildDisplayEvents(for: newEvents) {
             rebuildDisplayEvents()
         }
@@ -3738,6 +3749,7 @@ final class AppStore: ObservableObject {
         }
         latestSeenSeq = max(response.latest_seq ?? 0, events.map(\.seq).max() ?? 0)
         refreshSessionFilesFromLoadedEvents()
+        hydrateReferencedFilesIfNeeded(from: events)
         rebuildDisplayEvents()
         if shouldMaskLargeBatch {
             scheduleLargeTimelineBatchReveal()
@@ -3806,6 +3818,7 @@ final class AppStore: ObservableObject {
         sessionFilesHasMore = false
         sessionFilesNextOffset = 0
         refreshSessionFilesFromLoadedEvents()
+        hydrateReferencedFilesIfNeeded(from: events)
         loadedSessionID = cached.session.id
         latestSeenSeq = events.map(\.seq).max() ?? 0
         rebuildDisplayEvents()
@@ -3871,6 +3884,7 @@ final class AppStore: ObservableObject {
     }
 
     private func upsertSessionFile(_ file: ZFile) {
+        attachmentHydrationMisses.remove(file.id)
         let nextFiles = mergedFiles(sessionFiles + [file])
         if sessionFiles != nextFiles {
             sessionFiles = nextFiles
@@ -4011,6 +4025,48 @@ final class AppStore: ObservableObject {
             saveSelectedChatCache()
         } catch {
             AppLogger.error("images failed session=\(sessionID) \(serverErrorMessage(error) ?? "\(error)")")
+        }
+    }
+
+    private func hydrateReferencedFilesIfNeeded(from source: [ZEvent]) {
+        guard let sessionID = selectedSessionID, !source.isEmpty else { return }
+        let selectedEvents = source.filter { $0.session_id == sessionID }
+        guard !selectedEvents.isEmpty else { return }
+        let referencedIDs = selectedEvents.flatMap { $0.file_ids ?? [] }
+        guard !referencedIDs.isEmpty else { return }
+        let knownIDs = Set((sessionFiles + sessionVideoFiles + sessionImageFiles + uploads + files(from: events)).map(\.id))
+        let missing = referencedIDs.filter { fileID in
+            !knownIDs.contains(fileID) &&
+            !attachmentHydrationInFlight.contains(fileID) &&
+            !attachmentHydrationMisses.contains(fileID)
+        }
+        guard !missing.isEmpty else { return }
+        let generation = selectionGeneration
+        for fileID in Array(Set(missing)).prefix(12) {
+            attachmentHydrationInFlight.insert(fileID)
+            Task { @MainActor [weak self] in
+                await self?.hydrateReferencedFile(sessionID: sessionID, fileID: fileID, generation: generation)
+            }
+        }
+    }
+
+    private func hydrateReferencedFile(sessionID: String, fileID: String, generation: Int) async {
+        defer { attachmentHydrationInFlight.remove(fileID) }
+        do {
+            struct Response: Codable { let event: ZEvent }
+            let res: Response = try await api.get("/api/sessions/\(sessionID)/files/\(fileID)/event")
+            guard selectedSessionID == sessionID, selectionGeneration == generation else { return }
+            if let file = res.event.file {
+                upsertSessionFile(file)
+            }
+            if let artifact = res.event.artifact {
+                upsertSessionFile(artifact)
+            }
+            refreshSessionFilesFromLoadedEvents()
+            saveSelectedChatCache()
+        } catch {
+            attachmentHydrationMisses.insert(fileID)
+            AppLogger.warning("attachment hydrate failed session=\(sessionID) file=\(fileID) \(serverErrorMessage(error) ?? "\(error)")")
         }
     }
 

@@ -1268,6 +1268,9 @@ func checkPromptImageAttachments() throws {
 
     try assert(macStore.contains("func promptFiles(for event: ZEvent)"), "Mac store must resolve turn file_ids into prompt attachments")
     try assert(mobileStore.contains("func promptFiles(for event: ZEvent)"), "iOS store must resolve turn file_ids into prompt attachments")
+    try assert(macStore.contains("hydrateReferencedFilesIfNeeded(from:") && macStore.contains("/files/\\(fileID)/event"), "Mac store must hydrate prompt file_ids that are missing from local file pages")
+    try assert(mobileStore.contains("hydrateReferencedFilesIfNeeded(from:") && mobileStore.contains("/files/\\(fileID)/event"), "iOS store must hydrate prompt file_ids that are missing from local file pages")
+    try assert(macStore.contains("attachmentHydrationInFlight") && mobileStore.contains("attachmentHydrationInFlight"), "Attachment hydration must be bounded and deduped across devices")
     try assert(macTimeline.contains("MessageAttachment(file: $0, url: store.fileURL($0))"), "Mac timeline must pass prompt attachments into user bubbles")
     try assert(macEvents.contains("MessageAttachmentStrip"), "Mac user bubbles must render prompt attachments")
     try assert(macEvents.contains("attachment.file.content_type?.hasPrefix(\"image/\") == true"), "Mac prompt attachments must render image thumbnails")
