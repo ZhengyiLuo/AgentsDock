@@ -97,14 +97,10 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
       const landmark = landmarks[position]
       if (!landmark) continue
       const y = timelineTickY(position, offset)
-      const inViewport = Boolean(visible && position >= visible[0] && position <= visible[1])
       const isHovered = hoveredPositionRef.current === position
-      const emphasized = inViewport || isHovered
-      context.fillStyle = emphasized ? '#e8e8e5' : landmark.kind === 'error' ? '#94514d' : '#595957'
       const isCurrent = position === currentPosition
-      const x = isHovered || isCurrent ? 6 : inViewport ? 10 : 16
-      const tickWidth = isHovered ? 29 : isCurrent ? 26 : inViewport ? 16 : 7
-      context.fillRect(x, Math.round(y), tickWidth, isCurrent ? 2 : 1)
+      context.fillStyle = isHovered ? '#e8e8e5' : isCurrent ? '#b8b8b5' : landmark.kind === 'error' ? '#94514d' : '#595957'
+      context.fillRect(isHovered ? 7 : isCurrent ? 10 : 16, Math.round(y), isHovered ? 27 : isCurrent ? 19 : 7, 1)
     }
 
     if (offset > 0) {

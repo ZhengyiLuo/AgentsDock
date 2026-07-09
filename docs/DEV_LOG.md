@@ -6815,6 +6815,10 @@ Follow-up from rapid-switch stress:
   clears that override, and a saved row missing from the cached tail falls back
   to the latest message instead of the top of the tail.
 - Replaced the boxed visible-range bracket with short white visible ticks and a
-  single longer current-position stroke, matching the lightweight Codex rail.
+  single lightly emphasized current-position stroke, matching the lightweight
+  Codex rail without turning the viewport into a selection box.
+- Historical-window state now survives background cache-generation repairs.
+  Generation changes remount only the virtual row list; they no longer remount
+  the owning chat component and silently return an inspected old turn to live.
 - Regression suite: 44 tests across ten files, including invariant rail spacing,
   whole-index merging, manual-unread clearing, and missing-bookmark fallback.

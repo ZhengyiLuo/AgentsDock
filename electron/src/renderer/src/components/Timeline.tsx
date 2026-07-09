@@ -35,7 +35,7 @@ export function Timeline() {
     ? <div className="timeline-loading"><LoaderCircle className="spin" size={18} /><span>Loading this chat for the first time</span></div>
     : <div className="timeline-pending" />
   if (!snapshot) return <div className="timeline-empty"><h2>Conversation unavailable</h2><button className="primary-button" onClick={() => void useAppStore.getState().selectSession(sessionId)}>Try again</button></div>
-  return <TimelineSession key={`${sessionId}:${snapshot.generation ?? 0}`} sessionId={sessionId} snapshot={snapshot} />
+  return <TimelineSession key={sessionId} sessionId={sessionId} snapshot={snapshot} />
 }
 
 function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot: SessionSnapshot }) {
@@ -69,7 +69,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const [historicalWindow, setHistoricalWindow] = useState<HistoricalWindow | null>(null)
   const [seekingHistory, setSeekingHistory] = useState(false)
 
-  const sourceKey = historicalWindow ? `history:${historicalWindow.anchorSeq}` : 'live'
+  const sourceKey = historicalWindow ? `history:${historicalWindow.anchorSeq}` : `live:${snapshot.generation ?? 0}`
   const sourceEvents = historicalWindow?.page.events ?? snapshot.events
 
   const items = useMemo(() => {
