@@ -12,6 +12,7 @@ import type {
   ResumeSessionInput,
   RuntimeCatalog,
   Session,
+  TimelineIndex,
   TimelinePage,
   TmuxPane,
   UpdateJobInput,
@@ -122,6 +123,10 @@ export class AgentServerClient {
       events_omitted_before: response.events_omitted_before ?? 0,
       events_omitted_after: response.events_omitted_after ?? 0
     }
+  }
+
+  async timelineIndex(sessionId: string): Promise<TimelineIndex> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/timeline-index`)
   }
 
   async importHistory(sessionId: string, force = false): Promise<TimelinePage> {

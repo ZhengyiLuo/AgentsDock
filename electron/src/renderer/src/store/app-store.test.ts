@@ -112,6 +112,30 @@ describe('chat selection', () => {
   })
 })
 
+describe('read state', () => {
+  it('clears a manual unread marker when the open chat is read', async () => {
+    const unread: Session = {
+      ...sessionFor('chat-a'), latest_agent_event_seq: 12, last_read_agent_event_seq: 11, manual_unread: true
+    }
+    const updated: Session = { ...unread, last_read_agent_event_seq: 12, manual_unread: false }
+    const markRead = vi.fn().mockResolvedValue(updated)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { sessions: { markRead } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-a', sessions: [unread],
+      snapshots: { 'chat-a': { ...snapshot('chat-a', [eventFor('chat-a', 12)]), session: unread } }
+    })
+
+    await useAppStore.getState().markRead('chat-a')
+
+    expect(markRead).toHaveBeenCalledWith('chat-a', 12)
+    expect(useAppStore.getState().sessions[0].manual_unread).toBe(false)
+    expect(useAppStore.getState().snapshots['chat-a'].session.manual_unread).toBe(false)
+  })
+})
+
 describe('event merging', () => {
   it('retains the existing array and objects for equivalent server events', () => {
     const existing = [eventFor('chat-a', 1), eventFor('chat-a', 2)]

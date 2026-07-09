@@ -6795,3 +6795,21 @@ Follow-up from rapid-switch stress:
 - Regression suite: 38 tests across nine files. Packaged renderer probes verified
   painted canvas output, turn-level hover previews, wheel scrolling, and direct
   seek movement.
+
+## 2026-07-09 - Fixed-pitch whole-chat navigator
+
+- Replaced proportional landmark compression with a fixed 12-point tick pitch.
+  The 40-point rail remains attached to the timeline's left edge and scrolls
+  internally, so neither its geometry nor spacing changes as history grows.
+- Added a compact server-side semantic-turn index, cached by transcript file
+  signature. Long conversations can expose their complete navigation map
+  without sending or rendering every trace event and message body.
+- Selecting an unloaded landmark fetches a bounded history window around that
+  sequence. Historical inspection is isolated from the live tail and offers an
+  explicit return-to-latest action instead of merging distant ranges into the
+  contiguous cache.
+- Corrected two read/position regressions: opening a manually unread chat now
+  clears that override, and a saved row missing from the cached tail falls back
+  to the latest message instead of the top of the tail.
+- Regression suite: 44 tests across ten files, including invariant rail spacing,
+  whole-index merging, manual-unread clearing, and missing-bookmark fallback.

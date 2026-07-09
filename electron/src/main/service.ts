@@ -27,6 +27,7 @@ import type {
   ServerSettings,
   Session,
   SessionSnapshot,
+  TimelineIndex,
   TimelinePage,
   TmuxPane,
   UpdateSessionInput,
@@ -67,6 +68,7 @@ export class AppService {
   private filesRefreshInFlight = new Set<string>()
   private filesRefreshedAt = new Map<string, number>()
   private fileDownloads = new Map<string, Promise<string>>()
+  private timelineIndexes = new Map<string, TimelineIndex>()
 
   constructor() {
     appLog('startup', 'loading settings')
@@ -242,6 +244,39 @@ export class AppService {
     this.cache.putEvents(this.serverId, sessionId, page.events)
     this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more), page.latest_seq)
     return page
+  }
+
+  async timelineAround(sessionId: string, anchorSeq: number, limit = INITIAL_TAIL_EVENT_LIMIT): Promise<TimelinePage> {
+    const boundedLimit = Math.max(40, Math.min(600, limit))
+    const olderLimit = Math.floor(boundedLimit / 2)
+    const newerLimit = boundedLimit - olderLimit
+    const [older, newer] = await Promise.all([
+      this.client.sessionPage(sessionId, { before: anchorSeq, limit: olderLimit, tail: true, visible: true }),
+      this.client.sessionPage(sessionId, { after: Math.max(0, anchorSeq - 1), limit: newerLimit, tail: false, visible: true })
+    ])
+    const events = mergeEventsBySequence(older.events, newer.events)
+    const timeline = this.cache.timelineState(this.serverId, sessionId)
+    return {
+      session: newer.session ?? older.session,
+      events,
+      queued_turns: newer.queued_turns ?? older.queued_turns ?? [],
+      has_more: Boolean(older.has_more),
+      before: events[0]?.seq ?? null,
+      total: timeline?.knownTotal ?? null,
+      latest_seq: timeline?.verifiedLatestSeq ?? newer.latest_seq ?? older.latest_seq ?? null,
+      events_omitted_before: older.events_omitted_before ?? 0,
+      events_omitted_after: newer.events_omitted_after ?? 0
+    }
+  }
+
+  async timelineIndex(sessionId: string): Promise<TimelineIndex> {
+    const cached = this.timelineIndexes.get(`${this.serverId}:${sessionId}`)
+    const session = this.sessions.find(candidate => candidate.id === sessionId)
+    const expectedLatest = session?.latest_event_seq ?? 0
+    if (cached && cached.latest_seq >= expectedLatest) return cached
+    const index = await this.client.timelineIndex(sessionId)
+    this.timelineIndexes.set(`${this.serverId}:${sessionId}`, index)
+    return index
   }
 
   async subscribeTimeline(sessionId: string, after: number): Promise<void> {
@@ -705,6 +740,12 @@ function insertAfter(sessions: Session[], session: Session, parentId: string): S
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 function jsonEqual(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b) }
+
+function mergeEventsBySequence(...pages: Event[][]): Event[] {
+  const byId = new Map<string, Event>()
+  for (const event of pages.flat()) byId.set(event.id || `seq:${event.seq}`, event)
+  return [...byId.values()].sort((left, right) => left.seq - right.seq)
+}
 
 function linkedFilename(response: Response, target: string): string {
   const disposition = response.headers.get('content-disposition') ?? ''

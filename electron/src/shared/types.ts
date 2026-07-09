@@ -226,6 +226,27 @@ export interface TimelinePage {
   events_omitted_after?: number | null
 }
 
+export type TimelineLandmarkKind = 'user' | 'assistant' | 'trace' | 'media' | 'error' | 'job' | 'digest' | 'system'
+
+export interface TimelineIndexLandmark {
+  key: string
+  kind: TimelineLandmarkKind
+  start_seq: number
+  end_seq: number
+  title: string
+  preview: string
+  meta?: string | null
+  timestamp?: string | null
+}
+
+export interface TimelineIndex {
+  session_id: string
+  landmarks: TimelineIndexLandmark[]
+  latest_seq: number
+  event_count: number
+  generated_at?: string | null
+}
+
 export interface FilesPage {
   files: AgentFile[]
   total: number

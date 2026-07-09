@@ -380,9 +380,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch (error) { set({ error: errorMessage(error) }) }
   },
-  async markRead(sessionId, force = false) {
+  async markRead(sessionId, _force = false) {
     const session = get().sessions.find(candidate => candidate.id === sessionId)
-    if (!session || !isUnread(session) || session.manual_unread && !force) return
+    if (!session || !isUnread(session)) return
     const seq = session.latest_agent_event_seq ?? session.latest_event_seq ?? null
     try {
       const updated = await window.agentsDock.sessions.markRead(sessionId, seq)

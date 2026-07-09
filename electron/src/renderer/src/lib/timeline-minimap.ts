@@ -1,17 +1,21 @@
+import type { TimelineIndexLandmark, TimelineLandmarkKind } from '@shared/types'
 import type { RenderTimelineItem } from './timeline'
 import { isTimelineError, messageText } from './timeline'
 
-export type TimelineLandmarkKind = 'user' | 'assistant' | 'trace' | 'media' | 'error' | 'job' | 'digest' | 'system'
-
-export interface TimelineLandmark {
+export interface TimelineLandmark extends TimelineIndexLandmark {
   index: number
   endIndex: number
-  key: string
-  kind: TimelineLandmarkKind
-  title: string
-  preview: string
-  meta: string
-  timestamp?: string
+}
+
+export interface TimelineNavigatorLandmark extends TimelineIndexLandmark {
+  index?: number
+  endIndex?: number
+}
+
+export const TIMELINE_TICK_PITCH = 12
+
+export function timelineTickY(position: number, scrollOffset = 0, trackTop = 10): number {
+  return trackTop + position * TIMELINE_TICK_PITCH - scrollOffset
 }
 
 export function buildTimelineLandmarks(items: RenderTimelineItem[]): TimelineLandmark[] {
@@ -31,6 +35,25 @@ export function buildTimelineLandmarks(items: RenderTimelineItem[]): TimelineLan
     index++
   }
   return landmarks
+}
+
+export function mergeTimelineLandmarks(remote: TimelineIndexLandmark[] | undefined, loaded: TimelineLandmark[]): TimelineNavigatorLandmark[] {
+  if (!remote?.length) return loaded
+  const merged: TimelineNavigatorLandmark[] = remote.map(landmark => ({ ...landmark }))
+  const positions = new Map(merged.map((landmark, index) => [landmark.key, index]))
+  for (const landmark of loaded) {
+    let position = positions.get(landmark.key)
+    if (position == null) {
+      position = merged.findIndex(candidate => rangesOverlap(candidate, landmark) && compatibleKinds(candidate.kind, landmark.kind))
+    }
+    if (position >= 0) {
+      merged[position] = { ...merged[position], ...landmark }
+      positions.set(landmark.key, position)
+    } else {
+      merged.push(landmark)
+    }
+  }
+  return merged.sort((left, right) => left.start_seq - right.start_seq || left.end_seq - right.end_seq)
 }
 
 export function compactPreview(value: string, limit = 240): string {
@@ -74,6 +97,8 @@ function turnLandmark(items: RenderTimelineItem[], index: number, endIndex: numb
     title,
     preview,
     meta,
+    start_seq: Math.min(...items.map(itemStartSeq)),
+    end_seq: Math.max(...items.map(itemEndSeq)),
     timestamp: latestAssistant?.event.ts || user?.event.ts || traces[0]?.events[0]?.ts
   }
 }
@@ -88,6 +113,8 @@ function standaloneLandmark(item: RenderTimelineItem, index: number): TimelineLa
       title: item.title || 'Scheduled job',
       preview: compactPreview(messageText(item.latest)),
       meta: `${item.events.length} update${item.events.length === 1 ? '' : 's'}`,
+      start_seq: Math.min(...item.events.map(event => event.seq)),
+      end_seq: Math.max(...item.events.map(event => event.seq)),
       timestamp: item.latest.ts
     }
   }
@@ -101,8 +128,32 @@ function standaloneLandmark(item: RenderTimelineItem, index: number): TimelineLa
       title: humanizeType(item.event.type),
       preview: compactPreview(messageText(item.event)),
       meta: '',
+      start_seq: item.event.seq,
+      end_seq: item.event.seq,
       timestamp: item.event.ts
     }
   }
   return turnLandmark([item], index, index, item.key)
+}
+
+function itemStartSeq(item: RenderTimelineItem): number {
+  if (item.kind === 'message' || item.kind === 'system') return item.event.seq
+  if (item.kind === 'trace' || item.kind === 'job') return Math.min(...item.events.map(event => event.seq))
+  return Math.min(...item.files.map(file => file.seq ?? item.seq))
+}
+
+function itemEndSeq(item: RenderTimelineItem): number {
+  if (item.kind === 'message' || item.kind === 'system') return item.event.seq
+  if (item.kind === 'trace' || item.kind === 'job') return Math.max(...item.events.map(event => event.seq))
+  return Math.max(...item.files.map(file => file.seq ?? item.seq))
+}
+
+function rangesOverlap(left: TimelineIndexLandmark, right: TimelineIndexLandmark): boolean {
+  return left.start_seq <= right.end_seq && right.start_seq <= left.end_seq
+}
+
+function compatibleKinds(left: TimelineLandmarkKind, right: TimelineLandmarkKind): boolean {
+  if (left === right) return true
+  const turnKinds = new Set<TimelineLandmarkKind>(['user', 'assistant', 'trace', 'media', 'digest'])
+  return turnKinds.has(left) && turnKinds.has(right)
 }

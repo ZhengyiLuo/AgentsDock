@@ -26,6 +26,8 @@ export function registerIpc(service: AppService): void {
   handle('timeline:cached', sessionId => service.cachedTimeline(sessionId))
   handle('timeline:open', sessionId => service.openTimeline(sessionId))
   handle('timeline:older', (sessionId, before, limit) => service.olderTimeline(sessionId, before, limit))
+  handle('timeline:around', (sessionId, anchorSeq, limit) => service.timelineAround(sessionId, anchorSeq, limit))
+  handle('timeline:index', sessionId => service.timelineIndex(sessionId))
   handle('timeline:subscribe', (sessionId, after) => service.subscribeTimeline(sessionId, after))
   handle('timeline:unsubscribe', sessionId => service.unsubscribeTimeline(sessionId))
   handle('timeline:view-state:get', sessionId => service.viewState(sessionId))
