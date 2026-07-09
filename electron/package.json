@@ -22,7 +22,7 @@
     ]
   },
   "build": {
-    "appId": "com.zhengyiluo.ZenithDock",
+    "appId": "com.zhengyiluo.AgentsDockElectron",
     "productName": "AgentsDock",
     "asar": true,
     "directories": {
@@ -33,6 +33,7 @@
       "package.json"
     ],
     "mac": {
+      "icon": "../Sources/ZenithDockIOS/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-mac-512@2x.png",
       "category": "public.app-category.developer-tools",
       "target": [
         "dir"

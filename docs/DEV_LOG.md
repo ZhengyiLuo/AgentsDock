@@ -6767,3 +6767,13 @@ Follow-up from rapid-switch stress:
 - Regression suite now contains 36 tests across eight files. Packaged validation
   rendered the real provider error, exposed 92,604 remaining events in the
   repaired long chat, and resized a live preview from 1100x760 to 720x480.
+
+## 2026-07-09 - Correct Electron macOS icon packaging
+
+- Electron Builder no longer infers the app icon from the opaque, full-bleed
+  iOS source. The Mac package explicitly uses the padded, alpha-aware macOS
+  artwork so Finder, Dock, and small list renditions share the native silhouette.
+- The local Electron test app now has its own bundle identifier instead of
+  colliding with the production Swift app in LaunchServices and Finder caches.
+- The rebuilt bundle passed 36 tests, TypeScript validation, ad-hoc signing,
+  and strict bundle verification.
