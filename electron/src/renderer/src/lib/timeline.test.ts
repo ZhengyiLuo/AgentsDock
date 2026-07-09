@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
-import { extractUnifiedDiff, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
+import { extractUnifiedDiff, messageText, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -74,6 +74,37 @@ describe('projectTimeline', () => {
     expect(rows.filter(row => row.kind === 'message').map(row => row.kind === 'message' ? row.event.prompt || row.event.text : '')).toEqual([
       'First question', 'First answer', 'Second question', 'Second answer'
     ])
+  })
+
+  it('renders run-scoped provider errors as visible system rows instead of trace details', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Try it' }),
+      event(2, 'error', { run_id: 'run-1', error: 'Model request failed' })
+    ], []))
+    expect(rows.map(row => row.kind)).toEqual(['message', 'system'])
+    expect(rows[1]).toMatchObject({ kind: 'system', event: { error: 'Model request failed' } })
+  })
+
+  it('extracts the message from structured provider errors', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'error', { run_id: 'run-1', error: { type: 'error', status: 400, error: { type: 'invalid_request_error', message: 'Upgrade the CLI' } } })
+    ], []))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: 'system' })
+    if (rows[0].kind === 'system') expect(messageText(rows[0].event)).toBe('Upgrade the CLI')
+  })
+
+  it('extracts provider errors encoded as JSON message strings', () => {
+    const value = JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: 'Upgrade the CLI' } })
+    expect(messageText(event(1, 'error', { message: value }))).toBe('Upgrade the CLI')
+  })
+
+  it('keeps ordinary tool failures folded into the trace', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Inspect it' }),
+      event(2, 'tool_finished', { run_id: 'run-1', is_error: true, output: 'Exit code 1' })
+    ], []))
+    expect(rows.map(row => row.kind)).toEqual(['message', 'trace'])
   })
 })
 

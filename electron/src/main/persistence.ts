@@ -80,6 +80,8 @@ export class LocalCache {
         server_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         has_more INTEGER NOT NULL,
+        verified_latest_seq INTEGER,
+        known_total INTEGER,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (server_id, session_id)
       );
@@ -97,6 +99,9 @@ export class LocalCache {
         PRIMARY KEY (server_id, key)
       );
     `)
+    const timelineColumns = this.db.prepare('PRAGMA table_info(timeline_state)').all() as Array<{ name: string }>
+    if (!timelineColumns.some(column => column.name === 'verified_latest_seq')) this.db.exec('ALTER TABLE timeline_state ADD COLUMN verified_latest_seq INTEGER')
+    if (!timelineColumns.some(column => column.name === 'known_total')) this.db.exec('ALTER TABLE timeline_state ADD COLUMN known_total INTEGER')
   }
 
   sessions(serverId: string): Session[] {
@@ -194,8 +199,21 @@ export class LocalCache {
   }
 
   timelineHasMore(serverId: string, sessionId: string): boolean {
-    const row = this.db.prepare('SELECT has_more FROM timeline_state WHERE server_id = ? AND session_id = ?').get(serverId, sessionId) as { has_more: number } | undefined
-    return Boolean(row?.has_more)
+    return Boolean(this.timelineState(serverId, sessionId)?.hasMore)
+  }
+
+  timelineState(serverId: string, sessionId: string): { hasMore: boolean; verifiedLatestSeq: number | null; knownTotal: number | null } | null {
+    const row = this.db.prepare('SELECT has_more, verified_latest_seq, known_total FROM timeline_state WHERE server_id = ? AND session_id = ?')
+      .get(serverId, sessionId) as { has_more: number; verified_latest_seq: number | null; known_total: number | null } | undefined
+    return row ? { hasMore: Boolean(row.has_more), verifiedLatestSeq: row.verified_latest_seq, knownTotal: row.known_total } : null
+  }
+
+  visibleEventCount(serverId: string, sessionId: string): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count FROM events
+      WHERE server_id = ? AND session_id = ? AND json_extract(json, '$.type') <> 'raw_event'
+    `).get(serverId, sessionId) as { count: number }
+    return row.count
   }
 
   session(serverId: string, sessionId: string): Session | null {
@@ -235,11 +253,15 @@ export class LocalCache {
     }
   }
 
-  putTimelineState(serverId: string, sessionId: string, hasMore: boolean): void {
+  putTimelineState(serverId: string, sessionId: string, hasMore: boolean, verifiedLatestSeq?: number | null, knownTotal?: number | null): void {
     this.db.prepare(`
-      INSERT INTO timeline_state(server_id, session_id, has_more, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(server_id, session_id) DO UPDATE SET has_more = excluded.has_more, updated_at = excluded.updated_at
-    `).run(serverId, sessionId, hasMore ? 1 : 0, Date.now())
+      INSERT INTO timeline_state(server_id, session_id, has_more, verified_latest_seq, known_total, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(server_id, session_id) DO UPDATE SET
+        has_more = excluded.has_more,
+        verified_latest_seq = COALESCE(excluded.verified_latest_seq, timeline_state.verified_latest_seq),
+        known_total = COALESCE(excluded.known_total, timeline_state.known_total),
+        updated_at = excluded.updated_at
+    `).run(serverId, sessionId, hasMore ? 1 : 0, verifiedLatestSeq ?? null, knownTotal ?? null, Date.now())
   }
 
   queuedTurns(serverId: string, sessionId: string): QueuedTurn[] {
@@ -276,7 +298,7 @@ export class LocalCache {
     const events = this.events(serverId, sessionId)
     const files = this.files(serverId, sessionId)
     const fileCount = (this.db.prepare('SELECT COUNT(*) AS count FROM files WHERE server_id = ? AND session_id = ?').get(serverId, sessionId) as { count: number }).count
-    const timeline = this.db.prepare('SELECT has_more, updated_at FROM timeline_state WHERE server_id = ? AND session_id = ?').get(serverId, sessionId) as { has_more: number; updated_at: number } | undefined
+    const timeline = this.db.prepare('SELECT has_more, verified_latest_seq, known_total, updated_at FROM timeline_state WHERE server_id = ? AND session_id = ?').get(serverId, sessionId) as { has_more: number; verified_latest_seq: number | null; known_total: number | null; updated_at: number } | undefined
     const localHasMore = events.length > 0 && this.hasEventsBefore(serverId, sessionId, events[0].seq)
     return {
       session: parseJSON(row.json, {} as Session),
@@ -284,6 +306,7 @@ export class LocalCache {
       queuedTurns: this.queuedTurns(serverId, sessionId),
       files,
       hasMoreEvents: localHasMore || (timeline ? Boolean(timeline.has_more) : (events[0]?.seq ?? 1) > 1),
+      eventsTotal: timeline?.known_total ?? null,
       filesTotal: fileCount,
       cachedAt: timeline?.updated_at ?? row.updated_at,
       viewState: this.viewState(serverId, sessionId)

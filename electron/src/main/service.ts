@@ -34,6 +34,7 @@ import type {
   ViewState
 } from '../shared/types'
 import { updateQueuedTurns } from '../shared/queue'
+import { timelineCacheHasGap } from '../shared/history'
 import { LocalCache } from './persistence'
 import { AgentServerClient } from './server-client'
 import { SettingsStore } from './settings'
@@ -204,7 +205,7 @@ export class AppService {
     const page = await this.client.importHistory(sessionId, force)
     this.cache.putSession(this.serverId, page.session)
     this.cache.putEvents(this.serverId, sessionId, page.events)
-    this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more))
+    this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more), page.latest_seq, page.total)
     return page
   }
 
@@ -225,18 +226,20 @@ export class AppService {
     const localEvents = this.cache.eventsBefore(this.serverId, sessionId, before, limit)
     const localSession = this.sessions.find(session => session.id === sessionId) ?? this.cache.session(this.serverId, sessionId)
     if (localEvents.length && localSession) {
+      const timeline = this.cache.timelineState(this.serverId, sessionId)
       return {
         session: localSession,
         events: localEvents,
         queued_turns: this.cache.queuedTurns(this.serverId, sessionId),
         has_more: this.cache.hasEventsBefore(this.serverId, sessionId, localEvents[0].seq) || this.cache.timelineHasMore(this.serverId, sessionId),
-        before: localEvents[0].seq
+        before: localEvents[0].seq,
+        total: timeline?.knownTotal ?? null
       }
     }
     const page = await this.client.sessionPage(sessionId, { before, limit, tail: true, visible: true })
     this.cache.putSession(this.serverId, page.session)
     this.cache.putEvents(this.serverId, sessionId, page.events)
-    this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more))
+    this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more), page.latest_seq)
     return page
   }
 
@@ -497,13 +500,29 @@ export class AppService {
   private async reconcileTimelineAndStream(sessionId: string, cachedLast: number, lease: number): Promise<void> {
     try {
       const before = this.cache.snapshot(this.serverId, sessionId)
-      let page = cachedLast > 0
-        ? await this.client.sessionPage(sessionId, { after: cachedLast, limit: TAIL_EVENT_LIMIT, tail: false, visible: true })
-        : await this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+      const timelineState = this.cache.timelineState(this.serverId, sessionId)
+      const needsCompletenessAudit = Boolean(before && timelineState?.verifiedLatestSeq == null)
+      const pageRequest = cachedLast > 0
+        ? this.client.sessionPage(sessionId, { after: cachedLast, limit: TAIL_EVENT_LIMIT, tail: false, visible: true })
+        : this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+      const [deltaPage, auditPage] = await Promise.all([
+        pageRequest,
+        needsCompletenessAudit
+          ? this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+          : Promise.resolve(null)
+      ])
+      let page = deltaPage
       if (!this.isCurrentTimeline(sessionId, lease)) return
 
       let mode: 'merge' | 'replace' = 'merge'
-      if ((page.events_omitted_after ?? 0) > 0 || (page.latest_seq ?? cachedLast) < cachedLast) {
+      const cachedVisible = this.cache.visibleEventCount(this.serverId, sessionId)
+      if (auditPage && timelineCacheHasGap(cachedVisible, deltaPage.events.length, auditPage.total, before?.events[0]?.seq)) {
+        page = auditPage
+        mode = 'replace'
+        appLog('timeline', 'repairing incomplete legacy cache', {
+          sessionId, cachedVisible, serverVisible: auditPage.total, tailEvents: auditPage.events.length
+        })
+      } else if ((page.events_omitted_after ?? 0) > 0 || (page.latest_seq ?? cachedLast) < cachedLast) {
         page = await this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
         if (!this.isCurrentTimeline(sessionId, lease)) return
         mode = 'replace'
@@ -515,14 +534,17 @@ export class AppService {
       this.cache.putQueuedTurns(this.serverId, sessionId, page.queued_turns ?? [])
       const hasMoreEvents = mode === 'replace'
         ? Boolean(page.has_more)
-        : cachedLast === 0 ? Boolean(page.has_more) : Boolean(before?.hasMoreEvents || page.has_more)
-      this.cache.putTimelineState(this.serverId, sessionId, hasMoreEvents)
+        : cachedLast === 0 ? Boolean(page.has_more || auditPage?.has_more) : Boolean(before?.hasMoreEvents || page.has_more || auditPage?.has_more)
+      const verifiedLatestSeq = mode === 'replace' ? page.latest_seq : auditPage?.latest_seq
+      const knownTotal = mode === 'replace' ? page.total : auditPage?.total
+      this.cache.putTimelineState(this.serverId, sessionId, hasMoreEvents, verifiedLatestSeq, knownTotal)
       const snapshot: SessionSnapshot = mode === 'replace' ? (this.cache.snapshot(this.serverId, sessionId) ?? {
         session: page.session,
         events: page.events,
         queuedTurns: page.queued_turns ?? [],
         files: before?.files ?? [],
         hasMoreEvents,
+        eventsTotal: knownTotal ?? before?.eventsTotal ?? null,
         filesTotal: before?.filesTotal ?? 0,
         cachedAt: Date.now()
       }) : {
@@ -531,11 +553,12 @@ export class AppService {
         queuedTurns: page.queued_turns ?? [],
         files: [],
         hasMoreEvents,
+        eventsTotal: before?.eventsTotal ?? auditPage?.total ?? null,
         filesTotal: before?.filesTotal ?? 0,
         cachedAt: Date.now(),
         viewState: before?.viewState
       }
-      const changed = page.events.length > 0 || !jsonEqual(before?.queuedTurns ?? [], snapshot.queuedTurns) || !jsonEqual(before?.session, snapshot.session)
+      const changed = page.events.length > 0 || before?.hasMoreEvents !== snapshot.hasMoreEvents || before?.eventsTotal !== snapshot.eventsTotal || !jsonEqual(before?.queuedTurns ?? [], snapshot.queuedTurns) || !jsonEqual(before?.session, snapshot.session)
       if (changed) this.emit('server:timeline', { sessionId, snapshot, source: 'server', mode })
       const streamAfter = page.latest_seq ?? page.events.at(-1)?.seq ?? cachedLast
       this.activateTimelineStream(sessionId, streamAfter, lease)
@@ -552,7 +575,7 @@ export class AppService {
     this.cache.putSession(this.serverId, page.session)
     this.cache.replaceEvents(this.serverId, sessionId, page.events)
     this.cache.putQueuedTurns(this.serverId, sessionId, page.queued_turns ?? [])
-    this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more))
+    this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more), page.latest_seq, page.total)
     const cached = this.cache.snapshot(this.serverId, sessionId)
     if (!this.isCurrentTimeline(sessionId, lease)) throw new Error('Timeline selection superseded')
     this.activateTimelineStream(sessionId, page.latest_seq ?? page.events.at(-1)?.seq ?? 0, lease)
@@ -562,6 +585,7 @@ export class AppService {
       session: page.session,
       queuedTurns: page.queued_turns ?? [],
       hasMoreEvents: Boolean(page.has_more),
+      eventsTotal: page.total ?? cached.eventsTotal ?? null,
       cachedAt: Date.now()
     } : {
       session: page.session,
@@ -569,6 +593,7 @@ export class AppService {
       queuedTurns: page.queued_turns ?? [],
       files: [],
       hasMoreEvents: Boolean(page.has_more),
+      eventsTotal: page.total ?? null,
       filesTotal: 0,
       cachedAt: Date.now()
     }

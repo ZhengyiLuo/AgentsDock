@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, ArrowUp, LoaderCircle, Paperclip, Search, X } from 'lucide-react'
 import type { NativeFileRef, SessionSnapshot, ViewState } from '@shared/types'
-import { isAgentVisibleEvent, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
+import { isAgentVisibleEvent, messageText, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
 import { useAppStore } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
 
@@ -231,9 +231,10 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     return () => window.removeEventListener('agentsdock:find-file', listener)
   }, [findFile])
 
+  const olderRemaining = Math.max(0, (snapshot.eventsTotal ?? snapshot.events.length) - snapshot.events.length)
   const header = useCallback(() => snapshot.hasMoreEvents || loadingOlder
-    ? <div className="history-loader"><button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? <><LoaderCircle className="spin" size={13} /> Loading older messages</> : 'Show older messages'}</button></div>
-    : <div className="history-start">Beginning of conversation</div>, [loadOlder, loadingOlder, snapshot.hasMoreEvents])
+    ? <div className="history-loader"><button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? <><LoaderCircle className="spin" size={13} /> Loading older messages</> : `Show older messages${olderRemaining ? ` · ${olderRemaining.toLocaleString()} remaining` : ''}`}</button></div>
+    : <div className="history-start">Beginning of conversation</div>, [loadOlder, loadingOlder, olderRemaining, snapshot.hasMoreEvents])
   const components = useMemo(() => ({ Header: header, Footer: TimelineFooter }), [header])
   const itemContent = useCallback((_: number, item: RenderTimelineItem) => (
     <div className="virtual-row" data-timeline-key={item.key}>
@@ -312,7 +313,7 @@ export function sameTimelineKeys(keys: string[], items: RenderTimelineItem[]): b
 }
 
 function timelineSearchText(item: RenderTimelineItem): string {
-  if (item.kind === 'system') return [item.event.text, item.event.message, item.event.error, item.event.output].filter(Boolean).join('\n')
+  if (item.kind === 'system') return messageText(item.event)
   if (item.kind === 'job') return item.events.map(event => [event.text, event.message, event.result_text].filter(Boolean).join('\n')).join('\n')
   if (item.kind === 'message') return [item.event.prompt, item.event.text, item.event.result_text, item.event.message, item.event.output].filter(Boolean).join('\n')
   if (item.kind === 'trace') return item.events.map(event => [event.text, event.message, event.output].filter(Boolean).join('\n')).join('\n')

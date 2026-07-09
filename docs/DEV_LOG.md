@@ -6743,3 +6743,27 @@ Follow-up from rapid-switch stress:
   first visible message across an immediate A-to-B-to-A switch. The final app
   idled at 0 percent CPU with no renderer exception, unresponsive event, or
   ResizeObserver loop.
+
+## 2026-07-09 - Repair legacy history gaps and expose provider errors
+
+- Explicit provider, run, transport, digest, and artifact failures are projected
+  as visible red timeline rows before run-scoped events can be folded into a
+  trace. Ordinary failed tool calls remain inside the collapsed trace to avoid
+  turning expected command retries into timeline noise.
+- Error text accepts plain strings, structured error objects, nested API error
+  envelopes, and JSON-encoded envelopes. The row displays the human message
+  instead of raw JSON while preserving the original cached event.
+- A live cache audit found legacy sparse windows such as 240 cached visible
+  events against 74,130 on the server. Timeline metadata now persists an
+  authoritative total and verification sequence. Each unverified legacy chat is
+  audited once in the background after its cached view appears.
+- A cache containing sequence one plus a disconnected newest tail is replaced by
+  a contiguous authoritative tail, making backward pagination possible again.
+  Legitimate partial tails remain intact and continue paging one user-reached
+  page at a time. The history control reports the remaining server event count.
+- Media preview dialogs now resize in both dimensions with bounded minimum and
+  maximum geometry. Images and videos refit the resized content area rather than
+  retaining viewport-derived height limits.
+- Regression suite now contains 36 tests across eight files. Packaged validation
+  rendered the real provider error, exposed 92,604 remaining events in the
+  repaired long chat, and resized a live preview from 1100x760 to 720x480.

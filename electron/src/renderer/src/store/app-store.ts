@@ -498,12 +498,13 @@ function mergeSnapshots(previous: SessionSnapshot | undefined, next: SessionSnap
   const files = mergeFiles(previous.files, next.files)
   const queuedTurns = stableArray(previous.queuedTurns, next.queuedTurns)
   const session = jsonEquivalent(previous.session, next.session) ? previous.session : next.session
-  if (events === previous.events && files === previous.files && session === previous.session && queuedTurns === previous.queuedTurns && previous.hasMoreEvents === next.hasMoreEvents) return previous
-  return { ...next, session, queuedTurns, viewState: next.viewState ?? previous.viewState, events, files, generation: previous.generation }
+  const eventsTotal = next.eventsTotal ?? previous.eventsTotal
+  if (events === previous.events && files === previous.files && session === previous.session && queuedTurns === previous.queuedTurns && previous.hasMoreEvents === next.hasMoreEvents && previous.eventsTotal === eventsTotal) return previous
+  return { ...next, session, queuedTurns, viewState: next.viewState ?? previous.viewState, events, files, eventsTotal, generation: previous.generation }
 }
 
 function replaceSnapshot(previous: SessionSnapshot | undefined, next: SessionSnapshot): SessionSnapshot {
-  return { ...next, viewState: next.viewState ?? previous?.viewState, generation: (previous?.generation ?? 0) + 1 }
+  return { ...next, eventsTotal: next.eventsTotal ?? previous?.eventsTotal, viewState: next.viewState ?? previous?.viewState, generation: (previous?.generation ?? 0) + 1 }
 }
 
 function touchSnapshot(sessionId: string): void {

@@ -100,7 +100,7 @@ export interface Event {
   text?: string | null
   result_text?: string | null
   message?: string | null
-  error?: string | null
+  error?: JsonValue
   output?: string | null
   raw?: string | null
   argv?: string[] | null
@@ -240,6 +240,7 @@ export interface SessionSnapshot {
   queuedTurns: QueuedTurn[]
   files: AgentFile[]
   hasMoreEvents: boolean
+  eventsTotal?: number | null
   filesTotal: number
   cachedAt: number
   viewState?: ViewState | null

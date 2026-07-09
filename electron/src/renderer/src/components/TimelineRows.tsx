@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
 import type { JobItem, MediaItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { extractUnifiedDiff, messageText, parseUnifiedDiff } from '../lib/timeline'
+import { extractUnifiedDiff, isTimelineError, messageText, parseUnifiedDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
@@ -69,7 +69,7 @@ function ToolEvent({ event }: { event: Event }) {
 
 function SystemView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
   const event = item.event
-  const error = event.type === 'error' || event.type.endsWith('_error')
+  const error = isTimelineError(event)
   const digest = event.type.startsWith('handoff_digest_')
   const generating = event.type === 'handoff_digest_started'
   const icon = error ? <AlertTriangle size={15} /> : generating ? <LoaderCircle className="spin" size={15} /> : digest ? <Sparkles size={15} /> : <TerminalSquare size={15} />

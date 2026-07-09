@@ -108,6 +108,14 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       continue
     }
 
+    // Errors belong in the visible timeline even when they carry the active
+    // run ID. Handle them before the generic run/trace branches below.
+    if (isTimelineError(event)) {
+      items.push({ kind: 'system', id: `event:${event.id}`, key: `event:${event.id}`, seq: event.seq, event })
+      if (event.type === 'turn_finished' && activeTurn?.runId === event.run_id) activeTurn = null
+      continue
+    }
+
     if (event.type === 'turn_started') {
       const prior = event.run_id ? turnByRun.get(event.run_id) : activeTurn
       activeTurn = ensureTurn(event, Boolean(prior?.user))
@@ -222,7 +230,7 @@ function sameReferences<T>(a: T[], b: T[]): boolean {
 }
 
 export function messageText(event: Event): string {
-  return event.result_text || event.text || event.prompt || event.message || event.error || event.output || ''
+  return event.result_text || event.text || event.prompt || printableEventValue(event.message) || printableEventValue(event.error) || event.output || ''
 }
 
 export function eventFile(event: Event): AgentFile | null {
@@ -233,7 +241,37 @@ export function isAgentVisibleEvent(event: Event): boolean {
   return event.type === 'assistant_text' ||
     (event.type === 'turn_finished' && Boolean(event.result_text?.trim())) ||
     event.type === 'artifact_created' || event.type === 'file_uploaded' ||
-    event.type === 'error' || event.type.startsWith('handoff_digest_') || jobTypes.has(event.type)
+    isTimelineError(event) || event.type.startsWith('handoff_digest_') || jobTypes.has(event.type)
+}
+
+export function isTimelineError(event: Event): boolean {
+  // Tool failures stay inside the folded trace; run/provider/artifact failures
+  // need a first-class red row so the user cannot miss a failed turn.
+  if (event.type === 'tool_started' || event.type === 'tool_finished' || event.type === 'raw_event') return false
+  return event.type === 'error' || event.type.endsWith('_error') || event.is_error === true || Boolean(printableEventValue(event.error))
+}
+
+function printableEventValue(value: unknown): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const nested = printableEventValue(JSON.parse(trimmed))
+        if (nested) return nested
+      } catch { /* plain text that happens to begin with JSON punctuation */ }
+    }
+    return value
+  }
+  if (value == null) return ''
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    if ('message' in value && typeof value.message === 'string') return value.message
+    if ('error' in value) {
+      const nested = printableEventValue(value.error)
+      if (nested) return nested
+    }
+  }
+  try { return JSON.stringify(value, null, 2) }
+  catch { return String(value) }
 }
 
 export function extractUnifiedDiff(events: Event[]): string {
