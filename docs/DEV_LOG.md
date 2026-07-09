@@ -6777,3 +6777,21 @@ Follow-up from rapid-switch stress:
   colliding with the production Swift app in LaunchServices and Finder caches.
 - The rebuilt bundle passed 36 tests, TypeScript validation, ad-hoc signing,
   and strict bundle verification.
+
+## 2026-07-09 - Codex-style conversation navigator
+
+- Added a canvas-backed conversation minimap in a dedicated left gutter. It
+  groups each semantic turn into one neutral tick instead of adding a DOM node
+  or colored marker for every rendered event.
+- Visible and hovered turns use compact white strokes. Hovering shows the user
+  prompt, latest agent response, timestamp, and relevant command/file metadata;
+  clicking jumps directly to the turn and dragging scrubs through the loaded
+  timeline.
+- Wheel input over the navigator scrolls the real Virtuoso viewport. Visible
+  range updates are written imperatively to the canvas, so normal scrolling does
+  not publish React state or rerender timeline rows.
+- Fresh chat opens now request 240 visible events while older-history paging
+  remains bounded at 120 events per request.
+- Regression suite: 38 tests across nine files. Packaged renderer probes verified
+  painted canvas output, turn-level hover previews, wheel scrolling, and direct
+  seek movement.

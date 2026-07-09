@@ -5,6 +5,7 @@ import type { NativeFileRef, SessionSnapshot, ViewState } from '@shared/types'
 import { isAgentVisibleEvent, messageText, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
 import { useAppStore } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
+import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 
 const timelineViewStates = new Map<string, ViewState>()
 const FIRST_INDEX = 1_000_000
@@ -32,6 +33,7 @@ export function Timeline() {
 
 function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot: SessionSnapshot }) {
   const ref = useRef<VirtuosoHandle>(null)
+  const minimapRef = useRef<TimelineMinimapHandle>(null)
   const scroller = useRef<HTMLElement | null>(null)
   const semanticProjected = useRef<TimelineItem[]>([])
   const projected = useRef<RenderTimelineItem[]>([])
@@ -232,6 +234,12 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   }, [findFile])
 
   const olderRemaining = Math.max(0, (snapshot.eventsTotal ?? snapshot.events.length) - snapshot.events.length)
+  const seekTimeline = useCallback((index: number) => {
+    ref.current?.scrollToIndex({ index: Math.max(0, Math.min(index, itemsLength.current - 1)), align: 'center', behavior: 'auto' })
+  }, [])
+  const wheelTimeline = useCallback((deltaY: number) => {
+    scroller.current?.scrollBy({ top: deltaY, behavior: 'auto' })
+  }, [])
   const header = useCallback(() => snapshot.hasMoreEvents || loadingOlder
     ? <div className="history-loader"><button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? <><LoaderCircle className="spin" size={13} /> Loading older messages</> : `Show older messages${olderRemaining ? ` · ${olderRemaining.toLocaleString()} remaining` : ''}`}</button></div>
     : <div className="history-start">Beginning of conversation</div>, [loadOlder, loadingOlder, olderRemaining, snapshot.hasMoreEvents])
@@ -274,6 +282,10 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
           }
         }}
         rangeChanged={range => {
+          minimapRef.current?.setVisibleRange(
+            localVirtuosoIndex(range.startIndex, firstItemIndex.current, itemsLength.current),
+            localVirtuosoIndex(range.endIndex, firstItemIndex.current, itemsLength.current)
+          )
           scheduleViewSave()
         }}
         isScrolling={value => {
@@ -289,6 +301,14 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
         components={components}
         itemContent={itemContent}
       />
+      {items.length > 2 && <TimelineMinimap
+        ref={minimapRef}
+        items={items}
+        hasMoreEvents={snapshot.hasMoreEvents}
+        olderRemaining={olderRemaining}
+        onSeek={seekTimeline}
+        onWheel={wheelTimeline}
+      />}
       {searchOpen && <div className="timeline-search"><Search size={14} /><input autoFocus value={searchQuery} placeholder="Find in loaded messages" onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') moveSearch(event.shiftKey ? -1 : 1); if (event.key === 'Escape') setSearchOpen(false) }} /><span>{searchMatches.length ? `${searchCursor + 1}/${searchMatches.length}` : searchQuery ? '0/0' : ''}</span><button title="Previous" onClick={() => moveSearch(-1)}><ArrowUp size={13} /></button><button title="Next" onClick={() => moveSearch(1)}><ArrowDown size={13} /></button><button title="Close" onClick={() => setSearchOpen(false)}><X size={13} /></button></div>}
       {!atBottom && <button className={`latest-button ${newBelow ? 'has-new' : ''}`} onClick={() => ref.current?.scrollToIndex({ index: Math.max(0, items.length - 1), align: 'end', behavior: 'smooth' })}><ArrowDown size={14} />{newBelow ? 'New' : ''}</button>}
       {dropActive && <div className="timeline-drop"><Paperclip size={24} /> Drop files anywhere to attach</div>}
@@ -334,4 +354,9 @@ function timelineEvents(item: RenderTimelineItem): import('@shared/types').Event
   if (item.kind === 'message') return [item.event]
   if (item.kind === 'trace') return item.events
   return []
+}
+
+function localVirtuosoIndex(index: number, firstItemIndex: number, itemCount: number): number {
+  const local = index >= firstItemIndex ? index - firstItemIndex : index
+  return Math.max(0, Math.min(local, Math.max(0, itemCount - 1)))
 }

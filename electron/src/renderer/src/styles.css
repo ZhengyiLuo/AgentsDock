@@ -139,7 +139,7 @@ textarea { resize: none; }
 /* Timeline */
 .timeline { position: relative; min-width: 0; min-height: 0; background: #181818; }
 .timeline > div:first-child { overscroll-behavior: contain; }
-.virtual-row { width: 100%; max-width: 1140px; display: flow-root; margin: 0 auto; padding: 0 28px; user-select: text; }
+.virtual-row { width: 100%; max-width: 1240px; display: flow-root; margin: 0 auto; padding: 0 32px 0 82px; user-select: text; }
 .unread-divider { height: 23px; display: flex; align-items: center; gap: 8px; color: #55a9ff; font-size: 9px; font-weight: 700; }
 .unread-divider::before, .unread-divider::after { height: 1px; flex: 1; content: ""; background: #287dcc; }
 .unread-divider span { flex: 0 0 auto; }
@@ -154,6 +154,17 @@ textarea { resize: none; }
 .timeline-search span { min-width: 34px; color: var(--faint); font-size: 10px; text-align: right; }
 .timeline-search button { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: transparent; border-radius: 5px; }
 .timeline-search button:hover { color: white; background: #3b3b3b; }
+.timeline-minimap { width: 40px; position: absolute; z-index: 9; top: 8px; bottom: 8px; left: max(8px, calc((100% - 1240px) / 2 + 8px)); outline: none; cursor: pointer; touch-action: none; }
+.timeline-minimap:active { cursor: grabbing; }
+.timeline-minimap:focus-visible { border-radius: 5px; box-shadow: inset 0 0 0 1px #41413f; }
+.timeline-minimap canvas { width: 100%; height: 100%; display: block; }
+.timeline-minimap-older { display: none; }
+.timeline-minimap-popover { width: 352px; max-height: 142px; position: absolute; z-index: 40; left: 43px; transform: translateY(-50%); overflow: hidden; padding: 12px 13px; color: #d8d8d5; background: #2a2a2af7; border: 1px solid #454543; border-radius: 10px; box-shadow: 0 14px 38px #000a; backdrop-filter: blur(12px); pointer-events: none; }
+.timeline-minimap-popover header { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.timeline-minimap-popover header strong { min-width: 0; flex: 1; overflow: hidden; color: #f1f1ef; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-minimap-popover time, .timeline-minimap-popover footer { color: #858582; font-size: 9px; }
+.timeline-minimap-popover p { display: -webkit-box; margin: 0; overflow: hidden; color: #b7b7b4; font-size: 11px; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.timeline-minimap-popover footer { margin-top: 5px; }
 .timeline-end { height: 24px; }
 .history-loader, .history-start { display: flex; justify-content: center; padding: 16px; color: var(--faint); font-size: 11px; }
 .history-loader button { display: flex; align-items: center; gap: 6px; padding: 6px 12px; color: var(--muted); background: #232323; border-radius: 7px; }
@@ -229,6 +240,10 @@ textarea { resize: none; }
 .latest-button { position: absolute; z-index: 8; right: 19px; bottom: 13px; height: 29px; display: flex; align-items: center; gap: 5px; padding: 0 10px; color: white; background: #343434e8; border: 1px solid #4a4a4a; border-radius: 15px; box-shadow: 0 5px 18px #0007; font-size: 11px; }
 .latest-button.has-new { background: var(--accent); border-color: #2e92ff; }
 .timeline-drop, .drop-overlay { position: absolute; z-index: 50; inset: 8px; display: flex; align-items: center; justify-content: center; gap: 10px; color: white; background: #0a84ff1a; border: 2px dashed #3199ff; border-radius: 10px; backdrop-filter: blur(7px); pointer-events: none; }
+
+@media (max-width: 860px) {
+  .timeline-minimap { display: none; }
+}
 
 /* Media */
 .media-section { margin: 10px 0 13px; padding: 10px; background: #1d1d1d; border: 1px solid #2b2b2b; border-radius: 7px; }

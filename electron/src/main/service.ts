@@ -40,7 +40,8 @@ import { AgentServerClient } from './server-client'
 import { SettingsStore } from './settings'
 import { appLog } from './logger'
 
-const TAIL_EVENT_LIMIT = 120
+const INITIAL_TAIL_EVENT_LIMIT = 240
+const HISTORY_PAGE_EVENT_LIMIT = 120
 const FILE_PAGE_LIMIT = 60
 
 export class AppService {
@@ -222,7 +223,7 @@ export class AppService {
 
   cachedTimeline(sessionId: string): SessionSnapshot | null { return this.cache.snapshot(this.serverId, sessionId) }
 
-  async olderTimeline(sessionId: string, before: number, limit = TAIL_EVENT_LIMIT): Promise<TimelinePage> {
+  async olderTimeline(sessionId: string, before: number, limit = HISTORY_PAGE_EVENT_LIMIT): Promise<TimelinePage> {
     const localEvents = this.cache.eventsBefore(this.serverId, sessionId, before, limit)
     const localSession = this.sessions.find(session => session.id === sessionId) ?? this.cache.session(this.serverId, sessionId)
     if (localEvents.length && localSession) {
@@ -503,12 +504,12 @@ export class AppService {
       const timelineState = this.cache.timelineState(this.serverId, sessionId)
       const needsCompletenessAudit = Boolean(before && timelineState?.verifiedLatestSeq == null)
       const pageRequest = cachedLast > 0
-        ? this.client.sessionPage(sessionId, { after: cachedLast, limit: TAIL_EVENT_LIMIT, tail: false, visible: true })
-        : this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+        ? this.client.sessionPage(sessionId, { after: cachedLast, limit: INITIAL_TAIL_EVENT_LIMIT, tail: false, visible: true })
+        : this.client.sessionPage(sessionId, { limit: INITIAL_TAIL_EVENT_LIMIT, tail: true, visible: true })
       const [deltaPage, auditPage] = await Promise.all([
         pageRequest,
         needsCompletenessAudit
-          ? this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+          ? this.client.sessionPage(sessionId, { limit: INITIAL_TAIL_EVENT_LIMIT, tail: true, visible: true })
           : Promise.resolve(null)
       ])
       let page = deltaPage
@@ -523,7 +524,7 @@ export class AppService {
           sessionId, cachedVisible, serverVisible: auditPage.total, tailEvents: auditPage.events.length
         })
       } else if ((page.events_omitted_after ?? 0) > 0 || (page.latest_seq ?? cachedLast) < cachedLast) {
-        page = await this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+        page = await this.client.sessionPage(sessionId, { limit: INITIAL_TAIL_EVENT_LIMIT, tail: true, visible: true })
         if (!this.isCurrentTimeline(sessionId, lease)) return
         mode = 'replace'
       }
@@ -570,7 +571,7 @@ export class AppService {
   }
 
   private async fetchTimeline(sessionId: string, lease: number): Promise<SessionSnapshot> {
-    const page = await this.client.sessionPage(sessionId, { limit: TAIL_EVENT_LIMIT, tail: true, visible: true })
+    const page = await this.client.sessionPage(sessionId, { limit: INITIAL_TAIL_EVENT_LIMIT, tail: true, visible: true })
     if (!this.isCurrentTimeline(sessionId, lease)) throw new Error('Timeline selection superseded')
     this.cache.putSession(this.serverId, page.session)
     this.cache.replaceEvents(this.serverId, sessionId, page.events)
