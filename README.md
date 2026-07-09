@@ -74,6 +74,19 @@ the app directly to the MacBook Air at `/Users/zen/agi/ZenithDock.app` when
 `zens-macbook-air` is reachable over SSH. Override with `ZENITHDOCK_MBA_HOST`
 or `ZENITHDOCK_MBA_DEST` if needed.
 
+### Electron macOS preview
+
+The feature-compatible Electron rewrite lives in `electron/`. Build its
+separate local app without touching the Swift binary:
+
+```bash
+./scripts/build_electron_mac.sh
+```
+
+The result is `dist/AgentsDock-Electron.app`. See
+[`electron/FEATURE_PARITY.md`](electron/FEATURE_PARITY.md) for the parity and
+verification contract. This local workflow does not upload TestFlight.
+
 ## Build The iOS/iPadOS App
 
 The mobile SwiftUI target is `ZenithDockIOS` and reuses `ZenithCore`.

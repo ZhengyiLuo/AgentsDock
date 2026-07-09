@@ -6676,3 +6676,70 @@ Follow-up from rapid-switch stress:
   wheel-event path. During motion they use cached or type-aware row geometry;
   after the gesture, visible rows measure once and settle through the existing
   anchor-preserving correction path.
+
+## 2026-07-09 - Electron parity and cache-first timeline
+
+- Added a separate Electron macOS client under `electron/`; local builds install
+  only `dist/AgentsDock-Electron.app` and never replace the Swift app.
+- The renderer opens cached transcript tails immediately, then reconciles only
+  events after the cached sequence while a resumable WebSocket supplies live
+  events. Stale chat-open completions are rejected by a main-process lease.
+- React Virtuoso owns the timeline with stable semantic row keys, one-page
+  prepend transactions, persisted per-chat view state, no incoming auto-follow,
+  and explicit local-send bottom navigation.
+- In-memory snapshots are LRU-bounded, archived transcripts are evicted after
+  leaving them, hover prefetch is delayed/deduplicated, and streamed events are
+  published at most once per animation frame.
+- Added session-scoped drafts/uploads/queue state, Codex-style queued-turn UI,
+  runtime patch protection, job editing/fixed counts, digest preview/background
+  send, on-demand process/tmux inspection, media paging, lazy video thumbnails,
+  atomic downloads, and authorized relative Markdown file links.
+- Added regression coverage for queue state, live-run state, paging merges,
+  stable timeline row identity, bounded memory cache, URL handling, resumable
+  WebSockets, incremental warm-open requests, linked-file authorization, and
+  complete copy from folded code blocks.
+
+### Packaged startup hardening
+
+- A packaged-only opening stall was traced to synchronous Electron
+  `safeStorage` decryption after ad-hoc signing identities changed. The access
+  token now lives in a stable generic macOS Keychain item; normal startup never
+  touches the legacy encrypted blob. Migration is explicit and one-time.
+- React 19 then exposed a separate renderer loop: Zustand selectors returned a
+  fresh empty upload array for every snapshot read. Empty per-chat collections
+  now use stable constants, and concurrent StrictMode bootstrap calls share one
+  initialization promise.
+- The packaged smoke opens the real cached workspace, restores its selected
+  transcript, completes authenticated session/job refresh, and renders without
+  an unresponsive or renderer-crash log entry. Cache bootstrap completes before
+  the background server reconciliation.
+
+## 2026-07-09 - Deterministic Electron chat switching and history paging
+
+- Warm chat selection no longer reopens and rehydrates an equivalent SQLite
+  snapshot. It displays the in-memory cache immediately, reconciles HTTP deltas,
+  then resumes the live stream from the authoritative newest sequence. Selection
+  leases reject stale A-to-B-to-A completions before either UI or cache writes.
+- Older-history requests now ask for the adjacent page before the current
+  cursor. Locally cached older rows are served before the network, and
+  trace-heavy pages are accumulated until they contain useful message rows,
+  then published as one prepend transaction rather than a visible flyby.
+- Timeline projection now creates granular message, trace, media, job, and
+  status rows. Stable references, append/prepend fast paths, filtered raw events,
+  reserved media geometry, and narrower Virtuoso overscan keep live updates from
+  rebuilding or remeasuring the whole visible conversation.
+- Viewport restoration has one owner: a synchronous semantic bookmark containing
+  the actual DOM row key and its viewport offset. The racy asynchronous Virtuoso
+  measurement snapshot path was removed after stress testing proved it could
+  override a newer bookmark during an immediate chat round trip.
+- Server sequence rollback and disconnected-tail responses replace stale local
+  windows instead of merging incompatible histories. Fully cached histories over
+  the visible-tail limit remain pageable after relaunch, including offline use.
+- Composer, inspector, media grid, and Markdown rendering now subscribe to or
+  memoize only the state they own. Draft typing no longer republishes unrelated
+  timeline state or performs per-keystroke textarea measurement.
+- Regression suite: 29 tests across seven files. Packaged interaction smoke
+  measured cached chat switches in roughly 20-30 ms and preserved the exact
+  first visible message across an immediate A-to-B-to-A switch. The final app
+  idled at 0 percent CPU with no renderer exception, unresponsive event, or
+  ResizeObserver loop.
