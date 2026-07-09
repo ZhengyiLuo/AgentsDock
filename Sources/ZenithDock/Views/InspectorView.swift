@@ -2109,11 +2109,12 @@ private struct ChatFilesInspector: View {
     }
 
     // Videos and images grouped together into one visual gallery (videos first,
-    // then images), de-duplicated by id.
+    // then images), de-duplicated by id. Images have their own metadata refresh
+    // path because the generic file page may not include recent visual assets.
     private var media: [ZFile] {
         var seen = Set<String>()
         var result: [ZFile] = []
-        for file in store.sessionVideos + images where seen.insert(file.id).inserted {
+        for file in store.sessionVideos + store.sessionImages + images where seen.insert(file.id).inserted {
             result.append(file)
         }
         return result
