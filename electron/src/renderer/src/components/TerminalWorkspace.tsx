@@ -29,6 +29,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
   const fitRef = useRef<FitAddon | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const actionBusyRef = useRef(false)
+  const onCloseRef = useRef(onClose)
   const [connectionState, setConnectionState] = useState<TerminalConnectionState>('connecting')
   const [connectionName, setConnectionName] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -37,6 +38,8 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
   const [searchQuery, setSearchQuery] = useState('')
   const [confirmKill, setConfirmKill] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
+
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
 
   const refreshWindows = useCallback(async () => {
     try {
@@ -135,7 +138,15 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
         setSearchOpen(true)
         return false
       }
+      if (key === 'w' && onCloseRef.current) {
+        onCloseRef.current?.()
+        return false
+      }
       if (key === 't') {
+        if (event.shiftKey) {
+          onCloseRef.current?.()
+          return false
+        }
         void runAction('new-window')
         return false
       }
@@ -289,7 +300,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
           <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item danger" onSelect={() => setConfirmKill(true)}><Trash2 size={14} /> Kill tmux session</DropdownMenu.Item>
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
-        {onClose && <><span className="terminal-tool-separator" /><button className="icon-button terminal-panel-close" aria-label="Close terminal panel" title="Close terminal panel (tmux keeps running)" onClick={onClose}><X size={15} /></button></>}
+        {onClose && <><span className="terminal-tool-separator" /><button className="icon-button terminal-panel-close" aria-label="Close terminal panel" title="Close terminal panel (⌘W; tmux keeps running)" onClick={onClose}><X size={15} /></button></>}
       </div>
     </header>
     {searchOpen && <div className="terminal-search">
@@ -308,16 +319,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
         <ContextMenu.Item className="menu-item" onSelect={() => terminalRef.current?.clear()}>Clear scrollback</ContextMenu.Item>
       </ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>
-    <footer className="terminal-status"><span className={`terminal-state-dot ${connectionState}`} /><strong>{connectionStateLabel(connectionState)}</strong><span>{connectionName || 'persistent tmux'}</span><kbd>⌘T</kbd><small>new window</small><kbd>⌘D</kbd><small>split right</small><kbd>⇧⌘D</kbd><small>split down</small></footer>
   </section>
-}
-
-function connectionStateLabel(state: TerminalConnectionState): string {
-  if (state === 'connected') return 'Attached'
-  if (state === 'reconnecting') return 'Reconnecting'
-  if (state === 'connecting') return 'Connecting'
-  if (state === 'error') return 'Connection issue'
-  return 'Detached'
 }
 
 function terminalTheme(): ITheme {

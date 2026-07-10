@@ -28,7 +28,7 @@ export function ChatHeader({ terminalOpen = false, onTerminalToggle }: { termina
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}
           aria-label={terminalOpen ? 'Close terminal panel' : 'Open terminal panel'}
           aria-pressed={terminalOpen}
-          title={`${terminalOpen ? 'Close' : 'Open'} terminal panel (⌘J)`}
+          title={`${terminalOpen ? 'Close' : 'Open'} terminal panel (⌘⇧T)`}
           onClick={onTerminalToggle}
         ><SquareTerminal size={16} /></button>
         <ConnectionStatus />

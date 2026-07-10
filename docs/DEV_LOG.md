@@ -7125,8 +7125,19 @@ Follow-up from rapid-switch stress:
 - Removed the mutually exclusive Chat/Terminal workspace tabs. Opening a
   terminal now keeps the timeline and composer visible and docks the live tmux
   workspace beneath them, matching the interaction model used by coding tools.
-- Added one terminal icon in the chat header and `Command-J` for toggling the
+- Added one terminal icon in the chat header and `Command-Shift-T` for toggling the
   dock. Closing the dock only detaches the PTY client; the remote tmux session,
   windows, panes, and processes continue running.
 - The terminal dock owns a stable bounded height, a clear panel-close control,
   and its existing tmux window tabs and structured split/window actions.
+- Disabled tmux's own status line and removed the redundant app footer. The
+  dock now has one window strip and one terminal canvas instead of stacking two
+  sets of tabs, shortcut labels, and connection chrome.
+- The dock now mounts at its final terminal dimensions behind a clipped shell,
+  then raises its top edge with a 220 ms eased height/translation transition.
+  This animates chat reflow without repeatedly resizing the xterm canvas; close
+  reverses the motion before the PTY client detaches.
+- Lifted the dock into the application grid so it spans the complete bottom
+  edge beneath the sidebar, chat, and inspector rather than occupying only the
+  conversation column. While xterm is focused, `Command-W` closes the dock and
+  terminal editing/window/split shortcuts remain captured by xterm.

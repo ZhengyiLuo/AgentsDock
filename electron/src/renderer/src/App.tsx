@@ -6,7 +6,7 @@ import { Composer } from './components/Composer'
 import { Dialogs } from './components/Dialogs'
 import { Inspector } from './components/Inspector'
 import { Sidebar } from './components/Sidebar'
-import { TerminalWorkspace } from './components/TerminalWorkspace'
+import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
 import { useAppStore } from './store/app-store'
 
@@ -42,12 +42,13 @@ export function App() {
   }, [])
   useEffect(() => {
     const toggleTerminal = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.key.toLowerCase() !== 'j' || !selectedSessionId) return
+      if (!event.metaKey || !event.shiftKey || event.key.toLowerCase() !== 't' || !selectedSessionId) return
       event.preventDefault()
+      event.stopPropagation()
       setTerminalOpen(selectedSessionId, !terminalOpen)
     }
-    window.addEventListener('keydown', toggleTerminal)
-    return () => window.removeEventListener('keydown', toggleTerminal)
+    window.addEventListener('keydown', toggleTerminal, true)
+    return () => window.removeEventListener('keydown', toggleTerminal, true)
   }, [selectedSessionId, terminalOpen])
   const setTerminalOpen = (sessionId: string, open: boolean) => {
     setTerminalOpenBySession(current => {
@@ -70,17 +71,18 @@ export function App() {
       <Sidebar />
       <section className="conversation-pane">
         <ChatHeader terminalOpen={terminalOpen} onTerminalToggle={toggleTerminal} />
-        <div className={`chat-workspace${terminalOpen && selectedSession ? ' terminal-open' : ''}`}>
+        <div className="chat-workspace">
           <Timeline />
           <Composer />
-          {terminalOpen && selectedSession && <TerminalWorkspace
-            key={selectedSession.id}
-            session={selectedSession}
-            onClose={() => setTerminalOpen(selectedSession.id, false)}
-          />}
         </div>
       </section>
       {inspectorVisible && <Inspector key={selectedSessionId || 'empty'} />}
+      {selectedSession && <TerminalDock
+        key={selectedSession.id}
+        open={terminalOpen}
+        session={selectedSession}
+        onRequestClose={() => setTerminalOpen(selectedSession.id, false)}
+      />}
       {error && <div className="error-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
       <Dialogs />
       <CodeReview source={reviewDiff} onClose={() => setReviewDiff(null)} />
