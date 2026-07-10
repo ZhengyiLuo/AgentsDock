@@ -28,6 +28,7 @@ node_modules/.bin/electron-builder --mac dir --config.mac.identity=null --config
 mkdir -p "$ROOT/dist"
 rm -rf "$STAGED_DESTINATION"
 /usr/bin/ditto "$PROJECT/dist-verify/mac-arm64/AgentsDock.app" "$STAGED_DESTINATION"
+/usr/bin/touch "$STAGED_DESTINATION/Contents/Resources/disable-auto-update"
 /usr/bin/codesign --force --deep --sign - "$STAGED_DESTINATION"
 /usr/bin/codesign --verify --deep --strict "$STAGED_DESTINATION"
 

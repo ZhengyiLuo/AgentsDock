@@ -6911,3 +6911,5 @@ Follow-up from rapid-switch stress:
   `security` command from inside the App Sandbox.
 - Set build 59 as the first Electron TestFlight candidate. TypeScript validation
   and all 54 Electron regression tests pass before packaging.
+- Ad-hoc local packages carry a build marker that disables self-replacement;
+  only Developer-ID-signed direct releases participate in remote updates.

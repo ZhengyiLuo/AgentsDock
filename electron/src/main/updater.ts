@@ -1,5 +1,7 @@
 import { app } from 'electron'
 import { autoUpdater, type ProgressInfo, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import type { AppUpdateStatus } from '../shared/types'
 import { appLog } from './logger'
 
@@ -30,6 +32,14 @@ export class AppUpdateManager {
         state: 'disabled',
         channel: 'development',
         message: 'Updates are checked by packaged builds.'
+      })
+      return
+    }
+    if (existsSync(join(process.resourcesPath, 'disable-auto-update'))) {
+      this.set({
+        state: 'disabled',
+        channel: 'development',
+        message: 'This local build does not replace signed release builds.'
       })
       return
     }
