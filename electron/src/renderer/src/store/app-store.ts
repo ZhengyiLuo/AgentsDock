@@ -36,7 +36,6 @@ interface AppState {
   collapsedFolders: Set<string>
   archivedCollapsed: boolean
   inspectorVisible: boolean
-  reorderMode: boolean
   activeSessionIds: Set<string>
   error: string | null
   modals: ModalState
@@ -64,7 +63,6 @@ interface AppState {
   setFolderOrder(order: string[]): void
   setArchivedCollapsed(value: boolean): void
   setInspectorVisible(value: boolean): void
-  setReorderMode(value: boolean): void
   setModal<K extends keyof ModalState>(key: K, value: boolean): void
   setError(error: string | null): void
 }
@@ -102,7 +100,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   collapsedFolders: new Set(),
   archivedCollapsed: false,
   inspectorVisible: true,
-  reorderMode: false,
   activeSessionIds: new Set(),
   error: null,
   modals: defaultModals,
@@ -476,7 +473,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setFolderOrder(order) { set({ folderOrder: order }); void window.agentsDock.preferences.set('folderOrder', order) },
   setArchivedCollapsed(value) { set({ archivedCollapsed: value }); void window.agentsDock.preferences.set('archivedCollapsed', value) },
   setInspectorVisible(value) { set({ inspectorVisible: value }); void window.agentsDock.preferences.set('inspectorVisible', value) },
-  setReorderMode(value) { set({ reorderMode: value }) },
   setModal(key, value) { set(state => ({ modals: { ...state.modals, [key]: value } })) },
   setError(error) { set({ error }) }
 }))

@@ -15,7 +15,15 @@ import { sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
 interface Section { id: string; title: string; sessions: Session[]; kind: 'pinned' | 'folder' | 'archived' }
-interface DropIndicator { id: string; placement: 'before' | 'after' }
+interface DropIndicator { id: string; placement: 'before' | 'after' | 'inside' }
+interface DragItemData { type: 'session' | 'folder'; label?: string; section?: string }
+
+export const SIDEBAR_LONG_PRESS = { delay: 280, tolerance: 6 } as const
+
+export type SidebarDropOperation =
+  | { kind: 'reorder-folder'; order: string[] }
+  | { kind: 'move-session'; sessionId: string; folder: string }
+  | { kind: 'reorder-session'; sessionId: string; targetId: string; placement: 'before' | 'after' }
 
 const sidebarCollisionDetection: CollisionDetection = (args) => {
   const activeType = args.active.data.current?.type
@@ -31,50 +39,83 @@ export function Sidebar() {
   const folderOrder = useAppStore(state => state.folderOrder)
   const collapsed = useAppStore(state => state.collapsedFolders)
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
-  const reorderMode = useAppStore(state => state.reorderMode)
   const catalog = useAppStore(state => state.runtimeCatalog)
   const [query, setQuery] = useState('')
   const [dragging, setDragging] = useState<{ id: string; label: string; type: 'session' | 'folder' } | null>(null)
   const [drop, setDrop] = useState<DropIndicator | null>(null)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const dropRef = useRef<DropIndicator | null>(null)
+  const suppressClickRef = useRef<string | null>(null)
+  const suppressClickTimer = useRef<number | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: SIDEBAR_LONG_PRESS }))
   const sections = useMemo(() => buildSections(sessions, folderOrder, query), [sessions, folderOrder, query])
+  const folders = useMemo(() => orderedFolders(
+    [...new Set([...folderOrder, ...sessions.filter(session => !session.archived && !session.pinned).map(session => session.folder?.trim() || 'General')])],
+    folderOrder
+  ), [folderOrder, sessions])
+
+  useEffect(() => () => {
+    if (suppressClickTimer.current != null) window.clearTimeout(suppressClickTimer.current)
+  }, [])
+
+  const updateDrop = (next: DropIndicator | null) => {
+    dropRef.current = next
+    setDrop(current => current?.id === next?.id && current?.placement === next?.placement ? current : next)
+  }
+  const finishDrag = () => {
+    setDragging(null)
+    updateDrop(null)
+    if (suppressClickTimer.current != null) window.clearTimeout(suppressClickTimer.current)
+    suppressClickTimer.current = window.setTimeout(() => {
+      suppressClickRef.current = null
+      suppressClickTimer.current = null
+    }, 0)
+  }
 
   const onDragStart = (event: DragStartEvent) => {
-    const data = event.active.data.current as { type: 'session' | 'folder'; label: string } | undefined
-    if (data) setDragging({ id: String(event.active.id), label: data.label, type: data.type })
+    const data = event.active.data.current as DragItemData | undefined
+    if (!data) return
+    if (suppressClickTimer.current != null) window.clearTimeout(suppressClickTimer.current)
+    suppressClickRef.current = String(event.active.id)
+    setDragging({ id: String(event.active.id), label: data.label ?? '', type: data.type })
   }
   const onDragOver = (event: DragOverEvent) => {
-    if (!event.over) { setDrop(null); return }
-    const activeData = event.active.data.current as { type: 'session' | 'folder' } | undefined
-    const overData = event.over.data.current as { type: 'session' | 'folder'; section?: string } | undefined
+    if (!event.over || event.active.id === event.over.id) { updateDrop(null); return }
+    const activeData = event.active.data.current as DragItemData | undefined
+    const overData = event.over.data.current as DragItemData | undefined
+    if (activeData?.type === 'session' && overData?.type === 'folder') {
+      updateDrop({ id: String(event.over.id), placement: 'inside' })
+      return
+    }
+    if (activeData?.type === 'session' && overData?.type === 'session' && activeData.section !== overData.section) {
+      updateDrop(null)
+      return
+    }
     const translated = event.active.rect.current.translated
     const center = translated ? translated.top + translated.height / 2 : 0
     const placement = center < event.over.rect.top + event.over.rect.height / 2 ? 'before' : 'after'
     const overId = activeData?.type === 'folder' && overData?.type === 'session' && overData.section?.startsWith('folder:')
       ? overData.section
       : String(event.over.id)
-    setDrop({ id: overId, placement })
+    updateDrop({ id: overId, placement })
   }
   const onDragEnd = async (event: DragEndEvent) => {
-    const currentDrop = drop
-    setDragging(null); setDrop(null)
-    if (!event.over || !currentDrop || event.active.id === event.over.id) return
-    const activeData = event.active.data.current as { type: 'session' | 'folder'; section?: string } | undefined
-    const overData = event.over.data.current as { type: 'session' | 'folder'; section?: string } | undefined
-    if (activeData?.type === 'folder' && currentDrop.id.startsWith('folder:')) {
-      const active = String(event.active.id).replace('folder:', '')
-      const target = currentDrop.id.replace('folder:', '')
-      const current = orderedFolders(sections.filter(section => section.kind === 'folder').map(section => section.title), folderOrder)
-      useAppStore.getState().setFolderOrder(reorderFolderList(current, active, target, currentDrop.placement))
-    } else if (activeData?.type === 'session' && overData?.type === 'folder') {
-      const sessionId = String(event.active.id).replace('session:', '')
-      const folder = String(event.over.id).replace('folder:', '')
-      await useAppStore.getState().updateSession(sessionId, { folder, pinned: false, archived: false })
-    } else if (activeData?.type === 'session' && overData?.type === 'session' && activeData.section === overData.section) {
-      const active = String(event.active.id).replace('session:', '')
-      const target = String(event.over.id).replace('session:', '')
+    const operation = resolveSidebarDrop(
+      String(event.active.id),
+      event.active.data.current as DragItemData | undefined,
+      event.over ? String(event.over.id) : null,
+      event.over?.data.current as DragItemData | undefined,
+      dropRef.current,
+      folders
+    )
+    finishDrag()
+    if (!operation) return
+    if (operation.kind === 'reorder-folder') {
+      useAppStore.getState().setFolderOrder(operation.order)
+    } else if (operation.kind === 'move-session') {
+      await useAppStore.getState().updateSession(operation.sessionId, { folder: operation.folder, pinned: false, archived: false })
+    } else {
       try {
-        const next = await window.agentsDock.sessions.reorder(active, target, currentDrop.placement)
+        const next = await window.agentsDock.sessions.reorder(operation.sessionId, operation.targetId, operation.placement)
         useAppStore.setState({ sessions: next })
       } catch (error) { useAppStore.getState().setError(error instanceof Error ? error.message : String(error)) }
     }
@@ -93,24 +134,23 @@ export function Sidebar() {
       <div className="sidebar-actions">
         <button className="sidebar-action" onClick={() => useAppStore.getState().setModal('resume', true)}><Undo2 size={14} /> Resume ID</button>
         <button className="sidebar-action" onClick={() => useAppStore.getState().setModal('folder', true)}><FolderPlus size={14} /> New folder</button>
-        <button className={`sidebar-action ${reorderMode ? 'active' : ''}`} onClick={() => useAppStore.getState().setReorderMode(!reorderMode)}><GripVertical size={14} /> {reorderMode ? 'Done' : 'Reorder'}</button>
       </div>
       <label className="sidebar-search">
         <Search size={14} />
         <input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { const first = sections.flatMap(section => section.sessions)[0]; if (first) void useAppStore.getState().selectSession(first.id) } }} placeholder="Search chats" />
         <kbd>⌘P</kbd>
       </label>
-      <DndContext collisionDetection={sidebarCollisionDetection} sensors={sensors} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setDragging(null); setDrop(null) }}>
-        <div className={`session-list ${reorderMode ? 'reorder-mode' : ''}`}>
+      <DndContext collisionDetection={sidebarCollisionDetection} sensors={sensors} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={finishDrag}>
+        <div className="session-list">
           {sections.map(section => (
             <SidebarSection
               key={section.id}
               section={section}
               selectedId={selectedId}
               collapsed={section.kind === 'archived' ? archivedCollapsed : section.kind === 'folder' && collapsed.has(section.title)}
-              reorderMode={reorderMode}
               drop={drop}
               runtime={(session) => runtimeLabel(session, catalog)}
+              suppressClick={(id) => suppressClickRef.current === id}
             />
           ))}
           {!sections.some(section => section.sessions.length) && <div className="sidebar-empty">No chats found</div>}
@@ -125,8 +165,8 @@ export function Sidebar() {
   )
 }
 
-function SidebarSection({ section, selectedId, collapsed, reorderMode, drop, runtime }: {
-  section: Section; selectedId: string | null; collapsed: boolean; reorderMode: boolean; drop: DropIndicator | null; runtime: (session: Session) => string
+function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick }: {
+  section: Section; selectedId: string | null; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean
 }) {
   const toggle = () => {
     if (section.kind === 'archived') useAppStore.getState().setArchivedCollapsed(!collapsed)
@@ -134,24 +174,24 @@ function SidebarSection({ section, selectedId, collapsed, reorderMode, drop, run
   }
   return (
     <section className="sidebar-section">
-      <FolderHeader section={section} collapsed={collapsed} reorderMode={reorderMode} drop={drop} onToggle={toggle} />
+      <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />
       {!collapsed && section.sessions.map(session => (
-        <SessionRow key={session.id} session={session} selected={session.id === selectedId} reorderMode={reorderMode} sectionId={section.id} drop={drop} runtime={runtime(session)} />
+        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} />
       ))}
     </section>
   )
 }
 
-function FolderHeader({ section, collapsed, reorderMode, drop, onToggle }: { section: Section; collapsed: boolean; reorderMode: boolean; drop: DropIndicator | null; onToggle: () => void }) {
+function FolderHeader({ section, collapsed, drop, onToggle, suppressClick }: { section: Section; collapsed: boolean; drop: DropIndicator | null; onToggle: () => void; suppressClick: (id: string) => boolean }) {
   const id = `folder:${section.title}`
-  const draggable = useDraggable({ id, disabled: !reorderMode || section.kind !== 'folder', data: { type: 'folder', label: section.title } })
-  const droppable = useDroppable({ id, disabled: !reorderMode || section.kind !== 'folder', data: { type: 'folder' } })
+  const draggable = useDraggable({ id, disabled: section.kind !== 'folder', data: { type: 'folder', label: section.title } })
+  const droppable = useDroppable({ id, disabled: section.kind !== 'folder', data: { type: 'folder' } })
   const ref = (node: HTMLElement | null) => { draggable.setNodeRef(node); droppable.setNodeRef(node) }
   const indicator = drop?.id === id ? `drop-${drop.placement}` : ''
   return (
-    <div ref={ref} className={`section-header ${indicator} ${draggable.isDragging ? 'dragging' : ''}`} {...draggable.listeners} {...draggable.attributes}>
-      <button onClick={reorderMode ? undefined : onToggle} tabIndex={reorderMode ? -1 : 0}>
-        {reorderMode && section.kind === 'folder' ? <GripVertical size={12} /> : collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+    <div ref={ref} className={`section-header ${indicator} ${draggable.isDragging ? 'dragging' : ''}`}>
+      <button onClick={() => { if (!suppressClick(id)) onToggle() }} {...draggable.listeners} {...draggable.attributes}>
+        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
         {section.kind === 'pinned' ? <Pin size={11} /> : section.kind === 'archived' ? <Archive size={11} /> : <Folder size={11} />}
         <span>{section.title}</span><small>{section.sessions.length}</small>
       </button>
@@ -159,10 +199,10 @@ function FolderHeader({ section, collapsed, reorderMode, drop, onToggle }: { sec
   )
 }
 
-function SessionRow({ session, selected, reorderMode, sectionId, drop, runtime }: { session: Session; selected: boolean; reorderMode: boolean; sectionId: string; drop: DropIndicator | null; runtime: string }) {
+function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick }: { session: Session; selected: boolean; sectionId: string; drop: DropIndicator | null; runtime: string; suppressClick: (id: string) => boolean }) {
   const id = `session:${session.id}`
-  const draggable = useDraggable({ id, disabled: !reorderMode, data: { type: 'session', label: session.title, section: sectionId } })
-  const droppable = useDroppable({ id, disabled: !reorderMode, data: { type: 'session', section: sectionId } })
+  const draggable = useDraggable({ id, data: { type: 'session', label: session.title, section: sectionId } })
+  const droppable = useDroppable({ id, data: { type: 'session', section: sectionId } })
   const ref = (node: HTMLElement | null) => { draggable.setNodeRef(node); droppable.setNodeRef(node) }
   const unread = sessionUnread(session)
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
@@ -170,7 +210,7 @@ function SessionRow({ session, selected, reorderMode, sectionId, drop, runtime }
   const prefetchTimer = useRef<number | null>(null)
   useEffect(() => () => { if (prefetchTimer.current) window.clearTimeout(prefetchTimer.current) }, [])
   const schedulePrefetch = () => {
-    if (reorderMode || session.archived || selected) return
+    if (session.archived || selected) return
     if (prefetchTimer.current) window.clearTimeout(prefetchTimer.current)
     prefetchTimer.current = window.setTimeout(() => {
       prefetchTimer.current = null
@@ -182,13 +222,13 @@ function SessionRow({ session, selected, reorderMode, sectionId, drop, runtime }
     window.clearTimeout(prefetchTimer.current)
     prefetchTimer.current = null
   }
-  const select = () => { if (!reorderMode) void useAppStore.getState().selectSession(session.id) }
+  const select = () => { if (!suppressClick(id)) void useAppStore.getState().selectSession(session.id) }
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
         <div
           ref={ref}
-          className={`session-row ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${reorderMode ? 'reordering' : ''} ${indicator} ${draggable.isDragging ? 'dragging' : ''}`}
+          className={`session-row ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${indicator} ${draggable.isDragging ? 'dragging' : ''}`}
           onClick={select}
           onMouseEnter={schedulePrefetch}
           onMouseLeave={cancelPrefetch}
@@ -196,7 +236,6 @@ function SessionRow({ session, selected, reorderMode, sectionId, drop, runtime }
           {...draggable.listeners}
           {...draggable.attributes}
         >
-          {reorderMode && <GripVertical className="row-grip" size={14} />}
           <BackendMark backend={session.backend} size={18} />
           <span className="session-copy"><strong>{session.title}</strong><small>{session.backend === 'codex' ? 'Codex' : 'Claude'} · {runtime}{running ? ' · running' : unread ? ' · new' : ''}</small></span>
           {(running || unread) && <span className={`status-dot ${running ? 'running' : 'unread'}`} />}
@@ -260,4 +299,33 @@ export function reorderFolderList(folders: string[], active: string, target: str
   if (placement === 'after') index += 1
   reordered.splice(Math.max(0, index), 0, active)
   return reordered
+}
+
+export function resolveSidebarDrop(
+  activeId: string,
+  activeData: DragItemData | undefined,
+  overId: string | null,
+  overData: DragItemData | undefined,
+  drop: DropIndicator | null,
+  folders: string[]
+): SidebarDropOperation | null {
+  if (!overId || !drop || activeId === overId) return null
+  if (activeData?.type === 'folder' && drop.id.startsWith('folder:') && drop.placement !== 'inside') {
+    const active = activeId.replace('folder:', '')
+    const target = drop.id.replace('folder:', '')
+    const order = reorderFolderList(folders, active, target, drop.placement)
+    return order === folders ? null : { kind: 'reorder-folder', order }
+  }
+  if (activeData?.type === 'session' && overData?.type === 'folder') {
+    return { kind: 'move-session', sessionId: activeId.replace('session:', ''), folder: overId.replace('folder:', '') }
+  }
+  if (activeData?.type === 'session' && overData?.type === 'session' && activeData.section === overData.section && drop.placement !== 'inside') {
+    return {
+      kind: 'reorder-session',
+      sessionId: activeId.replace('session:', ''),
+      targetId: overId.replace('session:', ''),
+      placement: drop.placement
+    }
+  }
+  return null
 }

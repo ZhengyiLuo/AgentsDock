@@ -7054,3 +7054,23 @@ Follow-up from rapid-switch stress:
 - Added `scripts/smoke_terminal.mjs`. Its authenticated live-server run proved
   PTY input, detach/reattach state persistence, a second tmux window, a split
   pane, session deletion, and temporary-chat cleanup without server errors.
+
+## 2026-07-10 - Replace reorder mode with hold-and-drag gestures
+
+- Removed the sidebar's global Reorder mode and its state from the app store.
+  A normal row click continues to open or collapse immediately; holding a chat
+  or real folder header for 280 ms lifts it into a drag without changing the
+  behavior of quick clicks.
+- Drag completion is now resolved as one explicit operation. Pointer movement
+  only updates the insertion indicator, cancellation and self-drops are inert,
+  and the server or preference store is written exactly once after release.
+- Release clicks are suppressed after a completed or canceled drag, preventing
+  a reordered chat from also opening and preventing a moved folder from also
+  toggling its collapsed state.
+- Cross-folder chat drops show a folder highlight and move the chat only when
+  released on the folder header. Invalid cross-section row targets no longer
+  advertise an insertion line that cannot be honored by the server.
+- Folder reordering now derives from the complete folder list, so reordering
+  while search filters the sidebar cannot discard hidden folders.
+- Added drop-resolution and activation regressions. TypeScript and 74 Electron
+  tests pass in normal and shuffled execution order.
