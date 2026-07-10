@@ -6869,3 +6869,14 @@ Follow-up from rapid-switch stress:
   or predates the search endpoint.
 - Regression suite: 51 tests across twelve files; Python compile, TypeScript
   validation, and a synthetic server transcript search all pass.
+
+## 2026-07-09 - Synchronize the conversation navigator
+
+- The current-turn stroke now repaints for every visible-turn change. Previously
+  it could remain stale until the fixed-pitch rail crossed its recentering inset.
+- Timeline scrolling samples the row under the viewport center from the native
+  scroller once per animation frame. The canvas follows the real viewport
+  directly instead of Virtuoso's delayed overscan range callback.
+- Rail following now moves by only the distance needed to reveal the active
+  tick instead of recentering the whole strip in one visible jump.
+- Added a component regression test for in-inset current-turn changes.

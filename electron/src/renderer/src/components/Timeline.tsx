@@ -54,6 +54,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const topOffsetRef = useRef(initialViewState?.topOffset ?? 0)
   const distanceFromBottomRef = useRef(initialViewState?.distanceFromBottom ?? 0)
   const viewSaveTimer = useRef<number | null>(null)
+  const minimapSyncFrame = useRef<number | null>(null)
   const loadingOlderRef = useRef(false)
   const wasAtTop = useRef(false)
   const pendingLocalScroll = useRef(false)
@@ -73,6 +74,34 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const [timelineIndex, setTimelineIndex] = useState<TimelineIndex | null>(null)
   const [historicalWindow, setHistoricalWindow] = useState<HistoricalWindow | null>(null)
   const [seekingHistory, setSeekingHistory] = useState(false)
+
+  const syncMinimapToViewport = useCallback(() => {
+    const node = scroller.current
+    const minimap = minimapRef.current
+    if (!node || !minimap) return
+    const index = timelineIndexAtViewportCenter(node, firstItemIndex.current, itemsLength.current)
+    if (index != null) minimap.setVisibleRange(index, index)
+  }, [])
+  const scheduleMinimapSync = useCallback(() => {
+    if (minimapSyncFrame.current != null) return
+    minimapSyncFrame.current = window.requestAnimationFrame(() => {
+      minimapSyncFrame.current = null
+      syncMinimapToViewport()
+    })
+  }, [syncMinimapToViewport])
+  const setScroller = useCallback((node: HTMLElement | Window | null) => {
+    const next = node instanceof HTMLElement ? node : null
+    if (scroller.current === next) return
+    scroller.current?.removeEventListener('scroll', scheduleMinimapSync)
+    scroller.current = next
+    next?.addEventListener('scroll', scheduleMinimapSync, { passive: true })
+    if (next) scheduleMinimapSync()
+  }, [scheduleMinimapSync])
+
+  useEffect(() => () => {
+    scroller.current?.removeEventListener('scroll', scheduleMinimapSync)
+    if (minimapSyncFrame.current != null) window.cancelAnimationFrame(minimapSyncFrame.current)
+  }, [scheduleMinimapSync])
 
   const sourceKey = historicalWindow ? `history:${historicalWindow.anchorSeq}` : `live:${snapshot.generation ?? 0}`
   const sourceEvents = historicalWindow?.page.events ?? snapshot.events
@@ -341,6 +370,9 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     () => mergeTimelineLandmarks(timelineIndex?.landmarks, loadedLandmarks),
     [loadedLandmarks, timelineIndex?.landmarks]
   )
+  useEffect(() => {
+    scheduleMinimapSync()
+  }, [items, navigatorLandmarks, scheduleMinimapSync])
   const seekTimeline = useCallback(async (landmark: TimelineNavigatorLandmark) => {
     const directIndex = landmark.index ?? items.findIndex(item => {
       const [start, end] = timelineItemSequenceRange(item)
@@ -376,8 +408,12 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
       ? <div className="history-loader"><button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? <><LoaderCircle className="spin" size={13} /> Loading older messages</> : `Show older messages${olderRemaining ? ` · ${olderRemaining.toLocaleString()} remaining` : ''}`}</button></div>
       : <div className="history-start">Beginning of conversation</div>, [historicalWindow, loadOlder, loadingOlder, olderRemaining, returnToLatest, snapshot.hasMoreEvents])
   const components = useMemo(() => ({ Header: header, Footer: TimelineFooter }), [header])
-  const itemContent = useCallback((_: number, item: RenderTimelineItem) => (
-    <div className="virtual-row" data-timeline-key={item.key}>
+  const itemContent = useCallback((index: number, item: RenderTimelineItem) => (
+    <div
+      className="virtual-row"
+      data-timeline-key={item.key}
+      data-timeline-index={localVirtuosoIndex(index, firstItemIndex.current, itemsLength.current)}
+    >
       {item.key === unreadItemKey && <div className="unread-divider"><span>New messages</span></div>}
       <TimelineRowView item={item} sessionId={sessionId} onFindFile={findFile} />
     </div>
@@ -400,7 +436,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
         defaultItemHeight={170}
         increaseViewportBy={{ top: 260, bottom: 260 }}
         initialTopMostItemIndex={activeInitialLocation}
-        scrollerRef={node => { scroller.current = node instanceof HTMLElement ? node : null }}
+        scrollerRef={setScroller}
         skipAnimationFrameInResizeObserver
         followOutput={false}
         atBottomThreshold={80}
@@ -415,10 +451,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
           }
         }}
         rangeChanged={range => {
-          minimapRef.current?.setVisibleRange(
-            localVirtuosoIndex(range.startIndex, firstItemIndex.current, itemsLength.current),
-            localVirtuosoIndex(range.endIndex, firstItemIndex.current, itemsLength.current)
-          )
+          scheduleMinimapSync()
           scheduleViewSave()
         }}
         isScrolling={value => {
@@ -532,4 +565,23 @@ function timelineItemSequenceRange(item: RenderTimelineItem): [number, number] {
 function localVirtuosoIndex(index: number, firstItemIndex: number, itemCount: number): number {
   const local = index >= firstItemIndex ? index - firstItemIndex : index
   return Math.max(0, Math.min(local, Math.max(0, itemCount - 1)))
+}
+
+function timelineIndexAtViewportCenter(scroller: HTMLElement, firstItemIndex: number, itemCount: number): number | null {
+  if (!itemCount) return null
+  const bounds = scroller.getBoundingClientRect()
+  if (bounds.width <= 0 || bounds.height <= 0) return null
+  const x = Math.min(bounds.right - 8, Math.max(bounds.left + 48, bounds.left + bounds.width / 2))
+  const center = bounds.top + bounds.height / 2
+  const probes = [center, center - 32, center + 32, center - 96, center + 96]
+  for (const y of probes) {
+    const sampleY = Math.min(bounds.bottom - 2, Math.max(bounds.top + 2, y))
+    for (const element of document.elementsFromPoint(x, sampleY)) {
+      const row = element.closest<HTMLElement>('[data-timeline-index]')
+      if (!row || !scroller.contains(row)) continue
+      const index = Number(row.dataset.timelineIndex)
+      if (Number.isFinite(index)) return localVirtuosoIndex(index, firstItemIndex, itemCount)
+    }
+  }
+  return null
 }

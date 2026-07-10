@@ -66,9 +66,9 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
     const bottom = timelineTickY(last)
     const offset = scrollOffsetRef.current
     const inset = Math.min(54, Math.max(18, height / 5))
-    if (top < offset + inset || bottom > offset + height - inset) {
-      setScrollOffset((top + bottom) / 2 - height / 2)
-    }
+    if (top < offset + inset) setScrollOffset(top - inset)
+    else if (bottom > offset + height - inset) setScrollOffset(bottom - height + inset)
+    else drawRef.current()
   }, [setScrollOffset])
 
   const draw = useCallback(() => {
