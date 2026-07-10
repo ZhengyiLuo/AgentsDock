@@ -6941,3 +6941,12 @@ Follow-up from rapid-switch stress:
   selected chat or only cached/offline startup state.
 - Added a regression that renders the zero-session offline header and verifies
   the pill opens connection settings. The full suite passes with 55 tests.
+
+## 2026-07-09 - Add native right-click editing menus
+
+- Added a native Electron context menu for selected timeline text, editable
+  fields, links, and images. Selected chat text now exposes Copy and Select All;
+  the composer and text inputs expose the standard Undo/Redo/Cut/Copy/Paste/
+  Delete actions; links and images expose their native copy/open operations.
+- The menu is intentionally absent for generic non-text surfaces so it does not
+  collide with the existing Radix chat-management context menu in the sidebar.

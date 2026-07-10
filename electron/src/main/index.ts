@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, net, protocol, session, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, Menu, net, protocol, session, shell, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import { registerIpc } from './ipc'
@@ -124,6 +124,7 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', event => event.preventDefault())
+  installNativeContextMenu(window)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -131,6 +132,53 @@ function createWindow(): BrowserWindow {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
   return window
+}
+
+function installNativeContextMenu(window: BrowserWindow): void {
+  window.webContents.on('context-menu', (_event, params) => {
+    const template: MenuItemConstructorOptions[] = []
+    const separator = (): void => {
+      if (template.length && template.at(-1)?.type !== 'separator') template.push({ type: 'separator' })
+    }
+
+    if (params.linkURL) {
+      template.push(
+        { label: 'Open Link', click: () => void shell.openExternal(params.linkURL) },
+        { label: 'Copy Link', click: () => clipboard.writeText(params.linkURL) }
+      )
+    }
+
+    if (params.mediaType === 'image') {
+      separator()
+      template.push({ label: 'Copy Image', click: () => window.webContents.copyImageAt(params.x, params.y) })
+    }
+
+    if (params.isEditable) {
+      separator()
+      template.push(
+        { role: 'undo', enabled: params.editFlags.canUndo },
+        { role: 'redo', enabled: params.editFlags.canRedo },
+        { type: 'separator' },
+        { role: 'cut', enabled: params.editFlags.canCut },
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { role: 'pasteAndMatchStyle', enabled: params.editFlags.canPaste },
+        { role: 'delete', enabled: params.editFlags.canDelete },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: params.editFlags.canSelectAll }
+      )
+    } else if (params.selectionText.trim()) {
+      separator()
+      template.push(
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: params.editFlags.canSelectAll }
+      )
+    }
+
+    while (template.at(-1)?.type === 'separator') template.pop()
+    if (template.length) Menu.buildFromTemplate(template).popup({ window })
+  })
 }
 
 function createMenu(window: () => BrowserWindow | null): void {
