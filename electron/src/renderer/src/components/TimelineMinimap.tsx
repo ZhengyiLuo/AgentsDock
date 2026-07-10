@@ -4,7 +4,7 @@ import { formatTime } from '../lib/format'
 import { TIMELINE_TICK_PITCH, timelineTickY, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
 
 export interface TimelineMinimapHandle {
-  setVisibleRange(startIndex: number, endIndex: number): void
+  setVisibleRange(startIndex: number, endIndex: number, atBottom?: boolean): void
 }
 
 interface TimelineMinimapProps {
@@ -122,13 +122,14 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
   drawRef.current = draw
 
   useImperativeHandle(forwardedRef, () => ({
-    setVisibleRange(startIndex, endIndex) {
+    setVisibleRange(startIndex, endIndex, atBottom = false) {
       viewportRef.current = { start: startIndex, end: endIndex }
       const positions = visiblePositions()
-      if (positions) keepPositionsVisible(...positions)
+      if (positions && atBottom) setScrollOffset(maxScrollOffset())
+      else if (positions) keepPositionsVisible(...positions)
       else drawRef.current()
     }
-  }), [keepPositionsVisible, visiblePositions])
+  }), [keepPositionsVisible, maxScrollOffset, setScrollOffset, visiblePositions])
 
   useLayoutEffect(() => {
     const root = rootRef.current

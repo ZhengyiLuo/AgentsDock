@@ -62,6 +62,26 @@ describe('TimelineMinimap', () => {
     expect(fillRect).toHaveBeenCalled()
   })
 
+  it('pins the current marker to the final rail tick at the hard bottom', () => {
+    const ref = createRef<TimelineMinimapHandle>()
+    const landmarks: TimelineNavigatorLandmark[] = Array.from({ length: 100 }, (_, index) => ({
+      key: `turn-${index}`,
+      kind: 'assistant',
+      start_seq: index + 1,
+      end_seq: index + 1,
+      title: `Turn ${index}`,
+      preview: `Response ${index}`,
+      index,
+      endIndex: index
+    }))
+    render(<TimelineMinimap ref={ref} landmarks={landmarks} onSeek={vi.fn()} />)
+    fillRect.mockClear()
+
+    act(() => ref.current?.setVisibleRange(99, 99, true))
+
+    expect(fillRect.mock.calls).toContainEqual([10, 390, 19, 1])
+  })
+
   it('repaints its canvas palette when appearance changes', () => {
     const landmarks: TimelineNavigatorLandmark[] = Array.from({ length: 50 }, (_, index) => ({
       key: `turn-${index}`,

@@ -96,6 +96,11 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     const node = scroller.current
     const minimap = minimapRef.current
     if (!node || !minimap) return
+    if (atBottomRef.current && itemsLength.current > 0) {
+      const lastIndex = itemsLength.current - 1
+      minimap.setVisibleRange(lastIndex, lastIndex, true)
+      return
+    }
     const index = timelineIndexAtViewportCenter(node, firstItemIndex.current, itemsLength.current)
     if (index != null) minimap.setVisibleRange(index, index)
   }, [])
@@ -575,6 +580,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
           atBottomRef.current = value
           if (value) distanceFromBottomRef.current = 0
           setAtBottom(value)
+          scheduleMinimapSync()
           scheduleViewSave()
           if (value && !historicalWindow) {
             setNewBelow(false)

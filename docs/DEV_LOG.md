@@ -7197,3 +7197,11 @@ Follow-up from rapid-switch stress:
 - Added one LIFO close registry shared by transient surfaces, so nested viewers
   close in visual order and normal `Command-W` window closing remains intact
   when no dismissible UI is open.
+
+## 2026-07-10 - Pin the conversation navigator to the true bottom
+
+- Kept the minimap centered on the visible semantic row during ordinary
+  scrolling, but added an explicit hard-bottom signal from Virtuoso.
+- At the bottom boundary, the navigator now selects the final loaded landmark
+  and moves its fixed-size internal rail to the final tick instead of leaving
+  the active marker near the viewport-center message.
