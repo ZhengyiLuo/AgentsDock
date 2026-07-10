@@ -132,8 +132,9 @@ export function Sidebar() {
         </div>
       </div>
       <div className="sidebar-actions">
-        <button className="sidebar-action" onClick={() => useAppStore.getState().setModal('resume', true)}><Undo2 size={14} /> Resume ID</button>
-        <button className="sidebar-action" onClick={() => useAppStore.getState().setModal('folder', true)}><FolderPlus size={14} /> New folder</button>
+        <button className="sidebar-action" title="Resume chat" aria-label="Resume chat" onClick={() => useAppStore.getState().setModal('resume', true)}><Undo2 size={15} /></button>
+        <button className="sidebar-action" title="New folder" aria-label="New folder" onClick={() => useAppStore.getState().setModal('folder', true)}><FolderPlus size={15} /></button>
+        <button className="sidebar-action" title="Settings" aria-label="Settings" onClick={() => useAppStore.getState().setModal('settings', true)}><Settings size={15} /></button>
       </div>
       <label className="sidebar-search">
         <Search size={14} />
@@ -159,7 +160,6 @@ export function Sidebar() {
       </DndContext>
       <div className="sidebar-footer">
         <span>{sessions.filter(session => !session.archived).length} chats</span>
-        <button className="icon-button" title="Server settings" onClick={() => useAppStore.getState().setModal('settings', true)}><Settings size={15} /></button>
       </div>
     </aside>
   )

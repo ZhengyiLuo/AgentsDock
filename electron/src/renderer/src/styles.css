@@ -82,8 +82,8 @@ textarea { resize: none; }
 .sidebar-topbar { height: 42px; padding: 0 12px 0 16px; display: flex; align-items: center; justify-content: space-between; }
 .sidebar-topbar strong { font-size: 13px; }
 .toolbar-cluster { display: flex; gap: 2px; }
-.sidebar-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 4px 10px 8px; }
-.sidebar-action { height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--muted); background: #202020; border: 1px solid #292929; border-radius: 6px; font-size: 12px; }
+.sidebar-actions { display: flex; align-items: center; gap: 5px; padding: 4px 10px 8px; }
+.sidebar-action { width: 32px; height: 30px; flex: 0 0 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--muted); background: #202020; border: 1px solid #292929; border-radius: 6px; }
 .sidebar-action:hover, .sidebar-action.active { color: var(--text); background: #292929; }
 .sidebar-search { margin: 0 10px 8px; height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 8px; color: var(--faint); background: #202020; border: 1px solid #292929; border-radius: 7px; }
 .sidebar-search:focus-within { border-color: #4b4b4b; }

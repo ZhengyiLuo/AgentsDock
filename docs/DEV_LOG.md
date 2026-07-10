@@ -7074,3 +7074,13 @@ Follow-up from rapid-switch stress:
   while search filters the sidebar cannot discard hidden folders.
 - Added drop-resolution and activation regressions. TypeScript and 74 Electron
   tests pass in normal and shuffled execution order.
+
+## 2026-07-10 - Compact the sidebar action strip
+
+- Replaced the removed Reorder control with a dedicated Settings button beside
+  Resume Chat and New Folder.
+- Converted all three actions to fixed-size icon controls with native tooltips
+  and accessibility labels, reclaiming vertical-sidebar width without hiding
+  the commands behind a menu.
+- Removed the duplicate Settings shortcut from the footer; the footer now only
+  reports the active chat count.
