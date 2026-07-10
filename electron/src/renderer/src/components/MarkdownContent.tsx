@@ -10,9 +10,11 @@ const COLLAPSED_LINES = 72
 const REMARK_PLUGINS = [remarkGfm]
 const REHYPE_PLUGINS = [rehypeHighlight]
 
-export const MarkdownContent = memo(function MarkdownContent({ text, files = [], sessionId, compact = false, fold = true }: {
+interface MarkdownContentProps {
   text: string; files?: AgentFile[]; sessionId?: string; compact?: boolean; fold?: boolean
-}) {
+}
+
+export const MarkdownContent = memo(function MarkdownContent({ text, files = [], sessionId, compact = false, fold = true }: MarkdownContentProps) {
   const [expanded, setExpanded] = useState(false)
   const normalized = useMemo(() => stripDecorativeEmojiPrefixes(text), [text])
   const clipped = useMemo(() => clipText(normalized), [normalized])
@@ -54,7 +56,15 @@ export const MarkdownContent = memo(function MarkdownContent({ text, files = [],
       )}
     </div>
   )
-})
+}, markdownContentPropsEqual)
+
+function markdownContentPropsEqual(previous: MarkdownContentProps, next: MarkdownContentProps): boolean {
+  if (previous.text !== next.text || previous.sessionId !== next.sessionId ||
+    (previous.compact ?? false) !== (next.compact ?? false) || (previous.fold ?? true) !== (next.fold ?? true)) return false
+  const previousFiles = previous.files ?? []
+  const nextFiles = next.files ?? []
+  return previousFiles.length === nextFiles.length && previousFiles.every((file, index) => file.id === nextFiles[index]?.id)
+}
 
 function CodeBlock({ children, fullSource }: { children: ReactNode; fullSource: string }) {
   const [copied, setCopied] = useState(false)

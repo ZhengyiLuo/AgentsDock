@@ -535,7 +535,7 @@ function formatSearchTime(value?: string | null): string {
 function timelineItemHasEvent(item: RenderTimelineItem, eventId: string): boolean {
   if (item.kind === 'system') return item.event.id === eventId
   if (item.kind === 'job') return item.events.some(event => event.id === eventId)
-  if (item.kind === 'message') return item.event.id === eventId
+  if (item.kind === 'message') return item.events.some(event => event.id === eventId)
   if (item.kind === 'trace') return item.events.some(event => event.id === eventId)
   return item.files.some(file => file.event_id === eventId)
 }
@@ -543,7 +543,7 @@ function timelineItemHasEvent(item: RenderTimelineItem, eventId: string): boolea
 function timelineEvents(item: RenderTimelineItem): import('@shared/types').Event[] {
   if (item.kind === 'system') return [item.event]
   if (item.kind === 'job') return item.events
-  if (item.kind === 'message') return [item.event]
+  if (item.kind === 'message') return item.events
   if (item.kind === 'trace') return item.events
   return []
 }

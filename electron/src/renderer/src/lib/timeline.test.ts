@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
-import { extractUnifiedDiff, jobDisplayEvents, messageText, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
+import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -37,11 +37,10 @@ describe('projectTimeline', () => {
       })
     ], [])).filter(row => row.kind === 'message' && row.role === 'assistant')
 
-    expect(rows).toHaveLength(2)
-    expect(rows.map(row => row.kind === 'message' ? messageText(row.event) : '')).toEqual([
-      'I found the missing fields.',
-      'The transport test now passes.'
-    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind === 'message' ? messageItemText(rows[0]) : '').toBe(
+      'I found the missing fields.\n\nThe transport test now passes.'
+    )
   })
 
   it('keeps queued turns out of transcript history and groups recurring job output', () => {
@@ -95,7 +94,7 @@ describe('projectTimeline', () => {
       event(4, 'artifact_created', { run_id: 'run-1', artifact: file }),
       event(5, 'assistant_text', { run_id: 'run-1', text: 'Final update' })
     ], [file]))
-    expect(rows.map(row => row.kind)).toEqual(['message', 'message', 'message', 'trace', 'media'])
+    expect(rows.map(row => row.kind)).toEqual(['message', 'message', 'trace', 'media'])
     expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
   })
 
@@ -120,7 +119,7 @@ describe('projectTimeline', () => {
     expect(rows.map(row => row.kind)).toEqual(['message', 'trace'])
   })
 
-  it('marks assistant updates as one visual group while keeping every update virtualized', () => {
+  it('coalesces assistant updates into one stable response row', () => {
     const rows = renderTimelineItems(projectTimeline([
       event(1, 'turn_started', { run_id: 'run-1', prompt: 'Monitor it' }),
       event(2, 'assistant_text', { run_id: 'run-1', text: 'First update' }),
@@ -128,11 +127,9 @@ describe('projectTimeline', () => {
       event(4, 'assistant_text', { run_id: 'run-1', text: 'Final update' })
     ], [])).filter(row => row.kind === 'message' && row.role === 'assistant')
 
-    expect(rows).toMatchObject([
-      { groupPosition: 'first', groupIndex: 0, groupCount: 3 },
-      { groupPosition: 'middle', groupIndex: 1, groupCount: 3 },
-      { groupPosition: 'last', groupIndex: 2, groupCount: 3 }
-    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ key: 'turn:run-1:assistant', events: [{ id: 'event-2' }, { id: 'event-3' }, { id: 'event-4' }] })
+    expect(rows[0].kind === 'message' ? messageItemText(rows[0]) : '').toBe('First update\n\nSecond update\n\nFinal update')
   })
 
   it('keeps every imported prompt when a provider reuses one run id', () => {
@@ -142,7 +139,7 @@ describe('projectTimeline', () => {
       event(3, 'turn_started', { run_id: 'import-1', prompt: 'Second question' }),
       event(4, 'assistant_text', { run_id: 'import-1', text: 'Second answer' })
     ], []))
-    expect(rows.filter(row => row.kind === 'message').map(row => row.kind === 'message' ? row.event.prompt || row.event.text : '')).toEqual([
+    expect(rows.filter(row => row.kind === 'message').map(row => row.kind === 'message' ? messageItemText(row) : '')).toEqual([
       'First question', 'First answer', 'Second question', 'Second answer'
     ])
   })

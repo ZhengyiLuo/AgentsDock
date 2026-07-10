@@ -1,6 +1,6 @@
 import type { TimelineIndexLandmark, TimelineLandmarkKind } from '@shared/types'
 import type { RenderTimelineItem } from './timeline'
-import { isTimelineError, jobDisplayEvents, messageText } from './timeline'
+import { isTimelineError, jobDisplayEvents, messageItemText, messageText } from './timeline'
 
 export interface TimelineLandmark extends TimelineIndexLandmark {
   index: number
@@ -81,7 +81,7 @@ function turnLandmark(items: RenderTimelineItem[], index: number, endIndex: numb
   const files = media.flatMap(item => item.files)
   const tools = traces.flatMap(item => item.events).filter(event => event.type === 'tool_started')
   const prompt = user ? messageText(user.event) : ''
-  const response = latestAssistant ? messageText(latestAssistant.event) : ''
+  const response = latestAssistant ? messageItemText(latestAssistant) : ''
   const tracePreview = traces.flatMap(item => item.events).map(event => messageText(event) || event.tool?.name || '').find(Boolean) || ''
   const fileNames = files.map(file => file.title || file.filename).filter(Boolean)
   const title = compactPreview(prompt || response || tracePreview || fileNames[0] || 'Agent turn', 72)
@@ -139,13 +139,15 @@ function standaloneLandmark(item: RenderTimelineItem, index: number): TimelineLa
 }
 
 function itemStartSeq(item: RenderTimelineItem): number {
-  if (item.kind === 'message' || item.kind === 'system') return item.event.seq
+  if (item.kind === 'message') return Math.min(...item.events.map(event => event.seq))
+  if (item.kind === 'system') return item.event.seq
   if (item.kind === 'trace' || item.kind === 'job') return Math.min(...item.events.map(event => event.seq))
   return Math.min(...item.files.map(file => file.seq ?? item.seq))
 }
 
 function itemEndSeq(item: RenderTimelineItem): number {
-  if (item.kind === 'message' || item.kind === 'system') return item.event.seq
+  if (item.kind === 'message') return Math.max(...item.events.map(event => event.seq))
+  if (item.kind === 'system') return item.event.seq
   if (item.kind === 'trace' || item.kind === 'job') return Math.max(...item.events.map(event => event.seq))
   return Math.max(...item.files.map(file => file.seq ?? item.seq))
 }

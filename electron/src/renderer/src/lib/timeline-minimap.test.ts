@@ -22,7 +22,7 @@ describe('timeline minimap landmarks', () => {
 
     const landmarks = buildTimelineLandmarks(rows)
     expect(landmarks.map(item => item.kind)).toEqual(['user', 'job', 'error'])
-    expect(landmarks[0]).toMatchObject({ index: 0, endIndex: 4, title: 'Render the result', preview: 'Done.' })
+    expect(landmarks[0]).toMatchObject({ index: 0, endIndex: 3, title: 'Render the result', preview: 'I am rendering it now. Done.' })
     expect(landmarks[0]).toMatchObject({ start_seq: 1, end_seq: 5 })
     expect(landmarks[0].meta).toContain('result.mp4')
     expect(landmarks.find(item => item.kind === 'error')?.preview).toBe('Provider unavailable')

@@ -6978,3 +6978,23 @@ Follow-up from rapid-switch stress:
 - Trace rows now remain absent until they contain non-empty reasoning, a real
   tool event, or a reviewable diff. Two projection regressions cover both the
   hidden provisional state and its transition to a visible trace.
+
+## 2026-07-09 - Coalesce agent responses and add appearance modes
+
+- A provider turn now owns one stable assistant response row rather than one
+  virtualized row per incremental `assistant_text` event. The response keeps
+  each update as a keyed Markdown fragment, so live output appends cheaply
+  without reparsing the accumulated response.
+- Search, full-message copy, pinning, sequence ranges, and the timeline minimap
+  retain all constituent event IDs and text inside the coalesced response.
+- Removed the assistant continuation rail and its repeated metadata headers.
+  That rail was the unexplained white/gray bar visible beside some multi-update
+  responses.
+- Added persisted System, Light, and Dark appearance choices under Settings.
+  System is the default and follows live macOS appearance changes without an
+  app restart.
+- Added a complete light palette for the conversation, sidebar, inspector,
+  composer, dialogs, Markdown/code, media, jobs, errors, and diff review.
+- Hardened Markdown memoization so unchanged fragments do not rerender merely
+  because an equivalent file array has a new JavaScript identity.
+- TypeScript validation and all 59 Electron regression tests pass.

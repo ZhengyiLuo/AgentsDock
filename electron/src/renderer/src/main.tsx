@@ -3,8 +3,11 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@radix-ui/react-tooltip'
 import { App } from './App'
+import { initializeAppearance } from './lib/appearance'
 import './styles.css'
 import 'highlight.js/styles/github-dark.css'
+
+initializeAppearance()
 
 const queryClient = new QueryClient({
   defaultOptions: {

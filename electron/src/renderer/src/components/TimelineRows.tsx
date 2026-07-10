@@ -2,13 +2,13 @@ import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
 import type { JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageText, parseUnifiedDiff } from '../lib/timeline'
+import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
 
 export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, onFindFile }: { item: RenderTimelineItem; sessionId: string; onFindFile: (fileId: string) => void }) {
-  if (item.kind === 'message') return <div className={`turn-segment ${item.role} group-${item.groupPosition}`}><Message item={item} sessionId={sessionId} /></div>
+  if (item.kind === 'message') return <div className={`turn-segment ${item.role}`}><Message item={item} sessionId={sessionId} /></div>
   if (item.kind === 'trace') return <div className="turn-segment trace-segment"><TraceDisclosure events={item.events} sessionId={sessionId} /></div>
   if (item.kind === 'media') return <MediaRow item={item} sessionId={sessionId} onFindFile={onFindFile} />
   if (item.kind === 'job') return <JobView item={item} sessionId={sessionId} />
@@ -20,31 +20,31 @@ function MediaRow({ item, sessionId, onFindFile }: { item: MediaItem; sessionId:
 }
 
 function Message({ item, sessionId }: { item: MessageItem; sessionId: string }) {
-  const { event, role, files, groupPosition, groupIndex, groupCount } = item
-  const text = messageText(event)
-  const continuation = role === 'assistant' && (groupPosition === 'middle' || groupPosition === 'last')
+  const { event, events, role, files } = item
+  const primary = events[0] ?? event
+  const text = messageItemText(item)
   const [copied, setCopied] = useState(false)
   const pin = async () => {
-    const item: PinnedItem = {
-      id: `message:${event.id}`, sessionId, kind: 'message', eventId: event.id,
+    const pinned: PinnedItem = {
+      id: `message:${primary.id}`, sessionId, kind: 'message', eventId: primary.id,
       title: role === 'user' ? 'You' : 'Assistant', body: text, subtitle: formatTime(event.ts), createdAt: Date.now()
     }
-    await window.agentsDock.pins.put(item)
+    await window.agentsDock.pins.put(pinned)
     window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
   }
   const copy = async () => { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1200) }
   return (
-    <div className={`message-row ${role} group-${groupPosition}`} data-event-id={event.id}>
+    <div className={`message-row ${role}`} data-event-id={primary.id} data-event-count={events.length}>
       <div className="message-surface">
-        <header className={continuation ? 'continuation-meta' : undefined}>
-          {!continuation && <span>{role === 'user' ? 'You' : event.purpose === 'handoff_digest' ? 'Digest' : 'Assistant'}</span>}
-          {!continuation && role === 'assistant' && groupCount > 1 && <small className="update-count">{groupCount} updates</small>}
-          {continuation && <span className="sr-only">Assistant update {groupIndex + 1} of {groupCount}</span>}
+        <header>
+          <span>{role === 'user' ? 'You' : primary.purpose === 'handoff_digest' ? 'Digest' : 'Assistant'}</span>
           <time>{formatTime(event.ts)}</time>
           <button title="Pin" onClick={() => void pin()}><Pin size={12} /></button>
           <button title="Copy full message" onClick={() => void copy()}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
         </header>
-        <MarkdownContent text={text} files={files} sessionId={sessionId} />
+        <div className="message-parts">
+          {events.map(part => <MarkdownContent key={part.id} text={messageText(part)} files={files} sessionId={sessionId} />)}
+        </div>
       </div>
     </div>
   )

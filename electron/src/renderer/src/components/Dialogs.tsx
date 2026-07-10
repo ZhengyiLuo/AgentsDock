@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, Clock3, Command, Download, LoaderCircle, RefreshCw, Search, Server, X } from 'lucide-react'
+import { Check, Clock3, Command, Download, LoaderCircle, Monitor, Moon, RefreshCw, Search, Server, Sun, X } from 'lucide-react'
 import type { AppUpdateStatus, Backend, CreateJobInput, Job, Session, UpdateJobInput } from '@shared/types'
+import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { runtimeLabel } from '../lib/format'
 import { orderedActiveSessions, sessionMatchesQuery } from '../lib/sessions'
 import { useAppStore } from '../store/app-store'
@@ -76,8 +77,10 @@ function SettingsDialog() {
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
+  const [appearance, setAppearance] = useState<AppearanceMode>('system')
   useEffect(() => {
     if (!open) return
+    setAppearance(readAppearance())
     void window.agentsDock.settings.get().then(value => { setURL(value.serverUrl); setToken('') })
     void window.agentsDock.updates.status().then(setUpdate)
     return window.agentsDock.events.on('app:update', setUpdate)
@@ -91,8 +94,17 @@ function SettingsDialog() {
       window.location.reload()
     } catch (error) { useAppStore.getState().setError(message(error)) } finally { setSaving(false) }
   }
-  return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('settings', value)} title="Server connection" description="Connect this app to your AgentsDock server.">
+  const chooseAppearance = (mode: AppearanceMode) => {
+    setAppearance(mode)
+    setAppearanceMode(mode)
+  }
+  return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('settings', value)} title="Settings" description="Connection, appearance, and updates.">
     <form onSubmit={submit} className="dialog-form">
+      <fieldset className="appearance-field"><legend>Appearance</legend><div className="segmented appearance-picker">
+        <button type="button" className={appearance === 'system' ? 'active' : ''} onClick={() => chooseAppearance('system')}><Monitor size={14} />System</button>
+        <button type="button" className={appearance === 'light' ? 'active' : ''} onClick={() => chooseAppearance('light')}><Sun size={14} />Light</button>
+        <button type="button" className={appearance === 'dark' ? 'active' : ''} onClick={() => chooseAppearance('dark')}><Moon size={14} />Dark</button>
+      </div></fieldset>
       <div className={`server-health ${connected ? 'online' : 'offline'}`}><span /><div><strong>{connected ? 'Connected' : 'Offline'}</strong><small>{health?.server_identity || 'Connection settings are stored on this Mac.'}</small></div></div>
       <label><span>Server URL</span><div className="input-with-icon"><Server size={14} /><input value={url} onChange={event => setURL(event.target.value)} placeholder="100.73.184.23:7850" autoCapitalize="none" autoCorrect="off" /></div></label>
       <label><span>Access token</span><input type="password" value={token} onChange={event => setToken(event.target.value)} placeholder="Leave blank to keep saved token" autoComplete="off" /></label>
