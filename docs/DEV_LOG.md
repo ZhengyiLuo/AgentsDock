@@ -6822,3 +6822,12 @@ Follow-up from rapid-switch stress:
   the owning chat component and silently return an inspected old turn to live.
 - Regression suite: 44 tests across ten files, including invariant rail spacing,
   whole-index merging, manual-unread clearing, and missing-bookmark fallback.
+
+## 2026-07-09 - Repair Electron folder reordering
+
+- Folder drags now collide only with folder drop targets. Chat rows inside an
+  expanded folder can no longer steal the drop and silently cancel the reorder.
+- Kept the explicit before/after drop line and deferred the actual order change
+  until release, avoiding the distracting per-row swap animation.
+- Added order-invariant tests for before, after, self, and stale-target drops.
+- Regression suite: 47 tests across eleven files; TypeScript validation passes.

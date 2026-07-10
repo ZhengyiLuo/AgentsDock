@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core'
+import {
+  DndContext, DragOverlay, PointerSensor, closestCenter, useDraggable, useDroppable, useSensor, useSensors,
+  type CollisionDetection, type DragEndEvent, type DragOverEvent, type DragStartEvent
+} from '@dnd-kit/core'
 import {
   Archive, ArchiveRestore, ChevronDown, ChevronRight, Folder, FolderPlus, GripVertical, Inbox, MoreHorizontal,
   PanelLeftClose, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, Undo2
@@ -13,6 +16,14 @@ import { BackendMark } from './BackendMark'
 
 interface Section { id: string; title: string; sessions: Session[]; kind: 'pinned' | 'folder' | 'archived' }
 interface DropIndicator { id: string; placement: 'before' | 'after' }
+
+const sidebarCollisionDetection: CollisionDetection = (args) => {
+  const activeType = args.active.data.current?.type
+  const droppableContainers = activeType === 'folder'
+    ? args.droppableContainers.filter(container => container.data.current?.type === 'folder')
+    : args.droppableContainers
+  return closestCenter({ ...args, droppableContainers })
+}
 
 export function Sidebar() {
   const sessions = useAppStore(state => state.sessions)
@@ -34,10 +45,15 @@ export function Sidebar() {
   }
   const onDragOver = (event: DragOverEvent) => {
     if (!event.over) { setDrop(null); return }
+    const activeData = event.active.data.current as { type: 'session' | 'folder' } | undefined
+    const overData = event.over.data.current as { type: 'session' | 'folder'; section?: string } | undefined
     const translated = event.active.rect.current.translated
     const center = translated ? translated.top + translated.height / 2 : 0
     const placement = center < event.over.rect.top + event.over.rect.height / 2 ? 'before' : 'after'
-    setDrop({ id: String(event.over.id), placement })
+    const overId = activeData?.type === 'folder' && overData?.type === 'session' && overData.section?.startsWith('folder:')
+      ? overData.section
+      : String(event.over.id)
+    setDrop({ id: overId, placement })
   }
   const onDragEnd = async (event: DragEndEvent) => {
     const currentDrop = drop
@@ -45,15 +61,11 @@ export function Sidebar() {
     if (!event.over || !currentDrop || event.active.id === event.over.id) return
     const activeData = event.active.data.current as { type: 'session' | 'folder'; section?: string } | undefined
     const overData = event.over.data.current as { type: 'session' | 'folder'; section?: string } | undefined
-    if (activeData?.type === 'folder' && overData?.type === 'folder') {
+    if (activeData?.type === 'folder' && currentDrop.id.startsWith('folder:')) {
       const active = String(event.active.id).replace('folder:', '')
-      const target = String(event.over.id).replace('folder:', '')
+      const target = currentDrop.id.replace('folder:', '')
       const current = orderedFolders(sections.filter(section => section.kind === 'folder').map(section => section.title), folderOrder)
-      const without = current.filter(folder => folder !== active)
-      let index = without.indexOf(target)
-      if (currentDrop.placement === 'after') index += 1
-      without.splice(Math.max(0, index), 0, active)
-      useAppStore.getState().setFolderOrder(without)
+      useAppStore.getState().setFolderOrder(reorderFolderList(current, active, target, currentDrop.placement))
     } else if (activeData?.type === 'session' && overData?.type === 'folder') {
       const sessionId = String(event.active.id).replace('session:', '')
       const folder = String(event.over.id).replace('folder:', '')
@@ -88,7 +100,7 @@ export function Sidebar() {
         <input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { const first = sections.flatMap(section => section.sessions)[0]; if (first) void useAppStore.getState().selectSession(first.id) } }} placeholder="Search chats" />
         <kbd>⌘P</kbd>
       </label>
-      <DndContext sensors={sensors} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setDragging(null); setDrop(null) }}>
+      <DndContext collisionDetection={sidebarCollisionDetection} sensors={sensors} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setDragging(null); setDrop(null) }}>
         <div className={`session-list ${reorderMode ? 'reorder-mode' : ''}`}>
           {sections.map(section => (
             <SidebarSection
@@ -239,4 +251,13 @@ function buildSections(sessions: Session[], folderOrder: string[], query: string
 function orderedFolders(folders: string[], order: string[]): string[] {
   const index = new Map(order.map((folder, i) => [folder, i]))
   return [...folders].sort((a, b) => (index.get(a) ?? Number.MAX_SAFE_INTEGER) - (index.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b))
+}
+
+export function reorderFolderList(folders: string[], active: string, target: string, placement: 'before' | 'after'): string[] {
+  if (active === target || !folders.includes(active) || !folders.includes(target)) return folders
+  const reordered = folders.filter(folder => folder !== active)
+  let index = reordered.indexOf(target)
+  if (placement === 'after') index += 1
+  reordered.splice(Math.max(0, index), 0, active)
+  return reordered
 }
