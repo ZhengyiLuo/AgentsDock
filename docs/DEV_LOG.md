@@ -6950,3 +6950,17 @@ Follow-up from rapid-switch stress:
   Delete actions; links and images expose their native copy/open operations.
 - The menu is intentionally absent for generic non-text surfaces so it does not
   collide with the existing Radix chat-management context menu in the sidebar.
+
+## 2026-07-09 - Repair Electron TestFlight sandbox launch
+
+- Diagnosed macOS TestFlight build 59's launch crash from the Air's retained
+  crash reports and unified log. The App Sandbox denied Electron's dynamic
+  `MachPortRendezvousServer` registration, after which Electron trapped in its
+  V8 worker thread.
+- Restored Electron's required MAS identity contract: `ElectronTeamID` now
+  appears in `Info.plist`, and the parent app carries the matching
+  `KRR35MWWHD.com.zhengyiluo.ZenithDock` application group.
+- The MAS build script now rejects a staged app unless App Sandbox,
+  `ElectronTeamID`, and the exact application group are all present. This turns
+  the build-59 runtime crash into a packaging-time failure if signing regresses.
+- Advanced the macOS TestFlight build to 60.

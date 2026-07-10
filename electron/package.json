@@ -25,7 +25,7 @@
   "build": {
     "appId": "com.zhengyiluo.ZenithDock",
     "productName": "AgentsDock",
-    "buildVersion": "59",
+    "buildVersion": "60",
     "asar": true,
     "directories": {
       "output": "dist"
@@ -45,6 +45,7 @@
       "entitlements": "packaging/entitlements.mac.plist",
       "entitlementsInherit": "packaging/entitlements.mac.inherit.plist",
       "extendInfo": {
+        "ElectronTeamID": "KRR35MWWHD",
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "AgentsDock uses the microphone only when you choose voice input."
       }

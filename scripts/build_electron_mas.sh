@@ -84,6 +84,14 @@ if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$EN
   echo "MAS staging app is missing the App Sandbox entitlement." >&2
   exit 2
 fi
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$ENTITLEMENTS")" != "$TEAM_ID.com.zhengyiluo.ZenithDock" ]]; then
+  echo "MAS staging app is missing Electron's application group entitlement." >&2
+  exit 2
+fi
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :ElectronTeamID' "$APP/Contents/Info.plist")" != "$TEAM_ID" ]]; then
+  echo "MAS staging app is missing ElectronTeamID in Info.plist." >&2
+  exit 2
+fi
 
 rm -rf "$ARCHIVE" "$EXPORT_PATH"
 mkdir -p "$ARCHIVE/Products/Applications"
