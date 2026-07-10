@@ -14,6 +14,7 @@ import {
   Copy,
   LoaderCircle,
   MoreHorizontal,
+  MousePointer2,
   Plus,
   RefreshCw,
   Rows2,
@@ -36,6 +37,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
   const [connectionName, setConnectionName] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [windows, setWindows] = useState<TerminalWindow[]>([])
+  const [mouseEnabled, setMouseEnabled] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [confirmKill, setConfirmKill] = useState(false)
@@ -47,6 +49,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
     try {
       const snapshot = await window.agentsDock.terminal.windows(session.id)
       setWindows(snapshot.windows)
+      setMouseEnabled(Boolean(snapshot.mouse_enabled))
       if (snapshot.name) setConnectionName(snapshot.name)
     } catch (error) {
       setConnectionError(errorText(error))
@@ -60,6 +63,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
     try {
       const snapshot = await window.agentsDock.terminal.action(session.id, action, target)
       setWindows(snapshot.windows)
+      setMouseEnabled(Boolean(snapshot.mouse_enabled))
       setConnectionError(null)
       terminalRef.current?.focus()
     } catch (error) {
@@ -304,6 +308,8 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
         <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="icon-button" title="Terminal actions"><MoreHorizontal size={16} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
           <DropdownMenu.Item className="menu-item" onSelect={copy}><Copy size={14} /> Copy selection</DropdownMenu.Item>
           <DropdownMenu.Item className="menu-item" onSelect={paste}><ClipboardPaste size={14} /> Paste</DropdownMenu.Item>
+          <DropdownMenu.Separator className="menu-separator" />
+          <DropdownMenu.Item className="menu-item" onSelect={() => void runAction('toggle-mouse')}><MousePointer2 size={14} /> {mouseEnabled ? 'Use local text selection' : 'Enable tmux mouse capture'}</DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item" onSelect={() => void runAction('kill-pane')}><X size={14} /> Close active pane</DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />

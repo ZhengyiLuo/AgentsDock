@@ -7162,3 +7162,12 @@ Follow-up from rapid-switch stress:
   Command-A selects scrollback. Command-V is handled only by Electron/xterm's
   native paste event, fixing duplicated terminal pastes; explicit Copy/Paste
   actions remain available in both terminal menus.
+- Removed the legacy Tmux submitters inspector card now that each chat exposes
+  its persistent tmux session directly in the integrated terminal dock.
+- Made ordinary local text selection the terminal default. Existing tmux
+  sessions migrate once, the choice persists as a tmux session option, and the
+  terminal actions menu can toggle mouse capture back on for pane interaction.
+- Extended terminal resize anchoring through Virtuoso's delayed settlement.
+  A bounded observer follows the viewport and virtual spacer only during a
+  dock layout transaction, then releases the semantic row after 140 ms of
+  stability so drag-resizing cannot leave the conversation displaced.

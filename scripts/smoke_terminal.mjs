@@ -106,6 +106,19 @@ try {
   await second.waitFor(marker)
   await closeSocket(second.socket)
 
+  const localSelection = await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/windows`)
+  if (localSelection.mouse_enabled !== false) throw new Error('New terminal did not default to local text selection')
+  const mouseCapture = await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'toggle-mouse' })
+  })
+  if (mouseCapture.mouse_enabled !== true) throw new Error('Tmux mouse capture did not enable')
+  const selectionRestored = await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'toggle-mouse' })
+  })
+  if (selectionRestored.mouse_enabled !== false) throw new Error('Local text selection did not restore')
+
   await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/action`, {
     method: 'POST',
     body: JSON.stringify({ action: 'new-window' })
@@ -136,7 +149,7 @@ try {
   }
   if (!finalWindowProtected) throw new Error('The final tmux window was not protected')
 
-  console.log('Terminal smoke passed: attach, persistent state, reattach, window close, final-window guard, split pane')
+  console.log('Terminal smoke passed: attach, persistent state, local selection, mouse toggle, reattach, window close, final-window guard, split pane')
 } finally {
   if (sessionId) {
     await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal`, { method: 'DELETE' }).catch(() => {})

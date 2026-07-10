@@ -79,7 +79,6 @@ export function Inspector() {
         <PinnedSection sessionId={session.id} pins={pins} setPins={setPins} files={files} />
         <RunSummary sessionId={session.id} files={filesTotal} media={files} />
         <ProcessSection sessionId={session.id} />
-        <TmuxSection sessionId={session.id} />
         <section className="inspector-section collapsible-section">
           <div className="section-heading-row"><button className="section-toggle" onClick={toggleMedia}>{mediaOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<FileStack size={15} /><strong>Media &amp; files</strong><small>{files.length}/{filesTotal || files.length}</small></button><button className="nested-icon" title="Refresh" onClick={() => void loadFiles(true)}><RefreshCw size={12} /></button></div>
           {mediaOpen && <MediaInspector sessionId={session.id} files={files} total={filesTotal} loading={loadingFiles} loadMore={() => void loadFiles(false)} onPreview={setPreview} />}

@@ -65,6 +65,14 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const minimapSyncFrame = useRef<number | null>(null)
   const workspaceLayoutFrame = useRef<number | null>(null)
   const workspaceLayoutAnchor = useRef<WorkspaceLayoutAnchor | null>(null)
+  const workspaceLayoutFinishTimer = useRef<number | null>(null)
+  const workspaceLayoutFinishing = useRef(false)
+  const workspaceResizeObserver = useRef<ResizeObserver | null>(null)
+  const workspaceResizeObserverFrame = useRef<number | null>(null)
+  const captureVisiblePositionRef = useRef<() => void>(() => {})
+  const scheduleViewSaveRef = useRef<() => void>(() => {})
+  const scheduleWorkspaceRestoreRef = useRef<() => void>(() => {})
+  const scheduleWorkspaceFinishRef = useRef<() => void>(() => {})
   const loadingOlderRef = useRef(false)
   const pendingLocalScroll = useRef(false)
   const historySeekLease = useRef(0)
@@ -102,14 +110,36 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     const next = node instanceof HTMLElement ? node : null
     if (scroller.current === next) return
     scroller.current?.removeEventListener('scroll', scheduleMinimapSync)
+    workspaceResizeObserver.current?.disconnect()
+    workspaceResizeObserver.current = null
+    if (workspaceResizeObserverFrame.current != null) window.cancelAnimationFrame(workspaceResizeObserverFrame.current)
     scroller.current = next
     next?.addEventListener('scroll', scheduleMinimapSync, { passive: true })
-    if (next) scheduleMinimapSync()
+    if (next) {
+      scheduleMinimapSync()
+      const observer = new ResizeObserver(() => {
+        if (!workspaceLayoutAnchor.current) return
+        scheduleWorkspaceRestoreRef.current()
+        if (workspaceLayoutFinishing.current) scheduleWorkspaceFinishRef.current()
+      })
+      observer.observe(next)
+      workspaceResizeObserver.current = observer
+      workspaceResizeObserverFrame.current = window.requestAnimationFrame(() => {
+        workspaceResizeObserverFrame.current = null
+        if (workspaceResizeObserver.current !== observer || scroller.current !== next) return
+        const content = next.firstElementChild
+        if (content instanceof HTMLElement) observer.observe(content)
+      })
+    }
   }, [scheduleMinimapSync])
 
   useEffect(() => () => {
     scroller.current?.removeEventListener('scroll', scheduleMinimapSync)
     if (minimapSyncFrame.current != null) window.cancelAnimationFrame(minimapSyncFrame.current)
+    if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
+    if (workspaceLayoutFinishTimer.current != null) window.clearTimeout(workspaceLayoutFinishTimer.current)
+    if (workspaceResizeObserverFrame.current != null) window.cancelAnimationFrame(workspaceResizeObserverFrame.current)
+    workspaceResizeObserver.current?.disconnect()
   }, [scheduleMinimapSync])
 
   const sourceKey = historicalWindow ? `history:${historicalWindow.anchorSeq}` : `live:${snapshot.generation ?? 0}`
@@ -163,6 +193,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     distanceFromBottomRef.current = distanceFromBottom
     atBottomRef.current = distanceFromBottom <= 80
   }, [historicalWindow, items])
+  captureVisiblePositionRef.current = captureVisiblePosition
 
   const restoreWorkspaceLayoutAnchor = useCallback(() => {
     const node = scroller.current
@@ -203,6 +234,42 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
       persistView()
     }, 500)
   }, [captureVisiblePosition, persistView])
+  scheduleViewSaveRef.current = scheduleViewSave
+
+  const scheduleWorkspaceRestore = useCallback(() => {
+    if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
+    workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
+      workspaceLayoutFrame.current = null
+      restoreWorkspaceLayoutAnchor()
+    })
+  }, [restoreWorkspaceLayoutAnchor])
+  const finalizeWorkspaceLayout = useCallback(() => {
+    workspaceLayoutFinishTimer.current = null
+    if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
+    workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
+      workspaceLayoutFrame.current = null
+      const restored = restoreWorkspaceLayoutAnchor()
+      if (!restored) {
+        const itemKey = workspaceLayoutAnchor.current?.itemKey
+        const index = itemKey ? projected.current.findIndex(item => item.key === itemKey) : -1
+        if (index >= 0) ref.current?.scrollToIndex({ index, align: 'start', behavior: 'auto' })
+      }
+      workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
+        workspaceLayoutFrame.current = null
+        restoreWorkspaceLayoutAnchor()
+        workspaceLayoutAnchor.current = null
+        workspaceLayoutFinishing.current = false
+        captureVisiblePositionRef.current()
+        scheduleViewSaveRef.current()
+      })
+    })
+  }, [restoreWorkspaceLayoutAnchor])
+  const scheduleWorkspaceFinish = useCallback(() => {
+    if (workspaceLayoutFinishTimer.current != null) window.clearTimeout(workspaceLayoutFinishTimer.current)
+    workspaceLayoutFinishTimer.current = window.setTimeout(finalizeWorkspaceLayout, 140)
+  }, [finalizeWorkspaceLayout])
+  scheduleWorkspaceRestoreRef.current = scheduleWorkspaceRestore
+  scheduleWorkspaceFinishRef.current = scheduleWorkspaceFinish
 
   const unreadItemKey = useMemo(() => {
     const session = snapshot.session
@@ -275,30 +342,12 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   }, [items, captureVisiblePosition])
 
   useEffect(() => {
-    const scheduleRestore = (finish: boolean) => {
-      if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
-      workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
-        workspaceLayoutFrame.current = null
-        const restored = restoreWorkspaceLayoutAnchor()
-        if (!finish) return
-        if (!restored) {
-          const itemKey = workspaceLayoutAnchor.current?.itemKey
-          const index = itemKey ? projected.current.findIndex(item => item.key === itemKey) : -1
-          if (index >= 0) ref.current?.scrollToIndex({ index, align: 'start', behavior: 'auto' })
-        }
-        workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
-          workspaceLayoutFrame.current = null
-          restoreWorkspaceLayoutAnchor()
-          workspaceLayoutAnchor.current = null
-          captureVisiblePosition()
-          scheduleViewSave()
-        })
-      })
-    }
     const handleLayout = (event: Event) => {
       const { phase } = (event as CustomEvent<TimelineViewportLayoutDetail>).detail
       if (phase === 'begin') {
-        captureVisiblePosition()
+        if (workspaceLayoutFinishTimer.current != null) window.clearTimeout(workspaceLayoutFinishTimer.current)
+        workspaceLayoutFinishing.current = false
+        captureVisiblePositionRef.current()
         workspaceLayoutAnchor.current = {
           atBottom: atBottomRef.current,
           itemKey: topItemIdRef.current,
@@ -307,14 +356,18 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
         return
       }
       if (!workspaceLayoutAnchor.current) return
-      scheduleRestore(phase === 'end')
+      scheduleWorkspaceRestoreRef.current()
+      if (phase === 'end') {
+        workspaceLayoutFinishing.current = true
+        scheduleWorkspaceFinishRef.current()
+      }
     }
     window.addEventListener(TIMELINE_VIEWPORT_LAYOUT_EVENT, handleLayout)
     return () => {
       window.removeEventListener(TIMELINE_VIEWPORT_LAYOUT_EVENT, handleLayout)
       if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
     }
-  }, [captureVisiblePosition, restoreWorkspaceLayoutAnchor, scheduleViewSave])
+  }, [])
 
   useEffect(() => {
     const capture = () => {
