@@ -7084,3 +7084,27 @@ Follow-up from rapid-switch stress:
   the commands behind a menu.
 - Removed the duplicate Settings shortcut from the footer; the footer now only
   reports the active chat count.
+
+## 2026-07-10 - Search complete history across chats
+
+- The sidebar search field and `Command-P` dialog now combine immediate session
+  metadata matches with server-wide transcript matches. Results preserve the
+  normal sidebar order and show the matching message excerpt.
+- Selecting a transcript match opens its chat and seeks directly to the event,
+  fetching the surrounding historical page when that event is outside the
+  currently rendered tail.
+- Added a persistent server-side FTS5 index over user prompts, assistant text,
+  errors, scheduled jobs, reasoning summaries, and file metadata. It tracks a
+  byte offset per append-only JSONL transcript, ignores partial final writes,
+  and rebuilds a chat safely after truncation or replacement.
+- Search is debounced and stale responses cannot replace a newer query. Active
+  searches temporarily expand collapsed folders and Archived so matches remain
+  visible. When the server endpoint is unavailable, the Electron main process
+  searches the local SQLite event cache instead.
+- The production corpus benchmark covered 84 chats, 1.13 million raw events,
+  and 4.3 GB of JSONL. Its one-time index build took 20 seconds and produced a
+  201 MB index with 241,739 searchable events; warm global queries complete in
+  about 9 ms.
+- Added transport, grouping, metadata/history merge, debounce, stale-response,
+  and isolated append/truncate index regressions. TypeScript, Python compile,
+  and all 79 Electron tests pass in normal and shuffled execution order.

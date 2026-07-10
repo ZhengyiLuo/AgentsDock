@@ -94,6 +94,21 @@ describe('AgentServerClient live stream', () => {
     expect(new Headers(init.headers).get('X-ZenithDock-Token')).toBe('secret')
   })
 
+  it('searches complete history across chats through one authenticated request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      results: [{ session_id: 'chat-a', event_id: 'event-8', seq: 8, role: 'assistant', snippet: 'Force gate audit complete.' }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const results = await client.searchSessions('force gate', 75)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/search?')
+    expect(url).toContain('q=force+gate')
+    expect(url).toContain('limit=75')
+    expect(new Headers(init.headers).get('X-ZenithDock-Token')).toBe('secret')
+    expect(results[0]).toMatchObject({ session_id: 'chat-a', seq: 8 })
+  })
+
   it('attaches a binary terminal stream with dimensions, input, resize, and intentional detach', () => {
     vi.useFakeTimers()
     vi.stubGlobal('WebSocket', FakeWebSocket)

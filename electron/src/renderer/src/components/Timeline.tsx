@@ -9,6 +9,7 @@ import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { buildTimelineLandmarks, mergeTimelineLandmarks, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
 import { initialTimelineLocation } from '../lib/timeline-position'
 import { formatTime } from '../lib/format'
+import { OPEN_HISTORY_RESULT_EVENT } from '../lib/session-history-search'
 
 const timelineViewStates = new Map<string, ViewState>()
 const FIRST_INDEX = 1_000_000
@@ -318,6 +319,15 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
       if (lease === historySeekLease.current) setSeekingHistory(false)
     }
   }, [sessionId])
+
+  useEffect(() => {
+    const openHistoryResult = (event: Event) => {
+      const result = (event as CustomEvent<TimelineSearchResult>).detail
+      if (result?.session_id === sessionId) void openSearchResult(result)
+    }
+    window.addEventListener(OPEN_HISTORY_RESULT_EVENT, openHistoryResult)
+    return () => window.removeEventListener(OPEN_HISTORY_RESULT_EVENT, openHistoryResult)
+  }, [openSearchResult, sessionId])
 
   const openSearchAt = (cursor: number) => {
     const result = searchResults[cursor]

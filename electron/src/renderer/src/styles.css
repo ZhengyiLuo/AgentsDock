@@ -496,6 +496,7 @@ textarea { resize: none; }
 .command-results > button > span { min-width: 0; display: flex; flex-direction: column; }
 .command-results strong, .command-results small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .command-results small { color: var(--muted); font-size: 10px; }
+.command-results small.history-match { max-width: 520px; color: var(--text); opacity: .78; }
 .command-results p { padding: 25px; color: var(--faint); text-align: center; }
 .command-hint { padding: 8px 13px; color: var(--faint); border-top: 1px solid #303030; font-size: 9px; }
 .confirm-dialog { width: 430px; }

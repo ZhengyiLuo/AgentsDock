@@ -301,6 +301,19 @@ export class AppService {
     }
   }
 
+  async searchSessions(query: string, limit = 40): Promise<TimelineSearchResult[]> {
+    const clean = query.trim()
+    if (clean.length < 2) return []
+    try {
+      return await this.client.searchSessions(clean, limit)
+    } catch (error) {
+      appLog('search', 'server-wide history search unavailable; using local cache', {
+        error: error instanceof Error ? error.message : String(error)
+      })
+      return this.cache.searchSessions(this.serverId, clean, limit)
+    }
+  }
+
   async subscribeTimeline(sessionId: string, after: number): Promise<void> {
     const lease = this.beginTimelineSelection(sessionId)
     queueMicrotask(() => void this.reconcileTimelineAndStream(sessionId, after, lease))

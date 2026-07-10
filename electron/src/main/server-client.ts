@@ -146,6 +146,12 @@ export class AgentServerClient {
     return response.results ?? []
   }
 
+  async searchSessions(query: string, limit = 40): Promise<TimelineSearchResult[]> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) })
+    const response = await this.get<{ results?: TimelineSearchResult[] }>(`/api/search?${params}`)
+    return response.results ?? []
+  }
+
   async importHistory(sessionId: string, force = false): Promise<TimelinePage> {
     await this.post(`/api/sessions/${encodeURIComponent(sessionId)}/import-history`, { force })
     return this.sessionPage(sessionId)

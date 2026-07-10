@@ -6,10 +6,11 @@ import {
 } from '@dnd-kit/core'
 import {
   Archive, ArchiveRestore, ChevronDown, ChevronRight, Folder, FolderPlus, GripVertical, Inbox, MoreHorizontal,
-  PanelLeftClose, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, Undo2
+  LoaderCircle, PanelLeftClose, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, Undo2
 } from 'lucide-react'
-import type { Session } from '@shared/types'
+import type { Session, TimelineSearchResult } from '@shared/types'
 import { runtimeLabel } from '../lib/format'
+import { historyResultsBySession, openSessionHistoryResult, useSessionHistorySearch } from '../lib/session-history-search'
 import { sessionMatchesQuery } from '../lib/sessions'
 import { sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
@@ -41,13 +42,17 @@ export function Sidebar() {
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
   const catalog = useAppStore(state => state.runtimeCatalog)
   const [query, setQuery] = useState('')
+  const searching = Boolean(query.trim())
+  const historySearch = useSessionHistorySearch(query)
+  const historyResults = useMemo(() => historyResultsBySession(historySearch.results), [historySearch.results])
+  const historySessionIds = useMemo(() => new Set(historyResults.keys()), [historyResults])
   const [dragging, setDragging] = useState<{ id: string; label: string; type: 'session' | 'folder' } | null>(null)
   const [drop, setDrop] = useState<DropIndicator | null>(null)
   const dropRef = useRef<DropIndicator | null>(null)
   const suppressClickRef = useRef<string | null>(null)
   const suppressClickTimer = useRef<number | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: SIDEBAR_LONG_PRESS }))
-  const sections = useMemo(() => buildSections(sessions, folderOrder, query), [sessions, folderOrder, query])
+  const sections = useMemo(() => buildSections(sessions, folderOrder, query, historySessionIds), [sessions, folderOrder, query, historySessionIds])
   const folders = useMemo(() => orderedFolders(
     [...new Set([...folderOrder, ...sessions.filter(session => !session.archived && !session.pinned).map(session => session.folder?.trim() || 'General')])],
     folderOrder
@@ -137,8 +142,12 @@ export function Sidebar() {
         <button className="sidebar-action" title="Settings" aria-label="Settings" onClick={() => useAppStore.getState().setModal('settings', true)}><Settings size={15} /></button>
       </div>
       <label className="sidebar-search">
-        <Search size={14} />
-        <input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { const first = sections.flatMap(section => section.sessions)[0]; if (first) void useAppStore.getState().selectSession(first.id) } }} placeholder="Search chats" />
+        {historySearch.loading ? <LoaderCircle className="spin" size={14} /> : <Search size={14} />}
+        <input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+          if (event.key !== 'Enter') return
+          const first = sections.flatMap(section => section.sessions)[0]
+          if (first) void openSessionHistoryResult(first.id, historyResults.get(first.id))
+        }} placeholder="Search chats and history" />
         <kbd>⌘P</kbd>
       </label>
       <DndContext collisionDetection={sidebarCollisionDetection} sensors={sensors} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={finishDrag}>
@@ -148,13 +157,14 @@ export function Sidebar() {
               key={section.id}
               section={section}
               selectedId={selectedId}
-              collapsed={section.kind === 'archived' ? archivedCollapsed : section.kind === 'folder' && collapsed.has(section.title)}
+              collapsed={searching ? false : section.kind === 'archived' ? archivedCollapsed : section.kind === 'folder' && collapsed.has(section.title)}
               drop={drop}
               runtime={(session) => runtimeLabel(session, catalog)}
               suppressClick={(id) => suppressClickRef.current === id}
+              historyResults={historyResults}
             />
           ))}
-          {!sections.some(section => section.sessions.length) && <div className="sidebar-empty">No chats found</div>}
+          {!sections.some(section => section.sessions.length) && <div className="sidebar-empty">{historySearch.loading ? 'Searching history…' : 'No chats found'}</div>}
         </div>
         <DragOverlay dropAnimation={null}>{dragging && <div className="drag-overlay"><GripVertical size={13} />{dragging.label}</div>}</DragOverlay>
       </DndContext>
@@ -165,8 +175,8 @@ export function Sidebar() {
   )
 }
 
-function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick }: {
-  section: Section; selectedId: string | null; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean
+function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick, historyResults }: {
+  section: Section; selectedId: string | null; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean; historyResults: Map<string, TimelineSearchResult>
 }) {
   const toggle = () => {
     if (section.kind === 'archived') useAppStore.getState().setArchivedCollapsed(!collapsed)
@@ -176,7 +186,7 @@ function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppres
     <section className="sidebar-section">
       <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />
       {!collapsed && section.sessions.map(session => (
-        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} />
+        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} historyResult={historyResults.get(session.id)} />
       ))}
     </section>
   )
@@ -199,7 +209,7 @@ function FolderHeader({ section, collapsed, drop, onToggle, suppressClick }: { s
   )
 }
 
-function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick }: { session: Session; selected: boolean; sectionId: string; drop: DropIndicator | null; runtime: string; suppressClick: (id: string) => boolean }) {
+function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick, historyResult }: { session: Session; selected: boolean; sectionId: string; drop: DropIndicator | null; runtime: string; suppressClick: (id: string) => boolean; historyResult?: TimelineSearchResult }) {
   const id = `session:${session.id}`
   const draggable = useDraggable({ id, data: { type: 'session', label: session.title, section: sectionId } })
   const droppable = useDroppable({ id, data: { type: 'session', section: sectionId } })
@@ -222,7 +232,7 @@ function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick
     window.clearTimeout(prefetchTimer.current)
     prefetchTimer.current = null
   }
-  const select = () => { if (!suppressClick(id)) void useAppStore.getState().selectSession(session.id) }
+  const select = () => { if (!suppressClick(id)) void openSessionHistoryResult(session.id, historyResult) }
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
@@ -237,7 +247,7 @@ function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick
           {...draggable.attributes}
         >
           <BackendMark backend={session.backend} size={18} />
-          <span className="session-copy"><strong>{session.title}</strong><small>{session.backend === 'codex' ? 'Codex' : 'Claude'} · {runtime}{running ? ' · running' : unread ? ' · new' : ''}</small></span>
+          <span className="session-copy"><strong>{session.title}</strong><small title={historyResult?.snippet}>{historyResult?.snippet || `${session.backend === 'codex' ? 'Codex' : 'Claude'} · ${runtime}${running ? ' · running' : unread ? ' · new' : ''}`}</small></span>
           {(running || unread) && <span className={`status-dot ${running ? 'running' : 'unread'}`} />}
         </div>
       </ContextMenu.Trigger>
@@ -270,8 +280,8 @@ function MenuItem({ icon: Icon, label, onSelect, danger }: { icon: typeof MoreHo
   return <ContextMenu.Item className={`menu-item ${danger ? 'danger' : ''}`} onSelect={onSelect}><Icon size={14} />{label}</ContextMenu.Item>
 }
 
-function buildSections(sessions: Session[], folderOrder: string[], query: string): Section[] {
-  const filtered = sessions.filter(session => sessionMatchesQuery(session, query))
+export function buildSections(sessions: Session[], folderOrder: string[], query: string, historySessionIds: Set<string> = new Set()): Section[] {
+  const filtered = sessions.filter(session => sessionMatchesQuery(session, query) || historySessionIds.has(session.id))
   const pinned = filtered.filter(session => session.pinned && !session.archived)
   const archived = filtered.filter(session => session.archived)
   const byFolder = new Map<string, Session[]>()

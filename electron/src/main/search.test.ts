@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Event } from '../shared/types'
-import { searchEventRole, searchableEventText, searchSnippet, searchTokens } from './search'
+import { searchEventRole, searchableEventText, searchEventsAcrossSessions, searchSnippet, searchTokens } from './search'
 
 const event = (type: string, patch: Partial<Event> = {}): Event => ({
   id: 'event-1', session_id: 'chat-1', seq: 1, type, ts: '2026-07-09T10:00:00Z', ...patch
@@ -25,5 +25,18 @@ describe('timeline history search', () => {
     expect(snippet).toContain('needle')
     expect(snippet.startsWith('…')).toBe(true)
     expect(snippet.endsWith('…')).toBe(true)
+  })
+
+  it('returns the newest matching event once per chat', () => {
+    const events = [
+      event('assistant_text', { id: 'new-a', session_id: 'chat-a', seq: 8, text: 'Force gate audit complete.' }),
+      event('assistant_text', { id: 'old-a', session_id: 'chat-a', seq: 2, text: 'Force gate setup.' }),
+      event('turn_started', { id: 'user-b', session_id: 'chat-b', seq: 4, prompt: 'Run the force gate audit.' }),
+      event('assistant_text', { id: 'other', session_id: 'chat-c', seq: 9, text: 'Unrelated.' })
+    ]
+    expect(searchEventsAcrossSessions(events, '"force gate" audit', 10)).toEqual([
+      expect.objectContaining({ session_id: 'chat-a', event_id: 'new-a', role: 'assistant' }),
+      expect.objectContaining({ session_id: 'chat-b', event_id: 'user-b', role: 'user' })
+    ])
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { reorderFolderList, resolveSidebarDrop, SIDEBAR_LONG_PRESS } from './Sidebar'
+import type { Session } from '@shared/types'
+import { buildSections, reorderFolderList, resolveSidebarDrop, SIDEBAR_LONG_PRESS } from './Sidebar'
 
 describe('gesture reorder activation', () => {
   it('requires a deliberate hold while tolerating small pointer movement', () => {
@@ -70,5 +71,16 @@ describe('sidebar drop resolution', () => {
   it('does nothing for canceled and self drops', () => {
     expect(resolveSidebarDrop('session:a', { type: 'session', section: 'folder:Jobs' }, null, undefined, null, ['Jobs'])).toBeNull()
     expect(resolveSidebarDrop('session:a', { type: 'session', section: 'folder:Jobs' }, 'session:a', { type: 'session', section: 'folder:Jobs' }, { id: 'session:a', placement: 'after' }, ['Jobs'])).toBeNull()
+  })
+})
+
+describe('sidebar history filtering', () => {
+  it('keeps a chat whose transcript matches even when its metadata does not', () => {
+    const sessions: Session[] = [
+      { id: 'render', title: 'Renderer work', folder: 'Jobs', backend: 'codex' },
+      { id: 'training', title: 'Training', folder: 'Jobs', backend: 'claude' }
+    ]
+    const sections = buildSections(sessions, ['Jobs'], 'waterbottle', new Set(['training']))
+    expect(sections.flatMap(section => section.sessions).map(session => session.id)).toEqual(['training'])
   })
 })

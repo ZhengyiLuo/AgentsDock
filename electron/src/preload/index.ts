@@ -21,6 +21,7 @@ const api: AgentsDockAPI = {
     remove: sessionId => ipcRenderer.invoke('sessions:remove', sessionId),
     fork: sessionId => ipcRenderer.invoke('sessions:fork', sessionId),
     reorder: (sessionId, relativeTo, placement) => ipcRenderer.invoke('sessions:reorder', sessionId, relativeTo, placement),
+    searchHistory: (query, limit) => ipcRenderer.invoke('sessions:search-history', query, limit),
     markRead: (sessionId, seq) => ipcRenderer.invoke('sessions:read', sessionId, seq),
     markUnread: sessionId => ipcRenderer.invoke('sessions:unread', sessionId),
     importHistory: (sessionId, force) => ipcRenderer.invoke('sessions:import-history', sessionId, force)

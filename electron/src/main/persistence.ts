@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSnapshot, TimelineSearchResult, ViewState } from '../shared/types'
-import { searchEventRole, searchableEventText, searchSnippet, searchTokens } from './search'
+import { searchEventRole, searchableEventText, searchEventsAcrossSessions, searchSnippet, searchTokens } from './search'
 
 function parseJSON<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string') return fallback
@@ -200,7 +200,8 @@ export class LocalCache {
         json_extract(json, '$.type') IN (
           'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
           'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
-          'artifact_error', 'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted'
+          'artifact_created', 'artifact_error', 'file_uploaded',
+          'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted'
         ) OR json_extract(json, '$.type') LIKE '%_error'
       )
       ORDER BY seq DESC
@@ -222,6 +223,27 @@ export class LocalCache {
       if (results.length >= Math.max(1, Math.min(100, limit))) break
     }
     return results
+  }
+
+  searchSessions(serverId: string, query: string, limit = 40): TimelineSearchResult[] {
+    const tokens = searchTokens(query)
+    if (!tokens.length) return []
+    const rows = this.db.prepare(`
+      SELECT session_id, json FROM events
+      WHERE server_id = ? AND (
+        json_extract(json, '$.type') IN (
+          'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
+          'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
+          'artifact_created', 'artifact_error', 'file_uploaded',
+          'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted'
+        ) OR json_extract(json, '$.type') LIKE '%_error'
+      )
+      ORDER BY COALESCE(json_extract(json, '$.ts'), '') DESC, seq DESC
+    `).all(serverId)
+    function* events(): Generator<Event> {
+      for (const row of rows) yield parseJSON((row as { json: string }).json, {} as Event)
+    }
+    return searchEventsAcrossSessions(events(), query, limit)
   }
 
   hasEventsBefore(serverId: string, sessionId: string, before: number): boolean {

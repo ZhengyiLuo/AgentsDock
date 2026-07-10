@@ -43,3 +43,15 @@ curl -H 'Authorization: Bearer replace-with-a-long-random-token' \
 ```
 
 Leave the variable unset for open local development.
+
+## Whole-History Search
+
+`GET /api/search?q=<query>&limit=<chat-count>` searches user, assistant, error,
+job, reasoning-summary, and file text across every chat. Quoted phrases remain
+phrases; unquoted terms use prefix matching for responsive type-ahead search.
+
+The first request incrementally builds `history_search.sqlite3` inside the
+agent state directory. Each transcript stores its indexed byte offset, so later
+requests ingest only newly appended JSONL records. The index is persistent and
+safe across server restarts; a replaced or truncated transcript is rebuilt
+automatically. Indexing runs in a worker thread and does not block agent turns.

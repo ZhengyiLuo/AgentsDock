@@ -299,6 +299,7 @@ export interface TimelineSearchResult {
   ts?: string | null
   role: 'user' | 'assistant' | 'trace' | 'error' | 'job' | 'file' | 'system'
   snippet: string
+  match_count?: number | null
 }
 
 export interface FilesPage {

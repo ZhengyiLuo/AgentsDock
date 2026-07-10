@@ -36,3 +36,27 @@ export function searchSnippet(text: string, tokens: string[], limit = 260): stri
   start = Math.max(0, end - limit)
   return `${start ? '…' : ''}${text.slice(start, end).trim()}${end < text.length ? '…' : ''}`
 }
+
+export function searchEventsAcrossSessions(events: Iterable<Event>, query: string, limit = 40): TimelineSearchResult[] {
+  const tokens = searchTokens(query)
+  if (!tokens.length) return []
+  const matched = new Set<string>()
+  const results: TimelineSearchResult[] = []
+  for (const event of events) {
+    if (matched.has(event.session_id)) continue
+    const text = searchableEventText(event)
+    const folded = text.toLocaleLowerCase()
+    if (!text || !tokens.every(token => folded.includes(token))) continue
+    matched.add(event.session_id)
+    results.push({
+      session_id: event.session_id,
+      event_id: event.id,
+      seq: event.seq,
+      ts: event.ts,
+      role: searchEventRole(event),
+      snippet: searchSnippet(text, tokens)
+    })
+    if (results.length >= Math.max(1, Math.min(100, limit))) break
+  }
+  return results
+}

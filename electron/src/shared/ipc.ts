@@ -51,6 +51,7 @@ export interface AgentsDockAPI {
     remove(sessionId: string): Promise<boolean>
     fork(sessionId: string): Promise<Session>
     reorder(sessionId: string, relativeTo: string, placement: 'before' | 'after'): Promise<Session[]>
+    searchHistory(query: string, limit?: number): Promise<TimelineSearchResult[]>
     markRead(sessionId: string, seq?: number | null): Promise<Session>
     markUnread(sessionId: string): Promise<Session>
     importHistory(sessionId: string, force?: boolean): Promise<TimelinePage>

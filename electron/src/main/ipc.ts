@@ -23,6 +23,7 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('sessions:remove', sessionId => service.removeSession(sessionId))
   handle('sessions:fork', sessionId => service.forkSession(sessionId))
   handle('sessions:reorder', (sessionId, relativeTo, placement) => service.reorderSession(sessionId, relativeTo, placement))
+  handle('sessions:search-history', (query, limit) => service.searchSessions(query, limit))
   handle('sessions:read', (sessionId, seq) => service.markRead(sessionId, seq))
   handle('sessions:unread', sessionId => service.markUnread(sessionId))
   handle('sessions:import-history', (sessionId, force) => service.importHistory(sessionId, force))
