@@ -21,6 +21,7 @@ import type {
   SessionSnapshot,
   TimelineIndex,
   TimelinePage,
+  TimelineSearchResult,
   TmuxPane,
   UpdateSessionInput,
   UpdateJobInput,
@@ -51,6 +52,7 @@ export interface AgentsDockAPI {
     older(sessionId: string, before: number, limit?: number): Promise<TimelinePage>
     around(sessionId: string, anchorSeq: number, limit?: number): Promise<TimelinePage>
     index(sessionId: string): Promise<TimelineIndex>
+    search(sessionId: string, query: string, limit?: number): Promise<TimelineSearchResult[]>
     subscribe(sessionId: string, after: number): Promise<void>
     unsubscribe(sessionId: string): Promise<void>
     saveViewState(state: ViewState): Promise<void>

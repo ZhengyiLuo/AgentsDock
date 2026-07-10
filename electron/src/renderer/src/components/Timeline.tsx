@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, ArrowUp, LoaderCircle, Paperclip, Search, X } from 'lucide-react'
-import type { NativeFileRef, SessionSnapshot, TimelineIndex, TimelinePage, ViewState } from '@shared/types'
-import { isAgentVisibleEvent, messageText, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
+import type { NativeFileRef, SessionSnapshot, TimelineIndex, TimelinePage, TimelineSearchResult, ViewState } from '@shared/types'
+import { isAgentVisibleEvent, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
 import { useAppStore } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
 import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { buildTimelineLandmarks, mergeTimelineLandmarks, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
 import { initialTimelineLocation } from '../lib/timeline-position'
+import { formatTime } from '../lib/format'
 
 const timelineViewStates = new Map<string, ViewState>()
 const FIRST_INDEX = 1_000_000
@@ -57,6 +58,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const wasAtTop = useRef(false)
   const pendingLocalScroll = useRef(false)
   const historySeekLease = useRef(0)
+  const searchLease = useRef(0)
+  const searchNavigated = useRef(false)
   const itemsLength = useRef(0)
   const [atBottom, setAtBottom] = useState(initialViewState?.atBottom ?? true)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -65,6 +68,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchCursor, setSearchCursor] = useState(0)
+  const [searchResults, setSearchResults] = useState<TimelineSearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
   const [timelineIndex, setTimelineIndex] = useState<TimelineIndex | null>(null)
   const [historicalWindow, setHistoricalWindow] = useState<HistoricalWindow | null>(null)
   const [seekingHistory, setSeekingHistory] = useState(false)
@@ -143,11 +148,6 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     }, 500)
   }, [captureVisiblePosition, persistView])
 
-  const searchMatches = useMemo(() => {
-    const needle = searchQuery.trim().toLocaleLowerCase()
-    if (!needle) return []
-    return items.flatMap((item, index) => timelineSearchText(item).toLocaleLowerCase().includes(needle) ? [index] : [])
-  }, [items, searchQuery])
   const unreadItemKey = useMemo(() => {
     const session = snapshot.session
     const lastRead = session.last_read_agent_event_seq ?? 0
@@ -168,6 +168,31 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     })
     return () => { cancelled = true }
   }, [sessionId])
+
+  useEffect(() => {
+    const clean = searchQuery.trim()
+    const lease = ++searchLease.current
+    searchNavigated.current = false
+    setSearchCursor(0)
+    if (!searchOpen || clean.length < 2) {
+      setSearchResults([])
+      setSearchLoading(false)
+      return
+    }
+    setSearchResults([])
+    setSearchLoading(true)
+    const timer = window.setTimeout(() => {
+      void window.agentsDock.timeline.search(sessionId, clean, 50).then(results => {
+        if (lease !== searchLease.current) return
+        setSearchResults(results)
+      }).catch(error => {
+        if (lease === searchLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+      }).finally(() => {
+        if (lease === searchLease.current) setSearchLoading(false)
+      })
+    }, 220)
+    return () => window.clearTimeout(timer)
+  }, [searchOpen, searchQuery, sessionId])
 
   useEffect(() => {
     if (!unreadAtOpen || !document.hasFocus()) return
@@ -244,17 +269,46 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     return () => { window.removeEventListener('agentsdock:find-in-chat', openSearch); window.removeEventListener('agentsdock:find-event', findEvent) }
   }, [])
 
-  useEffect(() => {
-    setSearchCursor(0)
-    if (searchMatches[0] != null) ref.current?.scrollToIndex({ index: searchMatches[0], align: 'center', behavior: 'smooth' })
-  }, [searchQuery, searchMatches])
+  const openSearchResult = useCallback(async (result: TimelineSearchResult) => {
+    const directIndex = projected.current.findIndex(item => {
+      if (timelineItemHasEvent(item, result.event_id)) return true
+      const [start, end] = timelineItemSequenceRange(item)
+      return start <= result.seq && result.seq <= end
+    })
+    if (directIndex >= 0) {
+      ref.current?.scrollToIndex({ index: directIndex, align: 'center', behavior: 'auto' })
+      return
+    }
+    const lease = ++historySeekLease.current
+    setSeekingHistory(true)
+    try {
+      const page = await window.agentsDock.timeline.around(sessionId, result.seq, 260)
+      if (lease === historySeekLease.current) setHistoricalWindow({ page, anchorSeq: result.seq })
+    } catch (error) {
+      if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (lease === historySeekLease.current) setSeekingHistory(false)
+    }
+  }, [sessionId])
 
-  const moveSearch = (direction: 1 | -1) => {
-    if (!searchMatches.length) return
-    const cursor = (searchCursor + direction + searchMatches.length) % searchMatches.length
+  const openSearchAt = (cursor: number) => {
+    const result = searchResults[cursor]
+    if (!result) return
+    searchNavigated.current = true
     setSearchCursor(cursor)
-    ref.current?.scrollToIndex({ index: searchMatches[cursor], align: 'center', behavior: 'smooth' })
+    void openSearchResult(result)
   }
+  const moveSearch = (direction: 1 | -1) => {
+    if (!searchResults.length) return
+    openSearchAt((searchCursor + direction + searchResults.length) % searchResults.length)
+  }
+  const submitSearch = (direction: 1 | -1) => {
+    if (!searchResults.length) return
+    if (!searchNavigated.current) openSearchAt(direction > 0 ? searchCursor : searchResults.length - 1)
+    else moveSearch(direction)
+  }
+  const searchWindowStart = Math.max(0, Math.min(searchCursor - 5, Math.max(0, searchResults.length - 12)))
+  const visibleSearchResults = searchResults.slice(searchWindowStart, searchWindowStart + 12)
 
   const loadOlder = useCallback(async () => {
     if (!snapshot.hasMoreEvents || loadingOlderRef.current) return
@@ -385,7 +439,31 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
         landmarks={navigatorLandmarks}
         onSeek={seekTimeline}
       />}
-      {searchOpen && <div className="timeline-search"><Search size={14} /><input autoFocus value={searchQuery} placeholder="Find in loaded messages" onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') moveSearch(event.shiftKey ? -1 : 1); if (event.key === 'Escape') setSearchOpen(false) }} /><span>{searchMatches.length ? `${searchCursor + 1}/${searchMatches.length}` : searchQuery ? '0/0' : ''}</span><button title="Previous" onClick={() => moveSearch(-1)}><ArrowUp size={13} /></button><button title="Next" onClick={() => moveSearch(1)}><ArrowDown size={13} /></button><button title="Close" onClick={() => setSearchOpen(false)}><X size={13} /></button></div>}
+      {searchOpen && <div className="timeline-search-panel">
+        <div className="timeline-search">
+          {searchLoading ? <LoaderCircle className="spin" size={14} /> : <Search size={14} />}
+          <input autoFocus value={searchQuery} placeholder="Search full chat history" onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => {
+            if (event.key === 'Enter') { event.preventDefault(); submitSearch(event.shiftKey ? -1 : 1) }
+            if (event.key === 'ArrowDown') { event.preventDefault(); moveSearch(1) }
+            if (event.key === 'ArrowUp') { event.preventDefault(); moveSearch(-1) }
+            if (event.key === 'Escape') setSearchOpen(false)
+          }} />
+          <span>{searchResults.length ? `${searchCursor + 1}/${searchResults.length}` : searchQuery.trim().length >= 2 && !searchLoading ? '0/0' : ''}</span>
+          <button title="Previous" onClick={() => moveSearch(-1)}><ArrowUp size={13} /></button>
+          <button title="Next" onClick={() => moveSearch(1)}><ArrowDown size={13} /></button>
+          <button title="Close" onClick={() => setSearchOpen(false)}><X size={13} /></button>
+        </div>
+        {searchQuery.trim().length >= 2 && <div className="timeline-search-results">
+          {visibleSearchResults.map((result, offset) => {
+            const index = searchWindowStart + offset
+            return <button className={index === searchCursor ? 'active' : ''} key={`${result.event_id}:${result.seq}`} onClick={() => openSearchAt(index)}>
+            <span><strong>{searchRoleLabel(result.role)}</strong><time>{formatSearchTime(result.ts)}</time></span>
+            <small>{result.snippet}</small>
+          </button>})}
+          {!searchLoading && !searchResults.length && <p>No matches in this chat.</p>}
+          {searchResults.length > 12 && <p>Showing {searchWindowStart + 1}–{Math.min(searchResults.length, searchWindowStart + 12)} of {searchResults.length} · use Enter or arrows</p>}
+        </div>}
+      </div>}
       {!historicalWindow && !atBottom && <button className={`latest-button ${newBelow ? 'has-new' : ''}`} onClick={() => ref.current?.scrollToIndex({ index: Math.max(0, items.length - 1), align: 'end', behavior: 'smooth' })}><ArrowDown size={14} />{newBelow ? 'New' : ''}</button>}
       {seekingHistory && <div className="timeline-seeking"><LoaderCircle className="spin" size={13} /> Opening that point</div>}
       {dropActive && <div className="timeline-drop"><Paperclip size={24} /> Drop files anywhere to attach</div>}
@@ -409,12 +487,18 @@ export function sameTimelineKeys(keys: string[], items: RenderTimelineItem[]): b
   return keys.length === items.length && keys.every((key, index) => key === items[index]?.key)
 }
 
-function timelineSearchText(item: RenderTimelineItem): string {
-  if (item.kind === 'system') return messageText(item.event)
-  if (item.kind === 'job') return item.events.map(event => [event.text, event.message, event.result_text].filter(Boolean).join('\n')).join('\n')
-  if (item.kind === 'message') return [item.event.prompt, item.event.text, item.event.result_text, item.event.message, item.event.output].filter(Boolean).join('\n')
-  if (item.kind === 'trace') return item.events.map(event => [event.text, event.message, event.output].filter(Boolean).join('\n')).join('\n')
-  return item.files.map(file => [file.title, file.filename, file.text].filter(Boolean).join(' ')).join('\n')
+function searchRoleLabel(role: TimelineSearchResult['role']): string {
+  if (role === 'user') return 'You'
+  if (role === 'assistant') return 'Assistant'
+  if (role === 'trace') return 'Reasoning'
+  if (role === 'job') return 'Job'
+  if (role === 'file') return 'File'
+  if (role === 'error') return 'Error'
+  return 'System'
+}
+
+function formatSearchTime(value?: string | null): string {
+  return value ? formatTime(value) : ''
 }
 
 function timelineItemHasEvent(item: RenderTimelineItem, eventId: string): boolean {

@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
-import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSnapshot, ViewState } from '../shared/types'
+import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSnapshot, TimelineSearchResult, ViewState } from '../shared/types'
+import { searchEventRole, searchableEventText, searchSnippet, searchTokens } from './search'
 
 function parseJSON<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string') return fallback
@@ -188,6 +189,39 @@ export class LocalCache {
       ) ORDER BY seq ASC
     `).all(serverId, sessionId, before, limit)
     return rows.map(row => parseJSON((row as { json: string }).json, {} as Event))
+  }
+
+  searchEvents(serverId: string, sessionId: string, query: string, limit = 40): TimelineSearchResult[] {
+    const tokens = searchTokens(query)
+    if (!tokens.length) return []
+    const rows = this.db.prepare(`
+      SELECT json FROM events
+      WHERE server_id = ? AND session_id = ? AND (
+        json_extract(json, '$.type') IN (
+          'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
+          'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
+          'artifact_error', 'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted'
+        ) OR json_extract(json, '$.type') LIKE '%_error'
+      )
+      ORDER BY seq DESC
+    `).all(serverId, sessionId)
+    const results: TimelineSearchResult[] = []
+    for (const row of rows) {
+      const event = parseJSON((row as { json: string }).json, {} as Event)
+      const text = searchableEventText(event)
+      const folded = text.toLocaleLowerCase()
+      if (!text || !tokens.every(token => folded.includes(token))) continue
+      results.push({
+        session_id: sessionId,
+        event_id: event.id,
+        seq: event.seq,
+        ts: event.ts,
+        role: searchEventRole(event),
+        snippet: searchSnippet(text, tokens)
+      })
+      if (results.length >= Math.max(1, Math.min(100, limit))) break
+    }
+    return results
   }
 
   hasEventsBefore(serverId: string, sessionId: string, before: number): boolean {

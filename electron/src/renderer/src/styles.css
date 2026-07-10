@@ -150,11 +150,20 @@ textarea { resize: none; }
 .timeline-empty p { margin: 0; font-size: 12px; }
 .empty-symbol { font-size: 40px; color: #565654; }
 .timeline-loading { flex-direction: row; font-size: 12px; }
-.timeline-search { position: absolute; z-index: 30; top: 10px; right: 17px; height: 36px; display: flex; align-items: center; gap: 5px; padding: 0 6px 0 10px; color: var(--muted); background: #292929f2; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 8px 24px #0008; backdrop-filter: blur(10px); }
-.timeline-search input { width: 230px; background: transparent; border: 0; outline: 0; }
+.timeline-search-panel { width: min(430px, calc(100% - 34px)); position: absolute; z-index: 30; top: 10px; right: 17px; overflow: hidden; background: #292929f7; border: 1px solid #454545; border-radius: 9px; box-shadow: 0 12px 32px #0009; backdrop-filter: blur(12px); }
+.timeline-search { height: 36px; display: flex; align-items: center; gap: 5px; padding: 0 6px 0 10px; color: var(--muted); }
+.timeline-search input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; }
 .timeline-search span { min-width: 34px; color: var(--faint); font-size: 10px; text-align: right; }
 .timeline-search button { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: transparent; border-radius: 5px; }
 .timeline-search button:hover { color: white; background: #3b3b3b; }
+.timeline-search-results { max-height: min(390px, calc(100vh - 170px)); overflow-y: auto; padding: 5px; border-top: 1px solid #3b3b3b; }
+.timeline-search-results > button { width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; color: #c9c9c6; background: transparent; border-radius: 6px; text-align: left; }
+.timeline-search-results > button:hover, .timeline-search-results > button.active { background: #383838; }
+.timeline-search-results > button > span { width: 100%; display: flex; align-items: center; gap: 8px; }
+.timeline-search-results strong { flex: 1; color: #e9e9e6; font-size: 10px; }
+.timeline-search-results time { color: var(--faint); font-size: 9px; }
+.timeline-search-results small { display: -webkit-box; overflow: hidden; color: #aaa9a6; font-size: 10px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.timeline-search-results p { margin: 9px; color: var(--faint); font-size: 10px; text-align: center; }
 .timeline-minimap { width: 40px; position: absolute; z-index: 9; top: 0; bottom: 0; left: 0; overflow: visible; outline: none; cursor: pointer; touch-action: none; }
 .timeline-minimap:focus-visible { border-radius: 5px; box-shadow: inset 0 0 0 1px #41413f; }
 .timeline-minimap canvas { width: 100%; height: 100%; display: block; }

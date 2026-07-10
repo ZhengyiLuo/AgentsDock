@@ -247,6 +247,15 @@ export interface TimelineIndex {
   generated_at?: string | null
 }
 
+export interface TimelineSearchResult {
+  session_id: string
+  event_id: string
+  seq: number
+  ts?: string | null
+  role: 'user' | 'assistant' | 'trace' | 'error' | 'job' | 'file' | 'system'
+  snippet: string
+}
+
 export interface FilesPage {
   files: AgentFile[]
   total: number

@@ -26,7 +26,7 @@ import subprocess
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -359,7 +359,8 @@ def ensure_dirs(session_id: str | None = None) -> None:
 
 EVENT_SEQ_CACHE: dict[str, int] = {}
 EVENT_SEQ_LOCK = asyncio.Lock()
-TIMELINE_INDEX_CACHE: dict[str, dict[str, Any]] = {}
+TIMELINE_INDEX_CACHE_MAX = int(os.environ.get("ZENITHBOT_TIMELINE_INDEX_CACHE_MAX", "24"))
+TIMELINE_INDEX_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 TIMELINE_INDEX_LOCKS: dict[str, threading.Lock] = {}
 
 
@@ -2787,6 +2788,43 @@ def timeline_index_event_text(event: dict[str, Any]) -> str:
     return ""
 
 
+def timeline_search_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", value).strip()
+    if isinstance(value, dict):
+        for key in ("message", "error", "detail"):
+            text = timeline_search_value(value.get(key))
+            if text:
+                return text
+    try:
+        return re.sub(r"\s+", " ", json.dumps(value, ensure_ascii=False)).strip()
+    except Exception:
+        return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def timeline_search_event_text(event: dict[str, Any]) -> str:
+    for field in ("result_text", "text", "prompt", "message", "error"):
+        text = timeline_search_value(event.get(field))
+        if text:
+            return text
+    return ""
+
+
+def timeline_search_snippet(text: str, tokens: list[str], limit: int = 260) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    folded = compact.casefold()
+    positions = [folded.find(token) for token in tokens if token and folded.find(token) >= 0]
+    center = min(positions) if positions else 0
+    start = max(0, center - limit // 3)
+    end = min(len(compact), start + limit)
+    start = max(0, end - limit)
+    return ("…" if start else "") + compact[start:end].strip() + ("…" if end < len(compact) else "")
+
+
 def timeline_index_is_error(event: dict[str, Any]) -> bool:
     event_type = str(event.get("type") or "")
     if event_type in {"tool_started", "tool_finished", "raw_event"}:
@@ -2814,6 +2852,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
     signature = (stat.st_size, stat.st_mtime_ns)
     cached = TIMELINE_INDEX_CACHE.get(session_id)
     if cached and cached.get("signature") == signature:
+        TIMELINE_INDEX_CACHE.move_to_end(session_id)
         return cached["payload"]
 
     can_append = bool(
@@ -2846,13 +2885,35 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                 "event_count": 0,
                 "file_names": [],
                 "has_user": False,
+                "search_entries": [],
+                "_search_values": set(),
             }
             by_key[key] = record
             records.append(record)
+        record.setdefault("search_entries", [])
+        record.setdefault("_search_values", set())
         record["start_seq"] = min(int(record["start_seq"]), seq)
         record["end_seq"] = max(int(record["end_seq"]), seq)
         record["event_count"] += 1
         return record
+
+    def add_search_entry(record: dict[str, Any], event: dict[str, Any], role: str, text: str | None = None) -> None:
+        value = text if text is not None else timeline_search_event_text(event)
+        value = re.sub(r"\s+", " ", value or "").strip()
+        if not value:
+            return
+        search_values = record.setdefault("_search_values", set())
+        fingerprint = (role, value)
+        if fingerprint in search_values:
+            return
+        search_values.add(fingerprint)
+        record.setdefault("search_entries", []).append({
+            "event_id": str(event.get("id") or event.get("seq") or ""),
+            "seq": int(event.get("seq") or 0),
+            "ts": event.get("ts"),
+            "role": role,
+            "text": value,
+        })
 
     final_offset = scan_offset
     with path.open("rb") as source:
@@ -2881,6 +2942,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                 text = timeline_index_event_text(event)
                 if text:
                     record["preview"] = text
+                add_search_entry(record, event, "job")
                 continue
 
             if timeline_index_is_error(event):
@@ -2888,6 +2950,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                 record = ensure_record(f"event:{event.get('id') or seq}", "error", event)
                 record["title"] = compact_timeline_index_text(event_type.replace("_", " ").title() or "Error", 72)
                 record["preview"] = text or "Agent error"
+                add_search_entry(record, event, "error")
                 continue
 
             run_id = str(event.get("run_id") or "").strip()
@@ -2905,6 +2968,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                 if prompt:
                     record["title"] = compact_timeline_index_text(prompt, 72)
                     record["prompt"] = prompt
+                add_search_entry(record, event, "user")
                 continue
 
             key = current_turn_by_run.get(run_id) if run_id else active_turn_key
@@ -2920,6 +2984,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                     record["preview"] = response
                     if not record["title"]:
                         record["title"] = compact_timeline_index_text(response, 72)
+                add_search_entry(record, event, "assistant")
                 if event_type == "turn_finished" and active_turn_key == key:
                     active_turn_key = None
                 if event_type == "turn_finished" and run_id:
@@ -2938,6 +3003,7 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                         record["file_names"].append(file_name)
                     if not record["title"] and file_name:
                         record["title"] = file_name
+                    add_search_entry(record, event, "file", file_name)
                 continue
 
             if event_type in TIMELINE_INDEX_TRACE_TYPES or key:
@@ -2950,12 +3016,15 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
                 text = timeline_index_event_text(event)
                 if text and not record.get("trace_preview"):
                     record["trace_preview"] = text
+                if event_type == "reasoning_summary":
+                    add_search_entry(record, event, "trace")
                 continue
 
             text = timeline_index_event_text(event)
             record = ensure_record(f"event:{event.get('id') or seq}", "system", event)
             record["title"] = compact_timeline_index_text(event_type.replace("_", " ").title() or "System", 72)
             record["preview"] = text or record["title"]
+            add_search_entry(record, event, "system")
         final_offset = source.tell()
 
     landmarks: list[dict[str, Any]] = []
@@ -3014,7 +3083,37 @@ def _build_timeline_index_locked(session_id: str) -> dict[str, Any]:
         "offset": final_offset,
         "inode": stat.st_ino,
     }
+    TIMELINE_INDEX_CACHE.move_to_end(session_id)
+    while len(TIMELINE_INDEX_CACHE) > max(1, TIMELINE_INDEX_CACHE_MAX):
+        TIMELINE_INDEX_CACHE.popitem(last=False)
     return payload
+
+
+def search_timeline_index(session_id: str, query: str, limit: int = 40) -> dict[str, Any]:
+    matches = re.findall(r'"([^"]+)"|(\S+)', query.strip())
+    tokens = [(phrase or word).casefold() for phrase, word in matches if phrase or word]
+    if not tokens:
+        return {"session_id": session_id, "query": query, "results": []}
+    lock = TIMELINE_INDEX_LOCKS.setdefault(session_id, threading.Lock())
+    with lock:
+        _build_timeline_index_locked(session_id)
+        cached = TIMELINE_INDEX_CACHE.get(session_id) or {}
+        entries = [
+            entry
+            for record in cached.get("records", [])
+            for entry in record.get("search_entries", [])
+            if all(token in str(entry.get("text") or "").casefold() for token in tokens)
+        ]
+    entries.sort(key=lambda entry: int(entry.get("seq") or 0), reverse=True)
+    results = [{
+        "session_id": session_id,
+        "event_id": entry.get("event_id"),
+        "seq": int(entry.get("seq") or 0),
+        "ts": entry.get("ts"),
+        "role": entry.get("role") or "system",
+        "snippet": timeline_search_snippet(str(entry.get("text") or ""), tokens),
+    } for entry in entries[: max(1, min(100, limit))]]
+    return {"session_id": session_id, "query": query, "results": results}
 
 
 def compact_import_text(text: str) -> str:
@@ -5811,6 +5910,17 @@ async def get_timeline_index(session_id: str) -> dict[str, Any]:
     if session_id not in STORE.sessions:
         raise HTTPException(status_code=404, detail="session not found")
     return await asyncio.to_thread(build_timeline_index, session_id)
+
+
+@app.get("/api/sessions/{session_id}/search")
+async def search_session_timeline(
+    session_id: str,
+    q: str = Query(min_length=2, max_length=500),
+    limit: int = Query(default=40, ge=1, le=100),
+) -> dict[str, Any]:
+    if session_id not in STORE.sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    return await asyncio.to_thread(search_timeline_index, session_id, q, limit)
 
 
 @app.get("/api/sessions/{session_id}")

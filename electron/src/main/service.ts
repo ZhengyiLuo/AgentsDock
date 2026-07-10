@@ -29,6 +29,7 @@ import type {
   SessionSnapshot,
   TimelineIndex,
   TimelinePage,
+  TimelineSearchResult,
   TmuxPane,
   UpdateSessionInput,
   UpdateJobInput,
@@ -277,6 +278,20 @@ export class AppService {
     const index = await this.client.timelineIndex(sessionId)
     this.timelineIndexes.set(`${this.serverId}:${sessionId}`, index)
     return index
+  }
+
+  async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
+    const clean = query.trim()
+    if (clean.length < 2) return []
+    try {
+      return await this.client.searchTimeline(sessionId, clean, limit)
+    } catch (error) {
+      appLog('search', 'server history search unavailable; using local cache', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+      return this.cache.searchEvents(this.serverId, sessionId, clean, limit)
+    }
   }
 
   async subscribeTimeline(sessionId: string, after: number): Promise<void> {

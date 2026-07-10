@@ -26,6 +26,7 @@ const api: AgentsDockAPI = {
     older: (sessionId, before, limit) => ipcRenderer.invoke('timeline:older', sessionId, before, limit),
     around: (sessionId, anchorSeq, limit) => ipcRenderer.invoke('timeline:around', sessionId, anchorSeq, limit),
     index: sessionId => ipcRenderer.invoke('timeline:index', sessionId),
+    search: (sessionId, query, limit) => ipcRenderer.invoke('timeline:search', sessionId, query, limit),
     subscribe: (sessionId, after) => ipcRenderer.invoke('timeline:subscribe', sessionId, after),
     unsubscribe: sessionId => ipcRenderer.invoke('timeline:unsubscribe', sessionId),
     saveViewState: state => ipcRenderer.invoke('timeline:view-state:save', state),

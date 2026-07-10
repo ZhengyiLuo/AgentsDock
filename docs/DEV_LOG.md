@@ -6853,3 +6853,19 @@ Follow-up from rapid-switch stress:
 - Reconciliation now includes group position and count so streamed appends
   correctly turn the previous last update into a middle continuation.
 - Regression suite: 48 tests across eleven files; TypeScript validation passes.
+
+## 2026-07-09 - Search complete chat history
+
+- Replaced the in-chat renderer-only text scan with server-backed transcript
+  search. User prompts, assistant updates, reasoning summaries, errors, jobs,
+  and file names remain searchable even when their event bodies are not loaded.
+- Search reuses the incremental whole-chat semantic index and retains full
+  searchable text only in the bounded server LRU cache; full message bodies are
+  never added to the compact navigator response or React timeline state.
+- Results include role, timestamp, and a bounded context snippet. Selecting an
+  unloaded result opens the existing bounded history window around its exact
+  sequence, preserving the memory and scrolling guardrails.
+- Electron falls back to its local SQLite event cache if the server is offline
+  or predates the search endpoint.
+- Regression suite: 51 tests across twelve files; Python compile, TypeScript
+  validation, and a synthetic server transcript search all pass.

@@ -14,6 +14,7 @@ import type {
   Session,
   TimelineIndex,
   TimelinePage,
+  TimelineSearchResult,
   TmuxPane,
   UpdateJobInput,
   UpdateSessionInput
@@ -127,6 +128,12 @@ export class AgentServerClient {
 
   async timelineIndex(sessionId: string): Promise<TimelineIndex> {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/timeline-index`)
+  }
+
+  async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) })
+    const response = await this.get<{ results?: TimelineSearchResult[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/search?${params}`)
+    return response.results ?? []
   }
 
   async importHistory(sessionId: string, force = false): Promise<TimelinePage> {
