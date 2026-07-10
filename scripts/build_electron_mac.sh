@@ -7,7 +7,7 @@ DESTINATION="$ROOT/dist/AgentsDock-Electron.app"
 BUNDLED_RUNTIME="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 
 if [[ -d "$BUNDLED_RUNTIME/node/bin" ]]; then
-  export PATH="$BUNDLED_RUNTIME/bin:$BUNDLED_RUNTIME/node/bin:/usr/bin:/bin:$PATH"
+  export PATH="$BUNDLED_RUNTIME/bin:$BUNDLED_RUNTIME/bin/fallback:$BUNDLED_RUNTIME/node/bin:/usr/bin:/bin:$PATH"
 fi
 
 cd "$PROJECT"

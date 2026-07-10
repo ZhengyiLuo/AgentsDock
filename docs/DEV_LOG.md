@@ -6891,4 +6891,7 @@ Follow-up from rapid-switch stress:
   Electron also recovers older runs from `job_ran.run_id`, folds the agent
   response into the existing orange job card, keeps one summary per execution,
   and preserves artifacts from the latest run inside that card.
+- Local Electron packaging now includes the bundled runtime's package-manager
+  fallback directory in `PATH`, so Electron Builder can always spawn `pnpm`
+  instead of depending on whichever interactive shell launched the build.
 - Added a component regression test for in-inset current-turn changes.
