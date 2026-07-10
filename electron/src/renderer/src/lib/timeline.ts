@@ -225,10 +225,18 @@ export function renderTimelineItems(items: TimelineItem[]): RenderTimelineItem[]
         groupPosition, groupIndex: index, groupCount: count
       })
     }
-    if (item.trace.length) rows.push({ kind: 'trace', id: `${item.id}:trace`, key: `${item.key}:trace`, seq: item.trace[0].seq, events: item.trace })
+    if (traceHasVisibleContent(item.trace)) {
+      rows.push({ kind: 'trace', id: `${item.id}:trace`, key: `${item.key}:trace`, seq: item.trace[0].seq, events: item.trace })
+    }
     if (item.files.length) rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: item.files[0].seq ?? item.seq, files: item.files })
   }
   return rows
+}
+
+export function traceHasVisibleContent(events: Event[]): boolean {
+  return events.some(event => event.type === 'reasoning_summary' && Boolean(messageText(event).trim())) ||
+    events.some(event => event.type === 'tool_started' || event.type === 'tool_finished') ||
+    Boolean(extractUnifiedDiff(events).trim())
 }
 
 export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], next: RenderTimelineItem[]): RenderTimelineItem[] {

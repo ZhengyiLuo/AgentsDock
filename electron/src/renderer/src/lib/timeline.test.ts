@@ -99,6 +99,27 @@ describe('projectTimeline', () => {
     expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
   })
 
+  it('does not mount an empty trace row for provisional run metadata', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Start working' }),
+      event(2, 'process_started', { run_id: 'run-1' }),
+      event(3, 'provider_session', { run_id: 'run-1' }),
+      event(4, 'reasoning_summary', { run_id: 'run-1', text: '   ' })
+    ], []))
+
+    expect(rows.map(row => row.kind)).toEqual(['message'])
+  })
+
+  it('mounts the trace row once visible reasoning arrives', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Start working' }),
+      event(2, 'process_started', { run_id: 'run-1' }),
+      event(3, 'reasoning_summary', { run_id: 'run-1', text: 'Checking the repository' })
+    ], []))
+
+    expect(rows.map(row => row.kind)).toEqual(['message', 'trace'])
+  })
+
   it('marks assistant updates as one visual group while keeping every update virtualized', () => {
     const rows = renderTimelineItems(projectTimeline([
       event(1, 'turn_started', { run_id: 'run-1', prompt: 'Monitor it' }),

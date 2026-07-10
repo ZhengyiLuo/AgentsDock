@@ -6969,3 +6969,12 @@ Follow-up from rapid-switch stress:
   and renderer-helper inheritance.
 - Uploaded macOS build 60 successfully to App Store Connect. Missing dSYMs for
   prebuilt Electron binaries remain non-blocking symbol-upload warnings.
+
+## 2026-07-09 - Suppress provisional empty trace rows
+
+- Sending a prompt immediately produced process/session metadata and sometimes
+  a blank reasoning event. Those events created a virtualized trace row even
+  though the disclosure had no thought, tool call, or diff to render.
+- Trace rows now remain absent until they contain non-empty reasoning, a real
+  tool event, or a reviewable diff. Two projection regressions cover both the
+  hidden provisional state and its transition to a visible trace.
