@@ -56,7 +56,6 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const viewSaveTimer = useRef<number | null>(null)
   const minimapSyncFrame = useRef<number | null>(null)
   const loadingOlderRef = useRef(false)
-  const wasAtTop = useRef(false)
   const pendingLocalScroll = useRef(false)
   const historySeekLease = useRef(0)
   const searchLease = useRef(0)
@@ -460,9 +459,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
             scheduleViewSave()
           }
         }}
-        atTopStateChange={value => {
-          if (value && !wasAtTop.current && snapshot.hasMoreEvents && !historicalWindow) void loadOlder()
-          wasAtTop.current = value
+        startReached={() => {
+          if (snapshot.hasMoreEvents && !historicalWindow) void loadOlder()
         }}
         components={components}
         itemContent={itemContent}

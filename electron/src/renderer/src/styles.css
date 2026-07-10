@@ -187,7 +187,7 @@ textarea { resize: none; }
 .turn-segment.media { padding-bottom: 6px; }
 .turn-segment.assistant { position: relative; }
 .turn-segment.assistant:not(.group-only) { padding-left: 14px; }
-.turn-segment.assistant:not(.group-only)::before { content: ""; position: absolute; left: 2px; width: 1px; background: #444; }
+.turn-segment.assistant:not(.group-only)::before { content: ""; position: absolute; left: 2px; width: 1px; background: #30302f; }
 .turn-segment.assistant.group-first::before { top: 24px; bottom: -8px; }
 .turn-segment.assistant.group-middle::before { top: -8px; bottom: -8px; }
 .turn-segment.assistant.group-last::before { top: -8px; bottom: calc(100% - 17px); }

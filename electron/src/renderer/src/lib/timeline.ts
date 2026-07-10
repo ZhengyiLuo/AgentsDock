@@ -136,7 +136,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     if (event.type === 'assistant_text' || event.type === 'turn_finished') {
       const turn = ensureTurn(event)
       const text = event.type === 'turn_finished' ? event.result_text : event.text
-      if (text?.trim() && !turn.assistant.some(previous => messageText(previous) === text)) turn.assistant.push(event)
+      if (text?.trim() && !duplicatesAssistantOutput(turn.assistant, text, event.type === 'turn_finished')) turn.assistant.push(event)
       if (event.type === 'turn_finished') {
         turn.finishedAt = event.ts
         if (activeTurn?.id === turn.id) activeTurn = null
@@ -239,6 +239,18 @@ function timelineItemEqual(a: TimelineItem, b: TimelineItem): boolean {
 
 function sameReferences<T>(a: T[], b: T[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
+function duplicatesAssistantOutput(previous: Event[], candidate: string, aggregate: boolean): boolean {
+  const normalized = normalizeAssistantOutput(candidate)
+  if (!normalized) return true
+  const prior = previous.map(event => normalizeAssistantOutput(messageText(event))).filter(Boolean)
+  if (prior.includes(normalized)) return true
+  return aggregate && prior.length > 0 && prior.join(' ') === normalized
+}
+
+function normalizeAssistantOutput(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
 }
 
 export function messageText(event: Event): string {

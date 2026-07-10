@@ -26,6 +26,24 @@ describe('projectTimeline', () => {
     }
   })
 
+  it('does not render turn_finished when it repeats the accumulated assistant updates', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Fix the sync' }),
+      event(2, 'assistant_text', { run_id: 'run-1', text: 'I found the missing fields.' }),
+      event(3, 'assistant_text', { run_id: 'run-1', text: 'The transport test now passes.' }),
+      event(4, 'turn_finished', {
+        run_id: 'run-1',
+        result_text: 'I found the missing fields.\n\nThe transport test now passes.'
+      })
+    ], [])).filter(row => row.kind === 'message' && row.role === 'assistant')
+
+    expect(rows).toHaveLength(2)
+    expect(rows.map(row => row.kind === 'message' ? messageText(row.event) : '')).toEqual([
+      'I found the missing fields.',
+      'The transport test now passes.'
+    ])
+  })
+
   it('keeps queued turns out of transcript history and groups recurring job output', () => {
     const items = projectTimeline([
       event(1, 'turn_queued', { prompt: 'Later' }),

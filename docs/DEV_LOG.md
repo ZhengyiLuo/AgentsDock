@@ -6879,4 +6879,12 @@ Follow-up from rapid-switch stress:
   directly instead of Virtuoso's delayed overscan range callback.
 - Rail following now moves by only the distance needed to reveal the active
   tick instead of recentering the whole strip in one visible jump.
+- Older-history paging now uses Virtuoso's first-item-aware `startReached`
+  callback. It can trigger again after a prepend without requiring a down/up
+  scroll to clear a stale top-state latch.
+- Same-turn assistant grouping keeps its connective rail, but at a quieter
+  contrast so it does not resemble a second scrollbar beside the text.
+- Aggregated `turn_finished.result_text` no longer renders as a duplicate
+  message when it is the normalized concatenation of assistant updates already
+  shown for that run. Standalone finish results remain visible as a fallback.
 - Added a component regression test for in-inset current-turn changes.
