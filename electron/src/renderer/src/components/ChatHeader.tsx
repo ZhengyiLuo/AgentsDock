@@ -53,8 +53,9 @@ function applyFont(size: number, family: string) {
   document.documentElement.style.setProperty('--chat-font-family', family === 'mono' ? '"SFMono-Regular", Menlo, monospace' : family === 'rounded' ? 'ui-rounded, "SF Pro Rounded", -apple-system, sans-serif' : '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif')
 }
 
-function ConnectionStatus() {
+export function ConnectionStatus() {
   const connected = useAppStore(state => state.connected)
   const error = useAppStore(state => state.connectionError)
-  return <button className={`connection-status ${connected ? 'online' : 'offline'}`} title={error || (connected ? 'Server connected' : 'Open connection settings')} onClick={() => useAppStore.getState().setModal('settings', true)}><span />{connected ? 'Online' : 'Offline'}<MoreHorizontal size={13} /></button>
+  const label = connected ? 'Online' : 'Offline'
+  return <button type="button" className={`connection-status ${connected ? 'online' : 'offline'}`} aria-label={`Server connection: ${label}`} title={error || (connected ? 'Server connected' : 'Open connection settings')} onClick={() => useAppStore.getState().setModal('settings', true)}><span />{label}<MoreHorizontal size={13} /></button>
 }

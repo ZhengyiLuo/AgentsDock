@@ -132,7 +132,7 @@ textarea { resize: none; }
 .editable-title svg { color: var(--faint); }
 .title-block small { padding-left: 4px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions { display: flex; align-items: center; gap: 3px; -webkit-app-region: no-drag; }
-.connection-status { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--muted); background: #242424; border-radius: 7px; font-size: 11px; font-weight: 650; }
+.connection-status { height: 28px; position: relative; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--muted); background: #242424; border-radius: 7px; font-size: 11px; font-weight: 650; pointer-events: auto; -webkit-app-region: no-drag; }
 .connection-status > span, .server-pill > span, .server-health > span { width: 7px; height: 7px; border-radius: 50%; }
 .connection-status.online > span, .server-pill.online > span, .server-health.online > span { background: var(--green); }
 .connection-status.offline > span, .server-pill.offline > span, .server-health.offline > span { background: var(--danger); }

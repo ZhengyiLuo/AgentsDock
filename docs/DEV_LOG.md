@@ -6930,3 +6930,14 @@ Follow-up from rapid-switch stress:
   microphone, and Electron JIT entitlements; TestFlight accepted the package
   and began processing it. Missing dSYMs for prebuilt Electron binaries were
   warnings only and did not block the upload.
+
+## 2026-07-09 - Repair the startup connection control
+
+- The empty/startup chat header placed the Online/Offline pill directly inside
+  the draggable macOS title bar, so Electron could consume its pointer events
+  before React received the click.
+- The connection pill is now its own explicit `no-drag` interaction region with
+  a stable accessible label. It opens server settings whether the app has a
+  selected chat or only cached/offline startup state.
+- Added a regression that renders the zero-session offline header and verifies
+  the pill opens connection settings. The full suite passes with 55 tests.
