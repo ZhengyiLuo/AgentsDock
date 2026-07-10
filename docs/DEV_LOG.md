@@ -7187,3 +7187,13 @@ Follow-up from rapid-switch stress:
   entries. Pointer-down starts one deduplicated on-demand preparation, and the
   subsequent drag reuses that local file instead of racing an uncached network
   download from inside `dragstart`.
+
+## 2026-07-10 - Close transient surfaces before the app window
+
+- Replaced Electron's unconditional native Close role with an app-routed
+  `Command-W` command. The shortcut now dismisses the topmost media preview,
+  form dialog, or code-review sheet before considering the terminal dock or
+  application window.
+- Added one LIFO close registry shared by transient surfaces, so nested viewers
+  close in visual order and normal `Command-W` window closing remains intact
+  when no dismissible UI is open.

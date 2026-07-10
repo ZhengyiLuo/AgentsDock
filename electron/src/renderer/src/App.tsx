@@ -8,6 +8,7 @@ import { InspectorDock } from './components/InspectorDock'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
+import { closeTopTransient } from './lib/transient-close'
 import { useAppStore } from './store/app-store'
 
 export function App() {
@@ -66,6 +67,16 @@ export function App() {
       return next
     })
   }
+  useEffect(() => {
+    const closeSurface = () => {
+      if (closeTopTransient()) return
+      if (reviewDiff) { setReviewDiff(null); return }
+      if (terminalOpen && selectedSessionId) { setTerminalOpen(selectedSessionId, false); return }
+      void window.agentsDock.native.closeWindow()
+    }
+    window.addEventListener('agentsdock:close-surface', closeSurface)
+    return () => window.removeEventListener('agentsdock:close-surface', closeSurface)
+  }, [reviewDiff, selectedSessionId, terminalOpen])
   const toggleTerminal = () => {
     if (!selectedSessionId) return
     setTerminalOpen(selectedSessionId, !terminalOpen)

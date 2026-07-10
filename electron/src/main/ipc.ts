@@ -105,4 +105,6 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('native:log', (scope, message, data) => appLog(`renderer:${scope}`, message, data))
   handle('native:clipboard:read', () => clipboard.readText())
   handle('native:clipboard:write', text => clipboard.writeText(String(text ?? '')))
+  ipcMain.removeHandler('native:close-window')
+  ipcMain.handle('native:close-window', event => BrowserWindow.fromWebContents(event.sender)?.close())
 }

@@ -671,6 +671,7 @@ function handleMenuCommand(command: string, get: () => AppState, set: (value: Pa
   else if (command === 'previous-chat') void get().selectAdjacent(-1)
   else if (command === 'toggle-inspector') get().setInspectorVisible(!get().inspectorVisible)
   else if (command === 'jump-latest') window.dispatchEvent(new CustomEvent('agentsdock:jump-latest'))
+  else if (command === 'close-surface') window.dispatchEvent(new CustomEvent('agentsdock:close-surface'))
   else set({ error: `Unknown command: ${command}` })
 }
 

@@ -6,6 +6,7 @@ import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/a
 import { runtimeLabel } from '../lib/format'
 import { historyResultsBySession, openSessionHistoryResult, useSessionHistorySearch } from '../lib/session-history-search'
 import { orderedActiveSessions, sessionMatchesQuery } from '../lib/sessions'
+import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
@@ -67,6 +68,7 @@ function ConfirmDeleteDialog() {
 function Shell({ open, onOpenChange, title, description, children, className = '' }: {
   open: boolean; onOpenChange: (open: boolean) => void; title: string; description?: string; children: React.ReactNode; className?: string
 }) {
+  useTransientClose(open, () => onOpenChange(false))
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className={`form-dialog ${className}`}><header><div><Dialog.Title>{title}</Dialog.Title>{description && <Dialog.Description>{description}</Dialog.Description>}</div><Dialog.Close className="icon-button"><X size={16} /></Dialog.Close></header>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 

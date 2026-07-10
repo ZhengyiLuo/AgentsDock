@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Check, Copy, FileDiff, X } from 'lucide-react'
 import { parseUnifiedDiff } from '../lib/timeline'
+import { useTransientClose } from '../lib/transient-close'
 
 export function CodeReview({ source, onClose }: { source: string | null; onClose: () => void }) {
+  useTransientClose(Boolean(source), onClose)
   const files = useMemo(() => parseUnifiedDiff(source ?? ''), [source])
   const [selected, setSelected] = useState(0)
   const [copied, setCopied] = useState(false)

@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Download, ExternalLink, File, FolderOpen, Maximize2, Pin, Play, Search, X } from 'lucide-react'
 import type { AgentFile, PinnedItem } from '@shared/types'
 import { formatBytes } from '../lib/format'
+import { useTransientClose } from '../lib/transient-close'
 import { NativeFileDragSurface } from './NativeFileDragSurface'
 
 export const MediaGrid = memo(function MediaGrid({ files, sessionId, onFind, compact = false }: {
@@ -75,6 +76,7 @@ export function LazyVideoThumbnail({ source }: { source: string }) {
 }
 
 export function MediaPreviewDialog({ file, onClose }: { file: AgentFile | null; onClose: () => void }) {
+  useTransientClose(Boolean(file), onClose)
   if (!file) return null
   const source = window.agentsDock.files.mediaURL(file.id)
   const video = file.content_type?.startsWith('video/')

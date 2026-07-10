@@ -109,7 +109,8 @@ const api: AgentsDockAPI = {
     notify: (title, body, sessionId) => ipcRenderer.invoke('native:notify', title, body, sessionId),
     log: (scope, message, data) => ipcRenderer.invoke('native:log', scope, message, data),
     readClipboard: () => ipcRenderer.invoke('native:clipboard:read'),
-    writeClipboard: text => ipcRenderer.invoke('native:clipboard:write', text)
+    writeClipboard: text => ipcRenderer.invoke('native:clipboard:write', text),
+    closeWindow: () => ipcRenderer.invoke('native:close-window')
   },
   events: {
     on: <K extends keyof AppEventMap>(name: K, listener: (payload: AppEventMap[K]) => void) => {

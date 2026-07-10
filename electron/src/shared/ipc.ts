@@ -142,6 +142,7 @@ export interface AgentsDockAPI {
     log(scope: string, message: string, data?: unknown): Promise<void>
     readClipboard(): Promise<string>
     writeClipboard(text: string): Promise<void>
+    closeWindow(): Promise<void>
   }
   events: {
     on<K extends keyof import('./types').AppEventMap>(name: K, listener: (payload: import('./types').AppEventMap[K]) => void): () => void

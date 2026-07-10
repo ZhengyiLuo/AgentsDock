@@ -193,7 +193,7 @@ function createMenu(window: () => BrowserWindow | null): void {
     { role: 'fileMenu', submenu: [
       { label: 'New Chat', accelerator: 'Command+N', click: () => send('new-chat') },
       { label: 'Attach Files…', accelerator: 'Command+O', click: () => send('attach-files') },
-      { type: 'separator' }, { role: 'close' }
+      { type: 'separator' }, { label: 'Close', accelerator: 'Command+W', click: () => send('close-surface') }
     ] },
     { role: 'editMenu' },
     { label: 'Chat', submenu: [
