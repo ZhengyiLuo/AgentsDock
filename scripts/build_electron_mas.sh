@@ -80,7 +80,7 @@ codesign --verify --deep --strict "$APP"
 ENTITLEMENTS="$(mktemp -t agentsdock-entitlements).plist"
 trap 'rm -f "$ENTITLEMENTS"' EXIT
 codesign -d --entitlements :- "$APP" > "$ENTITLEMENTS" 2>/dev/null
-if [[ "$(plutil -extract com.apple.security.app-sandbox raw -o - "$ENTITLEMENTS")" != true ]]; then
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$ENTITLEMENTS")" != true ]]; then
   echo "MAS staging app is missing the App Sandbox entitlement." >&2
   exit 2
 fi
