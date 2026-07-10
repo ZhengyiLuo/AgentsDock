@@ -8,12 +8,13 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:icon": "../scripts/build_electron_icon.sh",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package:mac": "pnpm build && electron-builder --mac dir",
-    "package:mas": "pnpm build && electron-builder --mac mas"
+    "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac dir",
+    "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -33,7 +34,7 @@
       "package.json"
     ],
     "mac": {
-      "icon": "../Sources/ZenithDockIOS/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-mac-512@2x.png",
+      "icon": "build/AgentsDock.icns",
       "category": "public.app-category.developer-tools",
       "target": [
         "dir"

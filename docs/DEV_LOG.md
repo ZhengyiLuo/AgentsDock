@@ -6831,3 +6831,13 @@ Follow-up from rapid-switch stress:
   until release, avoiding the distracting per-row swap animation.
 - Added order-invariant tests for before, after, self, and stale-target drops.
 - Regression suite: 47 tests across eleven files; TypeScript validation passes.
+
+## 2026-07-09 - Repair Electron small app icons
+
+- Replaced Electron Builder's single-image icon conversion with a deterministic
+  multi-resolution ICNS built from the dedicated 16, 32, 128, 256, and 512
+  point macOS artwork.
+- This fixes the corrupted 16-point bitmap that Finder displayed as green/blue
+  pixel noise while the large Quick Look preview appeared correct.
+- Local Mac packaging now regenerates the ICNS before every build so small icon
+  regressions cannot hide behind Builder or Finder caches.

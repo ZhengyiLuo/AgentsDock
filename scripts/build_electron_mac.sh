@@ -12,6 +12,8 @@ fi
 
 cd "$PROJECT"
 
+"$ROOT/scripts/build_electron_icon.sh"
+
 if [[ ! -d node_modules ]]; then
   pnpm install --frozen-lockfile
 fi
