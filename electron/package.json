@@ -16,12 +16,6 @@
     "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac zip dmg",
     "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "esbuild"
-    ]
-  },
   "build": {
     "appId": "com.zhengyiluo.ZenithDock",
     "productName": "AgentsDock",

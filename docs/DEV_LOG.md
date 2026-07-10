@@ -7021,3 +7021,12 @@ Follow-up from rapid-switch stress:
   of producing silent or unhandled promise rejections.
 - Validation completed with TypeScript, 68 tests, four shuffled-order seeds,
   a production dependency audit, and no known package vulnerabilities.
+
+## 2026-07-10 - Migrate the pnpm 11 build allowlist
+
+- Moved the Electron and esbuild lifecycle-script allowlist out of the obsolete
+  `package.json` `pnpm.onlyBuiltDependencies` field and into pnpm 11's
+  `pnpm-workspace.yaml` `allowBuilds` map.
+- Clean installs now explicitly allow only the two native build dependencies
+  the macOS Electron package requires, explicitly deny the transitive Windows
+  installer hook, and no longer warn that the security policy was ignored.
