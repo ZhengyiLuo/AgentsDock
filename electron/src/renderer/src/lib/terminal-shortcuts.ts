@@ -8,3 +8,8 @@ export function terminalClipboardShortcut(event: Pick<KeyboardEvent, 'key' | 'me
   if (key === 'a') return 'select-all'
   return null
 }
+
+export function containTerminalWheel(event: Pick<WheelEvent, 'stopPropagation'>): true {
+  event.stopPropagation()
+  return true
+}

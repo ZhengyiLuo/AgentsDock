@@ -7171,3 +7171,6 @@ Follow-up from rapid-switch stress:
   A bounded observer follows the viewport and virtual spacer only during a
   dock layout transaction, then releases the semantic row after 140 ms of
   stability so drag-resizing cannot leave the conversation displaced.
+- Contained wheel events at xterm's native wheel hook. Terminal scrollback
+  still receives and processes every wheel gesture, but boundary scrolling no
+  longer escapes into the conversation timeline.

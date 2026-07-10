@@ -23,7 +23,7 @@ import {
   X
 } from 'lucide-react'
 import type { Session, TerminalAction, TerminalConnectionState, TerminalWindow } from '../../../shared/types'
-import { terminalClipboardShortcut } from '../lib/terminal-shortcuts'
+import { containTerminalWheel, terminalClipboardShortcut } from '../lib/terminal-shortcuts'
 import { useAppStore } from '../store/app-store'
 
 export function TerminalWorkspace({ session, onClose }: { session: Session; onClose?: () => void }) {
@@ -127,6 +127,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
     terminalRef.current = terminal
     fitRef.current = fit
     searchRef.current = search
+    terminal.attachCustomWheelEventHandler(containTerminalWheel)
 
     const data = terminal.onData(value => window.agentsDock.terminal.write(session.id, value))
     terminal.attachCustomKeyEventHandler(event => {

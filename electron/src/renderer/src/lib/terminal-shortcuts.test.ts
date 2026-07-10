@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { terminalClipboardShortcut } from './terminal-shortcuts'
+import { describe, expect, it, vi } from 'vitest'
+import { containTerminalWheel, terminalClipboardShortcut } from './terminal-shortcuts'
 
 describe('terminalClipboardShortcut', () => {
   it('leaves Control-C with the shell while reserving Command-C for local copying', () => {
@@ -13,5 +13,11 @@ describe('terminalClipboardShortcut', () => {
 
   it('maps Command-A to the terminal scrollback selection', () => {
     expect(terminalClipboardShortcut({ key: 'a', metaKey: true })).toBe('select-all')
+  })
+
+  it('keeps wheel input inside xterm while allowing xterm to process it', () => {
+    const stopPropagation = vi.fn()
+    expect(containTerminalWheel({ stopPropagation })).toBe(true)
+    expect(stopPropagation).toHaveBeenCalledOnce()
   })
 })
