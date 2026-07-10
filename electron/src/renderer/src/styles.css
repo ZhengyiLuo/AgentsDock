@@ -521,31 +521,35 @@ body.terminal-resizing { cursor: ns-resize; user-select: none; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 7px; padding: 16px; }
 
 /* Review */
-.review-overlay { background: #0007; }
-.review-dialog { z-index: 1100; width: min(1220px, calc(100vw - 50px)); height: min(820px, calc(100vh - 50px)); position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; grid-template-rows: 52px minmax(0, 1fr); overflow: hidden; background: #171717; border: 1px solid #3b3b3b; border-radius: 10px; box-shadow: 0 28px 100px #000d; }
-.review-header { display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #202020; border-bottom: 1px solid #353535; }
+.review-overlay { background: #0005; }
+.review-dialog { z-index: 1100; width: clamp(560px, 46vw, 820px); height: 100vh; position: fixed; inset: 0 0 0 auto; display: grid; grid-template-rows: 52px 42px minmax(0, 1fr); overflow: hidden; color: var(--text); background: var(--bg); border-left: 1px solid var(--border); box-shadow: -24px 0 70px #0009; animation: review-slide-in 150ms ease-out; }
+@keyframes review-slide-in { from { transform: translateX(22px); opacity: .65; } to { transform: translateX(0); opacity: 1; } }
+.review-header { display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .review-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; }
 .diff-stat { font: 11px "SFMono-Regular", monospace; }
+.diff-stat b, .diff-file-header b { color: #39c876; }
+.diff-stat i, .diff-file-header i { margin-left: 5px; color: #f06460; font-style: normal; }
 .review-spacer { flex: 1; }
-.review-body { min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
-.review-files { min-height: 0; overflow: auto; padding: 7px; background: #1b1b1b; border-right: 1px solid #333; }
-.review-files-label { padding: 8px; color: var(--muted); font-size: 10px; font-weight: 650; }
-.review-files button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px; color: #bbb; background: transparent; border-radius: 6px; text-align: left; }
-.review-files button:hover { background: #242424; }
-.review-files button.selected { color: white; background: #2c3d52; }
-.review-files button > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.review-files small { flex: 0 0 auto; }
-.diff-view { min-width: 0; min-height: 0; display: grid; grid-template-rows: 40px minmax(0, 1fr); }
-.diff-file-header { display: flex; align-items: center; gap: 10px; padding: 0 12px; color: #ddd; background: #1f1f1f; border-bottom: 1px solid #303030; font: 11px "SFMono-Regular", monospace; }
+.review-toolbar { min-width: 0; display: flex; align-items: center; gap: 9px; padding: 0 12px; color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--border); font-size: 11px; }
+.review-toolbar strong { color: var(--text); font-size: 12px; }
+.review-toolbar select { min-width: 0; max-width: 62%; margin-left: auto; padding: 5px 26px 5px 8px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; font: 10px "SFMono-Regular", monospace; text-overflow: ellipsis; }
+.review-diff-view { min-width: 0; min-height: 0; overflow: hidden; }
+.review-diff-list { width: 100%; height: 100%; overflow-x: auto !important; font: 11px/1.55 "SFMono-Regular", Menlo, monospace; user-select: text; }
+.diff-file-header { min-width: max(100%, 820px); height: 42px; display: flex; align-items: center; gap: 10px; padding: 0 12px; color: var(--text); background: var(--surface-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font: 11px "SFMono-Regular", monospace; }
+.diff-file-header:first-child { border-top: 0; }
 .diff-file-header > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diff-lines { min-width: 0; overflow: auto; font: 11px/1.55 "SFMono-Regular", Menlo, monospace; user-select: text; }
-.diff-line { min-width: max-content; display: grid; grid-template-columns: 48px 48px minmax(700px, 1fr); }
-.diff-line > span { padding-right: 8px; color: #686866; background: #1c1c1c; text-align: right; user-select: none; }
-.diff-line code { padding: 0 10px; white-space: pre; }
-.diff-line.add code { color: #d7f4df; background: #153523; }
-.diff-line.remove code { color: #ffd9d7; background: #3a1c1b; }
-.diff-line.header code { color: #a9a9a6; background: #292929; }
-.review-empty { padding: 30px; color: var(--muted); }
+.diff-file-header small { flex: 0 0 auto; }
+.diff-gap { min-width: max(100%, 820px); margin: 6px 0; padding: 6px 108px; color: var(--muted); background: var(--surface-3); border-block: 1px solid var(--border-soft); font-size: 10px; }
+.diff-line { min-width: max(100%, 820px); display: grid; grid-template-columns: 50px 50px minmax(720px, 1fr); }
+.diff-line > span { padding-right: 8px; color: var(--faint); background: var(--surface); border-right: 1px solid var(--border-soft); text-align: right; user-select: none; }
+.diff-line code { min-height: 17px; padding: 0 10px; color: var(--text); white-space: pre; }
+.diff-line.add > span, .diff-line.add code { color: #bdeccc; background: color-mix(in srgb, #176d39 35%, var(--bg)); }
+.diff-line.remove > span, .diff-line.remove code { color: #ffd1ce; background: color-mix(in srgb, #8b2825 34%, var(--bg)); }
+.diff-line.hunk code { color: #8fbbdf; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.diff-line.header code { color: var(--muted); background: var(--surface-2); }
+.review-state { height: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 30px; color: var(--muted); text-align: center; }
+.review-state.error { color: var(--danger); }
+@media (max-width: 760px) { .review-dialog { width: 100vw; } }
 .error-toast { position: fixed; z-index: 2000; right: 18px; bottom: 18px; max-width: 480px; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: #ffd4d1; background: #482725; border: 1px solid #743a37; border-radius: 8px; box-shadow: 0 12px 30px #0009; }
 .error-toast span { flex: 1; user-select: text; }
 .error-toast button { color: #ffaaa5; background: transparent; }

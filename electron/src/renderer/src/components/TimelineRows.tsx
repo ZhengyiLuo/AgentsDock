@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
-import type { JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
+import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
 import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
@@ -54,8 +54,24 @@ function TraceDisclosure({ events, sessionId }: { events: Event[]; sessionId: st
   const [open, setOpen] = useState(false)
   const tools = events.filter(event => event.type === 'tool_started' || event.type === 'tool_finished')
   const thoughts = events.filter(event => event.type === 'reasoning_summary')
+  const canonicalDiff = [...events].reverse().find(event => event.type === 'code_diff' && event.run_id)
   const diff = useMemo(() => extractUnifiedDiff(events), [events])
-  const files = useMemo(() => parseUnifiedDiff(diff), [diff])
+  const legacyFiles = useMemo(() => parseUnifiedDiff(diff), [diff])
+  const diffFiles = canonicalDiff?.diff_files ?? legacyFiles
+  const diffFileCount = canonicalDiff?.files_changed ?? diffFiles.length
+  const additions = canonicalDiff?.additions ?? legacyFiles.reduce((sum, file) => sum + file.additions, 0)
+  const deletions = canonicalDiff?.deletions ?? legacyFiles.reduce((sum, file) => sum + file.deletions, 0)
+  const openReview = () => {
+    const target: CodeReviewTarget = {
+      sessionId,
+      runId: canonicalDiff?.run_id,
+      source: canonicalDiff ? null : diff,
+      files: canonicalDiff?.diff_files,
+      additions,
+      deletions
+    }
+    window.dispatchEvent(new CustomEvent<CodeReviewTarget>('agentsdock:review-diff', { detail: target }))
+  }
   const headline = thoughts.at(-1)?.text?.split('\n')[0]?.replace(/^\*\*|\*\*$/g, '') || toolHeadline(tools.at(-1))
   return (
     <div className={`trace ${open ? 'open' : ''}`}>
@@ -66,7 +82,7 @@ function TraceDisclosure({ events, sessionId }: { events: Event[]; sessionId: st
         {thoughts.map(event => <div className="trace-thought" key={event.id}><Sparkles size={13} /><MarkdownContent text={event.text || ''} sessionId={sessionId} compact fold={false} /></div>)}
         {tools.map(event => <ToolEvent key={event.id} event={event} />)}
       </div>}
-      {files.length > 0 && <button className="changes-card" onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:review-diff', { detail: diff }))}><FileText size={17} /><span><strong>Edited {files.length} file{files.length === 1 ? '' : 's'}</strong><small><b>+{files.reduce((sum, file) => sum + file.additions, 0)}</b> <i>-{files.reduce((sum, file) => sum + file.deletions, 0)}</i></small></span><span className="review-label">Review</span></button>}
+      {diffFileCount > 0 && <CodeChangesCard fileCount={diffFileCount} additions={additions} deletions={deletions} onOpen={openReview} />}
     </div>
   )
 }
@@ -94,10 +110,26 @@ function JobView({ item, sessionId }: { item: JobItem; sessionId: string }) {
   const previous = updates.slice(0, -1)
   const visiblePrevious = previous.slice(-6).reverse()
   const runCount = new Set(item.events.map(event => event.run_id).filter(Boolean)).size
+  const codeDiff = [...item.events].reverse().find(event => event.type === 'code_diff' && event.run_id)
   const files = deduplicateFiles(item.events
     .filter(event => !latest.run_id || event.run_id === latest.run_id)
     .flatMap(event => [event.artifact, event.file].filter((file): file is NonNullable<typeof file> => Boolean(file))))
-  return <article className="job-row"><button className="job-summary" onClick={() => setOpen(value => !value)}><Clock3 size={15} /><span><strong>Latest Job Status</strong><small>{item.title} · {runCount || updates.length} run{(runCount || updates.length) === 1 ? '' : 's'} · {formatTime(latest.ts)}</small></span><ChevronRight size={14} /></button><div className="job-latest"><MarkdownContent text={latestText} files={files} sessionId={sessionId} />{files.length > 0 && <MediaGrid files={files} sessionId={sessionId} compact />}</div>{open && previous.length > 0 && <div className="job-history">{previous.length > visiblePrevious.length && <p>{previous.length - visiblePrevious.length} earlier runs hidden</p>}{visiblePrevious.map(event => <details key={event.id}><summary>{formatTime(event.ts)} · {titleCase(event.type)}</summary><MarkdownContent text={messageText(event)} sessionId={sessionId} compact /></details>)}</div>}</article>
+  const openReview = () => {
+    if (!codeDiff?.run_id) return
+    const target: CodeReviewTarget = {
+      sessionId,
+      runId: codeDiff.run_id,
+      files: codeDiff.diff_files,
+      additions: codeDiff.additions,
+      deletions: codeDiff.deletions
+    }
+    window.dispatchEvent(new CustomEvent<CodeReviewTarget>('agentsdock:review-diff', { detail: target }))
+  }
+  return <article className="job-row"><button className="job-summary" onClick={() => setOpen(value => !value)}><Clock3 size={15} /><span><strong>Latest Job Status</strong><small>{item.title} · {runCount || updates.length} run{(runCount || updates.length) === 1 ? '' : 's'} · {formatTime(latest.ts)}</small></span><ChevronRight size={14} /></button><div className="job-latest"><MarkdownContent text={latestText} files={files} sessionId={sessionId} />{files.length > 0 && <MediaGrid files={files} sessionId={sessionId} compact />}{(codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0) > 0 ? <CodeChangesCard fileCount={codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0} additions={codeDiff?.additions ?? 0} deletions={codeDiff?.deletions ?? 0} onOpen={openReview} /> : null}</div>{open && previous.length > 0 && <div className="job-history">{previous.length > visiblePrevious.length && <p>{previous.length - visiblePrevious.length} earlier runs hidden</p>}{visiblePrevious.map(event => <details key={event.id}><summary>{formatTime(event.ts)} · {titleCase(event.type)}</summary><MarkdownContent text={messageText(event)} sessionId={sessionId} compact /></details>)}</div>}</article>
+}
+
+function CodeChangesCard({ fileCount, additions, deletions, onOpen }: { fileCount: number; additions: number; deletions: number; onOpen: () => void }) {
+  return <button className="changes-card" onClick={onOpen}><FileText size={17} /><span><strong>Edited {fileCount} file{fileCount === 1 ? '' : 's'}</strong><small><b>+{additions}</b> <i>-{deletions}</i></small></span><span className="review-label">Review</span></button>
 }
 
 function deduplicateFiles<T extends { id: string }>(files: T[]): T[] {

@@ -55,3 +55,22 @@ agent state directory. Each transcript stores its indexed byte offset, so later
 requests ingest only newly appended JSONL records. The index is persistent and
 safe across server restarts; a replaced or truncated transcript is rebuilt
 automatically. Indexing runs in a worker thread and does not block agent turns.
+
+## Per-Turn Code Diffs
+
+For Git worktrees, the server captures the complete change made by each agent
+turn independently of provider tool output. It snapshots the worktree before
+and after the turn with an isolated temporary index, so pre-existing dirty or
+staged changes are preserved and the real Git index is never modified.
+
+The timeline receives a compact `code_diff` event with file and line-count
+metadata. The full patch is stored outside the event log and can be fetched
+with the normal token authentication:
+
+```text
+GET /api/sessions/{session_id}/diffs/{run_id}
+```
+
+The response is an uncapped textual Git patch (`text/x-diff`). Binary changes
+are represented by Git's compact binary-file marker rather than embedding the
+binary payload in chat history.

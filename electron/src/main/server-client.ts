@@ -140,6 +140,10 @@ export class AgentServerClient {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/timeline-index`)
   }
 
+  async codeDiff(sessionId: string, runId: string): Promise<string> {
+    return this.requestText(`/api/sessions/${encodeURIComponent(sessionId)}/diffs/${encodeURIComponent(runId)}`)
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
     const response = await this.get<{ results?: TimelineSearchResult[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/search?${params}`)
@@ -447,6 +451,22 @@ export class AgentServerClient {
   private post<T>(path: string, body: unknown): Promise<T> { return this.request(path, { method: 'POST', body: JSON.stringify(body) }) }
   private patch<T>(path: string, body: unknown): Promise<T> { return this.request(path, { method: 'PATCH', body: JSON.stringify(body) }) }
   private delete<T>(path: string): Promise<T> { return this.request(path, { method: 'DELETE' }) }
+
+  private async requestText(path: string): Promise<string> {
+    const headers = new Headers()
+    this.applyAuth(headers)
+    const response = await fetch(this.url(path), { headers, signal: AbortSignal.timeout(30_000) })
+    if (!response.ok) {
+      let detail = `${response.status} ${response.statusText}`
+      try {
+        const body = await response.json() as { detail?: unknown }
+        if (typeof body.detail === 'string') detail = body.detail
+        else if (body.detail) detail = JSON.stringify(body.detail)
+      } catch { /* keep HTTP status */ }
+      throw new ServerError(response.status, detail)
+    }
+    return response.text()
+  }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers)

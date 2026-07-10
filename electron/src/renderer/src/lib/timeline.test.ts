@@ -137,6 +137,20 @@ describe('projectTimeline', () => {
     expect(rows.map(row => row.kind)).toEqual(['message', 'trace'])
   })
 
+  it('keeps canonical per-turn code diffs inside the folded trace', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Fix it' }),
+      event(2, 'code_diff', {
+        run_id: 'run-1', files_changed: 1, additions: 4, deletions: 2,
+        diff_files: [{ path: 'src/app.ts', additions: 4, deletions: 2 }]
+      }),
+      event(3, 'turn_finished', { run_id: 'run-1', result_text: 'Fixed.' })
+    ], []))
+
+    expect(rows.map(row => row.kind)).toEqual(['message', 'message', 'trace'])
+    expect(rows[2]).toMatchObject({ kind: 'trace', events: [{ type: 'code_diff' }] })
+  })
+
   it('coalesces assistant updates into one stable response row', () => {
     const rows = renderTimelineItems(projectTimeline([
       event(1, 'turn_started', { run_id: 'run-1', prompt: 'Monitor it' }),
@@ -231,5 +245,33 @@ describe('parseUnifiedDiff', () => {
     const files = parseUnifiedDiff(source)
     expect(files).toHaveLength(1)
     expect(files[0]).toMatchObject({ path: 'src/app.ts', additions: 1, deletions: 1 })
+  })
+
+  it('parses every file and hunk in a complete Git patch without advancing metadata lines', () => {
+    const files = parseUnifiedDiff([
+      'diff --git a/a.ts b/a.ts',
+      'index 1111111..2222222 100644',
+      '--- a/a.ts',
+      '+++ b/a.ts',
+      '@@ -10,2 +10,3 @@',
+      ' same',
+      '-old',
+      '+new',
+      '+extra',
+      'diff --git a/b.ts b/b.ts',
+      'index 3333333..4444444 100644',
+      '--- a/b.ts',
+      '+++ b/b.ts',
+      '@@ -40 +40 @@',
+      '-before',
+      '+after'
+    ].join('\n'))
+
+    expect(files.map(file => ({ path: file.path, additions: file.additions, deletions: file.deletions }))).toEqual([
+      { path: 'a.ts', additions: 2, deletions: 1 },
+      { path: 'b.ts', additions: 1, deletions: 1 }
+    ])
+    expect(files[0].lines.find(line => line.kind === 'context')).toMatchObject({ oldLine: 10, newLine: 10 })
+    expect(files[1].lines.find(line => line.kind === 'remove')).toMatchObject({ oldLine: 40 })
   })
 })

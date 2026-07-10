@@ -82,6 +82,13 @@ export interface QueuedTurn {
   created_at?: string | null
 }
 
+export interface CodeDiffFileSummary {
+  path: string
+  additions?: number | null
+  deletions?: number | null
+  binary?: boolean | null
+}
+
 export interface Event {
   seq: number
   id: string
@@ -116,6 +123,12 @@ export interface Event {
   job_title?: string | null
   direction?: string | null
   positions?: QueuePosition[] | null
+  diff_files?: CodeDiffFileSummary[] | null
+  files_changed?: number | null
+  additions?: number | null
+  deletions?: number | null
+  byte_count?: number | null
+  repository_root?: string | null
 }
 
 export interface Job {

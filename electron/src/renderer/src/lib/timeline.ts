@@ -1,4 +1,4 @@
-import type { AgentFile, Event } from '@shared/types'
+import type { AgentFile, CodeDiffFileSummary, Event } from '@shared/types'
 
 export type TimelineItem = TurnItem | SystemItem | JobItem
 export type RenderTimelineItem = MessageItem | TraceItem | MediaItem | SystemItem | JobItem
@@ -66,7 +66,7 @@ export interface JobItem {
 const traceTypes = new Set([
   'reasoning_summary', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
   'provider_session', 'cwd_fallback', 'history_imported', 'backend_changed', 'artifact_error',
-  'session_created', 'idle_warning'
+  'session_created', 'idle_warning', 'code_diff'
 ])
 const hiddenTypes = new Set(['turn_queued', 'turn_unqueued', 'queue_snapshot'])
 const jobTypes = new Set(['job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error'])
@@ -231,6 +231,7 @@ export function renderTimelineItems(items: TimelineItem[]): RenderTimelineItem[]
 export function traceHasVisibleContent(events: Event[]): boolean {
   return events.some(event => event.type === 'reasoning_summary' && Boolean(messageText(event).trim())) ||
     events.some(event => event.type === 'tool_started' || event.type === 'tool_finished') ||
+    events.some(event => event.type === 'code_diff' && Boolean(event.run_id)) ||
     Boolean(extractUnifiedDiff(events).trim())
 }
 
@@ -385,38 +386,85 @@ export interface DiffFile {
   path: string
   additions: number
   deletions: number
-  lines: Array<{ kind: 'add' | 'remove' | 'context' | 'header'; text: string; oldLine?: number; newLine?: number }>
+  lines: DiffLine[]
+}
+
+export interface DiffLine {
+  kind: 'add' | 'remove' | 'context' | 'header' | 'hunk'
+  text: string
+  oldLine?: number
+  newLine?: number
+  oldStart?: number
+  oldCount?: number
+  newStart?: number
+  newCount?: number
+}
+
+export interface CodeReviewTarget {
+  sessionId: string
+  runId?: string | null
+  source?: string | null
+  files?: CodeDiffFileSummary[] | null
+  additions?: number | null
+  deletions?: number | null
 }
 
 export function parseUnifiedDiff(source: string): DiffFile[] {
   if (!source.trim()) return []
   const files: DiffFile[] = []
   let current: DiffFile | null = null
-  let oldLine = 0; let newLine = 0
+  let oldLine = 0
+  let newLine = 0
+  let inHunk = false
   for (const line of source.split('\n')) {
     const patchFile = line.match(/^\*\*\* (Update|Add|Delete) File:\s*(.+)$/i)
     if (patchFile) {
       current = { path: cleanDiffPath(patchFile[2]), additions: 0, deletions: 0, lines: [{ kind: 'header', text: line }] }
-      files.push(current); oldLine = 1; newLine = 1; continue
+      files.push(current); oldLine = 1; newLine = 1; inHunk = false; continue
     }
     if (line.startsWith('diff --git ')) {
-      const match = line.match(/ b\/(.+)$/)
-      current = { path: match?.[1] ?? 'Changes', additions: 0, deletions: 0, lines: [{ kind: 'header', text: line }] }
-      files.push(current); continue
+      const match = line.match(/\s"?b\/(.+?)"?$/)
+      current = { path: cleanDiffPath(match?.[1] ?? 'Changes'), additions: 0, deletions: 0, lines: [{ kind: 'header', text: line }] }
+      files.push(current); inHunk = false; continue
     }
     if (!current) {
-      if (line.startsWith('--- ')) { current = { path: line.slice(4), additions: 0, deletions: 0, lines: [] }; files.push(current) }
+      if (line.startsWith('--- ')) { current = { path: cleanDiffPath(line.slice(4)), additions: 0, deletions: 0, lines: [] }; files.push(current) }
       else {
         const status = line.match(/^(?: M|M |MM|AM| A|A |\?\?| D|D | R|R )\s+(.+)$/)
         if (status) files.push({ path: cleanDiffPath(status[1]), additions: 0, deletions: 0, lines: [{ kind: 'header', text: line }] })
         continue
       }
     }
-    const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-    if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); current.lines.push({ kind: 'header', text: line }); continue }
-    if (line.startsWith('+') && !line.startsWith('+++')) { current.additions++; current.lines.push({ kind: 'add', text: line.slice(1), newLine: newLine++ }); continue }
-    if (line.startsWith('-') && !line.startsWith('---')) { current.deletions++; current.lines.push({ kind: 'remove', text: line.slice(1), oldLine: oldLine++ }); continue }
-    current.lines.push({ kind: line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++') ? 'header' : 'context', text: line.replace(/^ /, ''), oldLine: oldLine++, newLine: newLine++ })
+    const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+    if (hunk) {
+      oldLine = Number(hunk[1]); newLine = Number(hunk[3]); inHunk = true
+      current.lines.push({
+        kind: 'hunk', text: line,
+        oldStart: oldLine, oldCount: Number(hunk[2] ?? 1),
+        newStart: newLine, newCount: Number(hunk[4] ?? 1)
+      })
+      continue
+    }
+    if (line.startsWith('@@')) {
+      inHunk = true
+      current.lines.push({ kind: 'hunk', text: line })
+      continue
+    }
+    if (!inHunk) {
+      current.lines.push({ kind: 'header', text: line })
+      if (line.startsWith('+++ ') && current.path === '/dev/null') current.path = cleanDiffPath(line.slice(4))
+      continue
+    }
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      current.additions++; current.lines.push({ kind: 'add', text: line.slice(1), newLine: newLine++ }); continue
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      current.deletions++; current.lines.push({ kind: 'remove', text: line.slice(1), oldLine: oldLine++ }); continue
+    }
+    if (line.startsWith(' ')) {
+      current.lines.push({ kind: 'context', text: line.slice(1), oldLine: oldLine++, newLine: newLine++ }); continue
+    }
+    current.lines.push({ kind: 'header', text: line })
   }
   return files
 }

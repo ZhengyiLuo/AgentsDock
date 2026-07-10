@@ -287,6 +287,10 @@ export class AppService {
     return index
   }
 
+  codeDiff(sessionId: string, runId: string): Promise<string> {
+    return this.client.codeDiff(sessionId, runId)
+  }
+
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const clean = query.trim()
     if (clean.length < 2) return []

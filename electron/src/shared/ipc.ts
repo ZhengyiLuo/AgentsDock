@@ -68,6 +68,9 @@ export interface AgentsDockAPI {
     saveViewState(state: ViewState): Promise<void>
     getViewState(sessionId: string): Promise<ViewState | null>
   }
+  diffs: {
+    get(sessionId: string, runId: string): Promise<string>
+  }
   turns: {
     send(input: SendTurnInput): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }>
     stop(sessionId: string): Promise<boolean>

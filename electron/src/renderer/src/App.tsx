@@ -8,6 +8,7 @@ import { InspectorDock } from './components/InspectorDock'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
+import type { CodeReviewTarget } from './lib/timeline'
 import { closeTopTransient } from './lib/transient-close'
 import { useAppStore } from './store/app-store'
 
@@ -18,7 +19,7 @@ export function App() {
   const selectedSessionId = useAppStore(state => state.selectedSessionId)
   const selectedSession = useAppStore(state => state.sessions.find(session => session.id === state.selectedSessionId) ?? null)
   const error = useAppStore(state => state.error)
-  const [reviewDiff, setReviewDiff] = useState<string | null>(null)
+  const [reviewTarget, setReviewTarget] = useState<CodeReviewTarget | null>(null)
   const [slowBoot, setSlowBoot] = useState(false)
   const [terminalOpenBySession, setTerminalOpenBySession] = useState<Record<string, boolean>>(() => {
     try {
@@ -37,7 +38,7 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [initialized])
   useEffect(() => {
-    const open = (event: Event) => setReviewDiff((event as CustomEvent<string>).detail)
+    const open = (event: Event) => setReviewTarget((event as CustomEvent<CodeReviewTarget>).detail)
     window.addEventListener('agentsdock:review-diff', open)
     return () => window.removeEventListener('agentsdock:review-diff', open)
   }, [])
@@ -70,13 +71,13 @@ export function App() {
   useEffect(() => {
     const closeSurface = () => {
       if (closeTopTransient()) return
-      if (reviewDiff) { setReviewDiff(null); return }
+      if (reviewTarget) { setReviewTarget(null); return }
       if (terminalOpen && selectedSessionId) { setTerminalOpen(selectedSessionId, false); return }
       void window.agentsDock.native.closeWindow()
     }
     window.addEventListener('agentsdock:close-surface', closeSurface)
     return () => window.removeEventListener('agentsdock:close-surface', closeSurface)
-  }, [reviewDiff, selectedSessionId, terminalOpen])
+  }, [reviewTarget, selectedSessionId, terminalOpen])
   const toggleTerminal = () => {
     if (!selectedSessionId) return
     setTerminalOpen(selectedSessionId, !terminalOpen)
@@ -105,7 +106,7 @@ export function App() {
       />}
       {error && <div className="error-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
       <Dialogs />
-      <CodeReview source={reviewDiff} onClose={() => setReviewDiff(null)} />
+      <CodeReview target={reviewTarget} onClose={() => setReviewTarget(null)} />
     </main>
   )
 }

@@ -38,6 +38,9 @@ const api: AgentsDockAPI = {
     saveViewState: state => ipcRenderer.invoke('timeline:view-state:save', state),
     getViewState: sessionId => ipcRenderer.invoke('timeline:view-state:get', sessionId)
   },
+  diffs: {
+    get: (sessionId, runId) => ipcRenderer.invoke('diffs:get', sessionId, runId)
+  },
   turns: {
     send: input => ipcRenderer.invoke('turns:send', input),
     stop: sessionId => ipcRenderer.invoke('turns:stop', sessionId)

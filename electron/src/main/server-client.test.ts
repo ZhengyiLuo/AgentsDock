@@ -109,6 +109,20 @@ describe('AgentServerClient live stream', () => {
     expect(results[0]).toMatchObject({ session_id: 'chat-a', seq: 8 })
   })
 
+  it('downloads the complete per-turn patch as authenticated text', async () => {
+    const patch = 'diff --git a/app.ts b/app.ts\n-old\n+new\n'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(patch, {
+      status: 200,
+      headers: { 'Content-Type': 'text/x-diff' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await expect(client.codeDiff('chat one', 'run-42')).resolves.toBe(patch)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/sessions/chat%20one/diffs/run-42')
+    expect(new Headers(init.headers).get('X-ZenithDock-Token')).toBe('secret')
+  })
+
   it('closes a specific tmux window through the structured terminal API', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       session_id: 'chat',

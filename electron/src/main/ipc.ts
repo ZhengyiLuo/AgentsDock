@@ -38,6 +38,7 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('timeline:unsubscribe', sessionId => service.unsubscribeTimeline(sessionId))
   handle('timeline:view-state:get', sessionId => service.viewState(sessionId))
   handle('timeline:view-state:save', state => service.saveViewState(state))
+  handle('diffs:get', (sessionId, runId) => service.codeDiff(sessionId, runId))
 
   handle('turns:send', input => service.sendTurn(input))
   handle('turns:stop', sessionId => service.stopTurn(sessionId))

@@ -7205,3 +7205,23 @@ Follow-up from rapid-switch stress:
 - At the bottom boundary, the navigator now selects the final loaded landmark
   and moves its fixed-size internal rail to the final tick instead of leaving
   the active marker near the viewport-center message.
+
+## 2026-07-10 - Capture complete per-turn diffs for Codex-style review
+
+- Replaced tool-output scraping as the primary review source. The server now
+  snapshots the repository worktree immediately before and after each agent
+  turn through an isolated temporary Git index, preserving pre-existing dirty
+  changes while capturing tracked, staged, and untracked edits made by the
+  turn without modifying the user's real index.
+- Stored each complete textual patch outside the timeline JSONL and exposed it
+  through an authenticated, run-scoped endpoint. Timeline events carry only
+  file/stat metadata, keeping chat paging and live updates lightweight even
+  when a patch is large. Binary changes remain compact Git binary summaries.
+- Removed the old prompt instruction that capped agent-emitted diffs at 240
+  lines. Historical turns retain the legacy trace parser as a fallback, while
+  new turns use the canonical server patch.
+- Rebuilt review as a Codex-style right-side pane with all files and hunks in
+  one continuous virtualized diff, exact old/new line numbers, unchanged-line
+  separators, file navigation, aggregate stats, and full-patch copying.
+- Added regressions for canonical diff grouping, complete multi-file parsing,
+  metadata line numbering, and authenticated full-patch transport.
