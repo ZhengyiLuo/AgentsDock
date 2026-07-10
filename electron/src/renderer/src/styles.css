@@ -49,12 +49,12 @@ textarea { resize: none; }
 .conversation-pane { min-width: 0; min-height: 0; grid-column: 2; grid-row: 1; display: grid; grid-template-rows: auto minmax(0, 1fr); position: relative; background: #181818; border-left: 1px solid var(--border); }
 .chat-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
 .terminal-dock-shell { --terminal-dock-height: clamp(220px, 38vh, 460px); height: 0; min-height: 0; position: relative; overflow: hidden; opacity: .72; pointer-events: none; transition: height 220ms cubic-bezier(.22, .8, .24, 1), opacity 150ms ease-out; will-change: height; }
-.app-shell > .terminal-dock-shell { grid-column: 1 / -1; grid-row: 2; }
+.app-shell > .terminal-dock-shell { grid-column: 2 / -1; grid-row: 2; }
 .terminal-dock-shell.open { height: var(--terminal-dock-height); opacity: 1; pointer-events: auto; }
 .terminal-dock-shell > .terminal-workspace { width: 100%; height: var(--terminal-dock-height); position: absolute; top: 0; right: 0; left: 0; transform: translateY(12px); transition: transform 220ms cubic-bezier(.22, .8, .24, 1); }
 .terminal-dock-shell.open > .terminal-workspace { transform: translateY(0); }
 .sidebar, .inspector { min-width: 0; min-height: 0; grid-row: 1; background: #171717; }
-.sidebar { grid-column: 1; }
+.sidebar { grid-column: 1; grid-row: 1 / -1; }
 .inspector { grid-column: 3; }
 .sidebar-drag-region, .inspector-drag-region { height: 36px; -webkit-app-region: drag; flex: 0 0 auto; }
 .spin { animation: spin 1s linear infinite; }

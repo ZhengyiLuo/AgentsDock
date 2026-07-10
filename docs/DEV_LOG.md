@@ -7137,7 +7137,8 @@ Follow-up from rapid-switch stress:
   then raises its top edge with a 220 ms eased height/translation transition.
   This animates chat reflow without repeatedly resizing the xterm canvas; close
   reverses the motion before the PTY client detaches.
-- Lifted the dock into the application grid so it spans the complete bottom
-  edge beneath the sidebar, chat, and inspector rather than occupying only the
-  conversation column. While xterm is focused, `Command-W` closes the dock and
-  terminal editing/window/split shortcuts remain captured by xterm.
+- Lifted the dock into the application grid so it spans the conversation and
+  inspector columns rather than occupying only the chat. The chat selector
+  remains full-height and visible beside it. While xterm is focused,
+  `Command-W` closes the dock and terminal editing/window/split shortcuts
+  remain captured by xterm.
