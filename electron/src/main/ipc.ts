@@ -63,10 +63,13 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('files:open', file => service.openFile(file))
   handle('files:open-linked', (sessionId, target) => service.openLinkedFile(sessionId, target))
   handle('files:reveal', file => service.revealFile(file))
-
-  ipcMain.on('files:begin-drag', (event, file) => {
+  handle('files:prepare-drag', file => service.prepareFileForDrag(file))
+  ipcMain.removeHandler('files:begin-drag')
+  ipcMain.handle('files:begin-drag', async (event, file) => {
     const window = BrowserWindow.fromWebContents(event.sender)
-    if (window) void service.beginDrag(file, window)
+    if (!window) return false
+    await service.beginDrag(file, window)
+    return true
   })
 
   handle('digest:preview', input => service.previewDigest(input))

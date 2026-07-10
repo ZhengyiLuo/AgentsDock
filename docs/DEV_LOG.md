@@ -7174,3 +7174,16 @@ Follow-up from rapid-switch stress:
 - Contained wheel events at xterm's native wheel hook. Terminal scrollback
   still receives and processes every wheel gesture, but boundary scrolling no
   longer escapes into the conversation timeline.
+
+## 2026-07-10 - Load more conversation and make file drag-out reliable
+
+- Doubled the first conversation tail from 240 to 480 raw events and each
+  older-history request from 120 to 240. Tool-heavy turns therefore consume
+  fewer visible pages, while Virtuoso still mounts only the viewport rows.
+- Kept file libraries metadata-only. Media previews continue to stream from
+  the server; a complete local file is materialized in the system temp folder
+  only when the user opens, reveals, or drags that specific item.
+- Unified native Finder drag-out for timeline attachments and inspector media
+  entries. Pointer-down starts one deduplicated on-demand preparation, and the
+  subsequent drag reuses that local file instead of racing an uncached network
+  download from inside `dragstart`.

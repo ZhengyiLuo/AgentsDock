@@ -45,8 +45,8 @@ import { AgentServerClient, type TerminalConnection } from './server-client'
 import { SettingsStore } from './settings'
 import { appLog } from './logger'
 
-const INITIAL_TAIL_EVENT_LIMIT = 240
-const HISTORY_PAGE_EVENT_LIMIT = 120
+const INITIAL_TAIL_EVENT_LIMIT = 480
+const HISTORY_PAGE_EVENT_LIMIT = 240
 const FILE_PAGE_LIMIT = 60
 
 export class AppService {
@@ -456,6 +456,8 @@ export class AppService {
     if (error) throw new Error(error)
   }
   async revealFile(file: AgentFile): Promise<void> { shell.showItemInFolder(await this.ensureLocalFile(file)) }
+
+  async prepareFileForDrag(file: AgentFile): Promise<void> { await this.ensureLocalFile(file) }
 
   async beginDrag(file: AgentFile, window: BrowserWindow): Promise<void> {
     const path = await this.ensureLocalFile(file)

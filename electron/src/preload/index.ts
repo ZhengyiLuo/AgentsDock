@@ -67,7 +67,8 @@ const api: AgentsDockAPI = {
     open: file => ipcRenderer.invoke('files:open', file),
     openLinked: (sessionId, target) => ipcRenderer.invoke('files:open-linked', sessionId, target),
     reveal: file => ipcRenderer.invoke('files:reveal', file),
-    beginDrag: file => ipcRenderer.send('files:begin-drag', file),
+    prepareDrag: file => ipcRenderer.invoke('files:prepare-drag', file),
+    beginDrag: file => ipcRenderer.invoke('files:begin-drag', file),
     mediaURL: fileId => `agentsdock-media://file/${encodeURIComponent(fileId)}`
   },
   digest: {

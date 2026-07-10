@@ -7,6 +7,8 @@ import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
 import { isAgentVisibleEvent, projectTimeline, renderTimelineItems } from '../lib/timeline'
 import { navigableSessions } from '../lib/sessions'
 
+const OLDER_HISTORY_EVENT_LIMIT = 240
+
 interface ModalState {
   settings: boolean
   newChat: boolean
@@ -431,7 +433,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const initialRows = primaryTimelineRows(snapshot.events, snapshot.files)
       let cursor = before
-      let page = await window.agentsDock.timeline.older(id, cursor, 120)
+      let page = await window.agentsDock.timeline.older(id, cursor, OLDER_HISTORY_EVENT_LIMIT)
       let collected = page.events
       let hasMore = Boolean(page.has_more)
       for (let attempt = 1; attempt < 4 && hasMore; attempt += 1) {
@@ -440,7 +442,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const nextCursor = collected[0]?.seq
         if (!nextCursor || nextCursor >= cursor) break
         cursor = nextCursor
-        const older = await window.agentsDock.timeline.older(id, cursor, 120)
+        const older = await window.agentsDock.timeline.older(id, cursor, OLDER_HISTORY_EVENT_LIMIT)
         if (!older.events.length) { hasMore = false; break }
         collected = mergeEvents(older.events, collected)
         page = older

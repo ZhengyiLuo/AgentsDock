@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Download, ExternalLink, File, FolderOpen, Maximize2, Pin, Play, Search, X } from 'lucide-react'
 import type { AgentFile, PinnedItem } from '@shared/types'
 import { formatBytes } from '../lib/format'
+import { NativeFileDragSurface } from './NativeFileDragSurface'
 
 export const MediaGrid = memo(function MediaGrid({ files, sessionId, onFind, compact = false }: {
   files: AgentFile[]; sessionId: string; onFind?: (file: AgentFile) => void; compact?: boolean
@@ -33,10 +34,9 @@ const MediaTile = memo(function MediaTile({ file, sessionId, onPreview, onFind }
     window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
   }
   return (
-    <article
+    <NativeFileDragSurface
+      file={file}
       className={`media-tile ${media ? 'has-preview' : 'file-only'}`}
-      draggable
-      onDragStart={event => { event.preventDefault(); window.agentsDock.files.beginDrag(file) }}
     >
       <button className="media-preview" onClick={media ? onPreview : () => void window.agentsDock.files.open(file)}>
         {type.startsWith('image/') ? <img src={source} alt={file.title || file.filename} loading="lazy" />
@@ -44,7 +44,7 @@ const MediaTile = memo(function MediaTile({ file, sessionId, onPreview, onFind }
           : <span className="file-glyph"><File size={22} /></span>}
       </button>
       <div className="media-meta"><strong title={file.title || file.filename}>{file.title || file.filename}</strong><small>{formatBytes(file.size)}</small></div>
-      <div className="media-actions">
+      <div className="media-actions" data-native-drag-ignore>
         {media && <button title="Preview" onClick={onPreview}><Maximize2 size={12} /></button>}
         {onFind && <button title="Find in chat" onClick={() => onFind(file)}><Search size={12} /></button>}
         <button title="Download" onClick={() => void window.agentsDock.files.save(file)}><Download size={12} /></button>
@@ -52,7 +52,7 @@ const MediaTile = memo(function MediaTile({ file, sessionId, onPreview, onFind }
         <button title="Open" onClick={() => void window.agentsDock.files.open(file)}><ExternalLink size={12} /></button>
         <button title="Pin" onClick={() => void pin()}><Pin size={12} /></button>
       </div>
-    </article>
+    </NativeFileDragSurface>
   )
 })
 
