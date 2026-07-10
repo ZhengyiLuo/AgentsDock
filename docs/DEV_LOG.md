@@ -6925,3 +6925,8 @@ Follow-up from rapid-switch stress:
   TestFlight path; the same script without `--upload` exports a local package.
 - Synced the promoted build 59 directly to the MacBook Air as
   `/Users/zen/agi/AgentsDock.app` and verified the launched bundle/version.
+- Uploaded Electron macOS version `0.1.1` build `59` to App Store Connect.
+  Cloud-managed signing preserved the App Sandbox, network, file-picker,
+  microphone, and Electron JIT entitlements; TestFlight accepted the package
+  and began processing it. Missing dSYMs for prebuilt Electron binaries were
+  warnings only and did not block the upload.
