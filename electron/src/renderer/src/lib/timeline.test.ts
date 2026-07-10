@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
-import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
+import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems } from './timeline'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -40,6 +40,24 @@ describe('projectTimeline', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].kind === 'message' ? messageItemText(rows[0]) : '').toBe(
       'I found the missing fields.\n\nThe transport test now passes.'
+    )
+  })
+
+  it('uses a cumulative finish payload instead of duplicating its earlier updates', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Fix the sync' }),
+      event(2, 'assistant_text', { run_id: 'run-1', text: 'I found the missing fields.' }),
+      event(3, 'assistant_text', { run_id: 'run-1', text: 'The transport test now passes.' }),
+      event(4, 'turn_finished', {
+        run_id: 'run-1',
+        result_text: 'I found the missing fields.\n\nThe transport test now passes.\n\nThe server is ready.'
+      })
+    ], [])).filter(row => row.kind === 'message' && row.role === 'assistant')
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ events: [{ id: 'event-4' }] })
+    expect(rows[0].kind === 'message' ? messageItemText(rows[0]) : '').toBe(
+      'I found the missing fields.\n\nThe transport test now passes.\n\nThe server is ready.'
     )
   })
 
@@ -130,6 +148,30 @@ describe('projectTimeline', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ key: 'turn:run-1:assistant', events: [{ id: 'event-2' }, { id: 'event-3' }, { id: 'event-4' }] })
     expect(rows[0].kind === 'message' ? messageItemText(rows[0]) : '').toBe('First update\n\nSecond update\n\nFinal update')
+  })
+
+  it('preserves every unchanged row when one update reaches a large chat', () => {
+    let seq = 0
+    const source: Event[] = []
+    for (let turn = 0; turn < 200; turn += 1) {
+      const runId = `run-${turn}`
+      source.push(event(++seq, 'turn_started', { run_id: runId, prompt: `Prompt ${turn}` }))
+      for (let update = 0; update < 4; update += 1) {
+        source.push(event(++seq, 'assistant_text', { run_id: runId, text: `Turn ${turn} update ${update}` }))
+      }
+    }
+    const semantic = projectTimeline(source, [])
+    const previous = renderTimelineItems(semantic)
+    expect(previous).toHaveLength(400)
+    expect(previous.filter(row => row.kind === 'message' && row.role === 'assistant')).toHaveLength(200)
+    expect(new Set(previous.map(row => row.key)).size).toBe(previous.length)
+
+    const nextEvent = event(++seq, 'assistant_text', { run_id: 'run-199', text: 'One final update' })
+    const nextSemantic = reconcileTimelineItems(semantic, projectTimeline([...source, nextEvent], []))
+    const next = reconcileRenderTimelineItems(previous, renderTimelineItems(nextSemantic))
+    expect(next.filter((row, index) => row !== previous[index])).toHaveLength(1)
+    const latest = next.findLast(row => row.kind === 'message' && row.role === 'assistant')
+    expect(latest?.kind === 'message' ? latest.events : []).toHaveLength(5)
   })
 
   it('keeps every imported prompt when a provider reuses one run id', () => {

@@ -1,4 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { useAppStore } from '../store/app-store'
@@ -53,5 +54,52 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Steer' })).toBeInTheDocument()
     expect(screen.getByTitle('Drag to reorder')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
+  })
+
+  it('reports queue action failures instead of leaving an unhandled rejection', async () => {
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        queue: { runNow: vi.fn().mockRejectedValue(new Error('Queued turn not found')) }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      error: null,
+      snapshots: {
+        'chat-1': {
+          session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, events: [],
+          queuedTurns: [{ queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Run this', file_ids: [], position: 1 }],
+          files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+        }
+      }
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.click(screen.getByRole('button', { name: 'Steer' }))
+
+    await waitFor(() => expect(useAppStore.getState().error).toBe('Queued turn not found'))
+  })
+
+  it('preserves text typed while a failed send is still in flight', async () => {
+    let rejectSend!: (error: Error) => void
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send: vi.fn(() => new Promise((_resolve, reject) => { rejectSend = reject })) }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, 'First request')
+    await user.click(screen.getByTitle('Send message'))
+    await user.type(editor, 'Next request')
+    await act(async () => rejectSend(new Error('offline')))
+
+    await waitFor(() => expect(editor).toHaveValue('First request\n\nNext request'))
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { BootstrapPayload, Event, QueuedTurn, Session, SessionSnapshot, TimelinePage } from '@shared/types'
+import type { AgentFile, BootstrapPayload, Event, NativeFileRef, QueuedTurn, Session, SessionSnapshot, TimelinePage } from '@shared/types'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { cacheSnapshot, mergeEvents, updateActiveSessions, updateQueuedTurns, useAppStore } from './app-store'
 
@@ -40,6 +40,39 @@ describe('live queue state', () => {
     useAppStore.getState().setQueued('chat-a', queue)
     expect(useAppStore.getState().snapshots['chat-a'].queuedTurns).toEqual(queue)
     expect(useAppStore.getState().snapshots['chat-b'].queuedTurns).toEqual([])
+  })
+})
+
+describe('send rollback', () => {
+  it('merges failed-send state without overwriting the next draft or attachments', async () => {
+    let rejectSend!: (error: Error) => void
+    const send = vi.fn(() => new Promise((_resolve, reject) => { rejectSend = reject }))
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { turns: { send } } as unknown as AgentsDockAPI
+    })
+    const oldFile: AgentFile = { id: 'old-file', filename: 'old.txt', content_type: 'text/plain' }
+    const newFile: AgentFile = { id: 'new-file', filename: 'new.txt', content_type: 'text/plain' }
+    const oldPath: NativeFileRef = { path: '/tmp/old.txt', name: 'old.txt' }
+    const newPath: NativeFileRef = { path: '/tmp/new.txt', name: 'new.txt' }
+    useAppStore.setState({
+      selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')], snapshots: {},
+      drafts: { 'chat-a': 'First request' }, uploadsBySession: { 'chat-a': [oldFile] },
+      uploadPathsBySession: { 'chat-a': [oldPath] }
+    })
+
+    const pending = useAppStore.getState().sendPrompt()
+    expect(useAppStore.getState().drafts['chat-a']).toBe('')
+    useAppStore.setState({
+      drafts: { 'chat-a': 'Next request' }, uploadsBySession: { 'chat-a': [newFile] },
+      uploadPathsBySession: { 'chat-a': [newPath] }
+    })
+    rejectSend(new Error('offline'))
+
+    await expect(pending).resolves.toBe(false)
+    expect(useAppStore.getState().drafts['chat-a']).toBe('Next request')
+    expect(useAppStore.getState().uploadsBySession['chat-a'].map(file => file.id)).toEqual(['new-file', 'old-file'])
+    expect(useAppStore.getState().uploadPathsBySession['chat-a'].map(file => file.path)).toEqual(['/tmp/new.txt', '/tmp/old.txt'])
   })
 })
 

@@ -69,8 +69,14 @@ export function Composer() {
     const outgoing = draft.trim()
     if (!outgoing) return
     setDraft('')
+    if (selectedId) {
+      useAppStore.getState().setDraftForSession(selectedId, '')
+      void window.agentsDock.preferences.set(`draft:${selectedId}`, '')
+    }
     const sent = await useAppStore.getState().sendPrompt(outgoing)
-    if (!sent && useAppStore.getState().selectedSessionId === selectedId) setDraft(outgoing)
+    if (!sent && useAppStore.getState().selectedSessionId === selectedId) {
+      setDraft(current => !current.trim() || current === outgoing ? outgoing : `${outgoing}\n\n${current}`)
+    }
   }
 
   const addFiles = async (refs: NativeFileRef[]) => useAppStore.getState().attachPaths(refs)
@@ -175,16 +181,20 @@ function QueueShelf({ sessionId, turns }: { sessionId: string; turns: QueuedTurn
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   if (!turns.length) return null
   const moveTo = async (activeId: string, targetId: string, placement: 'before' | 'after') => {
-    const ordered = [...turns].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-    const from = ordered.findIndex(turn => turn.queued_id === activeId)
-    let to = ordered.findIndex(turn => turn.queued_id === targetId) + (placement === 'after' ? 1 : 0)
-    if (from < to) to -= 1
-    let current = from
-    while (current !== to) {
-      const direction = current < to ? 'down' : 'up'
-      const next = await window.agentsDock.queue.move(sessionId, activeId, direction)
-      useAppStore.getState().setQueued(sessionId, next); current += direction === 'down' ? 1 : -1
-    }
+    try {
+      const ordered = [...turns].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      const from = ordered.findIndex(turn => turn.queued_id === activeId)
+      const target = ordered.findIndex(turn => turn.queued_id === targetId)
+      if (from < 0 || target < 0) return
+      let to = target + (placement === 'after' ? 1 : 0)
+      if (from < to) to -= 1
+      let current = from
+      while (current !== to) {
+        const direction = current < to ? 'down' : 'up'
+        const next = await window.agentsDock.queue.move(sessionId, activeId, direction)
+        useAppStore.getState().setQueued(sessionId, next); current += direction === 'down' ? 1 : -1
+      }
+    } catch (error) { reportActionError(error) }
   }
   const onDragOver = (event: DragOverEvent) => {
     if (!event.over) return setDrop(null)
@@ -196,10 +206,18 @@ function QueueShelf({ sessionId, turns }: { sessionId: string; turns: QueuedTurn
     const current = drop; setDrop(null)
     if (event.over && current && event.active.id !== event.over.id) void moveTo(String(event.active.id), String(event.over.id), current.placement)
   }
+  const saveEdit = async () => {
+    if (!editing) return
+    try {
+      await window.agentsDock.queue.update(sessionId, editing.queued_id, draft)
+      useAppStore.getState().setQueued(sessionId, await window.agentsDock.queue.list(sessionId))
+      setEditing(null)
+    } catch (error) { reportActionError(error) }
+  }
   return <div className="queue-shelf"><div className="queue-header"><div className="queue-label"><ListOrdered size={13} /><span>Queued turns</span><b>{turns.length}</b></div></div><DndContext sensors={sensors} onDragOver={onDragOver} onDragEnd={onDragEnd}>
     <div className="queue-list">{turns.map(turn => <QueuedRow key={turn.queued_id} turn={turn} sessionId={sessionId} drop={drop} onEdit={() => { setEditing(turn); setDraft(turn.display_prompt || turn.prompt) }} />)}</div>
   </DndContext>
-  {editing && <div className="inline-editor"><textarea value={draft} onChange={event => setDraft(event.target.value)} autoFocus /><div><button onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" onClick={() => void window.agentsDock.queue.update(sessionId, editing.queued_id, draft).then(() => window.agentsDock.queue.list(sessionId)).then(turns => { useAppStore.getState().setQueued(sessionId, turns); setEditing(null) })}>Save</button></div></div>}
+  {editing && <div className="inline-editor"><textarea value={draft} onChange={event => setDraft(event.target.value)} autoFocus /><div><button onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" onClick={() => void saveEdit()}>Save</button></div></div>}
   </div>
 }
 
@@ -208,20 +226,32 @@ function QueuedRow({ turn, sessionId, drop, onEdit }: { turn: QueuedTurn; sessio
   const target = useDroppable({ id: turn.queued_id })
   const ref = (node: HTMLElement | null) => { drag.setNodeRef(node); target.setNodeRef(node) }
   const indicator = drop?.id === turn.queued_id ? `drop-${drop.placement}` : ''
-  const refresh = () => window.agentsDock.queue.list(sessionId).then(turns => useAppStore.getState().setQueued(sessionId, turns))
+  const refresh = async () => useAppStore.getState().setQueued(sessionId, await window.agentsDock.queue.list(sessionId))
+  const runAndRefresh = async (action: () => Promise<unknown>) => {
+    try { await action(); await refresh() }
+    catch (error) { reportActionError(error) }
+  }
+  const move = async (direction: 'up' | 'down') => {
+    try { useAppStore.getState().setQueued(sessionId, await window.agentsDock.queue.move(sessionId, turn.queued_id, direction)) }
+    catch (error) { reportActionError(error) }
+  }
   return <div ref={ref} className={`queued-row ${indicator} ${drag.isDragging ? 'dragging' : ''}`} {...drag.attributes}>
     <button className="queue-grip" title="Drag to reorder" {...drag.listeners}><GripVertical size={13} /></button>
     <span className="queue-prompt" title={turn.display_prompt || turn.prompt}>{turn.display_prompt || turn.prompt}</span>
     <div className="queue-actions">
-    <button className="steer-action" title="Interrupt the current turn and send this now" onClick={() => void window.agentsDock.queue.runNow(sessionId, turn.queued_id).then(refresh)}><CornerDownRight size={13} /> <b>Steer</b></button>
-    <button className="queue-action" title="Remove from queue" onClick={() => void window.agentsDock.queue.remove(sessionId, turn.queued_id).then(refresh)}><Trash2 size={13} /></button>
+    <button className="steer-action" title="Interrupt the current turn and send this now" onClick={() => void runAndRefresh(() => window.agentsDock.queue.runNow(sessionId, turn.queued_id))}><CornerDownRight size={13} /> <b>Steer</b></button>
+    <button className="queue-action" title="Remove from queue" onClick={() => void runAndRefresh(() => window.agentsDock.queue.remove(sessionId, turn.queued_id))}><Trash2 size={13} /></button>
     <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="queue-action" title="More queue actions"><MoreHorizontal size={13} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="end">
       <DropdownMenu.Item className="menu-item" onSelect={onEdit}><Pencil size={13} /> Edit message</DropdownMenu.Item>
-      <DropdownMenu.Item className="menu-item" onSelect={() => void window.agentsDock.queue.move(sessionId, turn.queued_id, 'up').then(turns => useAppStore.getState().setQueued(sessionId, turns))}><ArrowUp size={13} /> Move earlier</DropdownMenu.Item>
-      <DropdownMenu.Item className="menu-item" onSelect={() => void window.agentsDock.queue.move(sessionId, turn.queued_id, 'down').then(turns => useAppStore.getState().setQueued(sessionId, turns))}><ArrowDown size={13} /> Move later</DropdownMenu.Item>
+      <DropdownMenu.Item className="menu-item" onSelect={() => void move('up')}><ArrowUp size={13} /> Move earlier</DropdownMenu.Item>
+      <DropdownMenu.Item className="menu-item" onSelect={() => void move('down')}><ArrowDown size={13} /> Move later</DropdownMenu.Item>
     </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
     </div>
   </div>
 }
 
 function isBackendLocked(session: Session): boolean { return Boolean(session.session_id || session.claude_session_id || session.codex_thread_id) }
+
+function reportActionError(error: unknown): void {
+  useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+}

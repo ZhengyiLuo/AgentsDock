@@ -92,6 +92,7 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
     const lastDrawn = clamp(Math.ceil((offset + height - TRACK_TOP) / TIMELINE_TICK_PITCH) + 1, 0, Math.max(0, landmarks.length - 1))
     const visible = visiblePositions()
     const currentPosition = visible ? Math.round((visible[0] + visible[1]) / 2) : -1
+    const palette = minimapPalette()
 
     for (let position = firstDrawn; position <= lastDrawn; position += 1) {
       const landmark = landmarks[position]
@@ -99,21 +100,21 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
       const y = timelineTickY(position, offset)
       const isHovered = hoveredPositionRef.current === position
       const isCurrent = position === currentPosition
-      context.fillStyle = isHovered ? '#e8e8e5' : isCurrent ? '#b8b8b5' : landmark.kind === 'error' ? '#94514d' : '#595957'
+      context.fillStyle = isHovered ? palette.hovered : isCurrent ? palette.current : landmark.kind === 'error' ? palette.error : palette.tick
       context.fillRect(isHovered ? 7 : isCurrent ? 10 : 16, Math.round(y), isHovered ? 27 : isCurrent ? 19 : 7, 1)
     }
 
     if (offset > 0) {
       const gradient = context.createLinearGradient(0, 0, 0, 18)
-      gradient.addColorStop(0, '#181818')
-      gradient.addColorStop(1, '#18181800')
+      gradient.addColorStop(0, palette.background)
+      gradient.addColorStop(1, palette.transparent)
       context.fillStyle = gradient
       context.fillRect(0, 0, width, 18)
     }
     if (offset < maxScrollOffset()) {
       const gradient = context.createLinearGradient(0, height - 18, 0, height)
-      gradient.addColorStop(0, '#18181800')
-      gradient.addColorStop(1, '#181818')
+      gradient.addColorStop(0, palette.transparent)
+      gradient.addColorStop(1, palette.background)
       context.fillStyle = gradient
       context.fillRect(0, height - 18, width, 18)
     }
@@ -152,6 +153,12 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
     if (positions) keepPositionsVisible(...positions)
     else draw()
   }, [draw, keepPositionsVisible, landmarks, maxScrollOffset, visiblePositions])
+
+  useEffect(() => {
+    const redraw = () => drawRef.current()
+    window.addEventListener('agentsdock:appearance', redraw)
+    return () => window.removeEventListener('agentsdock:appearance', redraw)
+  }, [])
 
   const landmarkFromPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>): HoveredLandmark | null => {
     if (!landmarks.length) return null
@@ -235,4 +242,11 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
+}
+
+function minimapPalette(): { hovered: string; current: string; error: string; tick: string; background: string; transparent: string } {
+  if (document.documentElement.dataset.theme === 'light') {
+    return { hovered: '#252522', current: '#62625d', error: '#c73531', tick: '#a3a39e', background: '#fbfbfa', transparent: '#fbfbfa00' }
+  }
+  return { hovered: '#e8e8e5', current: '#b8b8b5', error: '#94514d', tick: '#595957', background: '#181818', transparent: '#18181800' }
 }

@@ -274,14 +274,13 @@ export const useAppStore = create<AppState>((set, get) => ({
             : state.snapshots
         }
       })
-      void window.agentsDock.preferences.set(`draft:${sessionId}`, '')
       window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
       return true
     } catch (error) {
       set(state => ({
-        drafts: { ...state.drafts, [sessionId]: prompt },
-        uploadsBySession: { ...state.uploadsBySession, [sessionId]: uploads },
-        uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: uploadPaths },
+        drafts: { ...state.drafts, [sessionId]: state.drafts[sessionId]?.trim() ? state.drafts[sessionId] : prompt },
+        uploadsBySession: { ...state.uploadsBySession, [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], uploads) },
+        uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], uploadPaths) },
         error: errorMessage(error)
       }))
       return false
@@ -595,6 +594,9 @@ function mergeFiles(a: AgentFile[], b: AgentFile[]): AgentFile[] {
     else if (!jsonEquivalent(previous, file)) { byId.set(file.id, file); changed = true }
   }
   return changed ? [...byId.values()].sort((x, y) => (y.seq ?? 0) - (x.seq ?? 0)) : a
+}
+function mergeUploadPaths(a: NativeFileRef[], b: NativeFileRef[]): NativeFileRef[] {
+  return [...new Map([...a, ...b].map(file => [file.path, file])).values()]
 }
 function stableArray<T>(previous: T[], next: T[]): T[] { return jsonEquivalent(previous, next) ? previous : next }
 function healthActiveSessionIDs(health?: Health | null): Set<string> { return new Set(health?.active ?? health?.active_sessions ?? []) }

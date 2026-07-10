@@ -6998,3 +6998,26 @@ Follow-up from rapid-switch stress:
 - Hardened Markdown memoization so unchanged fragments do not rerender merely
   because an equivalent file array has a new JavaScript identity.
 - TypeScript validation and all 59 Electron regression tests pass.
+
+## 2026-07-10 - Harden Electron response, theme, and send lifecycles
+
+- Cumulative `turn_finished` payloads now replace the incremental fragments
+  they contain instead of repeating the same response inside the coalesced
+  assistant surface. Distinct non-cumulative finish text remains appended.
+- Added a 200-turn reconciliation stress regression. Appending one live update
+  changes exactly one of 400 rendered message rows; all other object identities
+  remain stable for React/Virtuoso memoization.
+- The canvas conversation navigator now uses the active light/dark palette and
+  repaints immediately when appearance changes. Previously CSS switched themes
+  while the canvas could retain dark ticks and edge gradients until a scroll.
+- Appearance tests now cover persistence, invalid-value fallback, immediate
+  application, and live macOS System-mode changes.
+- Failed sends no longer overwrite a newer draft or attachments created while
+  the request was in flight. Rollback merges captured and current attachment
+  state, while the composer preserves both the failed prompt and newly typed
+  follow-up text.
+- Queue steer, remove, edit, keyboard move, and drag reorder operations now
+  catch server failures and route them to the visible app error surface instead
+  of producing silent or unhandled promise rejections.
+- Validation completed with TypeScript, 68 tests, four shuffled-order seeds,
+  a production dependency audit, and no known package vulnerabilities.

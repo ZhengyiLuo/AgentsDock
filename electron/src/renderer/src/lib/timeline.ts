@@ -158,7 +158,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     if (event.type === 'assistant_text' || event.type === 'turn_finished') {
       const turn = ensureTurn(event)
       const text = event.type === 'turn_finished' ? event.result_text : event.text
-      if (text?.trim() && !duplicatesAssistantOutput(turn.assistant, text, event.type === 'turn_finished')) turn.assistant.push(event)
+      if (text?.trim()) appendAssistantOutput(turn.assistant, event, text, event.type === 'turn_finished')
       if (event.type === 'turn_finished') {
         turn.finishedAt = event.ts
         if (activeTurn?.id === turn.id) activeTurn = null
@@ -268,12 +268,29 @@ function sameReferences<T>(a: T[], b: T[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-function duplicatesAssistantOutput(previous: Event[], candidate: string, aggregate: boolean): boolean {
+function appendAssistantOutput(previous: Event[], event: Event, candidate: string, aggregate: boolean): void {
   const normalized = normalizeAssistantOutput(candidate)
-  if (!normalized) return true
+  if (!normalized) return
   const prior = previous.map(event => normalizeAssistantOutput(messageText(event))).filter(Boolean)
-  if (prior.includes(normalized)) return true
-  return aggregate && prior.length > 0 && prior.join(' ') === normalized
+  if (prior.includes(normalized)) return
+  if (aggregate && prior.length > 0) {
+    if (prior.join(' ') === normalized) return
+    if (containsInOrder(normalized, prior)) {
+      previous.splice(0, previous.length, event)
+      return
+    }
+  }
+  previous.push(event)
+}
+
+function containsInOrder(value: string, parts: string[]): boolean {
+  let cursor = 0
+  for (const part of parts) {
+    const position = value.indexOf(part, cursor)
+    if (position < 0) return false
+    cursor = position + part.length
+  }
+  return true
 }
 
 function normalizeAssistantOutput(value: string): string {
