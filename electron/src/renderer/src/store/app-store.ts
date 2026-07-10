@@ -70,7 +70,7 @@ interface AppState {
 }
 
 const defaultModals: ModalState = { settings: false, newChat: false, resume: false, folder: false, digest: false, job: false, search: false, review: false }
-const MINIMUM_AGENT_API_CONTRACT = 4
+const MINIMUM_AGENT_API_CONTRACT = 5
 let unsubscribers: Array<() => void> = []
 const olderLoads = new Map<string, Promise<number>>()
 const prefetchLoads = new Map<string, Promise<void>>()

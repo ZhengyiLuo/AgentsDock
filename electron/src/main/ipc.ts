@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { BrowserWindow, clipboard, ipcMain, shell } from 'electron'
 import type { AppService } from './service'
 import { appLog } from './logger'
 import type { AppUpdateManager } from './updater'
@@ -75,6 +75,15 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('processes:tail', (sessionId, path, lines) => service.processLog(sessionId, path, lines))
   handle('tmux:list', (sessionId, includeAll) => service.tmux(sessionId, includeAll))
   handle('tmux:capture', (sessionId, paneId, lines) => service.captureTmux(sessionId, paneId, lines))
+  handle('terminal:connect', (sessionId, options) => service.connectTerminal(sessionId, options))
+  handle('terminal:disconnect', sessionId => service.disconnectTerminal(sessionId))
+  handle('terminal:kill', sessionId => service.killTerminal(sessionId))
+  handle('terminal:windows', sessionId => service.terminalWindows(sessionId))
+  handle('terminal:action', (sessionId, action, target) => service.terminalAction(sessionId, action, target))
+  ipcMain.removeAllListeners('terminal:write')
+  ipcMain.on('terminal:write', (_event, sessionId, data) => service.writeTerminal(sessionId, data))
+  ipcMain.removeAllListeners('terminal:resize')
+  ipcMain.on('terminal:resize', (_event, sessionId, columns, rows) => service.resizeTerminal(sessionId, columns, rows))
   handle('pins:list', sessionId => service.pins(sessionId))
   handle('pins:put', item => service.putPin(item))
   handle('pins:remove', (sessionId, itemId) => service.removePin(sessionId, itemId))
@@ -90,4 +99,6 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('native:set-badge', count => service.setBadge(count))
   handle('native:notify', (title, body, sessionId) => service.notify(title, body, sessionId))
   handle('native:log', (scope, message, data) => appLog(`renderer:${scope}`, message, data))
+  handle('native:clipboard:read', () => clipboard.readText())
+  handle('native:clipboard:write', text => clipboard.writeText(String(text ?? '')))
 }

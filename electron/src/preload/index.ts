@@ -82,6 +82,15 @@ const api: AgentsDockAPI = {
     list: (sessionId, includeAll) => ipcRenderer.invoke('tmux:list', sessionId, includeAll),
     capture: (sessionId, paneId, lines) => ipcRenderer.invoke('tmux:capture', sessionId, paneId, lines)
   },
+  terminal: {
+    connect: (sessionId, options) => ipcRenderer.invoke('terminal:connect', sessionId, options),
+    write: (sessionId, data) => ipcRenderer.send('terminal:write', sessionId, data),
+    resize: (sessionId, columns, rows) => ipcRenderer.send('terminal:resize', sessionId, columns, rows),
+    disconnect: sessionId => ipcRenderer.invoke('terminal:disconnect', sessionId),
+    kill: sessionId => ipcRenderer.invoke('terminal:kill', sessionId),
+    windows: sessionId => ipcRenderer.invoke('terminal:windows', sessionId),
+    action: (sessionId, action, target) => ipcRenderer.invoke('terminal:action', sessionId, action, target)
+  },
   pins: {
     list: sessionId => ipcRenderer.invoke('pins:list', sessionId),
     put: item => ipcRenderer.invoke('pins:put', item),
@@ -96,7 +105,9 @@ const api: AgentsDockAPI = {
     showItemInFolder: path => ipcRenderer.invoke('native:show-item', path),
     setBadge: count => ipcRenderer.invoke('native:set-badge', count),
     notify: (title, body, sessionId) => ipcRenderer.invoke('native:notify', title, body, sessionId),
-    log: (scope, message, data) => ipcRenderer.invoke('native:log', scope, message, data)
+    log: (scope, message, data) => ipcRenderer.invoke('native:log', scope, message, data),
+    readClipboard: () => ipcRenderer.invoke('native:clipboard:read'),
+    writeClipboard: text => ipcRenderer.invoke('native:clipboard:write', text)
   },
   events: {
     on: <K extends keyof AppEventMap>(name: K, listener: (payload: AppEventMap[K]) => void) => {

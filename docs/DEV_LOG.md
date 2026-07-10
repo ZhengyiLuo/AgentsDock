@@ -7030,3 +7030,24 @@ Follow-up from rapid-switch stress:
 - Clean installs now explicitly allow only the two native build dependencies
   the macOS Electron package requires, explicitly deny the transitive Windows
   installer hook, and no longer warn that the security policy was ignored.
+
+## 2026-07-10 - Add persistent per-chat tmux terminals
+
+- Replaced the old snapshot-and-`send-keys` terminal path with a real
+  pseudo-terminal. The server launches `tmux attach-session` inside a PTY and
+  streams terminal bytes over an authenticated WebSocket.
+- A chat owns one stable `zd_<session-id>` tmux session. Closing the tab, losing
+  the network, switching chats, or quitting AgentsDock detaches only the
+  temporary tmux client; windows, panes, shells, and processes keep running.
+- Added a dedicated Electron `Chat | Terminal` workspace backed by xterm.js,
+  with live resize, reconnect, terminal search, web links, native copy/paste,
+  and light/dark themes.
+- Added tmux window tabs and structured actions for new windows, selecting
+  windows, horizontal/vertical splits, pane close, and explicit session kill.
+  Structured actions remain reliable even when the user's tmux prefix differs
+  from the default.
+- PTY output uses the event loop's native file-descriptor readiness support
+  instead of reserving one thread per open terminal. Input stays on the direct
+  low-latency path, and all attach processes are terminated on disconnect.
+- Bumped the server API contract to v5 and added transport regressions for
+  authorization, UTF-8 byte streaming, resize, input, and detach behavior.

@@ -12,6 +12,10 @@ import type {
   ResumeSessionInput,
   RuntimeCatalog,
   Session,
+  TerminalAction,
+  TerminalConnectOptions,
+  TerminalStateEvent,
+  TerminalWindowsSnapshot,
   TimelineIndex,
   TimelinePage,
   TimelineSearchResult,
@@ -29,6 +33,12 @@ interface SessionResponse {
   events_omitted_after?: number
   latest_seq?: number
   event_count?: number
+}
+
+export interface TerminalConnection {
+  write(data: string): void
+  resize(columns: number, rows: number): void
+  close(): void
 }
 
 export class ServerError extends Error {
@@ -239,6 +249,113 @@ export class AgentServerClient {
     const query = new URLSearchParams({ pane_id: paneId, lines: String(lines) })
     const response = await this.get<{ text?: string; output?: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/tmux/capture?${query}`)
     return response.text ?? response.output ?? ''
+  }
+
+  terminal(
+    sessionId: string,
+    options: TerminalConnectOptions,
+    onData: (data: string) => void,
+    onState: (state: TerminalStateEvent) => void
+  ): TerminalConnection {
+    const endpoint = new URL(this.url(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/ws`))
+    endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:'
+    let stopped = false
+    let retryDelay = 500
+    let retry: NodeJS.Timeout | null = null
+    let socket: WebSocket | null = null
+    let columns = options.columns
+    let rows = options.rows
+    let decoder = new TextDecoder()
+
+    const connect = (): void => {
+      if (stopped) return
+      onState({ sessionId, state: retryDelay === 500 ? 'connecting' : 'reconnecting' })
+      const url = new URL(endpoint)
+      url.searchParams.set('columns', String(columns))
+      url.searchParams.set('rows', String(rows))
+      if (options.cwd) url.searchParams.set('cwd', options.cwd)
+      if (this.token) url.searchParams.set('token', this.token)
+      decoder = new TextDecoder()
+      socket = new WebSocket(url)
+      socket.binaryType = 'arraybuffer'
+      socket.addEventListener('message', message => {
+        if (typeof message.data === 'string') {
+          try {
+            const control = JSON.parse(message.data) as { type?: string; name?: string; message?: string }
+            if (control.type === 'ready') {
+              retryDelay = 500
+              onState({ sessionId, state: 'connected', name: control.name ?? null })
+            } else if (control.type === 'error') {
+              onState({ sessionId, state: 'error', error: control.message || 'Terminal connection failed' })
+            }
+          } catch { /* ignore malformed control packets */ }
+          return
+        }
+        let bytes: Uint8Array | null = null
+        if (message.data instanceof ArrayBuffer) bytes = new Uint8Array(message.data)
+        else if (ArrayBuffer.isView(message.data)) bytes = new Uint8Array(message.data.buffer, message.data.byteOffset, message.data.byteLength)
+        else if (message.data && typeof message.data === 'object' && 'byteLength' in message.data) bytes = new Uint8Array(message.data as ArrayBuffer)
+        else if (message.data instanceof Blob) {
+          void message.data.arrayBuffer().then(buffer => {
+            const blobBytes = new Uint8Array(buffer)
+            if (blobBytes.byteLength) onData(decoder.decode(blobBytes, { stream: true }))
+          })
+          return
+        }
+        if (bytes?.byteLength) onData(decoder.decode(bytes, { stream: true }))
+      })
+      socket.addEventListener('close', event => {
+        const tail = decoder.decode()
+        if (tail) onData(tail)
+        if (stopped) {
+          onState({ sessionId, state: 'disconnected' })
+          return
+        }
+        if (event.code === 4401 || event.code === 4404) {
+          stopped = true
+          onState({ sessionId, state: 'error', error: event.code === 4401 ? 'Terminal authorization failed' : 'Chat not found' })
+          return
+        }
+        onState({ sessionId, state: 'reconnecting', error: event.reason || null })
+        const jitter = Math.floor(Math.random() * Math.min(250, retryDelay / 3))
+        retry = setTimeout(connect, retryDelay + jitter)
+        retryDelay = Math.min(10_000, retryDelay * 2)
+      })
+      socket.addEventListener('error', () => {
+        if (!stopped) onState({ sessionId, state: 'error', error: 'Terminal connection interrupted' })
+      })
+    }
+
+    connect()
+    return {
+      write(data: string): void {
+        if (socket?.readyState === 1) socket.send(new TextEncoder().encode(data))
+      },
+      resize(nextColumns: number, nextRows: number): void {
+        columns = nextColumns
+        rows = nextRows
+        if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', columns, rows }))
+      },
+      close(): void {
+        stopped = true
+        if (retry) clearTimeout(retry)
+        retry = null
+        socket?.close()
+      }
+    }
+  }
+
+  async deleteTerminal(sessionId: string): Promise<boolean> {
+    const response = await this.delete<{ killed?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/terminal`)
+    return response.killed ?? true
+  }
+
+  terminalWindows(sessionId: string): Promise<TerminalWindowsSnapshot> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/windows`)
+  }
+
+  terminalAction(sessionId: string, action: TerminalAction, target?: string): Promise<TerminalWindowsSnapshot> {
+    return this.post(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/action`, { action, target: target ?? null })
   }
 
   async sendDigest(sourceSessionId: string, targetSessionId: string, detail: string, userPrompt: string): Promise<boolean> {

@@ -27,6 +27,9 @@ import type {
   ServerSettings,
   Session,
   SessionSnapshot,
+  TerminalAction,
+  TerminalConnectOptions,
+  TerminalWindowsSnapshot,
   TimelineIndex,
   TimelinePage,
   TimelineSearchResult,
@@ -38,7 +41,7 @@ import type {
 import { updateQueuedTurns } from '../shared/queue'
 import { timelineCacheHasGap } from '../shared/history'
 import { LocalCache } from './persistence'
-import { AgentServerClient } from './server-client'
+import { AgentServerClient, type TerminalConnection } from './server-client'
 import { SettingsStore } from './settings'
 import { appLog } from './logger'
 
@@ -70,6 +73,8 @@ export class AppService {
   private filesRefreshedAt = new Map<string, number>()
   private fileDownloads = new Map<string, Promise<string>>()
   private timelineIndexes = new Map<string, TimelineIndex>()
+  private terminalConnections = new Map<string, TerminalConnection>()
+  private terminalLeases = new Map<string, number>()
 
   constructor() {
     appLog('startup', 'loading settings')
@@ -102,6 +107,7 @@ export class AppService {
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
     this.timelineLease += 1
+    this.disconnectAllTerminals()
     this.flushEventCache()
   }
 
@@ -130,6 +136,7 @@ export class AppService {
   publicSettings(): PublicServerSettings { return this.settings.publicSettings() }
 
   async applySettings(value: ServerSettings): Promise<Health> {
+    this.disconnectAllTerminals()
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
     this.timelineLease += 1
@@ -450,6 +457,37 @@ export class AppService {
   processLog(sessionId: string, path: string, lines?: number): Promise<string> { return this.client.processLog(sessionId, path, lines) }
   tmux(sessionId: string, includeAll?: boolean): Promise<TmuxPane[]> { return this.client.tmux(sessionId, includeAll) }
   captureTmux(sessionId: string, paneId: string, lines?: number): Promise<string> { return this.client.captureTmux(sessionId, paneId, lines) }
+  connectTerminal(sessionId: string, options: TerminalConnectOptions): void {
+    this.disconnectTerminal(sessionId)
+    const lease = (this.terminalLeases.get(sessionId) ?? 0) + 1
+    this.terminalLeases.set(sessionId, lease)
+    const connection = this.client.terminal(
+      sessionId,
+      options,
+      data => {
+        if (this.terminalLeases.get(sessionId) === lease) this.emit('terminal:data', { sessionId, data })
+      },
+      state => {
+        if (this.terminalLeases.get(sessionId) === lease) this.emit('terminal:state', state)
+      }
+    )
+    this.terminalConnections.set(sessionId, connection)
+  }
+  writeTerminal(sessionId: string, data: string): void { this.terminalConnections.get(sessionId)?.write(data) }
+  resizeTerminal(sessionId: string, columns: number, rows: number): void { this.terminalConnections.get(sessionId)?.resize(columns, rows) }
+  disconnectTerminal(sessionId: string): void {
+    this.terminalLeases.set(sessionId, (this.terminalLeases.get(sessionId) ?? 0) + 1)
+    this.terminalConnections.get(sessionId)?.close()
+    this.terminalConnections.delete(sessionId)
+  }
+  async killTerminal(sessionId: string): Promise<boolean> {
+    this.disconnectTerminal(sessionId)
+    return this.client.deleteTerminal(sessionId)
+  }
+  terminalWindows(sessionId: string): Promise<TerminalWindowsSnapshot> { return this.client.terminalWindows(sessionId) }
+  terminalAction(sessionId: string, action: TerminalAction, target?: string): Promise<TerminalWindowsSnapshot> {
+    return this.client.terminalAction(sessionId, action, target)
+  }
   pins(sessionId: string): PinnedItem[] { return this.cache.pins(this.serverId, sessionId) }
   putPin(item: PinnedItem): PinnedItem[] { return this.cache.putPin(this.serverId, item) }
   removePin(sessionId: string, itemId: string): PinnedItem[] { return this.cache.removePin(this.serverId, sessionId, itemId) }
@@ -714,6 +752,10 @@ export class AppService {
     for (const window of this.windows) {
       if (!window.isDestroyed()) window.webContents.send(name, payload)
     }
+  }
+
+  private disconnectAllTerminals(): void {
+    for (const sessionId of [...this.terminalConnections.keys()]) this.disconnectTerminal(sessionId)
   }
 
   private async ensureLocalFile(file: AgentFile): Promise<string> {

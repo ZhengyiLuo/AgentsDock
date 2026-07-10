@@ -88,6 +88,12 @@ The result is `dist/AgentsDock.app`. See
 verification contract. The local build is ad-hoc signed and does not upload a
 release.
 
+Each chat also owns an optional persistent remote terminal. Opening the
+Terminal tab creates or reattaches to a tmux session on the agent server; app
+disconnects detach the client without stopping shells, windows, panes, or
+long-running processes. The agent host must have `tmux` installed and run an
+agent server with API contract v5 or newer.
+
 Direct downloads use `electron-updater` with public release assets hosted on
 the `ZenithBotServer` GitHub Releases channel. The source repository stays
 private and no GitHub credential is embedded in the app. A production release

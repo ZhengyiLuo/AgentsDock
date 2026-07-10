@@ -4,15 +4,21 @@ import { AgentServerClient } from './server-client'
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
-  readonly listeners = new Map<string, Array<(event: { data?: string }) => void>>()
+  readonly listeners = new Map<string, Array<(event: { data?: unknown; code?: number; reason?: string }) => void>>()
+  readonly sent: unknown[] = []
   closed = false
+  readyState = 1
+  binaryType = ''
 
   constructor(readonly url: URL) { FakeWebSocket.instances.push(this) }
-  addEventListener(name: string, listener: (event: { data?: string }) => void): void {
+  addEventListener(name: string, listener: (event: { data?: unknown; code?: number; reason?: string }) => void): void {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener])
   }
-  close(): void { this.closed = true }
-  emit(name: string, data?: string): void { for (const listener of this.listeners.get(name) ?? []) listener({ data }) }
+  send(data: unknown): void { this.sent.push(data) }
+  close(): void { this.closed = true; this.readyState = 3 }
+  emit(name: string, data?: unknown, event: { code?: number; reason?: string } = {}): void {
+    for (const listener of this.listeners.get(name) ?? []) listener({ data, ...event })
+  }
 }
 
 describe('AgentServerClient live stream', () => {
@@ -86,5 +92,42 @@ describe('AgentServerClient live stream', () => {
     expect(url).toContain('/api/sessions/chat/links/file?target=out%2Freport.csv')
     expect(url).not.toContain('secret')
     expect(new Headers(init.headers).get('X-ZenithDock-Token')).toBe('secret')
+  })
+
+  it('attaches a binary terminal stream with dimensions, input, resize, and intentional detach', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const output: string[] = []
+    const states: string[] = []
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    const connection = client.terminal(
+      'chat with spaces',
+      { cwd: '/tmp/project path', columns: 132, rows: 44 },
+      data => output.push(data),
+      state => states.push(state.state)
+    )
+    const socket = FakeWebSocket.instances[0]
+    expect(String(socket.url)).toContain('/api/sessions/chat%20with%20spaces/terminal/ws')
+    expect(socket.url.searchParams.get('token')).toBe('secret')
+    expect(socket.url.searchParams.get('cwd')).toBe('/tmp/project path')
+    expect(socket.url.searchParams.get('columns')).toBe('132')
+    expect(socket.url.searchParams.get('rows')).toBe('44')
+
+    socket.emit('message', JSON.stringify({ type: 'ready', name: 'zd_chat_with_spaces' }))
+    socket.emit('message', new TextEncoder().encode('hello λ\r\n').buffer)
+    expect(states).toEqual(['connecting', 'connected'])
+    expect(output.join('')).toBe('hello λ\r\n')
+
+    connection.write('pwd\r')
+    connection.resize(160, 52)
+    expect(new TextDecoder().decode(socket.sent[0] as Uint8Array)).toBe('pwd\r')
+    expect(JSON.parse(String(socket.sent[1]))).toEqual({ type: 'resize', columns: 160, rows: 52 })
+
+    connection.close()
+    socket.emit('close', undefined, { code: 1000 })
+    vi.advanceTimersByTime(20_000)
+    expect(socket.closed).toBe(true)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(states.at(-1)).toBe('disconnected')
   })
 })

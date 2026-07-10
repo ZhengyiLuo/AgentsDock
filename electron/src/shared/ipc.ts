@@ -23,6 +23,9 @@ import type {
   TimelineIndex,
   TimelinePage,
   TimelineSearchResult,
+  TerminalConnectOptions,
+  TerminalAction,
+  TerminalWindowsSnapshot,
   TmuxPane,
   UpdateSessionInput,
   UpdateJobInput,
@@ -111,6 +114,15 @@ export interface AgentsDockAPI {
     list(sessionId: string, includeAll?: boolean): Promise<TmuxPane[]>
     capture(sessionId: string, paneId: string, lines?: number): Promise<string>
   }
+  terminal: {
+    connect(sessionId: string, options: TerminalConnectOptions): Promise<void>
+    write(sessionId: string, data: string): void
+    resize(sessionId: string, columns: number, rows: number): void
+    disconnect(sessionId: string): Promise<void>
+    kill(sessionId: string): Promise<boolean>
+    windows(sessionId: string): Promise<TerminalWindowsSnapshot>
+    action(sessionId: string, action: TerminalAction, target?: string): Promise<TerminalWindowsSnapshot>
+  }
   pins: {
     list(sessionId: string): Promise<PinnedItem[]>
     put(item: PinnedItem): Promise<PinnedItem[]>
@@ -126,6 +138,8 @@ export interface AgentsDockAPI {
     setBadge(count: number): Promise<void>
     notify(title: string, body: string, sessionId?: string): Promise<void>
     log(scope: string, message: string, data?: unknown): Promise<void>
+    readClipboard(): Promise<string>
+    writeClipboard(text: string): Promise<void>
   }
   events: {
     on<K extends keyof import('./types').AppEventMap>(name: K, listener: (payload: import('./types').AppEventMap[K]) => void): () => void

@@ -5,6 +5,7 @@ import { TooltipProvider } from '@radix-ui/react-tooltip'
 import { App } from './App'
 import { initializeAppearance } from './lib/appearance'
 import './styles.css'
+import '@xterm/xterm/css/xterm.css'
 import 'highlight.js/styles/github-dark.css'
 
 initializeAppearance()

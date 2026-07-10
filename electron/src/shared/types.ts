@@ -187,6 +187,38 @@ export interface TmuxPane {
   tags?: string[] | null
 }
 
+export type TerminalConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
+
+export interface TerminalConnectOptions {
+  cwd?: string | null
+  columns: number
+  rows: number
+}
+
+export interface TerminalStateEvent {
+  sessionId: string
+  state: TerminalConnectionState
+  name?: string | null
+  error?: string | null
+}
+
+export type TerminalAction = 'new-window' | 'split-right' | 'split-down' | 'next-window' | 'previous-window' | 'select-window' | 'kill-pane'
+
+export interface TerminalWindow {
+  id: string
+  index: number
+  name: string
+  active: boolean
+  panes: number
+}
+
+export interface TerminalWindowsSnapshot {
+  session_id: string
+  name: string
+  exists: boolean
+  windows: TerminalWindow[]
+}
+
 export interface Health {
   ok: boolean
   state_dir?: string
@@ -396,5 +428,7 @@ export interface AppEventMap {
   'server:runtime': RuntimeCatalog
   'server:files': { sessionId: string; files: AgentFile[]; total: number }
   'server:timeline': { sessionId: string; snapshot: SessionSnapshot; source: 'cache' | 'server'; mode?: 'merge' | 'replace' }
+  'terminal:data': { sessionId: string; data: string }
+  'terminal:state': TerminalStateEvent
   'native:menu': { command: string }
 }

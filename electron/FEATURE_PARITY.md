@@ -48,6 +48,9 @@ packaged-app smoke pass.
 - [x] Collapsed job timeline with latest result and bounded prior history
 - [x] LLM digest preview and background source-agent send-to-chat
 - [x] Live process metrics/stdout and linked tmux pane capture on demand
+- [x] Interactive per-chat terminal backed by a persistent remote tmux session
+- [x] Tmux window tabs, pane splits, reconnect, resize, search, copy/paste, and
+  explicit session teardown
 
 ## Native integration and resilience
 
