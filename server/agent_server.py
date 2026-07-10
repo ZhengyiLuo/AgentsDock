@@ -497,6 +497,8 @@ class TurnRequest(BaseModel):
     effort: str | None = None
     display_prompt: str | None = None
     purpose: str | None = None
+    job_id: str | None = None
+    job_title: str | None = None
     digest_job_id: str | None = None
     target_session_id: str | None = None
 
@@ -1063,6 +1065,9 @@ class JobStore:
             prompt=job["prompt"],
             file_ids=[],
             backend=job.get("backend"),
+            purpose="scheduled_job",
+            job_id=jid,
+            job_title=str(job.get("title") or jid),
         )
         result = await start_turn(job["session_id"], req, queue_if_busy=False)
         await self.mark_ran(jid)
@@ -5714,6 +5719,8 @@ async def start_turn(
             started_payload["queued_id"] = queued_id
         run_metadata = {
             "purpose": req.purpose,
+            "job_id": req.job_id,
+            "job_title": req.job_title,
             "digest_job_id": req.digest_job_id,
             "target_session_id": req.target_session_id,
         }

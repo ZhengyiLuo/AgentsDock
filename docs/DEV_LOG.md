@@ -6887,4 +6887,8 @@ Follow-up from rapid-switch stress:
 - Aggregated `turn_finished.result_text` no longer renders as a duplicate
   message when it is the normalized concatenation of assistant updates already
   shown for that run. Standalone finish results remain visible as a fallback.
+- Scheduled runs now carry their job identity through the full agent lifecycle.
+  Electron also recovers older runs from `job_ran.run_id`, folds the agent
+  response into the existing orange job card, keeps one summary per execution,
+  and preserves artifacts from the latest run inside that card.
 - Added a component regression test for in-inset current-turn changes.

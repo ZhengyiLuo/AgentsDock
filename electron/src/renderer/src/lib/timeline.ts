@@ -78,7 +78,37 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   const items: TimelineItem[] = []
   const turnByRun = new Map<string, TurnItem>()
   const jobById = new Map<string, JobItem>()
+  const jobByRun = new Map<string, string>()
+  const jobTitles = new Map<string, string>()
   let activeTurn: TurnItem | null = null
+
+  for (const event of events) {
+    const jobId = String(event.job_id || event.job?.id || '').trim()
+    if (!jobId) continue
+    const title = String(event.job_title || event.job?.title || '').trim()
+    if (title) jobTitles.set(jobId, title)
+    if (event.run_id && (jobTypes.has(event.type) || event.purpose === 'scheduled_job')) {
+      jobByRun.set(event.run_id, jobId)
+    }
+  }
+
+  const appendJobEvent = (event: Event, jobId: string): void => {
+    const existing = jobById.get(jobId)
+    const title = event.job_title || event.job?.title || jobTitles.get(jobId) || event.message || 'Scheduled job'
+    if (existing) {
+      if (!existing.events.some(candidate => candidate.id === event.id)) existing.events.push(event)
+      if (event.seq >= existing.latest.seq) existing.latest = event
+      existing.seq = Math.max(existing.seq, event.seq)
+      if (title && existing.title === 'Scheduled job') existing.title = title
+      return
+    }
+    const job: JobItem = {
+      kind: 'job', id: `job:${jobId}`, key: `job:${jobId}`, seq: event.seq,
+      title, events: [event], latest: event
+    }
+    jobById.set(jobId, job)
+    items.push(job)
+  }
 
   const ensureTurn = (event: Event, forceNew = false): TurnItem => {
     const runKey = event.run_id || activeTurn?.runId || `seq-${event.seq}`
@@ -96,18 +126,12 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
 
   for (const event of events) {
     if (hiddenTypes.has(event.type)) continue
-    if (jobTypes.has(event.type) || event.job_id) {
-      const jobId = event.job_id || event.job?.id || event.run_id || `job-${event.seq}`
-      const existing = jobById.get(jobId)
-      if (existing) {
-        existing.events.push(event); existing.latest = event; existing.seq = Math.max(existing.seq, event.seq)
-      } else {
-        const job: JobItem = {
-          kind: 'job', id: `job:${jobId}`, key: `job:${jobId}`, seq: event.seq,
-          title: event.job?.title || event.message || 'Scheduled job', events: [event], latest: event
-        }
-        jobById.set(jobId, job); items.push(job)
-      }
+    const explicitJobId = String(event.job_id || event.job?.id || '').trim()
+    const jobId = jobTypes.has(event.type) || event.purpose === 'scheduled_job'
+      ? explicitJobId || jobByRun.get(event.run_id || '') || event.run_id || `job-${event.seq}`
+      : jobByRun.get(event.run_id || '')
+    if (jobId) {
+      appendJobEvent(event, jobId)
       continue
     }
 
@@ -255,6 +279,36 @@ function normalizeAssistantOutput(value: string): string {
 
 export function messageText(event: Event): string {
   return event.result_text || event.text || event.prompt || printableEventValue(event.message) || printableEventValue(event.error) || event.output || ''
+}
+
+export function jobDisplayEvents(events: Event[]): Event[] {
+  const standalone: Event[] = []
+  const byRun = new Map<string, Event>()
+  for (const event of events) {
+    const runId = String(event.run_id || '').trim()
+    if (!runId) {
+      if (jobTypes.has(event.type)) standalone.push(event)
+      continue
+    }
+    const priority = jobDisplayPriority(event)
+    if (!priority) continue
+    const current = byRun.get(runId)
+    const currentPriority = current ? jobDisplayPriority(current) : 0
+    if (!current || priority > currentPriority || priority === currentPriority && event.seq >= current.seq) {
+      byRun.set(runId, event)
+    }
+  }
+  return [...standalone, ...byRun.values()].sort((left, right) => left.seq - right.seq)
+}
+
+function jobDisplayPriority(event: Event): number {
+  if (isTimelineError(event) || event.type === 'turn_stopped' || event.type === 'job_error') return 5
+  if (event.type === 'turn_finished' && messageText(event).trim()) return 4
+  if (event.type === 'assistant_text' && messageText(event).trim()) return 3
+  if (event.type === 'job_finished') return 3
+  if (event.type === 'job_ran' || event.type === 'job_started') return 2
+  if (event.type === 'turn_started') return 1
+  return 0
 }
 
 export function eventFile(event: Event): AgentFile | null {

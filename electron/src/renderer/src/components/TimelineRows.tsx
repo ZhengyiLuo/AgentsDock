@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
 import type { JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { extractUnifiedDiff, isTimelineError, messageText, parseUnifiedDiff } from '../lib/timeline'
+import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageText, parseUnifiedDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
@@ -88,10 +88,20 @@ function SystemView({ item, sessionId }: { item: SystemItem; sessionId: string }
 
 function JobView({ item, sessionId }: { item: JobItem; sessionId: string }) {
   const [open, setOpen] = useState(false)
-  const latestText = messageText(item.latest) || 'Scheduled job started. Waiting for agent output.'
-  const previous = item.events.slice(0, -1)
+  const updates = useMemo(() => jobDisplayEvents(item.events), [item.events])
+  const latest = updates.at(-1) ?? item.latest
+  const latestText = messageText(latest) || 'Scheduled job started. Waiting for agent output.'
+  const previous = updates.slice(0, -1)
   const visiblePrevious = previous.slice(-6).reverse()
-  return <article className="job-row"><button className="job-summary" onClick={() => setOpen(value => !value)}><Clock3 size={15} /><span><strong>Latest Job Status</strong><small>{item.title} · {item.events.length} run{item.events.length === 1 ? '' : 's'} · {formatTime(item.latest.ts)}</small></span><ChevronRight size={14} /></button><div className="job-latest"><MarkdownContent text={latestText} files={[]} sessionId={sessionId} /></div>{open && previous.length > 0 && <div className="job-history">{previous.length > visiblePrevious.length && <p>{previous.length - visiblePrevious.length} earlier updates hidden</p>}{visiblePrevious.map(event => <details key={event.id}><summary>{formatTime(event.ts)} · {titleCase(event.type)}</summary><MarkdownContent text={messageText(event)} sessionId={sessionId} compact /></details>)}</div>}</article>
+  const runCount = new Set(item.events.map(event => event.run_id).filter(Boolean)).size
+  const files = deduplicateFiles(item.events
+    .filter(event => !latest.run_id || event.run_id === latest.run_id)
+    .flatMap(event => [event.artifact, event.file].filter((file): file is NonNullable<typeof file> => Boolean(file))))
+  return <article className="job-row"><button className="job-summary" onClick={() => setOpen(value => !value)}><Clock3 size={15} /><span><strong>Latest Job Status</strong><small>{item.title} · {runCount || updates.length} run{(runCount || updates.length) === 1 ? '' : 's'} · {formatTime(latest.ts)}</small></span><ChevronRight size={14} /></button><div className="job-latest"><MarkdownContent text={latestText} files={files} sessionId={sessionId} />{files.length > 0 && <MediaGrid files={files} sessionId={sessionId} compact />}</div>{open && previous.length > 0 && <div className="job-history">{previous.length > visiblePrevious.length && <p>{previous.length - visiblePrevious.length} earlier runs hidden</p>}{visiblePrevious.map(event => <details key={event.id}><summary>{formatTime(event.ts)} · {titleCase(event.type)}</summary><MarkdownContent text={messageText(event)} sessionId={sessionId} compact /></details>)}</div>}</article>
+}
+
+function deduplicateFiles<T extends { id: string }>(files: T[]): T[] {
+  return [...new Map(files.map(file => [file.id, file])).values()]
 }
 
 async function pinSystem(event: Event, sessionId: string) {

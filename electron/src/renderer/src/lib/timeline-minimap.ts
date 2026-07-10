@@ -1,6 +1,6 @@
 import type { TimelineIndexLandmark, TimelineLandmarkKind } from '@shared/types'
 import type { RenderTimelineItem } from './timeline'
-import { isTimelineError, messageText } from './timeline'
+import { isTimelineError, jobDisplayEvents, messageText } from './timeline'
 
 export interface TimelineLandmark extends TimelineIndexLandmark {
   index: number
@@ -105,14 +105,16 @@ function turnLandmark(items: RenderTimelineItem[], index: number, endIndex: numb
 
 function standaloneLandmark(item: RenderTimelineItem, index: number): TimelineLandmark {
   if (item.kind === 'job') {
+    const updates = jobDisplayEvents(item.events)
+    const latest = updates.at(-1) ?? item.latest
     return {
       index,
       endIndex: index,
       key: item.key,
       kind: 'job',
       title: item.title || 'Scheduled job',
-      preview: compactPreview(messageText(item.latest)),
-      meta: `${item.events.length} update${item.events.length === 1 ? '' : 's'}`,
+      preview: compactPreview(messageText(latest)),
+      meta: `${updates.length} run${updates.length === 1 ? '' : 's'}`,
       start_seq: Math.min(...item.events.map(event => event.seq)),
       end_seq: Math.max(...item.events.map(event => event.seq)),
       timestamp: item.latest.ts

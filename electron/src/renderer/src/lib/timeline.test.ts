@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
-import { extractUnifiedDiff, messageText, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
+import { extractUnifiedDiff, jobDisplayEvents, messageText, parseUnifiedDiff, projectTimeline, reconcileTimelineItems, renderTimelineItems } from './timeline'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -52,6 +52,23 @@ describe('projectTimeline', () => {
     ], [])
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ kind: 'job', events: [{ type: 'job_started' }, { type: 'job_finished' }] })
+  })
+
+  it('folds a scheduled agent run into its job card, including legacy job_ran links', () => {
+    const items = projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-job-1', prompt: 'Check training status' }),
+      event(2, 'job_ran', { run_id: 'run-job-1', job_id: 'job-1', job: { id: 'job-1', session_id: 'chat-1', title: 'Training status', prompt: 'Check training status', interval_seconds: 3600 } }),
+      event(3, 'assistant_text', { run_id: 'run-job-1', text: 'Training is healthy.' }),
+      event(4, 'turn_finished', { run_id: 'run-job-1', result_text: 'Training is healthy.' })
+    ], [])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'job', title: 'Training status' })
+    const rows = renderTimelineItems(items)
+    expect(rows.map(row => row.kind)).toEqual(['job'])
+    if (items[0].kind === 'job') {
+      expect(jobDisplayEvents(items[0].events)).toMatchObject([{ type: 'turn_finished', result_text: 'Training is healthy.' }])
+    }
   })
 
   it('preserves unchanged row identities when one new turn is appended', () => {

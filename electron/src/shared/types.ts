@@ -113,6 +113,7 @@ export interface Event {
   artifact?: AgentFile | null
   job?: Job | null
   job_id?: string | null
+  job_title?: string | null
   direction?: string | null
   positions?: QueuePosition[] | null
 }
