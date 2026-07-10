@@ -1,14 +1,18 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import type { AppService } from './service'
 import { appLog } from './logger'
+import type { AppUpdateManager } from './updater'
 
-export function registerIpc(service: AppService): void {
+export function registerIpc(service: AppService, updater: AppUpdateManager): void {
   const handle = (channel: string, listener: (...args: any[]) => unknown): void => {
     ipcMain.removeHandler(channel)
     ipcMain.handle(channel, (_event, ...args) => listener(...args))
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('updates:status', () => updater.status())
+  handle('updates:check', () => updater.check(true))
+  handle('updates:install', () => updater.install())
   handle('settings:get', () => service.publicSettings())
   handle('settings:apply', settings => service.applySettings(settings))
 

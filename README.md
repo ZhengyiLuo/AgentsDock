@@ -74,18 +74,39 @@ the app directly to the MacBook Air at `/Users/zen/agi/ZenithDock.app` when
 `zens-macbook-air` is reachable over SSH. Override with `ZENITHDOCK_MBA_HOST`
 or `ZENITHDOCK_MBA_DEST` if needed.
 
-### Electron macOS preview
+### Electron macOS app
 
-The feature-compatible Electron rewrite lives in `electron/`. Build its
-separate local app without touching the Swift binary:
+The production macOS client lives in `electron/`. Build the canonical local
+app with:
 
 ```bash
 ./scripts/build_electron_mac.sh
 ```
 
-The result is `dist/AgentsDock-Electron.app`. See
+The result is `dist/AgentsDock.app`. See
 [`electron/FEATURE_PARITY.md`](electron/FEATURE_PARITY.md) for the parity and
-verification contract. This local workflow does not upload TestFlight.
+verification contract. The local build is ad-hoc signed and does not upload a
+release.
+
+Direct downloads use `electron-updater` with public release assets hosted on
+the `ZenithBotServer` GitHub Releases channel. The source repository stays
+private and no GitHub credential is embedded in the app. A production release
+requires a Developer ID Application certificate and notarization:
+
+```bash
+./scripts/build_electron_release.sh
+
+# Build and publish the signed zip/dmg plus latest-mac.yml.
+GH_TOKEN=... AGENTSDOCK_PUBLISH_MODE=always ./scripts/build_electron_release.sh
+```
+
+The Mac App Store/TestFlight build is a separate sandboxed target. It never
+runs the direct updater because Apple owns updates for that channel:
+
+```bash
+AGENTSDOCK_MAS_PROFILE=/path/to/profile.provisionprofile \
+  ./scripts/build_electron_mas.sh
+```
 
 ## Build The iOS/iPadOS App
 
@@ -110,7 +131,8 @@ xcodebuild archive \
   -archivePath build/ZenithDockIOS.xcarchive
 ```
 
-The macOS scheme builds the Mac TestFlight binary:
+The legacy Swift macOS scheme can still build its Mac archive, but the
+production desktop client is now the Electron MAS target documented above:
 
 ```bash
 xcodebuild archive \

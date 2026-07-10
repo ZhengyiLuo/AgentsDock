@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises'
 import { registerIpc } from './ipc'
 import { appLog } from './logger'
 import { AppService } from './service'
+import { AppUpdateManager } from './updater'
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'agentsdock-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
@@ -12,11 +13,20 @@ protocol.registerSchemesAsPrivileged([
 process.on('uncaughtException', error => appLog('fatal', 'uncaught exception', errorDetails(error)))
 process.on('unhandledRejection', reason => appLog('fatal', 'unhandled rejection', errorDetails(reason)))
 
+// Keep the preview app's cache, drafts, and encrypted settings when the
+// production bundle replaces it as the canonical AgentsDock binary.
+app.setPath('userData', join(app.getPath('appData'), 'agentsdock-electron'))
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   let mainWindow: BrowserWindow | null = null
   let service: AppService | null = null
+  const updater = new AppUpdateManager(status => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('app:update', status)
+    }
+  })
 
   app.on('second-instance', () => {
     if (!mainWindow) return
@@ -31,7 +41,7 @@ if (!app.requestSingleInstanceLock()) {
       appLog('main', 'constructing app service')
       service = new AppService()
       appLog('main', 'app service ready')
-      registerIpc(service)
+      registerIpc(service, updater)
       appLog('main', 'IPC registered')
       session.defaultSession.protocol.handle('agentsdock-media', request => {
         const url = new URL(request.url)
@@ -43,6 +53,7 @@ if (!app.requestSingleInstanceLock()) {
       mainWindow = createWindow()
       service.addWindow(mainWindow)
       service.start()
+      updater.start()
       appLog('main', 'window created and background services started')
     } catch (error) {
       const details = errorDetails(error)
@@ -65,7 +76,10 @@ if (!app.requestSingleInstanceLock()) {
     app.quit()
   })
 
-  app.on('before-quit', () => service?.stop())
+  app.on('before-quit', () => {
+    updater.stop()
+    service?.stop()
+  })
   app.on('window-all-closed', () => app.quit())
 }
 
@@ -124,6 +138,7 @@ function createMenu(window: () => BrowserWindow | null): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
+      { label: 'Check for Updates…', click: () => send('check-update') },
       { label: 'Settings…', accelerator: 'Command+,', click: () => send('settings') },
       { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }
     ] },

@@ -4,6 +4,11 @@ import type { AppEventMap } from '../shared/types'
 
 const api: AgentsDockAPI = {
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
+  updates: {
+    status: () => ipcRenderer.invoke('updates:status'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    install: () => ipcRenderer.invoke('updates:install')
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     apply: settings => ipcRenderer.invoke('settings:apply', settings)

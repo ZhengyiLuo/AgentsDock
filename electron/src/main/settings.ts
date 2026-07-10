@@ -40,20 +40,31 @@ export class SettingsStore {
   }
 
   accessToken(): string {
-    return this.value.keychainAccessToken ? readKeychainToken() : ''
+    if (this.value.keychainAccessToken) {
+      const token = readKeychainToken()
+      if (token) return token
+    }
+    return decryptStoredToken(this.value.encryptedAccessToken)
   }
 
   update(settings: ServerSettings): void {
     this.value.serverUrl = normalizeServerURL(settings.serverUrl)
     if (settings.accessToken !== '__KEEP__') {
       if (settings.accessToken) {
-        writeKeychainToken(settings.accessToken)
-        this.value.keychainAccessToken = true
+        if (!isMacAppStoreBuild() && writeKeychainToken(settings.accessToken)) {
+          this.value.keychainAccessToken = true
+          delete this.value.encryptedAccessToken
+        } else if (safeStorage.isEncryptionAvailable()) {
+          this.value.encryptedAccessToken = safeStorage.encryptString(settings.accessToken).toString('base64')
+          this.value.keychainAccessToken = false
+        } else {
+          throw new Error('Secure token storage is unavailable on this Mac.')
+        }
       } else {
         deleteKeychainToken()
         this.value.keychainAccessToken = false
+        delete this.value.encryptedAccessToken
       }
-      delete this.value.encryptedAccessToken
     }
     this.write()
   }
@@ -80,6 +91,7 @@ export class SettingsStore {
   }
 
   private migrateSwiftSettings(): StoredSettings | null {
+    if (isMacAppStoreBuild()) return null
     try {
       const serverUrl = normalizeServerURL(execFileSync('/usr/bin/defaults', ['read', 'com.zhengyiluo.ZenithDock', 'serverURL'], { encoding: 'utf8', timeout: 3000 }).trim())
       let token = ''
@@ -87,8 +99,7 @@ export class SettingsStore {
         token = execFileSync('/usr/bin/security', ['find-generic-password', '-s', 'com.zhengyiluo.ZenithDock', '-a', 'agent-access-token', '-w'], { encoding: 'utf8', timeout: 3000 }).trim()
       } catch { /* the endpoint can still be migrated without a token */ }
       const migrated: StoredSettings = { serverUrl }
-      if (token) {
-        writeKeychainToken(token)
+      if (token && writeKeychainToken(token)) {
         migrated.keychainAccessToken = true
       }
       mkdirSync(dirname(this.path), { recursive: true })
@@ -109,15 +120,17 @@ export class SettingsStore {
     try {
       const token = safeStorage.decryptString(Buffer.from(this.value.encryptedAccessToken, 'base64'))
       if (!token) return
-      writeKeychainToken(token)
-      this.value.keychainAccessToken = true
-      delete this.value.encryptedAccessToken
-      this.write()
+      if (writeKeychainToken(token)) {
+        this.value.keychainAccessToken = true
+        delete this.value.encryptedAccessToken
+        this.write()
+      }
     } catch { /* normal startup remains non-blocking; the user can re-enter the token */ }
   }
 }
 
 function readKeychainToken(): string {
+  if (isMacAppStoreBuild()) return ''
   try {
     return execFileSync('/usr/bin/security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w'], {
       encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore']
@@ -125,16 +138,29 @@ function readKeychainToken(): string {
   } catch { return '' }
 }
 
-function writeKeychainToken(token: string): void {
-  execFileSync('/usr/bin/security', ['add-generic-password', '-U', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w', token], {
-    encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'ignore', 'pipe']
-  })
+function writeKeychainToken(token: string): boolean {
+  try {
+    execFileSync('/usr/bin/security', ['add-generic-password', '-U', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w', token], {
+      encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'ignore', 'pipe']
+    })
+    return true
+  } catch { return false }
 }
 
 function deleteKeychainToken(): void {
+  if (isMacAppStoreBuild()) return
   try {
     execFileSync('/usr/bin/security', ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT], {
       encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'ignore', 'ignore']
     })
   } catch { /* deleting an absent token is already the desired state */ }
+}
+
+function decryptStoredToken(value: string | undefined): string {
+  if (!value || !safeStorage.isEncryptionAvailable()) return ''
+  try { return safeStorage.decryptString(Buffer.from(value, 'base64')) } catch { return '' }
+}
+
+function isMacAppStoreBuild(): boolean {
+  return Boolean((process as NodeJS.Process & { mas?: boolean }).mas)
 }

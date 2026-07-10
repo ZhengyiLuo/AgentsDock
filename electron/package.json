@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac dir",
+    "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac zip dmg",
     "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas"
   },
   "pnpm": {
@@ -23,8 +23,9 @@
     ]
   },
   "build": {
-    "appId": "com.zhengyiluo.AgentsDockElectron",
+    "appId": "com.zhengyiluo.ZenithDock",
     "productName": "AgentsDock",
+    "buildVersion": "59",
     "asar": true,
     "directories": {
       "output": "dist"
@@ -37,17 +38,29 @@
       "icon": "build/AgentsDock.icns",
       "category": "public.app-category.developer-tools",
       "target": [
-        "dir"
+        "zip",
+        "dmg"
       ],
       "hardenedRuntime": true,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.inherit.plist"
+      "entitlements": "packaging/entitlements.mac.plist",
+      "entitlementsInherit": "packaging/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "AgentsDock uses the microphone only when you choose voice input."
+      }
     },
     "mas": {
-      "entitlements": "build/entitlements.mas.plist",
-      "entitlementsInherit": "build/entitlements.mas.inherit.plist",
-      "provisioningProfile": "build/AgentsDock_Mac_App_Store.provisionprofile"
-    }
+      "entitlements": "packaging/entitlements.mas.plist",
+      "entitlementsInherit": "packaging/entitlements.mas.inherit.plist"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ZhengyiLuo",
+        "repo": "ZenithBotServer",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -66,6 +79,7 @@
     "@tanstack/react-query": "^5.101.2",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "electron-updater": "^6.8.9",
     "highlight.js": "^11.11.1",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",

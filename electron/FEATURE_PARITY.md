@@ -64,10 +64,11 @@ packaged-app smoke pass.
 - [x] `pnpm typecheck`
 - [x] `pnpm test`
 - [x] Production renderer/main/preload build
-- [x] Local arm64 package at `dist/AgentsDock-Electron.app`
+- [x] Local arm64 package at `dist/AgentsDock.app`
 - [x] Packaged launch, cache bootstrap, authenticated server connection, and
   real-workspace render smoke check
 - [x] Regression coverage for chat switching, queued turns, paging, full-copy,
   authorized file links, media state, and relaunch viewport persistence
 
-The Electron app is not uploaded to TestFlight by this workflow.
+Direct builds update from signed GitHub Release artifacts. MAS/TestFlight
+builds disable that updater and receive updates from Apple.

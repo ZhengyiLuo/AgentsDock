@@ -213,6 +213,18 @@ export interface PublicServerSettings {
   serverIdentity?: string | null
 }
 
+export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
+export type AppUpdateChannel = 'development' | 'direct' | 'app-store'
+export interface AppUpdateStatus {
+  state: AppUpdateState
+  channel: AppUpdateChannel
+  currentVersion: string
+  availableVersion?: string
+  progress?: number
+  message?: string
+  checkedAt?: string
+}
+
 export interface TimelinePage {
   session: Session
   events: Event[]
@@ -376,6 +388,7 @@ export interface NativeFileRef {
 }
 
 export interface AppEventMap {
+  'app:update': AppUpdateStatus
   'server:connection': { connected: boolean; health?: Health; error?: string }
   'server:sessions': Session[]
   'server:event': Event

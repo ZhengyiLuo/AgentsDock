@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$ROOT/electron"
-DESTINATION="$ROOT/dist/AgentsDock-Electron.app"
+DESTINATION="$ROOT/dist/AgentsDock.app"
+STAGED_DESTINATION="$ROOT/dist/.AgentsDock.next.app"
+LEGACY_DESTINATION="$ROOT/dist/AgentsDock-Electron.app"
 BUNDLED_RUNTIME="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 
 if [[ -d "$BUNDLED_RUNTIME/node/bin" ]]; then
@@ -24,9 +26,13 @@ node_modules/.bin/electron-vite build
 node_modules/.bin/electron-builder --mac dir --config.mac.identity=null --config.directories.output=dist-verify
 
 mkdir -p "$ROOT/dist"
+rm -rf "$STAGED_DESTINATION"
+/usr/bin/ditto "$PROJECT/dist-verify/mac-arm64/AgentsDock.app" "$STAGED_DESTINATION"
+/usr/bin/codesign --force --deep --sign - "$STAGED_DESTINATION"
+/usr/bin/codesign --verify --deep --strict "$STAGED_DESTINATION"
+
 rm -rf "$DESTINATION"
-/usr/bin/ditto "$PROJECT/dist-verify/mac-arm64/AgentsDock.app" "$DESTINATION"
-/usr/bin/codesign --force --deep --sign - "$DESTINATION"
-/usr/bin/codesign --verify --deep --strict "$DESTINATION"
+mv "$STAGED_DESTINATION" "$DESTINATION"
+rm -rf "$LEGACY_DESTINATION"
 
 echo "Built $DESTINATION"

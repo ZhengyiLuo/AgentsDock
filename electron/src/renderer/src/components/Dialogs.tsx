@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, Clock3, Command, LoaderCircle, Search, Server, X } from 'lucide-react'
-import type { Backend, CreateJobInput, Job, Session, UpdateJobInput } from '@shared/types'
+import { Check, Clock3, Command, Download, LoaderCircle, RefreshCw, Search, Server, X } from 'lucide-react'
+import type { AppUpdateStatus, Backend, CreateJobInput, Job, Session, UpdateJobInput } from '@shared/types'
 import { runtimeLabel } from '../lib/format'
 import { orderedActiveSessions, sessionMatchesQuery } from '../lib/sessions'
 import { useAppStore } from '../store/app-store'
@@ -75,7 +75,13 @@ function SettingsDialog() {
   const [url, setURL] = useState('')
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
-  useEffect(() => { if (open) void window.agentsDock.settings.get().then(value => { setURL(value.serverUrl); setToken('') }) }, [open])
+  const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
+  useEffect(() => {
+    if (!open) return
+    void window.agentsDock.settings.get().then(value => { setURL(value.serverUrl); setToken('') })
+    void window.agentsDock.updates.status().then(setUpdate)
+    return window.agentsDock.events.on('app:update', setUpdate)
+  }, [open])
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true)
     try {
@@ -90,6 +96,13 @@ function SettingsDialog() {
       <div className={`server-health ${connected ? 'online' : 'offline'}`}><span /><div><strong>{connected ? 'Connected' : 'Offline'}</strong><small>{health?.server_identity || 'Connection settings are stored on this Mac.'}</small></div></div>
       <label><span>Server URL</span><div className="input-with-icon"><Server size={14} /><input value={url} onChange={event => setURL(event.target.value)} placeholder="100.73.184.23:7850" autoCapitalize="none" autoCorrect="off" /></div></label>
       <label><span>Access token</span><input type="password" value={token} onChange={event => setToken(event.target.value)} placeholder="Leave blank to keep saved token" autoComplete="off" /></label>
+      {update && <div className="update-panel">
+        <div className="update-copy"><strong>App updates <small>v{update.currentVersion}</small></strong><span>{update.message}</span></div>
+        {update.channel === 'direct' && update.state !== 'downloaded' && <button type="button" className="quiet-button" disabled={update.state === 'checking' || update.state === 'downloading'} onClick={() => void window.agentsDock.updates.check()}>{update.state === 'checking' || update.state === 'downloading' ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} Check now</button>}
+        {update.state === 'downloaded' && <button type="button" className="primary-button" onClick={() => void window.agentsDock.updates.install()}><Download size={13} /> Restart to update</button>}
+        {update.channel === 'app-store' && <span className="update-channel">TestFlight</span>}
+        {update.state === 'downloading' && <div className="update-progress"><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
+      </div>}
       <footer><button type="button" className="quiet-button" onClick={() => useAppStore.getState().setModal('settings', false)}>Cancel</button><button className="primary-button" disabled={!url.trim() || saving}>{saving && <LoaderCircle className="spin" size={14} />} Apply &amp; reconnect</button></footer>
     </form>
   </Shell>

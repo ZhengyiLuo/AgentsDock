@@ -6895,3 +6895,19 @@ Follow-up from rapid-switch stress:
   fallback directory in `PATH`, so Electron Builder can always spawn `pnpm`
   instead of depending on whichever interactive shell launched the build.
 - Added a component regression test for in-inset current-turn changes.
+
+## 2026-07-09 - Promote Electron and split update channels
+
+- Promoted the Electron client to the canonical `dist/AgentsDock.app` output
+  and production bundle identifier while retaining its existing SQLite cache,
+  drafts, settings, and Keychain service.
+- Added `electron-updater` with a public, credential-free GitHub release feed,
+  background checks, download progress, manual checks, and restart-to-install.
+- Mac App Store/TestFlight builds explicitly disable the direct updater because
+  Apple owns updates for sandboxed builds. Direct and MAS packaging now have
+  separate scripts and signing requirements.
+- Corrected the malformed MAS application-group entitlement and made sandboxed
+  token storage use Electron secure storage instead of launching the external
+  `security` command from inside the App Sandbox.
+- Set build 59 as the first Electron TestFlight candidate. TypeScript validation
+  and all 54 Electron regression tests pass before packaging.

@@ -658,7 +658,11 @@ function updateBadge(sessions: Session[]): void { void window.agentsDock.native.
 
 function handleMenuCommand(command: string, get: () => AppState, set: (value: Partial<AppState>) => void): void {
   if (command.startsWith('open-session:')) { void get().selectSession(command.slice('open-session:'.length)); return }
-  if (command === 'settings') get().setModal('settings', true)
+  if (command === 'check-update') {
+    get().setModal('settings', true)
+    void window.agentsDock.updates.check()
+  }
+  else if (command === 'settings') get().setModal('settings', true)
   else if (command === 'new-chat') get().setModal('newChat', true)
   else if (command === 'attach-files') void window.agentsDock.files.choose().then(get().attachPaths)
   else if (command === 'find-chat') get().setModal('search', true)

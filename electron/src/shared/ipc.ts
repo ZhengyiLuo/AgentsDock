@@ -1,5 +1,6 @@
 import type {
   AgentFile,
+  AppUpdateStatus,
   BootstrapPayload,
   CreateJobInput,
   CreateSessionInput,
@@ -30,6 +31,11 @@ import type {
 
 export interface AgentsDockAPI {
   bootstrap(): Promise<BootstrapPayload>
+  updates: {
+    status(): Promise<AppUpdateStatus>
+    check(): Promise<AppUpdateStatus>
+    install(): Promise<boolean>
+  }
   settings: {
     get(): Promise<PublicServerSettings>
     apply(settings: ServerSettings): Promise<Health>
