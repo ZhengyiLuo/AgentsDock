@@ -6963,4 +6963,9 @@ Follow-up from rapid-switch stress:
 - The MAS build script now rejects a staged app unless App Sandbox,
   `ElectronTeamID`, and the exact application group are all present. This turns
   the build-59 runtime crash into a packaging-time failure if signing regresses.
-- Advanced the macOS TestFlight build to 60.
+- Advanced the macOS TestFlight build to 60. The fully signed exported payload
+  was expanded and checked before upload; Xcode preserved the application
+  identifier, team identifier, application group, sandbox, JIT permissions,
+  and renderer-helper inheritance.
+- Uploaded macOS build 60 successfully to App Store Connect. Missing dSYMs for
+  prebuilt Electron binaries remain non-blocking symbol-upload warnings.
