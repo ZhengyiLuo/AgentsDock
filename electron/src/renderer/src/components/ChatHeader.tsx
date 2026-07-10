@@ -32,7 +32,7 @@ export function ChatHeader({ terminalOpen = false, onTerminalToggle }: { termina
           onClick={onTerminalToggle}
         ><SquareTerminal size={16} /></button>
         <ConnectionStatus />
-        <button className="icon-button inspector-toggle" title={inspector ? 'Hide right panel' : 'Show right panel'} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button>
+        <button className="icon-button inspector-toggle" title={`${inspector ? 'Hide' : 'Show'} right panel (⌘L)`} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button>
       </div>
     </header>
   )

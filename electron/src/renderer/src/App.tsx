@@ -4,7 +4,7 @@ import { ChatHeader } from './components/ChatHeader'
 import { CodeReview } from './components/CodeReview'
 import { Composer } from './components/Composer'
 import { Dialogs } from './components/Dialogs'
-import { Inspector } from './components/Inspector'
+import { InspectorDock } from './components/InspectorDock'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
@@ -41,15 +41,24 @@ export function App() {
     return () => window.removeEventListener('agentsdock:review-diff', open)
   }, [])
   useEffect(() => {
-    const toggleTerminal = (event: KeyboardEvent) => {
-      if (!event.metaKey || !event.shiftKey || event.key.toLowerCase() !== 't' || !selectedSessionId) return
-      event.preventDefault()
-      event.stopPropagation()
-      setTerminalOpen(selectedSessionId, !terminalOpen)
+    const handleWorkspaceShortcut = (event: KeyboardEvent) => {
+      if (!event.metaKey) return
+      const key = event.key.toLowerCase()
+      if (event.shiftKey && key === 't' && selectedSessionId) {
+        event.preventDefault()
+        event.stopPropagation()
+        setTerminalOpen(selectedSessionId, !terminalOpen)
+        return
+      }
+      if (!event.shiftKey && key === 'l') {
+        event.preventDefault()
+        event.stopPropagation()
+        useAppStore.getState().setInspectorVisible(!inspectorVisible)
+      }
     }
-    window.addEventListener('keydown', toggleTerminal, true)
-    return () => window.removeEventListener('keydown', toggleTerminal, true)
-  }, [selectedSessionId, terminalOpen])
+    window.addEventListener('keydown', handleWorkspaceShortcut, true)
+    return () => window.removeEventListener('keydown', handleWorkspaceShortcut, true)
+  }, [inspectorVisible, selectedSessionId, terminalOpen])
   const setTerminalOpen = (sessionId: string, open: boolean) => {
     setTerminalOpenBySession(current => {
       const next = { ...current, [sessionId]: open }
@@ -76,7 +85,7 @@ export function App() {
           <Composer />
         </div>
       </section>
-      {inspectorVisible && <Inspector key={selectedSessionId || 'empty'} />}
+      <InspectorDock open={inspectorVisible} contentKey={selectedSessionId || 'empty'} />
       {selectedSession && <TerminalDock
         key={selectedSession.id}
         open={terminalOpen}

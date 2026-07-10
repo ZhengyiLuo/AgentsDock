@@ -7142,3 +7142,7 @@ Follow-up from rapid-switch stress:
   remains full-height and visible beside it. While xterm is focused,
   `Command-W` closes the dock and terminal editing/window/split shortcuts
   remain captured by xterm.
+- Replaced the right inspector's conditional mount with an animated presence
+  shell. `Command-L` and the header icon now ease the inspector column in and
+  out over the same 220 ms curve, preserve its content through the closing
+  motion, and retain the compact-window overlay behavior.

@@ -44,8 +44,8 @@ textarea { resize: none; }
 
 .app-boot { height: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
 .app-boot small { max-width: 340px; color: var(--faint); text-align: center; }
-.app-shell { height: 100%; display: grid; grid-template-columns: 282px minmax(520px, 1fr); grid-template-rows: minmax(0, 1fr) auto; background: var(--bg); }
-.app-shell.inspector-open { grid-template-columns: 282px minmax(520px, 1fr) minmax(300px, 350px); }
+.app-shell { --inspector-width: 350px; height: 100%; display: grid; grid-template-columns: 282px minmax(520px, 1fr) 0; grid-template-rows: minmax(0, 1fr) auto; background: var(--bg); transition: grid-template-columns 220ms cubic-bezier(.22, .8, .24, 1); }
+.app-shell.inspector-open { grid-template-columns: 282px minmax(520px, 1fr) var(--inspector-width); }
 .conversation-pane { min-width: 0; min-height: 0; grid-column: 2; grid-row: 1; display: grid; grid-template-rows: auto minmax(0, 1fr); position: relative; background: #181818; border-left: 1px solid var(--border); }
 .chat-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
 .terminal-dock-shell { --terminal-dock-height: clamp(220px, 38vh, 460px); height: 0; min-height: 0; position: relative; overflow: hidden; opacity: .72; pointer-events: none; transition: height 220ms cubic-bezier(.22, .8, .24, 1), opacity 150ms ease-out; will-change: height; }
@@ -53,9 +53,12 @@ textarea { resize: none; }
 .terminal-dock-shell.open { height: var(--terminal-dock-height); opacity: 1; pointer-events: auto; }
 .terminal-dock-shell > .terminal-workspace { width: 100%; height: var(--terminal-dock-height); position: absolute; top: 0; right: 0; left: 0; transform: translateY(12px); transition: transform 220ms cubic-bezier(.22, .8, .24, 1); }
 .terminal-dock-shell.open > .terminal-workspace { transform: translateY(0); }
-.sidebar, .inspector { min-width: 0; min-height: 0; grid-row: 1; background: #171717; }
+.sidebar, .inspector { min-width: 0; min-height: 0; background: #171717; }
 .sidebar { grid-column: 1; grid-row: 1 / -1; }
-.inspector { grid-column: 3; }
+.inspector-dock-shell { min-width: 0; min-height: 0; grid-column: 3; grid-row: 1; position: relative; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity 150ms ease-out; }
+.inspector-dock-shell.open { opacity: 1; pointer-events: auto; }
+.inspector-dock-shell > .inspector { width: var(--inspector-width); height: 100%; position: absolute; top: 0; right: 0; bottom: 0; transform: translateX(14px); transition: transform 220ms cubic-bezier(.22, .8, .24, 1); }
+.inspector-dock-shell.open > .inspector { transform: translateX(0); }
 .sidebar-drag-region, .inspector-drag-region { height: 36px; -webkit-app-region: drag; flex: 0 0 auto; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -743,14 +746,16 @@ textarea { resize: none; }
 :root[data-theme="light"] .hljs-function { color: #8250df; }
 
 @media (max-width: 1240px) {
-  .app-shell.inspector-open { grid-template-columns: 245px minmax(500px, 1fr) 310px; }
+  .app-shell { --inspector-width: 310px; grid-template-columns: 245px minmax(500px, 1fr) 0; }
+  .app-shell.inspector-open { grid-template-columns: 245px minmax(500px, 1fr) var(--inspector-width); }
   .sidebar-search kbd { display: none; }
   .virtual-row { padding: 0 20px 0 60px; }
 }
 @media (max-width: 1040px) {
-  .app-shell { grid-template-columns: 230px minmax(460px, 1fr); }
-  .app-shell.inspector-open { grid-template-columns: 230px minmax(460px, 1fr); }
-  .app-shell.inspector-open .inspector { position: fixed; z-index: 90; top: 0; right: 0; bottom: 0; width: 330px; box-shadow: -20px 0 55px #000b; }
+  .app-shell, .app-shell.inspector-open { --inspector-width: 330px; grid-template-columns: 230px minmax(460px, 1fr) 0; }
+  .inspector-dock-shell { width: var(--inspector-width); position: fixed; z-index: 90; top: 0; right: 0; bottom: 0; overflow: visible; transform: translateX(100%); transition: transform 220ms cubic-bezier(.22, .8, .24, 1), opacity 150ms ease-out; }
+  .inspector-dock-shell.open { transform: translateX(0); box-shadow: -20px 0 55px #000b; }
+  .inspector-dock-shell > .inspector { position: absolute; }
   .chat-header { padding-inline: 13px; }
   .virtual-row { padding: 0 14px 0 56px; }
 }
