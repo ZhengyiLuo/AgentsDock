@@ -51,7 +51,15 @@
     },
     "mas": {
       "entitlements": "packaging/entitlements.mas.plist",
-      "entitlementsInherit": "packaging/entitlements.mas.inherit.plist"
+      "entitlementsInherit": "packaging/entitlements.mas.inherit.plist",
+      "hardenedRuntime": false,
+      "preAutoEntitlements": false
+    },
+    "masDev": {
+      "entitlements": "packaging/entitlements.mas.plist",
+      "entitlementsInherit": "packaging/entitlements.mas.inherit.plist",
+      "hardenedRuntime": false,
+      "preAutoEntitlements": false
     },
     "publish": [
       {

@@ -2,5 +2,5 @@ node_modules/
 out/
 dist/
 dist-verify/
+dist-*/
 *.log
-
