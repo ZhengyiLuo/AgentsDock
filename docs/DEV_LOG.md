@@ -7051,3 +7051,6 @@ Follow-up from rapid-switch stress:
   low-latency path, and all attach processes are terminated on disconnect.
 - Bumped the server API contract to v5 and added transport regressions for
   authorization, UTF-8 byte streaming, resize, input, and detach behavior.
+- Added `scripts/smoke_terminal.mjs`. Its authenticated live-server run proved
+  PTY input, detach/reattach state persistence, a second tmux window, a split
+  pane, session deletion, and temporary-chat cleanup without server errors.
