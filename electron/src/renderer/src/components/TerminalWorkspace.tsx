@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
   Columns2,
   Copy,
   LoaderCircle,
@@ -21,6 +22,7 @@ import {
   X
 } from 'lucide-react'
 import type { Session, TerminalAction, TerminalConnectionState, TerminalWindow } from '../../../shared/types'
+import { terminalClipboardShortcut } from '../lib/terminal-shortcuts'
 import { useAppStore } from '../store/app-store'
 
 export function TerminalWorkspace({ session, onClose }: { session: Session; onClose?: () => void }) {
@@ -106,6 +108,8 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
       lineHeight: 1.18,
       letterSpacing: 0,
       macOptionIsMeta: true,
+      macOptionClickForcesSelection: true,
+      rightClickSelectsWord: true,
       scrollback: 20_000,
       smoothScrollDuration: 0,
       theme: terminalTheme()
@@ -124,16 +128,18 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
     terminal.attachCustomKeyEventHandler(event => {
       if (event.type !== 'keydown' || !event.metaKey) return true
       const key = event.key.toLowerCase()
-      if (key === 'c' && terminal.hasSelection()) {
-        void window.agentsDock.native.writeClipboard(terminal.getSelection())
+      const clipboardShortcut = terminalClipboardShortcut(event)
+      if (clipboardShortcut === 'copy') {
+        if (terminal.hasSelection()) void window.agentsDock.native.writeClipboard(terminal.getSelection())
         return false
       }
-      if (key === 'v') {
-        void window.agentsDock.native.readClipboard().then(value => {
-          if (value) window.agentsDock.terminal.write(session.id, value)
-        })
+      if (clipboardShortcut === 'select-all') {
+        terminal.selectAll()
         return false
       }
+      // Electron's Edit menu dispatches the native paste event to xterm. Letting
+      // that path run avoids injecting the clipboard a second time here.
+      if (clipboardShortcut === 'native-paste') return true
       if (key === 'f') {
         setSearchOpen(true)
         return false
@@ -296,6 +302,9 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
         <button className="icon-button" title="Find in terminal (⌘F)" onClick={() => setSearchOpen(value => !value)}><Search size={15} /></button>
         <button className="icon-button" title="Reconnect terminal" onClick={() => void connect()}><RefreshCw size={15} /></button>
         <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="icon-button" title="Terminal actions"><MoreHorizontal size={16} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" align="end">
+          <DropdownMenu.Item className="menu-item" onSelect={copy}><Copy size={14} /> Copy selection</DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" onSelect={paste}><ClipboardPaste size={14} /> Paste</DropdownMenu.Item>
+          <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item" onSelect={() => void runAction('kill-pane')}><X size={14} /> Close active pane</DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item danger" onSelect={() => setConfirmKill(true)}><Trash2 size={14} /> Kill tmux session</DropdownMenu.Item>

@@ -7146,3 +7146,19 @@ Follow-up from rapid-switch stress:
   shell. `Command-L` and the header icon now ease the inspector column in and
   out over the same 220 ms curve, preserve its content through the closing
   motion, and retain the compact-window overlay behavior.
+
+## 2026-07-10 - Resize the terminal without moving the conversation
+
+- Reduced the terminal dock's default height to 240 pixels and added a subtle
+  top-edge resize handle. Dragging, arrow-key adjustment, double-click reset,
+  viewport clamping, and the chosen persisted height all share one bounded
+  height model.
+- Dock animation and resizing now publish a short layout transaction. The
+  timeline preserves its current semantic row and pixel offset while reading
+  older content, and keeps the latest message visible when it was already at
+  the bottom, using native scroll offsets rather than repeated Virtuoso seeks.
+- Terminal selection now follows native Mac conventions even while tmux mouse
+  mode is active: Option-drag forces local selection, Command-C copies it, and
+  Command-A selects scrollback. Command-V is handled only by Electron/xterm's
+  native paste event, fixing duplicated terminal pastes; explicit Copy/Paste
+  actions remain available in both terminal menus.

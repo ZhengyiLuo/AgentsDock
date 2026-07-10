@@ -10,6 +10,7 @@ import { buildTimelineLandmarks, mergeTimelineLandmarks, type TimelineNavigatorL
 import { initialTimelineLocation } from '../lib/timeline-position'
 import { formatTime } from '../lib/format'
 import { OPEN_HISTORY_RESULT_EVENT } from '../lib/session-history-search'
+import { TIMELINE_VIEWPORT_LAYOUT_EVENT, type TimelineViewportLayoutDetail } from '../lib/workspace-layout'
 
 const timelineViewStates = new Map<string, ViewState>()
 const FIRST_INDEX = 1_000_000
@@ -18,6 +19,12 @@ const MAX_SAVED_TIMELINES = 16
 interface HistoricalWindow {
   page: TimelinePage
   anchorSeq: number
+}
+
+interface WorkspaceLayoutAnchor {
+  atBottom: boolean
+  itemKey: string | null
+  topOffset: number
 }
 
 export function Timeline() {
@@ -56,6 +63,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const distanceFromBottomRef = useRef(initialViewState?.distanceFromBottom ?? 0)
   const viewSaveTimer = useRef<number | null>(null)
   const minimapSyncFrame = useRef<number | null>(null)
+  const workspaceLayoutFrame = useRef<number | null>(null)
+  const workspaceLayoutAnchor = useRef<WorkspaceLayoutAnchor | null>(null)
   const loadingOlderRef = useRef(false)
   const pendingLocalScroll = useRef(false)
   const historySeekLease = useRef(0)
@@ -155,6 +164,24 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     atBottomRef.current = distanceFromBottom <= 80
   }, [historicalWindow, items])
 
+  const restoreWorkspaceLayoutAnchor = useCallback(() => {
+    const node = scroller.current
+    const anchor = workspaceLayoutAnchor.current
+    if (!node || !anchor) return true
+    if (anchor.atBottom) {
+      node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight)
+      return true
+    }
+    if (!anchor.itemKey) return true
+    const marker = Array.from(node.querySelectorAll<HTMLElement>('[data-timeline-key]'))
+      .find(candidate => candidate.dataset.timelineKey === anchor.itemKey)
+    const row = marker?.closest<HTMLElement>('[data-index]') ?? marker
+    if (!row) return false
+    const delta = row.getBoundingClientRect().top - node.getBoundingClientRect().top - anchor.topOffset
+    if (Math.abs(delta) > 0.5) node.scrollTop += delta
+    return true
+  }, [])
+
   const persistView = useCallback(() => {
     if (historicalWindow) return
     const state: ViewState = {
@@ -246,6 +273,48 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     })
     return () => window.cancelAnimationFrame(frame)
   }, [items, captureVisiblePosition])
+
+  useEffect(() => {
+    const scheduleRestore = (finish: boolean) => {
+      if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
+      workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
+        workspaceLayoutFrame.current = null
+        const restored = restoreWorkspaceLayoutAnchor()
+        if (!finish) return
+        if (!restored) {
+          const itemKey = workspaceLayoutAnchor.current?.itemKey
+          const index = itemKey ? projected.current.findIndex(item => item.key === itemKey) : -1
+          if (index >= 0) ref.current?.scrollToIndex({ index, align: 'start', behavior: 'auto' })
+        }
+        workspaceLayoutFrame.current = window.requestAnimationFrame(() => {
+          workspaceLayoutFrame.current = null
+          restoreWorkspaceLayoutAnchor()
+          workspaceLayoutAnchor.current = null
+          captureVisiblePosition()
+          scheduleViewSave()
+        })
+      })
+    }
+    const handleLayout = (event: Event) => {
+      const { phase } = (event as CustomEvent<TimelineViewportLayoutDetail>).detail
+      if (phase === 'begin') {
+        captureVisiblePosition()
+        workspaceLayoutAnchor.current = {
+          atBottom: atBottomRef.current,
+          itemKey: topItemIdRef.current,
+          topOffset: topOffsetRef.current
+        }
+        return
+      }
+      if (!workspaceLayoutAnchor.current) return
+      scheduleRestore(phase === 'end')
+    }
+    window.addEventListener(TIMELINE_VIEWPORT_LAYOUT_EVENT, handleLayout)
+    return () => {
+      window.removeEventListener(TIMELINE_VIEWPORT_LAYOUT_EVENT, handleLayout)
+      if (workspaceLayoutFrame.current != null) window.cancelAnimationFrame(workspaceLayoutFrame.current)
+    }
+  }, [captureVisiblePosition, restoreWorkspaceLayoutAnchor, scheduleViewSave])
 
   useEffect(() => {
     const capture = () => {
