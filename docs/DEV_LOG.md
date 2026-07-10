@@ -7108,3 +7108,14 @@ Follow-up from rapid-switch stress:
 - Added transport, grouping, metadata/history merge, debounce, stale-response,
   and isolated append/truncate index regressions. TypeScript, Python compile,
   and all 79 Electron tests pass in normal and shuffled execution order.
+
+## 2026-07-10 - Close persistent terminal windows from their tabs
+
+- Added a hover-visible close control to every tmux window tab. Closing a
+  regular window targets that exact tmux window, including any panes it owns,
+  while keeping the chat's persistent tmux session attached.
+- Closing the final window now enters the existing destructive session-kill
+  confirmation instead of silently ending every shell and process.
+- Added a server-side final-window guard so stale or concurrent clients cannot
+  bypass the UI protection, plus transport and authenticated terminal smoke
+  coverage for exact-window close and final-window rejection.

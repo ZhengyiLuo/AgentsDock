@@ -94,6 +94,10 @@ disconnects detach the client without stopping shells, windows, panes, or
 long-running processes. The agent host must have `tmux` installed and run an
 agent server with API contract v5 or newer.
 
+Terminal tabs expose window creation, selection, and hover-close controls.
+Closing a non-final tab kills that tmux window and its panes; closing the final
+tab requires confirmation because it ends the chat's persistent tmux session.
+
 Direct downloads use `electron-updater` with public release assets hosted on
 the `ZenithBotServer` GitHub Releases channel. The source repository stays
 private and no GitHub credential is embedded in the app. A production release

@@ -117,8 +117,26 @@ try {
   if (split.windows.length !== 2 || !split.windows.some(window => window.active && window.panes === 2)) {
     throw new Error(`Unexpected tmux window state: ${JSON.stringify(split.windows)}`)
   }
+  const activeWindow = split.windows.find(window => window.active)
+  const afterClose = await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'kill-window', target: String(activeWindow.index) })
+  })
+  if (afterClose.windows.length !== 1) {
+    throw new Error(`Tmux window did not close: ${JSON.stringify(afterClose.windows)}`)
+  }
+  let finalWindowProtected = false
+  try {
+    await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'kill-window', target: String(afterClose.windows[0].index) })
+    })
+  } catch (error) {
+    finalWindowProtected = String(error).includes('409')
+  }
+  if (!finalWindowProtected) throw new Error('The final tmux window was not protected')
 
-  console.log(`Terminal smoke passed: attach, persistent state, reattach, ${split.windows.length} windows, split pane`)
+  console.log('Terminal smoke passed: attach, persistent state, reattach, window close, final-window guard, split pane')
 } finally {
   if (sessionId) {
     await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal`, { method: 'DELETE' }).catch(() => {})

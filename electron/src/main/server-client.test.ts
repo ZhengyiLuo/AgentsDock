@@ -109,6 +109,21 @@ describe('AgentServerClient live stream', () => {
     expect(results[0]).toMatchObject({ session_id: 'chat-a', seq: 8 })
   })
 
+  it('closes a specific tmux window through the structured terminal API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      session_id: 'chat',
+      name: 'zd_chat',
+      exists: true,
+      windows: [{ id: '@1', index: 0, name: 'bash', active: true, panes: 1 }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await client.terminalAction('chat', 'kill-window', '2')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/sessions/chat/terminal/action')
+    expect(JSON.parse(String(init.body))).toEqual({ action: 'kill-window', target: '2' })
+  })
+
   it('attaches a binary terminal stream with dimensions, input, resize, and intentional detach', () => {
     vi.useFakeTimers()
     vi.stubGlobal('WebSocket', FakeWebSocket)

@@ -202,7 +202,7 @@ export interface TerminalStateEvent {
   error?: string | null
 }
 
-export type TerminalAction = 'new-window' | 'split-right' | 'split-down' | 'next-window' | 'previous-window' | 'select-window' | 'kill-pane'
+export type TerminalAction = 'new-window' | 'split-right' | 'split-down' | 'next-window' | 'previous-window' | 'select-window' | 'kill-window' | 'kill-pane'
 
 export interface TerminalWindow {
   id: string

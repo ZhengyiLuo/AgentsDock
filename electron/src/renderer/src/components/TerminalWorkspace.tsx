@@ -235,18 +235,45 @@ export function TerminalWorkspace({ session }: { session: Session }) {
       useAppStore.getState().setError(message)
     }
   }
+  const closeWindow = (index: number) => {
+    if (windows.length <= 1) {
+      setConfirmKill(true)
+      return
+    }
+    void runAction('kill-window', String(index))
+  }
 
   return <section className="terminal-workspace">
     <header className="terminal-toolbar">
       <div className="terminal-window-tabs" role="tablist" aria-label="Tmux windows">
-        {windows.length ? windows.map(window => <button
-          key={window.id}
-          className={window.active ? 'active' : ''}
-          role="tab"
-          aria-selected={window.active}
-          title={`${window.name} · ${window.panes} ${window.panes === 1 ? 'pane' : 'panes'}`}
-          onClick={() => void runAction('select-window', String(window.index))}
-        ><span>{window.index}</span>{window.name}<small>{window.panes > 1 ? window.panes : ''}</small></button>) : <div className="terminal-window-placeholder"><span className={`terminal-state-dot ${connectionState}`} />{connectionName || 'Terminal'}</div>}
+        {windows.length ? windows.map(tmuxWindow => <div
+          key={tmuxWindow.id}
+          className={`terminal-window-tab${tmuxWindow.active ? ' active' : ''}`}
+        >
+          <button
+            className="terminal-window-select"
+            role="tab"
+            aria-selected={tmuxWindow.active}
+            title={`${tmuxWindow.name} · ${tmuxWindow.panes} ${tmuxWindow.panes === 1 ? 'pane' : 'panes'}`}
+            onClick={() => void runAction('select-window', String(tmuxWindow.index))}
+          >
+            <span className="terminal-window-index">{tmuxWindow.index}</span>
+            <span className="terminal-window-name">{tmuxWindow.name}</span>
+            {tmuxWindow.panes > 1 && <small>{tmuxWindow.panes}</small>}
+          </button>
+          <button
+            className="terminal-window-close"
+            aria-label={`Close ${tmuxWindow.name} tmux window`}
+            title={windows.length === 1
+              ? 'Close final window and end tmux session'
+              : `Close tmux window${tmuxWindow.panes > 1 ? ` and its ${tmuxWindow.panes} panes` : ''}`}
+            disabled={actionBusy}
+            onClick={event => {
+              event.stopPropagation()
+              closeWindow(tmuxWindow.index)
+            }}
+          ><X size={12} /></button>
+        </div>) : <div className="terminal-window-placeholder"><span className={`terminal-state-dot ${connectionState}`} />{connectionName || 'Terminal'}</div>}
         <button className="terminal-add-window" title="New tmux window (⌘T)" onClick={() => void runAction('new-window')}><Plus size={14} /></button>
       </div>
       <div className="terminal-tools">
