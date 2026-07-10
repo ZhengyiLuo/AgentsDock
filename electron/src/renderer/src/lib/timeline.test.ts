@@ -64,6 +64,21 @@ describe('projectTimeline', () => {
     expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
   })
 
+  it('marks assistant updates as one visual group while keeping every update virtualized', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'run-1', prompt: 'Monitor it' }),
+      event(2, 'assistant_text', { run_id: 'run-1', text: 'First update' }),
+      event(3, 'assistant_text', { run_id: 'run-1', text: 'Second update' }),
+      event(4, 'assistant_text', { run_id: 'run-1', text: 'Final update' })
+    ], [])).filter(row => row.kind === 'message' && row.role === 'assistant')
+
+    expect(rows).toMatchObject([
+      { groupPosition: 'first', groupIndex: 0, groupCount: 3 },
+      { groupPosition: 'middle', groupIndex: 1, groupCount: 3 },
+      { groupPosition: 'last', groupIndex: 2, groupCount: 3 }
+    ])
+  })
+
   it('keeps every imported prompt when a provider reuses one run id', () => {
     const rows = renderTimelineItems(projectTimeline([
       event(1, 'turn_started', { run_id: 'import-1', prompt: 'First question' }),

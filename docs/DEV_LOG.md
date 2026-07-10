@@ -6841,3 +6841,15 @@ Follow-up from rapid-switch stress:
   pixel noise while the large Quick Look preview appeared correct.
 - Local Mac packaging now regenerates the ICNS before every build so small icon
   regressions cannot hide behind Builder or Finder caches.
+
+## 2026-07-09 - Group multi-update agent turns
+
+- Consecutive assistant updates sharing one provider run now render as one
+  visual response group with a single Assistant header, update count, compact
+  continuation metadata, and a subtle vertical rail.
+- Individual updates remain separate Virtuoso rows. This preserves bounded DOM
+  work, per-update pin/copy actions, and stable scrolling for very long runs
+  instead of replacing them with one oversized message component.
+- Reconciliation now includes group position and count so streamed appends
+  correctly turn the previous last update into a middle continuation.
+- Regression suite: 48 tests across eleven files; TypeScript validation passes.

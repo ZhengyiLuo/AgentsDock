@@ -1,14 +1,14 @@
 import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
-import type { JobItem, MediaItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
+import type { JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
 import { extractUnifiedDiff, isTimelineError, messageText, parseUnifiedDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
 
 export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, onFindFile }: { item: RenderTimelineItem; sessionId: string; onFindFile: (fileId: string) => void }) {
-  if (item.kind === 'message') return <div className={`turn-segment ${item.role}`}><Message event={item.event} role={item.role} sessionId={sessionId} files={item.files} /></div>
+  if (item.kind === 'message') return <div className={`turn-segment ${item.role} group-${item.groupPosition}`}><Message item={item} sessionId={sessionId} /></div>
   if (item.kind === 'trace') return <div className="turn-segment trace-segment"><TraceDisclosure events={item.events} sessionId={sessionId} /></div>
   if (item.kind === 'media') return <MediaRow item={item} sessionId={sessionId} onFindFile={onFindFile} />
   if (item.kind === 'job') return <JobView item={item} sessionId={sessionId} />
@@ -19,8 +19,10 @@ function MediaRow({ item, sessionId, onFindFile }: { item: MediaItem; sessionId:
   return <div className="turn-segment media-segment"><MediaGrid files={item.files} sessionId={sessionId} onFind={file => onFindFile(file.id)} /></div>
 }
 
-function Message({ event, role, sessionId, files }: { event: Event; role: 'user' | 'assistant'; sessionId: string; files: import('@shared/types').AgentFile[] }) {
+function Message({ item, sessionId }: { item: MessageItem; sessionId: string }) {
+  const { event, role, files, groupPosition, groupIndex, groupCount } = item
   const text = messageText(event)
+  const continuation = role === 'assistant' && (groupPosition === 'middle' || groupPosition === 'last')
   const [copied, setCopied] = useState(false)
   const pin = async () => {
     const item: PinnedItem = {
@@ -32,9 +34,16 @@ function Message({ event, role, sessionId, files }: { event: Event; role: 'user'
   }
   const copy = async () => { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1200) }
   return (
-    <div className={`message-row ${role}`} data-event-id={event.id}>
+    <div className={`message-row ${role} group-${groupPosition}`} data-event-id={event.id}>
       <div className="message-surface">
-        <header><span>{role === 'user' ? 'You' : event.purpose === 'handoff_digest' ? 'Digest' : 'Assistant'}</span><time>{formatTime(event.ts)}</time><button title="Pin" onClick={() => void pin()}><Pin size={12} /></button><button title="Copy full message" onClick={() => void copy()}>{copied ? <Check size={12} /> : <Copy size={12} />}</button></header>
+        <header className={continuation ? 'continuation-meta' : undefined}>
+          {!continuation && <span>{role === 'user' ? 'You' : event.purpose === 'handoff_digest' ? 'Digest' : 'Assistant'}</span>}
+          {!continuation && role === 'assistant' && groupCount > 1 && <small className="update-count">{groupCount} updates</small>}
+          {continuation && <span className="sr-only">Assistant update {groupIndex + 1} of {groupCount}</span>}
+          <time>{formatTime(event.ts)}</time>
+          <button title="Pin" onClick={() => void pin()}><Pin size={12} /></button>
+          <button title="Copy full message" onClick={() => void copy()}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
+        </header>
         <MarkdownContent text={text} files={files} sessionId={sessionId} />
       </div>
     </div>

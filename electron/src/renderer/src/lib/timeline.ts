@@ -11,6 +11,9 @@ export interface MessageItem {
   event: Event
   role: 'user' | 'assistant'
   files: AgentFile[]
+  groupPosition: 'only' | 'first' | 'middle' | 'last'
+  groupIndex: number
+  groupCount: number
 }
 
 export interface TraceItem {
@@ -185,11 +188,18 @@ export function renderTimelineItems(items: TimelineItem[]): RenderTimelineItem[]
       rows.push({
         kind: 'message', id: `${item.id}:user`, key: `${item.key}:user:${item.user.id}`,
         seq: item.user.seq, event: item.user, role: 'user',
-        files: item.files.filter(file => item.user?.file_ids?.includes(file.id))
+        files: item.files.filter(file => item.user?.file_ids?.includes(file.id)),
+        groupPosition: 'only', groupIndex: 0, groupCount: 1
       })
     }
-    for (const event of item.assistant) {
-      rows.push({ kind: 'message', id: `${item.id}:assistant:${event.id}`, key: `${item.key}:assistant:${event.id}`, seq: event.seq, event, role: 'assistant', files: item.files })
+    for (const [index, event] of item.assistant.entries()) {
+      const count = item.assistant.length
+      const groupPosition = count === 1 ? 'only' : index === 0 ? 'first' : index === count - 1 ? 'last' : 'middle'
+      rows.push({
+        kind: 'message', id: `${item.id}:assistant:${event.id}`, key: `${item.key}:assistant:${event.id}`,
+        seq: event.seq, event, role: 'assistant', files: item.files,
+        groupPosition, groupIndex: index, groupCount: count
+      })
     }
     if (item.trace.length) rows.push({ kind: 'trace', id: `${item.id}:trace`, key: `${item.key}:trace`, seq: item.trace[0].seq, events: item.trace })
     if (item.files.length) rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: item.files[0].seq ?? item.seq, files: item.files })
@@ -204,7 +214,9 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
     const before = previousByKey.get(item.key)
     if (!before || before.kind !== item.kind) return item
     if (before === item) return before
-    if (before.kind === 'message' && item.kind === 'message' && before.event === item.event && sameReferences(before.files, item.files)) return before
+    if (before.kind === 'message' && item.kind === 'message' && before.event === item.event &&
+      before.groupPosition === item.groupPosition && before.groupIndex === item.groupIndex && before.groupCount === item.groupCount &&
+      sameReferences(before.files, item.files)) return before
     if (before.kind === 'trace' && item.kind === 'trace' && sameReferences(before.events, item.events)) return before
     if (before.kind === 'media' && item.kind === 'media' && sameReferences(before.files, item.files)) return before
     return item
