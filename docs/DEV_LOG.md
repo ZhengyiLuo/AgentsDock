@@ -7119,3 +7119,14 @@ Follow-up from rapid-switch stress:
 - Added a server-side final-window guard so stale or concurrent clients cannot
   bypass the UI protection, plus transport and authenticated terminal smoke
   coverage for exact-window close and final-window rejection.
+
+## 2026-07-10 - Dock persistent terminals below the chat
+
+- Removed the mutually exclusive Chat/Terminal workspace tabs. Opening a
+  terminal now keeps the timeline and composer visible and docks the live tmux
+  workspace beneath them, matching the interaction model used by coding tools.
+- Added one terminal icon in the chat header and `Command-J` for toggling the
+  dock. Closing the dock only detaches the PTY client; the remote tmux session,
+  windows, panes, and processes continue running.
+- The terminal dock owns a stable bounded height, a clear panel-close control,
+  and its existing tmux window tabs and structured split/window actions.

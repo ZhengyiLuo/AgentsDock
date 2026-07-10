@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { ALargeSmall, Check, MessageSquareText, MoreHorizontal, PanelRight, PanelRightClose, Pin, RefreshCw, Search, SquareTerminal } from 'lucide-react'
+import { ALargeSmall, Check, MoreHorizontal, PanelRight, PanelRightClose, Pin, RefreshCw, Search, SquareTerminal } from 'lucide-react'
 import { runtimeLabel, shortId } from '../lib/format'
 import { useAppStore } from '../store/app-store'
 
-export function ChatHeader({ workspaceMode = 'chat', onWorkspaceModeChange }: { workspaceMode?: 'chat' | 'terminal'; onWorkspaceModeChange?: (mode: 'chat' | 'terminal') => void }) {
+export function ChatHeader({ terminalOpen = false, onTerminalToggle }: { terminalOpen?: boolean; onTerminalToggle?: () => void }) {
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   const connected = useAppStore(state => state.connected)
   const inspector = useAppStore(state => state.inspectorVisible)
@@ -19,15 +19,18 @@ export function ChatHeader({ workspaceMode = 'chat', onWorkspaceModeChange }: { 
         <div className="editable-title"><input value={title} onChange={event => setTitle(event.target.value)} onBlur={save} onKeyDown={event => { if (event.key === 'Enter') { event.currentTarget.blur(); save() } }} /><Check size={14} /></div>
         <small>{session.backend === 'codex' ? 'Codex' : 'Claude'} · {runtimeLabel(session, catalog)} · session {shortId(session.session_id || session.codex_thread_id || session.claude_session_id)}</small>
       </div>
-      <nav className="workspace-tabs" aria-label="Chat workspace">
-        <button className={workspaceMode === 'chat' ? 'active' : ''} onClick={() => onWorkspaceModeChange?.('chat')}><MessageSquareText size={14} />Chat</button>
-        <button className={workspaceMode === 'terminal' ? 'active' : ''} onClick={() => onWorkspaceModeChange?.('terminal')}><SquareTerminal size={14} />Terminal</button>
-      </nav>
       <div className="header-actions">
         <button className="icon-button" title="Refresh latest" onClick={() => void useAppStore.getState().selectSession(session.id, true)}><RefreshCw size={15} /></button>
         <button className="icon-button" title="Find in chat" onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:find-in-chat'))}><Search size={15} /></button>
         <button className="icon-button" title={session.pinned ? 'Unpin chat' : 'Pin chat'} onClick={() => void useAppStore.getState().updateSession(session.id, { pinned: !session.pinned })}><Pin size={15} fill={session.pinned ? 'currentColor' : 'none'} /></button>
         <FontMenu />
+        <button
+          className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}
+          aria-label={terminalOpen ? 'Close terminal panel' : 'Open terminal panel'}
+          aria-pressed={terminalOpen}
+          title={`${terminalOpen ? 'Close' : 'Open'} terminal panel (⌘J)`}
+          onClick={onTerminalToggle}
+        ><SquareTerminal size={16} /></button>
         <ConnectionStatus />
         <button className="icon-button inspector-toggle" title={inspector ? 'Hide right panel' : 'Show right panel'} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button>
       </div>

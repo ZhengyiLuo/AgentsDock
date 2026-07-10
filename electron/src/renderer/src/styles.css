@@ -46,7 +46,9 @@ textarea { resize: none; }
 .app-boot small { max-width: 340px; color: var(--faint); text-align: center; }
 .app-shell { height: 100%; display: grid; grid-template-columns: 282px minmax(520px, 1fr); background: var(--bg); }
 .app-shell.inspector-open { grid-template-columns: 282px minmax(520px, 1fr) minmax(300px, 350px); }
-.conversation-pane { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; position: relative; background: #181818; border-left: 1px solid var(--border); }
+.conversation-pane { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); position: relative; background: #181818; border-left: 1px solid var(--border); }
+.chat-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+.chat-workspace.terminal-open { grid-template-rows: minmax(150px, 1fr) auto clamp(220px, 38vh, 460px); }
 .sidebar, .inspector { min-width: 0; min-height: 0; background: #171717; }
 .sidebar-drag-region, .inspector-drag-region { height: 36px; -webkit-app-region: drag; flex: 0 0 auto; }
 .spin { animation: spin 1s linear infinite; }
@@ -131,18 +133,14 @@ textarea { resize: none; }
 .editable-title svg { color: var(--faint); }
 .title-block small { padding-left: 4px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions { display: flex; align-items: center; gap: 3px; -webkit-app-region: no-drag; }
-.workspace-tabs { height: 33px; display: flex; align-self: flex-end; gap: 15px; -webkit-app-region: no-drag; }
-.workspace-tabs button { height: 33px; position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 650; }
-.workspace-tabs button:hover { color: var(--text); }
-.workspace-tabs button.active { color: var(--text); }
-.workspace-tabs button.active::after { height: 2px; position: absolute; right: 0; bottom: -13px; left: 0; content: ""; background: var(--accent); border-radius: 2px 2px 0 0; }
+.terminal-toggle.active { color: var(--text); background: var(--surface-3); }
 .connection-status { height: 28px; position: relative; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--muted); background: #242424; border-radius: 7px; font-size: 11px; font-weight: 650; pointer-events: auto; -webkit-app-region: no-drag; }
 .connection-status > span, .server-pill > span, .server-health > span { width: 7px; height: 7px; border-radius: 50%; }
 .connection-status.online > span, .server-pill.online > span, .server-health.online > span { background: var(--green); }
 .connection-status.offline > span, .server-pill.offline > span, .server-health.offline > span { background: var(--danger); }
 
 /* Persistent terminal */
-.terminal-workspace { min-width: 0; min-height: 0; position: relative; display: grid; grid-template-rows: 39px minmax(0, 1fr) 24px; overflow: hidden; background: #111212; }
+.terminal-workspace { min-width: 0; min-height: 0; position: relative; display: grid; grid-template-rows: 39px minmax(0, 1fr) 24px; overflow: hidden; background: #111212; border-top: 1px solid #303131; box-shadow: 0 -10px 30px #0003; }
 .terminal-toolbar { min-width: 0; display: flex; align-items: stretch; gap: 8px; padding: 0 8px 0 10px; background: #181919; border-bottom: 1px solid #2a2b2b; }
 .terminal-window-tabs { min-width: 0; flex: 1; display: flex; align-items: stretch; gap: 1px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .terminal-window-tabs::-webkit-scrollbar { display: none; }
@@ -162,6 +160,8 @@ textarea { resize: none; }
 .terminal-window-tabs > .terminal-add-window { min-width: 30px; width: 30px; padding: 0; justify-content: center; }
 .terminal-window-placeholder { display: flex; align-items: center; gap: 8px; padding: 0 9px; color: #aaa9a6; font-size: 11px; }
 .terminal-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
+.terminal-tool-separator { width: 1px; height: 18px; margin: 0 4px; background: #353636; }
+.terminal-panel-close { margin-left: 1px; }
 .terminal-host { min-width: 0; min-height: 0; height: 100%; overflow: hidden; padding: 10px 10px 5px 12px; background: #111212; user-select: text; }
 .terminal-host .xterm { height: 100%; }
 .terminal-host .xterm-viewport { overscroll-behavior: contain; }

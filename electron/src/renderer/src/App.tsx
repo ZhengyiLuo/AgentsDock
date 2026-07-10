@@ -10,8 +10,6 @@ import { TerminalWorkspace } from './components/TerminalWorkspace'
 import { Timeline } from './components/Timeline'
 import { useAppStore } from './store/app-store'
 
-type WorkspaceMode = 'chat' | 'terminal'
-
 export function App() {
   const initialize = useAppStore(state => state.initialize)
   const initialized = useAppStore(state => state.initialized)
@@ -21,11 +19,15 @@ export function App() {
   const error = useAppStore(state => state.error)
   const [reviewDiff, setReviewDiff] = useState<string | null>(null)
   const [slowBoot, setSlowBoot] = useState(false)
-  const [workspaceModes, setWorkspaceModes] = useState<Record<string, WorkspaceMode>>(() => {
-    try { return JSON.parse(localStorage.getItem('agentsdock:workspace-modes') || '{}') as Record<string, WorkspaceMode> }
-    catch { return {} }
+  const [terminalOpenBySession, setTerminalOpenBySession] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('agentsdock:terminal-open')
+      if (saved) return JSON.parse(saved) as Record<string, boolean>
+      const legacy = JSON.parse(localStorage.getItem('agentsdock:workspace-modes') || '{}') as Record<string, string>
+      return Object.fromEntries(Object.entries(legacy).map(([sessionId, mode]) => [sessionId, mode === 'terminal']))
+    } catch { return {} }
   })
-  const workspaceMode = selectedSessionId ? workspaceModes[selectedSessionId] ?? 'chat' : 'chat'
+  const terminalOpen = selectedSessionId ? terminalOpenBySession[selectedSessionId] ?? false : false
 
   useEffect(() => { void initialize() }, [initialize])
   useEffect(() => {
@@ -38,13 +40,25 @@ export function App() {
     window.addEventListener('agentsdock:review-diff', open)
     return () => window.removeEventListener('agentsdock:review-diff', open)
   }, [])
-  const setWorkspaceMode = (mode: WorkspaceMode) => {
-    if (!selectedSessionId) return
-    setWorkspaceModes(current => {
-      const next = { ...current, [selectedSessionId]: mode }
-      localStorage.setItem('agentsdock:workspace-modes', JSON.stringify(next))
+  useEffect(() => {
+    const toggleTerminal = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.key.toLowerCase() !== 'j' || !selectedSessionId) return
+      event.preventDefault()
+      setTerminalOpen(selectedSessionId, !terminalOpen)
+    }
+    window.addEventListener('keydown', toggleTerminal)
+    return () => window.removeEventListener('keydown', toggleTerminal)
+  }, [selectedSessionId, terminalOpen])
+  const setTerminalOpen = (sessionId: string, open: boolean) => {
+    setTerminalOpenBySession(current => {
+      const next = { ...current, [sessionId]: open }
+      localStorage.setItem('agentsdock:terminal-open', JSON.stringify(next))
       return next
     })
+  }
+  const toggleTerminal = () => {
+    if (!selectedSessionId) return
+    setTerminalOpen(selectedSessionId, !terminalOpen)
   }
 
   if (!initialized) {
@@ -55,10 +69,16 @@ export function App() {
     <main className={`app-shell ${inspectorVisible ? 'inspector-open' : ''}`}>
       <Sidebar />
       <section className="conversation-pane">
-        <ChatHeader workspaceMode={workspaceMode} onWorkspaceModeChange={setWorkspaceMode} />
-        {workspaceMode === 'terminal' && selectedSession
-          ? <TerminalWorkspace key={selectedSession.id} session={selectedSession} />
-          : <><Timeline /><Composer /></>}
+        <ChatHeader terminalOpen={terminalOpen} onTerminalToggle={toggleTerminal} />
+        <div className={`chat-workspace${terminalOpen && selectedSession ? ' terminal-open' : ''}`}>
+          <Timeline />
+          <Composer />
+          {terminalOpen && selectedSession && <TerminalWorkspace
+            key={selectedSession.id}
+            session={selectedSession}
+            onClose={() => setTerminalOpen(selectedSession.id, false)}
+          />}
+        </div>
       </section>
       {inspectorVisible && <Inspector key={selectedSessionId || 'empty'} />}
       {error && <div className="error-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}

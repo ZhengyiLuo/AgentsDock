@@ -23,7 +23,7 @@ import {
 import type { Session, TerminalAction, TerminalConnectionState, TerminalWindow } from '../../../shared/types'
 import { useAppStore } from '../store/app-store'
 
-export function TerminalWorkspace({ session }: { session: Session }) {
+export function TerminalWorkspace({ session, onClose }: { session: Session; onClose?: () => void }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -289,6 +289,7 @@ export function TerminalWorkspace({ session }: { session: Session }) {
           <DropdownMenu.Separator className="menu-separator" />
           <DropdownMenu.Item className="menu-item danger" onSelect={() => setConfirmKill(true)}><Trash2 size={14} /> Kill tmux session</DropdownMenu.Item>
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
+        {onClose && <><span className="terminal-tool-separator" /><button className="icon-button terminal-panel-close" aria-label="Close terminal panel" title="Close terminal panel (tmux keeps running)" onClick={onClose}><X size={15} /></button></>}
       </div>
     </header>
     {searchOpen && <div className="terminal-search">
