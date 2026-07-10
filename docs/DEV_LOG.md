@@ -6916,3 +6916,12 @@ Follow-up from rapid-switch stress:
 - MAS signing disables Electron Builder's entitlement auto-mutation. The
   automatic pass added an unauthorized application group and produced an
   invalid signature despite a successful packaging exit.
+- The TestFlight script now creates a MAS app with ad-hoc signatures plus the
+  real sandbox/JIT entitlements, wraps it in an Xcode archive, and delegates
+  every production signature to Xcode cloud-managed distribution. This avoids
+  depending on expiring local Apple Distribution identities without dropping
+  Electron helper entitlements.
+- `./scripts/build_electron_mas.sh --upload` is the canonical Electron macOS
+  TestFlight path; the same script without `--upload` exports a local package.
+- Synced the promoted build 59 directly to the MacBook Air as
+  `/Users/zen/agi/AgentsDock.app` and verified the launched bundle/version.

@@ -101,11 +101,16 @@ GH_TOKEN=... AGENTSDOCK_PUBLISH_MODE=always ./scripts/build_electron_release.sh
 ```
 
 The Mac App Store/TestFlight build is a separate sandboxed target. It never
-runs the direct updater because Apple owns updates for that channel:
+runs the direct updater because Apple owns updates for that channel. Xcode
+applies cloud-managed App Store signatures, so the build does not depend on a
+local Apple Distribution certificate:
 
 ```bash
-AGENTSDOCK_MAS_PROFILE=/path/to/profile.provisionprofile \
-  ./scripts/build_electron_mas.sh
+# Export a locally installable App Store package.
+./scripts/build_electron_mas.sh
+
+# Upload the same build directly to TestFlight.
+./scripts/build_electron_mas.sh --upload
 ```
 
 ## Build The iOS/iPadOS App
