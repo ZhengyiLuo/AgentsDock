@@ -8,6 +8,7 @@ import { InspectorDock } from './components/InspectorDock'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
+import { WorkspaceResizeHandles, savedWorkspaceColumnStyle } from './components/WorkspaceResizeHandles'
 import type { CodeReviewTarget } from './lib/timeline'
 import { closeTopTransient } from './lib/transient-close'
 import { useAppStore } from './store/app-store'
@@ -20,6 +21,7 @@ export function App() {
   const selectedSession = useAppStore(state => state.sessions.find(session => session.id === state.selectedSessionId) ?? null)
   const error = useAppStore(state => state.error)
   const [reviewTarget, setReviewTarget] = useState<CodeReviewTarget | null>(null)
+  const [columnStyle] = useState(savedWorkspaceColumnStyle)
   const [slowBoot, setSlowBoot] = useState(false)
   const [terminalOpenBySession, setTerminalOpenBySession] = useState<Record<string, boolean>>(() => {
     try {
@@ -88,7 +90,7 @@ export function App() {
   }
 
   return (
-    <main className={`app-shell ${inspectorVisible ? 'inspector-open' : ''}`}>
+    <main className={`app-shell ${inspectorVisible ? 'inspector-open' : ''}`} style={columnStyle}>
       <Sidebar />
       <section className="conversation-pane">
         <ChatHeader terminalOpen={terminalOpen} onTerminalToggle={toggleTerminal} />
@@ -98,6 +100,7 @@ export function App() {
         </div>
       </section>
       <InspectorDock open={inspectorVisible} contentKey={selectedSessionId || 'empty'} />
+      <WorkspaceResizeHandles inspectorOpen={inspectorVisible} />
       {selectedSession && <TerminalDock
         key={selectedSession.id}
         open={terminalOpen}

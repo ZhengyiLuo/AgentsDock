@@ -91,6 +91,7 @@ const api: AgentsDockAPI = {
     connect: (sessionId, options) => ipcRenderer.invoke('terminal:connect', sessionId, options),
     write: (sessionId, data) => ipcRenderer.send('terminal:write', sessionId, data),
     resize: (sessionId, columns, rows) => ipcRenderer.send('terminal:resize', sessionId, columns, rows),
+    scroll: (sessionId, delta) => ipcRenderer.send('terminal:scroll', sessionId, delta),
     disconnect: sessionId => ipcRenderer.invoke('terminal:disconnect', sessionId),
     kill: sessionId => ipcRenderer.invoke('terminal:kill', sessionId),
     windows: sessionId => ipcRenderer.invoke('terminal:windows', sessionId),

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { containTerminalWheel, terminalClipboardShortcut } from './terminal-shortcuts'
+import { accumulateTerminalWheel, containTerminalWheel, terminalClipboardShortcut } from './terminal-shortcuts'
 
 describe('terminalClipboardShortcut', () => {
   it('leaves Control-C with the shell while reserving Command-C for local copying', () => {
@@ -19,5 +19,14 @@ describe('terminalClipboardShortcut', () => {
     const stopPropagation = vi.fn()
     expect(containTerminalWheel({ stopPropagation })).toBe(true)
     expect(stopPropagation).toHaveBeenCalledOnce()
+  })
+
+  it('accumulates trackpad pixels into bounded tmux history lines', () => {
+    const first = accumulateTerminalWheel(0, { deltaY: -8, deltaMode: 0 })
+    expect(first).toEqual({ lines: 0, remainder: -1 / 3 })
+    const second = accumulateTerminalWheel(first.remainder, { deltaY: -20, deltaMode: 0 })
+    expect(second.lines).toBe(-1)
+    expect(second.remainder).toBeCloseTo(-1 / 6)
+    expect(accumulateTerminalWheel(0, { deltaY: 200, deltaMode: 1 }).lines).toBe(80)
   })
 })

@@ -164,8 +164,10 @@ describe('AgentServerClient live stream', () => {
 
     connection.write('pwd\r')
     connection.resize(160, 52)
+    connection.scroll(-6)
     expect(new TextDecoder().decode(socket.sent[0] as Uint8Array)).toBe('pwd\r')
     expect(JSON.parse(String(socket.sent[1]))).toEqual({ type: 'resize', columns: 160, rows: 52 })
+    expect(JSON.parse(String(socket.sent[2]))).toEqual({ type: 'scroll', delta: -6 })
 
     connection.close()
     socket.emit('close', undefined, { code: 1000 })

@@ -494,6 +494,7 @@ export class AppService {
   }
   writeTerminal(sessionId: string, data: string): void { this.terminalConnections.get(sessionId)?.write(data) }
   resizeTerminal(sessionId: string, columns: number, rows: number): void { this.terminalConnections.get(sessionId)?.resize(columns, rows) }
+  scrollTerminal(sessionId: string, delta: number): void { this.terminalConnections.get(sessionId)?.scroll(delta) }
   disconnectTerminal(sessionId: string): void {
     this.terminalLeases.set(sessionId, (this.terminalLeases.get(sessionId) ?? 0) + 1)
     this.terminalConnections.get(sessionId)?.close()

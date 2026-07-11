@@ -123,6 +123,7 @@ export interface AgentsDockAPI {
     connect(sessionId: string, options: TerminalConnectOptions): Promise<void>
     write(sessionId: string, data: string): void
     resize(sessionId: string, columns: number, rows: number): void
+    scroll(sessionId: string, delta: number): void
     disconnect(sessionId: string): Promise<void>
     kill(sessionId: string): Promise<boolean>
     windows(sessionId: string): Promise<TerminalWindowsSnapshot>

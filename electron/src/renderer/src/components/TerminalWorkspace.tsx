@@ -23,7 +23,7 @@ import {
   X
 } from 'lucide-react'
 import type { Session, TerminalAction, TerminalConnectionState, TerminalWindow } from '../../../shared/types'
-import { containTerminalWheel, terminalClipboardShortcut } from '../lib/terminal-shortcuts'
+import { accumulateTerminalWheel, containTerminalWheel, terminalClipboardShortcut } from '../lib/terminal-shortcuts'
 import { useAppStore } from '../store/app-store'
 
 export function TerminalWorkspace({ session, onClose }: { session: Session; onClose?: () => void }) {
@@ -33,6 +33,8 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
   const searchRef = useRef<SearchAddon | null>(null)
   const actionBusyRef = useRef(false)
   const onCloseRef = useRef(onClose)
+  const mouseEnabledRef = useRef(false)
+  const wheelRemainderRef = useRef(0)
   const [connectionState, setConnectionState] = useState<TerminalConnectionState>('connecting')
   const [connectionName, setConnectionName] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -44,6 +46,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
   const [actionBusy, setActionBusy] = useState(false)
 
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
+  useEffect(() => { mouseEnabledRef.current = mouseEnabled }, [mouseEnabled])
 
   const refreshWindows = useCallback(async () => {
     try {
@@ -127,7 +130,15 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
     terminalRef.current = terminal
     fitRef.current = fit
     searchRef.current = search
-    terminal.attachCustomWheelEventHandler(containTerminalWheel)
+    terminal.attachCustomWheelEventHandler(event => {
+      if (mouseEnabledRef.current) return containTerminalWheel(event)
+      event.stopPropagation()
+      event.preventDefault()
+      const scroll = accumulateTerminalWheel(wheelRemainderRef.current, event, terminal.rows)
+      wheelRemainderRef.current = scroll.remainder
+      if (scroll.lines) window.agentsDock.terminal.scroll(session.id, scroll.lines)
+      return false
+    })
 
     const data = terminal.onData(value => window.agentsDock.terminal.write(session.id, value))
     terminal.attachCustomKeyEventHandler(event => {

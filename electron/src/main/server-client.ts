@@ -38,6 +38,7 @@ interface SessionResponse {
 export interface TerminalConnection {
   write(data: string): void
   resize(columns: number, rows: number): void
+  scroll(delta: number): void
   close(): void
 }
 
@@ -345,6 +346,10 @@ export class AgentServerClient {
         columns = nextColumns
         rows = nextRows
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', columns, rows }))
+      },
+      scroll(delta: number): void {
+        const bounded = Math.max(-80, Math.min(80, Math.trunc(delta)))
+        if (bounded && socket?.readyState === 1) socket.send(JSON.stringify({ type: 'scroll', delta: bounded }))
       },
       close(): void {
         stopped = true

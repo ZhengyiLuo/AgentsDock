@@ -7225,3 +7225,18 @@ Follow-up from rapid-switch stress:
   separators, file navigation, aggregate stats, and full-patch copying.
 - Added regressions for canonical diff grouping, complete multi-file parsing,
   metadata line numbering, and authenticated full-patch transport.
+
+## 2026-07-10 - Make tmux history and workspace columns directly manipulable
+
+- Replaced ineffective local xterm scrolling for tmux attachments with a
+  lightweight WebSocket control path into the active pane's persistent copy
+  history. Trackpad pixels accumulate into bounded line deltas, native tmux
+  mouse mode still takes precedence, and wheel input cannot leak into chat.
+- AgentsDock tracks copy mode that it entered for scrolling and exits it before
+  the next typed shell input, while leaving user-entered tmux copy mode alone.
+- Added slim drag handles to both sides of the conversation. The chat list and
+  details inspector resize without publishing React state on every pointer
+  move, preserve the current timeline anchor, enforce conversation-safe bounds,
+  support keyboard resizing and double-click reset, and persist their widths.
+- Added regression coverage for trackpad accumulation, bounded scroll control,
+  terminal WebSocket transport, and workspace column constraints.

@@ -89,6 +89,8 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   ipcMain.on('terminal:write', (_event, sessionId, data) => service.writeTerminal(sessionId, data))
   ipcMain.removeAllListeners('terminal:resize')
   ipcMain.on('terminal:resize', (_event, sessionId, columns, rows) => service.resizeTerminal(sessionId, columns, rows))
+  ipcMain.removeAllListeners('terminal:scroll')
+  ipcMain.on('terminal:scroll', (_event, sessionId, delta) => service.scrollTerminal(sessionId, delta))
   handle('pins:list', sessionId => service.pins(sessionId))
   handle('pins:put', item => service.putPin(item))
   handle('pins:remove', (sessionId, itemId) => service.removePin(sessionId, itemId))
