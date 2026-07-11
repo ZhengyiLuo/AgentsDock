@@ -7310,3 +7310,15 @@ Follow-up from rapid-switch stress:
   Uploads now discover the local App Store Connect API key and issuer metadata
   (or accept explicit environment overrides) and pass key authentication to
   `xcodebuild`; no key material or account-specific identifier is committed.
+
+Release result:
+
+- Electron macOS build 61 passed TypeScript validation and all 115 Electron
+  tests, retained the required MAS sandbox/JIT application-group contract, and
+  uploaded successfully as `AgentsDockMac`. App Store Connect reports the
+  package is processing. Prebuilt Electron binary dSYM notices remain
+  non-blocking, matching build 60.
+- Native iOS/iPadOS build 59 passed `ZenithGuardrails`, archived as arm64 with
+  version 0.1.1, build 59, and `ITSAppUsesNonExemptEncryption = false`. Its
+  strict signature check and App Store export succeeded; App Store Connect
+  accepted `AgentsDockIOS` and reports the package is processing.
