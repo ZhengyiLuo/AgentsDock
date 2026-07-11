@@ -8,22 +8,15 @@ export function NativeFileDragSurface({ file, className, children }: {
   children: ReactNode
 }) {
   const [preparing, setPreparing] = useState(false)
+  const [ready, setReady] = useState(false)
   const prepared = useRef(false)
   const preparation = useRef<Promise<void> | null>(null)
-  const holdTimer = useRef<number | null>(null)
-
-  const clearHoldTimer = (): void => {
-    if (holdTimer.current == null) return
-    window.clearTimeout(holdTimer.current)
-    holdTimer.current = null
-  }
 
   useEffect(() => {
-    clearHoldTimer()
     prepared.current = false
     preparation.current = null
     setPreparing(false)
-    return clearHoldTimer
+    setReady(false)
   }, [file.id])
 
   const prepare = (): Promise<void> => {
@@ -31,7 +24,15 @@ export function NativeFileDragSurface({ file, className, children }: {
     if (preparation.current) return preparation.current
     setPreparing(true)
     preparation.current = window.agentsDock.files.prepareDrag(file)
-      .then(() => { prepared.current = true })
+      .then(() => {
+        prepared.current = true
+        setReady(true)
+      })
+      .catch(error => {
+        prepared.current = false
+        setReady(false)
+        throw error
+      })
       .finally(() => {
         preparation.current = null
         setPreparing(false)
@@ -48,24 +49,25 @@ export function NativeFileDragSurface({ file, className, children }: {
       className={className}
       draggable
       aria-busy={preparing}
+      data-native-file-drag
       data-native-drag-preparing={preparing || undefined}
+      data-native-drag-ready={ready || undefined}
+      title={preparing ? `Preparing ${file.filename} for drag...` : undefined}
+      onPointerEnter={() => {
+        void prepare().catch(() => undefined)
+      }}
       onPointerDownCapture={event => {
         if (event.button !== 0 || ignoresNativeDrag(event.target)) return
-        clearHoldTimer()
-        holdTimer.current = window.setTimeout(() => {
-          holdTimer.current = null
-          void prepare().catch(reportError)
-        }, 150)
+        void prepare().catch(reportError)
       }}
-      onPointerUpCapture={clearHoldTimer}
-      onPointerCancel={clearHoldTimer}
       onDragStart={event => {
-        clearHoldTimer()
         event.preventDefault()
         if (ignoresNativeDrag(event.target)) return
-        void prepare()
-          .then(() => window.agentsDock.files.beginDrag(file))
-          .catch(reportError)
+        if (!prepared.current) {
+          void prepare().catch(reportError)
+          return
+        }
+        window.agentsDock.files.beginDrag(file)
       }}
     >
       {children}

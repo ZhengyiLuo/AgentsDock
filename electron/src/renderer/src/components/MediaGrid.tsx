@@ -72,7 +72,7 @@ const MediaTile = memo(function MediaTile({ file, sessionId, onPreview, onFind, 
       className={`media-tile ${media ? 'has-preview' : 'file-only'}`}
     >
       <button className="media-preview" onClick={media ? onPreview : () => void window.agentsDock.files.open(file)}>
-        {type.startsWith('image/') ? <img src={source} alt={file.title || file.filename} loading="lazy" />
+        {type.startsWith('image/') ? <img src={source} alt={file.title || file.filename} loading="lazy" draggable={false} />
           : type.startsWith('video/') ? <><LazyVideoThumbnail source={source} /><span className="play-badge"><Play size={16} fill="currentColor" /></span></>
           : <span className="file-glyph"><File size={22} /></span>}
       </button>
@@ -101,7 +101,7 @@ export function LazyVideoThumbnail({ source }: { source: string }) {
     observer.observe(node)
     return () => observer.disconnect()
   }, [active])
-  return <span ref={ref} className="lazy-video-thumb">{active && <video src={source} preload="metadata" muted />}</span>
+  return <span ref={ref} className="lazy-video-thumb">{active && <video src={source} preload="metadata" muted draggable={false} />}</span>
 }
 
 export function MediaPreviewDialog({ file, files = EMPTY_MEDIA_FILES, onSelect, onClose }: {

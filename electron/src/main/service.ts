@@ -463,10 +463,15 @@ export class AppService {
 
   async prepareFileForDrag(file: AgentFile): Promise<void> { await this.ensureLocalFile(file) }
 
-  async beginDrag(file: AgentFile, window: BrowserWindow): Promise<void> {
-    const path = await this.ensureLocalFile(file)
+  beginDrag(file: AgentFile, window: BrowserWindow): boolean {
+    const path = this.localFilePath(file)
+    if (!existsSync(path)) {
+      appLog('files', 'native drag requested before local file was ready', { fileId: file.id, filename: file.filename })
+      return false
+    }
     const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL8WQAAAABJRU5ErkJggg==')
     window.webContents.startDrag({ file: path, icon })
+    return true
   }
 
   previewDigest(input: DigestInput): Promise<string> { return this.client.previewDigest(input.sourceSessionId, input.targetSessionId, input.detail, input.userPrompt) }
@@ -779,7 +784,7 @@ export class AppService {
   }
 
   private async ensureLocalFile(file: AgentFile): Promise<string> {
-    const path = join(app.getPath('temp'), 'AgentsDockFiles', file.id, file.filename)
+    const path = this.localFilePath(file)
     if (existsSync(path)) return path
     const key = `${file.id}:${path}`
     const existing = this.fileDownloads.get(key)
@@ -787,6 +792,10 @@ export class AppService {
     const download = this.downloadFile(file, path).then(() => path).finally(() => this.fileDownloads.delete(key))
     this.fileDownloads.set(key, download)
     return download
+  }
+
+  private localFilePath(file: AgentFile): string {
+    return join(app.getPath('temp'), 'AgentsDockFiles', file.id, basename(file.filename))
   }
 
   private async downloadFile(file: AgentFile, path: string): Promise<void> {

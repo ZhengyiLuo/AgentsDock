@@ -101,7 +101,7 @@ export interface AgentsDockAPI {
     openLinked(sessionId: string, target: string): Promise<void>
     reveal(file: AgentFile): Promise<void>
     prepareDrag(file: AgentFile): Promise<void>
-    beginDrag(file: AgentFile): Promise<boolean>
+    beginDrag(file: AgentFile): void
     mediaURL(fileId: string): string
   }
   digest: {

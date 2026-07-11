@@ -7338,3 +7338,26 @@ Release result:
 - Added component and parser regressions for canonical patch rendering, file
   navigation, and status-only false positives. The Electron suite now contains
   119 passing tests across 28 files.
+
+## 2026-07-10 - Make timeline and inspector assets real macOS file drags
+
+- Replaced the broken async drag-start chain with Electron's native drag event
+  path. The renderer now warms only the file under the pointer, then hands the
+  already-local path to the main process during the active drag gesture.
+- Kept attachment caching demand-driven: opening a chat still does not download
+  every file or video. Pointer hover/press prepares one candidate in the
+  existing temporary cache, which Finder and Dropover receive as a real file.
+- Disabled Chromium's competing image/video URL drag behavior and applied the
+  same native surface to timeline media, compact file rows, and inspector tiles.
+- Added regressions for ready-file drag, slow preparation, stale gestures, and
+  action-button isolation. TypeScript and all 120 Electron tests pass.
+
+## 2026-07-10 - Remove the dedicated two-job scheduler ceiling
+
+- Changed the scheduled-job-specific active-run default from `2` to `0`
+  (unlimited) in both server copies and documented the environment override.
+- Retained per-chat serialization, host load/memory pressure checks, and the
+  global active-agent guard so removing the arbitrary scheduler ceiling does
+  not remove machine protection.
+- Deployed and restarted the active server, verified it responds on port 7850,
+  and pushed standalone server commit `8e1dc5a` to GitHub.
