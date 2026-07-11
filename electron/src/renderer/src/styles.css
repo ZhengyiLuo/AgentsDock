@@ -77,8 +77,8 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Shared controls */
-.icon-button, .composer-icon, .media-actions button, .message-surface header button, .system-row header button, .nested-icon, .output-panel button, .queued-row button, .job-list article > button:not(.job-copy), .pin-list article > button, .document-list button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--muted); background: transparent; border-radius: 6px; }
-.icon-button:hover, .composer-icon:hover, .media-actions button:hover, .message-surface header button:hover, .system-row header button:hover, .queued-row button:hover, .job-list article > button:hover, .pin-list article > button:hover { color: var(--text); background: var(--surface-3); }
+.icon-button, .composer-icon, .media-actions button, .message-surface header button, .system-row header button, .nested-icon, .output-panel button, .queued-row button, .job-list article > button:not(.job-copy), .pin-list article > button:not(.pin-content), .document-list button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--muted); background: transparent; border-radius: 6px; }
+.icon-button:hover, .composer-icon:hover, .media-actions button:hover, .message-surface header button:hover, .system-row header button:hover, .queued-row button:hover, .job-list article > button:hover, .pin-list article > button:not(.pin-content):hover { color: var(--text); background: var(--surface-3); }
 .quiet-button, .primary-button, .stop-button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 7px; font-weight: 600; }
 .quiet-button { background: var(--surface-3); color: #dededb; border: 1px solid #373737; }
 .quiet-button:hover { background: #323232; }
@@ -260,6 +260,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .message-surface > header, .system-row header { display: flex; align-items: center; gap: 7px; min-height: 20px; margin-bottom: 3px; color: var(--muted); font-size: 10px; font-weight: 650; user-select: none; }
 .message-surface > header time, .system-row header time { color: var(--faint); font-weight: 450; }
 .message-surface > header button, .system-row header button { width: 20px; height: 20px; }
+.pin-button.active { color: #e7bd55 !important; background: #3a321d !important; }
 .message-row.user .message-surface > header { justify-content: flex-end; }
 .message-parts { min-width: 0; }
 .message-parts > .markdown + .markdown { margin-top: 12px; }
@@ -343,6 +344,14 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .media-meta small { color: var(--faint); font-size: 9px; }
 .media-actions { height: 29px; display: flex; align-items: center; padding: 0 3px; }
 .media-actions button { width: 25px; height: 24px; }
+.timeline-document-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.media-grid + .timeline-document-grid { margin-top: 7px; }
+.media-file-row { min-width: min(100%, 280px); max-width: 460px; min-height: 46px; flex: 1 1 320px; display: flex; align-items: center; gap: 7px; padding: 5px 6px; overflow: hidden; background: #171717; border: 1px solid #2d2d2d; border-radius: 6px; }
+.compact-file-glyph { width: 30px; height: 30px; flex: 0 0 30px; display: flex; align-items: center; justify-content: center; color: #81817e; background: #202020; border-radius: 5px; }
+.media-file-copy { min-width: 72px; flex: 1; display: flex; flex-direction: column; gap: 2px; overflow: hidden; color: var(--text); background: transparent; text-align: left; }
+.media-file-copy strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.media-file-copy small { color: var(--faint); font-size: 9px; }
+.media-file-row .media-actions { height: 30px; flex: 0 0 auto; padding: 0; }
 .media-more { margin-top: 8px; }
 .media-dialog { z-index: 1100; width: min(1100px, calc(100vw - 90px)); height: min(760px, calc(100vh - 90px)); min-width: min(420px, calc(100vw - 24px)); min-height: min(300px, calc(100vh - 24px)); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; resize: both; background: #151515; border: 1px solid #414141; border-radius: 10px; box-shadow: 0 25px 80px #000c; }
 .media-dialog-head, .media-dialog-foot { min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #202020; }
@@ -416,11 +425,14 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .inspector-actions > button { height: 29px; display: flex; align-items: center; justify-content: center; gap: 6px; color: #bcbcb9; background: #242424; border: 1px solid #303030; border-radius: 6px; font-size: 10px; }
 .pins-section p, .process-list p, .tmux-list p, .job-list p { margin: 3px 0; color: var(--faint); font-size: 10px; }
 .pin-list { display: flex; flex-direction: column; gap: 5px; }
-.pin-list article { display: flex; align-items: flex-start; gap: 4px; padding: 5px; background: #232323; border-radius: 6px; }
-.pin-content { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; color: #d2d2cf; background: transparent; text-align: left; }
-.pin-content strong, .pin-content span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pin-content span { color: var(--muted); font-size: 10px; }
-.pin-content small { color: var(--faint); font-size: 9px; }
+.pin-list article { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px 6px 7px 8px; background: #232323; border: 1px solid transparent; border-radius: 6px; }
+.pin-list article:hover { background: #272727; border-color: #303030; }
+.pin-item-mark { flex: 0 0 auto; color: #d5aa42; }
+.pin-content { min-width: 0; height: auto; flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 0; overflow: hidden; color: #d2d2cf; background: transparent; text-align: left; }
+.pin-content strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pin-preview { display: -webkit-box; overflow: hidden; color: #d2d2cf; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.pin-content small { overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.pin-content small b { color: var(--muted); font-weight: 600; }
 .run-summary > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px 4px; }
 .run-summary span { display: flex; flex-direction: column; color: var(--faint); font-size: 9px; }
 .run-summary b { color: #d7d7d4; font-size: 13px; }
@@ -714,14 +726,18 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 :root[data-theme="light"] .session-settings select { background: #f2f2ef; border-color: #d9d9d4; }
 :root[data-theme="light"] .inspector-actions > button,
 :root[data-theme="light"] .pin-list article,
+:root[data-theme="light"] .media-file-row,
 :root[data-theme="light"] .process-list article,
 :root[data-theme="light"] .job-list article,
 :root[data-theme="light"] .tmux-list > button,
 :root[data-theme="light"] .inspector-media-grid article,
 :root[data-theme="light"] .document-list article { color: #4b4b47; background: #f1f1ee; border-color: #ddddda; }
 :root[data-theme="light"] .pin-content,
+:root[data-theme="light"] .media-file-copy,
 :root[data-theme="light"] .process-list article > div,
 :root[data-theme="light"] .job-copy { color: #3f3f3b; }
+:root[data-theme="light"] .compact-file-glyph { color: #71716d; background: #e5e5e1; }
+:root[data-theme="light"] .pin-button.active { color: #956f12 !important; background: #f4e8c4 !important; }
 :root[data-theme="light"] .load-more { background: #e8e8e4; }
 :root[data-theme="light"] .output-panel { background: #fff; border-color: #cfcfca; box-shadow: 0 12px 35px #1b1b1830; }
 :root[data-theme="light"] .output-panel header { background: #eeeeeb; }

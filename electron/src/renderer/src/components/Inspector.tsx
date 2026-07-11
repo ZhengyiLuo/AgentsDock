@@ -99,7 +99,11 @@ export function Inspector() {
 }
 
 function PinnedSection({ sessionId, pins, setPins, files }: { sessionId: string; pins: PinnedItem[]; setPins: (items: PinnedItem[]) => void; files: AgentFile[] }) {
-  return <section className="inspector-section pins-section"><h3><Pin size={14} /> Pinned <small>{pins.length}</small></h3>{!pins.length ? <p>Pin important messages or files from the timeline.</p> : <div className="pin-list">{pins.map(pin => <article key={pin.id}><button className="pin-content" onClick={() => pin.fileId ? void window.agentsDock.files.open(files.find(file => file.id === pin.fileId) || { id: pin.fileId, filename: pin.title }) : pin.eventId && window.dispatchEvent(new CustomEvent('agentsdock:find-event', { detail: pin.eventId }))}><strong>{pin.title}</strong>{pin.body && <span>{pin.body}</span>}<small>{pin.subtitle}</small></button><button title="Unpin" onClick={() => void window.agentsDock.pins.remove(sessionId, pin.id).then(setPins)}><X size={12} /></button></article>)}</div>}</section>
+  const remove = async (itemId: string) => {
+    setPins(await window.agentsDock.pins.remove(sessionId, itemId))
+    window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
+  }
+  return <section className="inspector-section pins-section"><h3><Pin size={14} /> Pinned <small>{pins.length}</small></h3>{!pins.length ? <p>Pin important messages or files from the timeline.</p> : <div className="pin-list">{pins.map(pin => <article key={pin.id} className={pin.kind}><Pin className="pin-item-mark" size={11} fill="currentColor" /><button className="pin-content" onClick={() => pin.fileId ? void window.agentsDock.files.open(files.find(file => file.id === pin.fileId) || { id: pin.fileId, filename: pin.title }) : pin.eventId && window.dispatchEvent(new CustomEvent('agentsdock:find-event', { detail: pin.eventId }))}>{pin.body ? <span className="pin-preview">{pin.body}</span> : <strong>{pin.title}</strong>}<small><b>{pin.body ? pin.title : pin.kind === 'file' ? 'File' : 'Message'}</b>{pin.subtitle ? ` · ${pin.subtitle}` : ''}</small></button><button title="Unpin" onClick={() => void remove(pin.id)}><X size={12} /></button></article>)}</div>}</section>
 }
 
 function SessionField({ label, value, onSave, allowEmpty = false }: { label: string; value: string; onSave: (value: string) => Promise<void>; allowEmpty?: boolean }) {

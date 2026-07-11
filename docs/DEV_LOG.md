@@ -7250,3 +7250,16 @@ Follow-up from rapid-switch stress:
   folder grouping to place a transcript hit above a stronger chat-name hit.
 - Title matches open the chat normally; transcript-only matches still jump to
   the matching event. Added regressions for ranking and sidebar integration.
+
+## 2026-07-10 - Make pins legible and files content-aware
+
+- Fixed a shared icon-button selector that collapsed the pinned message body
+  into a 28-pixel square. Pinned rows now show a two-line preview, source/time,
+  a persistent pin marker, and a compact unpin action.
+- Loaded the chat's local pin IDs once at the timeline level and propagated the
+  state to visible rows. Pinned message, system, and file actions now render a
+  filled gold pin and toggle cleanly in either direction.
+- Split documents from visual media in timeline file groups. Images and videos
+  retain preview tiles, while ordinary files use compact, dynamically wrapping
+  rows with filename, size, drag-out, download, reveal, open, find, and pin.
+- Added focused UI regressions and kept the complete Electron suite green.

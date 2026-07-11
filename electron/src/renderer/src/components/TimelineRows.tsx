@@ -7,29 +7,35 @@ import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
 
-export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, onFindFile }: { item: RenderTimelineItem; sessionId: string; onFindFile: (fileId: string) => void }) {
-  if (item.kind === 'message') return <div className={`turn-segment ${item.role}`}><Message item={item} sessionId={sessionId} /></div>
+export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, onFindFile, pinnedItemIds }: { item: RenderTimelineItem; sessionId: string; onFindFile: (fileId: string) => void; pinnedItemIds: ReadonlySet<string> }) {
+  if (item.kind === 'message') return <div className={`turn-segment ${item.role}`}><Message item={item} sessionId={sessionId} pinned={pinnedItemIds.has(`message:${item.events[0]?.id ?? item.event.id}`)} /></div>
   if (item.kind === 'trace') return <div className="turn-segment trace-segment"><TraceDisclosure events={item.events} sessionId={sessionId} /></div>
-  if (item.kind === 'media') return <MediaRow item={item} sessionId={sessionId} onFindFile={onFindFile} />
-  if (item.kind === 'job') return <JobView item={item} sessionId={sessionId} />
-  return <SystemView item={item} sessionId={sessionId} />
+  if (item.kind === 'media') return <MediaRow item={item} sessionId={sessionId} onFindFile={onFindFile} pinnedItemIds={pinnedItemIds} />
+  if (item.kind === 'job') return <JobView item={item} sessionId={sessionId} pinnedItemIds={pinnedItemIds} />
+  return <SystemView item={item} sessionId={sessionId} pinned={pinnedItemIds.has(`message:${item.event.id}`)} />
 })
 
-function MediaRow({ item, sessionId, onFindFile }: { item: MediaItem; sessionId: string; onFindFile: (fileId: string) => void }) {
-  return <div className="turn-segment media-segment"><MediaGrid files={item.files} sessionId={sessionId} onFind={file => onFindFile(file.id)} /></div>
+function MediaRow({ item, sessionId, onFindFile, pinnedItemIds }: { item: MediaItem; sessionId: string; onFindFile: (fileId: string) => void; pinnedItemIds: ReadonlySet<string> }) {
+  return <div className="turn-segment media-segment"><MediaGrid files={item.files} sessionId={sessionId} onFind={file => onFindFile(file.id)} pinnedItemIds={pinnedItemIds} /></div>
 }
 
-function Message({ item, sessionId }: { item: MessageItem; sessionId: string }) {
+function Message({ item, sessionId, pinned }: { item: MessageItem; sessionId: string; pinned: boolean }) {
   const { event, events, role, files } = item
   const primary = events[0] ?? event
   const text = messageItemText(item)
   const [copied, setCopied] = useState(false)
-  const pin = async () => {
-    const pinned: PinnedItem = {
-      id: `message:${primary.id}`, sessionId, kind: 'message', eventId: primary.id,
+  const pinId = `message:${primary.id}`
+  const togglePin = async () => {
+    if (pinned) {
+      await window.agentsDock.pins.remove(sessionId, pinId)
+      window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
+      return
+    }
+    const pinItem: PinnedItem = {
+      id: pinId, sessionId, kind: 'message', eventId: primary.id,
       title: role === 'user' ? 'You' : 'Assistant', body: text, subtitle: formatTime(event.ts), createdAt: Date.now()
     }
-    await window.agentsDock.pins.put(pinned)
+    await window.agentsDock.pins.put(pinItem)
     window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
   }
   const copy = async () => { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1200) }
@@ -39,7 +45,7 @@ function Message({ item, sessionId }: { item: MessageItem; sessionId: string }) 
         <header>
           <span>{role === 'user' ? 'You' : primary.purpose === 'handoff_digest' ? 'Digest' : 'Assistant'}</span>
           <time>{formatTime(event.ts)}</time>
-          <button title="Pin" onClick={() => void pin()}><Pin size={12} /></button>
+          <button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin message' : 'Pin message'} onClick={() => void togglePin()}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button>
           <button title="Copy full message" onClick={() => void copy()}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
         </header>
         <div className="message-parts">
@@ -92,17 +98,17 @@ function ToolEvent({ event }: { event: Event }) {
   return <details className="tool-event"><summary><Wrench size={13} /><strong>{event.tool?.name || (event.type === 'tool_started' ? 'Tool started' : 'Tool result')}</strong><small>{event.exit_code === 0 ? 'Success' : event.exit_code != null ? `Exit ${event.exit_code}` : ''}</small></summary><pre>{text.slice(0, 12000)}</pre></details>
 }
 
-function SystemView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function SystemView({ item, sessionId, pinned }: { item: SystemItem; sessionId: string; pinned: boolean }) {
   const event = item.event
   const error = isTimelineError(event)
   const digest = event.type.startsWith('handoff_digest_')
   const generating = event.type === 'handoff_digest_started'
   const icon = error ? <AlertTriangle size={15} /> : generating ? <LoaderCircle className="spin" size={15} /> : digest ? <Sparkles size={15} /> : <TerminalSquare size={15} />
   const text = messageText(event) || titleCase(event.type)
-  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{titleCase(event.type)}</strong><time>{formatTime(event.ts)}</time><button title="Pin" onClick={() => void pinSystem(event, sessionId)}><Pin size={12} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact /></div></article>
+  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{titleCase(event.type)}</strong><time>{formatTime(event.ts)}</time><button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin item' : 'Pin item'} onClick={() => void toggleSystemPin(event, sessionId, pinned)}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact /></div></article>
 }
 
-function JobView({ item, sessionId }: { item: JobItem; sessionId: string }) {
+function JobView({ item, sessionId, pinnedItemIds }: { item: JobItem; sessionId: string; pinnedItemIds: ReadonlySet<string> }) {
   const [open, setOpen] = useState(false)
   const updates = useMemo(() => jobDisplayEvents(item.events), [item.events])
   const latest = updates.at(-1) ?? item.latest
@@ -125,7 +131,7 @@ function JobView({ item, sessionId }: { item: JobItem; sessionId: string }) {
     }
     window.dispatchEvent(new CustomEvent<CodeReviewTarget>('agentsdock:review-diff', { detail: target }))
   }
-  return <article className="job-row"><button className="job-summary" onClick={() => setOpen(value => !value)}><Clock3 size={15} /><span><strong>Latest Job Status</strong><small>{item.title} · {runCount || updates.length} run{(runCount || updates.length) === 1 ? '' : 's'} · {formatTime(latest.ts)}</small></span><ChevronRight size={14} /></button><div className="job-latest"><MarkdownContent text={latestText} files={files} sessionId={sessionId} />{files.length > 0 && <MediaGrid files={files} sessionId={sessionId} compact />}{(codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0) > 0 ? <CodeChangesCard fileCount={codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0} additions={codeDiff?.additions ?? 0} deletions={codeDiff?.deletions ?? 0} onOpen={openReview} /> : null}</div>{open && previous.length > 0 && <div className="job-history">{previous.length > visiblePrevious.length && <p>{previous.length - visiblePrevious.length} earlier runs hidden</p>}{visiblePrevious.map(event => <details key={event.id}><summary>{formatTime(event.ts)} · {titleCase(event.type)}</summary><MarkdownContent text={messageText(event)} sessionId={sessionId} compact /></details>)}</div>}</article>
+  return <article className="job-row"><button className="job-summary" onClick={() => setOpen(value => !value)}><Clock3 size={15} /><span><strong>Latest Job Status</strong><small>{item.title} · {runCount || updates.length} run{(runCount || updates.length) === 1 ? '' : 's'} · {formatTime(latest.ts)}</small></span><ChevronRight size={14} /></button><div className="job-latest"><MarkdownContent text={latestText} files={files} sessionId={sessionId} />{files.length > 0 && <MediaGrid files={files} sessionId={sessionId} compact pinnedItemIds={pinnedItemIds} />}{(codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0) > 0 ? <CodeChangesCard fileCount={codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0} additions={codeDiff?.additions ?? 0} deletions={codeDiff?.deletions ?? 0} onOpen={openReview} /> : null}</div>{open && previous.length > 0 && <div className="job-history">{previous.length > visiblePrevious.length && <p>{previous.length - visiblePrevious.length} earlier runs hidden</p>}{visiblePrevious.map(event => <details key={event.id}><summary>{formatTime(event.ts)} · {titleCase(event.type)}</summary><MarkdownContent text={messageText(event)} sessionId={sessionId} compact /></details>)}</div>}</article>
 }
 
 function CodeChangesCard({ fileCount, additions, deletions, onOpen }: { fileCount: number; additions: number; deletions: number; onOpen: () => void }) {
@@ -136,7 +142,12 @@ function deduplicateFiles<T extends { id: string }>(files: T[]): T[] {
   return [...new Map(files.map(file => [file.id, file])).values()]
 }
 
-async function pinSystem(event: Event, sessionId: string) {
+async function toggleSystemPin(event: Event, sessionId: string, pinned: boolean) {
+  if (pinned) {
+    await window.agentsDock.pins.remove(sessionId, `message:${event.id}`)
+    window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
+    return
+  }
   const text = messageText(event)
   await window.agentsDock.pins.put({ id: `message:${event.id}`, sessionId, kind: 'message', eventId: event.id, title: titleCase(event.type), body: text, subtitle: formatTime(event.ts), createdAt: Date.now() })
   window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))

@@ -91,6 +91,27 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const [timelineIndex, setTimelineIndex] = useState<TimelineIndex | null>(null)
   const [historicalWindow, setHistoricalWindow] = useState<HistoricalWindow | null>(null)
   const [seekingHistory, setSeekingHistory] = useState(false)
+  const [pinnedItemIds, setPinnedItemIds] = useState<ReadonlySet<string>>(() => new Set())
+
+  useEffect(() => {
+    let disposed = false
+    const refreshPins = () => {
+      void window.agentsDock.pins.list(sessionId).then(items => {
+        if (disposed) return
+        const next = new Set(items.map(item => item.id))
+        setPinnedItemIds(current => sameStringSet(current, next) ? current : next)
+      })
+    }
+    const changed = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === sessionId) refreshPins()
+    }
+    refreshPins()
+    window.addEventListener('agentsdock:pins-changed', changed)
+    return () => {
+      disposed = true
+      window.removeEventListener('agentsdock:pins-changed', changed)
+    }
+  }, [sessionId])
 
   const syncMinimapToViewport = useCallback(() => {
     const node = scroller.current
@@ -551,9 +572,9 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
       data-timeline-index={localVirtuosoIndex(index, firstItemIndex.current, itemsLength.current)}
     >
       {item.key === unreadItemKey && <div className="unread-divider"><span>New messages</span></div>}
-      <TimelineRowView item={item} sessionId={sessionId} onFindFile={findFile} />
+      <TimelineRowView item={item} sessionId={sessionId} onFindFile={findFile} pinnedItemIds={pinnedItemIds} />
     </div>
-  ), [findFile, sessionId, unreadItemKey])
+  ), [findFile, pinnedItemIds, sessionId, unreadItemKey])
 
   return (
     <div
@@ -641,6 +662,10 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
 }
 
 function TimelineFooter() { return <div className="timeline-end" /> }
+
+function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  return a.size === b.size && [...a].every(value => b.has(value))
+}
 
 function rememberViewState(state: ViewState): void {
   timelineViewStates.delete(state.sessionId)
