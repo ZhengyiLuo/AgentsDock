@@ -6,6 +6,8 @@ PROJECT="$ROOT/electron"
 BUNDLED_RUNTIME="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 TEAM_ID="${AGENTSDOCK_TEAM_ID:-KRR35MWWHD}"
 UPLOAD=false
+ASC_KEY_PATH="${AGENTSDOCK_ASC_KEY_PATH:-}"
+ASC_ISSUER_ID="${AGENTSDOCK_ASC_ISSUER_ID:-}"
 
 usage() {
   cat <<'EOF'
@@ -67,6 +69,32 @@ if [[ ! -f "$EXPORT_OPTIONS" ]]; then
   exit 2
 fi
 
+AUTHENTICATION_ARGS=()
+if [[ "$UPLOAD" == true ]]; then
+  if [[ -z "$ASC_KEY_PATH" ]]; then
+    setopt local_options null_glob
+    ASC_KEYS=("$HOME/.appstoreconnect/private_keys"/AuthKey_*.p8)
+    if (( ${#ASC_KEYS[@]} > 0 )); then
+      ASC_KEY_PATH="${ASC_KEYS[1]}"
+    fi
+  fi
+  if [[ -z "$ASC_ISSUER_ID" && -f "$HOME/.appstoreconnect/issuer_id" ]]; then
+    ASC_ISSUER_ID="$(tr -d '[:space:]' < "$HOME/.appstoreconnect/issuer_id")"
+  fi
+  if [[ -z "$ASC_KEY_PATH" || ! -f "$ASC_KEY_PATH" || -z "$ASC_ISSUER_ID" ]]; then
+    echo "App Store Connect API credentials are required for TestFlight upload." >&2
+    echo "Set AGENTSDOCK_ASC_KEY_PATH and AGENTSDOCK_ASC_ISSUER_ID, or install ~/.appstoreconnect/private_keys/AuthKey_*.p8 plus ~/.appstoreconnect/issuer_id." >&2
+    exit 2
+  fi
+  ASC_KEY_ID="${ASC_KEY_PATH:t:r}"
+  ASC_KEY_ID="${ASC_KEY_ID#AuthKey_}"
+  AUTHENTICATION_ARGS=(
+    -authenticationKeyPath "$ASC_KEY_PATH"
+    -authenticationKeyID "$ASC_KEY_ID"
+    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  )
+fi
+
 # Xcode owns the real App Store signatures. The ad-hoc signature here makes
 # Electron Builder apply the MAS sandbox/JIT entitlements to every helper so
 # Xcode can preserve them while replacing the signatures in the export step.
@@ -116,7 +144,8 @@ xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportPath "$EXPORT_PATH" \
   -exportOptionsPlist "$EXPORT_OPTIONS" \
-  -allowProvisioningUpdates
+  -allowProvisioningUpdates \
+  "${AUTHENTICATION_ARGS[@]}"
 
 if [[ "$UPLOAD" == true ]]; then
   echo "Uploaded AgentsDock $VERSION ($BUILD_NUMBER) to App Store Connect/TestFlight."

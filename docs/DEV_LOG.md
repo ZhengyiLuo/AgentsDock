@@ -7306,3 +7306,7 @@ Follow-up from rapid-switch stress:
 - Advanced the paging contract assertion from the retired v4 marker to the
   current v6 contract that combines visible-history paging with full diff
   transport.
+- Hardened the Electron TestFlight script against stale Xcode account tokens.
+  Uploads now discover the local App Store Connect API key and issuer metadata
+  (or accept explicit environment overrides) and pass key authentication to
+  `xcodebuild`; no key material or account-specific identifier is committed.
