@@ -1,0 +1,53 @@
+{
+  "name": "mobile-react",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@shopify/flash-list": "2.0.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "expo": "~57.0.4",
+    "expo-blur": "~57.0.0",
+    "expo-clipboard": "~57.0.0",
+    "expo-document-picker": "~57.0.0",
+    "expo-file-system": "~57.0.0",
+    "expo-haptics": "~57.0.0",
+    "expo-image": "~57.0.0",
+    "expo-notifications": "~57.0.3",
+    "expo-secure-store": "~57.0.0",
+    "expo-sharing": "~57.0.3",
+    "expo-status-bar": "~57.0.0",
+    "expo-video": "~57.0.0",
+    "lucide-react-native": "^1.24.0",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-draggable-flatlist": "^4.0.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-markdown-display": "^7.0.2",
+    "react-native-reanimated": "4.5.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "4.25.2",
+    "react-native-svg": "15.15.4",
+    "react-native-webview": "13.16.1",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/react": "~19.2.2",
+    "esbuild": "^0.28.1",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "embed:xterm": "node scripts/embed-xterm.mjs",
+    "postinstall": "node scripts/embed-xterm.mjs",
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "ios:phone": "expo run:ios --device 'iPhone 17 Pro'",
+    "ios:pad": "expo run:ios --device 'iPad Pro 13-inch (M5)'",
+    "typecheck": "tsc --noEmit",
+    "web": "expo start --web"
+  },
+  "private": true
+}

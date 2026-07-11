@@ -7393,3 +7393,21 @@ Release result:
   preview while preserving the complete prompt in the hover title and editor.
 - Added width/overflow containment to the queue shelf, scroll list, rows, and
   inline editor, plus component and CSS regressions for long steer payloads.
+
+## 2026-07-11 - Start the isolated React Native mobile rewrite
+
+- Added a parallel Expo SDK 57 / React Native 0.86 app under `mobile-react/`
+  with a separate local name and bundle identifier. The shipping SwiftUI app,
+  TestFlight target, and desktop Electron app remain untouched.
+- Reused the canonical server API for sessions, tail-first history, live event
+  streams, queue actions, jobs, files, search, digests, processes, full diffs,
+  and persistent tmux terminals rather than adding a mobile-only protocol.
+- Added endpoint-scoped secure settings and bounded transcript caching. Cached
+  chats paint immediately; the newest server tail reconciles in place, while
+  older history pages prepend through FlashList without downloading assets.
+- Added adaptive iPhone/iPad navigation, grouped chats, unread/running states,
+  markdown and code, folded traces, grouped scheduled jobs, queue controls,
+  attachments, media preview/share, pins, runtime controls, full-history
+  search, code review, process inspection, digest handoff, and xterm/tmux.
+- Kept local user sends as the only automatic bottom-scroll trigger. Incoming
+  agent updates preserve the current reading position.
