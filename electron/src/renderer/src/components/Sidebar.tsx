@@ -9,9 +9,10 @@ import {
   LoaderCircle, PanelLeftClose, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, Undo2
 } from 'lucide-react'
 import type { Session, TimelineSearchResult } from '@shared/types'
+import { useCommandChatSwitcher } from '../lib/chat-switcher'
 import { runtimeLabel } from '../lib/format'
 import { historyResultsBySession, openSessionHistoryResult, useSessionHistorySearch } from '../lib/session-history-search'
-import { rankSessionsForSearch, sessionNameMatchRank } from '../lib/sessions'
+import { navigableSessions, rankSessionsForSearch, sessionNameMatchRank } from '../lib/sessions'
 import { sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
@@ -53,6 +54,17 @@ export function Sidebar() {
   const suppressClickTimer = useRef<number | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: SIDEBAR_LONG_PRESS }))
   const sections = useMemo(() => buildSections(sessions, folderOrder, query, historySessionIds), [sessions, folderOrder, query, historySessionIds])
+  const shortcutSessions = useMemo(
+    () => (searching ? sections.flatMap(section => section.sessions) : navigableSessions(sessions, folderOrder, collapsed)).slice(0, 9),
+    [collapsed, folderOrder, searching, sections, sessions]
+  )
+  const commandHintsVisible = useCommandChatSwitcher(shortcutSessions.map(session => session.id), sessionId => {
+    void useAppStore.getState().selectSession(sessionId)
+  })
+  const shortcutNumbers = useMemo(
+    () => commandHintsVisible ? new Map(shortcutSessions.map((session, index) => [session.id, index + 1])) : EMPTY_SHORTCUT_NUMBERS,
+    [commandHintsVisible, shortcutSessions]
+  )
   const folders = useMemo(() => orderedFolders(
     [...new Set([...folderOrder, ...sessions.filter(session => !session.archived && !session.pinned).map(session => session.folder?.trim() || 'General')])],
     folderOrder
@@ -163,6 +175,7 @@ export function Sidebar() {
               suppressClick={(id) => suppressClickRef.current === id}
               historyResults={historyResults}
               query={query}
+              shortcutNumbers={shortcutNumbers}
             />
           ))}
           {!sections.some(section => section.sessions.length) && <div className="sidebar-empty">{historySearch.loading ? 'Searching history…' : 'No chats found'}</div>}
@@ -176,9 +189,9 @@ export function Sidebar() {
   )
 }
 
-function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick, historyResults, query }: {
+function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick, historyResults, query, shortcutNumbers }: {
   section: Section; selectedId: string | null; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean; historyResults: Map<string, TimelineSearchResult>
-  query: string
+  query: string; shortcutNumbers: ReadonlyMap<string, number>
 }) {
   const toggle = () => {
     if (section.kind === 'archived') useAppStore.getState().setArchivedCollapsed(!collapsed)
@@ -188,7 +201,7 @@ function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppres
     <section className="sidebar-section">
       <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />
       {!collapsed && section.sessions.map(session => (
-        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} historyResult={sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined} />
+        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} historyResult={sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined} shortcutNumber={shortcutNumbers.get(session.id)} />
       ))}
     </section>
   )
@@ -211,7 +224,7 @@ function FolderHeader({ section, collapsed, drop, onToggle, suppressClick }: { s
   )
 }
 
-function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick, historyResult }: { session: Session; selected: boolean; sectionId: string; drop: DropIndicator | null; runtime: string; suppressClick: (id: string) => boolean; historyResult?: TimelineSearchResult }) {
+function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick, historyResult, shortcutNumber }: { session: Session; selected: boolean; sectionId: string; drop: DropIndicator | null; runtime: string; suppressClick: (id: string) => boolean; historyResult?: TimelineSearchResult; shortcutNumber?: number }) {
   const id = `session:${session.id}`
   const searchResult = sectionId === 'search'
   const draggable = useDraggable({ id, disabled: searchResult, data: { type: 'session', label: session.title, section: sectionId } })
@@ -251,6 +264,7 @@ function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick
         >
           <BackendMark backend={session.backend} size={18} />
           <span className="session-copy"><strong>{session.title}</strong><small title={historyResult?.snippet}>{historyResult?.snippet || `${session.backend === 'codex' ? 'Codex' : 'Claude'} · ${runtime}${running ? ' · running' : unread ? ' · new' : ''}`}</small></span>
+          {shortcutNumber && <kbd className="chat-shortcut-hint">⌘{shortcutNumber}</kbd>}
           {(running || unread) && <span className={`status-dot ${running ? 'running' : 'unread'}`} />}
         </div>
       </ContextMenu.Trigger>
@@ -258,6 +272,8 @@ function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick
     </ContextMenu.Root>
   )
 }
+
+const EMPTY_SHORTCUT_NUMBERS: ReadonlyMap<string, number> = new Map()
 
 function SessionContextMenu({ session, unread }: { session: Session; unread: boolean }) {
   const update = useAppStore(state => state.updateSession)

@@ -7263,3 +7263,17 @@ Follow-up from rapid-switch stress:
   retain preview tiles, while ordinary files use compact, dynamically wrapping
   rows with filename, size, drag-out, download, reveal, open, find, and pin.
 - Added focused UI regressions and kept the complete Electron suite green.
+
+## 2026-07-10 - Add steering and Command-hold chat switching
+
+- Made `Command-Enter` a true steer action. While an agent is active, a new
+  composer message is queued and immediately promoted through the server's
+  existing run-now path; ordinary Enter retains normal queue behavior.
+- Added the same shortcut to the queued-message editor and hardened the
+  queue/run-now race: a not-found result is accepted only when a refresh proves
+  that the turn already left the queue, otherwise the real error remains.
+- Holding Command for 420 ms now reveals `Command-1` through `Command-9` hints
+  beside the first nine chats in visible sidebar order. The number shortcuts
+  work immediately, hide on release/blur, and follow filtered search order.
+- Added regression coverage for the hold gesture, numeric routing, steering,
+  race handling, and composer integration.

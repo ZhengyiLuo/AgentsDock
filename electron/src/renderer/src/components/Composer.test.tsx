@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
@@ -61,7 +61,10 @@ describe('Composer', () => {
       configurable: true,
       value: {
         preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
-        queue: { runNow: vi.fn().mockRejectedValue(new Error('Queued turn not found')) }
+        queue: {
+          runNow: vi.fn().mockRejectedValue(new Error('Queued turn not found')),
+          list: vi.fn().mockResolvedValue([{ queued_id: 'queued-1', session_id: 'chat-1', prompt: 'Run this', file_ids: [] }])
+        }
       } as unknown as AgentsDockAPI
     })
     useAppStore.setState({
@@ -101,5 +104,31 @@ describe('Composer', () => {
     await act(async () => rejectSend(new Error('offline')))
 
     await waitFor(() => expect(editor).toHaveValue('First request\n\nNext request'))
+  })
+
+  it('uses Command-Enter to steer a new message immediately', async () => {
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+      queued: true,
+      queued_id: 'queued-steer'
+    })
+    const runNow = vi.fn().mockResolvedValue(true)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send },
+        queue: { runNow, list: vi.fn().mockResolvedValue([]) }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ activeSessionIds: new Set(['chat-1']) })
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    fireEvent.change(editor, { target: { value: 'Steer this now' } })
+    fireEvent.keyDown(editor, { key: 'Enter', metaKey: true })
+
+    await waitFor(() => expect(runNow).toHaveBeenCalledWith('chat-1', 'queued-steer'))
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'chat-1', prompt: 'Steer this now' }))
+    expect(editor).toHaveValue('')
   })
 })

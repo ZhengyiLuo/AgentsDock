@@ -6,6 +6,7 @@ import type {
 import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
 import { isAgentVisibleEvent, projectTimeline, renderTimelineItems } from '../lib/timeline'
 import { navigableSessions } from '../lib/sessions'
+import { steerQueuedTurn } from '../lib/queue-actions'
 
 const OLDER_HISTORY_EVENT_LIMIT = 240
 
@@ -48,7 +49,7 @@ interface AppState {
   selectAdjacent(direction: 1 | -1): Promise<void>
   setDraft(text: string): void
   setDraftForSession(sessionId: string, text: string): void
-  sendPrompt(promptOverride?: string): Promise<boolean>
+  sendPrompt(promptOverride?: string, steer?: boolean): Promise<boolean>
   stopTurn(): Promise<void>
   attachPaths(files: NativeFileRef[]): Promise<void>
   removeUpload(fileId: string): void
@@ -246,7 +247,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(state => ({ drafts: { ...state.drafts, [sessionId]: text } }))
   },
 
-  async sendPrompt(promptOverride) {
+  async sendPrompt(promptOverride, steer = false) {
     const sessionId = get().selectedSessionId
     if (!sessionId) return false
     const prompt = (promptOverride ?? get().drafts[sessionId] ?? '').trim()
@@ -273,6 +274,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             : state.snapshots
         }
       })
+      if (steer && response.queued_id) {
+        try { get().setQueued(sessionId, await steerQueuedTurn(sessionId, response.queued_id)) }
+        catch (error) { set({ error: errorMessage(error) }) }
+      }
       window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
       return true
     } catch (error) {

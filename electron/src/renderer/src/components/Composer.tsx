@@ -4,6 +4,7 @@ import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSe
 import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, File, GripVertical, ListOrdered, MoreHorizontal, Paperclip, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react'
 import type { AgentFile, NativeFileRef, QueuedTurn, Session } from '@shared/types'
 import { formatBytes, runtimeLabel } from '../lib/format'
+import { steerQueuedTurn } from '../lib/queue-actions'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
@@ -65,7 +66,7 @@ export function Composer() {
     if (storedDraft && !draft && selectedId === useAppStore.getState().selectedSessionId) setDraft(storedDraft)
   }, [storedDraft])
 
-  const send = async () => {
+  const send = async (steer = false) => {
     const outgoing = draft.trim()
     if (!outgoing) return
     setDraft('')
@@ -73,7 +74,7 @@ export function Composer() {
       useAppStore.getState().setDraftForSession(selectedId, '')
       void window.agentsDock.preferences.set(`draft:${selectedId}`, '')
     }
-    const sent = await useAppStore.getState().sendPrompt(outgoing)
+    const sent = await useAppStore.getState().sendPrompt(outgoing, steer)
     if (!sent && useAppStore.getState().selectedSessionId === selectedId) {
       setDraft(current => !current.trim() || current === outgoing ? outgoing : `${outgoing}\n\n${current}`)
     }
@@ -110,7 +111,7 @@ export function Composer() {
         onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.nativeEvent.isComposing) {
             event.preventDefault()
-            if (draft.trim()) void send()
+            if (draft.trim()) void send(event.metaKey)
           }
         }}
         onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void handleFiles(event.clipboardData.files) } }}
@@ -129,7 +130,7 @@ export function Composer() {
         <RuntimeMenu session={session} />
         <span className="composer-spacer" />
         {running && <button className="stop-button" onClick={() => void useAppStore.getState().stopTurn()} title="Stop agent"><span className="activity-ring" /><Square size={12} fill="currentColor" /> Stop</button>}
-        <button className="send-button" disabled={!draft.trim()} onClick={() => void send()} title={running ? 'Queue message' : 'Send message'}><Send size={17} /></button>
+        <button className="send-button" disabled={!draft.trim()} onClick={() => void send()} title={running ? 'Queue message · ⌘↩ steers now' : 'Send message'}><Send size={17} /></button>
       </div>
       {dropActive && <div className="drop-overlay"><Paperclip size={22} /> Drop files to attach</div>}
     </div>
@@ -206,18 +207,19 @@ function QueueShelf({ sessionId, turns }: { sessionId: string; turns: QueuedTurn
     const current = drop; setDrop(null)
     if (event.over && current && event.active.id !== event.over.id) void moveTo(String(event.active.id), String(event.over.id), current.placement)
   }
-  const saveEdit = async () => {
+  const saveEdit = async (steer = false) => {
     if (!editing) return
     try {
       await window.agentsDock.queue.update(sessionId, editing.queued_id, draft)
-      useAppStore.getState().setQueued(sessionId, await window.agentsDock.queue.list(sessionId))
+      const turns = steer ? await steerQueuedTurn(sessionId, editing.queued_id) : await window.agentsDock.queue.list(sessionId)
+      useAppStore.getState().setQueued(sessionId, turns)
       setEditing(null)
     } catch (error) { reportActionError(error) }
   }
   return <div className="queue-shelf"><div className="queue-header"><div className="queue-label"><ListOrdered size={13} /><span>Queued turns</span><b>{turns.length}</b></div></div><DndContext sensors={sensors} onDragOver={onDragOver} onDragEnd={onDragEnd}>
     <div className="queue-list">{turns.map(turn => <QueuedRow key={turn.queued_id} turn={turn} sessionId={sessionId} drop={drop} onEdit={() => { setEditing(turn); setDraft(turn.display_prompt || turn.prompt) }} />)}</div>
   </DndContext>
-  {editing && <div className="inline-editor"><textarea value={draft} onChange={event => setDraft(event.target.value)} autoFocus /><div><button onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" onClick={() => void saveEdit()}>Save</button></div></div>}
+  {editing && <div className="inline-editor"><textarea value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && event.metaKey && !event.nativeEvent.isComposing) { event.preventDefault(); void saveEdit(true) } }} autoFocus /><div><button onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" onClick={() => void saveEdit()}>Save</button></div></div>}
   </div>
 }
 
@@ -231,6 +233,10 @@ function QueuedRow({ turn, sessionId, drop, onEdit }: { turn: QueuedTurn; sessio
     try { await action(); await refresh() }
     catch (error) { reportActionError(error) }
   }
+  const steer = async () => {
+    try { useAppStore.getState().setQueued(sessionId, await steerQueuedTurn(sessionId, turn.queued_id)) }
+    catch (error) { reportActionError(error) }
+  }
   const move = async (direction: 'up' | 'down') => {
     try { useAppStore.getState().setQueued(sessionId, await window.agentsDock.queue.move(sessionId, turn.queued_id, direction)) }
     catch (error) { reportActionError(error) }
@@ -239,7 +245,7 @@ function QueuedRow({ turn, sessionId, drop, onEdit }: { turn: QueuedTurn; sessio
     <button className="queue-grip" title="Drag to reorder" {...drag.listeners}><GripVertical size={13} /></button>
     <span className="queue-prompt" title={turn.display_prompt || turn.prompt}>{turn.display_prompt || turn.prompt}</span>
     <div className="queue-actions">
-    <button className="steer-action" title="Interrupt the current turn and send this now" onClick={() => void runAndRefresh(() => window.agentsDock.queue.runNow(sessionId, turn.queued_id))}><CornerDownRight size={13} /> <b>Steer</b></button>
+    <button className="steer-action" title="Interrupt the current turn and send this now (⌘↩ while editing)" onClick={() => void steer()}><CornerDownRight size={13} /> <b>Steer</b></button>
     <button className="queue-action" title="Remove from queue" onClick={() => void runAndRefresh(() => window.agentsDock.queue.remove(sessionId, turn.queued_id))}><Trash2 size={13} /></button>
     <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="queue-action" title="More queue actions"><MoreHorizontal size={13} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="end">
       <DropdownMenu.Item className="menu-item" onSelect={onEdit}><Pencil size={13} /> Edit message</DropdownMenu.Item>
