@@ -4,14 +4,19 @@ import * as DocumentPicker from 'expo-document-picker'
 import { ArrowDown, ArrowUp, CornerDownRight, Paperclip, Send, Square, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
+import type { AgentFile, QueuedTurn, UploadRef } from '../types'
 import { BackendMark } from './BackendMark'
 import { IconButton, Pill } from './ui'
+
+const EMPTY_FILES: AgentFile[] = []
+const EMPTY_PENDING: UploadRef[] = []
+const EMPTY_QUEUE: QueuedTurn[] = []
 
 export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () => void }) {
   const colors = usePalette()
   const draft = useAppStore(state => state.drafts[sessionId] ?? '')
-  const uploads = useAppStore(state => state.uploads[sessionId] ?? [])
-  const pending = useAppStore(state => state.uploadPending[sessionId] ?? [])
+  const uploads = useAppStore(state => state.uploads[sessionId]) ?? EMPTY_FILES
+  const pending = useAppStore(state => state.uploadPending[sessionId]) ?? EMPTY_PENDING
   const snapshot = useAppStore(state => state.snapshots[sessionId])
   const session = useAppStore(state => state.sessions.find(value => value.id === sessionId))
   const active = useAppStore(state => state.activeSessionIds.has(sessionId))
@@ -77,7 +82,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
 
 function QueueShelf({ sessionId }: { sessionId: string }) {
   const colors = usePalette()
-  const turns = useAppStore(state => state.snapshots[sessionId]?.queuedTurns ?? [])
+  const turns = useAppStore(state => state.snapshots[sessionId]?.queuedTurns) ?? EMPTY_QUEUE
   const update = useAppStore(state => state.updateQueued)
   const remove = useAppStore(state => state.removeQueued)
   const move = useAppStore(state => state.moveQueued)

@@ -75,7 +75,8 @@ export function SearchDialog({ visible, sessionId, onClose }: { visible: boolean
 
 export function DigestDialog({ visible, source, onClose }: { visible: boolean; source: Session | null; onClose: () => void }) {
   const colors = usePalette()
-  const sessions = useAppStore(state => state.sessions.filter(value => !value.archived && value.id !== source?.id))
+  const allSessions = useAppStore(state => state.sessions)
+  const sessions = useMemo(() => allSessions.filter(value => !value.archived && value.id !== source?.id), [allSessions, source?.id])
   const [target, setTarget] = useState('')
   const [detail, setDetail] = useState('balanced')
   const [prompt, setPrompt] = useState('')
