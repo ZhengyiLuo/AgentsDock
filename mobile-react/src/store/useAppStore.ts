@@ -160,8 +160,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (cached) set(state => ({ snapshots: { ...state.snapshots, [selected]: cached } }))
     }
     await get().reconnect()
-    if (get().connected) void Notifications.requestPermissionsAsync().catch(() => { /* unavailable in unsigned simulator builds */ })
-    void updateBadge(get().sessions)
+    if (get().connected) {
+      void Notifications.requestPermissionsAsync().catch(() => { /* unavailable in unsigned simulator builds */ })
+      void updateBadge(get().sessions)
+    }
     if (refreshTimer) clearInterval(refreshTimer)
     refreshTimer = setInterval(() => { void get().refreshSessions() }, 12_000)
   },
