@@ -5,6 +5,7 @@ import { normalizeServerURL } from '../lib/format'
 
 const SETTINGS_KEY = 'agentsdock.react.settings.v1'
 const TOKEN_KEY = 'agentsdock.react.access-token'
+const TOKEN_FALLBACK_KEY = 'agentsdock.react.access-token.simulator-fallback'
 const SESSION_LIMIT = 10
 const EVENT_LIMIT = 720
 
@@ -22,10 +23,24 @@ export async function saveSettings(value: StoredSettings): Promise<void> {
   await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...value, serverURL: normalizeServerURL(value.serverURL) }))
 }
 
-export async function loadToken(): Promise<string> { return await SecureStore.getItemAsync(TOKEN_KEY) ?? '' }
+export async function loadToken(): Promise<string> {
+  try {
+    const token = await SecureStore.getItemAsync(TOKEN_KEY)
+    if (token !== null) return token
+  } catch { /* unsigned simulator builds do not have Keychain entitlements */ }
+  try { return await AsyncStorage.getItem(TOKEN_FALLBACK_KEY) ?? '' }
+  catch { return '' }
+}
+
 export async function saveToken(token: string): Promise<void> {
-  if (token) await SecureStore.setItemAsync(TOKEN_KEY, token)
-  else await SecureStore.deleteItemAsync(TOKEN_KEY)
+  try {
+    if (token) await SecureStore.setItemAsync(TOKEN_KEY, token)
+    else await SecureStore.deleteItemAsync(TOKEN_KEY)
+    await AsyncStorage.removeItem(TOKEN_FALLBACK_KEY)
+  } catch {
+    if (token) await AsyncStorage.setItem(TOKEN_FALLBACK_KEY, token)
+    else await AsyncStorage.removeItem(TOKEN_FALLBACK_KEY)
+  }
 }
 
 function namespace(serverURL: string): string { return encodeURIComponent(normalizeServerURL(serverURL).toLowerCase()) }
