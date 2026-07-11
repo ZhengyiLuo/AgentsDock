@@ -594,11 +594,17 @@ public struct ZEvent: Codable, Identifiable, Hashable, Sendable {
     public var job_id: String?
     public var direction: String?
     public var positions: [ZQueuePosition]?
+    public var repository_root: String?
+    public var files_changed: Int?
+    public var additions: Int?
+    public var deletions: Int?
+    public var byte_count: Int?
 
     private enum CodingKeys: String, CodingKey {
         case seq, id, session_id, type, ts, run_id, queued_id, position, purpose, digest_job_id, target_session_id
         case backend, prompt, file_ids, text, result_text, message, error, output, raw, argv, exit_code, is_error
         case provider_session_id, tool_id, tool, file, artifact, job, job_id, direction, positions
+        case repository_root, files_changed, additions, deletions, byte_count
     }
 
     public init(from decoder: Decoder) throws {
@@ -635,6 +641,11 @@ public struct ZEvent: Codable, Identifiable, Hashable, Sendable {
         job_id = try container.decodeIfPresent(String.self, forKey: .job_id)
         direction = try container.decodeIfPresent(String.self, forKey: .direction)
         positions = try container.decodeIfPresent([ZQueuePosition].self, forKey: .positions)
+        repository_root = try container.decodeIfPresent(String.self, forKey: .repository_root)
+        files_changed = try container.decodeIfPresent(Int.self, forKey: .files_changed)
+        additions = try container.decodeIfPresent(Int.self, forKey: .additions)
+        deletions = try container.decodeIfPresent(Int.self, forKey: .deletions)
+        byte_count = try container.decodeIfPresent(Int.self, forKey: .byte_count)
     }
 
     private static func decodeStringLike(_ container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) throws -> String? {
@@ -863,6 +874,18 @@ public struct APIClient: Sendable {
         return req
     }
 
+    public func webSocketURL(_ path: String, queryItems: [URLQueryItem] = []) -> URL {
+        var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        comps.scheme = comps.scheme == "https" ? "wss" : "ws"
+        comps.path = path
+        var items = queryItems
+        if let accessToken {
+            items.append(URLQueryItem(name: "token", value: accessToken))
+        }
+        comps.queryItems = items.isEmpty ? nil : items
+        return comps.url!
+    }
+
     public func get<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> T {
         var req = URLRequest(url: url(path))
         applyAuth(to: &req)
@@ -880,6 +903,19 @@ public struct APIClient: Sendable {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response, data)
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    public func getText(_ path: String) async throws -> String {
+        var req = URLRequest(url: url(path))
+        applyAuth(to: &req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response, data)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "ZenithDock.API", code: -2, userInfo: [
+                NSLocalizedDescriptionKey: "Server returned non-UTF-8 text"
+            ])
+        }
+        return text
     }
 
     public func post<Body: Encodable, T: Decodable>(_ path: String, body: Body, as type: T.Type = T.self) async throws -> T {

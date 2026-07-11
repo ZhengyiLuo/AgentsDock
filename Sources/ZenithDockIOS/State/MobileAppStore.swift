@@ -50,9 +50,12 @@ final class MobileAppStore: ObservableObject {
     @Published var processSnapshot: ZProcessSnapshot?
     @Published var processLogTail: ZProcessLogTail?
     @Published var isLoadingProcesses = false
+    @Published private(set) var notificationsEnabled = UserDefaults.standard.object(forKey: "AgentsDock.notificationsEnabled") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "AgentsDock.notificationsEnabled")
     @Published private(set) var unreadAgentSessionIDs: Set<String> = [] {
         didSet {
-            UnreadNotificationController.shared.updateBadge(unreadCount: unreadAgentSessionIDs.count)
+            UnreadNotificationController.shared.updateBadge(unreadCount: notificationsEnabled ? unreadAgentSessionIDs.count : 0)
         }
     }
     @Published private(set) var folderOrder: [String] = UserDefaults.standard.stringArray(forKey: "mobileFolderOrder") ?? [] {
@@ -60,6 +63,11 @@ final class MobileAppStore: ObservableObject {
     }
     @Published private(set) var collapsedFolders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "mobileCollapsedFolders") ?? [])
     @Published private(set) var archivedSectionCollapsed = UserDefaults.standard.bool(forKey: "mobileArchivedSectionCollapsed")
+    @Published private(set) var featureStateNamespace = ZEndpointCache.namespace(
+        serverURL: defaultAgentServerURLString,
+        default: defaultAgentServerURLString
+    )
+    @Published private(set) var timelineNavigationTarget: MobileTimelineNavigationTarget?
 
     private let initialEventLimit = 160
     private let olderHistoryPageLimit = 160
@@ -170,6 +178,7 @@ final class MobileAppStore: ObservableObject {
         }
         serverURLString = effectiveServerAddress
         serverIdentity = Self.loadServerIdentity(for: serverURLString)
+        featureStateNamespace = serverCacheNamespace
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
         UnreadNotificationController.shared.configure { [weak self] sessionID in
@@ -177,12 +186,27 @@ final class MobileAppStore: ObservableObject {
                 await self?.select(sessionID: sessionID)
             }
         }
-        UnreadNotificationController.shared.requestAuthorizationIfNeeded()
+        if notificationsEnabled {
+            UnreadNotificationController.shared.requestAuthorizationIfNeeded()
+        }
         UnreadNotificationController.shared.updateBadge(unreadCount: 0)
     }
 
     func setApplicationActive(_ active: Bool) {
         applicationIsActive = active
+    }
+
+    func setNotificationsEnabled(_ enabled: Bool) {
+        guard notificationsEnabled != enabled else { return }
+        notificationsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "AgentsDock.notificationsEnabled")
+        if enabled {
+            UnreadNotificationController.shared.requestAuthorizationIfNeeded()
+            UnreadNotificationController.shared.updateBadge(unreadCount: unreadAgentSessionIDs.count)
+        } else {
+            UnreadNotificationController.shared.clearAll()
+            UnreadNotificationController.shared.updateBadge(unreadCount: 0)
+        }
     }
 
     var api: APIClient {
@@ -792,7 +816,7 @@ final class MobileAppStore: ObservableObject {
     }
 
     private func deliverUnreadNotification(_ candidate: ZUnreadNotificationCandidate) {
-        guard !applicationIsActive else { return }
+        guard notificationsEnabled, !applicationIsActive else { return }
         UnreadNotificationController.shared.notify(
             sessionID: candidate.sessionID,
             title: candidate.title,
@@ -839,6 +863,7 @@ final class MobileAppStore: ObservableObject {
         memoryChatCache = [:]
         memoryChatCacheOrder = []
         serverIdentity = Self.loadServerIdentity(for: effectiveServerAddress)
+        featureStateNamespace = serverCacheNamespace
         lastReadAgentSeqBySessionID = loadReadState()
         draftPromptsBySessionID = loadDraftPrompts()
         unreadAgentSessionIDs = []
@@ -859,6 +884,7 @@ final class MobileAppStore: ObservableObject {
         serverIdentity = clean
         saveServerIdentity(clean, for: effectiveServerAddress)
         let newNamespace = serverCacheNamespace
+        featureStateNamespace = newNamespace
         guard oldNamespace != newNamespace else { return }
         migrateLocalServerState(from: oldNamespace, to: newNamespace)
         memoryChatCache = [:]
@@ -979,7 +1005,7 @@ final class MobileAppStore: ObservableObject {
         activeSessionIDs = []
         syncSelectedRunningState()
         setStatus("Server upgrade required")
-        setConnectionDetail("Server upgrade required: app build needs agent API v\(minimumAgentAPIContractVersion), but this server reports v\(version ?? 0). Redeploy/restart the ZenithDock server.")
+        setConnectionDetail("Server upgrade required: app build needs agent API v\(minimumAgentAPIContractVersion), but this server reports v\(version ?? 0). Redeploy or restart the AgentsDock agent server.")
     }
 
     func refreshSessions(showErrors: Bool = true) async {
@@ -1572,6 +1598,101 @@ final class MobileAppStore: ObservableObject {
         }
     }
 
+    func navigate(to target: MobileTimelineNavigationTarget) async {
+        if selectedSessionID != target.sessionID {
+            await select(sessionID: target.sessionID)
+        }
+        guard selectedSessionID == target.sessionID else { return }
+
+        if !events.contains(where: { $0.id == target.eventID }) {
+            do {
+                let response: SessionEventsResponse = try await api.get(
+                    "/api/sessions/\(target.sessionID)",
+                    queryItems: [
+                        URLQueryItem(name: "before", value: "\(target.seq + 1)"),
+                        URLQueryItem(name: "limit", value: "320"),
+                        URLQueryItem(name: "tail", value: "true"),
+                        URLQueryItem(name: "visible", value: "true")
+                    ]
+                )
+                guard selectedSessionID == target.sessionID else { return }
+                replaceSessionFromServer(response.session)
+                mergeEvents(response.events)
+                if let omittedBefore = response.events_omitted_before {
+                    omittedHistoryEventCount = omittedBefore
+                }
+                refreshSessionFilesFromLoadedEvents()
+                hydrateReferencedFilesIfNeeded(from: response.events)
+                rememberSelectedChat()
+            } catch {
+                report(error)
+                return
+            }
+        }
+
+        guard events.contains(where: { $0.id == target.eventID }) else {
+            errorText = "That message is no longer available in the chat history."
+            return
+        }
+        timelineNavigationTarget = target
+    }
+
+    func navigate(to result: ZTimelineSearchResult) async {
+        await navigate(to: MobileTimelineNavigationTarget(searchResult: result))
+    }
+
+    func navigate(sessionID: String, sequence: Int) async {
+        if selectedSessionID != sessionID {
+            await select(sessionID: sessionID)
+        }
+        guard selectedSessionID == sessionID else { return }
+        if !events.contains(where: { $0.seq == sequence }) {
+            do {
+                let response: SessionEventsResponse = try await api.get(
+                    "/api/sessions/\(sessionID)",
+                    queryItems: [
+                        URLQueryItem(name: "before", value: "\(sequence + 1)"),
+                        URLQueryItem(name: "limit", value: "320"),
+                        URLQueryItem(name: "tail", value: "true"),
+                        URLQueryItem(name: "visible", value: "true")
+                    ]
+                )
+                guard selectedSessionID == sessionID else { return }
+                replaceSessionFromServer(response.session)
+                mergeEvents(response.events)
+                if let omittedBefore = response.events_omitted_before {
+                    omittedHistoryEventCount = omittedBefore
+                }
+                rememberSelectedChat()
+            } catch {
+                report(error)
+                return
+            }
+        }
+        guard let event = events.min(by: {
+            abs($0.seq - sequence) < abs($1.seq - sequence)
+        }) else { return }
+        timelineNavigationTarget = MobileTimelineNavigationTarget(
+            sessionID: sessionID,
+            eventID: event.id,
+            seq: event.seq
+        )
+    }
+
+    func navigate(to pin: ZPinnedItem) async {
+        guard let eventID = pin.eventID, let seq = pin.eventSeq else { return }
+        await navigate(to: MobileTimelineNavigationTarget(
+            sessionID: pin.sessionID,
+            eventID: eventID,
+            seq: seq
+        ))
+    }
+
+    func consumeTimelineNavigationTarget(_ id: String) {
+        guard timelineNavigationTarget?.id == id else { return }
+        timelineNavigationTarget = nil
+    }
+
     func refreshSelectedFiles() async {
         guard let sid = selectedSessionID else { return }
         await loadSessionFiles(sessionID: sid, generation: selectionGeneration)
@@ -1940,6 +2061,10 @@ final class MobileAppStore: ObservableObject {
         api.authenticatedURL("/api/files/\(file.id)")
     }
 
+    func fileURL(fileID: String) -> URL {
+        api.authenticatedURL("/api/files/\(fileID)")
+    }
+
     func promptFiles(for event: ZEvent) -> [ZFile] {
         guard let fileIDs = event.file_ids, !fileIDs.isEmpty else { return [] }
         let knownFiles = mergedFiles(sessionFiles + uploads + files(from: events))
@@ -2104,6 +2229,7 @@ final class MobileAppStore: ObservableObject {
         socketLive = false
         processSnapshot = nil
         processLogTail = nil
+        timelineNavigationTarget = nil
         syncSelectedRunningState()
     }
 
@@ -2432,7 +2558,7 @@ final class MobileAppStore: ObservableObject {
         } else if ns.domain == "ZenithDock.API", ns.code == 401 || ns.code == 403 {
             errorText = "Agent server rejected the access token for \(resolvedServerURLString). Check the token on the server and in this app."
         } else if ns.domain == NSURLErrorDomain {
-            errorText = "\(connectionFailureSummary(error)). If Safari works but server logs do not show an app request, enable Local Network for ZenithDock in iOS Settings and make sure Tailscale is active."
+            errorText = "\(connectionFailureSummary(error)). If Safari works but server logs do not show an app request, enable Local Network for AgentsDock in iOS Settings and make sure Tailscale is active."
         } else {
             errorText = message
         }
@@ -2468,10 +2594,10 @@ final class MobileAppStore: ObservableObject {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
             if ns.code == NSURLErrorAppTransportSecurityRequiresSecureConnection {
-                return "iOS App Transport Security blocked HTTP to \(resolvedServerURLString) (-1022). Install the latest ZenithDock build with arbitrary user-entered agent HTTP URLs enabled, or use HTTPS."
+                return "iOS App Transport Security blocked HTTP to \(resolvedServerURLString) (-1022). Install the latest AgentsDock build with arbitrary user-entered agent HTTP URLs enabled, or use HTTPS."
             }
             if isLocalNetworkPrivacyError(ns) {
-                return "iOS blocked ZenithDock from accessing the local network. Enable ZenithDock in Settings > Privacy & Security > Local Network, or use a reachable Tailscale endpoint."
+                return "iOS blocked AgentsDock from accessing the local network. Enable AgentsDock in Settings > Privacy & Security > Local Network, or use a reachable Tailscale endpoint."
             }
             return "Cannot reach \(resolvedServerURLString). \(ns.localizedDescription) (\(ns.code))"
         }

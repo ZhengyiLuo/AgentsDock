@@ -7361,3 +7361,25 @@ Release result:
   not remove machine protection.
 - Deployed and restarted the active server, verified it responds on port 7850,
   and pushed standalone server commit `8e1dc5a` to GitHub.
+
+## 2026-07-10 - Bring iPhone and iPad to desktop feature parity
+
+- Added server-backed whole-history search, per-chat timeline outlines, and
+  exact event navigation without forcing a complete transcript into memory.
+- Added local message/file pins scoped to canonical server identity. Pinned
+  files remain openable after their source timeline page is evicted, while
+  changing to an unrelated server cannot leak the prior server's pin state.
+- Added canonical full-diff review with changed-file navigation, old/new line
+  numbers, red/green code rows, exact totals, and full-patch copy. iPad uses a
+  two-pane workspace; iPhone uses a compact file picker and horizontal code
+  scrolling.
+- Added a native SwiftTerm terminal attached to each chat's persistent server
+  tmux session, including windows, right/down splits, pane/window close,
+  reconnect, tmux mouse mode, and explicit session termination.
+- Added dedicated system/light/dark appearance and connection/notification
+  settings, plus mobile message/file pin actions, Find in Chat, and native
+  attachment drag-out from timeline and inspector surfaces.
+- Verified real authenticated flows on iPad and iPhone simulators against the
+  live server, including an SMP three-file patch, terminal shell, complete
+  history search, and a 6,000-plus-event chat. The generic simulator build and
+  the expanded `ZenithGuardrails` suite pass.

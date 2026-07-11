@@ -5,6 +5,7 @@ import ZenithCore
 
 struct MobileChatOptionsView: View {
     @EnvironmentObject private var store: MobileAppStore
+    @EnvironmentObject private var features: MobileFeatureStore
     @Binding var isPresented: Bool
     @Binding var resumeOpen: Bool
 
@@ -107,6 +108,10 @@ struct MobileChatOptionsView: View {
                         }
                     }
 
+                    MobilePinnedItemsSection(session: session) {
+                        isPresented = false
+                    }
+
                     MobileLiveProcessesSection()
 
                     Section {
@@ -121,14 +126,26 @@ struct MobileChatOptionsView: View {
                                     spacing: 10
                                 ) {
                                     ForEach(videoFiles) { file in
-                                        MobileVideoGridCell(file: file, url: store.fileURL(file))
+                                        MobileVideoGridCell(
+                                            file: file,
+                                            url: store.fileURL(file),
+                                            find: file.event_seq.map { sequence in
+                                                { findInChat(sessionID: session.id, sequence: sequence) }
+                                            }
+                                        )
                                     }
                                 }
                                 .padding(.vertical, 4)
                             }
                             if !otherFiles.isEmpty {
                                 ForEach(otherFiles) { file in
-                                    MobileChatFileRow(file: file, url: store.fileURL(file))
+                                    MobileChatFileRow(
+                                        file: file,
+                                        url: store.fileURL(file),
+                                        find: file.event_seq.map { sequence in
+                                            { findInChat(sessionID: session.id, sequence: sequence) }
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -250,6 +267,11 @@ struct MobileChatOptionsView: View {
             }
             return lhs.filename.localizedStandardCompare(rhs.filename) == .orderedAscending
         }
+    }
+
+    private func findInChat(sessionID: String, sequence: Int) {
+        isPresented = false
+        Task { await store.navigate(sessionID: sessionID, sequence: sequence) }
     }
 
     private func syncDrafts() {
@@ -993,8 +1015,11 @@ private struct MobileHandoffDigestView: View {
 }
 
 private struct MobileVideoGridCell: View {
+    @EnvironmentObject private var store: MobileAppStore
+    @EnvironmentObject private var features: MobileFeatureStore
     let file: ZFile
     let url: URL
+    let find: (() -> Void)?
     @State private var fullscreenVideo = false
     @State private var thumbnail: UIImage?
     @State private var thumbnailFailed = false
@@ -1022,6 +1047,20 @@ private struct MobileVideoGridCell: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
+                Button {
+                    features.toggleFilePin(file, fallbackSessionID: store.selectedSessionID ?? "")
+                } label: {
+                    Image(systemName: features.isFilePinned(file.id) ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(features.isFilePinned(file.id) ? "Unpin file" : "Pin file")
+                if let find {
+                    Button(action: find) {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Find in chat")
+                }
                 MobileArtifactShareButton(file: file, url: url, title: "")
                     .labelStyle(.iconOnly)
                     .font(.caption)
@@ -1150,8 +1189,11 @@ private func makeMobileVideoThumbnailData(from url: URL) throws -> Data {
 }
 
 private struct MobileChatFileRow: View {
+    @EnvironmentObject private var store: MobileAppStore
+    @EnvironmentObject private var features: MobileFeatureStore
     let file: ZFile
     let url: URL
+    let find: (() -> Void)?
     @State private var fullscreenVideo = false
 
     var body: some View {
@@ -1169,6 +1211,20 @@ private struct MobileChatFileRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            Button {
+                features.toggleFilePin(file, fallbackSessionID: store.selectedSessionID ?? "")
+            } label: {
+                Image(systemName: features.isFilePinned(file.id) ? "pin.fill" : "pin")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(features.isFilePinned(file.id) ? "Unpin file" : "Pin file")
+            if let find {
+                Button(action: find) {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Find in chat")
+            }
             if isVideo {
                 MobileArtifactShareButton(file: file, url: url, title: "")
                     .labelStyle(.iconOnly)

@@ -13,6 +13,9 @@ let package = Package(
         .executable(name: "ZenithDockIOS", targets: ["ZenithDockIOS"]),
         .executable(name: "ZenithGuardrails", targets: ["ZenithGuardrails"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.14.0")
+    ],
     targets: [
         .target(
             name: "ZenithCore",
@@ -28,7 +31,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "ZenithDockIOS",
-            dependencies: ["ZenithCore"],
+            dependencies: [
+                "ZenithCore",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             path: "Sources/ZenithDockIOS",
             resources: [
                 .process("Resources")

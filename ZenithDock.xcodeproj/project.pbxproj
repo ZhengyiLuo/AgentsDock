@@ -44,6 +44,15 @@
 		B10000000000000000000001 /* UnreadNotificationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* UnreadNotificationController.swift */; };
 		B10000000000000000000002 /* UnreadNotificationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* UnreadNotificationController.swift */; };
 		B10000000000000000000003 /* UnreadNotificationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* UnreadNotificationState.swift */; };
+		B20000000000000000000001 /* AgentFeatures.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* AgentFeatures.swift */; };
+		B20000000000000000000002 /* MobileFeatureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* MobileFeatureStore.swift */; };
+		B20000000000000000000003 /* MobileTerminalController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* MobileTerminalController.swift */; };
+		B20000000000000000000004 /* MobilePinnedItemsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* MobilePinnedItemsView.swift */; };
+		B20000000000000000000005 /* MobileHistoryNavigatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* MobileHistoryNavigatorView.swift */; };
+		B20000000000000000000006 /* MobileCodeReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* MobileCodeReviewView.swift */; };
+		B20000000000000000000007 /* MobileTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* MobileTerminalView.swift */; };
+		B20000000000000000000008 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = SPP000000000000000000001 /* SwiftTerm */; };
+		B20000000000000000000009 /* MobileSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000009 /* MobileSettingsView.swift */; };
 		B00000000000000000000020 /* ZenithCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; };
 		B00000000000000000000021 /* ZenithCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = P00000000000000000000002 /* ZenithCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -127,6 +136,14 @@
 		F10000000000000000000001 /* UnreadNotificationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadNotificationController.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* UnreadNotificationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadNotificationController.swift; sourceTree = "<group>"; };
 		F10000000000000000000003 /* UnreadNotificationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadNotificationState.swift; sourceTree = "<group>"; };
+		F20000000000000000000001 /* AgentFeatures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentFeatures.swift; sourceTree = "<group>"; };
+		F20000000000000000000002 /* MobileFeatureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileFeatureStore.swift; sourceTree = "<group>"; };
+		F20000000000000000000003 /* MobileTerminalController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTerminalController.swift; sourceTree = "<group>"; };
+		F20000000000000000000004 /* MobilePinnedItemsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobilePinnedItemsView.swift; sourceTree = "<group>"; };
+		F20000000000000000000005 /* MobileHistoryNavigatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHistoryNavigatorView.swift; sourceTree = "<group>"; };
+		F20000000000000000000006 /* MobileCodeReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileCodeReviewView.swift; sourceTree = "<group>"; };
+		F20000000000000000000007 /* MobileTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTerminalView.swift; sourceTree = "<group>"; };
+		F20000000000000000000009 /* MobileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSettingsView.swift; sourceTree = "<group>"; };
 		F00000000000000000000020 /* ZenithDockMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZenithDockMac.entitlements; sourceTree = "<group>"; };
 		P00000000000000000000001 /* AgentsDock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentsDock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		P00000000000000000000002 /* ZenithCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = ZenithCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -139,6 +156,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B0000000000000000000000D /* ZenithCore.framework in Frameworks */,
+				B20000000000000000000008 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -219,6 +237,7 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000001 /* ZenithCore.swift */,
+				F20000000000000000000001 /* AgentFeatures.swift */,
 				F10000000000000000000003 /* UnreadNotificationState.swift */,
 			);
 			path = ZenithCore;
@@ -257,6 +276,8 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000004 /* MobileAppStore.swift */,
+				F20000000000000000000002 /* MobileFeatureStore.swift */,
+				F20000000000000000000003 /* MobileTerminalController.swift */,
 			);
 			path = State;
 			sourceTree = "<group>";
@@ -275,9 +296,14 @@
 			children = (
 				F00000000000000000000006 /* MobileComposerView.swift */,
 				F00000000000000000000007 /* MobileEventViews.swift */,
+				F20000000000000000000006 /* MobileCodeReviewView.swift */,
+				F20000000000000000000005 /* MobileHistoryNavigatorView.swift */,
+				F20000000000000000000004 /* MobilePinnedItemsView.swift */,
+				F20000000000000000000009 /* MobileSettingsView.swift */,
 				F00000000000000000000008 /* MobileResumeView.swift */,
 				F00000000000000000000009 /* MobileRootView.swift */,
 				F0000000000000000000000A /* MobileSidebarView.swift */,
+				F20000000000000000000007 /* MobileTerminalView.swift */,
 				F0000000000000000000000B /* MobileTimelineView.swift */,
 				F00000000000000000000021 /* MobileChatOptionsView.swift */,
 			);
@@ -376,6 +402,9 @@
 				D00000000000000000000001 /* PBXTargetDependency */,
 			);
 			name = ZenithDockIOS;
+			packageProductDependencies = (
+				SPP000000000000000000001 /* SwiftTerm */,
+			);
 			productName = ZenithDock;
 			productReference = P00000000000000000000001 /* AgentsDock.app */;
 			productType = "com.apple.product-type.application";
@@ -446,6 +475,9 @@
 			);
 			mainGroup = G00000000000000000000000;
 			productRefGroup = G00000000000000000000003 /* Products */;
+			packageReferences = (
+				SPR000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -483,13 +515,20 @@
 				B00000000000000000000002 /* ZenithDockIOSApp.swift in Sources */,
 				B00000000000000000000003 /* MobileTheme.swift in Sources */,
 				B00000000000000000000004 /* MobileAppStore.swift in Sources */,
+				B20000000000000000000002 /* MobileFeatureStore.swift in Sources */,
+				B20000000000000000000003 /* MobileTerminalController.swift in Sources */,
 				B00000000000000000000005 /* MobileFormatting.swift in Sources */,
 				B00000000000000000000006 /* MobileComposerView.swift in Sources */,
 				B00000000000000000000007 /* MobileEventViews.swift in Sources */,
+				B20000000000000000000006 /* MobileCodeReviewView.swift in Sources */,
+				B20000000000000000000005 /* MobileHistoryNavigatorView.swift in Sources */,
+				B20000000000000000000004 /* MobilePinnedItemsView.swift in Sources */,
 				B00000000000000000000008 /* MobileResumeView.swift in Sources */,
 				B00000000000000000000009 /* MobileRootView.swift in Sources */,
 				B0000000000000000000000A /* MobileSidebarView.swift in Sources */,
 				B0000000000000000000000B /* MobileTimelineView.swift in Sources */,
+				B20000000000000000000007 /* MobileTerminalView.swift in Sources */,
+				B20000000000000000000009 /* MobileSettingsView.swift in Sources */,
 				B00000000000000000000023 /* MobileChatOptionsView.swift in Sources */,
 				B10000000000000000000002 /* UnreadNotificationController.swift in Sources */,
 			);
@@ -500,6 +539,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000001 /* ZenithCore.swift in Sources */,
+				B20000000000000000000001 /* AgentFeatures.swift in Sources */,
 				B10000000000000000000003 /* UnreadNotificationState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -828,6 +868,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		SPR000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.14.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		SPP000000000000000000001 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = SPR000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;
 }

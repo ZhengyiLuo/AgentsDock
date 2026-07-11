@@ -3,7 +3,9 @@ import ZenithCore
 
 struct MobileSidebarView: View {
     @EnvironmentObject private var store: MobileAppStore
+    @EnvironmentObject private var features: MobileFeatureStore
     @Binding var resumeOpen: Bool
+    @Binding var settingsOpen: Bool
     @State private var deleteCandidate: ZSession?
     @State private var reorderMode = false
     @State private var searchText = ""
@@ -57,19 +59,48 @@ struct MobileSidebarView: View {
                     MobileArchivedSectionHeader()
                 }
             }
-            if isSearching && filteredPinnedSessions.isEmpty && filteredFolderNames.isEmpty && filteredArchivedSessions.isEmpty {
+            if isSearching && (features.isSearchingHistory || !features.historyResults.isEmpty || features.historySearchError != nil) {
+                Section("Message History") {
+                    if features.isSearchingHistory {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Searching every chat…")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    ForEach(features.historyResults) { result in
+                        Button {
+                            Task { await store.navigate(to: result) }
+                        } label: {
+                            MobileHistorySearchResultRow(
+                                result: result,
+                                sessionTitle: store.sessions.first(where: { $0.id == result.session_id })?.title ?? "Chat"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let error = features.historySearchError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if isSearching && filteredPinnedSessions.isEmpty && filteredFolderNames.isEmpty && filteredArchivedSessions.isEmpty && features.historyResults.isEmpty && !features.isSearchingHistory {
                 Text("No chats match “\(normalizedSearchText)”")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .environment(\.editMode, .constant(reorderMode ? .active : .inactive))
-        .navigationTitle("ZenithDock")
+        .navigationTitle("AgentsDock")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
         .onChange(of: searchText) { _, _ in
             if isSearching && reorderMode {
                 reorderMode = false
             }
+            features.scheduleHistorySearch(normalizedSearchText, api: store.api)
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -81,6 +112,12 @@ struct MobileSidebarView: View {
                 .disabled(isSearching)
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    settingsOpen = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
                 Button {
                     Task { await store.refresh() }
                 } label: {
@@ -308,6 +345,63 @@ struct MobileSidebarView: View {
                     Label("Delete Chat", systemImage: "trash")
                 }
             }
+    }
+}
+
+private struct MobileHistorySearchResultRow: View {
+    let result: ZTimelineSearchResult
+    let sessionTitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 7) {
+                Image(systemName: roleIcon)
+                    .foregroundStyle(roleTint)
+                    .frame(width: 16)
+                Text(sessionTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let count = result.match_count, count > 1 {
+                    Text("\(count) matches")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Text(result.snippet)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            if let timestamp = result.ts {
+                Text(searchTimestamp(timestamp))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(sessionTitle), \(result.snippet)")
+    }
+
+    private var roleIcon: String {
+        switch result.role {
+        case "user": return "person.fill"
+        case "assistant": return "sparkles"
+        case "file": return "paperclip"
+        case "job": return "clock"
+        case "error": return "exclamationmark.triangle"
+        case "trace": return "chevron.left.forwardslash.chevron.right"
+        default: return "text.bubble"
+        }
+    }
+
+    private var roleTint: Color {
+        result.role == "error" ? .red : .accentColor
+    }
+
+    private func searchTimestamp(_ value: String) -> String {
+        guard let date = parseMobileServerDate(value) else { return value }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

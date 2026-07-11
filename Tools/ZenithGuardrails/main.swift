@@ -950,6 +950,70 @@ func checkCodeReviewSurfaceIsStructured() throws {
     try assert(!review.contains("lower.contains(\"git status\")"), "Code review extraction must not treat git status commands as review hunks")
 }
 
+func checkMobileParitySurfaces() throws {
+    let searchJSON = #"{"results":[{"session_id":"chat-1","event_id":"event-9","seq":91,"role":"assistant","snippet":"matching context","match_count":2}]}"#
+    let search = try JSONDecoder().decode(ZTimelineSearchResponse.self, from: Data(searchJSON.utf8))
+    try assert(search.results.first?.id == "chat-1:event-9", "Mobile whole-history search hits must keep stable session/event identity")
+    try assert(search.results.first?.seq == 91, "Mobile history navigation must preserve the exact server event sequence")
+
+    let diffSource = """
+    diff --git a/Sources/Old.swift b/Sources/Old.swift
+    --- a/Sources/Old.swift
+    +++ b/Sources/Old.swift
+    @@ -10,2 +10,2 @@
+     let stable = true
+    -let oldValue = 1
+    +let newValue = 2
+    diff --git a/Sources/New.swift b/Sources/New.swift
+    new file mode 100644
+    --- /dev/null
+    +++ b/Sources/New.swift
+    @@ -0,0 +1,2 @@
+    +let first = true
+    +let second = true
+    """
+    let diff = ZUnifiedDiffParser.parse(diffSource)
+    try assert(diff.files.map(\.path) == ["Sources/Old.swift", "Sources/New.swift"], "Mobile review must split the canonical patch into real files")
+    try assert(diff.additions == 3 && diff.deletions == 1, "Mobile review must preserve exact addition/deletion totals")
+    let changedLine = diff.files[0].lines.first { $0.kind == .added }
+    try assert(changedLine?.newNumber == 11 && changedLine?.text == "let newValue = 2", "Mobile review must retain code text and line numbers")
+    try assert(ZUnifiedDiffParser.parse("  \n").files.isEmpty, "An empty server patch must render as no code changes, not a fake file")
+
+    let terminalAPI = APIClient(baseURL: URL(string: "http://example.test:7850")!, accessToken: "secret")
+    let terminalURL = terminalAPI.webSocketURL(
+        "/api/sessions/chat-1/terminal/ws",
+        queryItems: [URLQueryItem(name: "rows", value: "32")]
+    )
+    try assert(terminalURL.scheme == "ws", "Mobile terminal must convert HTTP agent endpoints to WebSocket URLs")
+    let terminalQuery = URLComponents(url: terminalURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    try assert(terminalQuery.contains(URLQueryItem(name: "token", value: "secret")), "Mobile terminal WebSocket URLs must carry the configured access token")
+    try assert(ZTerminalAction.splitRight.rawValue == "split-right" && ZTerminalAction.killPane.rawValue == "kill-pane", "Mobile tmux actions must match the server contract")
+
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let package = try String(contentsOf: cwd.appendingPathComponent("Package.swift"), encoding: .utf8)
+    let project = try String(contentsOf: cwd.appendingPathComponent("ZenithDock.xcodeproj/project.pbxproj"), encoding: .utf8)
+    let root = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileRootView.swift"), encoding: .utf8)
+    let sidebar = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSidebarView.swift"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTimelineView.swift"), encoding: .utf8)
+    let events = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileEventViews.swift"), encoding: .utf8)
+    let options = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileChatOptionsView.swift"), encoding: .utf8)
+    let pins = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobilePinnedItemsView.swift"), encoding: .utf8)
+    let settings = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileSettingsView.swift"), encoding: .utf8)
+    let terminal = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithDockIOS/Views/MobileTerminalView.swift"), encoding: .utf8)
+
+    try assert(package.contains("SwiftTerm.git") && package.contains("exact: \"1.14.0\""), "Mobile terminal must use a pinned proven terminal emulator")
+    try assert(project.contains("MobileTerminalView.swift in Sources") && project.contains("SwiftTerm in Frameworks"), "The signed iOS target must include the terminal workspace")
+    try assert(root.contains("MobileSettingsView()") && root.contains("preferredColorScheme"), "Mobile must expose dedicated settings and system-aware appearance")
+    try assert(sidebar.contains("features.scheduleHistorySearch") && sidebar.contains("MobileHistorySearchResultRow"), "Mobile sidebar search must include server-backed chat history")
+    try assert(timeline.contains("MobileHistoryNavigatorView") && timeline.contains("MobileCodeReviewView") && timeline.contains("MobileTerminalView"), "Mobile chat header must route to history, review, and terminal workspaces")
+    try assert(events.contains("toggleMessagePin") && events.contains("toggleFilePin") && events.contains("MobileArtifactDragItemProvider.provider"), "Mobile timeline messages and files must support pins and native drag-out")
+    try assert(options.contains("Find in chat") && options.contains("toggleFilePin"), "Mobile media details must expose Find in Chat and file pins")
+    try assert(pins.contains("fileURL(fileID:"), "Old pinned files must remain openable after their timeline page leaves memory")
+    try assert(!root.contains("migratingFrom:"), "Endpoint changes must not copy local pins between unrelated servers")
+    try assert(settings.contains("Agent notifications and badge") && settings.contains("AgentsDock.appearanceMode"), "Mobile settings must own appearance and notification controls")
+    try assert(terminal.contains("splitRight") && terminal.contains("splitDown") && terminal.contains("killSession"), "Mobile terminal must expose persistent tmux window and pane controls")
+}
+
 func checkUnreadMessageMarker() throws {
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let core = try String(contentsOf: cwd.appendingPathComponent("Sources/ZenithCore/ZenithCore.swift"), encoding: .utf8)
@@ -1728,6 +1792,7 @@ do {
     try checkFlexibleEventOutputDecoding()
     try checkInlineVideoPlayAutoplays()
     try checkCodeReviewSurfaceIsStructured()
+    try checkMobileParitySurfaces()
     try checkUnreadMessageMarker()
     try checkUnreadNotificationTransitions()
     try checkTimelineHistoryPaging()

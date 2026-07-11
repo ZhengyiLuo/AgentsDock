@@ -12,6 +12,9 @@ struct MobileTimelineView: View {
     @Binding var resumeOpen: Bool
     @State private var isAtBottom = true
     @State private var optionsOpen = false
+    @State private var historyNavigatorOpen = false
+    @State private var terminalOpen = false
+    @State private var reviewRoute: MobileCodeReviewRoute?
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
     @State private var visibleRowLimit = 110
@@ -42,7 +45,13 @@ struct MobileTimelineView: View {
         VStack(spacing: 0) {
             MobileChatHeader(
                 resumeOpen: $resumeOpen,
-                optionsOpen: $optionsOpen
+                optionsOpen: $optionsOpen,
+                openHistory: { historyNavigatorOpen = true },
+                openTerminal: { terminalOpen = true },
+                openReview: { event in
+                    guard let runID = event.run_id else { return }
+                    reviewRoute = MobileCodeReviewRoute(sessionID: event.session_id, runID: runID)
+                }
             )
             Divider()
             ScrollViewReader { proxy in
@@ -150,6 +159,9 @@ struct MobileTimelineView: View {
                 .onChange(of: store.scrollRevision) {
                     scrollToBottom(proxy)
                 }
+                .onChange(of: store.timelineNavigationTarget?.id) {
+                    positionTimelineNavigationTarget(allRows, proxy: proxy)
+                }
                 .onChange(of: store.selectedSessionID) {
                     openingTimelineRevealRevision += 1
                     isOpeningTimelineMasked = store.selectedSessionID != nil
@@ -222,6 +234,20 @@ struct MobileTimelineView: View {
             MobileChatOptionsView(isPresented: $optionsOpen, resumeOpen: $resumeOpen)
                 .environmentObject(store)
         }
+        .sheet(isPresented: $historyNavigatorOpen) {
+            MobileHistoryNavigatorView()
+                .environmentObject(store)
+        }
+        .fullScreenCover(isPresented: $terminalOpen) {
+            if let session = store.selectedSession {
+                MobileTerminalView(session: session)
+                    .environmentObject(store)
+            }
+        }
+        .fullScreenCover(item: $reviewRoute) { route in
+            MobileCodeReviewView(sessionID: route.sessionID, runID: route.runID)
+                .environmentObject(store)
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
@@ -240,6 +266,33 @@ struct MobileTimelineView: View {
             withTransaction(noAnimationTransaction) {
                 action()
             }
+        }
+    }
+
+    private func positionTimelineNavigationTarget(_ allRows: [MobileTimelineRow], proxy: ScrollViewProxy) {
+        guard let target = store.timelineNavigationTarget,
+              target.sessionID == store.selectedSessionID,
+              let rowIndex = allRows.firstIndex(where: { $0.containsEventID(target.eventID) }) else {
+            return
+        }
+        let row = allRows[rowIndex]
+        let requiredVisibleRows = max(defaultVisibleRowLimit, allRows.count - rowIndex + 5)
+        if visibleRowLimit < requiredVisibleRows {
+            setVisibleRowLimit(requiredVisibleRows)
+        }
+        pendingOpenBottomSessionID = nil
+        isOpeningTimelineMasked = false
+        suppressHistoryLoading(for: 1.0)
+        disarmAutomaticOlderHistoryLoad()
+        let targetID = target.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            guard store.timelineNavigationTarget?.id == targetID,
+                  store.selectedSessionID == target.sessionID else { return }
+            withTransaction(noAnimationTransaction) {
+                proxy.scrollTo(row.id, anchor: .center)
+                isAtBottom = false
+            }
+            store.consumeTimelineNavigationTarget(targetID)
         }
     }
 
@@ -706,6 +759,9 @@ private struct MobileChatHeader: View {
     @EnvironmentObject private var store: MobileAppStore
     @Binding var resumeOpen: Bool
     @Binding var optionsOpen: Bool
+    let openHistory: () -> Void
+    let openTerminal: () -> Void
+    let openReview: (ZEvent) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -720,6 +776,20 @@ private struct MobileChatHeader: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                Button(action: openHistory) {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Search chat history")
+                if let latestCodeDiff {
+                    Button { openReview(latestCodeDiff) } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                    }
+                    .accessibilityLabel("Review latest code changes")
+                }
+                Button(action: openTerminal) {
+                    Image(systemName: "terminal")
+                }
+                .accessibilityLabel("Open persistent terminal")
                 Menu {
                     Button {
                         resumeOpen = true
@@ -730,6 +800,17 @@ private struct MobileChatHeader: View {
                         optionsOpen = true
                     } label: {
                         Label("Chat Options", systemImage: "slider.horizontal.3")
+                    }
+                    Button(action: openHistory) {
+                        Label("Search Chat History", systemImage: "magnifyingglass")
+                    }
+                    Button(action: openTerminal) {
+                        Label("Open Terminal", systemImage: "terminal")
+                    }
+                    if let latestCodeDiff {
+                        Button { openReview(latestCodeDiff) } label: {
+                            Label("Review Code Changes", systemImage: "doc.text.magnifyingglass")
+                        }
                     }
                     if let session = store.selectedSession {
                         Picker("Backend", selection: Binding(
@@ -812,6 +893,10 @@ private struct MobileChatHeader: View {
         return "\(store.runtimeCatalog.compactSummary(for: session)) · \(session.folder ?? "General")"
     }
 
+    private var latestCodeDiff: ZEvent? {
+        store.displayEvents.last { $0.type == "code_diff" && $0.run_id != nil }
+    }
+
     private func cleanLaunchDeferredText(_ text: String) -> String {
         text.replacingOccurrences(of: "agent launch deferred: ", with: "Launch deferred: ")
     }
@@ -835,6 +920,12 @@ private struct MobileChatHeader: View {
     private func normalized(_ value: String?) -> String {
         value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
+}
+
+private struct MobileCodeReviewRoute: Identifiable {
+    let sessionID: String
+    let runID: String
+    var id: String { "\(sessionID):\(runID)" }
 }
 
 private struct MobileTimelineHistoryLoader: View {
@@ -1009,6 +1100,7 @@ private enum MobileTimelineRow: Identifiable {
         "cwd_fallback",
         "history_imported",
         "backend_changed",
+        "code_diff",
         "artifact_error",
         "session_created"
     ]
@@ -1045,6 +1137,7 @@ private enum MobileTimelineRows {
         "cwd_fallback",
         "history_imported",
         "backend_changed",
+        "code_diff",
         "artifact_error",
         "session_created"
     ]

@@ -175,6 +175,7 @@ struct MobileEventCard: View {
                 actionTitle: actionTitle,
                 actionSystemImage: actionSystemImage,
                 linkContext: linkContext,
+                pinEvent: event,
                 action: action
             )
         }
@@ -182,7 +183,7 @@ struct MobileEventCard: View {
 
     private func assistantBubble(label: String = "Assistant", text: String, isDigest: Bool = false, isJob: Bool = false) -> some View {
         HStack {
-            MobileMessageBubble(label: label, text: text, isUser: false, queued: isDigest, isJob: isJob, timestamp: messageTimestamp, linkContext: linkContext)
+            MobileMessageBubble(label: label, text: text, isUser: false, queued: isDigest, isJob: isJob, timestamp: messageTimestamp, linkContext: linkContext, pinEvent: event)
             Spacer(minLength: 44)
         }
     }
@@ -235,6 +236,7 @@ private struct MobileJobEventSummary: View {
 }
 
 struct MobileMessageBubble: View {
+    @EnvironmentObject private var features: MobileFeatureStore
     let label: String
     let text: String
     let isUser: Bool
@@ -245,6 +247,7 @@ struct MobileMessageBubble: View {
     var actionTitle: String?
     var actionSystemImage: String?
     var linkContext: ZMarkdownLinkContext?
+    var pinEvent: ZEvent?
     var action: (() -> Void)?
     @State private var fullTextExpanded = false
 
@@ -275,6 +278,15 @@ struct MobileMessageBubble: View {
                     }
                     .buttonStyle(.borderless)
                     .accessibilityLabel(fullTextExpanded ? "Collapse message" : "Expand full message")
+                }
+                if let pinEvent {
+                    Button {
+                        features.toggleMessagePin(event: pinEvent, title: label, body: text)
+                    } label: {
+                        Image(systemName: features.isMessagePinned(pinEvent.id) ? "pin.fill" : "pin")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(features.isMessagePinned(pinEvent.id) ? "Unpin message" : "Pin message")
                 }
                 Button {
                     copyToPasteboard(ZClipboardText.normalizedForCopy(text))
@@ -386,7 +398,8 @@ struct MobileJobRunBubble: View {
                 isUser: false,
                 isJob: true,
                 timestamp: timestamp,
-                linkContext: linkContext
+                linkContext: linkContext,
+                pinEvent: jobRun.runEvent
             )
             Spacer(minLength: 44)
         }
@@ -678,6 +691,8 @@ struct MobileArtifactGridCard: View {
 }
 
 private struct MobileArtifactGridTile: View {
+    @EnvironmentObject private var store: MobileAppStore
+    @EnvironmentObject private var features: MobileFeatureStore
     let file: ZFile
     let url: URL
     var linkContext: ZMarkdownLinkContext?
@@ -705,6 +720,13 @@ private struct MobileArtifactGridTile: View {
                 Text(file.title ?? file.filename)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                Button {
+                    features.toggleFilePin(file, fallbackSessionID: store.selectedSessionID ?? "")
+                } label: {
+                    Image(systemName: features.isFilePinned(file.id) ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(features.isFilePinned(file.id) ? "Unpin file" : "Pin file")
                 MobileArtifactShareButton(file: file, url: url)
             }
             .font(.caption2.weight(.semibold))
@@ -715,6 +737,9 @@ private struct MobileArtifactGridTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(MobileTheme.softLine))
         .contentShape(Rectangle())
+        .onDrag {
+            MobileArtifactDragItemProvider.provider(for: file, url: url)
+        }
         .mobileImageFullscreen(isPresented: $fullscreenImage, url: url, title: file.title ?? file.filename)
         .mobileVideoFullscreen(isPresented: $fullscreenVideo, url: url, title: file.title ?? file.filename)
         .task(id: url) {
@@ -882,24 +907,57 @@ struct MobileTraceCard: View {
     let events: [ZEvent]
     var linkContext: ZMarkdownLinkContext?
     @State private var expanded = false
+    @State private var reviewOpen = false
 
     var body: some View {
         MobileSystemCard(icon: "chevron.left.forwardslash.chevron.right", title: "") {
-            DisclosureGroup(isExpanded: $expanded) {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(events) { event in
-                        MobileTraceRow(event: event, linkContext: linkContext)
+            VStack(alignment: .leading, spacing: 9) {
+                if let codeDiffEvent {
+                    Button {
+                        reviewOpen = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc.badge.gearshape")
+                                .foregroundStyle(Color.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Edited \(codeDiffEvent.files_changed ?? 0) files")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("+\(codeDiffEvent.additions ?? 0)  -\(codeDiffEvent.deletions ?? 0)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("Review")
+                                .font(.caption.weight(.semibold))
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .padding(10)
+                        .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+                    }
+                    .buttonStyle(.plain)
+                }
+                DisclosureGroup(isExpanded: $expanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(events.filter { $0.type != "code_diff" }) { event in
+                            MobileTraceRow(event: event, linkContext: linkContext)
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    HStack {
+                        Text(traceTitle)
+                            .font(.subheadline.weight(.semibold))
+                        Text(traceSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, 6)
-            } label: {
-                HStack {
-                    Text(traceTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(traceSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            }
+        }
+        .fullScreenCover(isPresented: $reviewOpen) {
+            if let codeDiffEvent, let runID = codeDiffEvent.run_id {
+                MobileCodeReviewView(sessionID: codeDiffEvent.session_id, runID: runID)
             }
         }
     }
@@ -917,6 +975,10 @@ struct MobileTraceCard: View {
         let ids = Set(events.compactMap { $0.tool?.id ?? $0.tool_id })
         if !ids.isEmpty { return ids.count }
         return events.filter { $0.type == "tool_started" }.count
+    }
+
+    private var codeDiffEvent: ZEvent? {
+        events.last { $0.type == "code_diff" && $0.run_id != nil }
     }
 }
 
@@ -1144,6 +1206,8 @@ struct MobileCodeBlock: View {
 }
 
 struct MobileArtifactView: View {
+    @EnvironmentObject private var store: MobileAppStore
+    @EnvironmentObject private var features: MobileFeatureStore
     let file: ZFile
     let url: URL
     var linkContext: ZMarkdownLinkContext?
@@ -1192,6 +1256,15 @@ struct MobileArtifactView: View {
                 }
                 Link(destination: url) {
                     Label("Open file", systemImage: "arrow.up.right.square")
+                }
+                .font(.caption.weight(.semibold))
+                Button {
+                    features.toggleFilePin(file, fallbackSessionID: store.selectedSessionID ?? "")
+                } label: {
+                    Label(
+                        features.isFilePinned(file.id) ? "Unpin file" : "Pin file",
+                        systemImage: features.isFilePinned(file.id) ? "pin.slash" : "pin"
+                    )
                 }
                 .font(.caption.weight(.semibold))
                 MobileArtifactShareButton(file: file, url: url)
