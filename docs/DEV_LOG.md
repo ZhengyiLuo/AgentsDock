@@ -7289,3 +7289,20 @@ Follow-up from rapid-switch stress:
 - Added a current-position indicator, forced video/image elements to reload
   cleanly when the selection changes, and covered keyboard navigation and
   boundary states with a focused UI regression.
+
+## 2026-07-10 - TestFlight builds 61 and 59 preparation
+
+- Advanced the Electron macOS TestFlight build from 60 to 61 for the media
+  gallery navigation and the complete set of Electron improvements committed
+  since the previous upload.
+- Advanced the native iOS/iPadOS TestFlight build from 58 to 59. The platform
+  keeps its independent build sequence while sharing version 0.1.1 and the
+  current server API contract.
+- Confirmed the embedded server source and standalone ZenithBotServer checkout
+  are byte-identical; standalone `main` is clean and synchronized with GitHub.
+- Updated a stale native guardrail that still expected providers to print
+  truncated diffs. It now verifies the canonical per-turn server snapshot path
+  introduced with API contract 6 instead of requiring the retired prompt text.
+- Advanced the paging contract assertion from the retired v4 marker to the
+  current v6 contract that combines visible-history paging with full diff
+  transport.
