@@ -56,6 +56,30 @@ describe('Composer', () => {
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
   })
 
+  it('keeps a long steer prompt in the bounded queue prompt surface', () => {
+    const longPrompt = `Inspect ${'/workspace/a-very-long-unbroken-worktree-name/'.repeat(12)} and report the exact status.`
+    useAppStore.setState({
+      snapshots: {
+        'chat-1': {
+          session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+          events: [],
+          queuedTurns: [{ queued_id: 'queued-long', session_id: 'chat-1', prompt: longPrompt, display_prompt: longPrompt, file_ids: [], position: 1 }],
+          files: [],
+          hasMoreEvents: false,
+          filesTotal: 0,
+          cachedAt: 0
+        }
+      }
+    })
+
+    render(<Composer />)
+
+    const prompt = screen.getByText(longPrompt)
+    expect(prompt).toHaveClass('queue-prompt')
+    expect(prompt).toHaveAttribute('title', longPrompt)
+    expect(prompt.closest('.queued-row')).toBeInTheDocument()
+  })
+
   it('reports queue action failures instead of leaving an unhandled rejection', async () => {
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,

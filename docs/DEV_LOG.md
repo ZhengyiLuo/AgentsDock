@@ -7383,3 +7383,13 @@ Release result:
   live server, including an SMP three-file patch, terminal shell, complete
   history search, and a 6,000-plus-event chat. The generic simulator build and
   the expanded `ZenithGuardrails` suite pass.
+
+## 2026-07-11 - Contain long steer messages beside the inspector
+
+- Replaced the queued-turn flex row with an explicit grip/content/actions grid
+  so long prompts cannot contribute an oversized intrinsic width or render
+  underneath the right inspector.
+- Queue prompts now wrap unbroken paths and prose inside a compact three-line
+  preview while preserving the complete prompt in the hover title and editor.
+- Added width/overflow containment to the queue shelf, scroll list, rows, and
+  inline editor, plus component and CSS regressions for long steer payloads.
