@@ -83,4 +83,15 @@ describe('sidebar history filtering', () => {
     const sections = buildSections(sessions, ['Jobs'], 'waterbottle', new Set(['training']))
     expect(sections.flatMap(section => section.sessions).map(session => session.id)).toEqual(['training'])
   })
+
+  it('puts chat-name matches ahead of transcript-only matches', () => {
+    const sessions: Session[] = [
+      { id: 'content', title: 'Training', folder: 'Jobs', backend: 'claude' },
+      { id: 'name', title: 'Waterbottle renderer', folder: 'General', backend: 'codex' }
+    ]
+    const sections = buildSections(sessions, ['Jobs', 'General'], 'waterbottle', new Set(['content']))
+    expect(sections).toHaveLength(1)
+    expect(sections[0].title).toBe('Matches')
+    expect(sections[0].sessions.map(session => session.id)).toEqual(['name', 'content'])
+  })
 })

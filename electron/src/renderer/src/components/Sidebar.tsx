@@ -11,11 +11,11 @@ import {
 import type { Session, TimelineSearchResult } from '@shared/types'
 import { runtimeLabel } from '../lib/format'
 import { historyResultsBySession, openSessionHistoryResult, useSessionHistorySearch } from '../lib/session-history-search'
-import { sessionMatchesQuery } from '../lib/sessions'
+import { rankSessionsForSearch, sessionNameMatchRank } from '../lib/sessions'
 import { sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
-interface Section { id: string; title: string; sessions: Session[]; kind: 'pinned' | 'folder' | 'archived' }
+interface Section { id: string; title: string; sessions: Session[]; kind: 'pinned' | 'folder' | 'archived' | 'search' }
 interface DropIndicator { id: string; placement: 'before' | 'after' | 'inside' }
 interface DragItemData { type: 'session' | 'folder'; label?: string; section?: string }
 
@@ -162,6 +162,7 @@ export function Sidebar() {
               runtime={(session) => runtimeLabel(session, catalog)}
               suppressClick={(id) => suppressClickRef.current === id}
               historyResults={historyResults}
+              query={query}
             />
           ))}
           {!sections.some(section => section.sessions.length) && <div className="sidebar-empty">{historySearch.loading ? 'Searching history…' : 'No chats found'}</div>}
@@ -175,8 +176,9 @@ export function Sidebar() {
   )
 }
 
-function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick, historyResults }: {
+function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppressClick, historyResults, query }: {
   section: Section; selectedId: string | null; collapsed: boolean; drop: DropIndicator | null; runtime: (session: Session) => string; suppressClick: (id: string) => boolean; historyResults: Map<string, TimelineSearchResult>
+  query: string
 }) {
   const toggle = () => {
     if (section.kind === 'archived') useAppStore.getState().setArchivedCollapsed(!collapsed)
@@ -186,7 +188,7 @@ function SidebarSection({ section, selectedId, collapsed, drop, runtime, suppres
     <section className="sidebar-section">
       <FolderHeader section={section} collapsed={collapsed} drop={drop} onToggle={toggle} suppressClick={suppressClick} />
       {!collapsed && section.sessions.map(session => (
-        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} historyResult={historyResults.get(session.id)} />
+        <SessionRow key={session.id} session={session} selected={session.id === selectedId} sectionId={section.id} drop={drop} runtime={runtime(session)} suppressClick={suppressClick} historyResult={sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined} />
       ))}
     </section>
   )
@@ -201,8 +203,8 @@ function FolderHeader({ section, collapsed, drop, onToggle, suppressClick }: { s
   return (
     <div ref={ref} className={`section-header ${indicator} ${draggable.isDragging ? 'dragging' : ''}`}>
       <button onClick={() => { if (!suppressClick(id)) onToggle() }} {...draggable.listeners} {...draggable.attributes}>
-        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        {section.kind === 'pinned' ? <Pin size={11} /> : section.kind === 'archived' ? <Archive size={11} /> : <Folder size={11} />}
+        {section.kind !== 'search' && (collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />)}
+        {section.kind === 'pinned' ? <Pin size={11} /> : section.kind === 'archived' ? <Archive size={11} /> : section.kind === 'search' ? <Search size={11} /> : <Folder size={11} />}
         <span>{section.title}</span><small>{section.sessions.length}</small>
       </button>
     </div>
@@ -211,8 +213,9 @@ function FolderHeader({ section, collapsed, drop, onToggle, suppressClick }: { s
 
 function SessionRow({ session, selected, sectionId, drop, runtime, suppressClick, historyResult }: { session: Session; selected: boolean; sectionId: string; drop: DropIndicator | null; runtime: string; suppressClick: (id: string) => boolean; historyResult?: TimelineSearchResult }) {
   const id = `session:${session.id}`
-  const draggable = useDraggable({ id, data: { type: 'session', label: session.title, section: sectionId } })
-  const droppable = useDroppable({ id, data: { type: 'session', section: sectionId } })
+  const searchResult = sectionId === 'search'
+  const draggable = useDraggable({ id, disabled: searchResult, data: { type: 'session', label: session.title, section: sectionId } })
+  const droppable = useDroppable({ id, disabled: searchResult, data: { type: 'session', section: sectionId } })
   const ref = (node: HTMLElement | null) => { draggable.setNodeRef(node); droppable.setNodeRef(node) }
   const unread = sessionUnread(session)
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
@@ -281,7 +284,8 @@ function MenuItem({ icon: Icon, label, onSelect, danger }: { icon: typeof MoreHo
 }
 
 export function buildSections(sessions: Session[], folderOrder: string[], query: string, historySessionIds: Set<string> = new Set()): Section[] {
-  const filtered = sessions.filter(session => sessionMatchesQuery(session, query) || historySessionIds.has(session.id))
+  const filtered = rankSessionsForSearch(sessions, query, historySessionIds)
+  if (query.trim()) return filtered.length ? [{ id: 'search', title: 'Matches', sessions: filtered, kind: 'search' }] : []
   const pinned = filtered.filter(session => session.pinned && !session.archived)
   const archived = filtered.filter(session => session.archived)
   const byFolder = new Map<string, Session[]>()

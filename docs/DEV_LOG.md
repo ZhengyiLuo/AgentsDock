@@ -7240,3 +7240,13 @@ Follow-up from rapid-switch stress:
   support keyboard resizing and double-click reset, and persist their widths.
 - Added regression coverage for trackpad accumulation, bounded scroll control,
   terminal WebSocket transport, and workspace column constraints.
+
+## 2026-07-10 - Rank chat names ahead of transcript matches
+
+- Added one deterministic search rank shared by the sidebar and Command-P:
+  exact title, title prefix, title word/substring, full-history content, then
+  incidental session metadata.
+- Search mode now presents one globally ranked result list instead of allowing
+  folder grouping to place a transcript hit above a stronger chat-name hit.
+- Title matches open the chat normally; transcript-only matches still jump to
+  the matching event. Added regressions for ranking and sidebar integration.

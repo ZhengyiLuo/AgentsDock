@@ -5,7 +5,7 @@ import type { AppUpdateStatus, Backend, CreateJobInput, Job, Session, UpdateJobI
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { runtimeLabel } from '../lib/format'
 import { historyResultsBySession, openSessionHistoryResult, useSessionHistorySearch } from '../lib/session-history-search'
-import { orderedActiveSessions, sessionMatchesQuery } from '../lib/sessions'
+import { orderedActiveSessions, rankSessionsForSearch, sessionNameMatchRank } from '../lib/sessions'
 import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
@@ -167,13 +167,20 @@ function SearchDialog() {
   const [query, setQuery] = useState('')
   const historySearch = useSessionHistorySearch(query)
   const historyResults = useMemo(() => historyResultsBySession(historySearch.results), [historySearch.results])
-  const filtered = sessions.filter(session => sessionMatchesQuery(session, query) || historyResults.has(session.id)).slice(0, 18)
+  const filtered = useMemo(
+    () => rankSessionsForSearch(sessions, query, new Set(historyResults.keys())).slice(0, 18),
+    [historyResults, query, sessions]
+  )
   useEffect(() => { if (open) setQuery('') }, [open])
-  const openSession = (session: Session) => { useAppStore.getState().setModal('search', false); void openSessionHistoryResult(session.id, historyResults.get(session.id)) }
+  const openSession = (session: Session) => {
+    useAppStore.getState().setModal('search', false)
+    const historyResult = sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined
+    void openSessionHistoryResult(session.id, historyResult)
+  }
   return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('search', value)} title="Open chat" className="command-dialog">
     <label className="command-search">{historySearch.loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}<input autoFocus value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && filtered[0]) openSession(filtered[0]) }} placeholder="Search chats and full history" /></label>
     <div className="command-results">{filtered.map(session => {
-      const match = historyResults.get(session.id)
+      const match = sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined
       return <button key={session.id} onClick={() => openSession(session)}><BackendMark backend={session.backend} size={18} /><span><strong>{session.title}</strong><small>{session.folder || 'General'} · {runtimeLabel(session, useAppStore.getState().runtimeCatalog)}</small>{match && <small className="history-match">{match.snippet}</small>}</span></button>
     })}{!filtered.length && <p>{historySearch.loading ? 'Searching full history…' : 'No matching chats.'}</p>}</div>
     <div className="command-hint"><Command size={12} /> P searches chats and messages · Control Tab switches chats</div>
