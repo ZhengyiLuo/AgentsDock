@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, Copy, FileDiff, LoaderCircle, RotateCcw, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, FileCode2, FileDiff, Folder, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import type { CodeReviewTarget, DiffFile, DiffLine } from '../lib/timeline'
-import { parseUnifiedDiff } from '../lib/timeline'
+import { parseReviewableDiff } from '../lib/timeline'
 import { useTransientClose } from '../lib/transient-close'
 
 type ReviewRow =
@@ -16,6 +16,19 @@ interface ReviewModel {
   fileStarts: number[]
 }
 
+interface ReviewTreeEntry {
+  file: DiffFile
+  fileIndex: number
+  name: string
+}
+
+interface ReviewTreeNode {
+  name: string
+  path: string
+  directories: ReviewTreeNode[]
+  files: ReviewTreeEntry[]
+}
+
 export function CodeReview({ target, onClose }: { target: CodeReviewTarget | null; onClose: () => void }) {
   useTransientClose(Boolean(target), onClose)
   const [source, setSource] = useState('')
@@ -23,7 +36,21 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [activeFile, setActiveFile] = useState(0)
+  const [filter, setFilter] = useState('')
+  const [workspaceLeft, setWorkspaceLeft] = useState(0)
   const list = useRef<VirtuosoHandle>(null)
+
+  useLayoutEffect(() => {
+    if (!target) return
+    const sidebar = document.querySelector<HTMLElement>('.sidebar')
+    if (!sidebar) { setWorkspaceLeft(0); return }
+    const update = () => setWorkspaceLeft(Math.round(sidebar.getBoundingClientRect().right))
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(sidebar)
+    window.addEventListener('resize', update)
+    return () => { observer.disconnect(); window.removeEventListener('resize', update) }
+  }, [target])
 
   useEffect(() => {
     let active = true
@@ -31,6 +58,7 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
     setError(null)
     setCopied(false)
     setActiveFile(0)
+    setFilter('')
     if (!target?.runId) {
       setLoading(false)
       return () => { active = false }
@@ -46,11 +74,23 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
     return () => { active = false }
   }, [target])
 
-  const files = useMemo(() => parseUnifiedDiff(source), [source])
+  const files = useMemo(() => parseReviewableDiff(source), [source])
   const model = useMemo(() => buildReviewModel(files), [files])
-  const additions = target?.additions ?? files.reduce((sum, file) => sum + file.additions, 0)
-  const deletions = target?.deletions ?? files.reduce((sum, file) => sum + file.deletions, 0)
-  const fileCount = target?.files?.length ?? files.length
+  const parsedAdditions = files.reduce((sum, file) => sum + file.additions, 0)
+  const parsedDeletions = files.reduce((sum, file) => sum + file.deletions, 0)
+  const additions = target?.runId && target.additions != null ? target.additions : parsedAdditions
+  const deletions = target?.runId && target.deletions != null ? target.deletions : parsedDeletions
+  const fileCount = files.length || (loading ? target?.files?.length ?? 0 : 0)
+  const normalizedFilter = filter.trim().toLowerCase()
+  const filteredEntries = useMemo(() => files.map((file, fileIndex) => ({
+    file,
+    fileIndex,
+    name: file.path.split('/').filter(Boolean).at(-1) || file.path
+  })).filter(entry => !normalizedFilter || entry.file.path.toLowerCase().includes(normalizedFilter)), [files, normalizedFilter])
+  const fileTree = useMemo(() => buildFileTree(filteredEntries), [filteredEntries])
+  const unavailableMessage = error || (source.trim() && files.length === 0
+    ? 'This historical turn recorded a file list, but no line-level patch. AgentsDock will not present that inventory as a diff.'
+    : 'No line-level code changes were captured for this turn.')
 
   if (!target) return null
 
@@ -73,29 +113,29 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
     list.current?.scrollToIndex({ index: model.fileStarts[fileIndex] ?? 0, align: 'start', behavior: 'auto' })
   }
 
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
+  return <Dialog.Root open modal={false} onOpenChange={open => { if (!open) onClose() }}>
     <Dialog.Portal>
-      <Dialog.Overlay className="dialog-overlay review-overlay" />
-      <Dialog.Content className="review-dialog">
+      <Dialog.Content className="review-dialog" style={{ left: workspaceLeft }} onPointerDownOutside={event => event.preventDefault()}>
         <Dialog.Description className="sr-only">Complete code changes from the selected agent turn.</Dialog.Description>
         <header className="review-header">
-          <Dialog.Title><FileDiff size={16} /> Review</Dialog.Title>
-          <span className="diff-stat"><b>+{additions}</b><i>-{deletions}</i></span>
+          <Dialog.Title><FileDiff size={15} /> Review</Dialog.Title>
           <span className="review-spacer" />
-          <button className="quiet-button" disabled={!source} onClick={() => void copy()}>{copied ? <Check size={14} /> : <Copy size={14} />} Copy diff</button>
+          <button className="quiet-button" disabled={files.length === 0} onClick={() => void copy()}>{copied ? <Check size={14} /> : <Copy size={14} />} Copy diff</button>
           <Dialog.Close className="icon-button" aria-label="Close review"><X size={16} /></Dialog.Close>
         </header>
         <div className="review-toolbar">
-          <strong>Last turn</strong>
+          <span className="review-turn-selector"><strong>Last turn</strong><ChevronDown size={13} /></span>
+          <span className="diff-stat"><b>+{additions}</b><i>-{deletions}</i></span>
           <span>{fileCount} file{fileCount === 1 ? '' : 's'}</span>
-          {files.length > 0 && <select aria-label="Jump to changed file" value={Math.min(activeFile, files.length - 1)} onChange={event => jumpToFile(Number(event.target.value))}>
+          {files.length > 0 && <select className="review-file-select" aria-label="Jump to changed file" value={Math.min(activeFile, files.length - 1)} onChange={event => jumpToFile(Number(event.target.value))}>
             {files.map((file, index) => <option value={index} key={`${file.path}:${index}`}>{file.path}</option>)}
           </select>}
         </div>
-        <section className="review-diff-view">
-          {loading && !source ? <div className="review-state"><LoaderCircle className="spin" size={18} /><span>Loading complete diff…</span></div>
-            : error && !source ? <div className="review-state error"><span>{error}</span><button className="quiet-button" onClick={retry}><RotateCcw size={14} /> Retry</button></div>
-              : model.rows.length === 0 ? <div className="review-state"><span>No unified diff was found for this turn.</span></div>
+        <div className="review-workspace">
+          <section className="review-diff-view">
+            {error && files.length > 0 && <div className="review-inline-warning"><span>{error}</span><button onClick={retry}><RotateCcw size={13} /> Retry</button></div>}
+            {loading && files.length === 0 ? <div className="review-state"><LoaderCircle className="spin" size={18} /><span>Loading complete diff…</span></div>
+              : model.rows.length === 0 ? <div className="review-state error"><FileDiff size={24} /><span>{unavailableMessage}</span>{target.runId && <button className="quiet-button" onClick={retry}><RotateCcw size={14} /> Retry</button>}</div>
                 : <Virtuoso
                   ref={list}
                   className="review-diff-list"
@@ -104,10 +144,65 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
                   rangeChanged={range => setActiveFile(fileIndexAtRow(model.fileStarts, range.startIndex))}
                   itemContent={(_index, row) => <ReviewRowView row={row} />}
                 />}
-        </section>
+          </section>
+          <aside className="review-navigator" aria-label="Changed files">
+            <label className="review-filter"><Search size={13} /><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="Filter files…" /></label>
+            <div className="review-tree-root"><Folder size={14} /><strong title={target.repositoryRoot || undefined}>{shortRepositoryRoot(target.repositoryRoot)}</strong><span>{files.length}</span></div>
+            <div className="review-tree">
+              {filteredEntries.length > 0
+                ? <ReviewTree node={fileTree} activeFile={activeFile} onSelect={jumpToFile} />
+                : <p>No matching files</p>}
+            </div>
+          </aside>
+        </div>
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>
+}
+
+function ReviewTree({ node, activeFile, onSelect }: { node: ReviewTreeNode; activeFile: number; onSelect: (index: number) => void }) {
+  return <>
+    {node.directories.map(directory => <details className="review-tree-directory" open key={directory.path}>
+      <summary><ChevronRight size={12} /><Folder size={13} /><span>{directory.name}</span></summary>
+      <div><ReviewTree node={directory} activeFile={activeFile} onSelect={onSelect} /></div>
+    </details>)}
+    {node.files.map(entry => <button className={entry.fileIndex === activeFile ? 'active' : ''} title={entry.file.path} key={`${entry.file.path}:${entry.fileIndex}`} onClick={() => onSelect(entry.fileIndex)}>
+      <span className="review-file-status">M</span><FileCode2 size={13} /><span>{entry.name}</span><small><b>+{entry.file.additions}</b><i>-{entry.file.deletions}</i></small>
+    </button>)}
+  </>
+}
+
+function buildFileTree(entries: ReviewTreeEntry[]): ReviewTreeNode {
+  type MutableNode = { name: string; path: string; directories: Map<string, MutableNode>; files: ReviewTreeEntry[] }
+  const root: MutableNode = { name: '', path: '', directories: new Map(), files: [] }
+  for (const entry of entries) {
+    const parts = entry.file.path.split('/').filter(Boolean)
+    entry.name = parts.pop() || entry.file.path
+    let node = root
+    for (const part of parts) {
+      const path = node.path ? `${node.path}/${part}` : part
+      let child = node.directories.get(part)
+      if (!child) {
+        child = { name: part, path, directories: new Map(), files: [] }
+        node.directories.set(part, child)
+      }
+      node = child
+    }
+    node.files.push(entry)
+  }
+  const freeze = (node: MutableNode): ReviewTreeNode => ({
+    name: node.name,
+    path: node.path,
+    directories: [...node.directories.values()].sort((a, b) => a.name.localeCompare(b.name)).map(freeze),
+    files: [...node.files].sort((a, b) => a.name.localeCompare(b.name))
+  })
+  return freeze(root)
+}
+
+function shortRepositoryRoot(path?: string | null): string {
+  if (!path) return 'Changed files'
+  const parts = path.split('/').filter(Boolean)
+  return parts.length > 3 ? `…/${parts.slice(-3).join('/')}` : path
 }
 
 function buildReviewModel(files: DiffFile[]): ReviewModel {

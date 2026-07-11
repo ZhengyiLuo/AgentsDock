@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
 import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff } from '../lib/timeline'
+import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageItemText, messageText, parseReviewableDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
@@ -62,7 +62,7 @@ function TraceDisclosure({ events, sessionId }: { events: Event[]; sessionId: st
   const thoughts = events.filter(event => event.type === 'reasoning_summary')
   const canonicalDiff = [...events].reverse().find(event => event.type === 'code_diff' && event.run_id)
   const diff = useMemo(() => extractUnifiedDiff(events), [events])
-  const legacyFiles = useMemo(() => parseUnifiedDiff(diff), [diff])
+  const legacyFiles = useMemo(() => parseReviewableDiff(diff), [diff])
   const diffFiles = canonicalDiff?.diff_files ?? legacyFiles
   const diffFileCount = canonicalDiff?.files_changed ?? diffFiles.length
   const additions = canonicalDiff?.additions ?? legacyFiles.reduce((sum, file) => sum + file.additions, 0)
@@ -74,7 +74,8 @@ function TraceDisclosure({ events, sessionId }: { events: Event[]; sessionId: st
       source: canonicalDiff ? null : diff,
       files: canonicalDiff?.diff_files,
       additions,
-      deletions
+      deletions,
+      repositoryRoot: canonicalDiff?.repository_root
     }
     window.dispatchEvent(new CustomEvent<CodeReviewTarget>('agentsdock:review-diff', { detail: target }))
   }
@@ -127,7 +128,8 @@ function JobView({ item, sessionId, pinnedItemIds }: { item: JobItem; sessionId:
       runId: codeDiff.run_id,
       files: codeDiff.diff_files,
       additions: codeDiff.additions,
-      deletions: codeDiff.deletions
+      deletions: codeDiff.deletions,
+      repositoryRoot: codeDiff.repository_root
     }
     window.dispatchEvent(new CustomEvent<CodeReviewTarget>('agentsdock:review-diff', { detail: target }))
   }

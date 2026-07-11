@@ -7322,3 +7322,19 @@ Release result:
   version 0.1.1, build 59, and `ITSAppUsesNonExemptEncryption = false`. Its
   strict signature check and App Store export succeeded; App Store Connect
   accepted `AgentsDockIOS` and reports the package is processing.
+
+## 2026-07-10 - Replace the file inventory with a real review workspace
+
+- Stopped treating `git status --short` output as a diff. Legacy traces only
+  receive a Review action when they contain real patch markers and line-level
+  hunks; historical status inventories now explain that no patch was captured
+  instead of displaying eighteen fake `+0/-0` files.
+- Rebuilt Review as a full workspace to the right of the persistent chat
+  sidebar. The main pane renders the complete server patch with old/new line
+  numbers, red/green code rows, hunk gaps, and continuous virtualized files.
+- Added a searchable, hierarchical changed-file tree on the right with active
+  file tracking and click-to-jump. Narrow windows retain a compact file picker
+  while dedicating their width to the code.
+- Added component and parser regressions for canonical patch rendering, file
+  navigation, and status-only false positives. The Electron suite now contains
+  119 passing tests across 28 files.

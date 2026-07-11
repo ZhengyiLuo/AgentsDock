@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
-import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseUnifiedDiff, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems } from './timeline'
+import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseReviewableDiff, parseUnifiedDiff, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems } from './timeline'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -238,6 +238,21 @@ describe('parseUnifiedDiff', () => {
     expect(files).toHaveLength(1)
     expect(files[0]).toMatchObject({ path: 'a.ts', additions: 1, deletions: 1 })
     expect(files[0].lines.some(line => line.kind === 'add' && line.newLine === 1)).toBe(true)
+  })
+
+  it('does not present git status output as a line-level code review', () => {
+    const source = [
+      ' M groot/rl/scripts/sim2sim/run_eval.py',
+      '?? groot/rl/scripts/sim2sim/configs/new.yaml'
+    ].join('\n')
+
+    expect(parseUnifiedDiff(source)).toHaveLength(2)
+    expect(parseReviewableDiff(source)).toEqual([])
+  })
+
+  it('retains complete git patches for the code review workspace', () => {
+    const source = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new'
+    expect(parseReviewableDiff(source)).toMatchObject([{ path: 'a.ts', additions: 1, deletions: 1 }])
   })
 
   it('recognizes Claude apply_patch input as a reviewable change', () => {

@@ -407,6 +407,7 @@ export interface CodeReviewTarget {
   files?: CodeDiffFileSummary[] | null
   additions?: number | null
   deletions?: number | null
+  repositoryRoot?: string | null
 }
 
 export function parseUnifiedDiff(source: string): DiffFile[] {
@@ -467,6 +468,13 @@ export function parseUnifiedDiff(source: string): DiffFile[] {
     current.lines.push({ kind: 'header', text: line })
   }
   return files
+}
+
+export function parseReviewableDiff(source: string): DiffFile[] {
+  return parseUnifiedDiff(source).filter(file => file.lines.some(line =>
+    line.kind === 'hunk' || line.kind === 'add' || line.kind === 'remove' ||
+    (line.kind === 'header' && (/^diff --git /.test(line.text) || /^\*\*\* (?:Update|Add|Delete) File:/.test(line.text) || /^Binary files /.test(line.text) || /^(?:old|new) mode \d+/.test(line.text)))
+  ))
 }
 
 function toolInputTexts(event: Event): string[] {
