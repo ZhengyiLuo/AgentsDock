@@ -7411,3 +7411,18 @@ Release result:
   search, code review, process inspection, digest handoff, and xterm/tmux.
 - Kept local user sends as the only automatic bottom-scroll trigger. Incoming
   agent updates preserve the current reading position.
+
+## 2026-07-11 - Verify the standalone React Native iPhone/iPad build
+
+- Generated the isolated iOS workspace, installed its CocoaPods graph, and
+  produced a standalone Release-simulator app with an embedded Hermes bundle.
+- Fixed the production-only markdown dependency gap by declaring `punycode`
+  explicitly; both TypeScript and Expo's 3,188-module production export pass.
+- Hardened unsigned simulator startup with a local token fallback while keeping
+  SecureStore as the signed-device path. Notification permission and badges are
+  deferred until a server connection succeeds.
+- Removed unstable Zustand selectors that returned fresh arrays on every store
+  read and triggered React 19's maximum-update-depth protection.
+- Installed and launched the same universal artifact on iPhone 17 Pro and iPad
+  Pro 13-inch simulators. Phone navigation, iPad split view, light/dark system
+  appearance, and fatal-runtime log checks pass.
