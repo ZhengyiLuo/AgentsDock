@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { AgentFile } from '@shared/types'
@@ -22,6 +22,35 @@ describe('MediaPreviewDialog', () => {
     expect(onClose).toHaveBeenCalledOnce()
     view.unmount()
     expect(closeTopTransient()).toBe(false)
+  })
+
+  it('navigates the media cluster with arrow keys and visible controls', () => {
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        files: {
+          mediaURL: vi.fn((id: string) => `agentsdock-media://file/${id}`),
+          open: vi.fn(),
+          save: vi.fn()
+        }
+      } as unknown as AgentsDockAPI
+    })
+    const first: AgentFile = { id: 'video-1', filename: 'first.mp4', content_type: 'video/mp4' }
+    const second: AgentFile = { id: 'video-2', filename: 'second.mp4', content_type: 'video/mp4' }
+    const onSelect = vi.fn()
+    const view = render(<MediaPreviewDialog file={first} files={[first, second]} onSelect={onSelect} onClose={vi.fn()} />)
+
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Previous media' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next media' })).toBeEnabled()
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    expect(onSelect).toHaveBeenCalledWith(second)
+
+    onSelect.mockClear()
+    view.rerender(<MediaPreviewDialog file={second} files={[first, second]} onSelect={onSelect} onClose={vi.fn()} />)
+    fireEvent.keyDown(window, { key: 'ArrowLeft' })
+    expect(onSelect).toHaveBeenCalledWith(first)
   })
 })
 

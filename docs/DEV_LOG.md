@@ -7277,3 +7277,15 @@ Follow-up from rapid-switch stress:
   work immediately, hide on release/blur, and follow filtered search order.
 - Added regression coverage for the hold gesture, numeric routing, steering,
   race handling, and composer integration.
+
+## 2026-07-10 - Navigate media clusters inside the preview modal
+
+- Turned the shared image/video modal into a bounded gallery. Left and right
+  arrow keys move to adjacent media, matching visible previous/next controls;
+  the controls disable at the beginning and end instead of wrapping silently.
+- Passed the complete message or inspector media collection into the viewer,
+  so navigation is not limited to the four thumbnails currently shown in a
+  timeline cluster.
+- Added a current-position indicator, forced video/image elements to reload
+  cleanly when the selection changes, and covered keyboard navigation and
+  boundary states with a focused UI regression.

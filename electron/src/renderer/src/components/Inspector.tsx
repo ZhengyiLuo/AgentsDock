@@ -85,7 +85,7 @@ export function Inspector() {
           {mediaOpen && <MediaInspector sessionId={session.id} files={files} total={filesTotal} loading={loadingFiles} loadMore={() => void loadFiles(false)} onPreview={setPreview} />}
         </section>
         <JobsSection jobs={jobs} />
-        <MediaPreviewDialog file={preview} onClose={() => setPreview(null)} />
+        <MediaPreviewDialog file={preview} files={files} onSelect={setPreview} onClose={() => setPreview(null)} />
       </>}
     </div>
   </aside>
