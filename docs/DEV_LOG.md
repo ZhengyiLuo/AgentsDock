@@ -32,6 +32,15 @@ painful to rediscover later.
 - Build 60 contains the restored React mobile parity flows: complete chat
   actions, folders, scheduled jobs, tmux/process inspection, pinned content,
   isolated search state, and explicit iPad connection settings.
+- The React typecheck and signed generic-device archive passed. The archive is
+  arm64, version `0.1.1`, build `60`, carries the exempt-encryption flag, and
+  uses the existing AgentsDock application identifier.
+- Xcode's stale GUI account token could not provision the push entitlement, so
+  the release used the repository's established App Store Connect API-key path
+  to fetch the correct profile and upload. App Store Connect accepted the
+  package and reports it processing.
+- Missing dSYM warnings are limited to prebuilt Expo, React, Hermes, and
+  SDWebImage frameworks. They did not block export or upload.
 
 ## 2026-07-04 - Never Read Keychain During AppStore Initialization
 
