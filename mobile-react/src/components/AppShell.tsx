@@ -5,7 +5,7 @@ import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import { ChatScreen } from './ChatScreen'
 import { CodeReview } from './CodeReview'
-import { DigestDialog, JobDialog, NewChatDialog, ProcessDialog, SearchDialog, SettingsDialog } from './Dialogs'
+import { DigestDialog, JobDialog, NewChatDialog, ProcessDialog, SearchDialog, SettingsDialog, TmuxDialog } from './Dialogs'
 import { Inspector } from './Inspector'
 import { Sidebar } from './Sidebar'
 import { TerminalView } from './TerminalView'
@@ -29,8 +29,9 @@ export function AppShell() {
   const [search, setSearch] = useState(false)
   const [globalSearch, setGlobalSearch] = useState(false)
   const [digest, setDigest] = useState(false)
-  const [job, setJob] = useState(false)
+  const [jobEditor, setJobEditor] = useState<string | 'new' | null>(null)
   const [processes, setProcesses] = useState(false)
+  const [tmux, setTmux] = useState(false)
   const [terminal, setTerminal] = useState(false)
   const [reviewRun, setReviewRun] = useState<string | null>(null)
   const compact = width < 720
@@ -54,7 +55,7 @@ export function AppShell() {
   const chat = selected ? <ChatScreen sessionId={selected.id} compact={compact} onBack={() => setMobileChatOpen(false)} onOptions={() => setOptions(true)} onSearch={() => setSearch(true)} onToggleInspector={() => setInspectorVisible(value => !value)} onReview={setReviewRun} /> : <NoChat connecting={connecting} onSettings={() => setSettings(true)} />
 
   return <View style={[styles.fill, { backgroundColor: colors.background }]}>
-    {compact ? (mobileChatOpen && selected ? chat : sidebar) : <View style={styles.workspace}><View style={{ width: width >= 1180 ? 285 : 255 }}>{sidebar}</View><View style={styles.chat}>{chat}</View>{showInspector && selected ? <View style={{ width: Math.min(350, width * 0.29) }}><Inspector sessionId={selected.id} onDigest={() => setDigest(true)} onJob={() => setJob(true)} onTerminal={() => setTerminal(true)} onProcesses={() => setProcesses(true)} /></View> : null}</View>}
+    {compact ? (mobileChatOpen && selected ? chat : sidebar) : <View style={styles.workspace}><View style={{ width: width >= 1180 ? 285 : 255 }}>{sidebar}</View><View style={styles.chat}>{chat}</View>{showInspector && selected ? <View style={{ width: Math.min(350, width * 0.29) }}><Inspector sessionId={selected.id} onDigest={() => setDigest(true)} onJob={jobId => setJobEditor(jobId ?? 'new')} onTerminal={() => setTerminal(true)} onProcesses={() => setProcesses(true)} onTmux={() => setTmux(true)} /></View> : null}</View>}
     {!compact && selected && !showInspector ? <Pressable onPress={() => setInspectorVisible(true)} style={[styles.restoreInspector, { backgroundColor: colors.raised, borderColor: colors.border }]}><PanelRight size={17} color={colors.muted} /></Pressable> : null}
     {error ? <View style={[styles.error, { backgroundColor: colors.surface, borderColor: colors.red }]}><AlertCircle size={17} color={colors.red} /><Text style={[styles.errorText, { color: colors.text }]} numberOfLines={3}>{error}</Text><IconButton icon={Settings} size={15} onPress={() => setSettings(true)} label="Settings" /><IconButton icon={X} size={15} onPress={clearError} label="Dismiss" /></View> : null}
 
@@ -63,10 +64,11 @@ export function AppShell() {
     <SearchDialog visible={search} sessionId={selected?.id} onClose={() => setSearch(false)} />
     <SearchDialog visible={globalSearch} onClose={() => setGlobalSearch(false)} />
     <DigestDialog visible={digest} source={selected} onClose={() => setDigest(false)} />
-    <JobDialog visible={job} session={selected} onClose={() => setJob(false)} />
+    <JobDialog visible={jobEditor != null} session={selected} jobId={jobEditor === 'new' ? null : jobEditor} onClose={() => setJobEditor(null)} />
     <ProcessDialog visible={processes} sessionId={selected?.id ?? null} onClose={() => setProcesses(false)} />
+    <TmuxDialog visible={tmux} sessionId={selected?.id ?? null} onClose={() => setTmux(false)} />
     <CodeReview sessionId={selected?.id ?? ''} runId={reviewRun} onClose={() => setReviewRun(null)} />
-    <Modal visible={options && Boolean(selected)} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setOptions(false)}>{selected ? <View style={[styles.fill, { backgroundColor: colors.background }]}><View style={styles.modalTop}><Text style={[styles.modalTitle, { color: colors.text }]}>Chat details</Text><IconButton icon={X} onPress={() => setOptions(false)} label="Close" /></View><Inspector sessionId={selected.id} onDigest={() => { setOptions(false); setDigest(true) }} onJob={() => { setOptions(false); setJob(true) }} onTerminal={() => { setOptions(false); setTerminal(true) }} onProcesses={() => { setOptions(false); setProcesses(true) }} /></View> : null}</Modal>
+    <Modal visible={options && Boolean(selected)} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setOptions(false)}>{selected ? <View style={[styles.fill, { backgroundColor: colors.background }]}><View style={styles.modalTop}><Text style={[styles.modalTitle, { color: colors.text }]}>Chat details</Text><IconButton icon={X} onPress={() => setOptions(false)} label="Close" /></View><Inspector sessionId={selected.id} onDigest={() => { setOptions(false); setDigest(true) }} onJob={jobId => { setOptions(false); setJobEditor(jobId ?? 'new') }} onTerminal={() => { setOptions(false); setTerminal(true) }} onProcesses={() => { setOptions(false); setProcesses(true) }} onTmux={() => { setOptions(false); setTmux(true) }} /></View> : null}</Modal>
     <Modal visible={terminal && Boolean(selected)} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setTerminal(false)}>{selected ? <TerminalView session={selected} onClose={() => setTerminal(false)} /> : null}</Modal>
   </View>
 }

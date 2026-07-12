@@ -24,6 +24,8 @@ export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, o
 function MessageRowView({ row, sessionId }: { row: Extract<TimelineRow, { kind: 'message' }>; sessionId: string }) {
   const colors = usePalette()
   const pin = useAppStore(state => state.pinMessage)
+  const removePin = useAppStore(state => state.removePin)
+  const pinned = useAppStore(state => state.pins.some(value => value.id === `message:${row.events.at(-1)?.id}`))
   const full = useMemo(() => rowText(row), [row])
   const [expanded, setExpanded] = useState(false)
   const folded = full.length > FOLD_AT && !expanded
@@ -35,7 +37,7 @@ function MessageRowView({ row, sessionId }: { row: Extract<TimelineRow, { kind: 
         <View style={styles.metaRow}>
           <Text style={[styles.author, { color: colors.muted }]}>{row.role === 'user' ? 'You' : 'Assistant'}</Text>
           <Text style={[styles.time, { color: colors.muted }]}>{formatTime(event.ts)}</Text>
-          <IconButton icon={Pin} size={13} label="Pin message" onPress={() => void pin(sessionId, event, full)} />
+          <IconButton icon={Pin} size={13} selected={pinned} label={pinned ? 'Unpin message' : 'Pin message'} onPress={() => void (pinned ? removePin(`message:${event.id}`) : pin(sessionId, event, full))} />
           <IconButton icon={Copy} size={13} label="Copy full text" onPress={() => void Clipboard.setStringAsync(full)} />
         </View>
         <MarkdownContent value={visible} />

@@ -16,6 +16,9 @@ export function MediaGrid({ files, sessionId, compact = false }: { files: AgentF
   const colors = usePalette()
   const { width } = useWindowDimensions()
   const pinFile = useAppStore(state => state.pinFile)
+  const removePin = useAppStore(state => state.removePin)
+  const pins = useAppStore(state => state.pins)
+  const pinnedIds = useMemo(() => new Set(pins.filter(value => value.kind === 'file').map(value => value.fileId)), [pins])
   const [selected, setSelected] = useState<number | null>(null)
   const visible = useMemo(() => files.slice(0, compact ? 8 : 24), [compact, files])
   const columns = width >= 1100 ? 4 : width >= 680 ? 3 : 2
@@ -40,7 +43,7 @@ export function MediaGrid({ files, sessionId, compact = false }: { files: AgentF
             </View>
             <View style={styles.tileActions}>
               <IconButton icon={Download} size={14} label="Download" onPress={() => void downloadAndShare(file)} />
-              <IconButton icon={Pin} size={14} label="Pin" onPress={() => void pinFile(sessionId, file)} />
+              <IconButton icon={Pin} size={14} selected={pinnedIds.has(file.id)} label={pinnedIds.has(file.id) ? 'Unpin' : 'Pin'} onPress={() => void (pinnedIds.has(file.id) ? removePin(`file:${file.id}`) : pinFile(sessionId, file))} />
               {isMedia(file) ? <IconButton icon={Maximize2} size={14} label="Preview" onPress={() => setSelected(index)} /> : null}
             </View>
           </Pressable>

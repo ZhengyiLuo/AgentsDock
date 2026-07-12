@@ -433,7 +433,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async createJob(input) { try { const job = await client.createJob(input); set(state => ({ jobs: [...state.jobs, job] })) } catch (error) { set({ error: errorMessage(error) }) } },
   async updateJob(jobId, patch) { try { const job = await client.updateJob(jobId, patch); set(state => ({ jobs: state.jobs.map(value => value.id === jobId ? job : value) })) } catch (error) { set({ error: errorMessage(error) }) } },
   async deleteJob(jobId) { try { await client.deleteJob(jobId); set(state => ({ jobs: state.jobs.filter(value => value.id !== jobId) })) } catch (error) { set({ error: errorMessage(error) }) } },
-  async runJob(jobId) { try { await client.runJob(jobId) } catch (error) { set({ error: errorMessage(error) }) } },
+  async runJob(jobId) { try { await client.runJob(jobId); await get().refreshJobs() } catch (error) { set({ error: errorMessage(error) }) } },
 
   async search(query, sessionId) {
     const clean = query.trim()
@@ -483,6 +483,7 @@ function applyLiveEvent(event: Event, set: (value: Partial<AppState> | ((state: 
     return { snapshots: { ...state.snapshots, [sessionId]: next }, activeSessionIds: active }
   })
   if (['assistant_text', 'turn_finished', 'artifact_created', 'file_uploaded'].includes(event.type)) void get().refreshSessions()
+  if (event.type.startsWith('job_')) void get().refreshJobs()
   if (NativeAppState.currentState !== 'active' && ['assistant_text', 'turn_finished', 'artifact_created', 'file_uploaded', 'job_finished', 'job_error'].includes(event.type)) {
     const session = get().sessions.find(value => value.id === sessionId)
     if (session) void notifyOnce(session, event.seq)

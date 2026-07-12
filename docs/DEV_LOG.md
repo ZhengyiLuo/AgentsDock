@@ -7603,3 +7603,25 @@ Release result:
   so search results cannot accidentally change the move target.
 - Added `@expo/ui` 57.0.4, passed the mobile TypeScript check, linked ExpoUI,
   and completed a Release simulator build.
+
+## 2026-07-12 - Audit and restore React mobile feature parity
+
+- Audited the React rewrite against the old Swift iOS client, Electron desktop,
+  the Zustand store, and the server client. Replaced the aspirational mobile
+  parity document with a status matrix that distinguishes working UI from
+  API-only and partial workflows.
+- Added sidebar refresh, folder creation, persistent empty folders, folder
+  folding, long-press folder ordering, and loaded/active chat counts.
+- Restored the complete scheduled-job workflow: create, edit, fixed/looping
+  runs, first-run time, enable/pause, run now, refresh, and confirmed delete.
+  Job events now refresh the authoritative job list.
+- Added an on-demand tmux submitter inspector with chat-scoped or machine-wide
+  pane discovery, captured output, and copy. Live process rows and stdout now
+  expose copy actions as well.
+- Made message and file pin controls reflect their current state and toggle
+  cleanly. Pinned messages can be opened and copied in full; loaded pinned files
+  can be previewed without searching the timeline.
+- Mobile TypeScript validation passes. Exact search-hit jumps, the landmark
+  navigator, media find-in-chat/drag gestures, arbitrary process-log selection,
+  and explicit appearance/notification preferences remain honestly marked
+  partial rather than being described as shipped.

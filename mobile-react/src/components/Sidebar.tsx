@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { MenuView, type MenuAction } from '@expo/ui/community/menu'
-import { Archive, ArchiveRestore, ChevronDown, ChevronRight, Pin, PinOff, Plus, Search, Settings, Trash2, type LucideIcon } from 'lucide-react-native'
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FolderPlus, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, type LucideIcon } from 'lucide-react-native'
 import Swipeable from 'react-native-gesture-handler/Swipeable'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
@@ -24,6 +24,8 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
   const clearSearch = useAppStore(state => state.clearSearch)
   const select = useAppStore(state => state.selectSession)
   const reorder = useAppStore(state => state.reorderSession)
+  const refreshSessions = useAppStore(state => state.refreshSessions)
+  const setFolderOrder = useAppStore(state => state.setFolderOrder)
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['Archived']))
 
@@ -40,6 +42,7 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
           .sort((a, b) => Number(b.title.toLowerCase().includes(clean)) - Number(a.title.toLowerCase().includes(clean)))
       : sessions
     const groups = new Map<string, Session[]>()
+    for (const folder of folderOrder) groups.set(folder, [])
     for (const session of filtered) {
       const folder = sessionSection(session)
       groups.set(folder, [...(groups.get(folder) ?? []), session])
@@ -77,12 +80,27 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
     }
     return [...values]
   }, [folderOrder, sessions])
+  const movableFolders = useMemo(() => folders.filter(folder => folder !== 'General'), [folders])
+  const createFolder = () => {
+    Alert.prompt('New folder', 'Create a folder, then move chats into it from their long-press menu.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Create', onPress: (value?: string) => { const name = value?.trim(); if (name && !folders.includes(name)) setFolderOrder([...movableFolders, name]) } },
+    ], 'plain-text')
+  }
+  const moveFolder = (folder: string, direction: 'up' | 'down') => {
+    const order = [...movableFolders]
+    const index = order.indexOf(folder)
+    const target = direction === 'up' ? index - 1 : index + 1
+    if (index < 0 || target < 0 || target >= order.length) return
+    ;[order[index], order[target]] = [order[target], order[index]]
+    setFolderOrder(order)
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: colors.text }]}>AgentsDock</Text>
-        <View style={styles.actions}><IconButton icon={Plus} onPress={onNewChat} label="New chat" /><IconButton icon={Settings} onPress={onSettings} label="Settings" /></View>
+        <View style={styles.actions}><IconButton icon={RefreshCw} onPress={() => void refreshSessions()} label="Refresh chats" /><IconButton icon={FolderPlus} onPress={createFolder} label="New folder" /><IconButton icon={Plus} onPress={onNewChat} label="New chat" /><IconButton icon={Settings} onPress={onSettings} label="Settings" /></View>
       </View>
       <View style={[styles.search, { backgroundColor: colors.raised, borderColor: colors.border }]}>
         <Search size={16} color={colors.muted} />
@@ -101,13 +119,14 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
         keyExtractor={item => item.key}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => item.kind === 'header' ? (
-          <Pressable onPress={() => setCollapsed(value => { const next = new Set(value); if (next.has(item.folder)) next.delete(item.folder); else next.add(item.folder); return next })} style={styles.header}>
-            {collapsed.has(item.folder) ? <ChevronRight size={13} color={colors.muted} /> : <ChevronDown size={13} color={colors.muted} />}
-            <Text style={[styles.headerText, { color: colors.muted }]}>{item.title}</Text>
-            <Text style={[styles.count, { color: colors.muted }]}>{item.count}</Text>
-          </Pressable>
-        ) : (() => {
+        renderItem={({ item }) => item.kind === 'header' ? <FolderHeader
+          item={item}
+          collapsed={collapsed.has(item.folder)}
+          canMoveUp={movableFolders.indexOf(item.folder) > 0}
+          canMoveDown={movableFolders.indexOf(item.folder) >= 0 && movableFolders.indexOf(item.folder) < movableFolders.length - 1}
+          onToggle={() => setCollapsed(value => { const next = new Set(value); if (next.has(item.folder)) next.delete(item.folder); else next.add(item.folder); return next })}
+          onMove={direction => moveFolder(item.folder, direction)}
+        /> : (() => {
           const { previousId, nextId } = reorderNeighbors.get(item.session.id) ?? { previousId: null, nextId: null }
           return <SessionRow
             session={item.session}
@@ -122,8 +141,31 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
           />
         })()}
       />
+      <View style={[styles.footer, { borderColor: colors.border }]}><Text style={{ color: colors.muted, fontSize: 10 }}>{sessions.length} chats</Text><View style={{ flex: 1 }} /><View style={[styles.footerDot, { backgroundColor: active.size ? colors.green : colors.muted }]} /><Text style={{ color: colors.muted, fontSize: 10 }}>{active.size} active</Text></View>
     </View>
   )
+}
+
+function FolderHeader({ item, collapsed, canMoveUp, canMoveDown, onToggle, onMove }: {
+  item: Extract<Row, { kind: 'header' }>
+  collapsed: boolean
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onToggle: () => void
+  onMove: (direction: 'up' | 'down') => void
+}) {
+  const colors = usePalette()
+  const movable = !['Pinned', 'General', 'Archived'].includes(item.folder)
+  const header = <Pressable onPress={onToggle} style={styles.header}>
+    {collapsed ? <ChevronRight size={13} color={colors.muted} /> : <ChevronDown size={13} color={colors.muted} />}
+    <Text style={[styles.headerText, { color: colors.muted }]}>{item.title}</Text>
+    <Text style={[styles.count, { color: colors.muted }]}>{item.count}</Text>
+  </Pressable>
+  if (!movable) return header
+  return <MenuView shouldOpenOnLongPress title={item.title} actions={[
+    { id: 'move-up', title: 'Move Folder Up', image: 'arrow.up', attributes: { disabled: !canMoveUp } },
+    { id: 'move-down', title: 'Move Folder Down', image: 'arrow.down', attributes: { disabled: !canMoveDown } },
+  ]} onPressAction={event => { if (event.nativeEvent.event === 'move-up') onMove('up'); if (event.nativeEvent.event === 'move-down') onMove('down') }} style={styles.menuTrigger}>{header}</MenuView>
 }
 
 function SessionRow({ session, selected, running, folders, canMoveUp, canMoveDown, onMoveUp, onMoveDown, onPress }: {
@@ -249,4 +291,5 @@ const styles = StyleSheet.create({
   swipeActions: { flexDirection: 'row' },
   swipeAction: { width: 76, minHeight: 51, alignItems: 'center', justifyContent: 'center', gap: 3 },
   swipeActionText: { color: 'white', fontSize: 10, fontWeight: '700' },
+  footer: { minHeight: 34, borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 5 }, footerDot: { width: 6, height: 6, borderRadius: 3 },
 })

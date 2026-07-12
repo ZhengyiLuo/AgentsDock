@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
-import { Check, ChevronDown, Play, Search, X } from 'lucide-react-native'
+import * as Clipboard from 'expo-clipboard'
+import { Check, ChevronDown, Copy, Search, SquareTerminal, X } from 'lucide-react-native'
 import { client, useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import type { Backend, CreateJobInput, RuntimeOption, Session } from '../types'
@@ -94,21 +95,37 @@ export function DigestDialog({ visible, source, onClose }: { visible: boolean; s
   </Sheet>
 }
 
-export function JobDialog({ visible, session: session, onClose }: { visible: boolean; session: Session | null; onClose: () => void }) {
+export function JobDialog({ visible, session, jobId, onClose }: { visible: boolean; session: Session | null; jobId: string | null; onClose: () => void }) {
   const colors = usePalette()
+  const jobs = useAppStore(state => state.jobs)
   const create = useAppStore(state => state.createJob)
+  const update = useAppStore(state => state.updateJob)
+  const job = jobs.find(value => value.id === jobId) ?? null
   const [title, setTitle] = useState('Status check')
   const [prompt, setPrompt] = useState('Check the current status and report meaningful changes.')
   const [interval, setIntervalValue] = useState('3600')
   const [loop, setLoop] = useState(true)
   const [maxRuns, setMaxRuns] = useState('1')
   const [start, setStart] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  useEffect(() => {
+    if (!visible) return
+    setTitle(job?.title ?? 'Status check')
+    setPrompt(job?.prompt ?? 'Check the current status and report meaningful changes.')
+    setIntervalValue(String(job?.interval_seconds ?? 3600))
+    setLoop(job?.loop ?? true)
+    setMaxRuns(String(job?.max_runs ?? 1))
+    setStart(job?.first_run_at ?? job?.next_run_at_iso ?? '')
+    setEnabled(job?.enabled ?? true)
+  }, [job, visible])
   if (!session) return null
   const submit = async () => {
-    const body: CreateJobInput = { session_id: session.id, title: title.trim(), prompt: prompt.trim(), interval_seconds: Math.max(60, Number(interval) || 3600), first_run_at: start.trim() || null, loop, max_runs: loop ? null : Math.max(1, Number(maxRuns) || 1), enabled: true, backend: session.backend, model: session.model, effort: session.effort }
-    await create(body); onClose()
+    const body: CreateJobInput = { session_id: session.id, title: title.trim(), prompt: prompt.trim(), interval_seconds: Math.max(60, Number(interval) || 3600), first_run_at: start.trim() || null, loop, max_runs: loop ? null : Math.max(1, Number(maxRuns) || 1), enabled, backend: session.backend, model: session.model, effort: session.effort }
+    if (job) await update(job.id, body)
+    else await create(body)
+    onClose()
   }
-  return <Sheet visible={visible} title="Schedule job" onClose={onClose} wide>
+  return <Sheet visible={visible} title={job ? 'Edit job' : 'Schedule job'} onClose={onClose} wide>
     <Label text="Title" /><TextInput value={title} onChangeText={setTitle} style={[styles.input, { color: colors.text, backgroundColor: colors.raised, borderColor: colors.border }]} />
     <Label text="Prompt" /><TextInput value={prompt} onChangeText={setPrompt} multiline style={[styles.textarea, { color: colors.text, backgroundColor: colors.raised, borderColor: colors.border }]} />
     <Label text="Interval"><View style={styles.presetRow}>{[300, 900, 3600, 21600, 86400].map(value => <Pressable key={value} onPress={() => setIntervalValue(String(value))} style={[styles.preset, { backgroundColor: interval === String(value) ? colors.blue : colors.raised }]}><Text style={{ color: interval === String(value) ? 'white' : colors.text, fontSize: 11 }}>{value < 3600 ? `${value / 60}m` : value < 86400 ? `${value / 3600}h` : '1d'}</Text></Pressable>)}</View></Label>
@@ -116,7 +133,8 @@ export function JobDialog({ visible, session: session, onClose }: { visible: boo
     <Label text="First run (ISO, optional)" /><TextInput value={start} onChangeText={setStart} autoCapitalize="none" placeholder="2026-07-11T18:00:00-07:00" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, backgroundColor: colors.raised, borderColor: colors.border }]} />
     <View style={styles.toggle}><Text style={{ color: colors.text, flex: 1 }}>Loop forever</Text><Switch value={loop} onValueChange={setLoop} /></View>
     {!loop ? <><Label text="Number of runs" /><TextInput value={maxRuns} onChangeText={setMaxRuns} keyboardType="number-pad" style={[styles.input, { color: colors.text, backgroundColor: colors.raised, borderColor: colors.border }]} /></> : null}
-    <PrimaryButton label="Schedule" disabled={!title.trim() || !prompt.trim()} onPress={() => void submit()} />
+    <View style={styles.toggle}><Text style={{ color: colors.text, flex: 1 }}>Enabled</Text><Switch value={enabled} onValueChange={setEnabled} /></View>
+    <PrimaryButton label={job ? 'Save job' : 'Schedule'} disabled={!title.trim() || !prompt.trim()} onPress={() => void submit()} />
   </Sheet>
 }
 
@@ -126,8 +144,36 @@ export function ProcessDialog({ visible, sessionId, onClose }: { visible: boolea
   const snapshot = useAppStore(state => sessionId ? state.processes[sessionId] : undefined)
   useEffect(() => { if (visible && sessionId) void inspect(sessionId) }, [inspect, sessionId, visible])
   return <Sheet visible={visible} title="Live processes" onClose={onClose} wide>
-    <ScrollView style={{ maxHeight: 560 }}>{snapshot?.processes.length ? snapshot.processes.map(process => <View key={process.pid} style={[styles.process, { backgroundColor: colors.raised }]}><View style={[styles.processDot, { backgroundColor: colors.green }]} /><View style={{ flex: 1 }}><Text selectable style={{ color: colors.text, fontSize: 12, fontFamily: 'Menlo' }}>{process.command || process.args}</Text><Text style={{ color: colors.muted, fontSize: 10 }}>{process.cwd} · pid {process.pid} · CPU {process.cpu_percent ?? 0}% · {Math.round((process.rss_kb ?? 0) / 1024)} MB</Text></View></View>) : <Text style={[styles.empty, { color: colors.muted }]}>No live processes for this chat.</Text>}{snapshot?.stdout_tail?.text ? <Text selectable style={[styles.log, { color: colors.text, backgroundColor: '#090b0e' }]}>{snapshot.stdout_tail.text}</Text> : null}</ScrollView>
-    <SecondaryButton label="Refresh" onPress={() => sessionId && void inspect(sessionId)} />
+    <ScrollView style={{ maxHeight: 560 }}>{snapshot?.processes.length ? snapshot.processes.map(process => <View key={process.pid} style={[styles.process, { backgroundColor: colors.raised }]}><View style={[styles.processDot, { backgroundColor: colors.green }]} /><View style={{ flex: 1 }}><Text selectable style={{ color: colors.text, fontSize: 12, fontFamily: 'Menlo' }}>{process.command || process.args}</Text><Text style={{ color: colors.muted, fontSize: 10 }}>{process.cwd} · pid {process.pid} · CPU {process.cpu_percent ?? 0}% · {Math.round((process.rss_kb ?? 0) / 1024)} MB</Text></View><IconButton icon={Copy} size={14} onPress={() => void Clipboard.setStringAsync([process.command || process.args, process.cwd].filter(Boolean).join('\n'))} label="Copy process" /></View>) : <Text style={[styles.empty, { color: colors.muted }]}>No live processes for this chat.</Text>}{snapshot?.stdout_tail?.text ? <View><View style={styles.outputHeader}><Text style={[styles.outputTitle, { color: colors.muted }]}>Live stdout</Text><IconButton icon={Copy} size={14} onPress={() => void Clipboard.setStringAsync(snapshot.stdout_tail?.text ?? '')} label="Copy stdout" /></View><Text selectable style={[styles.log, { color: colors.text, backgroundColor: '#090b0e' }]}>{snapshot.stdout_tail.text}</Text></View> : null}</ScrollView>
+    <View style={styles.buttonRow}><SecondaryButton label="Refresh" onPress={() => sessionId && void inspect(sessionId)} /></View>
+  </Sheet>
+}
+
+export function TmuxDialog({ visible, sessionId, onClose }: { visible: boolean; sessionId: string | null; onClose: () => void }) {
+  const colors = usePalette()
+  const inspect = useAppStore(state => state.inspectTmux)
+  const panes = useAppStore(state => sessionId ? state.tmuxPanes[sessionId] : undefined) ?? []
+  const [includeAll, setIncludeAll] = useState(false)
+  const [selectedPane, setSelectedPane] = useState<string | null>(null)
+  const [output, setOutput] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (visible && sessionId) void inspect(sessionId, includeAll)
+    if (!visible) { setSelectedPane(null); setOutput('') }
+  }, [includeAll, inspect, sessionId, visible])
+  const capture = async (paneId: string) => {
+    if (!sessionId) return
+    setSelectedPane(paneId); setBusy(true)
+    try { setOutput(await client.captureTmux(sessionId, paneId, 500)) }
+    finally { setBusy(false) }
+  }
+  return <Sheet visible={visible} title="Tmux submitters" onClose={onClose} wide>
+    <View style={styles.toggle}><View style={{ flex: 1 }}><Text style={{ color: colors.text, fontWeight: '700' }}>Machine-wide panes</Text><Text style={{ color: colors.muted, fontSize: 10 }}>Off shows panes linked to this chat.</Text></View><Switch value={includeAll} onValueChange={setIncludeAll} /></View>
+    <ScrollView style={{ maxHeight: selectedPane ? 280 : 520 }}>
+      {panes.length ? panes.map(pane => <Pressable key={pane.pane_id} onPress={() => void capture(pane.pane_id)} style={[styles.process, { backgroundColor: selectedPane === pane.pane_id ? colors.raised : colors.surface, borderColor: colors.border }]}><View style={[styles.processDot, { backgroundColor: pane.dead ? colors.muted : colors.green }]} /><SquareTerminal size={15} color={colors.muted} /><View style={{ flex: 1 }}><Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>{pane.session_name ?? 'tmux'}:{pane.window_name ?? pane.pane_index ?? pane.pane_id}</Text><Text selectable style={{ color: colors.muted, fontSize: 10, marginTop: 3 }} numberOfLines={2}>{pane.command || 'shell'} · {pane.current_path || pane.cwd || 'unknown directory'}</Text>{pane.tags?.length ? <Text style={{ color: colors.blue, fontSize: 10, marginTop: 3 }}>{pane.tags.join(' · ')}</Text> : null}</View></Pressable>) : <Text style={[styles.empty, { color: colors.muted }]}>No tmux panes linked to this chat.</Text>}
+    </ScrollView>
+    {selectedPane ? <View><View style={styles.outputHeader}><Text style={[styles.outputTitle, { color: colors.muted }]}>{busy ? 'Capturing output…' : `Output · ${selectedPane}`}</Text><IconButton icon={Copy} size={14} onPress={() => void Clipboard.setStringAsync(output)} label="Copy tmux output" /></View><ScrollView style={{ maxHeight: 250 }}><Text selectable style={[styles.log, { color: colors.text, backgroundColor: '#090b0e' }]}>{output || (busy ? 'Loading…' : 'No output.')}</Text></ScrollView></View> : null}
+    <View style={styles.buttonRow}><SecondaryButton label="Refresh" onPress={() => sessionId && void inspect(sessionId, includeAll)} /></View>
   </Sheet>
 }
 
@@ -156,4 +202,5 @@ const styles = StyleSheet.create({
   searchBox: { height: 42, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }, result: { minHeight: 58, padding: 10, borderBottomWidth: StyleSheet.hairlineWidth }, empty: { padding: 24, textAlign: 'center' },
   preview: { maxHeight: 280, borderRadius: 6, padding: 10 }, presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 }, preset: { minWidth: 42, minHeight: 29, borderRadius: 5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }, toggle: { minHeight: 42, flexDirection: 'row', alignItems: 'center' },
   process: { minHeight: 58, borderRadius: 6, padding: 9, marginBottom: 6, flexDirection: 'row', gap: 8 }, processDot: { width: 7, height: 7, borderRadius: 4, marginTop: 5 }, log: { padding: 10, borderRadius: 6, fontFamily: 'Menlo', fontSize: 11, lineHeight: 16 },
+  outputHeader: { minHeight: 34, flexDirection: 'row', alignItems: 'center' }, outputTitle: { flex: 1, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
 })
