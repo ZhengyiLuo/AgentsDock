@@ -7557,7 +7557,7 @@ Release result:
 - Extended the dock regression to prove the dragged height reaches the mounted
   terminal workspace. TypeScript, Python compile validation, and all 140
   Electron tests pass.
-- Added a short, debounced compatibility sync through the structured terminal
-  resize endpoint. This makes the resized tmux geometry take effect immediately
-  against an older live server process while preserving the low-latency
-  WebSocket resize path and avoiding one HTTP request per pointer event.
+- Added a short, debounced reconciliation through the structured terminal
+  resize endpoint. The staged server handles that endpoint with an explicit
+  tmux window resize, while the low-latency WebSocket remains the primary path;
+  debouncing avoids one HTTP request per pointer event.
