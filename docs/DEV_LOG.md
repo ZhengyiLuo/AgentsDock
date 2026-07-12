@@ -7426,3 +7426,13 @@ Release result:
 - Installed and launched the same universal artifact on iPhone 17 Pro and iPad
   Pro 13-inch simulators. Phone navigation, iPad split view, light/dark system
   appearance, and fatal-runtime log checks pass.
+
+## 2026-07-11 - Make the mobile terminal escapable and share backend artwork
+
+- Replaced the React rewrite's temporary text-drawn Claude and Codex marks with
+  the exact 48-pixel assets used by the Electron app.
+- Kept the terminal close control permanently visible on compact iPhones while
+  moving tmux windows, navigation, split, and kill actions into a horizontal
+  toolbar that can scroll independently.
+- Preserved the full-screen persistent tmux terminal and its reconnect state;
+  overflowing controls can no longer trap the user inside the modal.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { ChevronLeft, ChevronRight, Columns2, Plus, Rows2, Trash2, X } from 'lucide-react-native'
 import { WebView } from 'react-native-webview'
 import { client } from '../store/useAppStore'
@@ -18,17 +18,18 @@ export function TerminalView({ session, onClose }: { session: Session; onClose: 
   const action = async (name: 'new-window' | 'split-right' | 'split-down' | 'next-window' | 'previous-window' | 'kill-window') => {
     try { setWindows((await client.terminalAction(session.id, name)).windows) } catch { /* status remains visible in terminal */ }
   }
-  return <View style={[styles.root, { backgroundColor: colors.background, borderColor: colors.border }]}>
-    <View style={[styles.tabs, { borderColor: colors.border }]}>
-      <View style={[styles.statusDot, { backgroundColor: status === 'Connected' ? colors.green : colors.orange }]} /><Text style={{ color: colors.muted, fontSize: 10 }}>{status}</Text>
-      {windows.map(window => <Pressable key={window.id} onPress={() => void client.terminalAction(session.id, 'select-window', String(window.index)).then(value => setWindows(value.windows))} style={[styles.tab, { backgroundColor: window.active ? colors.raised : 'transparent' }]}><Text style={{ color: window.active ? colors.text : colors.muted, fontSize: 11 }} numberOfLines={1}>{window.name}</Text></Pressable>)}
-      <IconButton icon={Plus} size={14} label="New window" onPress={() => void action('new-window')} />
-      <View style={{ flex: 1 }} />
-      <IconButton icon={ChevronLeft} size={14} label="Previous window" onPress={() => void action('previous-window')} />
-      <IconButton icon={ChevronRight} size={14} label="Next window" onPress={() => void action('next-window')} />
-      <IconButton icon={Columns2} size={14} label="Split right" onPress={() => void action('split-right')} />
-      <IconButton icon={Rows2} size={14} label="Split down" onPress={() => void action('split-down')} />
-      <IconButton icon={Trash2} size={14} label="Close terminal window" onPress={() => void action('kill-window')} />
+  return <View style={[styles.root, { backgroundColor: colors.background, borderColor: colors.border }]}> 
+    <View style={[styles.tabs, { borderColor: colors.border }]}> 
+      <View style={styles.status}><View style={[styles.statusDot, { backgroundColor: status === 'Connected' ? colors.green : colors.orange }]} /><Text style={{ color: colors.muted, fontSize: 10 }} numberOfLines={1}>{status}</Text></View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroller} contentContainerStyle={styles.tabContent}>
+        {windows.map(window => <Pressable key={window.id} onPress={() => void client.terminalAction(session.id, 'select-window', String(window.index)).then(value => setWindows(value.windows))} style={[styles.tab, { backgroundColor: window.active ? colors.raised : 'transparent' }]}><Text style={{ color: window.active ? colors.text : colors.muted, fontSize: 11 }} numberOfLines={1}>{window.name}</Text></Pressable>)}
+        <IconButton icon={Plus} size={14} label="New window" onPress={() => void action('new-window')} />
+        <IconButton icon={ChevronLeft} size={14} label="Previous window" onPress={() => void action('previous-window')} />
+        <IconButton icon={ChevronRight} size={14} label="Next window" onPress={() => void action('next-window')} />
+        <IconButton icon={Columns2} size={14} label="Split right" onPress={() => void action('split-right')} />
+        <IconButton icon={Rows2} size={14} label="Split down" onPress={() => void action('split-down')} />
+        <IconButton icon={Trash2} size={14} label="Close terminal window" onPress={() => void action('kill-window')} />
+      </ScrollView>
       <IconButton icon={X} size={14} label="Close terminal" onPress={onClose} />
     </View>
     <WebView
@@ -73,4 +74,12 @@ function useAppToken(): string {
   return client.authHeaders()['X-ZenithDock-Token'] ?? ''
 }
 
-const styles = StyleSheet.create({ root: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth }, tabs: { height: 42, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 5, flexDirection: 'row', alignItems: 'center', gap: 4 }, statusDot: { width: 7, height: 7, borderRadius: 4 }, tab: { maxWidth: 120, height: 30, borderRadius: 5, paddingHorizontal: 10, justifyContent: 'center' } })
+const styles = StyleSheet.create({
+  root: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
+  tabs: { height: 44, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 5, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  status: { maxWidth: 82, flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 3 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  tabScroller: { flex: 1 },
+  tabContent: { alignItems: 'center', gap: 4, paddingHorizontal: 2 },
+  tab: { maxWidth: 120, height: 30, borderRadius: 5, paddingHorizontal: 10, justifyContent: 'center' },
+})
