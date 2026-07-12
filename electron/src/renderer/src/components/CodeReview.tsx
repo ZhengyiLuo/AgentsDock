@@ -39,6 +39,7 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
   const [filter, setFilter] = useState('')
   const [workspaceLeft, setWorkspaceLeft] = useState(0)
   const list = useRef<VirtuosoHandle>(null)
+  const requestEpoch = useRef(0)
 
   useLayoutEffect(() => {
     if (!target) return
@@ -53,7 +54,7 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
   }, [target])
 
   useEffect(() => {
-    let active = true
+    const epoch = ++requestEpoch.current
     setSource(target?.source ?? '')
     setError(null)
     setCopied(false)
@@ -61,17 +62,17 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
     setFilter('')
     if (!target?.runId) {
       setLoading(false)
-      return () => { active = false }
+      return
     }
     setLoading(true)
     void window.agentsDock.diffs.get(target.sessionId, target.runId)
-      .then(diff => { if (active) setSource(diff) })
+      .then(diff => { if (requestEpoch.current === epoch) setSource(diff) })
       .catch(reason => {
-        if (!active) return
+        if (requestEpoch.current !== epoch) return
         setError(reason instanceof Error ? reason.message : String(reason))
       })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
+      .finally(() => { if (requestEpoch.current === epoch) setLoading(false) })
+    return () => { if (requestEpoch.current === epoch) requestEpoch.current += 1 }
   }, [target])
 
   const files = useMemo(() => parseReviewableDiff(source), [source])
@@ -96,12 +97,14 @@ export function CodeReview({ target, onClose }: { target: CodeReviewTarget | nul
 
   const retry = () => {
     if (!target.runId) return
+    const epoch = ++requestEpoch.current
+    const { sessionId, runId } = target
     setLoading(true)
     setError(null)
-    void window.agentsDock.diffs.get(target.sessionId, target.runId)
-      .then(setSource)
-      .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
-      .finally(() => setLoading(false))
+    void window.agentsDock.diffs.get(sessionId, runId)
+      .then(diff => { if (requestEpoch.current === epoch) setSource(diff) })
+      .catch(reason => { if (requestEpoch.current === epoch) setError(reason instanceof Error ? reason.message : String(reason)) })
+      .finally(() => { if (requestEpoch.current === epoch) setLoading(false) })
   }
   const copy = async () => {
     await window.agentsDock.native.writeClipboard(source)

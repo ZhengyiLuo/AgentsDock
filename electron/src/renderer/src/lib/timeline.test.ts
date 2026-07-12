@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentFile, Event } from '@shared/types'
-import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseReviewableDiff, parseUnifiedDiff, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems } from './timeline'
+import { extractUnifiedDiff, jobDisplayEvents, messageItemText, messageText, parseReviewableDiff, parseUnifiedDiff, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, reviewTargetBelongsToSession } from './timeline'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -288,5 +288,13 @@ describe('parseUnifiedDiff', () => {
     ])
     expect(files[0].lines.find(line => line.kind === 'context')).toMatchObject({ oldLine: 10, newLine: 10 })
     expect(files[1].lines.find(line => line.kind === 'remove')).toMatchObject({ oldLine: 40 })
+  })
+})
+
+describe('reviewTargetBelongsToSession', () => {
+  it('accepts only the currently selected chat as the owner of a review', () => {
+    expect(reviewTargetBelongsToSession({ sessionId: 'chat-1', runId: 'run-1' }, 'chat-1')).toBe(true)
+    expect(reviewTargetBelongsToSession({ sessionId: 'chat-1', runId: 'run-1' }, 'chat-2')).toBe(false)
+    expect(reviewTargetBelongsToSession(null, 'chat-1')).toBe(false)
   })
 })

@@ -10,7 +10,7 @@ import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
 import { isTerminalToggleShortcut } from './lib/workspace-shortcuts'
 import { WorkspaceResizeHandles, savedWorkspaceColumnStyle } from './components/WorkspaceResizeHandles'
-import type { CodeReviewTarget } from './lib/timeline'
+import { reviewTargetBelongsToSession, type CodeReviewTarget } from './lib/timeline'
 import { closeTopTransient } from './lib/transient-close'
 import { useAppStore } from './store/app-store'
 
@@ -41,10 +41,17 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [initialized])
   useEffect(() => {
-    const open = (event: Event) => setReviewTarget((event as CustomEvent<CodeReviewTarget>).detail)
+    const open = (event: Event) => {
+      const target = (event as CustomEvent<CodeReviewTarget>).detail
+      if (!reviewTargetBelongsToSession(target, useAppStore.getState().selectedSessionId)) return
+      setReviewTarget(target)
+    }
     window.addEventListener('agentsdock:review-diff', open)
     return () => window.removeEventListener('agentsdock:review-diff', open)
   }, [])
+  useEffect(() => {
+    setReviewTarget(current => reviewTargetBelongsToSession(current, selectedSessionId) ? current : null)
+  }, [selectedSessionId])
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
       if (isTerminalToggleShortcut(event) && selectedSessionId) {

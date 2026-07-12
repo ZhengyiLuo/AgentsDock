@@ -7528,3 +7528,19 @@ Release result:
   avoiding repeated tiny loads from fragmented local caches.
 - Kept all fetches bounded and virtualized. TypeScript and all 138 Electron
   tests pass.
+
+## 2026-07-12 - Keep edited files owned by their source chat
+
+- Replaced whole-worktree turn diffs with file-scoped diffs attributed from
+  the owning provider's mutating tool calls. Claude `Edit`/`Write` paths and
+  Codex's nested `exec` + `apply_patch` payloads are recognized; manifest files
+  and paths outside the chat repository are discarded.
+- This prevents concurrent agents sharing one Git worktree from claiming one
+  another's edited files. Turns without a provable edited path no longer emit
+  an untrustworthy code-change card.
+- Closed the Review workspace when its source chat is no longer selected,
+  rejected cross-session Review events, and added request epochs so a slow
+  response from the previous chat cannot overwrite the current review.
+- Added regressions for chat ownership and late diff responses, plus explicit
+  session checks before timeline and scheduled-job change cards are mounted.
+- TypeScript, Python compile validation, and all 140 Electron tests pass.

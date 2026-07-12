@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { resetTransientCloseStackForTests } from '../lib/transient-close'
@@ -53,5 +53,25 @@ describe('CodeReview', () => {
 
     expect(screen.getByText(/recorded a file list, but no line-level patch/i)).toBeInTheDocument()
     expect(screen.queryByText(' M src/example.ts')).not.toBeInTheDocument()
+  })
+
+  it('ignores a late diff response after the review switches chats', async () => {
+    let resolveFirst: (value: string) => void = () => undefined
+    const first = new Promise<string>(resolve => { resolveFirst = resolve })
+    const get = vi.fn((sessionId: string) => sessionId === 'chat-1'
+      ? first
+      : Promise.resolve('diff --git a/chat-two.ts b/chat-two.ts\n--- a/chat-two.ts\n+++ b/chat-two.ts\n@@ -1 +1 @@\n-old\n+chatTwo'))
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { diffs: { get }, native: { writeClipboard: vi.fn() } } as unknown as AgentsDockAPI
+    })
+
+    const view = render(<CodeReview target={{ sessionId: 'chat-1', runId: 'run-1' }} onClose={vi.fn()} />)
+    view.rerender(<CodeReview target={{ sessionId: 'chat-2', runId: 'run-2' }} onClose={vi.fn()} />)
+    expect(await screen.findByText('+chatTwo')).toBeInTheDocument()
+
+    resolveFirst('diff --git a/chat-one.ts b/chat-one.ts\n--- a/chat-one.ts\n+++ b/chat-one.ts\n@@ -1 +1 @@\n-old\n+chatOne')
+    await waitFor(() => expect(screen.queryByText('+chatOne')).not.toBeInTheDocument())
+    expect(screen.getByText('+chatTwo')).toBeInTheDocument()
   })
 })

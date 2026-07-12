@@ -410,6 +410,10 @@ export interface CodeReviewTarget {
   repositoryRoot?: string | null
 }
 
+export function reviewTargetBelongsToSession(target: CodeReviewTarget | null, sessionId: string | null): boolean {
+  return Boolean(target && sessionId && target.sessionId === sessionId)
+}
+
 export function parseUnifiedDiff(source: string): DiffFile[] {
   if (!source.trim()) return []
   const files: DiffFile[] = []

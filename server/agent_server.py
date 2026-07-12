@@ -473,12 +473,83 @@ def _parse_git_numstat(source: str) -> list[dict[str, Any]]:
     return files
 
 
+def _patch_changed_paths(source: str) -> set[str]:
+    paths: set[str] = set()
+    # Codex's orchestration tool embeds apply_patch in a JavaScript string, so
+    # patch newlines arrive as literal `\\n` sequences rather than line breaks.
+    expanded = str(source or "").replace("\\r\\n", "\n").replace("\\n", "\n")
+    for raw_line in expanded.splitlines():
+        line = raw_line.strip()
+        match = re.match(r"^\*\*\* (?:Add|Update|Delete) File:\s*(.+?)\s*$", line)
+        if match:
+            paths.add(match.group(1).rstrip("\\").strip())
+            continue
+        match = re.match(r"^\*\*\* Move to:\s*(.+?)\s*$", line)
+        if match:
+            paths.add(match.group(1).rstrip("\\").strip())
+            continue
+        match = re.match(r"^(?:---|\+\+\+)\s+(?:[ab]/)?(.+?)\s*$", line)
+        if match and match.group(1) != "/dev/null":
+            paths.add(match.group(1).rstrip("\\").strip())
+    return paths
+
+
+def tool_changed_paths(tool: dict[str, Any]) -> set[str]:
+    """Return only paths explicitly owned by a mutating provider tool call."""
+    name = str(tool.get("name") or "").strip().lower().replace("-", "_")
+    tool_input = tool.get("input") if isinstance(tool.get("input"), dict) else {}
+    paths: set[str] = set()
+    direct_path_tools = {
+        "edit", "write", "multiedit", "multi_edit", "notebookedit", "notebook_edit",
+        "str_replace_editor", "create_file", "delete_file",
+    }
+    if name in direct_path_tools:
+        for key in ("file_path", "path", "notebook_path"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                paths.add(value.strip())
+    if name in {"apply_patch", "applypatch", "patch"}:
+        patch = tool_input.get("patch") or tool_input.get("input") or tool_input.get("value")
+        if isinstance(patch, str):
+            paths.update(_patch_changed_paths(patch))
+    elif name in {"exec", "run_javascript", "javascript"}:
+        for key in ("value", "code", "script", "input"):
+            source = tool_input.get(key)
+            if isinstance(source, str) and "apply_patch" in source and "***" in source:
+                paths.update(_patch_changed_paths(source))
+    return paths
+
+
+def _normalize_changed_paths(paths: set[str], repo_root: str, cwd: str) -> list[str]:
+    root = Path(repo_root).expanduser().resolve()
+    working = Path(cwd).expanduser().resolve()
+    normalized: set[str] = set()
+    for raw in paths:
+        clean = str(raw or "").strip().strip("\"'`")
+        if not clean or clean == "/dev/null":
+            continue
+        if clean.startswith("a/") or clean.startswith("b/"):
+            clean = clean[2:]
+        candidate = Path(clean).expanduser()
+        candidates = [candidate] if candidate.is_absolute() else [working / candidate, root / candidate]
+        for resolved in candidates:
+            try:
+                relative = resolved.resolve().relative_to(root)
+            except (OSError, ValueError):
+                continue
+            if relative.parts and ".." not in relative.parts:
+                normalized.add(relative.as_posix())
+                break
+    return sorted(normalized)
+
+
 def _write_turn_code_diff(
     session_id: str,
     run_id: str,
     backend: str,
     baseline: dict[str, str],
     cwd: str,
+    changed_paths: set[str],
 ) -> dict[str, Any] | None:
     current = _capture_git_tree(session_id, run_id, cwd)
     if not current or current.get("repo_root") != baseline.get("repo_root"):
@@ -489,6 +560,14 @@ def _write_turn_code_diff(
         return None
 
     repo_root = str(current["repo_root"])
+    attributed_paths = _normalize_changed_paths(changed_paths, repo_root, cwd)
+    if not attributed_paths:
+        logger.info(
+            "code diff skipped session=%s run=%s: no agent-owned edit paths",
+            session_id,
+            run_id,
+        )
+        return None
     diff_root = code_diffs_dir(session_id)
     patch_path = diff_root / f"{safe_name(run_id)}.patch"
     patch_tmp = diff_root / f".{safe_name(run_id)}-{uuid.uuid4().hex}.patch"
@@ -496,7 +575,7 @@ def _write_turn_code_diff(
         with patch_tmp.open("w", encoding="utf-8") as output:
             patch = _git_command(
                 repo_root,
-                ["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--unified=3", base_tree, current_tree, "--"],
+                ["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--unified=3", base_tree, current_tree, "--", *attributed_paths],
                 stdout=output,
             )
         if patch.returncode != 0 or patch_tmp.stat().st_size == 0:
@@ -504,7 +583,7 @@ def _write_turn_code_diff(
                 patch_tmp.unlink()
             return None
         patch_tmp.replace(patch_path)
-        numstat = _git_command(repo_root, ["diff", "--numstat", "--find-renames", base_tree, current_tree, "--"])
+        numstat = _git_command(repo_root, ["diff", "--numstat", "--find-renames", base_tree, current_tree, "--", *attributed_paths])
         files = _parse_git_numstat(numstat.stdout if numstat.returncode == 0 else "")
         additions = sum(int(item["additions"] or 0) for item in files)
         deletions = sum(int(item["deletions"] or 0) for item in files)
@@ -518,6 +597,8 @@ def _write_turn_code_diff(
             "deletions": deletions,
             "byte_count": patch_path.stat().st_size,
             "created_at": now_iso(),
+            "attribution": "agent_tool_paths",
+            "attributed_paths": attributed_paths,
         }
         metadata_path = diff_root / f"{safe_name(run_id)}.json"
         metadata_tmp = diff_root / f".{safe_name(run_id)}-{uuid.uuid4().hex}.json"
@@ -541,10 +622,11 @@ async def publish_turn_code_diff(
     backend: str,
     cwd: str,
     baseline: dict[str, str] | None,
+    changed_paths: set[str],
 ) -> None:
     if not baseline:
         return
-    metadata = await asyncio.to_thread(_write_turn_code_diff, session_id, run_id, backend, baseline, cwd)
+    metadata = await asyncio.to_thread(_write_turn_code_diff, session_id, run_id, backend, baseline, cwd, changed_paths)
     if metadata:
         await append_event(session_id, "code_diff", metadata)
 
@@ -5827,6 +5909,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
     text_parts: list[str] = []
     provider_id: str | None = None
     current_tools: dict[str, dict[str, Any]] = {}
+    changed_paths: set[str] = set()
     last_event = time.time()
     idle_killed = False
     stream_error: str | None = None
@@ -5877,6 +5960,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
                         tid = block.get("id") or f"tool_{uuid.uuid4().hex[:8]}"
                         tool = {"id": tid, "name": block.get("name", "tool"), "input": block.get("input", {})}
                         current_tools[tid] = tool
+                        changed_paths.update(tool_changed_paths(tool))
                         await append_event(session_id, "tool_started", {"run_id": run_id, "tool": tool})
             elif etype == "user":
                 for block in event.get("message", {}).get("content", []):
@@ -5925,7 +6009,7 @@ async def run_claude(session_id: str, run_id: str, prompt: str, sess: dict[str, 
     result_text = clean_assistant_text(final_text or "\n\n".join(text_parts).strip())
     await collect_manifest(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts, final=True)
     await collect_recent_leftover_manifests(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts)
-    await publish_turn_code_diff(session_id, run_id, BACKEND_CLAUDE, cwd, diff_baseline)
+    await publish_turn_code_diff(session_id, run_id, BACKEND_CLAUDE, cwd, diff_baseline, changed_paths)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
         "backend": BACKEND_CLAUDE,
@@ -6027,6 +6111,7 @@ async def run_codex(
     tool_calls: dict[str, dict[str, Any]] = {}
     started_tool_ids: set[str] = set()
     finished_tool_ids: set[str] = set()
+    changed_paths: set[str] = set()
     codex_history_path = find_codex_history(provider_id) if provider_id else None
     codex_history_pos = codex_history_path.stat().st_size if codex_history_path and codex_history_path.exists() else 0
     manifest_watch_task = asyncio.create_task(watch_manifest_artifacts(session_id, run_id, manifest_path, seen_artifacts))
@@ -6061,6 +6146,7 @@ async def run_codex(
         tool_id = str(tool.get("id") or f"tool_{uuid.uuid4().hex[:8]}")
         tool["id"] = tool_id
         tool_calls[tool_id] = tool
+        changed_paths.update(tool_changed_paths(tool))
         if tool_id in started_tool_ids:
             return
         started_tool_ids.add(tool_id)
@@ -6268,7 +6354,7 @@ async def run_codex(
         await STORE.save_provider_session(session_id, provider_id, BACKEND_CODEX)
     await collect_manifest(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts, final=True)
     await collect_recent_leftover_manifests(session_id, run_id, manifest_path, seen_artifacts=seen_artifacts)
-    await publish_turn_code_diff(session_id, run_id, BACKEND_CODEX, cwd, diff_baseline)
+    await publish_turn_code_diff(session_id, run_id, BACKEND_CODEX, cwd, diff_baseline, changed_paths)
     await append_event(session_id, "turn_finished", {
         "run_id": run_id,
         "backend": BACKEND_CODEX,

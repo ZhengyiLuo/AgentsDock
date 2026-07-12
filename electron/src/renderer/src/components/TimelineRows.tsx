@@ -60,7 +60,7 @@ function TraceDisclosure({ events, sessionId }: { events: Event[]; sessionId: st
   const [open, setOpen] = useState(false)
   const tools = events.filter(event => event.type === 'tool_started' || event.type === 'tool_finished')
   const thoughts = events.filter(event => event.type === 'reasoning_summary')
-  const canonicalDiff = [...events].reverse().find(event => event.type === 'code_diff' && event.run_id)
+  const canonicalDiff = [...events].reverse().find(event => event.session_id === sessionId && event.type === 'code_diff' && event.run_id)
   const diff = useMemo(() => extractUnifiedDiff(events), [events])
   const legacyFiles = useMemo(() => parseReviewableDiff(diff), [diff])
   const diffFiles = canonicalDiff?.diff_files ?? legacyFiles
@@ -117,7 +117,7 @@ function JobView({ item, sessionId, pinnedItemIds }: { item: JobItem; sessionId:
   const previous = updates.slice(0, -1)
   const visiblePrevious = previous.slice(-6).reverse()
   const runCount = new Set(item.events.map(event => event.run_id).filter(Boolean)).size
-  const codeDiff = [...item.events].reverse().find(event => event.type === 'code_diff' && event.run_id)
+  const codeDiff = [...item.events].reverse().find(event => event.session_id === sessionId && event.type === 'code_diff' && event.run_id)
   const files = deduplicateFiles(item.events
     .filter(event => !latest.run_id || event.run_id === latest.run_id)
     .flatMap(event => [event.artifact, event.file].filter((file): file is NonNullable<typeof file> => Boolean(file))))
