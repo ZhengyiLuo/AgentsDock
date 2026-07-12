@@ -273,10 +273,18 @@ export class AgentServerClient {
     let stopped = false
     let retryDelay = 500
     let retry: NodeJS.Timeout | null = null
+    let resizeSync: NodeJS.Timeout | null = null
     let socket: WebSocket | null = null
     let columns = options.columns
     let rows = options.rows
     let decoder = new TextDecoder()
+    const syncTerminalSize = (): void => {
+      if (resizeSync) clearTimeout(resizeSync)
+      resizeSync = setTimeout(() => {
+        resizeSync = null
+        void this.post(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/resize`, { columns, rows }).catch(() => undefined)
+      }, 120)
+    }
 
     const connect = (): void => {
       if (stopped) return
@@ -346,6 +354,7 @@ export class AgentServerClient {
         columns = nextColumns
         rows = nextRows
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', columns, rows }))
+        syncTerminalSize()
       },
       scroll(delta: number): void {
         const bounded = Math.max(-80, Math.min(80, Math.trunc(delta)))
@@ -354,7 +363,9 @@ export class AgentServerClient {
       close(): void {
         stopped = true
         if (retry) clearTimeout(retry)
+        if (resizeSync) clearTimeout(resizeSync)
         retry = null
+        resizeSync = null
         socket?.close()
       }
     }

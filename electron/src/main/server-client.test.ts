@@ -141,6 +141,11 @@ describe('AgentServerClient live stream', () => {
   it('attaches a binary terminal stream with dimensions, input, resize, and intentional detach', () => {
     vi.useFakeTimers()
     vi.stubGlobal('WebSocket', FakeWebSocket)
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
     const output: string[] = []
     const states: string[] = []
     const client = new AgentServerClient('http://example.test:7850', 'secret')
@@ -168,6 +173,11 @@ describe('AgentServerClient live stream', () => {
     expect(new TextDecoder().decode(socket.sent[0] as Uint8Array)).toBe('pwd\r')
     expect(JSON.parse(String(socket.sent[1]))).toEqual({ type: 'resize', columns: 160, rows: 52 })
     expect(JSON.parse(String(socket.sent[2]))).toEqual({ type: 'scroll', delta: -6 })
+    vi.advanceTimersByTime(120)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [resizeURL, resizeInit] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(resizeURL).toContain('/api/sessions/chat%20with%20spaces/terminal/resize')
+    expect(JSON.parse(String(resizeInit.body))).toEqual({ columns: 160, rows: 52 })
 
     connection.close()
     socket.emit('close', undefined, { code: 1000 })
