@@ -7485,3 +7485,14 @@ Release result:
   conversation, which previously moved the minimap highlight to the wrong end.
 - Added explicit edge-policy, overlap, de-duplication, and live-tail bridge
   regressions. TypeScript and all 130 Electron tests pass.
+
+## 2026-07-11 - Make Command-Enter reliably promote queued steering turns
+
+- Hardened the composer steer path to resolve a newly queued turn ID from the
+  top-level response, its `turn_queued` event, or a refreshed queue snapshot.
+  Command-Enter now promotes the exact new turn even against server versions
+  that omit the top-level `queued_id` field.
+- Preserved the existing Command-Enter behavior in the queued-message editor
+  and retained race-safe handling when a queued turn starts before promotion.
+- Added event-ID and queue-discovery regressions. TypeScript and all 132
+  Electron tests pass.

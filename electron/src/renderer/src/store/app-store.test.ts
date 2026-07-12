@@ -76,6 +76,56 @@ describe('send rollback', () => {
   })
 })
 
+describe('Command-Enter steering', () => {
+  it('promotes a queued turn when its ID is carried by the queue event', async () => {
+    const runNow = vi.fn().mockResolvedValue(true)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        turns: { send: vi.fn().mockResolvedValue({
+          session: sessionFor('chat-a'),
+          queued: true,
+          event: eventFor('chat-a', 2, { type: 'turn_queued', queued_id: 'event-queue-id', prompt: 'Steer now' })
+        }) },
+        queue: { runNow, list: vi.fn().mockResolvedValue([]) }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')],
+      snapshots: { 'chat-a': snapshot('chat-a', [eventFor('chat-a', 1)]) }, error: null
+    })
+
+    await expect(useAppStore.getState().sendPrompt('Steer now', true)).resolves.toBe(true)
+
+    expect(runNow).toHaveBeenCalledWith('chat-a', 'event-queue-id')
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
+  it('resolves the exact newly queued turn when older servers omit the ID from the response', async () => {
+    const existing: QueuedTurn = { queued_id: 'existing', session_id: 'chat-a', prompt: 'Earlier', file_ids: [], position: 1 }
+    const created: QueuedTurn = { queued_id: 'resolved-new', session_id: 'chat-a', prompt: 'Steer this exact prompt', file_ids: [], position: 2 }
+    const runNow = vi.fn().mockResolvedValue(true)
+    const list = vi.fn().mockResolvedValueOnce([existing, created]).mockResolvedValueOnce([existing])
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        turns: { send: vi.fn().mockResolvedValue({ session: sessionFor('chat-a'), queued: true }) },
+        queue: { runNow, list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-a', sessions: [sessionFor('chat-a')],
+      snapshots: { 'chat-a': { ...snapshot('chat-a', [eventFor('chat-a', 1)]), queuedTurns: [existing] } }, error: null
+    })
+
+    await expect(useAppStore.getState().sendPrompt('Steer this exact prompt', true)).resolves.toBe(true)
+
+    expect(runNow).toHaveBeenCalledWith('chat-a', 'resolved-new')
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().error).toBeNull()
+  })
+})
+
 describe('older timeline paging', () => {
   it('merges against the current snapshot so streamed events are not discarded', async () => {
     const session = sessionFor('chat-a')
@@ -282,7 +332,7 @@ describe('bootstrap', () => {
 })
 
 function sessionFor(id: string): Session { return { id, title: id, backend: 'codex' } }
-function eventFor(sessionId: string, seq: number): Event { return { id: `${sessionId}-${seq}`, session_id: sessionId, seq, type: 'assistant_text', ts: '2026-07-09T10:00:00Z', text: String(seq) } }
+function eventFor(sessionId: string, seq: number, patch: Partial<Event> = {}): Event { return { id: `${sessionId}-${seq}`, session_id: sessionId, seq, type: 'assistant_text', ts: '2026-07-09T10:00:00Z', text: String(seq), ...patch } }
 function snapshot(id: string, events: Event[], hasMoreEvents = false): SessionSnapshot {
   return { session: sessionFor(id), events, queuedTurns: [], files: [], hasMoreEvents, filesTotal: 0, cachedAt: 0 }
 }

@@ -300,6 +300,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const prompt = (promptOverride ?? get().drafts[sessionId] ?? '').trim()
     if (!prompt) return false
     const session = get().sessions.find(candidate => candidate.id === sessionId)
+    const queuedBeforeSend = new Set((get().snapshots[sessionId]?.queuedTurns ?? []).map(turn => turn.queued_id))
     const uploads = get().uploadsBySession[sessionId] ?? []
     const uploadPaths = get().uploadPathsBySession[sessionId] ?? []
     set(state => ({
@@ -321,9 +322,15 @@ export const useAppStore = create<AppState>((set, get) => ({
             : state.snapshots
         }
       })
-      if (steer && response.queued_id) {
-        try { get().setQueued(sessionId, await steerQueuedTurn(sessionId, response.queued_id)) }
-        catch (error) { set({ error: errorMessage(error) }) }
+      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
+      if (steer && responseQueued) {
+        try {
+          const queuedId = response.queued_id
+            || response.event?.queued_id
+            || await findNewQueuedTurn(sessionId, prompt, queuedBeforeSend)
+          if (!queuedId) throw new Error('The message was queued, but its queue ID could not be resolved for steering.')
+          get().setQueued(sessionId, await steerQueuedTurn(sessionId, queuedId))
+        } catch (error) { set({ error: errorMessage(error) }) }
       }
       window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
       return true
@@ -650,6 +657,15 @@ function mergeUploadPaths(a: NativeFileRef[], b: NativeFileRef[]): NativeFileRef
 }
 function stableArray<T>(previous: T[], next: T[]): T[] { return jsonEquivalent(previous, next) ? previous : next }
 function healthActiveSessionIDs(health?: Health | null): Set<string> { return new Set(health?.active ?? health?.active_sessions ?? []) }
+
+async function findNewQueuedTurn(sessionId: string, prompt: string, previousIDs: ReadonlySet<string>): Promise<string | null> {
+  const turns = await window.agentsDock.queue.list(sessionId)
+  useAppStore.getState().setQueued(sessionId, turns)
+  const newTurns = turns.filter(turn => !previousIDs.has(turn.queued_id))
+  const cleanPrompt = prompt.trim()
+  return newTurns.find(turn => (turn.display_prompt || turn.prompt).trim() === cleanPrompt)?.queued_id
+    ?? (newTurns.length === 1 ? newTurns[0].queued_id : null)
+}
 
 function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
