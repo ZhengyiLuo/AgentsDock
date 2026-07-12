@@ -4,7 +4,7 @@ import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSe
 import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, File, GripVertical, ListOrdered, MoreHorizontal, Paperclip, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react'
 import type { AgentFile, NativeFileRef, QueuedTurn, Session } from '@shared/types'
 import { formatBytes, runtimeLabel } from '../lib/format'
-import { steerQueuedTurn } from '../lib/queue-actions'
+import { steerFirstQueuedTurn, steerQueuedTurn } from '../lib/queue-actions'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
@@ -80,6 +80,16 @@ export function Composer() {
     }
   }
 
+  const steerFirstQueued = async () => {
+    if (!selectedId) return
+    try {
+      const result = await steerFirstQueuedTurn(selectedId)
+      useAppStore.getState().setQueued(selectedId, result.turns)
+    } catch (error) {
+      reportActionError(error)
+    }
+  }
+
   const addFiles = async (refs: NativeFileRef[]) => useAppStore.getState().attachPaths(refs)
   const handleFiles = async (files: FileList | File[]) => {
     const refs: NativeFileRef[] = []
@@ -112,6 +122,7 @@ export function Composer() {
           if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.nativeEvent.isComposing) {
             event.preventDefault()
             if (draft.trim()) void send(event.metaKey)
+            else if (event.metaKey) void steerFirstQueued()
           }
         }}
         onPaste={event => { if (event.clipboardData.files.length) { event.preventDefault(); void handleFiles(event.clipboardData.files) } }}

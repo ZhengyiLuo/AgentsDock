@@ -7561,3 +7561,15 @@ Release result:
   resize endpoint. The staged server handles that endpoint with an explicit
   tmux window resize, while the low-latency WebSocket remains the primary path;
   debouncing avoids one HTTP request per pointer event.
+
+## 2026-07-12 - Let Command-Enter force the first queued turn
+
+- Extended the composer shortcut so Command-Enter with an empty editor refreshes
+  the server queue and immediately promotes its position-one turn. This uses the
+  authoritative queue order rather than whichever order the local shelf last
+  rendered.
+- Kept the existing behavior for non-empty drafts: Command-Enter sends that new
+  text as an immediate steering turn, while ordinary Enter retains normal send
+  or queue behavior.
+- Added regressions for out-of-order queue snapshots, empty queues, and the
+  end-to-end composer shortcut. TypeScript and all 143 Electron tests pass.

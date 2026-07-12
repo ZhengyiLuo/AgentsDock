@@ -155,4 +155,35 @@ describe('Composer', () => {
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'chat-1', prompt: 'Steer this now' }))
     expect(editor).toHaveValue('')
   })
+
+  it('uses Command-Enter with an empty editor to steer the first queued message', async () => {
+    const first = { queued_id: 'queued-first', session_id: 'chat-1', prompt: 'First queued turn', file_ids: [], position: 1 }
+    const second = { queued_id: 'queued-second', session_id: 'chat-1', prompt: 'Second queued turn', file_ids: [], position: 2 }
+    const runNow = vi.fn().mockResolvedValue(true)
+    const list = vi.fn().mockResolvedValueOnce([second, first]).mockResolvedValueOnce([second])
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send },
+        queue: { runNow, list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      snapshots: {
+        'chat-1': {
+          session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, events: [], queuedTurns: [first, second],
+          files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+        }
+      }
+    })
+    render(<Composer />)
+
+    fireEvent.keyDown(screen.getByPlaceholderText('Message'), { key: 'Enter', metaKey: true })
+
+    await waitFor(() => expect(runNow).toHaveBeenCalledWith('chat-1', 'queued-first'))
+    expect(send).not.toHaveBeenCalled()
+    expect(useAppStore.getState().snapshots['chat-1'].queuedTurns).toEqual([second])
+  })
 })
