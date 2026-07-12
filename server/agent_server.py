@@ -2217,6 +2217,15 @@ def set_pty_dimensions(fd: int, columns: int, rows: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", lines, cols, 0, 0))
 
 
+def resize_terminal_window(session_id: str, columns: int, rows: int) -> tuple[int, int]:
+    cols, lines = terminal_dimensions(columns, rows)
+    name = terminal_session_name(session_id)
+    # PTY TIOCSWINSZ alone is not enough when a persistent tmux session has
+    # previously been attached from a differently sized Mac or iPad.
+    run_tmux(["resize-window", "-t", name, "-x", str(cols), "-y", str(lines)], check=False)
+    return cols, lines
+
+
 def ensure_terminal_session(
     session_id: str,
     cwd: str | None = None,
@@ -2247,6 +2256,8 @@ def ensure_terminal_session(
         run_tmux(["set-option", "-t", name, "mouse", "off"], check=False)
         run_tmux(["set-option", "-t", name, "@agentsdock_mouse_initialized", "1"], check=False)
     run_tmux(["set-option", "-t", name, "window-size", "latest"], check=False)
+    if columns is not None or rows is not None:
+        resize_terminal_window(session_id, columns or 120, rows or 36)
     # AgentsDock renders its own window tabs and terminal controls. The tmux
     # status line would duplicate those controls and consume a row in the PTY.
     run_tmux(["set-option", "-t", name, "status", "off"], check=False)
@@ -2402,9 +2413,7 @@ def resize_terminal_pane(session_id: str, columns: int, rows: int) -> dict[str, 
     name = terminal_session_name(session_id)
     if not tmux_session_exists(name):
         ensure_terminal_session(session_id)
-    cols = max(40, min(int(columns or 100), 300))
-    line_count = max(10, min(int(rows or 30), 120))
-    run_tmux(["resize-pane", "-t", name, "-x", str(cols), "-y", str(line_count)], check=False)
+    cols, line_count = resize_terminal_window(session_id, columns, rows)
     return terminal_snapshot(session_id, lines=line_count)
 
 
@@ -7084,6 +7093,7 @@ async def session_terminal(
                 if control.get("type") == "resize":
                     next_cols, next_rows = terminal_dimensions(control.get("columns"), control.get("rows"))
                     set_pty_dimensions(master_fd, next_cols, next_rows)
+                    await asyncio.to_thread(resize_terminal_window, session_id, next_cols, next_rows)
                 elif control.get("type") == "scroll":
                     with suppress(TypeError, ValueError):
                         auto_scroll_mode = await asyncio.to_thread(

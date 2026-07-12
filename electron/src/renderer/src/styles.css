@@ -185,8 +185,8 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .terminal-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
 .terminal-tool-separator { width: 1px; height: 18px; margin: 0 4px; background: #353636; }
 .terminal-panel-close { margin-left: 1px; }
-.terminal-host { min-width: 0; min-height: 0; height: 100%; overflow: hidden; padding: 10px 10px 5px 12px; background: #111212; user-select: text; }
-.terminal-host .xterm { height: 100%; }
+.terminal-host { min-width: 0; min-height: 0; width: 100%; height: 100%; position: relative; overflow: hidden; background: #111212; user-select: text; }
+.terminal-host .xterm { width: 100%; height: 100%; position: absolute; inset: 0; padding: 10px 10px 5px 12px; }
 .terminal-host .xterm-viewport { overscroll-behavior: contain; }
 .terminal-host .xterm-screen canvas { image-rendering: auto; }
 .terminal-search { position: absolute; z-index: 20; top: 47px; right: 14px; display: flex; align-items: center; gap: 4px; height: 35px; padding: 0 5px 0 9px; color: var(--muted); background: #292a2af5; border: 1px solid #454646; border-radius: 8px; box-shadow: 0 10px 30px #0008; }

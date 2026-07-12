@@ -7544,3 +7544,16 @@ Release result:
 - Added regressions for chat ownership and late diff responses, plus explicit
   session checks before timeline and scheduled-job change cards are mounted.
 - TypeScript, Python compile validation, and all 140 Electron tests pass.
+
+## 2026-07-12 - Make terminal height reach xterm and persistent tmux
+
+- Bound the terminal workspace and xterm host explicitly to the user-selected
+  dock height, keeping xterm absolutely fitted inside the available grid row
+  instead of leaving stale canvas space after a vertical resize.
+- Added an explicit server-side tmux `resize-window` step for initial attach,
+  WebSocket geometry updates, and the compatibility resize endpoint. PTY
+  `TIOCSWINSZ` is still sent, but tmux no longer has to infer the new size from
+  a session that may previously have been attached on another device.
+- Extended the dock regression to prove the dragged height reaches the mounted
+  terminal workspace. TypeScript, Python compile validation, and all 140
+  Electron tests pass.

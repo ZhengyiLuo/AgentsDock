@@ -323,7 +323,7 @@ export function TerminalWorkspace({ session, layoutHeight, onClose }: { session:
     void runAction('kill-window', String(index))
   }
 
-  return <section className="terminal-workspace">
+  return <section className="terminal-workspace" style={{ height: `${layoutHeight}px` }} data-layout-height={layoutHeight}>
     <header className="terminal-toolbar">
       <div className="terminal-window-tabs" role="tablist" aria-label="Tmux windows">
         {windows.length ? windows.map(tmuxWindow => <div

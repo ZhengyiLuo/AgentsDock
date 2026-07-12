@@ -4,7 +4,7 @@ import type { Session } from '@shared/types'
 import { DEFAULT_TERMINAL_DOCK_HEIGHT, TERMINAL_DOCK_ANIMATION_MS, TerminalDock } from './TerminalDock'
 
 vi.mock('./TerminalWorkspace', () => ({
-  TerminalWorkspace: () => <div data-testid="terminal-workspace" />
+  TerminalWorkspace: ({ layoutHeight }: { layoutHeight: number }) => <div data-testid="terminal-workspace" data-layout-height={layoutHeight} />
 }))
 
 const session: Session = { id: 'chat', title: 'Chat', backend: 'codex' }
@@ -53,6 +53,7 @@ describe('TerminalDock', () => {
     fireEvent.pointerMove(window, { pointerId: 7, clientY: 420 })
 
     expect(shell?.style.getPropertyValue('--terminal-dock-height')).toBe(`${DEFAULT_TERMINAL_DOCK_HEIGHT + 80}px`)
+    expect(screen.getByTestId('terminal-workspace')).toHaveAttribute('data-layout-height', String(DEFAULT_TERMINAL_DOCK_HEIGHT + 80))
 
     fireEvent.pointerUp(window, { pointerId: 7, clientY: 420 })
     expect(localStorage.getItem('agentsdock:terminal-dock-height')).toBe(String(DEFAULT_TERMINAL_DOCK_HEIGHT + 80))
