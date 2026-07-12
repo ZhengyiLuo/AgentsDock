@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ActionSheetIOS, Alert, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
-import { ChevronDown, ChevronRight, Plus, Search, Settings } from 'lucide-react-native'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { MenuView, type MenuAction } from '@expo/ui/community/menu'
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, Pin, PinOff, Plus, Search, Settings, Trash2, type LucideIcon } from 'lucide-react-native'
+import Swipeable from 'react-native-gesture-handler/Swipeable'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import type { Session } from '../types'
@@ -21,6 +23,7 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
   const search = useAppStore(state => state.search)
   const clearSearch = useAppStore(state => state.clearSearch)
   const select = useAppStore(state => state.selectSession)
+  const reorder = useAppStore(state => state.reorderSession)
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['Archived']))
 
@@ -38,7 +41,7 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
       : sessions
     const groups = new Map<string, Session[]>()
     for (const session of filtered) {
-      const folder = session.archived ? 'Archived' : session.pinned ? 'Pinned' : session.folder?.trim() || 'General'
+      const folder = sessionSection(session)
       groups.set(folder, [...(groups.get(folder) ?? []), session])
     }
     const orderedFolders = ['Pinned', ...folderOrder, ...[...groups.keys()].filter(folder => !['Pinned', 'Archived'].includes(folder) && !folderOrder.includes(folder)).sort(), 'General', 'Archived']
@@ -51,6 +54,29 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
       ]
     })
   }, [collapsed, folderOrder, query, searchResults, sessions])
+  const reorderNeighbors = useMemo(() => {
+    const groups = new Map<string, Session[]>()
+    for (const session of sessions) {
+      const section = sessionSection(session)
+      groups.set(section, [...(groups.get(section) ?? []), session])
+    }
+    const result = new Map<string, { previousId: string | null; nextId: string | null }>()
+    for (const values of groups.values()) {
+      values.sort(sessionOrder).forEach((session, index) => result.set(session.id, {
+        previousId: values[index - 1]?.id ?? null,
+        nextId: values[index + 1]?.id ?? null,
+      }))
+    }
+    return result
+  }, [sessions])
+  const folders = useMemo(() => {
+    const values = new Set(['General', ...folderOrder])
+    for (const session of sessions) {
+      const folder = session.folder?.trim()
+      if (folder && !['Pinned', 'Archived'].includes(folder)) values.add(folder)
+    }
+    return [...values]
+  }, [folderOrder, sessions])
 
   return (
     <View style={[styles.root, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -81,44 +107,82 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
             <Text style={[styles.headerText, { color: colors.muted }]}>{item.title}</Text>
             <Text style={[styles.count, { color: colors.muted }]}>{item.count}</Text>
           </Pressable>
-        ) : (
-          <SessionRow
+        ) : (() => {
+          const { previousId, nextId } = reorderNeighbors.get(item.session.id) ?? { previousId: null, nextId: null }
+          return <SessionRow
             session={item.session}
             selected={selected === item.session.id}
             running={active.has(item.session.id)}
+            folders={folders}
+            canMoveUp={Boolean(previousId)}
+            canMoveDown={Boolean(nextId)}
+            onMoveUp={() => { if (previousId) void reorder(item.session.id, previousId, 'before') }}
+            onMoveDown={() => { if (nextId) void reorder(item.session.id, nextId, 'after') }}
             onPress={() => { void select(item.session.id); onOpenChat?.() }}
           />
-        )}
+        })()}
       />
     </View>
   )
 }
 
-function SessionRow({ session, selected, running, onPress }: { session: Session; selected: boolean; running: boolean; onPress: () => void }) {
+function SessionRow({ session, selected, running, folders, canMoveUp, canMoveDown, onMoveUp, onMoveDown, onPress }: {
+  session: Session
+  selected: boolean
+  running: boolean
+  folders: string[]
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
+  onPress: () => void
+}) {
   const colors = usePalette()
   const unread = isUnread(session)
   const markRead = useAppStore(state => state.markRead)
   const markUnread = useAppStore(state => state.markUnread)
-  const toggleReadState = () => { void (unread ? markRead(session.id) : markUnread(session.id)) }
-  const showActions = () => {
-    const action = unread ? 'Mark as read' : 'Mark as unread'
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: [action, 'Cancel'], cancelButtonIndex: 1, title: session.title },
-        index => { if (index === 0) toggleReadState() },
-      )
-      return
-    }
-    Alert.alert(session.title, undefined, [
-      { text: action, onPress: toggleReadState },
+  const update = useAppStore(state => state.updateSession)
+  const fork = useAppStore(state => state.forkSession)
+  const remove = useAppStore(state => state.deleteSession)
+  const swipeRef = useRef<Swipeable>(null)
+  const confirmDelete = () => {
+    Alert.alert('Delete chat?', `“${session.title}” and its AgentsDock history will be removed. Provider history is not deleted.`, [
       { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete chat', style: 'destructive', onPress: () => { void remove(session.id) } },
     ])
   }
-  return (
+  const runAction = (id: string) => {
+    if (id === 'read-state') void (unread ? markRead(session.id) : markUnread(session.id))
+    else if (id === 'fork') void fork(session.id)
+    else if (id === 'move-up') onMoveUp()
+    else if (id === 'move-down') onMoveDown()
+    else if (id === 'pin') void update(session.id, { pinned: !session.pinned })
+    else if (id === 'archive') void update(session.id, { archived: !session.archived })
+    else if (id === 'delete') confirmDelete()
+    else if (id.startsWith('folder:')) void update(session.id, { folder: decodeURIComponent(id.slice(7)), pinned: false })
+  }
+  const folderActions: MenuAction[] = folders.map(folder => ({
+    id: `folder:${encodeURIComponent(folder)}`,
+    title: folder,
+    state: !session.pinned && (session.folder?.trim() || 'General') === folder ? 'on' : 'off',
+  }))
+  const actions: MenuAction[] = [
+    { id: 'read-state', title: unread ? 'Mark as Read' : 'Mark as Unread', image: unread ? 'envelope.open' : 'envelope.badge' },
+    { id: 'primary-actions', title: '', displayInline: true, subactions: [
+      { id: 'fork', title: 'Fork Chat', image: 'arrow.triangle.branch' },
+      { id: 'move-up', title: 'Move Up', image: 'arrow.up', attributes: { disabled: !canMoveUp } },
+      { id: 'move-down', title: 'Move Down', image: 'arrow.down', attributes: { disabled: !canMoveDown } },
+    ] },
+    ...(session.archived ? [] : [
+      { id: 'pin', title: session.pinned ? 'Unpin Chat' : 'Pin Chat', image: session.pinned ? 'pin.slash' : 'pin' } satisfies MenuAction,
+      { id: 'move-folder', title: 'Move to Folder', image: 'folder', subactions: folderActions } satisfies MenuAction,
+    ]),
+    { id: 'archive', title: session.archived ? 'Unarchive Chat' : 'Archive Chat', image: 'archivebox' },
+    { id: 'delete', title: 'Delete Chat', image: 'trash', attributes: { destructive: true } },
+  ]
+  const row = <MenuView shouldOpenOnLongPress title={session.title} actions={actions} onPressAction={event => runAction(event.nativeEvent.event)} style={styles.menuTrigger}>
     <Pressable
       onPress={onPress}
-      onLongPress={showActions}
-      delayLongPress={360}
       style={({ pressed }) => [styles.session, { backgroundColor: selected ? colors.raised : pressed ? `${colors.raised}99` : 'transparent' }]}
     >
       <BackendMark backend={session.backend} size={22} />
@@ -130,7 +194,28 @@ function SessionRow({ session, selected, running, onPress }: { session: Session;
       </View>
       <View style={[styles.statusDot, { backgroundColor: running ? colors.green : unread ? colors.blue : 'transparent' }]} />
     </Pressable>
+  </MenuView>
+  return (
+    <Swipeable
+      ref={swipeRef}
+      friction={1.7}
+      overshootLeft={false}
+      overshootRight={false}
+      renderLeftActions={() => session.archived
+        ? <SwipeAction icon={ArchiveRestore} label="Unarchive" color={colors.muted} onPress={() => { swipeRef.current?.close(); void update(session.id, { archived: false }) }} />
+        : <SwipeAction icon={session.pinned ? PinOff : Pin} label={session.pinned ? 'Unpin' : 'Pin'} color={colors.blue} onPress={() => { swipeRef.current?.close(); void update(session.id, { pinned: !session.pinned }) }} />}
+      renderRightActions={() => <View style={styles.swipeActions}>
+        {!session.archived ? <SwipeAction icon={Archive} label="Archive" color={colors.muted} onPress={() => { swipeRef.current?.close(); void update(session.id, { archived: true }) }} /> : null}
+        <SwipeAction icon={Trash2} label="Delete" color={colors.red} onPress={() => { swipeRef.current?.close(); confirmDelete() }} />
+      </View>}
+    >
+      {row}
+    </Swipeable>
   )
+}
+
+function SwipeAction({ icon: Icon, label, color, onPress }: { icon: LucideIcon; label: string; color: string; onPress: () => void }) {
+  return <Pressable onPress={onPress} style={[styles.swipeAction, { backgroundColor: color }]}><Icon size={17} color="white" /><Text style={styles.swipeActionText}>{label}</Text></Pressable>
 }
 
 function sessionOrder(a: Session, b: Session): number {
@@ -138,6 +223,10 @@ function sessionOrder(a: Session, b: Session): number {
   const right = b.sort_order ?? Number.MAX_SAFE_INTEGER
   if (left !== right) return left - right
   return (a.created_at ?? '').localeCompare(b.created_at ?? '')
+}
+
+function sessionSection(session: Session): string {
+  return session.archived ? 'Archived' : session.pinned ? 'Pinned' : session.folder?.trim() || 'General'
 }
 
 const styles = StyleSheet.create({
@@ -152,8 +241,12 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, fontSize: 11, fontWeight: '700' },
   count: { fontSize: 10 },
   session: { minHeight: 51, borderRadius: 6, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  menuTrigger: { flex: 1 },
   sessionText: { flex: 1, minWidth: 0 },
   sessionTitle: { fontSize: 13, fontWeight: '700' },
   sessionMeta: { marginTop: 2, fontSize: 10.5, fontWeight: '600' },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
+  swipeActions: { flexDirection: 'row' },
+  swipeAction: { width: 76, minHeight: 51, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  swipeActionText: { color: 'white', fontSize: 10, fontWeight: '700' },
 })
