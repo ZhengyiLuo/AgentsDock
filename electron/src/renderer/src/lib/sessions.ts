@@ -50,6 +50,37 @@ export function orderedActiveSessions(sessions: Session[], folderOrder: string[]
   return [...pinned, ...folders.flatMap(folder => regular.filter(session => (session.folder?.trim() || 'General') === folder))]
 }
 
+export interface DigestTargetSection {
+  id: string
+  title: string
+  sessions: Session[]
+}
+
+export function digestTargetSections(
+  sessions: Session[],
+  folderOrder: string[],
+  sourceSessionId: string | null,
+  query = ''
+): DigestTargetSection[] {
+  const needle = query.trim().toLocaleLowerCase()
+  const targets = orderedActiveSessions(sessions, folderOrder).filter(session => {
+    if (session.id === sourceSessionId) return false
+    if (!needle) return true
+    return `${session.title} ${session.folder || 'General'} ${session.backend}`.toLocaleLowerCase().includes(needle)
+  })
+  const sections: DigestTargetSection[] = []
+  const pinned = targets.filter(session => session.pinned)
+  if (pinned.length) sections.push({ id: 'pinned', title: 'Pinned', sessions: pinned })
+
+  const regular = targets.filter(session => !session.pinned)
+  const folders = [...new Set(regular.map(session => session.folder?.trim() || 'General'))]
+  for (const folder of folders) {
+    const folderSessions = regular.filter(session => (session.folder?.trim() || 'General') === folder)
+    if (folderSessions.length) sections.push({ id: `folder:${folder}`, title: folder, sessions: folderSessions })
+  }
+  return sections
+}
+
 export function navigableSessions(sessions: Session[], folderOrder: string[], collapsedFolders: Set<string>): Session[] {
   return orderedActiveSessions(sessions, folderOrder).filter(session => session.pinned || !collapsedFolders.has(session.folder?.trim() || 'General'))
 }

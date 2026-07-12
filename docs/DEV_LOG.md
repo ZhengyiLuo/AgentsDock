@@ -7496,3 +7496,19 @@ Release result:
   and retained race-safe handling when a queued turn starts before promotion.
 - Added event-ID and queue-discovery regressions. TypeScript and all 132
   Electron tests pass.
+
+## 2026-07-11 - Restore and redesign context digest creation
+
+- Replaced the Electron digest dropdown with a source-to-target handoff view,
+  a searchable target browser grouped in the same pinned/folder order as the
+  chat sidebar, segmented detail controls, an editable target prompt, and a
+  selectable LLM preview.
+- Fixed the late-bootstrap race that left the target empty when sessions loaded
+  after the dialog opened. Archived chats and the source chat are excluded,
+  while a disappearing target is replaced with the next valid sidebar target.
+- Split preview and background-send progress, kept request failures visible in
+  the dialog, and stopped treating a rejected server response as a successful
+  digest launch. A successful send still runs as a real source-agent turn and
+  reports progress in the source timeline.
+- Added target-order, late-session, rejected-send, and preview-payload
+  regressions. TypeScript and all 137 Electron tests pass.

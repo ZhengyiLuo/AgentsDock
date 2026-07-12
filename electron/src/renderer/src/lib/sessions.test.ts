@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@shared/types'
-import { rankSessionsForSearch, sessionNameMatchRank } from './sessions'
+import { digestTargetSections, rankSessionsForSearch, sessionNameMatchRank } from './sessions'
 
 const session = (id: string, title: string, patch: Partial<Session> = {}): Session => ({
   id,
@@ -35,5 +35,32 @@ describe('chat search ranking', () => {
     const sessions = [session('a', 'B'), session('b', 'A')]
     expect(rankSessionsForSearch(sessions, '', new Set())).toBe(sessions)
     expect(sessionNameMatchRank(sessions[0], '')).toBe(0)
+  })
+})
+
+describe('digest target sections', () => {
+  it('matches sidebar order while excluding archived and source chats', () => {
+    const sessions = [
+      session('source', 'Source', { pinned: true }),
+      session('pinned', 'Pinned target', { pinned: true, folder: 'Research' }),
+      session('general', 'General target', { folder: 'General' }),
+      session('research', 'Research target', { folder: 'Research' }),
+      session('archived', 'Archived target', { folder: 'Research', archived: true })
+    ]
+
+    expect(digestTargetSections(sessions, ['Research', 'General'], 'source')).toEqual([
+      { id: 'pinned', title: 'Pinned', sessions: [sessions[1]] },
+      { id: 'folder:Research', title: 'Research', sessions: [sessions[3]] },
+      { id: 'folder:General', title: 'General', sessions: [sessions[2]] }
+    ])
+  })
+
+  it('filters targets without changing their section order', () => {
+    const sessions = [
+      session('a', 'Renderer audit', { folder: 'Research' }),
+      session('b', 'Training status', { folder: 'Jobs' })
+    ]
+    expect(digestTargetSections(sessions, ['Jobs', 'Research'], null, 'render').flatMap(section => section.sessions).map(item => item.id))
+      .toEqual(['a'])
   })
 })
