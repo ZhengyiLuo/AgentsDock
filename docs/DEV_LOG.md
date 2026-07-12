@@ -19,6 +19,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-12 - Restore iPhone edge-swipe navigation in build 61
+
+- The React mobile rewrite exposed a Back button but had no interactive back
+  gesture, so swiping right from a chat did nothing.
+- Kept the compact sidebar mounted underneath the chat and added a direction-
+  locked left-edge pan. The chat follows the finger, completes on distance or
+  velocity, and springs back for an incomplete gesture without stealing normal
+  timeline scrolling or message gestures.
+- Added Android hardware-back parity for the same compact chat state.
+- React typecheck and the Release iPhone simulator build pass. Advanced the
+  iOS/iPadOS TestFlight build from 60 to 61; the server API contract is
+  unchanged from the server refresh performed with build 60.
+
 ## 2026-07-12 - React iOS/iPadOS TestFlight Build 60
 
 - Promoted the React Native mobile rewrite from its local-only application ID
