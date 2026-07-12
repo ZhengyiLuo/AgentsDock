@@ -7511,4 +7511,6 @@ Release result:
   digest launch. A successful send still runs as a real source-agent turn and
   reports progress in the source timeline.
 - Added target-order, late-session, rejected-send, and preview-payload
-  regressions. TypeScript and all 137 Electron tests pass.
+  regressions. Packaged-renderer QA with 35 targets also caught and fixed an
+  unbounded target-list expansion; the list now scrolls inside a stable dialog
+  workspace. TypeScript and all 137 Electron tests pass.
