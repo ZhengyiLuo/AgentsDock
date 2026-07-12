@@ -8,6 +8,7 @@ import { TimelineRowView } from './TimelineRows'
 import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { buildTimelineLandmarks, mergeTimelineLandmarks, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
 import { initialTimelineLocation } from '../lib/timeline-position'
+import { bridgeHistoricalPageToLive, historicalEdgeAction, mergeHistoricalPages } from '../lib/timeline-history'
 import { formatTime } from '../lib/format'
 import { OPEN_HISTORY_RESULT_EVENT } from '../lib/session-history-search'
 import { TIMELINE_VIEWPORT_LAYOUT_EVENT, type TimelineViewportLayoutDetail } from '../lib/workspace-layout'
@@ -74,6 +75,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const scheduleWorkspaceRestoreRef = useRef<() => void>(() => {})
   const scheduleWorkspaceFinishRef = useRef<() => void>(() => {})
   const loadingOlderRef = useRef(false)
+  const historicalPagingRef = useRef<'older' | 'newer' | null>(null)
+  const historicalWindowRef = useRef(false)
   const pendingLocalScroll = useRef(false)
   const historySeekLease = useRef(0)
   const searchLease = useRef(0)
@@ -90,8 +93,10 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   const [searchLoading, setSearchLoading] = useState(false)
   const [timelineIndex, setTimelineIndex] = useState<TimelineIndex | null>(null)
   const [historicalWindow, setHistoricalWindow] = useState<HistoricalWindow | null>(null)
+  const [historicalPaging, setHistoricalPaging] = useState<'older' | 'newer' | null>(null)
   const [seekingHistory, setSeekingHistory] = useState(false)
   const [pinnedItemIds, setPinnedItemIds] = useState<ReadonlySet<string>>(() => new Set())
+  historicalWindowRef.current = Boolean(historicalWindow)
 
   useEffect(() => {
     let disposed = false
@@ -117,7 +122,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     const node = scroller.current
     const minimap = minimapRef.current
     if (!node || !minimap) return
-    if (atBottomRef.current && itemsLength.current > 0) {
+    if (!historicalWindowRef.current && atBottomRef.current && itemsLength.current > 0) {
       const lastIndex = itemsLength.current - 1
       minimap.setVisibleRange(lastIndex, lastIndex, true)
       return
@@ -416,6 +421,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     const localSend = (event: Event) => {
       if ((event as CustomEvent<{ sessionId: string }>).detail.sessionId !== sessionId) return
       historySeekLease.current += 1
+      historicalPagingRef.current = null
+      setHistoricalPaging(null)
       setHistoricalWindow(null)
       pendingLocalScroll.current = true
       requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -426,6 +433,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     }
     const jump = () => {
       historySeekLease.current += 1
+      historicalPagingRef.current = null
+      setHistoricalPaging(null)
       setHistoricalWindow(null)
       window.requestAnimationFrame(() => ref.current?.scrollToIndex({ index: Math.max(0, itemsLength.current - 1), align: 'end', behavior: 'smooth' }))
     }
@@ -457,6 +466,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
       return
     }
     const lease = ++historySeekLease.current
+    historicalPagingRef.current = null
+    setHistoricalPaging(null)
     setSeekingHistory(true)
     try {
       const page = await window.agentsDock.timeline.around(sessionId, result.seq, 260)
@@ -540,6 +551,8 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
       return
     }
     const lease = ++historySeekLease.current
+    historicalPagingRef.current = null
+    setHistoricalPaging(null)
     setSeekingHistory(true)
     try {
       const page = await window.agentsDock.timeline.around(sessionId, landmark.start_seq, 260)
@@ -553,18 +566,61 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
   }, [items, sessionId])
   const returnToLatest = useCallback(() => {
     historySeekLease.current += 1
+    historicalPagingRef.current = null
+    setHistoricalPaging(null)
     setSeekingHistory(false)
     setHistoricalWindow(null)
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       ref.current?.scrollToIndex({ index: Math.max(0, itemsLength.current - 1), align: 'end', behavior: 'auto' })
     }))
   }, [])
+  const loadHistoricalEdge = useCallback(async (direction: 'older' | 'newer') => {
+    const current = historicalWindow
+    if (!current || historicalPagingRef.current) return
+    const action = historicalEdgeAction(current.page, direction)
+    if (action === 'none') return
+    if (action === 'return-live') {
+      returnToLatest()
+      return
+    }
+    const edgeSequence = direction === 'older'
+      ? current.page.events[0]?.seq
+      : current.page.events.at(-1)?.seq
+    if (edgeSequence == null) return
+    const lease = ++historySeekLease.current
+    historicalPagingRef.current = direction
+    setHistoricalPaging(direction)
+    try {
+      const page = await window.agentsDock.timeline.around(
+        sessionId,
+        direction === 'newer' ? edgeSequence + 1 : edgeSequence,
+        360
+      )
+      if (lease !== historySeekLease.current) return
+      setHistoricalWindow(active => {
+        if (!active || active.anchorSeq !== current.anchorSeq) return active
+        const merged = mergeHistoricalPages(active.page, page)
+        const nextPage = direction === 'newer' ? bridgeHistoricalPageToLive(merged, snapshot.events) : merged
+        return nextPage === active.page ? active : { ...active, page: nextPage }
+      })
+    } catch (error) {
+      if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (lease === historySeekLease.current) {
+        historicalPagingRef.current = null
+        setHistoricalPaging(null)
+      }
+    }
+  }, [historicalWindow, returnToLatest, sessionId, snapshot.events])
   const header = useCallback(() => historicalWindow
-    ? <div className="history-window"><span>Viewing an older part of this chat</span><button onClick={returnToLatest}>Return to latest</button></div>
+    ? <div className="history-window"><span>{historicalPaging === 'older' ? 'Loading earlier messages…' : 'Viewing an older part of this chat · scroll either direction to continue'}</span><button onClick={returnToLatest}>Return to latest</button></div>
     : snapshot.hasMoreEvents || loadingOlder
       ? <div className="history-loader"><button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? <><LoaderCircle className="spin" size={13} /> Loading older messages</> : `Show older messages${olderRemaining ? ` · ${olderRemaining.toLocaleString()} remaining` : ''}`}</button></div>
-      : <div className="history-start">Beginning of conversation</div>, [historicalWindow, loadOlder, loadingOlder, olderRemaining, returnToLatest, snapshot.hasMoreEvents])
-  const components = useMemo(() => ({ Header: header, Footer: TimelineFooter }), [header])
+      : <div className="history-start">Beginning of conversation</div>, [historicalPaging, historicalWindow, loadOlder, loadingOlder, olderRemaining, returnToLatest, snapshot.hasMoreEvents])
+  const footer = useCallback(() => historicalWindow && historicalPaging === 'newer'
+    ? <div className="history-loader"><span><LoaderCircle className="spin" size={13} /> Loading newer messages</span></div>
+    : <TimelineFooter />, [historicalPaging, historicalWindow])
+  const components = useMemo(() => ({ Header: header, Footer: footer }), [footer, header])
   const itemContent = useCallback((index: number, item: RenderTimelineItem) => (
     <div
       className="virtual-row"
@@ -611,6 +667,14 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
         rangeChanged={range => {
           scheduleMinimapSync()
           scheduleViewSave()
+          const localStart = localVirtuosoIndex(range.startIndex, firstItemIndex.current, itemsLength.current)
+          const localEnd = localVirtuosoIndex(range.endIndex, firstItemIndex.current, itemsLength.current)
+          if (historicalWindow) {
+            if (localStart <= 1) void loadHistoricalEdge('older')
+            if (localEnd >= itemsLength.current - 2) void loadHistoricalEdge('newer')
+          } else if (localStart <= 1 && snapshot.hasMoreEvents) {
+            void loadOlder()
+          }
         }}
         isScrolling={value => {
           if (!value) {
@@ -619,8 +683,10 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
           }
         }}
         startReached={() => {
-          if (snapshot.hasMoreEvents && !historicalWindow) void loadOlder()
+          if (historicalWindow) void loadHistoricalEdge('older')
+          else if (snapshot.hasMoreEvents) void loadOlder()
         }}
+        endReached={() => { if (historicalWindow) void loadHistoricalEdge('newer') }}
         components={components}
         itemContent={itemContent}
       />

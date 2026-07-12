@@ -7462,3 +7462,16 @@ Release result:
   Control-backtick shortcut while preserving Command-T for a new tmux window.
 - Added pointer-drag and shortcut regressions. TypeScript and all 127 Electron
   tests pass.
+
+## 2026-07-11 - Let minimap history navigation flow back into the chat
+
+- Replaced the minimap's fixed 260-event historical island with bidirectional,
+  edge-triggered paging. Ordinary upward scrolling loads the preceding slice;
+  downward scrolling loads the following slice and reconnects with the cached
+  live tail when their sequence ranges meet.
+- Kept each fetch bounded and merged overlapping events by stable ID, so the
+  app does not eagerly download the whole transcript or duplicate rows.
+- Stopped treating the bottom of a historical slice as the bottom of the full
+  conversation, which previously moved the minimap highlight to the wrong end.
+- Added explicit edge-policy, overlap, de-duplication, and live-tail bridge
+  regressions. TypeScript and all 130 Electron tests pass.

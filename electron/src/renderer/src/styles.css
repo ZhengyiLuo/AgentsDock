@@ -243,6 +243,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .timeline-minimap-popover footer { margin-top: 5px; }
 .timeline-end { height: 24px; }
 .history-loader, .history-start { display: flex; justify-content: center; padding: 16px; color: var(--faint); font-size: 11px; }
+.history-loader > span { display: inline-flex; align-items: center; gap: 6px; }
 .history-loader button { display: flex; align-items: center; gap: 6px; padding: 6px 12px; color: var(--muted); background: #232323; border-radius: 7px; }
 .history-loader button:hover { color: var(--text); background: #2b2b2b; }
 .history-window { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 11px 16px; color: #aaa9a5; font-size: 11px; }
