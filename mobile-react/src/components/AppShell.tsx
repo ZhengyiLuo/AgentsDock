@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
+import { Linking, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
 import { AlertCircle, PanelRight, Settings, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
@@ -39,6 +39,14 @@ export function AppShell() {
 
   useEffect(() => { void initialize() }, [initialize])
   useEffect(() => { if (!selectedId) setMobileChatOpen(false) }, [selectedId])
+  useEffect(() => {
+    const openDeepLink = ({ url }: { url: string }) => {
+      if (/:\/\/terminal(?:[/?#]|$)/i.test(url)) setTerminal(true)
+    }
+    const subscription = Linking.addEventListener('url', openDeepLink)
+    void Linking.getInitialURL().then(url => { if (url) openDeepLink({ url }) })
+    return () => subscription.remove()
+  }, [])
 
   if (!initialized) return <View style={[styles.fill, { backgroundColor: colors.background }]}><Loading label="Starting AgentsDock" /></View>
 
