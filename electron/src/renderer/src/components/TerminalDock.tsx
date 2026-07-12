@@ -110,7 +110,7 @@ export function TerminalDock({
 
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* window tracking remains active */ }
     resizeDrag.current = {
       pointerId: event.pointerId,
       startY: event.clientY,
@@ -121,23 +121,45 @@ export function TerminalDock({
     document.body.classList.add('terminal-resizing')
     notifyTimelineViewportLayout('begin')
   }
-  const moveResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const updateResize = (pointerId: number, clientY: number) => {
     const drag = resizeDrag.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    const next = clampTerminalDockHeight(drag.startHeight + drag.startY - event.clientY)
+    if (!drag || drag.pointerId !== pointerId) return
+    const next = clampTerminalDockHeight(drag.startHeight + drag.startY - clientY)
     drag.currentHeight = next
     setHeight(next)
   }
-  const finishResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const completeResize = (pointerId: number, captureTarget?: Element | null) => {
     const drag = resizeDrag.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (!drag || drag.pointerId !== pointerId) return
+    try {
+      if (captureTarget?.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId)
+    } catch { /* pointer capture is best effort */ }
     resizeDrag.current = null
     setResizing(false)
     document.body.classList.remove('terminal-resizing')
     window.localStorage.setItem(TERMINAL_DOCK_HEIGHT_KEY, String(drag.currentHeight))
     window.requestAnimationFrame(() => notifyTimelineViewportLayout('end'))
   }
+  const moveResize = (event: ReactPointerEvent<HTMLDivElement>) => updateResize(event.pointerId, event.clientY)
+  const finishResize = (event: ReactPointerEvent<HTMLDivElement>) => completeResize(event.pointerId, event.currentTarget)
+
+  useEffect(() => {
+    if (!resizing) return
+    const move = (event: PointerEvent) => {
+      if (resizeDrag.current?.pointerId !== event.pointerId) return
+      event.preventDefault()
+      updateResize(event.pointerId, event.clientY)
+    }
+    const finish = (event: PointerEvent) => completeResize(event.pointerId)
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerup', finish, true)
+    window.addEventListener('pointercancel', finish, true)
+    return () => {
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerup', finish, true)
+      window.removeEventListener('pointercancel', finish, true)
+    }
+  }, [resizing])
   const resizeWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const delta = event.shiftKey ? 50 : 20
     let next: number | null = null
@@ -185,7 +207,7 @@ export function TerminalDock({
         onDoubleClick={resetHeight}
         onKeyDown={resizeWithKeyboard}
       />
-      <TerminalWorkspace session={session} onClose={onRequestClose} />
+      <TerminalWorkspace session={session} layoutHeight={height} onClose={onRequestClose} />
     </>}
   </div>
 }

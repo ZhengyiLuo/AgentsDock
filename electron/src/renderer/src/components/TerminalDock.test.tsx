@@ -41,4 +41,21 @@ describe('TerminalDock', () => {
     expect(shell?.style.getPropertyValue('--terminal-dock-height')).toBe(`${DEFAULT_TERMINAL_DOCK_HEIGHT + 20}px`)
     expect(localStorage.getItem('agentsdock:terminal-dock-height')).toBe(String(DEFAULT_TERMINAL_DOCK_HEIGHT + 20))
   })
+
+  it('tracks pointer resizing outside the narrow drag handle', () => {
+    vi.useFakeTimers()
+    const { container } = render(<TerminalDock session={session} open onRequestClose={() => {}} />)
+    act(() => vi.advanceTimersByTime(40))
+    const shell = container.querySelector<HTMLElement>('.terminal-dock-shell')
+    const handle = screen.getByRole('separator', { name: 'Resize terminal panel' })
+
+    fireEvent.pointerDown(handle, { pointerId: 7, clientY: 500 })
+    fireEvent.pointerMove(window, { pointerId: 7, clientY: 420 })
+
+    expect(shell?.style.getPropertyValue('--terminal-dock-height')).toBe(`${DEFAULT_TERMINAL_DOCK_HEIGHT + 80}px`)
+
+    fireEvent.pointerUp(window, { pointerId: 7, clientY: 420 })
+    expect(localStorage.getItem('agentsdock:terminal-dock-height')).toBe(String(DEFAULT_TERMINAL_DOCK_HEIGHT + 80))
+    expect(document.body).not.toHaveClass('terminal-resizing')
+  })
 })

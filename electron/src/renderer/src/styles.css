@@ -55,7 +55,7 @@ textarea { resize: none; }
 .terminal-dock-shell > .terminal-workspace { width: 100%; height: var(--terminal-dock-height); position: absolute; top: 0; right: 0; left: 0; transform: translateY(12px); transition: transform 220ms cubic-bezier(.22, .8, .24, 1); }
 .terminal-dock-shell.open > .terminal-workspace { transform: translateY(0); }
 .terminal-dock-shell.resizing, .terminal-dock-shell.resizing > .terminal-workspace { transition: none; }
-.terminal-dock-resize-handle { height: 9px; position: absolute; z-index: 45; top: 0; right: 0; left: 0; cursor: ns-resize; touch-action: none; outline: none; }
+.terminal-dock-resize-handle { height: 12px; position: absolute; z-index: 45; top: 0; right: 0; left: 0; cursor: ns-resize; touch-action: none; outline: none; }
 .terminal-dock-resize-handle::after { width: 42px; height: 3px; position: absolute; top: 2px; left: 50%; content: ""; background: #70706d; border-radius: 3px; opacity: 0; transform: translateX(-50%); transition: opacity 120ms ease; }
 .terminal-dock-resize-handle:hover::after, .terminal-dock-resize-handle:focus-visible::after, .terminal-dock-shell.resizing .terminal-dock-resize-handle::after { opacity: .9; }
 body.terminal-resizing { cursor: ns-resize; user-select: none; }

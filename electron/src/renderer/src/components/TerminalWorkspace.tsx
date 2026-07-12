@@ -26,7 +26,7 @@ import type { Session, TerminalAction, TerminalConnectionState, TerminalWindow }
 import { accumulateTerminalWheel, containTerminalWheel, terminalClipboardShortcut } from '../lib/terminal-shortcuts'
 import { useAppStore } from '../store/app-store'
 
-export function TerminalWorkspace({ session, onClose }: { session: Session; onClose?: () => void }) {
+export function TerminalWorkspace({ session, layoutHeight, onClose }: { session: Session; layoutHeight: number; onClose?: () => void }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -35,6 +35,7 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
   const onCloseRef = useRef(onClose)
   const mouseEnabledRef = useRef(false)
   const wheelRemainderRef = useRef(0)
+  const requestFitRef = useRef<(reason: string) => void>(() => undefined)
   const [connectionState, setConnectionState] = useState<TerminalConnectionState>('connecting')
   const [connectionName, setConnectionName] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -183,6 +184,49 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
       return true
     })
 
+    let resizeFrame = 0
+    let settleTimer = 0
+    let lastSize = ''
+    const fitTerminal = (reason: string) => {
+      resizeFrame = 0
+      try {
+        const bounds = host.getBoundingClientRect()
+        if (bounds.width < 32 || bounds.height < 32) return
+        const proposed = fit.proposeDimensions()
+        if (!proposed) return
+        const columns = Math.max(2, Math.floor(proposed.cols))
+        const rows = Math.max(1, Math.floor(proposed.rows))
+        if (terminal.cols !== columns || terminal.rows !== rows) terminal.resize(columns, rows)
+        const size = `${terminal.cols}x${terminal.rows}`
+        if (size !== lastSize) {
+          lastSize = size
+          terminal.refresh(0, Math.max(0, terminal.rows - 1))
+          window.agentsDock.terminal.resize(session.id, terminal.cols, terminal.rows)
+        }
+        if (reason === 'initial' || reason === 'connected' || reason.endsWith(':settled')) {
+          void window.agentsDock.native.log('terminal-layout', 'terminal fitted', {
+            sessionId: session.id,
+            reason,
+            width: Math.round(bounds.width),
+            height: Math.round(bounds.height),
+            columns: terminal.cols,
+            rows: terminal.rows
+          }).catch(() => undefined)
+        }
+      } catch (error) {
+        void window.agentsDock.native.log('terminal-layout', 'terminal fit failed', {
+          sessionId: session.id, reason, error: errorText(error)
+        }).catch(() => undefined)
+      }
+    }
+    const scheduleFit = (reason: string) => {
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
+      resizeFrame = window.requestAnimationFrame(() => fitTerminal(reason))
+      if (settleTimer) window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(() => fitTerminal(`${reason}:settled`), 90)
+    }
+    requestFitRef.current = scheduleFit
+
     const removeDataListener = window.agentsDock.events.on('terminal:data', payload => {
       if (payload.sessionId === session.id) terminal.write(payload.data)
     })
@@ -193,40 +237,31 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
       if (payload.name) setConnectionName(payload.name)
       if (payload.state === 'connected') {
         terminal.focus()
+        scheduleFit('connected')
         void refreshWindows()
       }
     })
     const find = () => setSearchOpen(true)
     window.addEventListener('agentsdock:find-in-chat', find)
 
-    let resizeFrame = 0
-    let lastSize = ''
-    const fitTerminal = () => {
-      resizeFrame = 0
-      try {
-        fit.fit()
-        const size = `${terminal.cols}x${terminal.rows}`
-        if (size !== lastSize) {
-          lastSize = size
-          window.agentsDock.terminal.resize(session.id, terminal.cols, terminal.rows)
-        }
-      } catch { /* the host may be between layouts */ }
-    }
-    const observer = new ResizeObserver(() => {
-      if (resizeFrame) cancelAnimationFrame(resizeFrame)
-      resizeFrame = requestAnimationFrame(fitTerminal)
-    })
+    const observer = new ResizeObserver(() => scheduleFit('resize-observer'))
     observer.observe(host)
+    if (host.parentElement) observer.observe(host.parentElement)
+    const onWindowResize = () => scheduleFit('window-resize')
+    window.addEventListener('resize', onWindowResize)
     const themeObserver = new MutationObserver(() => { terminal.options.theme = terminalTheme() })
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-    resizeFrame = requestAnimationFrame(() => {
-      fitTerminal()
+    resizeFrame = window.requestAnimationFrame(() => {
+      fitTerminal('initial')
       void connect()
     })
 
     return () => {
-      if (resizeFrame) cancelAnimationFrame(resizeFrame)
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
+      if (settleTimer) window.clearTimeout(settleTimer)
+      requestFitRef.current = () => undefined
       observer.disconnect()
+      window.removeEventListener('resize', onWindowResize)
       themeObserver.disconnect()
       data.dispose()
       removeDataListener()
@@ -239,6 +274,18 @@ export function TerminalWorkspace({ session, onClose }: { session: Session; onCl
       searchRef.current = null
     }
   }, [connect, refreshWindows, runAction, session.id])
+
+  useLayoutEffect(() => {
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      requestFitRef.current('dock-height')
+      secondFrame = window.requestAnimationFrame(() => requestFitRef.current('dock-height-second-frame'))
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [layoutHeight])
 
   const searchNext = (previous = false) => {
     if (!searchQuery) return

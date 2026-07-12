@@ -7448,3 +7448,17 @@ Release result:
 - Added regression coverage for non-blocking cached opens, disk-cache-first
   selection, stalled-open retry, and rapid A-to-B-to-A selection races.
 - Verified TypeScript and all 124 Electron tests before packaging.
+
+## 2026-07-11 - Make the persistent terminal resize reliably
+
+- Replaced drag-handle-only pointer tracking with window-level pointer capture,
+  so terminal height resizing continues after the pointer leaves the narrow
+  separator and always persists the final height.
+- Added a deduplicated xterm fit controller that observes the host, panel, and
+  app window; refits on direct dock-height changes; performs a settled-layout
+  pass; refreshes the canvas; and forwards changed rows/columns to the remote
+  tmux PTY.
+- Replaced the terminal-panel toggle from Command-Shift-T with the VS Code-style
+  Control-backtick shortcut while preserving Command-T for a new tmux window.
+- Added pointer-drag and shortcut regressions. TypeScript and all 127 Electron
+  tests pass.

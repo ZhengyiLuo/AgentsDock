@@ -8,6 +8,7 @@ import { InspectorDock } from './components/InspectorDock'
 import { Sidebar } from './components/Sidebar'
 import { TerminalDock } from './components/TerminalDock'
 import { Timeline } from './components/Timeline'
+import { isTerminalToggleShortcut } from './lib/workspace-shortcuts'
 import { WorkspaceResizeHandles, savedWorkspaceColumnStyle } from './components/WorkspaceResizeHandles'
 import type { CodeReviewTarget } from './lib/timeline'
 import { closeTopTransient } from './lib/transient-close'
@@ -46,14 +47,14 @@ export function App() {
   }, [])
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
-      if (!event.metaKey) return
-      const key = event.key.toLowerCase()
-      if (event.shiftKey && key === 't' && selectedSessionId) {
+      if (isTerminalToggleShortcut(event) && selectedSessionId) {
         event.preventDefault()
         event.stopPropagation()
         setTerminalOpen(selectedSessionId, !terminalOpen)
         return
       }
+      if (!event.metaKey) return
+      const key = event.key.toLowerCase()
       if (!event.shiftKey && key === 'l') {
         event.preventDefault()
         event.stopPropagation()
