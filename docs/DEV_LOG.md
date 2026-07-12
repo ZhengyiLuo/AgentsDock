@@ -7588,3 +7588,18 @@ Release result:
   active, and provides a compact click-through activity transcript.
 - Added lifecycle regressions using real Claude `task_*` and Codex
   `spawn_agent` payload shapes.
+
+## 2026-07-12 - Restore native iOS chat actions
+
+- Replaced the React rewrite's single read-state action sheet with Expo UI's
+  native long-press menu. On iOS this is a SwiftUI `ContextMenu` anchored to
+  the chat row, with native icons, nested folder choices, and destructive
+  styling.
+- Restored the old iOS and Mac chat-row actions: mark read/unread, fork, move
+  up/down within the current section, pin/unpin, move to folder,
+  archive/unarchive, and confirmed deletion.
+- Restored leading pin/unpin (or unarchive) and trailing archive/delete swipe
+  actions. Reorder neighbors are derived from the complete unfiltered section
+  so search results cannot accidentally change the move target.
+- Added `@expo/ui` 57.0.4, passed the mobile TypeScript check, linked ExpoUI,
+  and completed a Release simulator build.
