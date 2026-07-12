@@ -206,7 +206,8 @@ export function DigestDialog() {
     () => digestTargetSections(sessions, folderOrder, sourceId, targetQuery),
     [folderOrder, sessions, sourceId, targetQuery]
   )
-  const targetSession = allChoices.find(session => session.id === target) ?? null
+  const resolvedTarget = allChoices.some(session => session.id === target) ? target : allChoices[0]?.id ?? ''
+  const targetSession = allChoices.find(session => session.id === resolvedTarget) ?? null
   const busy = phase !== 'idle'
 
   useEffect(() => {
@@ -225,10 +226,10 @@ export function DigestDialog() {
   }, [allChoices, open, target])
 
   const previewDigest = async () => {
-    if (!sourceId || !target) return
+    if (!sourceId || !resolvedTarget) return
     setPhase('preview'); setStatus('Summarizing source chat with the LLM…')
     try {
-      const result = await window.agentsDock.digest.preview({ sourceSessionId: sourceId, targetSessionId: target, detail, userPrompt: prompt.trim() })
+      const result = await window.agentsDock.digest.preview({ sourceSessionId: sourceId, targetSessionId: resolvedTarget, detail, userPrompt: prompt.trim() })
       setPreview(result)
       setStatus(`${result.length.toLocaleString()} character preview`)
     } catch (error) {
@@ -238,10 +239,10 @@ export function DigestDialog() {
     }
   }
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (!sourceId || !target) return
+    event.preventDefault(); if (!sourceId || !resolvedTarget) return
     setPhase('send'); setStatus('Starting digest in the source chat…')
     try {
-      const accepted = await window.agentsDock.digest.send({ sourceSessionId: sourceId, targetSessionId: target, detail, userPrompt: prompt.trim() })
+      const accepted = await window.agentsDock.digest.send({ sourceSessionId: sourceId, targetSessionId: resolvedTarget, detail, userPrompt: prompt.trim() })
       if (!accepted) throw new Error('The server did not accept the digest request.')
       useAppStore.getState().setModal('digest', false)
     } catch (error) {
@@ -263,7 +264,7 @@ export function DigestDialog() {
           <header><strong>Target chat</strong><small>{allChoices.length} available</small></header>
           <label className="digest-target-search"><Search size={14} /><input value={targetQuery} onChange={event => setTargetQuery(event.target.value)} placeholder="Filter chats" aria-label="Filter target chats" /></label>
           <div className="digest-target-list" role="listbox" aria-label="Digest target chat">
-            {targetSections.map(section => <section key={section.id}><h3>{section.title}</h3>{section.sessions.map(session => <button type="button" role="option" aria-selected={target === session.id} className={target === session.id ? 'selected' : ''} key={session.id} onClick={() => setTarget(session.id)}><BackendMark backend={session.backend} size={17} /><span><strong>{session.title}</strong><small>{runtimeLabel(session, useAppStore.getState().runtimeCatalog)}</small></span>{target === session.id && <Check size={15} />}</button>)}</section>)}
+            {targetSections.map(section => <section key={section.id}><h3>{section.title}</h3>{section.sessions.map(session => <button type="button" role="option" aria-selected={resolvedTarget === session.id} className={resolvedTarget === session.id ? 'selected' : ''} key={session.id} onClick={() => setTarget(session.id)}><BackendMark backend={session.backend} size={17} /><span><strong>{session.title}</strong><small>{runtimeLabel(session, useAppStore.getState().runtimeCatalog)}</small></span>{resolvedTarget === session.id && <Check size={15} />}</button>)}</section>)}
             {!targetSections.length && <p>No matching active chats.</p>}
           </div>
         </section>
@@ -284,8 +285,8 @@ export function DigestDialog() {
         <div className={`digest-status ${status && !busy && !preview ? 'error' : ''}`}>{busy && <LoaderCircle className="spin" size={14} />}<span>{status || 'Ready'}</span></div>
         <span className="dialog-spacer" />
         <button type="button" className="quiet-button" onClick={() => useAppStore.getState().setModal('digest', false)}>Cancel</button>
-        <button type="button" className="quiet-button" disabled={busy || !sourceId || !target} onClick={() => void previewDigest()}>{phase === 'preview' && <LoaderCircle className="spin" size={14} />} Preview</button>
-        <button className="primary-button" disabled={!sourceId || !target || busy}>{phase === 'send' && <LoaderCircle className="spin" size={14} />} Send to chat</button>
+        <button type="button" className="quiet-button" disabled={busy || !sourceId || !resolvedTarget} onClick={() => void previewDigest()}>{phase === 'preview' && <LoaderCircle className="spin" size={14} />} Preview</button>
+        <button className="primary-button" disabled={!sourceId || !resolvedTarget || busy}>{phase === 'send' && <LoaderCircle className="spin" size={14} />} Send to chat</button>
       </footer>
     </form>
   </Shell>

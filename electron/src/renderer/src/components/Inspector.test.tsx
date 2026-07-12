@@ -48,4 +48,29 @@ describe('Inspector', () => {
     expect(await screen.findByText('Keep this deployment command for later.')).toBeInTheDocument()
     expect(view.container.querySelector('.pin-content')).toHaveTextContent('Assistant · 2:29 PM today')
   })
+
+  it('shows a compact live subagent section only when the chat has subagents', () => {
+    const session = { id: 'chat-1', title: 'Performance check', backend: 'claude' as const }
+    useAppStore.setState({
+      sessions: [session],
+      snapshots: {
+        'chat-1': {
+          session,
+          events: [{
+            id: 'agent-start', seq: 1, session_id: 'chat-1', run_id: 'run-1',
+            type: 'tool_started', ts: '2026-07-12T10:00:00Z', backend: 'claude',
+            tool: { id: 'agent-1', name: 'Agent', input: { description: 'Audit timeline performance' } }
+          }],
+          queuedTurns: [], files: [], hasMoreEvents: false, eventsTotal: 1, filesTotal: 0, cachedAt: 1
+        }
+      }
+    })
+
+    const view = render(<Inspector />)
+
+    const section = view.container.querySelector('.subagents-section')
+    expect(section).toHaveTextContent('Subagents')
+    expect(section).toHaveTextContent('Audit timeline performance')
+    expect(section).toHaveTextContent('1 active')
+  })
 })

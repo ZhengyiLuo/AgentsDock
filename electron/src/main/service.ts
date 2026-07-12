@@ -44,6 +44,7 @@ import { LocalCache } from './persistence'
 import { AgentServerClient, type TerminalConnection } from './server-client'
 import { SettingsStore } from './settings'
 import { appLog } from './logger'
+import { SubagentEventProjector } from './subagent-projection'
 
 const INITIAL_TAIL_EVENT_LIMIT = 480
 const HISTORY_PAGE_EVENT_LIMIT = 480
@@ -76,6 +77,7 @@ export class AppService {
   private timelineIndexes = new Map<string, TimelineIndex>()
   private terminalConnections = new Map<string, TerminalConnection>()
   private terminalLeases = new Map<string, number>()
+  private subagentProjector = new SubagentEventProjector()
 
   constructor() {
     appLog('startup', 'loading settings')
@@ -138,6 +140,7 @@ export class AppService {
 
   async applySettings(value: ServerSettings): Promise<Health> {
     this.disconnectAllTerminals()
+    this.subagentProjector.reset()
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
     this.timelineLease += 1
@@ -354,7 +357,11 @@ export class AppService {
     this.stopTimelineStream?.()
     this.stopTimelineStream = this.client.stream(sessionId, after, event => {
       if (!this.isCurrentTimeline(sessionId, lease)) return
-      if (event.type === 'raw_event') return
+      const subagentState = this.subagentProjector.project(event)
+      if (event.type === 'raw_event') {
+        if (subagentState) this.emit('server:event', subagentState)
+        return
+      }
       this.emit('server:event', event)
       this.enqueueEventCache(event)
     }, (connected, error) => {

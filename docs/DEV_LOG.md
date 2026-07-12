@@ -7573,3 +7573,18 @@ Release result:
   or queue behavior.
 - Added regressions for out-of-order queue snapshots, empty queues, and the
   end-to-end composer shortcut. TypeScript and all 143 Electron tests pass.
+
+## 2026-07-12 - Add a live, chat-scoped subagent inspector
+
+- Added a provider-neutral subagent lifecycle reducer over the event stream.
+  Claude native Agent tasks expose their exact task ID, description, current
+  child tool, completion state, and bounded activity log. Ordinary background
+  Bash tasks are deliberately excluded.
+- Recognized Codex collaborator spawns by task name and provider reference,
+  keeping them live until their parent turn finishes. This reflects the data
+  Codex exposes without pretending each child is a tmux pane.
+- Added an on-demand Subagents section to the chat inspector. It only appears
+  for chats that actually used subagents, opens automatically while one is
+  active, and provides a compact click-through activity transcript.
+- Added lifecycle regressions using real Claude `task_*` and Codex
+  `spawn_agent` payload shapes.

@@ -68,7 +68,7 @@ const traceTypes = new Set([
   'provider_session', 'cwd_fallback', 'history_imported', 'backend_changed', 'artifact_error',
   'session_created', 'idle_warning', 'code_diff'
 ])
-const hiddenTypes = new Set(['turn_queued', 'turn_unqueued', 'queue_snapshot'])
+const hiddenTypes = new Set(['turn_queued', 'turn_unqueued', 'queue_snapshot', 'subagent_state'])
 const jobTypes = new Set(['job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error'])
 
 export function projectTimeline(events: Event[], knownFiles: AgentFile[]): TimelineItem[] {

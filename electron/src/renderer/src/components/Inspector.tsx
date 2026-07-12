@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ChevronDown, ChevronRight, Clock3, Copy, Download, ExternalLink, File, FileStack, FolderOpen, GitFork, LoaderCircle, MoreHorizontal, Pause, Pin, Play, RefreshCw, Server, SquareTerminal, Trash2, Unplug, X } from 'lucide-react'
-import type { AgentFile, AgentProcess, Job, PinnedItem, TmuxPane } from '@shared/types'
+import { Archive, Bot, ChevronDown, ChevronRight, Clock3, Copy, Download, ExternalLink, File, FileStack, FolderOpen, GitFork, LoaderCircle, MoreHorizontal, Pause, Pin, Play, RefreshCw, Server, SquareTerminal, Trash2, Unplug, X } from 'lucide-react'
+import type { AgentFile, AgentProcess, Event as AgentEvent, Job, PinnedItem, TmuxPane } from '@shared/types'
 import { formatBytes, formatTime, runtimeLabel } from '../lib/format'
+import { isSubagentActive, subagentLogText, subagentsFromEvents } from '../lib/subagents'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { LazyVideoThumbnail, MediaPreviewDialog } from './MediaGrid'
@@ -79,6 +80,7 @@ export function Inspector() {
 
         <PinnedSection sessionId={session.id} pins={pins} setPins={setPins} files={files} />
         <RunSummary sessionId={session.id} files={filesTotal} media={files} />
+        <SubagentsSection key={session.id} sessionId={session.id} />
         <ProcessSection sessionId={session.id} />
         <section className="inspector-section collapsible-section">
           <div className="section-heading-row"><button className="section-toggle" onClick={toggleMedia}>{mediaOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<FileStack size={15} /><strong>Media &amp; files</strong><small>{files.length}/{filesTotal || files.length}</small></button><button className="nested-icon" title="Refresh" onClick={() => void loadFiles(true)}><RefreshCw size={12} /></button></div>
@@ -96,6 +98,47 @@ export function Inspector() {
     const available = (options?.[type] ?? []).filter(option => option.value)
     return <><option value="">{label}</option>{available.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}{current && !available.some(option => option.value === current) && <option value={current}>{current}</option>}</>
   }
+}
+
+const EMPTY_EVENTS: AgentEvent[] = []
+
+function SubagentsSection({ sessionId }: { sessionId: string }) {
+  const events = useAppStore(state => state.snapshots[sessionId]?.events ?? EMPTY_EVENTS)
+  const agents = useMemo(() => subagentsFromEvents(events), [events])
+  const activeCount = agents.filter(isSubagentActive).length
+  const [open, setOpen] = useState(activeCount > 0)
+  const [output, setOutput] = useState<ReturnType<typeof subagentsFromEvents>[number] | null>(null)
+  const [, setClock] = useState(0)
+
+  useEffect(() => {
+    if (activeCount > 0) setOpen(true)
+  }, [activeCount])
+
+  useEffect(() => {
+    if (!activeCount) return
+    const timer = window.setInterval(() => setClock(value => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [activeCount])
+
+  if (!agents.length) return null
+  return <section className="inspector-section collapsible-section subagents-section">
+    <button className="section-toggle" onClick={() => setOpen(value => !value)}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<Bot size={15} /><strong>Subagents</strong><small>{activeCount ? `${activeCount} active` : agents.length}</small></button>
+    {open && <div className="subagent-list">{agents.slice(0, 12).map(agent => <button key={agent.key} onClick={() => setOutput(agent)}>
+      <span className={`subagent-state ${agent.status}`} />
+      <div><strong>{agent.name}</strong><small>{agent.backend === 'claude' ? 'Claude' : 'Codex'} · {agent.status} · {subagentElapsed(agent.startedAt, agent.updatedAt, isSubagentActive(agent))}</small><code>{agent.latestActivity || agent.kind}</code></div>
+    </button>)}</div>}
+    {output && <OutputPanel title={output.name} text={subagentLogText(agents.find(agent => agent.key === output.key) || output)} onClose={() => setOutput(null)} />}
+  </section>
+}
+
+function subagentElapsed(startedAt: string, updatedAt: string, active: boolean): string {
+  const start = Date.parse(startedAt)
+  const end = active ? Date.now() : Date.parse(updatedAt)
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 'live'
+  const seconds = Math.max(0, Math.round((end - start) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
 function PinnedSection({ sessionId, pins, setPins, files }: { sessionId: string; pins: PinnedItem[]; setPins: (items: PinnedItem[]) => void; files: AgentFile[] }) {

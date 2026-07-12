@@ -63,6 +63,7 @@ export interface AgentFile {
 }
 
 export interface ToolCall {
+  id?: string
   name: string
   input?: JsonValue
 }
@@ -116,6 +117,16 @@ export interface Event {
   provider_session_id?: string | null
   tool_id?: string | null
   tool?: ToolCall | null
+  subagent_id?: string | null
+  subagent_tool_id?: string | null
+  subagent_name?: string | null
+  subagent_kind?: string | null
+  subagent_status?: string | null
+  subagent_activity?: string | null
+  subagent_summary?: string | null
+  subagent_started_at?: string | null
+  subagent_provider_ref?: string | null
+  subagent_log?: Array<{ ts: string; text: string }> | null
   file?: AgentFile | null
   artifact?: AgentFile | null
   job?: Job | null

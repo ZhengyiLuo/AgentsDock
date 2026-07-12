@@ -435,7 +435,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .session-id-row code { overflow: hidden; color: #9f9f9c; font: 9px "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 0; background: transparent; border: 0; }
 .inspector-actions > button { height: 29px; display: flex; align-items: center; justify-content: center; gap: 6px; color: #bcbcb9; background: #242424; border: 1px solid #303030; border-radius: 6px; font-size: 10px; }
-.pins-section p, .process-list p, .tmux-list p, .job-list p { margin: 3px 0; color: var(--faint); font-size: 10px; }
+.pins-section p, .process-list p, .tmux-list p, .job-list p, .subagent-list p { margin: 3px 0; color: var(--faint); font-size: 10px; }
 .pin-list { display: flex; flex-direction: column; gap: 5px; }
 .pin-list article { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px 6px 7px 8px; background: #232323; border: 1px solid transparent; border-radius: 6px; }
 .pin-list article:hover { background: #272727; border-color: #303030; }
@@ -455,7 +455,17 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .section-toggle small { color: var(--faint); font-size: 9px; }
 .nested-icon { width: 23px; height: 23px; }
 .nested-add { height: 23px; padding: 0 7px; color: #9dc8f7; background: #263546; border-radius: 5px; font-size: 9px; }
-.process-list, .tmux-list, .job-list { display: flex; flex-direction: column; gap: 5px; padding: 0 7px 8px; }
+.process-list, .tmux-list, .job-list, .subagent-list { display: flex; flex-direction: column; gap: 5px; padding: 0 7px 8px; }
+.subagent-list > button { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 7px; padding: 7px; color: #ccc; background: #232323; border-radius: 6px; text-align: left; }
+.subagent-list > button:hover { background: #292929; }
+.subagent-list > button > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.subagent-list strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-list small { color: var(--muted); font-size: 9px; }
+.subagent-list code { overflow: hidden; color: var(--faint); font: 8px "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-state { width: 7px; height: 7px; margin-top: 3px; border-radius: 50%; background: var(--faint); }
+.subagent-state.starting, .subagent-state.running { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
+.subagent-state.failed { background: var(--red); }
+.subagent-state.stopped { background: #d5a340; }
 .process-list article, .job-list article { min-width: 0; display: flex; align-items: center; gap: 5px; padding: 7px; background: #232323; border-radius: 6px; }
 .process-list article > div, .job-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; color: #d0d0cd; background: transparent; text-align: left; }
 .process-list strong, .job-copy strong, .tmux-list strong { max-width: 100%; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
@@ -821,6 +831,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 :root[data-theme="light"] .process-list article,
 :root[data-theme="light"] .job-list article,
 :root[data-theme="light"] .tmux-list > button,
+:root[data-theme="light"] .subagent-list > button,
 :root[data-theme="light"] .inspector-media-grid article,
 :root[data-theme="light"] .document-list article { color: #4b4b47; background: #f1f1ee; border-color: #ddddda; }
 :root[data-theme="light"] .pin-content,
