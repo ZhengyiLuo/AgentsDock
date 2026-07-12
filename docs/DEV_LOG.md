@@ -41,6 +41,15 @@ painful to rediscover later.
   package and reports it processing.
 - Missing dSYM warnings are limited to prebuilt Expo, React, Hermes, and
   SDWebImage frameworks. They did not block export or upload.
+- The standalone ZenithBotServer checkout was byte-identical to the embedded
+  server and already synchronized with GitHub. The active `sonic` service was
+  redeployed and restarted successfully. Its state reload took about 35
+  seconds, longer than the deploy script's five-second health window; the
+  service then reported active and resumed authenticated `200` responses.
+- Extended the deploy health window to 45 attempts, configurable through
+  `ZENITHDOCK_HEALTH_ATTEMPTS`, in both the embedded and standalone server
+  repositories so a normal large-state reload no longer reports a false
+  deployment failure.
 
 ## 2026-07-04 - Never Read Keychain During AppStore Initialization
 
