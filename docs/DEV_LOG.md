@@ -7437,6 +7437,16 @@ Release result:
 - Preserved the full-screen persistent tmux terminal and its reconnect state;
   overflowing controls can no longer trap the user inside the modal.
 
+## 2026-07-11 - Restore iOS terminal typing and clipboard operations
+
+- Added an explicit user-gesture focus bridge for xterm's hidden textarea so a
+  tap in the terminal or the fixed keyboard button reliably opens iOS input.
+- Added native Copy and Paste toolbar actions through Expo Clipboard. Copy uses
+  the active xterm selection and falls back to the visible terminal viewport;
+  Paste is injected once through xterm's input path into the attached tmux pane.
+- Kept clipboard contents out of terminal URLs and app state; text crosses the
+  WebView bridge only for the requested operation.
+
 ## 2026-07-11 - Make Mac chat opening self-recovering
 
 - Changed Electron chat selection to paint an in-memory or SQLite-cached
