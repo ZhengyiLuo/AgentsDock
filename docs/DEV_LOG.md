@@ -19,6 +19,20 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-12 - React iOS/iPadOS TestFlight Build 60
+
+- Promoted the React Native mobile rewrite from its local-only application ID
+  to the existing AgentsDock App Store identity: `com.zhengyiluo.ZenithDock`.
+- Kept the public version at `0.1.1`, advanced the independent iOS/iPadOS build
+  sequence from native build 59 to React build 60, and retained automatic
+  signing under team `KRR35MWWHD`.
+- Made the generated native Info.plist consume Xcode's version/build settings
+  instead of stale hard-coded `0.1.0 (1)` values, and kept the exempt-encryption
+  declaration for unattended TestFlight processing.
+- Build 60 contains the restored React mobile parity flows: complete chat
+  actions, folders, scheduled jobs, tmux/process inspection, pinned content,
+  isolated search state, and explicit iPad connection settings.
+
 ## 2026-07-04 - Never Read Keychain During AppStore Initialization
 
 - A freshly rebuilt production bundle appeared not to launch and emitted no
