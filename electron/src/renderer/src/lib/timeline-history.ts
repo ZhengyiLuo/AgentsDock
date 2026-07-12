@@ -2,6 +2,13 @@ import type { Event, TimelinePage } from '@shared/types'
 
 export type HistoricalEdgeAction = 'load' | 'return-live' | 'none'
 
+// A jump should land with enough surrounding conversation to browse without
+// immediately paging again. Directional older loads can use the full server
+// page instead of spending half their budget on already-visible events.
+export const HISTORICAL_SEEK_EVENT_LIMIT = 1_200
+export const HISTORICAL_OLDER_EVENT_LIMIT = 1_000
+export const HISTORICAL_NEWER_WINDOW_LIMIT = 1_200
+
 export function historicalPageHasOlder(page: TimelinePage): boolean {
   return Boolean(page.has_more) || (page.events_omitted_before ?? 0) > 0
 }

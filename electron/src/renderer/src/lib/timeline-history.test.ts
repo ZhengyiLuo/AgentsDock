@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { Event, Session, TimelinePage } from '@shared/types'
-import { bridgeHistoricalPageToLive, historicalEdgeAction, historicalPageHasNewer, historicalPageHasOlder, mergeHistoricalPages } from './timeline-history'
+import {
+  bridgeHistoricalPageToLive,
+  HISTORICAL_NEWER_WINDOW_LIMIT,
+  HISTORICAL_OLDER_EVENT_LIMIT,
+  HISTORICAL_SEEK_EVENT_LIMIT,
+  historicalEdgeAction,
+  historicalPageHasNewer,
+  historicalPageHasOlder,
+  mergeHistoricalPages
+} from './timeline-history'
 
 const session: Session = { id: 'chat', title: 'Chat', backend: 'codex' }
 const event = (seq: number): Event => ({ id: `event-${seq}`, session_id: 'chat', seq, type: 'assistant_text', ts: '2026-07-11T00:00:00Z', text: String(seq) })
@@ -15,6 +24,12 @@ const page = (sequences: number[], before: number, after: number): TimelinePage 
 })
 
 describe('historical timeline paging', () => {
+  it('keeps jumps and edge continuation large enough to avoid tiny-page churn', () => {
+    expect(HISTORICAL_SEEK_EVENT_LIMIT).toBe(1_200)
+    expect(HISTORICAL_OLDER_EVENT_LIMIT).toBe(1_000)
+    expect(HISTORICAL_NEWER_WINDOW_LIMIT).toBe(1_200)
+  })
+
   it('merges overlapping adjacent pages without duplicating events', () => {
     const merged = mergeHistoricalPages(page([40, 50, 60], 39, 40), page([20, 30, 40, 50], 19, 50))
     expect(merged.events.map(item => item.seq)).toEqual([20, 30, 40, 50, 60])

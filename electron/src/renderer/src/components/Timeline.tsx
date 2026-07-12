@@ -8,7 +8,14 @@ import { TimelineRowView } from './TimelineRows'
 import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { buildTimelineLandmarks, mergeTimelineLandmarks, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
 import { initialTimelineLocation } from '../lib/timeline-position'
-import { bridgeHistoricalPageToLive, historicalEdgeAction, mergeHistoricalPages } from '../lib/timeline-history'
+import {
+  bridgeHistoricalPageToLive,
+  HISTORICAL_NEWER_WINDOW_LIMIT,
+  HISTORICAL_OLDER_EVENT_LIMIT,
+  HISTORICAL_SEEK_EVENT_LIMIT,
+  historicalEdgeAction,
+  mergeHistoricalPages
+} from '../lib/timeline-history'
 import { formatTime } from '../lib/format'
 import { OPEN_HISTORY_RESULT_EVENT } from '../lib/session-history-search'
 import { TIMELINE_VIEWPORT_LAYOUT_EVENT, type TimelineViewportLayoutDetail } from '../lib/workspace-layout'
@@ -470,7 +477,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     setHistoricalPaging(null)
     setSeekingHistory(true)
     try {
-      const page = await window.agentsDock.timeline.around(sessionId, result.seq, 260)
+      const page = await window.agentsDock.timeline.around(sessionId, result.seq, HISTORICAL_SEEK_EVENT_LIMIT)
       if (lease === historySeekLease.current) setHistoricalWindow({ page, anchorSeq: result.seq })
     } catch (error) {
       if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
@@ -555,7 +562,7 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     setHistoricalPaging(null)
     setSeekingHistory(true)
     try {
-      const page = await window.agentsDock.timeline.around(sessionId, landmark.start_seq, 260)
+      const page = await window.agentsDock.timeline.around(sessionId, landmark.start_seq, HISTORICAL_SEEK_EVENT_LIMIT)
       if (lease !== historySeekLease.current) return
       setHistoricalWindow({ page, anchorSeq: landmark.start_seq })
     } catch (error) {
@@ -591,11 +598,9 @@ function TimelineSession({ sessionId, snapshot }: { sessionId: string; snapshot:
     historicalPagingRef.current = direction
     setHistoricalPaging(direction)
     try {
-      const page = await window.agentsDock.timeline.around(
-        sessionId,
-        direction === 'newer' ? edgeSequence + 1 : edgeSequence,
-        360
-      )
+      const page = direction === 'older'
+        ? await window.agentsDock.timeline.older(sessionId, edgeSequence, HISTORICAL_OLDER_EVENT_LIMIT)
+        : await window.agentsDock.timeline.around(sessionId, edgeSequence + 1, HISTORICAL_NEWER_WINDOW_LIMIT)
       if (lease !== historySeekLease.current) return
       setHistoricalWindow(active => {
         if (!active || active.anchorSeq !== current.anchorSeq) return active

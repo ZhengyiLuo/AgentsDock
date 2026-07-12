@@ -7514,3 +7514,17 @@ Release result:
   regressions. Packaged-renderer QA with 35 targets also caught and fixed an
   unbounded target-list expansion; the list now scrolls inside a stable dialog
   workspace. TypeScript and all 137 Electron tests pass.
+
+## 2026-07-12 - Load useful history windows around timeline jumps
+
+- Increased minimap and search-result jumps from a 260-event island to a
+  1,200-event window, split around the selected turn. Jumping deep into a long
+  chat now arrives with enough neighboring conversation to browse normally.
+- Made older-edge continuation directional, allowing up to 1,000 genuinely
+  older events rather than spending half the request on the already loaded
+  historical window. Newer continuation uses the larger surrounding window.
+- Doubled ordinary older-history pages from 240 to 480 events and taught the
+  main process to fill a partial SQLite page from the server before returning,
+  avoiding repeated tiny loads from fragmented local caches.
+- Kept all fetches bounded and virtualized. TypeScript and all 138 Electron
+  tests pass.

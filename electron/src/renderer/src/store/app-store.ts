@@ -8,7 +8,7 @@ import { isAgentVisibleEvent, projectTimeline, renderTimelineItems } from '../li
 import { navigableSessions } from '../lib/sessions'
 import { steerQueuedTurn } from '../lib/queue-actions'
 
-const OLDER_HISTORY_EVENT_LIMIT = 240
+const OLDER_HISTORY_EVENT_LIMIT = 480
 const TIMELINE_CACHE_TIMEOUT_MS = 2_000
 const TIMELINE_OPEN_TIMEOUT_MS = 8_000
 

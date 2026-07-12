@@ -46,7 +46,8 @@ import { SettingsStore } from './settings'
 import { appLog } from './logger'
 
 const INITIAL_TAIL_EVENT_LIMIT = 480
-const HISTORY_PAGE_EVENT_LIMIT = 240
+const HISTORY_PAGE_EVENT_LIMIT = 480
+const HISTORY_AROUND_EVENT_LIMIT = 1_200
 const FILE_PAGE_LIMIT = 60
 
 export class AppService {
@@ -236,26 +237,42 @@ export class AppService {
   async olderTimeline(sessionId: string, before: number, limit = HISTORY_PAGE_EVENT_LIMIT): Promise<TimelinePage> {
     const localEvents = this.cache.eventsBefore(this.serverId, sessionId, before, limit)
     const localSession = this.sessions.find(session => session.id === sessionId) ?? this.cache.session(this.serverId, sessionId)
-    if (localEvents.length && localSession) {
-      const timeline = this.cache.timelineState(this.serverId, sessionId)
-      return {
+    const timeline = this.cache.timelineState(this.serverId, sessionId)
+    const localPage = localEvents.length && localSession
+      ? {
         session: localSession,
         events: localEvents,
         queued_turns: this.cache.queuedTurns(this.serverId, sessionId),
         has_more: this.cache.hasEventsBefore(this.serverId, sessionId, localEvents[0].seq) || this.cache.timelineHasMore(this.serverId, sessionId),
         before: localEvents[0].seq,
         total: timeline?.knownTotal ?? null
-      }
+      } satisfies TimelinePage
+      : null
+    if (localPage && (localEvents.length >= limit || !localPage.has_more)) return localPage
+
+    const remoteBefore = localEvents[0]?.seq ?? before
+    const remaining = Math.max(1, limit - localEvents.length)
+    let page: TimelinePage
+    try {
+      page = await this.client.sessionPage(sessionId, { before: remoteBefore, limit: remaining, tail: true, visible: true })
+    } catch (error) {
+      if (localPage) return localPage
+      throw error
     }
-    const page = await this.client.sessionPage(sessionId, { before, limit, tail: true, visible: true })
     this.cache.putSession(this.serverId, page.session)
     this.cache.putEvents(this.serverId, sessionId, page.events)
     this.cache.putTimelineState(this.serverId, sessionId, Boolean(page.has_more), page.latest_seq)
-    return page
+    const events = mergeEventsBySequence(page.events, localEvents)
+    return {
+      ...page,
+      events,
+      before: events[0]?.seq ?? null,
+      total: page.total ?? timeline?.knownTotal ?? null
+    }
   }
 
   async timelineAround(sessionId: string, anchorSeq: number, limit = INITIAL_TAIL_EVENT_LIMIT): Promise<TimelinePage> {
-    const boundedLimit = Math.max(40, Math.min(600, limit))
+    const boundedLimit = Math.max(40, Math.min(HISTORY_AROUND_EVENT_LIMIT, limit))
     const olderLimit = Math.floor(boundedLimit / 2)
     const newerLimit = boundedLimit - olderLimit
     const [older, newer] = await Promise.all([
