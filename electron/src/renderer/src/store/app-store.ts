@@ -9,6 +9,8 @@ import { navigableSessions } from '../lib/sessions'
 import { steerQueuedTurn } from '../lib/queue-actions'
 
 const OLDER_HISTORY_EVENT_LIMIT = 240
+const TIMELINE_CACHE_TIMEOUT_MS = 2_000
+const TIMELINE_OPEN_TIMEOUT_MS = 8_000
 
 interface ModalState {
   settings: boolean
@@ -186,30 +188,75 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async selectSession(sessionId, force = false) {
-    if (!force && get().selectedSessionId === sessionId && get().snapshots[sessionId]) { touchSnapshot(sessionId); return }
+    if (!force && get().selectedSessionId === sessionId && get().snapshots[sessionId]) {
+      touchSnapshot(sessionId)
+      if (get().loadingSessionId === sessionId) set({ loadingSessionId: null })
+      return
+    }
     if (get().selectedSessionId && get().selectedSessionId !== sessionId) window.dispatchEvent(new Event('agentsdock:capture-timeline'))
     const request = ++selectionEpoch
+    logTimelineSelection('selection requested', { sessionId, force, request, memoryCached: Boolean(get().snapshots[sessionId]) })
     if (get().selectedSessionId !== sessionId) set(state => ({
       selectedSessionId: sessionId,
-      snapshots: pruneArchivedSnapshots(state.snapshots, state.sessions, sessionId)
+      snapshots: pruneArchivedSnapshots(state.snapshots, state.sessions, sessionId),
+      loadingSessionId: null,
+      error: null
     }))
     touchSnapshot(sessionId)
     const existing = get().snapshots[sessionId]
     if (existing) {
-      try { await window.agentsDock.timeline.subscribe(sessionId, existing.events.at(-1)?.seq ?? 0) }
-      catch (error) { if (request === selectionEpoch && get().selectedSessionId === sessionId) set({ error: errorMessage(error) }) }
+      if (get().loadingSessionId === sessionId) set({ loadingSessionId: null })
+      subscribeToTimeline(sessionId, existing.events.at(-1)?.seq ?? 0, request)
+      logTimelineSelection('selection painted from memory', { sessionId, request, events: existing.events.length })
       return
     }
-    set({ loadingSessionId: sessionId })
+    set({ loadingSessionId: sessionId, error: null })
+
     try {
-      const snapshot = await window.agentsDock.timeline.open(sessionId)
+      const cached = await withDeadline(
+        window.agentsDock.timeline.cached(sessionId),
+        TIMELINE_CACHE_TIMEOUT_MS,
+        'Local timeline cache did not respond'
+      )
       if (request !== selectionEpoch || get().selectedSessionId !== sessionId) return
-      set(state => ({
-        snapshots: cacheSnapshot(state.snapshots, sessionId, mergeSnapshots(state.snapshots[sessionId], snapshot), sessionId),
-        loadingSessionId: null
-      }))
+      if (cached) {
+        set(state => ({
+          snapshots: cacheSnapshot(state.snapshots, sessionId, mergeSnapshots(state.snapshots[sessionId], cached), sessionId),
+          loadingSessionId: null
+        }))
+        subscribeToTimeline(sessionId, cached.events.at(-1)?.seq ?? 0, request)
+        logTimelineSelection('selection painted from disk cache', { sessionId, request, events: cached.events.length })
+        return
+      }
     } catch (error) {
-      if (request === selectionEpoch && get().selectedSessionId === sessionId) set({ loadingSessionId: null, error: errorMessage(error) })
+      logTimelineSelection('disk cache unavailable; opening from server', { sessionId, request, error: errorMessage(error) })
+    }
+
+    let lastError: unknown = new Error('Timeline did not load')
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      if (request !== selectionEpoch || get().selectedSessionId !== sessionId) return
+      logTimelineSelection('cold timeline open started', { sessionId, request, attempt })
+      try {
+        const snapshot = await withDeadline(
+          window.agentsDock.timeline.open(sessionId),
+          TIMELINE_OPEN_TIMEOUT_MS,
+          `Timeline open attempt ${attempt} timed out`
+        )
+        if (request !== selectionEpoch || get().selectedSessionId !== sessionId) return
+        set(state => ({
+          snapshots: cacheSnapshot(state.snapshots, sessionId, mergeSnapshots(state.snapshots[sessionId], snapshot), sessionId),
+          loadingSessionId: null
+        }))
+        logTimelineSelection('cold timeline open completed', { sessionId, request, attempt, events: snapshot.events.length })
+        return
+      } catch (error) {
+        lastError = error
+        logTimelineSelection('cold timeline open failed', { sessionId, request, attempt, error: errorMessage(error) })
+      }
+    }
+
+    if (request === selectionEpoch && get().selectedSessionId === sessionId) {
+      set({ loadingSessionId: null, error: `Could not load this chat. ${errorMessage(lastError)}` })
     }
   },
 
@@ -603,6 +650,32 @@ function mergeUploadPaths(a: NativeFileRef[], b: NativeFileRef[]): NativeFileRef
 }
 function stableArray<T>(previous: T[], next: T[]): T[] { return jsonEquivalent(previous, next) ? previous : next }
 function healthActiveSessionIDs(health?: Health | null): Set<string> { return new Set(health?.active ?? health?.active_sessions ?? []) }
+
+function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+    promise.then(
+      value => { window.clearTimeout(timer); resolve(value) },
+      error => { window.clearTimeout(timer); reject(error) }
+    )
+  })
+}
+
+function logTimelineSelection(message: string, details: Record<string, unknown>): void {
+  try {
+    const pending = window.agentsDock?.native?.log?.('timeline-selection', message, details)
+    void pending?.catch(() => undefined)
+  } catch { /* diagnostics must never affect chat selection */ }
+}
+
+function subscribeToTimeline(sessionId: string, after: number, request: number): void {
+  void Promise.resolve()
+    .then(() => window.agentsDock.timeline.subscribe(sessionId, after))
+    .catch(error => logTimelineSelection('timeline subscription failed', {
+      sessionId, request, after, error: errorMessage(error)
+    }))
+}
+
 export function updateActiveSessions(current: Set<string>, event: Event): Set<string> {
   const next = new Set(current)
   if (event.type === 'turn_started') next.add(event.session_id)

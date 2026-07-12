@@ -7436,3 +7436,15 @@ Release result:
   toolbar that can scroll independently.
 - Preserved the full-screen persistent tmux terminal and its reconnect state;
   overflowing controls can no longer trap the user inside the modal.
+
+## 2026-07-11 - Make Mac chat opening self-recovering
+
+- Changed Electron chat selection to paint an in-memory or SQLite-cached
+  transcript immediately, then reconcile the live server tail in the
+  background. A stream subscription can no longer hold the chat-open action.
+- Added bounded cold-open attempts with one automatic retry, stale-selection
+  rejection, and dedicated timeline-selection diagnostics. A stalled IPC or
+  server request now exits the loading state without requiring Force Refresh.
+- Added regression coverage for non-blocking cached opens, disk-cache-first
+  selection, stalled-open retry, and rapid A-to-B-to-A selection races.
+- Verified TypeScript and all 124 Electron tests before packaging.

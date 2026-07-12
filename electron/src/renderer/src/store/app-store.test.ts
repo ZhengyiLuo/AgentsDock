@@ -116,16 +116,64 @@ describe('older timeline paging', () => {
 })
 
 describe('chat selection', () => {
-  it('activates an in-memory chat without reopening and replacing its snapshot', async () => {
-    const subscribe = vi.fn().mockResolvedValue(undefined)
+  it('activates an in-memory chat without waiting for the stream subscription', async () => {
+    const subscribe = vi.fn(() => new Promise<void>(() => undefined))
     const open = vi.fn()
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: { timeline: { subscribe, open } } as unknown as AgentsDockAPI })
     const cached = snapshot('chat-a', [eventFor('chat-a', 7)])
-    useAppStore.setState({ selectedSessionId: 'chat-b', sessions: [sessionFor('chat-a'), sessionFor('chat-b')], snapshots: { 'chat-a': cached } })
+    useAppStore.setState({ selectedSessionId: 'chat-b', loadingSessionId: 'chat-a', sessions: [sessionFor('chat-a'), sessionFor('chat-b')], snapshots: { 'chat-a': cached } })
     await useAppStore.getState().selectSession('chat-a')
+    await Promise.resolve()
     expect(subscribe).toHaveBeenCalledWith('chat-a', 7)
     expect(open).not.toHaveBeenCalled()
     expect(useAppStore.getState().snapshots['chat-a']).toBe(cached)
+    expect(useAppStore.getState().loadingSessionId).toBeNull()
+  })
+
+  it('paints a disk-cached chat before starting a server subscription', async () => {
+    const diskSnapshot = snapshot('chat-a', [eventFor('chat-a', 9)])
+    const cached = vi.fn().mockResolvedValue(diskSnapshot)
+    const subscribe = vi.fn().mockResolvedValue(undefined)
+    const open = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { cached, subscribe, open } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ selectedSessionId: null, loadingSessionId: null, sessions: [sessionFor('chat-a')], snapshots: {}, error: null })
+
+    await useAppStore.getState().selectSession('chat-a')
+    await Promise.resolve()
+
+    expect(cached).toHaveBeenCalledWith('chat-a')
+    expect(open).not.toHaveBeenCalled()
+    expect(subscribe).toHaveBeenCalledWith('chat-a', 9)
+    expect(useAppStore.getState().snapshots['chat-a'].events.map(item => item.seq)).toEqual([9])
+    expect(useAppStore.getState().loadingSessionId).toBeNull()
+  })
+
+  it('automatically retries a stalled cold open instead of requiring Force Refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const open = vi.fn()
+        .mockImplementationOnce(() => new Promise<SessionSnapshot>(() => undefined))
+        .mockResolvedValueOnce(snapshot('chat-a', [eventFor('chat-a', 12)]))
+      Object.defineProperty(window, 'agentsDock', {
+        configurable: true,
+        value: { timeline: { cached: vi.fn().mockResolvedValue(null), open, subscribe: vi.fn() } } as unknown as AgentsDockAPI
+      })
+      useAppStore.setState({ selectedSessionId: null, loadingSessionId: null, sessions: [sessionFor('chat-a')], snapshots: {}, error: null })
+
+      const pending = useAppStore.getState().selectSession('chat-a')
+      await vi.advanceTimersByTimeAsync(8_000)
+      await pending
+
+      expect(open).toHaveBeenCalledTimes(2)
+      expect(useAppStore.getState().snapshots['chat-a'].events.map(item => item.seq)).toEqual([12])
+      expect(useAppStore.getState().loadingSessionId).toBeNull()
+      expect(useAppStore.getState().error).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ignores an obsolete completion across an A to B to A switch', async () => {
