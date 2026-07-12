@@ -27,7 +27,6 @@ export function AppShell() {
   const [newChat, setNewChat] = useState(false)
   const [options, setOptions] = useState(false)
   const [search, setSearch] = useState(false)
-  const [globalSearch, setGlobalSearch] = useState(false)
   const [digest, setDigest] = useState(false)
   const [jobEditor, setJobEditor] = useState<string | 'new' | null>(null)
   const [processes, setProcesses] = useState(false)
@@ -62,7 +61,6 @@ export function AppShell() {
     <SettingsDialog visible={settings} onClose={() => setSettings(false)} />
     <NewChatDialog visible={newChat} onClose={() => setNewChat(false)} />
     <SearchDialog visible={search} sessionId={selected?.id} onClose={() => setSearch(false)} />
-    <SearchDialog visible={globalSearch} onClose={() => setGlobalSearch(false)} />
     <DigestDialog visible={digest} source={selected} onClose={() => setDigest(false)} />
     <JobDialog visible={jobEditor != null} session={selected} jobId={jobEditor === 'new' ? null : jobEditor} onClose={() => setJobEditor(null)} />
     <ProcessDialog visible={processes} sessionId={selected?.id ?? null} onClose={() => setProcesses(false)} />
@@ -74,12 +72,13 @@ export function AppShell() {
 }
 
 function NoChat({ connecting, onSettings }: { connecting: boolean; onSettings: () => void }) {
-  return <View style={styles.fill}>{connecting ? <Loading label="Connecting to agent server" /> : <EmptyState title="No chat selected" body="Choose a chat from the sidebar or connect to a server." />}<Pressable onPress={onSettings} style={styles.settingsHit} /></View>
+  const colors = usePalette()
+  return <View style={styles.fill}>{connecting ? <Loading label="Connecting to agent server" /> : <><EmptyState title="No chat selected" body="Choose a chat from the sidebar or connect to a server." /><Pressable onPress={onSettings} style={[styles.connectionSettings, { backgroundColor: colors.raised, borderColor: colors.border }]}><Settings size={15} color={colors.muted} /><Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>Connection settings</Text></Pressable></>}</View>
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 }, workspace: { flex: 1, flexDirection: 'row' }, chat: { flex: 1, minWidth: 0 },
   restoreInspector: { position: 'absolute', top: 17, right: 10, width: 35, height: 35, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   error: { position: 'absolute', left: 12, right: 12, bottom: 12, minHeight: 50, maxWidth: 740, alignSelf: 'center', borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 }, errorText: { flex: 1, fontSize: 12 },
-  modalTop: { height: 54, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' }, modalTitle: { flex: 1, fontSize: 16, fontWeight: '800' }, settingsHit: { position: 'absolute', inset: 0 },
+  modalTop: { height: 54, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' }, modalTitle: { flex: 1, fontSize: 16, fontWeight: '800' }, connectionSettings: { position: 'absolute', alignSelf: 'center', top: '58%', minHeight: 38, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
 })

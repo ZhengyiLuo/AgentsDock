@@ -267,3 +267,13 @@ export interface CreateJobInput {
   model?: string | null
   effort?: string | null
 }
+export interface UpdateJobInput {
+  title?: string | null
+  prompt?: string | null
+  interval_seconds?: number | null
+  next_run_at?: string | null
+  loop?: boolean | null
+  max_runs?: number | null
+  enabled?: boolean | null
+  backend?: Backend | null
+}

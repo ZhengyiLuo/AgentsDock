@@ -7625,3 +7625,18 @@ Release result:
   navigator, media find-in-chat/drag gestures, arbitrary process-log selection,
   and explicit appearance/notification preferences remain honestly marked
   partial rather than being described as shipped.
+
+## 2026-07-12 - Harden React mobile parity after simulator smoke testing
+
+- Corrected the scheduled-job update contract: job creation uses
+  `first_run_at`, while editing now sends the server-supported `next_run_at`.
+  The earlier React form appeared to save a changed start time but the server
+  silently ignored that field on updates.
+- Isolated modal history-search state from the sidebar's live search. Find in
+  chat no longer overwrites global sidebar results or reopens with a stale
+  query from the previous chat.
+- Replaced the iPad empty-state's invisible full-screen Settings hit target with
+  an explicit Connection settings button.
+- The Release simulator app compiled and linked successfully with signing
+  disabled after Xcode's local ad-hoc signing subsystem failed. The same
+  universal simulator app installed and launched on the booted iPhone and iPad.

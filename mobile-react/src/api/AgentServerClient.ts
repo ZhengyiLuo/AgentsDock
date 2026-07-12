@@ -16,6 +16,7 @@ import type {
   TimelinePage,
   TimelineSearchResult,
   TmuxPane,
+  UpdateJobInput,
   UploadRef,
 } from '../types'
 import { normalizeServerURL } from '../lib/format'
@@ -159,7 +160,7 @@ export class AgentServerClient {
   }
 
   async createJob(input: CreateJobInput): Promise<Job> { return (await this.post<{ job: Job }>('/api/jobs', input)).job }
-  async updateJob(jobId: string, patch: Partial<Job>): Promise<Job> { return (await this.patch<{ job: Job }>(`/api/jobs/${encodeURIComponent(jobId)}`, patch)).job }
+  async updateJob(jobId: string, patch: UpdateJobInput): Promise<Job> { return (await this.patch<{ job: Job }>(`/api/jobs/${encodeURIComponent(jobId)}`, patch)).job }
   async deleteJob(jobId: string): Promise<void> { await this.delete(`/api/jobs/${encodeURIComponent(jobId)}`) }
   async runJob(jobId: string): Promise<void> { await this.post(`/api/jobs/${encodeURIComponent(jobId)}/run`, {}) }
 

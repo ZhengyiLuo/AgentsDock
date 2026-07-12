@@ -17,6 +17,7 @@ import type {
   TimelineIndex,
   TimelineSearchResult,
   TmuxPane,
+  UpdateJobInput,
   UploadRef,
 } from '../types'
 import { AgentServerClient } from '../api/AgentServerClient'
@@ -102,7 +103,7 @@ interface AppState {
   runQueuedNow(queuedId: string): Promise<void>
   refreshJobs(): Promise<void>
   createJob(input: CreateJobInput): Promise<void>
-  updateJob(jobId: string, patch: Partial<Job>): Promise<void>
+  updateJob(jobId: string, patch: UpdateJobInput): Promise<void>
   deleteJob(jobId: string): Promise<void>
   runJob(jobId: string): Promise<void>
   search(query: string, sessionId?: string): Promise<void>

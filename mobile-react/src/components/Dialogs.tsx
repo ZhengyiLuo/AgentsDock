@@ -4,7 +4,7 @@ import * as Clipboard from 'expo-clipboard'
 import { Check, ChevronDown, Copy, Search, SquareTerminal, X } from 'lucide-react-native'
 import { client, useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
-import type { Backend, CreateJobInput, RuntimeOption, Session } from '../types'
+import type { Backend, CreateJobInput, RuntimeOption, Session, UpdateJobInput } from '../types'
 import { BackendMark } from './BackendMark'
 import { IconButton } from './ui'
 
@@ -54,13 +54,22 @@ export function NewChatDialog({ visible, onClose }: { visible: boolean; onClose:
 export function SearchDialog({ visible, sessionId, onClose }: { visible: boolean; sessionId?: string; onClose: () => void }) {
   const colors = usePalette()
   const sessions = useAppStore(state => state.sessions)
-  const results = useAppStore(state => state.searchResults)
-  const busy = useAppStore(state => state.searchBusy)
-  const search = useAppStore(state => state.search)
   const select = useAppStore(state => state.selectSession)
-  const clear = useAppStore(state => state.clearSearch)
   const [query, setQuery] = useState('')
-  useEffect(() => { const timer = setTimeout(() => { if (query.trim()) void search(query, sessionId); else clear() }, 230); return () => clearTimeout(timer) }, [clear, query, search, sessionId])
+  const [results, setResults] = useState<Awaited<ReturnType<typeof client.searchTimeline>>>([])
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!visible) { setQuery(''); setResults([]); setBusy(false); return }
+    const clean = query.trim()
+    if (!clean) { setResults([]); setBusy(false); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      setBusy(true)
+      const request = sessionId ? client.searchTimeline(sessionId, clean) : client.searchSessions(clean)
+      void request.then(value => { if (!cancelled) setResults(value) }).catch(() => { if (!cancelled) setResults([]) }).finally(() => { if (!cancelled) setBusy(false) })
+    }, 230)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [query, sessionId, visible])
   const nameMatches = useMemo(() => sessionId ? [] : sessions.filter(value => value.title.toLowerCase().includes(query.trim().toLowerCase())), [query, sessionId, sessions])
   const resultRows = results.filter(result => !nameMatches.some(session => session.id === result.session_id))
   const open = (id: string) => { void select(id); onClose() }
@@ -115,13 +124,16 @@ export function JobDialog({ visible, session, jobId, onClose }: { visible: boole
     setIntervalValue(String(job?.interval_seconds ?? 3600))
     setLoop(job?.loop ?? true)
     setMaxRuns(String(job?.max_runs ?? 1))
-    setStart(job?.first_run_at ?? job?.next_run_at_iso ?? '')
+    setStart(job?.next_run_at_iso ?? job?.first_run_at ?? '')
     setEnabled(job?.enabled ?? true)
   }, [job, visible])
   if (!session) return null
   const submit = async () => {
     const body: CreateJobInput = { session_id: session.id, title: title.trim(), prompt: prompt.trim(), interval_seconds: Math.max(60, Number(interval) || 3600), first_run_at: start.trim() || null, loop, max_runs: loop ? null : Math.max(1, Number(maxRuns) || 1), enabled, backend: session.backend, model: session.model, effort: session.effort }
-    if (job) await update(job.id, body)
+    if (job) {
+      const patch: UpdateJobInput = { title: body.title, prompt: body.prompt, interval_seconds: body.interval_seconds, next_run_at: start.trim() || null, loop: body.loop, max_runs: body.max_runs, enabled: body.enabled, backend: body.backend }
+      await update(job.id, patch)
+    }
     else await create(body)
     onClose()
   }
