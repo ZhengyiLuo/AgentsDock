@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActionSheetIOS, Alert, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ChevronDown, ChevronRight, Plus, Search, Settings } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
@@ -97,9 +97,28 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
 function SessionRow({ session, selected, running, onPress }: { session: Session; selected: boolean; running: boolean; onPress: () => void }) {
   const colors = usePalette()
   const unread = isUnread(session)
+  const markRead = useAppStore(state => state.markRead)
+  const markUnread = useAppStore(state => state.markUnread)
+  const toggleReadState = () => { void (unread ? markRead(session.id) : markUnread(session.id)) }
+  const showActions = () => {
+    const action = unread ? 'Mark as read' : 'Mark as unread'
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: [action, 'Cancel'], cancelButtonIndex: 1, title: session.title },
+        index => { if (index === 0) toggleReadState() },
+      )
+      return
+    }
+    Alert.alert(session.title, undefined, [
+      { text: action, onPress: toggleReadState },
+      { text: 'Cancel', style: 'cancel' },
+    ])
+  }
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={showActions}
+      delayLongPress={360}
       style={({ pressed }) => [styles.session, { backgroundColor: selected ? colors.raised : pressed ? `${colors.raised}99` : 'transparent' }]}
     >
       <BackendMark backend={session.backend} size={22} />
