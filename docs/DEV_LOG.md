@@ -27,7 +27,9 @@ painful to rediscover later.
 - Added a repeatable Electron Linux pipeline that cross-builds x64 by default,
   with an arm64 override, and emits portable AppImage plus tar.gz artifacts.
 - Added Linux package metadata and a 1024 px PNG icon while keeping the macOS
-  ICNS and MAS packaging paths unchanged.
+  ICNS and MAS packaging paths unchanged. The desktop filename and WM class are
+  explicitly synchronized so Linux launchers associate the live window with
+  the packaged icon.
 - Removed macOS-only window chrome from non-Mac builds and changed desktop menu
   accelerators to `CmdOrCtrl`, retaining Command on macOS and using Control on
   Linux.

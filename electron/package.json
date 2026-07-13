@@ -1,5 +1,6 @@
 {
   "name": "agentsdock-electron",
+  "desktopName": "agentsdock.desktop",
   "version": "0.1.1",
   "private": true,
   "description": "AgentsDock cross-platform Electron client",
@@ -60,6 +61,7 @@
     "linux": {
       "icon": "build/AgentsDock.png",
       "category": "Development",
+      "syncDesktopName": true,
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "target": [
         "AppImage",
