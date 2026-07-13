@@ -485,16 +485,15 @@ export class AppService {
   }
   async revealFile(file: AgentFile): Promise<void> { shell.showItemInFolder(await this.ensureLocalFile(file)) }
 
-  async prepareFileForDrag(file: AgentFile): Promise<void> { await this.ensureLocalFile(file) }
-
-  beginDrag(file: AgentFile, window: BrowserWindow): boolean {
-    const path = this.localFilePath(file)
-    if (!existsSync(path)) {
-      appLog('files', 'native drag requested before local file was ready', { fileId: file.id, filename: file.filename })
-      return false
-    }
-    const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL8WQAAAABJRU5ErkJggg==')
+  async beginDrag(file: AgentFile, window: BrowserWindow): Promise<boolean> {
+    appLog('files', 'preparing native file drag', { fileId: file.id, filename: file.filename })
+    const path = await this.ensureLocalFile(file)
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return false
+    const icon = await app.getFileIcon(path, { size: 'normal' }).catch(() =>
+      nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL8WQAAAABJRU5ErkJggg==')
+    )
     window.webContents.startDrag({ file: path, icon })
+    appLog('files', 'native file drag started', { fileId: file.id, filename: file.filename, path })
     return true
   }
 

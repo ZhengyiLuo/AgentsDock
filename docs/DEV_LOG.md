@@ -7749,3 +7749,19 @@ Release result:
   real user message and kept internal digest work out of the visible queue.
 - Added source/target projection, status rendering, and queue-order regression
   coverage. TypeScript and all 155 Electron tests pass.
+
+## 2026-07-13 - Make media drag-out work on the first gesture
+
+- Replaced the two-gesture native file drag contract. The renderer previously
+  canceled the first drag unless its hover-triggered temp download had already
+  finished, forcing uncached files and videos to be dragged twice.
+- A drag now asks the Electron main process to materialize only that selected
+  file, shares any in-flight download, and starts a real macOS native file drag
+  as soon as the local file is ready.
+- Removed hover downloads so browsing a media grid does not silently cache
+  every file. Native drags now use the file's Finder icon and emit start/prep
+  diagnostics to the app log.
+- Replaced the regression that required a second gesture with first-drag and
+  in-flight deduplication coverage. TypeScript and all 155 Electron tests pass.
+- Rebuilt `/Users/zen/agi/ZenithDock/dist/AgentsDock.app` and synced the direct
+  app bundle to `/Users/zen/agi/AgentsDock.app` on the MacBook Air.
