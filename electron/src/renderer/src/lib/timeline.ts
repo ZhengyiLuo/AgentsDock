@@ -71,6 +71,11 @@ const traceTypes = new Set([
 const hiddenTypes = new Set(['turn_queued', 'turn_unqueued', 'queue_snapshot', 'subagent_state'])
 const jobTypes = new Set(['job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error'])
 
+export function isHandoffDigestEvent(event: Event): boolean {
+  return Boolean(event.digest_job_id) &&
+    (event.purpose === 'handoff_digest' || event.type.startsWith('handoff_digest_'))
+}
+
 export function projectTimeline(events: Event[], knownFiles: AgentFile[]): TimelineItem[] {
   const filesById = new Map(knownFiles.map(file => [file.id, file]))
   const items: TimelineItem[] = []
@@ -78,6 +83,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   const jobById = new Map<string, JobItem>()
   const jobByRun = new Map<string, string>()
   const jobTitles = new Map<string, string>()
+  const digestById = new Map<string, SystemItem>()
   let activeTurn: TurnItem | null = null
 
   for (const event of events) {
@@ -108,6 +114,23 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     items.push(job)
   }
 
+  const appendDigestEvent = (event: Event): void => {
+    const digestId = String(event.digest_job_id || '').trim()
+    if (!digestId) return
+    const existing = digestById.get(digestId)
+    if (existing) {
+      // Keep one stable row at the point where creation began, while its
+      // visible status advances from queued/running to sent or failed.
+      existing.event = event
+      return
+    }
+    const item: SystemItem = {
+      kind: 'system', id: `digest:${digestId}`, key: `digest:${digestId}`, seq: event.seq, event
+    }
+    digestById.set(digestId, item)
+    items.push(item)
+  }
+
   const ensureTurn = (event: Event, forceNew = false): TurnItem => {
     const runKey = event.run_id || activeTurn?.runId || `seq-${event.seq}`
     const existing = turnByRun.get(runKey)
@@ -123,6 +146,14 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   }
 
   for (const event of events) {
+    // Digest generation intentionally runs as a real turn in the source
+    // provider session so it can use that chat's context. It is workflow
+    // plumbing, though, not a user/assistant exchange. Collapse every event
+    // from that internal turn and its lifecycle into one status row.
+    if (isHandoffDigestEvent(event)) {
+      appendDigestEvent(event)
+      continue
+    }
     if (hiddenTypes.has(event.type)) continue
     const explicitJobId = String(event.job_id || event.job?.id || '').trim()
     const jobId = jobTypes.has(event.type) || event.purpose === 'scheduled_job'

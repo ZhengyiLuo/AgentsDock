@@ -7736,3 +7736,16 @@ Release result:
 - The Release simulator app compiled and linked successfully with signing
   disabled after Xcode's local ad-hoc signing subsystem failed. The same
   universal simulator app installed and launched on the booted iPhone and iPad.
+
+## 2026-07-13 - Restore compact digest handoff presentation
+
+- Kept digest generation as a real source-agent turn so it retains the source
+  chat's provider context, but stopped exposing that internal prompt, reply,
+  trace, and queue entry as ordinary conversation content.
+- Grouped every event carrying the same digest job ID into one stable yellow
+  lifecycle row. It updates in place from Creating Digest to Digest Sent or
+  Digest Failed; only the target chat receives the generated digest body.
+- Prevented Command-Enter from steering an internal queued digest ahead of a
+  real user message and kept internal digest work out of the visible queue.
+- Added source/target projection, status rendering, and queue-order regression
+  coverage. TypeScript and all 155 Electron tests pass.

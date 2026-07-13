@@ -71,6 +71,34 @@ describe('projectTimeline', () => {
     expect(items[0]).toMatchObject({ kind: 'job', events: [{ type: 'job_started' }, { type: 'job_finished' }] })
   })
 
+  it('collapses a source-chat digest turn into one lifecycle row', () => {
+    const digest = { purpose: 'handoff_digest', digest_job_id: 'digest-1', target_session_id: 'chat-2' }
+    const items = projectTimeline([
+      event(1, 'turn_queued', { ...digest, queued_id: 'queued-digest', prompt: 'Generate a handoff digest for Target.' }),
+      event(2, 'turn_started', { ...digest, queued_id: 'queued-digest', run_id: 'run-digest', prompt: 'Generate a handoff digest for Target.' }),
+      event(3, 'reasoning_summary', { ...digest, run_id: 'run-digest', text: 'Selecting durable context' }),
+      event(4, 'assistant_text', { ...digest, run_id: 'run-digest', text: '# ZenithDock Context Digest\n\nPrivate generated body' }),
+      event(5, 'turn_finished', { ...digest, run_id: 'run-digest', result_text: '# ZenithDock Context Digest\n\nPrivate generated body' }),
+      event(6, 'handoff_digest_sent', { digest_job_id: 'digest-1', target_session_id: 'chat-2', message: 'Context digest was sent to Target.' })
+    ], [])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      kind: 'system', key: 'digest:digest-1', seq: 1,
+      event: { type: 'handoff_digest_sent', message: 'Context digest was sent to Target.' }
+    })
+    expect(renderTimelineItems(items)).toHaveLength(1)
+  })
+
+  it('keeps a target-chat digest delivery as one ordinary incoming turn', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'target-run', prompt: '# ZenithDock Context Digest\n\nDelivered context' })
+    ], []))
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: 'message', role: 'user' })
+  })
+
   it('folds a scheduled agent run into its job card, including legacy job_ran links', () => {
     const items = projectTimeline([
       event(1, 'turn_started', { run_id: 'run-job-1', prompt: 'Check training status' }),

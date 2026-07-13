@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, LoaderCircle, Pin, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import type { Event, PinnedItem } from '@shared/types'
 import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { extractUnifiedDiff, isTimelineError, jobDisplayEvents, messageItemText, messageText, parseReviewableDiff } from '../lib/timeline'
+import { extractUnifiedDiff, isHandoffDigestEvent, isTimelineError, jobDisplayEvents, messageItemText, messageText, parseReviewableDiff } from '../lib/timeline'
 import { formatTime, titleCase } from '../lib/format'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
@@ -102,11 +102,25 @@ function ToolEvent({ event }: { event: Event }) {
 function SystemView({ item, sessionId, pinned }: { item: SystemItem; sessionId: string; pinned: boolean }) {
   const event = item.event
   const error = isTimelineError(event)
-  const digest = event.type.startsWith('handoff_digest_')
-  const generating = event.type === 'handoff_digest_started'
+  const digest = isHandoffDigestEvent(event)
+  const generating = digest && !event.type.endsWith('_sent') && !event.type.endsWith('_error')
   const icon = error ? <AlertTriangle size={15} /> : generating ? <LoaderCircle className="spin" size={15} /> : digest ? <Sparkles size={15} /> : <TerminalSquare size={15} />
-  const text = messageText(event) || titleCase(event.type)
-  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{titleCase(event.type)}</strong><time>{formatTime(event.ts)}</time><button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin item' : 'Pin item'} onClick={() => void toggleSystemPin(event, sessionId, pinned)}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact /></div></article>
+  const title = digest ? digestStatusTitle(event) : titleCase(event.type)
+  const text = digest ? digestStatusText(event) : messageText(event) || titleCase(event.type)
+  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{title}</strong><time>{formatTime(event.ts)}</time><button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin item' : 'Pin item'} onClick={() => void toggleSystemPin(event, sessionId, pinned, title, text)}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact /></div></article>
+}
+
+function digestStatusTitle(event: Event): string {
+  if (event.type.endsWith('_sent')) return 'Digest Sent'
+  if (event.type.endsWith('_error')) return 'Digest Failed'
+  return 'Creating Digest'
+}
+
+function digestStatusText(event: Event): string {
+  if (event.type.endsWith('_sent') || event.type.endsWith('_error')) {
+    return messageText(event) || (event.type.endsWith('_sent') ? 'Context digest created and sent.' : 'Context digest generation failed.')
+  }
+  return 'Creating a context digest from this chat and sending it to the target chat.'
 }
 
 function JobView({ item, sessionId, pinnedItemIds }: { item: JobItem; sessionId: string; pinnedItemIds: ReadonlySet<string> }) {
@@ -144,14 +158,13 @@ function deduplicateFiles<T extends { id: string }>(files: T[]): T[] {
   return [...new Map(files.map(file => [file.id, file])).values()]
 }
 
-async function toggleSystemPin(event: Event, sessionId: string, pinned: boolean) {
+async function toggleSystemPin(event: Event, sessionId: string, pinned: boolean, title = titleCase(event.type), body = messageText(event)) {
   if (pinned) {
     await window.agentsDock.pins.remove(sessionId, `message:${event.id}`)
     window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
     return
   }
-  const text = messageText(event)
-  await window.agentsDock.pins.put({ id: `message:${event.id}`, sessionId, kind: 'message', eventId: event.id, title: titleCase(event.type), body: text, subtitle: formatTime(event.ts), createdAt: Date.now() })
+  await window.agentsDock.pins.put({ id: `message:${event.id}`, sessionId, kind: 'message', eventId: event.id, title, body, subtitle: formatTime(event.ts), createdAt: Date.now() })
   window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
 }
 

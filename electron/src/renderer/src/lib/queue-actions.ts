@@ -19,6 +19,7 @@ export async function steerQueuedTurn(sessionId: string, queuedId: string): Prom
 export async function steerFirstQueuedTurn(sessionId: string): Promise<SteerFirstQueuedResult> {
   const turns = await window.agentsDock.queue.list(sessionId)
   const first = turns
+    .filter(turn => turn.purpose !== 'handoff_digest')
     .map((turn, index) => ({ turn, index }))
     .sort((a, b) => (a.turn.position ?? Number.MAX_SAFE_INTEGER) - (b.turn.position ?? Number.MAX_SAFE_INTEGER) || a.index - b.index)[0]?.turn
 

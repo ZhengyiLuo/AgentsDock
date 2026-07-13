@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { Event } from '@shared/types'
-import type { MessageItem } from '../lib/timeline'
+import type { MessageItem, SystemItem } from '../lib/timeline'
 import { TimelineRowView } from './TimelineRows'
 
 describe('timeline pin state', () => {
@@ -17,5 +17,21 @@ describe('timeline pin state', () => {
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set(['message:event-1'])} />)
 
     expect(screen.getByTitle('Unpin message')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('renders a completed digest as one compact status without its generated body', () => {
+    const event: Event = {
+      id: 'digest-sent', session_id: 'chat-1', seq: 8, type: 'handoff_digest_sent',
+      ts: '2026-07-10T14:29:00Z', digest_job_id: 'digest-1',
+      message: 'Context digest from Source was sent to Target.'
+    }
+    const item: SystemItem = {
+      kind: 'system', id: 'digest:digest-1', key: 'digest:digest-1', seq: 2, event
+    }
+    render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+
+    expect(screen.getByText('Digest Sent')).toBeInTheDocument()
+    expect(screen.getByText('Context digest from Source was sent to Target.')).toBeInTheDocument()
+    expect(screen.queryByText('ZenithDock Context Digest')).not.toBeInTheDocument()
   })
 })

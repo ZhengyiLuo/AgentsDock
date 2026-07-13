@@ -1,6 +1,6 @@
 import type { TimelineIndexLandmark, TimelineLandmarkKind } from '@shared/types'
 import type { RenderTimelineItem } from './timeline'
-import { isTimelineError, jobDisplayEvents, messageItemText, messageText } from './timeline'
+import { isHandoffDigestEvent, isTimelineError, jobDisplayEvents, messageItemText, messageText } from './timeline'
 
 export interface TimelineLandmark extends TimelineIndexLandmark {
   index: number
@@ -121,7 +121,7 @@ function standaloneLandmark(item: RenderTimelineItem, index: number): TimelineLa
     }
   }
   if (item.kind === 'system') {
-    const digest = item.event.type.startsWith('handoff_digest_')
+    const digest = isHandoffDigestEvent(item.event)
     return {
       index,
       endIndex: index,
@@ -130,7 +130,7 @@ function standaloneLandmark(item: RenderTimelineItem, index: number): TimelineLa
       title: humanizeType(item.event.type),
       preview: compactPreview(messageText(item.event)),
       meta: '',
-      start_seq: item.event.seq,
+      start_seq: item.seq,
       end_seq: item.event.seq,
       timestamp: item.event.ts
     }

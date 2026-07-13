@@ -64,4 +64,14 @@ describe('steerFirstQueuedTurn', () => {
     await expect(steerFirstQueuedTurn('chat-1')).resolves.toEqual({ steered: false, turns: [] })
     expect(runNow).not.toHaveBeenCalled()
   })
+
+  it('does not steer an internal digest-generation turn', async () => {
+    const digest = { queued_id: 'digest', session_id: 'chat-1', prompt: 'Generate digest', file_ids: [], position: 1, purpose: 'handoff_digest' }
+    const user = { queued_id: 'user', session_id: 'chat-1', prompt: 'User follow-up', file_ids: [], position: 2 }
+    list.mockResolvedValueOnce([digest, user]).mockResolvedValueOnce([digest])
+    runNow.mockResolvedValue(true)
+
+    await expect(steerFirstQueuedTurn('chat-1')).resolves.toEqual({ steered: true, turns: [digest] })
+    expect(runNow).toHaveBeenCalledWith('chat-1', 'user')
+  })
 })

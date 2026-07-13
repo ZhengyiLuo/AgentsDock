@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core'
 import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, File, GripVertical, ListOrdered, MoreHorizontal, Paperclip, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react'
@@ -16,6 +16,7 @@ export function Composer() {
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   const selectedId = useAppStore(state => state.selectedSessionId)
   const queuedTurns = useAppStore(state => state.selectedSessionId ? state.snapshots[state.selectedSessionId]?.queuedTurns ?? EMPTY_QUEUED_TURNS : EMPTY_QUEUED_TURNS)
+  const visibleQueuedTurns = useMemo(() => queuedTurns.filter(turn => turn.purpose !== 'handoff_digest'), [queuedTurns])
   const storedDraft = useAppStore(state => state.selectedSessionId ? state.drafts[state.selectedSessionId] ?? '' : '')
   const uploads = useAppStore(state => state.selectedSessionId ? state.uploadsBySession[state.selectedSessionId] ?? EMPTY_UPLOADS : EMPTY_UPLOADS)
   const uploadPaths = useAppStore(state => state.selectedSessionId ? state.uploadPathsBySession[state.selectedSessionId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)
@@ -110,7 +111,7 @@ export function Composer() {
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropActive(false) }}
       onDrop={event => { event.preventDefault(); setDropActive(false); void handleFiles(event.dataTransfer.files) }}
     >
-      <QueueShelf sessionId={session.id} turns={queuedTurns} />
+      <QueueShelf sessionId={session.id} turns={visibleQueuedTurns} />
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf files={uploads} pending={uploadPaths} />}
       <textarea
         value={draft}
