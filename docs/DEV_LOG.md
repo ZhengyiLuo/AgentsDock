@@ -15,6 +15,9 @@ painful to rediscover later.
   `/Users/zen/agi/ZenithDock/dist/AgentsDock.app`.
 - If a staged bundle is ever created for safety, call that out and delete it
   once the normal bundle is updated.
+- Treat TestFlight upload as part of completing every app change. Commit and
+  verify first, then upload the changed platform unless the user explicitly
+  pauses that release.
 - Every TestFlight release must also update the server side: deploy/restart the
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
@@ -39,6 +42,8 @@ painful to rediscover later.
   Pro 13-inch simulators. A first clean build filled the disk in a generated
   DerivedData directory; only that failed directory was removed, then both
   builds passed using the established simulator cache.
+- Advanced the React iOS/iPadOS release metadata from build 61 to build 62 for
+  TestFlight distribution.
 
 ## 2026-07-12 - Restore iPhone edge-swipe navigation in build 61
 
