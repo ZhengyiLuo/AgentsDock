@@ -22,6 +22,28 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-13 - Rotation-safe mobile media grids and previews
+
+- Kept iPhones in the compact navigation hierarchy in both portrait and
+  landscape. A width-only breakpoint previously rebuilt the whole workspace as
+  an iPad layout during rotation and could leave controls or recycled rows
+  missing after rotating back.
+- Reset the compact chat swipe transform when the viewport changes and force
+  FlashList to remeasure recycled rows at the new timeline width. If the user
+  was already at the bottom, rotation preserves that position without an
+  animated jump.
+- Rebuilt mobile media groups around their measured container width instead of
+  the device width. Timeline groups now decode at most four media previews,
+  inspector groups at most eight, and overflow opens the complete media viewer.
+- Replaced blank video cards with lazy native `expo-video` thumbnails. Images
+  retain their aspect ratio, ordinary files use compact rows, and large media
+  batches no longer create a decoder for every attachment in the turn.
+- React typecheck, `git diff --check`, and the Release simulator build pass.
+  Installed the package on iPhone 17 Pro and iPad Pro 13-inch simulators and
+  verified portrait/landscape/return cycles on both without missing controls or
+  stale timeline geometry.
+- Aligned the native React iOS project with TestFlight build `64`.
+
 ## 2026-07-12 - Persisted iOS/iPadOS chat text sizing
 
 - Added a `Chat text size` stepper to mobile Settings with a live preview and

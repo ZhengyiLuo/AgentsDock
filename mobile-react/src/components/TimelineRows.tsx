@@ -14,7 +14,10 @@ import { MediaGrid } from './MediaGrid'
 
 const FOLD_AT = 5_000
 
-export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, onReview, fontScale }: { row: TimelineRow; sessionId: string; onReview: (runId: string) => void; fontScale: number }) {
+export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, onReview, fontScale, layoutWidth }: { row: TimelineRow; sessionId: string; onReview: (runId: string) => void; fontScale: number; layoutWidth: number }) {
+  // layoutWidth deliberately participates in memo equality so recycled cells
+  // are remeasured when the device rotates or an iPad split view changes size.
+  void layoutWidth
   if (row.kind === 'message') return <MessageRowView row={row} sessionId={sessionId} fontScale={fontScale} />
   if (row.kind === 'trace') return <TraceRowView row={row} onReview={onReview} fontScale={fontScale} />
   if (row.kind === 'media') return <MediaRowView row={row} sessionId={sessionId} />

@@ -17,7 +17,7 @@ import { EmptyState, IconButton, Loading } from './ui'
 export function AppShell() {
   const colors = usePalette()
   const insets = useSafeAreaInsets()
-  const { width } = useWindowDimensions()
+  const { width, height } = useWindowDimensions()
   const initialized = useAppStore(state => state.initialized)
   const connecting = useAppStore(state => state.connecting)
   const sessions = useAppStore(state => state.sessions)
@@ -38,7 +38,9 @@ export function AppShell() {
   const [terminal, setTerminal] = useState(false)
   const [reviewRun, setReviewRun] = useState<string | null>(null)
   const [pendingInspectorAction, setPendingInspectorAction] = useState<{ kind: 'digest' | 'job' | 'terminal' | 'processes' | 'tmux'; jobId?: string } | null>(null)
-  const compact = width < 720
+  // Keep phones in the stacked navigator when they rotate to landscape. Using
+  // width alone rebuilt the entire workspace as an iPad layout mid-rotation.
+  const compact = width < 720 || Math.min(width, height) < 600
   const showInspector = !compact && width >= 1080 && inspectorVisible
   const selected = sessions.find(value => value.id === selectedId) ?? null
   const openMobileChat = useCallback(() => setMobileChatOpen(true), [])
@@ -100,6 +102,9 @@ export function AppShell() {
 
 function MobileChatPane({ children, width, backgroundColor, onClose }: { children: ReactNode; width: number; backgroundColor: string; onClose: () => void }) {
   const translateX = useSharedValue(0)
+  useEffect(() => {
+    translateX.value = 0
+  }, [translateX, width])
   const edgeBackGesture = useMemo(() => Gesture.Pan()
     .hitSlop({ left: 0, width: 28 })
     .activeOffsetX(10)
