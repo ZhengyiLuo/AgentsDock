@@ -3,10 +3,12 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { MenuView, type MenuAction } from '@expo/ui/community/menu'
 import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FolderPlus, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, type LucideIcon } from 'lucide-react-native'
 import Swipeable from 'react-native-gesture-handler/Swipeable'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import type { Session } from '../types'
 import { isUnread, runtimeSummary } from '../lib/format'
+import { compareSessions, orderedSessionSections, sessionSection } from '../lib/session-order'
 import { BackendMark } from './BackendMark'
 import { IconButton } from './ui'
 
@@ -14,6 +16,7 @@ type Row = { kind: 'header'; key: string; title: string; folder: string; count: 
 
 export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () => void; onNewChat: () => void; onOpenChat?: () => void }) {
   const colors = usePalette()
+  const insets = useSafeAreaInsets()
   const sessions = useAppStore(state => state.sessions)
   const selected = useAppStore(state => state.selectedSessionId)
   const active = useAppStore(state => state.activeSessionIds)
@@ -41,16 +44,9 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
       ? sessions.filter(session => session.title.toLowerCase().includes(clean) || matchedByContent.has(session.id))
           .sort((a, b) => Number(b.title.toLowerCase().includes(clean)) - Number(a.title.toLowerCase().includes(clean)))
       : sessions
-    const groups = new Map<string, Session[]>()
-    for (const folder of folderOrder) groups.set(folder, [])
-    for (const session of filtered) {
-      const folder = sessionSection(session)
-      groups.set(folder, [...(groups.get(folder) ?? []), session])
-    }
-    const orderedFolders = ['Pinned', ...folderOrder, ...[...groups.keys()].filter(folder => !['Pinned', 'Archived'].includes(folder) && !folderOrder.includes(folder)).sort(), 'General', 'Archived']
-      .filter((value, index, values) => values.indexOf(value) === index && groups.has(value))
-    return orderedFolders.flatMap<Row>(folder => {
-      const values = [...(groups.get(folder) ?? [])].sort(sessionOrder)
+    return orderedSessionSections(filtered, folderOrder).flatMap<Row>(section => {
+      const folder = section.id
+      const values = section.sessions
       return [
         { kind: 'header', key: `header:${folder}`, title: folder, folder, count: values.length },
         ...((collapsed.has(folder) ? [] : values.map(session => ({ kind: 'session' as const, key: session.id, session })))),
@@ -65,7 +61,7 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
     }
     const result = new Map<string, { previousId: string | null; nextId: string | null }>()
     for (const values of groups.values()) {
-      values.sort(sessionOrder).forEach((session, index) => result.set(session.id, {
+      values.sort(compareSessions).forEach((session, index) => result.set(session.id, {
         previousId: values[index - 1]?.id ?? null,
         nextId: values[index + 1]?.id ?? null,
       }))
@@ -100,7 +96,7 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
     <View style={[styles.root, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: colors.text }]}>AgentsDock</Text>
-        <View style={styles.actions}><IconButton icon={RefreshCw} onPress={() => void refreshSessions()} label="Refresh chats" /><IconButton icon={FolderPlus} onPress={createFolder} label="New folder" /><IconButton icon={Plus} onPress={onNewChat} label="New chat" /><IconButton icon={Settings} onPress={onSettings} label="Settings" /></View>
+        <View style={styles.actions}><IconButton icon={RefreshCw} onPress={() => void refreshSessions()} label="Refresh chats" /><IconButton icon={FolderPlus} onPress={createFolder} label="New folder" /><IconButton icon={Plus} onPress={onNewChat} label="New chat" /><IconButton icon={Settings} onPress={onSettings} label="Settings" testID="sidebar-settings" /></View>
       </View>
       <View style={[styles.search, { backgroundColor: colors.raised, borderColor: colors.border }]}>
         <Search size={16} color={colors.muted} />
@@ -141,7 +137,7 @@ export function Sidebar({ onSettings, onNewChat, onOpenChat }: { onSettings: () 
           />
         })()}
       />
-      <View style={[styles.footer, { borderColor: colors.border }]}><Text style={{ color: colors.muted, fontSize: 10 }}>{sessions.length} chats</Text><View style={{ flex: 1 }} /><View style={[styles.footerDot, { backgroundColor: active.size ? colors.green : colors.muted }]} /><Text style={{ color: colors.muted, fontSize: 10 }}>{active.size} active</Text></View>
+      <View style={[styles.footer, { borderColor: colors.border, minHeight: 34 + insets.bottom, paddingBottom: insets.bottom }]}><Text style={{ color: colors.muted, fontSize: 10 }}>{sessions.length} chats</Text><View style={{ flex: 1 }} /><View style={[styles.footerDot, { backgroundColor: active.size ? colors.green : colors.muted }]} /><Text style={{ color: colors.muted, fontSize: 10 }}>{active.size} active</Text></View>
     </View>
   )
 }
@@ -224,6 +220,9 @@ function SessionRow({ session, selected, running, folders, canMoveUp, canMoveDow
   ]
   const row = <MenuView shouldOpenOnLongPress title={session.title} actions={actions} onPressAction={event => runAction(event.nativeEvent.event)} style={styles.menuTrigger}>
     <Pressable
+      testID={`chat-row-${session.id}`}
+      accessibilityRole="button"
+      accessibilityLabel={session.title}
       onPress={onPress}
       style={({ pressed }) => [styles.session, { backgroundColor: selected ? colors.raised : pressed ? `${colors.raised}99` : 'transparent' }]}
     >
@@ -258,17 +257,6 @@ function SessionRow({ session, selected, running, folders, canMoveUp, canMoveDow
 
 function SwipeAction({ icon: Icon, label, color, onPress }: { icon: LucideIcon; label: string; color: string; onPress: () => void }) {
   return <Pressable onPress={onPress} style={[styles.swipeAction, { backgroundColor: color }]}><Icon size={17} color="white" /><Text style={styles.swipeActionText}>{label}</Text></Pressable>
-}
-
-function sessionOrder(a: Session, b: Session): number {
-  const left = a.sort_order ?? Number.MAX_SAFE_INTEGER
-  const right = b.sort_order ?? Number.MAX_SAFE_INTEGER
-  if (left !== right) return left - right
-  return (a.created_at ?? '').localeCompare(b.created_at ?? '')
-}
-
-function sessionSection(session: Session): string {
-  return session.archived ? 'Archived' : session.pinned ? 'Pinned' : session.folder?.trim() || 'General'
 }
 
 const styles = StyleSheet.create({

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { BackHandler, Linking, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { AlertCircle, PanelRight, Settings, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
@@ -16,6 +16,7 @@ import { EmptyState, IconButton, Loading } from './ui'
 
 export function AppShell() {
   const colors = usePalette()
+  const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
   const initialized = useAppStore(state => state.initialized)
   const connecting = useAppStore(state => state.connecting)
@@ -36,6 +37,7 @@ export function AppShell() {
   const [tmux, setTmux] = useState(false)
   const [terminal, setTerminal] = useState(false)
   const [reviewRun, setReviewRun] = useState<string | null>(null)
+  const [pendingInspectorAction, setPendingInspectorAction] = useState<{ kind: 'digest' | 'job' | 'terminal' | 'processes' | 'tmux'; jobId?: string } | null>(null)
   const compact = width < 720
   const showInspector = !compact && width >= 1080 && inspectorVisible
   const selected = sessions.find(value => value.id === selectedId) ?? null
@@ -60,6 +62,18 @@ export function AppShell() {
     void Linking.getInitialURL().then(url => { if (url) openDeepLink({ url }) })
     return () => subscription.remove()
   }, [])
+  useEffect(() => {
+    if (options || !pendingInspectorAction) return
+    const timer = setTimeout(() => {
+      if (pendingInspectorAction.kind === 'digest') setDigest(true)
+      else if (pendingInspectorAction.kind === 'job') setJobEditor(pendingInspectorAction.jobId ?? 'new')
+      else if (pendingInspectorAction.kind === 'terminal') setTerminal(true)
+      else if (pendingInspectorAction.kind === 'processes') setProcesses(true)
+      else if (pendingInspectorAction.kind === 'tmux') setTmux(true)
+      setPendingInspectorAction(null)
+    }, Platform.OS === 'ios' ? 280 : 0)
+    return () => clearTimeout(timer)
+  }, [options, pendingInspectorAction])
 
   if (!initialized) return <View style={[styles.fill, { backgroundColor: colors.background }]}><Loading label="Starting AgentsDock" /></View>
 
@@ -69,7 +83,7 @@ export function AppShell() {
   return <View style={[styles.fill, { backgroundColor: colors.background }]}>
     {compact ? <View style={styles.fill}>{sidebar}{mobileChatOpen && selected ? <MobileChatPane width={width} backgroundColor={colors.background} onClose={closeMobileChat}>{chat}</MobileChatPane> : null}</View> : <View style={styles.workspace}><View style={{ width: width >= 1180 ? 285 : 255 }}>{sidebar}</View><View style={styles.chat}>{chat}</View>{showInspector && selected ? <View style={{ width: Math.min(350, width * 0.29) }}><Inspector sessionId={selected.id} onDigest={() => setDigest(true)} onJob={jobId => setJobEditor(jobId ?? 'new')} onTerminal={() => setTerminal(true)} onProcesses={() => setProcesses(true)} onTmux={() => setTmux(true)} /></View> : null}</View>}
     {!compact && selected && !showInspector ? <Pressable onPress={() => setInspectorVisible(true)} style={[styles.restoreInspector, { backgroundColor: colors.raised, borderColor: colors.border }]}><PanelRight size={17} color={colors.muted} /></Pressable> : null}
-    {error ? <View style={[styles.error, { backgroundColor: colors.surface, borderColor: colors.red }]}><AlertCircle size={17} color={colors.red} /><Text style={[styles.errorText, { color: colors.text }]} numberOfLines={3}>{error}</Text><IconButton icon={Settings} size={15} onPress={() => setSettings(true)} label="Settings" /><IconButton icon={X} size={15} onPress={clearError} label="Dismiss" /></View> : null}
+    {error ? <View style={[styles.error, { bottom: insets.bottom + 12, backgroundColor: colors.surface, borderColor: colors.red }]}><AlertCircle size={17} color={colors.red} /><Text style={[styles.errorText, { color: colors.text }]} numberOfLines={3}>{error}</Text><IconButton icon={Settings} size={15} onPress={() => setSettings(true)} label="Settings" testID="error-settings" /><IconButton icon={X} size={15} onPress={clearError} label="Dismiss" testID="error-dismiss" /></View> : null}
 
     <SettingsDialog visible={settings} onClose={() => setSettings(false)} />
     <NewChatDialog visible={newChat} onClose={() => setNewChat(false)} />
@@ -79,7 +93,7 @@ export function AppShell() {
     <ProcessDialog visible={processes} sessionId={selected?.id ?? null} onClose={() => setProcesses(false)} />
     <TmuxDialog visible={tmux} sessionId={selected?.id ?? null} onClose={() => setTmux(false)} />
     <CodeReview sessionId={selected?.id ?? ''} runId={reviewRun} onClose={() => setReviewRun(null)} />
-    <Modal visible={options && Boolean(selected)} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'} allowSwipeDismissal onRequestClose={() => setOptions(false)}>{selected ? <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]} edges={['bottom']}><View style={styles.modalGrabber} /><View style={styles.modalTop}><Text style={[styles.modalTitle, { color: colors.text }]}>Chat details</Text><IconButton icon={X} onPress={() => setOptions(false)} label="Close" /></View><Inspector sessionId={selected.id} onDigest={() => { setOptions(false); setDigest(true) }} onJob={jobId => { setOptions(false); setJobEditor(jobId ?? 'new') }} onTerminal={() => { setOptions(false); setTerminal(true) }} onProcesses={() => { setOptions(false); setProcesses(true) }} onTmux={() => { setOptions(false); setTmux(true) }} /></SafeAreaView> : null}</Modal>
+    <Modal visible={options && Boolean(selected)} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'} allowSwipeDismissal onRequestClose={() => setOptions(false)}>{selected ? <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]} edges={['bottom']}><View style={styles.modalGrabber} /><View style={styles.modalTop}><Text style={[styles.modalTitle, { color: colors.text }]}>Chat details</Text><IconButton icon={X} onPress={() => setOptions(false)} label="Close" /></View><Inspector sessionId={selected.id} onDigest={() => { setPendingInspectorAction({ kind: 'digest' }); setOptions(false) }} onJob={jobId => { setPendingInspectorAction({ kind: 'job', jobId }); setOptions(false) }} onTerminal={() => { setPendingInspectorAction({ kind: 'terminal' }); setOptions(false) }} onProcesses={() => { setPendingInspectorAction({ kind: 'processes' }); setOptions(false) }} onTmux={() => { setPendingInspectorAction({ kind: 'tmux' }); setOptions(false) }} /></SafeAreaView> : null}</Modal>
     <Modal visible={terminal && Boolean(selected)} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'} allowSwipeDismissal onRequestClose={() => setTerminal(false)}>{selected ? <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]} edges={['top', 'bottom']}><TerminalView session={selected} onClose={() => setTerminal(false)} /></SafeAreaView> : null}</Modal>
   </View>
 }
@@ -120,6 +134,6 @@ function NoChat({ connecting, onSettings }: { connecting: boolean; onSettings: (
 const styles = StyleSheet.create({
   fill: { flex: 1 }, workspace: { flex: 1, flexDirection: 'row' }, chat: { flex: 1, minWidth: 0 }, mobileChatPane: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 2 },
   restoreInspector: { position: 'absolute', top: 17, right: 10, width: 35, height: 35, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
-  error: { position: 'absolute', left: 12, right: 12, bottom: 12, minHeight: 50, maxWidth: 740, alignSelf: 'center', borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 }, errorText: { flex: 1, fontSize: 12 },
+  error: { position: 'absolute', left: 12, right: 12, minHeight: 50, maxWidth: 740, alignSelf: 'center', borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 }, errorText: { flex: 1, fontSize: 12 },
   modalGrabber: { alignSelf: 'center', width: 36, height: 5, marginTop: 7, borderRadius: 3, backgroundColor: '#8a8a8a88' }, modalTop: { height: 54, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' }, modalTitle: { flex: 1, fontSize: 16, fontWeight: '800' }, connectionSettings: { position: 'absolute', alignSelf: 'center', top: '58%', minHeight: 38, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
 })

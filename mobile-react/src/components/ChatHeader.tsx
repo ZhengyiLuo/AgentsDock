@@ -17,7 +17,7 @@ export function ChatHeader({ sessionId, compact, onBack, onOptions, onSearch, on
     <IconButton icon={RefreshCw} onPress={() => void useAppStore.getState().selectSession(sessionId)} label="Refresh" />
     <IconButton icon={Search} onPress={onSearch} label="Find in chat" />
     {!compact ? <IconButton icon={PanelRight} onPress={onToggleInspector} label="Toggle details" /> : null}
-    <Pressable onPress={connected ? onOptions : () => void reconnect()} style={[styles.online, { backgroundColor: colors.raised }]}><View style={[styles.dot, { backgroundColor: connected ? colors.green : colors.red }]} /><Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }}>{connected ? 'Online' : 'Offline'}</Text><Ellipsis size={14} color={colors.muted} /></Pressable>
+    <Pressable testID="chat-details" accessibilityRole="button" accessibilityLabel={connected ? 'Chat details' : 'Reconnect'} onPress={connected ? onOptions : () => void reconnect()} style={[styles.online, { backgroundColor: colors.raised }]}><View style={[styles.dot, { backgroundColor: connected ? colors.green : colors.red }]} /><Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }}>{connected ? 'Online' : 'Offline'}</Text><Ellipsis size={14} color={colors.muted} /></Pressable>
   </View>
 }
 

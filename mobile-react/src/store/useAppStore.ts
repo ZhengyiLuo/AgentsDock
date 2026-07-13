@@ -105,8 +105,8 @@ interface AppState {
   moveQueued(sessionId: string, queuedId: string, direction: 'up' | 'down'): Promise<boolean>
   runQueuedNow(sessionId: string, queuedId: string): Promise<boolean>
   refreshJobs(): Promise<void>
-  createJob(input: CreateJobInput): Promise<void>
-  updateJob(jobId: string, patch: UpdateJobInput): Promise<void>
+  createJob(input: CreateJobInput): Promise<boolean>
+  updateJob(jobId: string, patch: UpdateJobInput): Promise<boolean>
   deleteJob(jobId: string): Promise<void>
   runJob(jobId: string): Promise<void>
   search(query: string, sessionId?: string): Promise<void>
@@ -466,8 +466,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async refreshJobs() { try { set({ jobs: await client.jobs() }) } catch (error) { set({ error: errorMessage(error) }) } },
-  async createJob(input) { try { const job = await client.createJob(input); set(state => ({ jobs: [...state.jobs, job] })) } catch (error) { set({ error: errorMessage(error) }) } },
-  async updateJob(jobId, patch) { try { const job = await client.updateJob(jobId, patch); set(state => ({ jobs: state.jobs.map(value => value.id === jobId ? job : value) })) } catch (error) { set({ error: errorMessage(error) }) } },
+  async createJob(input) {
+    try {
+      const job = await client.createJob(input)
+      set(state => ({ jobs: [...state.jobs.filter(value => value.id !== job.id), job] }))
+      return true
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      return false
+    }
+  },
+  async updateJob(jobId, patch) {
+    try {
+      const job = await client.updateJob(jobId, patch)
+      set(state => ({ jobs: state.jobs.map(value => value.id === jobId ? job : value) }))
+      return true
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      return false
+    }
+  },
   async deleteJob(jobId) { try { await client.deleteJob(jobId); set(state => ({ jobs: state.jobs.filter(value => value.id !== jobId) })) } catch (error) { set({ error: errorMessage(error) }) } },
   async runJob(jobId) { try { await client.runJob(jobId); await get().refreshJobs() } catch (error) { set({ error: errorMessage(error) }) } },
 

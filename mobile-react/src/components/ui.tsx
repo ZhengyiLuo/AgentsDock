@@ -3,12 +3,13 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import type { LucideIcon } from 'lucide-react-native'
 import { usePalette } from '../theme'
 
-export function IconButton({ icon: Icon, onPress, disabled, selected, size = 18, label }: { icon: LucideIcon; onPress: () => void; disabled?: boolean; selected?: boolean; size?: number; label?: string }) {
+export function IconButton({ icon: Icon, onPress, disabled, selected, size = 18, label, testID }: { icon: LucideIcon; onPress: () => void; disabled?: boolean; selected?: boolean; size?: number; label?: string; testID?: string }) {
   const colors = usePalette()
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      testID={testID}
       disabled={disabled}
       hitSlop={8}
       onPress={onPress}
@@ -44,7 +45,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
   sectionHeader: { minHeight: 28, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitle: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  pill: { minHeight: 24, maxWidth: 190, borderRadius: 6, paddingHorizontal: 8, justifyContent: 'center' },
+  pill: { minHeight: 24, minWidth: 0, maxWidth: 190, flexShrink: 1, borderRadius: 6, paddingHorizontal: 8, justifyContent: 'center' },
   pillText: { fontSize: 12, fontWeight: '600' },
   loading: { flex: 1, minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 10 },
   empty: { flex: 1, minHeight: 180, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },

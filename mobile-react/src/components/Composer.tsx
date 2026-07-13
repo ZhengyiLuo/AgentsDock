@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import { ArrowDown, ArrowUp, CornerDownRight, Paperclip, Send, Square, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
@@ -15,6 +15,7 @@ const EMPTY_QUEUE: QueuedTurn[] = []
 
 export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () => void }) {
   const colors = usePalette()
+  const { width } = useWindowDimensions()
   const draft = useAppStore(state => state.drafts[sessionId] ?? '')
   const uploads = useAppStore(state => state.uploads[sessionId]) ?? EMPTY_FILES
   const pending = useAppStore(state => state.uploadPending[sessionId]) ?? EMPTY_PENDING
@@ -43,7 +44,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
   }
 
   return (
-    <View style={[styles.shell, { borderColor: colors.border, backgroundColor: colors.background }]}>
+    <View testID="chat-composer" style={[styles.shell, { borderColor: colors.border, backgroundColor: colors.background }]}>
       {queued.length ? <QueueShelf sessionId={sessionId} onSent={onSent} /> : null}
       {(uploads.length || pending.length) ? <View style={styles.uploads}>
         {uploads.map(file => <View key={file.id} style={[styles.upload, { backgroundColor: colors.raised }]}><Paperclip size={13} color={colors.muted} /><Text style={[styles.uploadName, { color: colors.text }]} numberOfLines={1}>{file.filename}</Text><IconButton icon={X} size={13} onPress={() => removeUpload(file.id)} label="Remove attachment" /></View>)}
@@ -51,6 +52,8 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
       </View> : null}
       <View style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <TextInput
+          testID="chat-composer-input"
+          accessibilityLabel="Message"
           value={draft}
           onChangeText={setDraft}
           placeholder={active ? 'Queue a follow-up…' : 'Message'}
@@ -63,12 +66,13 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
         />
         <View style={styles.toolbar}>
           <IconButton icon={Paperclip} onPress={() => void pick()} label="Attach files" />
-          {session ? <View style={styles.runtime}><BackendMark backend={session.backend} size={21} /><Text style={[styles.backend, { color: colors.text }]}>{session.backend === 'claude' ? 'Claude' : 'Codex'}</Text><Pill tone="neutral">{session.model || 'Server model'}{session.effort ? ` · ${session.effort}` : ''}</Pill></View> : null}
-          <View style={{ flex: 1 }} />
+          {session ? <View style={styles.runtime}><BackendMark backend={session.backend} size={21} />{width >= 430 ? <Text style={[styles.backend, { color: colors.text }]}>{session.backend === 'claude' ? 'Claude' : 'Codex'}</Text> : null}<Pill tone="neutral">{session.model || 'Server model'}{session.effort ? ` · ${session.effort}` : ''}</Pill></View> : null}
+          <View style={styles.toolbarSpacer} />
           {active ? <IconButton icon={Square} selected onPress={() => void stopTurn()} label="Stop agent" /> : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={active ? 'Queue message' : 'Send message'}
+            testID="chat-send"
             disabled={!draft.trim() || sending}
             onPress={() => void send(false)}
             style={({ pressed }) => [styles.send, { backgroundColor: draft.trim() ? colors.blue : colors.raised, opacity: pressed || sending ? 0.6 : 1 }]}
@@ -128,8 +132,8 @@ const styles = StyleSheet.create({
   composer: { maxHeight: 260, minHeight: 112, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   input: { minHeight: 58, maxHeight: 178, paddingHorizontal: 14, paddingTop: 12, fontSize: 15.5, lineHeight: 21 },
   toolbar: { height: 45, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  runtime: { flexDirection: 'row', alignItems: 'center', gap: 6 }, backend: { fontSize: 12, fontWeight: '700' },
-  send: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }, steer: { position: 'absolute', right: 53, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 3 },
+  runtime: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }, backend: { fontSize: 12, fontWeight: '700' }, toolbarSpacer: { flex: 1, minWidth: 0 },
+  send: { width: 36, height: 36, flexShrink: 0, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }, steer: { position: 'absolute', right: 53, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 3 },
   uploads: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 }, upload: { maxWidth: 220, minHeight: 30, paddingLeft: 8, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 5 }, uploadName: { flex: 1, fontSize: 11 },
   queue: { gap: 5, maxHeight: 236 }, queueLabel: { fontSize: 10, fontWeight: '800', textAlign: 'right' },
   queueList: { maxHeight: 210 }, queueListContent: { gap: 5 },

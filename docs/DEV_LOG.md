@@ -7765,3 +7765,28 @@ Release result:
   in-flight deduplication coverage. TypeScript and all 155 Electron tests pass.
 - Rebuilt `/Users/zen/agi/ZenithDock/dist/AgentsDock.app` and synced the direct
   app bundle to `/Users/zen/agi/AgentsDock.app` on the MacBook Air.
+
+## 2026-07-12 - Complete mobile scheduled-job and digest parity
+
+- Rebuilt the React mobile scheduled-job editor around the server's real
+  contract. iPhone and iPad can now create and edit fixed-count or forever
+  jobs, choose the backend, select common or custom intervals, control the
+  first/next run, pause or resume, run immediately, and delete with
+  confirmation.
+- Made the inspector fetch authoritative jobs when opened and display each
+  chat's current schedule, run count, next-run time, and enabled state. Job
+  lifecycle events refresh this list instead of leaving stale cards behind.
+- Brought digest handoff up to desktop behavior: targets follow the sidebar's
+  stable folder/chat order, archived chats stay out of the picker, detail uses
+  the server-supported short/normal/deep values, and preview/send expose real
+  progress and errors without silently closing the sheet.
+- Fixed the compact modal handoff on iOS so Chat Details closes before opening
+  the job or digest sheet. This avoids stacked native modals that appeared to
+  make the commands unresponsive.
+- Replaced the clipped keyboard layout with explicit keyboard-frame geometry.
+  The composer grows for multiline text and its runtime controls and Send
+  button remain above the software keyboard and safe area on phone and tablet.
+- Passed TypeScript validation, a Release arm64 simulator build, and complete
+  XCUITest flows on iPhone 17 Pro and iPad Pro 13-inch covering digest preview
+  and send, job creation and display, multiline composition, and keyboard
+  clearance.
