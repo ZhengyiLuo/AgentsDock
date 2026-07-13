@@ -22,6 +22,19 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-13 - Add the first Linux desktop build
+
+- Added a repeatable Electron Linux pipeline that cross-builds x64 by default,
+  with an arm64 override, and emits portable AppImage plus tar.gz artifacts.
+- Added Linux package metadata and a 1024 px PNG icon while keeping the macOS
+  ICNS and MAS packaging paths unchanged.
+- Removed macOS-only window chrome from non-Mac builds and changed desktop menu
+  accelerators to `CmdOrCtrl`, retaining Command on macOS and using Control on
+  Linux.
+- The release script runs TypeScript validation and the complete Electron test
+  suite before packaging. The first artifact is smoke-tested on a real x86_64
+  Linux host before being considered complete.
+
 ## 2026-07-13 - Prepare Electron macOS TestFlight build 62
 
 - Advanced the Electron macOS build from 61 to 62 for the indexed whole-history

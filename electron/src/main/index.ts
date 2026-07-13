@@ -89,6 +89,12 @@ function errorDetails(error: unknown): { message: string; stack?: string } {
 }
 
 function createWindow(): BrowserWindow {
+  const platformWindowOptions = process.platform === 'darwin'
+    ? {
+        titleBarStyle: 'hiddenInset' as const,
+        trafficLightPosition: { x: 16, y: 16 }
+      }
+    : {}
   const window = new BrowserWindow({
     width: 1500,
     height: 960,
@@ -96,8 +102,7 @@ function createWindow(): BrowserWindow {
     minHeight: 680,
     show: false,
     title: 'AgentsDock',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
+    ...platformWindowOptions,
     backgroundColor: '#171717',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -183,27 +188,35 @@ function installNativeContextMenu(window: BrowserWindow): void {
 
 function createMenu(window: () => BrowserWindow | null): void {
   const send = (command: string): void => window()?.webContents.send('native:menu', { command })
+  const applicationMenu: MenuItemConstructorOptions = process.platform === 'darwin'
+    ? { role: 'appMenu', submenu: [
+        { role: 'about' }, { type: 'separator' },
+        { label: 'Check for Updates…', click: () => send('check-update') },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => send('settings') },
+        { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }
+      ] }
+    : { label: 'AgentsDock', submenu: [
+        { role: 'about' },
+        { label: 'Check for Updates…', click: () => send('check-update') },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => send('settings') },
+        { type: 'separator' }, { role: 'quit' }
+      ] }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu', submenu: [
-      { role: 'about' }, { type: 'separator' },
-      { label: 'Check for Updates…', click: () => send('check-update') },
-      { label: 'Settings…', accelerator: 'Command+,', click: () => send('settings') },
-      { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }
-    ] },
+    applicationMenu,
     { role: 'fileMenu', submenu: [
-      { label: 'New Chat', accelerator: 'Command+N', click: () => send('new-chat') },
-      { label: 'Attach Files…', accelerator: 'Command+O', click: () => send('attach-files') },
-      { type: 'separator' }, { label: 'Close', accelerator: 'Command+W', click: () => send('close-surface') }
+      { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => send('new-chat') },
+      { label: 'Attach Files…', accelerator: 'CmdOrCtrl+O', click: () => send('attach-files') },
+      { type: 'separator' }, { label: 'Close', accelerator: 'CmdOrCtrl+W', click: () => send('close-surface') }
     ] },
     { role: 'editMenu' },
     { label: 'Chat', submenu: [
-      { label: 'Find Chat…', accelerator: 'Command+P', click: () => send('find-chat') },
-      { label: 'Find in Current Chat…', accelerator: 'Command+F', click: () => send('find-in-current-chat') },
+      { label: 'Find Chat…', accelerator: 'CmdOrCtrl+P', click: () => send('find-chat') },
+      { label: 'Find in Current Chat…', accelerator: 'CmdOrCtrl+F', click: () => send('find-in-current-chat') },
       { label: 'Next Chat', accelerator: 'Control+Tab', click: () => send('next-chat') },
       { label: 'Previous Chat', accelerator: 'Control+Shift+Tab', click: () => send('previous-chat') },
       { type: 'separator' },
-      { label: 'Toggle Inspector', accelerator: 'Command+L', click: () => send('toggle-inspector') },
-      { label: 'Jump to Latest', accelerator: 'Command+Down', click: () => send('jump-latest') }
+      { label: 'Toggle Inspector', accelerator: 'CmdOrCtrl+L', click: () => send('toggle-inspector') },
+      { label: 'Jump to Latest', accelerator: 'CmdOrCtrl+Down', click: () => send('jump-latest') }
     ] },
     { role: 'viewMenu' },
     { role: 'windowMenu' },

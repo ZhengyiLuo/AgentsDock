@@ -1,6 +1,7 @@
 # ZenithDock
 
-Native macOS, iOS, and iPadOS frontend for a remote ZenithDock agent server.
+Electron macOS/Linux and native iOS/iPadOS frontends for a remote ZenithDock
+agent server.
 
 ## Dev Log
 
@@ -122,6 +123,19 @@ local Apple Distribution certificate:
 # Upload the same build directly to TestFlight.
 ./scripts/build_electron_mas.sh --upload
 ```
+
+### Electron Linux app
+
+Build portable x86_64 Linux artifacts from macOS or Linux with:
+
+```bash
+./scripts/build_electron_linux.sh
+```
+
+The build runs TypeScript validation and the complete Electron regression suite
+before producing both an AppImage and a tarball under `dist/linux/`. Override
+the architecture with `AGENTSDOCK_LINUX_ARCH=arm64`. The AppImage is the default
+distribution artifact and does not require installation.
 
 ## Build The iOS/iPadOS App
 

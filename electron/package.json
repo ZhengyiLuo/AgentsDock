@@ -2,7 +2,7 @@
   "name": "agentsdock-electron",
   "version": "0.1.1",
   "private": true,
-  "description": "AgentsDock macOS Electron client",
+  "description": "AgentsDock cross-platform Electron client",
   "author": "AgentsDock",
   "main": "./out/main/index.mjs",
   "scripts": {
@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac zip dmg",
-    "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas"
+    "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas",
+    "package:linux": "../scripts/build_electron_linux.sh"
   },
   "build": {
     "appId": "com.zhengyiluo.ZenithDock",
@@ -55,6 +56,15 @@
       "entitlementsInherit": "packaging/entitlements.mas.inherit.plist",
       "hardenedRuntime": false,
       "preAutoEntitlements": false
+    },
+    "linux": {
+      "icon": "build/AgentsDock.png",
+      "category": "Development",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ]
     },
     "publish": [
       {
