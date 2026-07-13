@@ -82,6 +82,26 @@ describe('TimelineMinimap', () => {
     expect(fillRect.mock.calls).toContainEqual([10, 390, 19, 1])
   })
 
+  it('pins to the final whole-chat tick when the loaded tail maps before remote landmarks', () => {
+    const ref = createRef<TimelineMinimapHandle>()
+    const landmarks: TimelineNavigatorLandmark[] = Array.from({ length: 100 }, (_, position) => ({
+      key: `turn-${position}`,
+      kind: 'assistant',
+      start_seq: position + 1,
+      end_seq: position + 1,
+      title: `Turn ${position}`,
+      preview: `Response ${position}`,
+      index: position >= 80 && position < 90 ? position - 80 : undefined,
+      endIndex: position >= 80 && position < 90 ? position - 80 : undefined
+    }))
+    render(<TimelineMinimap ref={ref} landmarks={landmarks} onSeek={vi.fn()} />)
+    fillRect.mockClear()
+
+    act(() => ref.current?.setVisibleRange(9, 9, true))
+
+    expect(fillRect.mock.calls).toContainEqual([10, 390, 19, 1])
+  })
+
   it('repaints its canvas palette when appearance changes', () => {
     const landmarks: TimelineNavigatorLandmark[] = Array.from({ length: 50 }, (_, index) => ({
       key: `turn-${index}`,

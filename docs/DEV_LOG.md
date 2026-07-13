@@ -7835,3 +7835,14 @@ Release result:
 - Added regressions for false-empty memory caches, false-empty disk caches,
   corrupted verified totals, and genuinely empty verified chats. TypeScript
   and all 159 Electron tests pass.
+
+## 2026-07-13 - Keep the timeline navigator honest at the hard bottom
+
+- Made the conversation navigator treat the real timeline's hard-bottom state
+  as authoritative instead of inferring its active tick from whichever local
+  tail rows happen to be loaded.
+- The rail now pins both its scroll offset and current marker to the final
+  whole-chat landmark while the native timeline is at the end, including when
+  the server index contains remote landmarks beyond the loaded row mapping.
+- Added a regression for a partially loaded tail whose final local row maps
+  before later whole-chat landmarks.

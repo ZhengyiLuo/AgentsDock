@@ -29,6 +29,7 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
   const sizeRef = useRef({ width: 40, height: 400 })
   const viewportRef = useRef({ start: 0, end: 0 })
   const scrollOffsetRef = useRef(0)
+  const pinnedToBottomRef = useRef(false)
   const hoveredPositionRef = useRef<number | null>(null)
   const drawRef = useRef<() => void>(() => {})
   const draggingRef = useRef(false)
@@ -91,7 +92,9 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
     const firstDrawn = clamp(Math.floor((offset - TRACK_TOP) / TIMELINE_TICK_PITCH) - 1, 0, Math.max(0, landmarks.length - 1))
     const lastDrawn = clamp(Math.ceil((offset + height - TRACK_TOP) / TIMELINE_TICK_PITCH) + 1, 0, Math.max(0, landmarks.length - 1))
     const visible = visiblePositions()
-    const currentPosition = visible ? Math.round((visible[0] + visible[1]) / 2) : -1
+    const currentPosition = pinnedToBottomRef.current && landmarks.length
+      ? landmarks.length - 1
+      : visible ? Math.round((visible[0] + visible[1]) / 2) : -1
     const palette = minimapPalette()
 
     for (let position = firstDrawn; position <= lastDrawn; position += 1) {
@@ -124,8 +127,9 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
   useImperativeHandle(forwardedRef, () => ({
     setVisibleRange(startIndex, endIndex, atBottom = false) {
       viewportRef.current = { start: startIndex, end: endIndex }
+      pinnedToBottomRef.current = atBottom
       const positions = visiblePositions()
-      if (positions && atBottom) setScrollOffset(maxScrollOffset())
+      if (atBottom) setScrollOffset(maxScrollOffset())
       else if (positions) keepPositionsVisible(...positions)
       else drawRef.current()
     }
@@ -139,7 +143,8 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
       sizeRef.current = { width: bounds.width, height: bounds.height }
       scrollOffsetRef.current = clamp(scrollOffsetRef.current, 0, maxScrollOffset())
       const positions = visiblePositions()
-      if (positions) keepPositionsVisible(...positions)
+      if (pinnedToBottomRef.current) setScrollOffset(maxScrollOffset())
+      else if (positions) keepPositionsVisible(...positions)
       else drawRef.current()
     }
     resize()
@@ -151,9 +156,10 @@ export const TimelineMinimap = memo(forwardRef<TimelineMinimapHandle, TimelineMi
   useEffect(() => {
     scrollOffsetRef.current = clamp(scrollOffsetRef.current, 0, maxScrollOffset())
     const positions = visiblePositions()
-    if (positions) keepPositionsVisible(...positions)
+    if (pinnedToBottomRef.current) setScrollOffset(maxScrollOffset())
+    else if (positions) keepPositionsVisible(...positions)
     else draw()
-  }, [draw, keepPositionsVisible, landmarks, maxScrollOffset, visiblePositions])
+  }, [draw, keepPositionsVisible, landmarks, maxScrollOffset, setScrollOffset, visiblePositions])
 
   useEffect(() => {
     const redraw = () => drawRef.current()
