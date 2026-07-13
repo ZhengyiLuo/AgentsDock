@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { ActivityIndicator, Modal, Pressable, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
+import { ActivityIndicator, Modal, Platform, Pressable, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { Image } from 'expo-image'
 import { VideoView, useVideoPlayer } from 'expo-video'
 import * as FileSystem from 'expo-file-system/legacy'
 import * as Sharing from 'expo-sharing'
-import { ChevronLeft, ChevronRight, Download, File, Maximize2, Pin, Play, X } from 'lucide-react-native'
+import { ChevronLeft, ChevronRight, Download, File, Maximize2, Pin, Play } from 'lucide-react-native'
 import { client } from '../store/useAppStore'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
@@ -50,7 +51,13 @@ export function MediaGrid({ files, sessionId, compact = false }: { files: AgentF
         ))}
       </View>
       {files.length > visible.length ? <Text style={[styles.more, { color: colors.muted }]}>Showing {visible.length} of {files.length}</Text> : null}
-      <Modal visible={selected != null} animationType="fade" presentationStyle="fullScreen" onRequestClose={() => setSelected(null)}>
+      <Modal
+        visible={selected != null}
+        animationType="slide"
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        allowSwipeDismissal
+        onRequestClose={() => setSelected(null)}
+      >
         {selected != null && visible[selected] ? <MediaViewer files={visible.filter(isMedia)} initialId={visible[selected].id} onClose={() => setSelected(null)} /> : null}
       </Modal>
     </View>
@@ -62,11 +69,11 @@ function MediaViewer({ files, initialId, onClose }: { files: AgentFile[]; initia
   const [index, setIndex] = useState(Math.max(0, files.findIndex(file => file.id === initialId)))
   const file = files[index]
   return (
-    <View style={[styles.viewer, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.viewer, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <View style={styles.viewerTop}>
+        <IconButton icon={ChevronLeft} onPress={onClose} label="Back" />
         <Text style={[styles.viewerTitle, { color: colors.text }]} numberOfLines={1}>{file?.title || file?.filename}</Text>
         <IconButton icon={Download} onPress={() => file && void downloadAndShare(file)} label="Download" />
-        <IconButton icon={X} onPress={onClose} label="Close" />
       </View>
       <View style={styles.viewerBody}>
         {file && isImage(file) ? <Image source={{ uri: client.fileURL(file.id), headers: client.authHeaders() }} contentFit="contain" style={StyleSheet.absoluteFill} /> : file ? <RemoteVideo file={file} /> : <ActivityIndicator />}
@@ -76,7 +83,7 @@ function MediaViewer({ files, initialId, onClose }: { files: AgentFile[]; initia
         </> : null}
       </View>
       <Text style={[styles.viewerCount, { color: colors.muted }]}>{index + 1} / {files.length}</Text>
-    </View>
+    </SafeAreaView>
   )
 }
 

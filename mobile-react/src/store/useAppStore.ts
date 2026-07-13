@@ -97,10 +97,10 @@ interface AppState {
   markRead(sessionId: string): Promise<void>
   markUnread(sessionId: string): Promise<void>
   setFolderOrder(order: string[]): void
-  updateQueued(queuedId: string, prompt: string): Promise<void>
-  removeQueued(queuedId: string): Promise<void>
-  moveQueued(queuedId: string, direction: 'up' | 'down'): Promise<void>
-  runQueuedNow(queuedId: string): Promise<void>
+  updateQueued(sessionId: string, queuedId: string, prompt: string): Promise<boolean>
+  removeQueued(sessionId: string, queuedId: string): Promise<boolean>
+  moveQueued(sessionId: string, queuedId: string, direction: 'up' | 'down'): Promise<boolean>
+  runQueuedNow(sessionId: string, queuedId: string): Promise<boolean>
   refreshJobs(): Promise<void>
   createJob(input: CreateJobInput): Promise<void>
   updateJob(jobId: string, patch: UpdateJobInput): Promise<void>
@@ -323,7 +323,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const response = await client.sendTurn(sessionId, prompt, files.map(file => file.id), session?.model, session?.effort)
       set(state => ({ sessions: state.sessions.map(value => value.id === sessionId ? response.session : value) }))
       if (response.event) applyLiveEvent(response.event, set, get)
-      if (steer && response.queued_id) await client.runQueuedNow(sessionId, response.queued_id)
+      if (steer && response.queued_id) return await get().runQueuedNow(sessionId, response.queued_id)
       return true
     } catch (error) {
       set(state => ({ drafts: { ...state.drafts, [sessionId]: prompt }, uploads: { ...state.uploads, [sessionId]: files }, error: errorMessage(error) }))
@@ -425,10 +425,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     void saveSettings({ serverURL: get().serverURL, selectedSessionId: get().selectedSessionId, folderOrder: order })
   },
 
-  async updateQueued(queuedId, prompt) { await queueAction(async id => client.updateQueued(id, queuedId, prompt), set, get) },
-  async removeQueued(queuedId) { await queueAction(async id => client.removeQueued(id, queuedId), set, get) },
-  async moveQueued(queuedId, direction) { await queueAction(async id => client.moveQueued(id, queuedId, direction), set, get) },
-  async runQueuedNow(queuedId) { await queueAction(async id => client.runQueuedNow(id, queuedId), set, get) },
+  async updateQueued(sessionId, queuedId, prompt) { return queueAction(sessionId, () => client.updateQueued(sessionId, queuedId, prompt), set, get) },
+  async removeQueued(sessionId, queuedId) { return queueAction(sessionId, () => client.removeQueued(sessionId, queuedId), set, get) },
+  async moveQueued(sessionId, queuedId, direction) { return queueAction(sessionId, () => client.moveQueued(sessionId, queuedId, direction), set, get) },
+  async runQueuedNow(sessionId, queuedId) {
+    const before = get().snapshots[sessionId]?.queuedTurns ?? []
+    setSnapshotQueue(sessionId, before.filter(value => value.queued_id !== queuedId), set, get)
+    try {
+      await client.runQueuedNow(sessionId, queuedId)
+    } catch (error) {
+      const turns = await client.queue(sessionId).catch(() => null)
+      if (!turns) {
+        setSnapshotQueue(sessionId, before, set, get)
+        set({ error: errorMessage(error) })
+        return false
+      }
+      setSnapshotQueue(sessionId, turns, set, get)
+      if (turns.some(value => value.queued_id === queuedId)) {
+        set({ error: errorMessage(error) })
+        return false
+      }
+    }
+    const refreshed = await client.queue(sessionId).catch(() => null)
+    if (refreshed) setSnapshotQueue(sessionId, refreshed, set, get)
+    set(state => {
+      const active = new Set(state.activeSessionIds)
+      active.add(sessionId)
+      return { activeSessionIds: active }
+    })
+    return true
+  },
 
   async refreshJobs() { try { set({ jobs: await client.jobs() }) } catch (error) { set({ error: errorMessage(error) }) } },
   async createJob(input) { try { const job = await client.createJob(input); set(state => ({ jobs: [...state.jobs, job] })) } catch (error) { set({ error: errorMessage(error) }) } },
@@ -504,15 +530,25 @@ function reduceQueue(current: QueuedTurn[], event: Event): QueuedTurn[] {
   return current
 }
 
-async function queueAction(action: (sessionId: string) => Promise<void>, set: (value: Partial<AppState>) => void, get: () => AppState): Promise<void> {
-  const id = get().selectedSessionId
-  if (!id) return
+async function queueAction(sessionId: string, action: () => Promise<void>, set: (value: Partial<AppState>) => void, get: () => AppState): Promise<boolean> {
   try {
-    await action(id)
-    const page = await client.sessionPage(id, { limit: 1, tail: true })
-    const snapshot = get().snapshots[id]
-    if (snapshot) set({ snapshots: { ...get().snapshots, [id]: { ...snapshot, queuedTurns: page.queued_turns } } })
-  } catch (error) { set({ error: errorMessage(error) }) }
+    await action()
+    setSnapshotQueue(sessionId, await client.queue(sessionId), set, get)
+    return true
+  } catch (error) {
+    const refreshed = await client.queue(sessionId).catch(() => null)
+    if (refreshed) setSnapshotQueue(sessionId, refreshed, set, get)
+    set({ error: errorMessage(error) })
+    return false
+  }
+}
+
+function setSnapshotQueue(sessionId: string, queuedTurns: QueuedTurn[], set: (value: Partial<AppState>) => void, get: () => AppState): void {
+  const snapshot = get().snapshots[sessionId]
+  if (!snapshot) return
+  const next = { ...snapshot, queuedTurns, cachedAt: Date.now() }
+  set({ snapshots: { ...get().snapshots, [sessionId]: next } })
+  void saveSnapshot(get().serverURL, next)
 }
 
 function healthActiveSessions(health: Health): Set<string> {

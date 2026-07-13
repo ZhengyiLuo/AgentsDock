@@ -19,6 +19,27 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-12 - Mobile keyboard, dismissal, media, and queue UX audit
+
+- Wrapped the active chat workspace in iOS keyboard avoidance so the composer
+  and visible timeline resize above the software keyboard instead of being
+  covered by it. Timeline drags continue to dismiss the keyboard interactively.
+- Converted full-screen mobile dialogs, chat details, terminal, media, and code
+  review presentations to native iOS page sheets with swipe-down dismissal.
+  Media preview now has an explicit leading Back control as well as the native
+  dismissal gesture.
+- Repaired queued-message actions to carry their owning session ID instead of
+  reading whichever chat happens to be selected. `Send now` now has a visible
+  busy state, uses the server's interrupt/run-now endpoint, handles the known
+  response-vs-queue-removal race, refreshes and persists the queue, and scrolls
+  to the newly started turn only after success.
+- Made multiple queued messages vertically scrollable and kept edit, reorder,
+  remove, and send-now actions disabled while a mutation is in flight.
+- React typecheck and Release builds pass for both the iPhone 17 Pro and iPad
+  Pro 13-inch simulators. A first clean build filled the disk in a generated
+  DerivedData directory; only that failed directory was removed, then both
+  builds passed using the established simulator cache.
+
 ## 2026-07-12 - Restore iPhone edge-swipe navigation in build 61
 
 - The React mobile rewrite exposed a Back button but had no interactive back

@@ -146,6 +146,9 @@ export class AgentServerClient {
     const value = await this.post<{ stopped?: boolean; ok?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {})
     return value.stopped ?? value.ok ?? true
   }
+  async queue(sessionId: string): Promise<QueuedTurn[]> {
+    return (await this.sessionPage(sessionId, { limit: 1, tail: true, visible: false })).queued_turns
+  }
   async updateQueued(sessionId: string, queuedId: string, prompt: string): Promise<void> {
     await this.patch(`/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}`, { prompt })
   }

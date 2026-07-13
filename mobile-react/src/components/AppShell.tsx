@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BackHandler, Linking, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
+import { BackHandler, Linking, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { AlertCircle, PanelRight, Settings, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
@@ -78,8 +79,8 @@ export function AppShell() {
     <ProcessDialog visible={processes} sessionId={selected?.id ?? null} onClose={() => setProcesses(false)} />
     <TmuxDialog visible={tmux} sessionId={selected?.id ?? null} onClose={() => setTmux(false)} />
     <CodeReview sessionId={selected?.id ?? ''} runId={reviewRun} onClose={() => setReviewRun(null)} />
-    <Modal visible={options && Boolean(selected)} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setOptions(false)}>{selected ? <View style={[styles.fill, { backgroundColor: colors.background }]}><View style={styles.modalTop}><Text style={[styles.modalTitle, { color: colors.text }]}>Chat details</Text><IconButton icon={X} onPress={() => setOptions(false)} label="Close" /></View><Inspector sessionId={selected.id} onDigest={() => { setOptions(false); setDigest(true) }} onJob={jobId => { setOptions(false); setJobEditor(jobId ?? 'new') }} onTerminal={() => { setOptions(false); setTerminal(true) }} onProcesses={() => { setOptions(false); setProcesses(true) }} onTmux={() => { setOptions(false); setTmux(true) }} /></View> : null}</Modal>
-    <Modal visible={terminal && Boolean(selected)} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setTerminal(false)}>{selected ? <TerminalView session={selected} onClose={() => setTerminal(false)} /> : null}</Modal>
+    <Modal visible={options && Boolean(selected)} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'} allowSwipeDismissal onRequestClose={() => setOptions(false)}>{selected ? <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]} edges={['bottom']}><View style={styles.modalGrabber} /><View style={styles.modalTop}><Text style={[styles.modalTitle, { color: colors.text }]}>Chat details</Text><IconButton icon={X} onPress={() => setOptions(false)} label="Close" /></View><Inspector sessionId={selected.id} onDigest={() => { setOptions(false); setDigest(true) }} onJob={jobId => { setOptions(false); setJobEditor(jobId ?? 'new') }} onTerminal={() => { setOptions(false); setTerminal(true) }} onProcesses={() => { setOptions(false); setProcesses(true) }} onTmux={() => { setOptions(false); setTmux(true) }} /></SafeAreaView> : null}</Modal>
+    <Modal visible={terminal && Boolean(selected)} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'} allowSwipeDismissal onRequestClose={() => setTerminal(false)}>{selected ? <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]} edges={['top', 'bottom']}><TerminalView session={selected} onClose={() => setTerminal(false)} /></SafeAreaView> : null}</Modal>
   </View>
 }
 
@@ -120,5 +121,5 @@ const styles = StyleSheet.create({
   fill: { flex: 1 }, workspace: { flex: 1, flexDirection: 'row' }, chat: { flex: 1, minWidth: 0 }, mobileChatPane: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 2 },
   restoreInspector: { position: 'absolute', top: 17, right: 10, width: 35, height: 35, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   error: { position: 'absolute', left: 12, right: 12, bottom: 12, minHeight: 50, maxWidth: 740, alignSelf: 'center', borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 }, errorText: { flex: 1, fontSize: 12 },
-  modalTop: { height: 54, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' }, modalTitle: { flex: 1, fontSize: 16, fontWeight: '800' }, connectionSettings: { position: 'absolute', alignSelf: 'center', top: '58%', minHeight: 38, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  modalGrabber: { alignSelf: 'center', width: 36, height: 5, marginTop: 7, borderRadius: 3, backgroundColor: '#8a8a8a88' }, modalTop: { height: 54, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' }, modalTitle: { flex: 1, fontSize: 16, fontWeight: '800' }, connectionSettings: { position: 'absolute', alignSelf: 'center', top: '58%', minHeight: 38, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
 })

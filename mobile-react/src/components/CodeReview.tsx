@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import * as Clipboard from 'expo-clipboard'
 import { Copy, X } from 'lucide-react-native'
 import { client } from '../store/useAppStore'
@@ -20,14 +21,14 @@ export function CodeReview({ sessionId, runId, onClose }: { sessionId: string; r
   }, [runId, sessionId])
   const files = useMemo(() => parseDiff(diff), [diff])
   const file = files[selected]
-  return <Modal visible={Boolean(runId)} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+  return <Modal visible={Boolean(runId)} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'} allowSwipeDismissal onRequestClose={onClose}>
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <View style={[styles.header, { borderColor: colors.border }]}><Text style={[styles.title, { color: colors.text }]}>Review</Text><Text style={{ color: colors.green }}>+{files.reduce((sum, value) => sum + value.additions, 0)}</Text><Text style={{ color: colors.red }}>-{files.reduce((sum, value) => sum + value.deletions, 0)}</Text><View style={{ flex: 1 }} /><IconButton icon={Copy} onPress={() => void Clipboard.setStringAsync(diff)} label="Copy diff" /><IconButton icon={X} onPress={onClose} label="Close" /></View>
       {loading ? <Loading label="Loading complete diff" /> : <View style={styles.workspace}>
         <ScrollView style={[styles.files, { borderColor: colors.border }]} contentContainerStyle={{ padding: 6 }}>{files.map((value, index) => <Pressable key={`${value.path}:${index}`} onPress={() => setSelected(index)} style={[styles.file, { backgroundColor: index === selected ? colors.raised : 'transparent' }]}><Text style={{ flex: 1, color: colors.text, fontSize: 11, fontFamily: 'Menlo' }} numberOfLines={2}>{value.path}</Text><Text style={{ color: colors.green, fontSize: 10 }}>+{value.additions}</Text><Text style={{ color: colors.red, fontSize: 10 }}>-{value.deletions}</Text></Pressable>)}</ScrollView>
         <ScrollView style={styles.diff} horizontal contentContainerStyle={{ minWidth: '100%' }}><ScrollView contentContainerStyle={{ paddingVertical: 8 }}>{file?.lines.map((line, index) => <View key={index} style={[styles.line, line.startsWith('+') && !line.startsWith('+++') ? { backgroundColor: '#123c25' } : line.startsWith('-') && !line.startsWith('---') ? { backgroundColor: '#421d20' } : undefined]}><Text selectable style={[styles.lineNumber, { color: colors.muted }]}>{index + 1}</Text><Text selectable style={[styles.code, { color: line.startsWith('+') ? '#68e393' : line.startsWith('-') ? '#ff858b' : colors.text }]}>{line || ' '}</Text></View>)}</ScrollView></ScrollView>
       </View>}
-    </View>
+    </SafeAreaView>
   </Modal>
 }
 

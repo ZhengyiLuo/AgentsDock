@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import { ArrowDown, ArrowUp, CornerDownRight, Paperclip, Send, Square, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
@@ -42,7 +42,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
 
   return (
     <View style={[styles.shell, { borderColor: colors.border, backgroundColor: colors.background }]}>
-      {queued.length ? <QueueShelf sessionId={sessionId} /> : null}
+      {queued.length ? <QueueShelf sessionId={sessionId} onSent={onSent} /> : null}
       {(uploads.length || pending.length) ? <View style={styles.uploads}>
         {uploads.map(file => <View key={file.id} style={[styles.upload, { backgroundColor: colors.raised }]}><Paperclip size={13} color={colors.muted} /><Text style={[styles.uploadName, { color: colors.text }]} numberOfLines={1}>{file.filename}</Text><IconButton icon={X} size={13} onPress={() => removeUpload(file.id)} label="Remove attachment" /></View>)}
         {pending.map(file => <View key={file.uri} style={[styles.upload, { backgroundColor: colors.raised }]}><Text style={{ color: colors.muted, fontSize: 11 }}>Uploading {file.name}…</Text></View>)}
@@ -80,7 +80,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
   )
 }
 
-function QueueShelf({ sessionId }: { sessionId: string }) {
+function QueueShelf({ sessionId, onSent }: { sessionId: string; onSent: () => void }) {
   const colors = usePalette()
   const turns = useAppStore(state => state.snapshots[sessionId]?.queuedTurns) ?? EMPTY_QUEUE
   const update = useAppStore(state => state.updateQueued)
@@ -89,15 +89,34 @@ function QueueShelf({ sessionId }: { sessionId: string }) {
   const runNow = useAppStore(state => state.runQueuedNow)
   const [editing, setEditing] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  const [busyTurn, setBusyTurn] = useState<string | null>(null)
+  const commitEdit = async (turn: QueuedTurn) => {
+    const prompt = editText.trim()
+    setEditing(null)
+    if (prompt && prompt !== turn.prompt) await update(sessionId, turn.queued_id, prompt)
+  }
+  const act = async (queuedId: string, action: () => Promise<boolean>) => {
+    if (busyTurn) return
+    setBusyTurn(queuedId)
+    try { return await action() } finally { setBusyTurn(null) }
+  }
   return <View style={styles.queue}>
     <Text style={[styles.queueLabel, { color: colors.muted }]}>Queued {turns.length}</Text>
-    {turns.map((turn, index) => <View key={turn.queued_id} style={[styles.queueRow, { backgroundColor: colors.queued, borderColor: colors.yellow }]}>
-      {editing === turn.queued_id ? <TextInput autoFocus value={editText} onChangeText={setEditText} multiline style={[styles.queueInput, { color: colors.text }]} onBlur={() => { if (editText.trim() && editText !== turn.prompt) void update(turn.queued_id, editText.trim()); setEditing(null) }} /> : <Pressable style={{ flex: 1 }} onPress={() => { setEditing(turn.queued_id); setEditText(turn.prompt) }}><Text style={[styles.queueText, { color: colors.text }]} numberOfLines={3}>{turn.display_prompt || turn.prompt}</Text></Pressable>}
-      <Pressable onPress={() => void runNow(turn.queued_id)} style={styles.runNow}><CornerDownRight size={13} color={colors.yellow} /><Text style={{ color: colors.yellow, fontSize: 11, fontWeight: '700' }}>Now</Text></Pressable>
-      <IconButton icon={ArrowUp} size={13} disabled={index === 0} onPress={() => void move(turn.queued_id, 'up')} label="Move up" />
-      <IconButton icon={ArrowDown} size={13} disabled={index === turns.length - 1} onPress={() => void move(turn.queued_id, 'down')} label="Move down" />
-      <IconButton icon={Trash2} size={13} onPress={() => void remove(turn.queued_id)} label="Remove from queue" />
-    </View>)}
+    <ScrollView style={styles.queueList} contentContainerStyle={styles.queueListContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+      {turns.map((turn, index) => {
+        const busy = busyTurn === turn.queued_id
+        return <View key={turn.queued_id} style={[styles.queueRow, { backgroundColor: colors.queued, borderColor: colors.yellow }]}>
+          {editing === turn.queued_id ? <TextInput autoFocus value={editText} onChangeText={setEditText} multiline style={[styles.queueInput, { color: colors.text }]} onBlur={() => void commitEdit(turn)} /> : <Pressable style={styles.queuePrompt} onPress={() => { setEditing(turn.queued_id); setEditText(turn.prompt) }}><Text style={[styles.queueText, { color: colors.text }]} numberOfLines={3}>{turn.display_prompt || turn.prompt}</Text></Pressable>}
+          <Pressable accessibilityRole="button" accessibilityLabel="Send queued message now" disabled={Boolean(busyTurn)} onPress={() => void act(turn.queued_id, () => runNow(sessionId, turn.queued_id)).then(sent => { if (sent) onSent() })} style={({ pressed }) => [styles.runNow, { opacity: pressed || busyTurn && !busy ? 0.45 : 1 }]}>
+            {busy ? <ActivityIndicator size="small" color={colors.yellow} /> : <CornerDownRight size={14} color={colors.yellow} />}
+            <Text style={{ color: colors.yellow, fontSize: 11, fontWeight: '800' }}>Send now</Text>
+          </Pressable>
+          <IconButton icon={ArrowUp} size={13} disabled={index === 0 || Boolean(busyTurn)} onPress={() => void act(turn.queued_id, () => move(sessionId, turn.queued_id, 'up'))} label="Move up" />
+          <IconButton icon={ArrowDown} size={13} disabled={index === turns.length - 1 || Boolean(busyTurn)} onPress={() => void act(turn.queued_id, () => move(sessionId, turn.queued_id, 'down'))} label="Move down" />
+          <IconButton icon={Trash2} size={13} disabled={Boolean(busyTurn)} onPress={() => void act(turn.queued_id, () => remove(sessionId, turn.queued_id))} label="Remove from queue" />
+        </View>
+      })}
+    </ScrollView>
   </View>
 }
 
@@ -109,6 +128,7 @@ const styles = StyleSheet.create({
   runtime: { flexDirection: 'row', alignItems: 'center', gap: 6 }, backend: { fontSize: 12, fontWeight: '700' },
   send: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }, steer: { position: 'absolute', right: 53, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 3 },
   uploads: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 }, upload: { maxWidth: 220, minHeight: 30, paddingLeft: 8, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 5 }, uploadName: { flex: 1, fontSize: 11 },
-  queue: { gap: 5, maxHeight: 210 }, queueLabel: { fontSize: 10, fontWeight: '800', textAlign: 'right' },
-  queueRow: { minHeight: 39, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, flexDirection: 'row', alignItems: 'center', paddingLeft: 10, gap: 2 }, queueText: { fontSize: 12.5, lineHeight: 17 }, queueInput: { flex: 1, minHeight: 36, fontSize: 12.5, paddingVertical: 6 }, runNow: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 5 },
+  queue: { gap: 5, maxHeight: 236 }, queueLabel: { fontSize: 10, fontWeight: '800', textAlign: 'right' },
+  queueList: { maxHeight: 210 }, queueListContent: { gap: 5 },
+  queueRow: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 7, flexDirection: 'row', alignItems: 'center', paddingLeft: 10, gap: 2 }, queuePrompt: { flex: 1, minWidth: 60, paddingVertical: 8 }, queueText: { fontSize: 12.5, lineHeight: 17 }, queueInput: { flex: 1, minHeight: 40, fontSize: 12.5, paddingVertical: 6 }, runNow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 7 },
 })
