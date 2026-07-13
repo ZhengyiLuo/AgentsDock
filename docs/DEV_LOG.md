@@ -31,6 +31,15 @@ painful to rediscover later.
   changes only the Electron/macOS artifact.
 - The matching standalone server revision is `6f87ad5`, already pushed to
   GitHub and deployed to the active `sonic` service.
+- All 165 Electron tests and TypeScript validation passed. Xcode preserved the
+  required MAS sandbox/JIT application-group contract and App Store Connect
+  accepted AgentsDock 0.1.1 (62); the package is processing. The established
+  prebuilt Electron dSYM notices were non-blocking.
+- Rebuilt the canonical direct app at `dist/AgentsDock.app`, synced it directly
+  to `/Users/zen/agi/AgentsDock.app` on the MacBook Air, and verified its deep
+  signature and bundle version 62 remotely.
+- Reconfirmed that `sonic` is active and its deployed `agent_server.py` SHA-256
+  is byte-identical to standalone server commit `6f87ad5`.
 
 ## 2026-07-13 - Index whole-history search off the request path
 
