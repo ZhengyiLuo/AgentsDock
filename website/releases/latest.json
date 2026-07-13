@@ -1,0 +1,21 @@
+{
+  "version": "0.1.1-preview",
+  "published_at": "2026-07-13",
+  "notes_url": "https://github.com/ZhengyiLuo/ZenithDock/releases",
+  "platforms": {
+    "macos": {
+      "available": false,
+      "filename": "AgentsDock-0.1.1-arm64.dmg",
+      "url": "./releases/AgentsDock-0.1.1-arm64.dmg",
+      "sha256": "",
+      "label": "macOS package slot is ready; publish the signed DMG to enable it."
+    },
+    "linux": {
+      "available": false,
+      "filename": "AgentsDock-0.1.1-x86_64.AppImage",
+      "url": "./releases/AgentsDock-0.1.1-x86_64.AppImage",
+      "sha256": "",
+      "label": "Linux package slot is ready; publish the AppImage to enable it."
+    }
+  }
+}

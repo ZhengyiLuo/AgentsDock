@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock is a self-hosted research workspace for Claude Code and Codex, with persistent chats, rich media, scheduled jobs, and integrated terminals." />
+    <meta name="theme-color" content="#111412" />
+    <title>AgentsDock - Claude and Codex, built for serious work</title>
+    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#product">Product</a>
+        <a href="#self-hosted">Self-hosted</a>
+        <a href="#downloads">Downloads</a>
+      </nav>
+      <a class="header-action" href="#downloads">Get AgentsDock</a>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-shade" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="live-dot"></span> A control room for agent work</p>
+          <h1 id="hero-title">AgentsDock</h1>
+          <p class="hero-lede">Claude and Codex, together in one self-hosted workspace built for research, long-running jobs, and the files that come out of them.</p>
+          <div class="hero-actions" aria-label="Downloads">
+            <button class="download-button primary" type="button" data-download="macos">
+              <span class="button-icon" aria-hidden="true">⌘</span>
+              <span><strong>Download for macOS</strong><small>Apple silicon</small></span>
+            </button>
+            <button class="download-button secondary" type="button" data-download="linux">
+              <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
+              <span><strong>Download for Linux</strong><small>x64 AppImage</small></span>
+            </button>
+          </div>
+          <p class="release-line"><span id="release-version">Private preview</span> · Your agents and data stay on your server.</p>
+        </div>
+        <div class="hero-proof" aria-label="Key capabilities">
+          <span>Claude Code</span>
+          <span>Codex CLI</span>
+          <span>Persistent tmux</span>
+          <span>Rich media</span>
+        </div>
+      </section>
+
+      <section class="positioning" id="product">
+        <p class="section-kicker">For research and more</p>
+        <h2>One place for the conversation, the computation, and the result.</h2>
+        <p>AgentsDock keeps long-running agent work legible. Follow the reasoning without drowning in tool output, inspect the live terminal, and keep every video, image, file, and scheduled run attached to the right chat.</p>
+      </section>
+
+      <section class="product-stage" aria-label="AgentsDock product view">
+        <div class="product-frame">
+          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span><strong>AgentsDock</strong></div>
+          <img src="./assets/agentsdock-terminal.png" alt="AgentsDock showing a research conversation, inspector, scheduled jobs, and a persistent tmux terminal" />
+        </div>
+        <div class="stage-notes" aria-label="Product highlights">
+          <article><span>01</span><strong>Keep every run in context</strong><p>Chats, jobs, files, and terminals remain attached to the same research thread.</p></article>
+          <article><span>02</span><strong>See the real output</strong><p>Play videos, inspect image grids, download files, and drag artifacts into your next workflow.</p></article>
+          <article><span>03</span><strong>Stay close to the machine</strong><p>Open the chat’s persistent tmux workspace without leaving the conversation.</p></article>
+        </div>
+      </section>
+
+      <section class="feature-band" aria-labelledby="feature-title">
+        <div class="feature-heading">
+          <p class="section-kicker">The useful parts, connected</p>
+          <h2 id="feature-title">Built for work that takes longer than one answer.</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Claude + Codex</h3><p>Choose the right backend, model, and reasoning level for each chat without splitting your work across apps.</p></article>
+          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>Research-ready timelines</h3><p>Compact reasoning traces, searchable history, readable markdown, code diffs, and a navigator for very long threads.</p></article>
+          <article class="feature-item accent-amber"><span class="feature-index">03</span><h3>Videos that belong in chat</h3><p>Preview media as it arrives, open full players, browse files in a dense grid, and download or drag them anywhere.</p></article>
+          <article class="feature-item accent-red"><span class="feature-index">04</span><h3>Jobs, queues, and handoffs</h3><p>Schedule recurring work, steer queued turns, and create an LLM-generated digest that carries context into another agent.</p></article>
+          <article class="feature-item accent-cyan"><span class="feature-index">05</span><h3>Persistent terminals</h3><p>Every chat gets a durable tmux workspace. Reopen it later and continue exactly where the terminal left off.</p></article>
+          <article class="feature-item accent-white"><span class="feature-index">06</span><h3>Files stay first-class</h3><p>Pin important artifacts, search across active histories, and keep outputs organized with folders and chat-level media views.</p></article>
+        </div>
+      </section>
+
+      <section class="self-hosted" id="self-hosted" aria-labelledby="hosted-title">
+        <div class="hosted-copy">
+          <p class="section-kicker">Fully self-hosted</p>
+          <h2 id="hosted-title">The app is remote. The control stays yours.</h2>
+          <p>Run the lightweight AgentsDock server beside Claude Code and Codex CLI. The desktop app connects over your network or Tailscale, while source code, credentials, chat history, terminals, and large artifacts remain on infrastructure you control.</p>
+          <a href="https://github.com/ZhengyiLuo/ZenithBotServer" target="_blank" rel="noreferrer">View the server on GitHub <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="architecture" aria-label="AgentsDock self-hosted architecture">
+          <div class="arch-node client"><small>Mac or Linux</small><strong>AgentsDock</strong><span>Chat · Media · Terminal</span></div>
+          <div class="arch-link"><span>Encrypted network</span><b aria-hidden="true">→</b></div>
+          <div class="arch-node server"><small>Your machine</small><strong>AgentsDock Server</strong><span>Claude CLI · Codex CLI · tmux</span></div>
+        </div>
+      </section>
+
+      <section class="workflow" aria-labelledby="workflow-title">
+        <p class="section-kicker">A better research loop</p>
+        <h2 id="workflow-title">Ask. Run. Inspect. Hand off.</h2>
+        <ol>
+          <li><span>1</span><strong>Start in context</strong><p>Choose Claude or Codex and point the chat at the right working directory.</p></li>
+          <li><span>2</span><strong>Let work continue</strong><p>Queue follow-ups, schedule checks, and watch the active state without interrupting the agent.</p></li>
+          <li><span>3</span><strong>Review the evidence</strong><p>Open code changes, media, files, live processes, and the attached terminal.</p></li>
+          <li><span>4</span><strong>Carry it forward</strong><p>Create a concise digest and send the important context into the next chat.</p></li>
+        </ol>
+      </section>
+
+      <section class="downloads" id="downloads" aria-labelledby="download-title">
+        <div>
+          <p class="section-kicker">Desktop preview</p>
+          <h2 id="download-title">Bring your agents into the Dock.</h2>
+          <p>Install the desktop client, connect it to your AgentsDock server, and keep Claude and Codex available from every machine you use.</p>
+        </div>
+        <div class="download-options">
+          <article>
+            <div><span class="platform-mark">⌘</span><p><strong>macOS</strong><small>Apple silicon · macOS 14+</small></p></div>
+            <button type="button" data-download="macos">Download .dmg</button>
+            <code id="macos-checksum">SHA256 published with release</code>
+          </article>
+          <article>
+            <div><span class="platform-mark terminal-icon">&gt;_</span><p><strong>Linux</strong><small>x86_64 · AppImage</small></p></div>
+            <button type="button" data-download="linux">Download AppImage</button>
+            <code id="linux-checksum">SHA256 published with release</code>
+          </article>
+        </div>
+        <p class="download-status" id="download-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>Claude and Codex, built for research that keeps moving.</p>
+      <div><a href="https://github.com/ZhengyiLuo/ZenithDock">GitHub</a><a href="#self-hosted">Server setup</a><a href="#downloads">Downloads</a></div>
+    </footer>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
