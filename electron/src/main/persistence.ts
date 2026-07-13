@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSnapshot, TimelineSearchResult, ViewState } from '../shared/types'
-import { searchEventRole, searchableEventText, searchEventsAcrossSessions, searchSnippet, searchTokens } from './search'
+import { isSearchableEvent, searchEventRole, searchableEventText, searchFtsQuery, searchSnippet, searchTokens } from './search'
 
 function parseJSON<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string') return fallback
@@ -28,8 +28,8 @@ function sessionSort(a: Session, b: Session): number {
 export class LocalCache {
   private readonly db: DatabaseSync
 
-  constructor() {
-    this.db = new DatabaseSync(join(app.getPath('userData'), 'agentsdock.sqlite'))
+  constructor(path?: string) {
+    this.db = new DatabaseSync(path ?? join(app.getPath('userData'), 'agentsdock.sqlite'))
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
@@ -49,6 +49,23 @@ export class LocalCache {
         PRIMARY KEY (server_id, session_id, event_id)
       );
       CREATE INDEX IF NOT EXISTS events_order ON events(server_id, session_id, seq);
+      CREATE VIRTUAL TABLE IF NOT EXISTS event_search USING fts5(
+        text,
+        server_id UNINDEXED,
+        session_id UNINDEXED,
+        event_id UNINDEXED,
+        seq UNINDEXED,
+        ts UNINDEXED,
+        role UNINDEXED,
+        tokenize='unicode61 remove_diacritics 2'
+      );
+      CREATE TABLE IF NOT EXISTS event_search_keys (
+        server_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        search_rowid INTEGER,
+        PRIMARY KEY (server_id, session_id, event_id)
+      ) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS queued_turns (
         server_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
@@ -105,6 +122,8 @@ export class LocalCache {
     if (!timelineColumns.some(column => column.name === 'known_total')) this.db.exec('ALTER TABLE timeline_state ADD COLUMN known_total INTEGER')
   }
 
+  close(): void { this.db.close() }
+
   sessions(serverId: string): Session[] {
     return this.db.prepare('SELECT json FROM sessions WHERE server_id = ?')
       .all(serverId).map(row => parseJSON((row as { json: string }).json, {} as Session))
@@ -119,9 +138,15 @@ export class LocalCache {
     const live = new Set(sessions.map(session => session.id))
     this.db.exec('BEGIN')
     try {
-      for (const session of sessions) put.run(serverId, session.id, JSON.stringify(session), Date.now())
+      for (const session of sessions) {
+        put.run(serverId, session.id, JSON.stringify(session), Date.now())
+        if (session.archived) this.removeSearchEntries(serverId, session.id)
+      }
       for (const cached of this.sessions(serverId)) {
-        if (!live.has(cached.id)) this.db.prepare('DELETE FROM sessions WHERE server_id = ? AND session_id = ?').run(serverId, cached.id)
+        if (!live.has(cached.id)) {
+          this.removeSearchEntries(serverId, cached.id)
+          this.db.prepare('DELETE FROM sessions WHERE server_id = ? AND session_id = ?').run(serverId, cached.id)
+        }
       }
       this.db.exec('COMMIT')
     } catch (error) {
@@ -131,15 +156,24 @@ export class LocalCache {
   }
 
   putSession(serverId: string, session: Session): void {
-    this.db.prepare(`
-      INSERT INTO sessions(server_id, session_id, json, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(server_id, session_id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at
-    `).run(serverId, session.id, JSON.stringify(session), Date.now())
+    this.db.exec('BEGIN')
+    try {
+      this.db.prepare(`
+        INSERT INTO sessions(server_id, session_id, json, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(server_id, session_id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at
+      `).run(serverId, session.id, JSON.stringify(session), Date.now())
+      if (session.archived) this.removeSearchEntries(serverId, session.id)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
   }
 
   removeSession(serverId: string, sessionId: string): void {
     this.db.exec('BEGIN')
     try {
+      this.removeSearchEntries(serverId, sessionId)
       for (const table of ['sessions', 'events', 'queued_turns', 'files', 'view_state', 'timeline_state', 'pins']) {
         this.db.prepare(`DELETE FROM ${table} WHERE server_id = ? AND session_id = ?`).run(serverId, sessionId)
       }
@@ -195,55 +229,61 @@ export class LocalCache {
     const tokens = searchTokens(query)
     if (!tokens.length) return []
     const rows = this.db.prepare(`
-      SELECT json FROM events
-      WHERE server_id = ? AND session_id = ? AND (
-        json_extract(json, '$.type') IN (
-          'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
-          'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
-          'artifact_created', 'artifact_error', 'file_uploaded',
-          'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted'
-        ) OR json_extract(json, '$.type') LIKE '%_error'
-      )
-      ORDER BY seq DESC
-    `).all(serverId, sessionId)
-    const results: TimelineSearchResult[] = []
-    for (const row of rows) {
-      const event = parseJSON((row as { json: string }).json, {} as Event)
-      const text = searchableEventText(event)
-      const folded = text.toLocaleLowerCase()
-      if (!text || !tokens.every(token => folded.includes(token))) continue
-      results.push({
-        session_id: sessionId,
-        event_id: event.id,
-        seq: event.seq,
-        ts: event.ts,
-        role: searchEventRole(event),
-        snippet: searchSnippet(text, tokens)
-      })
-      if (results.length >= Math.max(1, Math.min(100, limit))) break
-    }
-    return results
+      SELECT event_id, seq, ts, role, text
+      FROM event_search
+      WHERE event_search MATCH ? AND server_id = ? AND session_id = ?
+      ORDER BY CAST(seq AS INTEGER) DESC
+      LIMIT ?
+    `).all(searchFtsQuery(query), serverId, sessionId, Math.max(1, Math.min(100, limit))) as Array<{
+      event_id: string; seq: number | string; ts: string | null; role: TimelineSearchResult['role']; text: string
+    }>
+    return rows.map(row => ({
+      session_id: sessionId,
+      event_id: row.event_id,
+      seq: Number(row.seq),
+      ts: row.ts ?? undefined,
+      role: row.role,
+      snippet: searchSnippet(row.text, tokens)
+    }))
   }
 
   searchSessions(serverId: string, query: string, limit = 40): TimelineSearchResult[] {
     const tokens = searchTokens(query)
     if (!tokens.length) return []
     const rows = this.db.prepare(`
-      SELECT session_id, json FROM events
-      WHERE server_id = ? AND (
-        json_extract(json, '$.type') IN (
-          'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
-          'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
-          'artifact_created', 'artifact_error', 'file_uploaded',
-          'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted'
-        ) OR json_extract(json, '$.type') LIKE '%_error'
+      WITH ranked AS (
+        SELECT event_search.session_id, event_id, seq, ts, role, text,
+               ROW_NUMBER() OVER (
+                 PARTITION BY event_search.session_id
+                 ORDER BY COALESCE(ts, '') DESC, CAST(seq AS INTEGER) DESC
+               ) AS match_rank,
+               COUNT(*) OVER (PARTITION BY event_search.session_id) AS match_count
+        FROM event_search
+        JOIN sessions
+          ON sessions.server_id = event_search.server_id
+         AND sessions.session_id = event_search.session_id
+        WHERE event_search MATCH ?
+          AND event_search.server_id = ?
+          AND COALESCE(json_extract(sessions.json, '$.archived'), 0) = 0
       )
-      ORDER BY COALESCE(json_extract(json, '$.ts'), '') DESC, seq DESC
-    `).all(serverId)
-    function* events(): Generator<Event> {
-      for (const row of rows) yield parseJSON((row as { json: string }).json, {} as Event)
-    }
-    return searchEventsAcrossSessions(events(), query, limit)
+      SELECT session_id, event_id, seq, ts, role, text, match_count
+      FROM ranked
+      WHERE match_rank = 1
+      ORDER BY COALESCE(ts, '') DESC, CAST(seq AS INTEGER) DESC
+      LIMIT ?
+    `).all(searchFtsQuery(query), serverId, Math.max(1, Math.min(100, limit))) as Array<{
+      session_id: string; event_id: string; seq: number | string; ts: string | null
+      role: TimelineSearchResult['role']; text: string; match_count: number
+    }>
+    return rows.map(row => ({
+      session_id: row.session_id,
+      event_id: row.event_id,
+      seq: Number(row.seq),
+      ts: row.ts ?? undefined,
+      role: row.role,
+      snippet: searchSnippet(row.text, tokens),
+      match_count: Number(row.match_count)
+    }))
   }
 
   hasEventsBefore(serverId: string, sessionId: string, before: number): boolean {
@@ -282,10 +322,16 @@ export class LocalCache {
     const put = this.db.prepare(`
       INSERT INTO events(server_id, session_id, seq, event_id, json) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(server_id, session_id, event_id) DO UPDATE SET seq = excluded.seq, json = excluded.json
+      WHERE events.seq <> excluded.seq OR events.json <> excluded.json
     `)
     this.db.exec('BEGIN')
     try {
-      for (const event of events) put.run(serverId, sessionId, event.seq, event.id, JSON.stringify(event))
+      const changed: Event[] = []
+      for (const event of events) {
+        const result = put.run(serverId, sessionId, event.seq, event.id, JSON.stringify(event))
+        if (result.changes > 0) changed.push(event)
+      }
+      if (this.sessionIsSearchable(serverId, sessionId)) this.indexSearchEvents(serverId, sessionId, changed)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -301,11 +347,95 @@ export class LocalCache {
     this.db.exec('BEGIN')
     try {
       this.db.prepare('DELETE FROM events WHERE server_id = ? AND session_id = ?').run(serverId, sessionId)
+      this.removeSearchEntries(serverId, sessionId)
       for (const event of events) put.run(serverId, sessionId, event.seq, event.id, JSON.stringify(event))
+      if (this.sessionIsSearchable(serverId, sessionId)) this.indexSearchEvents(serverId, sessionId, events)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
       throw error
+    }
+  }
+
+  backfillSearchIndexBatch(limit = 400): number {
+    const rows = this.db.prepare(`
+      SELECT events.server_id, events.session_id, events.json
+      FROM events
+      JOIN sessions
+        ON sessions.server_id = events.server_id
+       AND sessions.session_id = events.session_id
+      LEFT JOIN event_search_keys
+        ON event_search_keys.server_id = events.server_id
+       AND event_search_keys.session_id = events.session_id
+       AND event_search_keys.event_id = events.event_id
+      WHERE event_search_keys.event_id IS NULL
+        AND COALESCE(json_extract(sessions.json, '$.archived'), 0) = 0
+        AND (
+          json_extract(events.json, '$.type') IN (
+            'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
+            'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
+            'artifact_created', 'artifact_error', 'file_uploaded',
+            'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted', 'handoff_digest_sent'
+          ) OR json_extract(events.json, '$.type') LIKE '%_error'
+        )
+      ORDER BY events.server_id, events.session_id, events.seq
+      LIMIT ?
+    `).all(Math.max(1, Math.min(2_000, limit))) as Array<{ server_id: string; session_id: string; json: string }>
+    if (!rows.length) return 0
+    this.db.exec('BEGIN')
+    try {
+      for (const row of rows) this.indexSearchEvents(row.server_id, row.session_id, [parseJSON(row.json, {} as Event)])
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    return rows.length
+  }
+
+  private removeSearchEntries(serverId: string, sessionId: string): void {
+    this.db.prepare(`
+      DELETE FROM event_search
+      WHERE rowid IN (
+        SELECT search_rowid FROM event_search_keys
+        WHERE server_id = ? AND session_id = ? AND search_rowid IS NOT NULL
+      )
+    `).run(serverId, sessionId)
+    this.db.prepare('DELETE FROM event_search_keys WHERE server_id = ? AND session_id = ?').run(serverId, sessionId)
+  }
+
+  private sessionIsSearchable(serverId: string, sessionId: string): boolean {
+    const row = this.db.prepare('SELECT json FROM sessions WHERE server_id = ? AND session_id = ?')
+      .get(serverId, sessionId) as { json: string } | undefined
+    return !row || !parseJSON(row.json, {} as Session).archived
+  }
+
+  private indexSearchEvents(serverId: string, sessionId: string, events: Event[]): void {
+    const existing = this.db.prepare(`
+      SELECT search_rowid FROM event_search_keys
+      WHERE server_id = ? AND session_id = ? AND event_id = ?
+    `)
+    const deleteSearch = this.db.prepare('DELETE FROM event_search WHERE rowid = ?')
+    const deleteKey = this.db.prepare('DELETE FROM event_search_keys WHERE server_id = ? AND session_id = ? AND event_id = ?')
+    const insertSearch = this.db.prepare(`
+      INSERT INTO event_search(text, server_id, session_id, event_id, seq, ts, role)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    const insertKey = this.db.prepare(`
+      INSERT INTO event_search_keys(server_id, session_id, event_id, search_rowid)
+      VALUES (?, ?, ?, ?)
+    `)
+    for (const event of events) {
+      if (!event.id) continue
+      const current = existing.get(serverId, sessionId, event.id) as { search_rowid: number | null } | undefined
+      if (current?.search_rowid != null) deleteSearch.run(current.search_rowid)
+      if (current) deleteKey.run(serverId, sessionId, event.id)
+      if (!isSearchableEvent(event)) continue
+      const text = searchableEventText(event)
+      const result = text
+        ? insertSearch.run(text, serverId, sessionId, event.id, event.seq, event.ts ?? null, searchEventRole(event))
+        : null
+      insertKey.run(serverId, sessionId, event.id, result ? Number(result.lastInsertRowid) : null)
     }
   }
 

@@ -33,7 +33,11 @@ export function rankSessionsForSearch(sessions: Session[], query: string, histor
   return sessions
     .map((session, index) => {
       const nameRank = sessionNameMatchRank(session, clean)
-      const rank = nameRank ?? (historySessionIds.has(session.id) ? 10 : sessionMatchesQuery(session, clean) ? 20 : Number.POSITIVE_INFINITY)
+      const rank = nameRank ?? (session.archived
+        ? Number.POSITIVE_INFINITY
+        : historySessionIds.has(session.id) ? 10
+          : sessionMatchesQuery(session, clean) ? 20
+            : Number.POSITIVE_INFINITY)
       return { session, index, rank }
     })
     .filter(result => Number.isFinite(result.rank))

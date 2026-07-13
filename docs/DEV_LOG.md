@@ -22,6 +22,25 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-13 - Index whole-history search off the request path
+
+- Removed the server-wide JSONL walk from `/api/search`. A background task now
+  maintains the existing SQLite FTS5 index incrementally for dirty active chats
+  and performs a bounded full reconciliation every five minutes.
+- Added a persistent FTS5 index to the Electron cache. New events are indexed
+  transactionally, legacy cached events backfill in small yielding batches, and
+  repeated pages do not rewrite unchanged search rows.
+- Kept title matches immediate and first in the UI. Active chats can match full
+  history; archived chats deliberately match by title only.
+- Added short-lived, server-identity-scoped query caching and in-flight request
+  sharing so the sidebar and Command-P search surfaces do not issue duplicate
+  network work.
+- Added regressions for title-only archived search, shared in-flight searches,
+  global-vs-in-chat result deduplication, and indexed search across 12,000
+  cached events.
+- Expanded media in the resizable preview so images and videos use the complete
+  available stage while preserving their aspect ratio.
+
 ## 2026-07-13 - Rotation-safe mobile media grids and previews
 
 - Kept iPhones in the compact navigation hierarchy in both portrait and

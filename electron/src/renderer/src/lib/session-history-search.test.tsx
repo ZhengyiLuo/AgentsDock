@@ -1,14 +1,14 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TimelineSearchResult } from '@shared/types'
-import { useSessionHistorySearch } from './session-history-search'
+import { clearSessionHistorySearchCache, useSessionHistorySearch } from './session-history-search'
 
 function result(sessionId: string, snippet: string): TimelineSearchResult {
   return { session_id: sessionId, event_id: `${sessionId}-event`, seq: 1, role: 'assistant', snippet }
 }
 
 describe('whole-history session search', () => {
-  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+  afterEach(() => { clearSessionHistorySearchCache(); vi.useRealTimers(); vi.restoreAllMocks() })
 
   it('debounces requests and ignores a stale response from an older query', async () => {
     vi.useFakeTimers()
@@ -48,5 +48,22 @@ describe('whole-history session search', () => {
     act(() => { vi.advanceTimersByTime(500) })
     expect(searchHistory).not.toHaveBeenCalled()
     expect(hook.current).toEqual({ results: [], loading: false })
+  })
+
+  it('deduplicates identical in-flight searches across search surfaces', async () => {
+    vi.useFakeTimers()
+    const searchHistory = vi.fn().mockResolvedValue([result('shared', 'one request')])
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { sessions: { searchHistory } }
+    })
+    const first = renderHook(() => useSessionHistorySearch('shared query'))
+    const second = renderHook(() => useSessionHistorySearch('shared query'))
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(220) })
+
+    expect(searchHistory).toHaveBeenCalledTimes(1)
+    expect(first.result.current.results).toEqual([result('shared', 'one request')])
+    expect(second.result.current.results).toEqual([result('shared', 'one request')])
   })
 })

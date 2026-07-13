@@ -36,6 +36,16 @@ describe('chat search ranking', () => {
     expect(rankSessionsForSearch(sessions, '', new Set())).toBe(sessions)
     expect(sessionNameMatchRank(sessions[0], '')).toBe(0)
   })
+
+  it('searches archived chats by title only', () => {
+    const sessions = [
+      session('archived-title', 'Renderer archive', { archived: true }),
+      session('archived-content', 'Old work', { archived: true, cwd: '/work/renderer' }),
+      session('active-content', 'Current work')
+    ]
+    expect(rankSessionsForSearch(sessions, 'renderer', new Set(['archived-content', 'active-content'])).map(item => item.id))
+      .toEqual(['archived-title', 'active-content'])
+  })
 })
 
 describe('digest target sections', () => {

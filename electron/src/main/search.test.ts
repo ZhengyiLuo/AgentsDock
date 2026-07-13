@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Event } from '../shared/types'
-import { searchEventRole, searchableEventText, searchEventsAcrossSessions, searchSnippet, searchTokens } from './search'
+import { mergeTimelineSearchResults, searchEventRole, searchableEventText, searchEventsAcrossSessions, searchFtsQuery, searchSnippet, searchTokens } from './search'
 
 const event = (type: string, patch: Partial<Event> = {}): Event => ({
   id: 'event-1', session_id: 'chat-1', seq: 1, type, ts: '2026-07-09T10:00:00Z', ...patch
@@ -9,6 +9,7 @@ const event = (type: string, patch: Partial<Event> = {}): Event => ({
 describe('timeline history search', () => {
   it('keeps quoted phrases together and combines them with ordinary terms', () => {
     expect(searchTokens('renderer "force gate" audit')).toEqual(['renderer', 'force gate', 'audit'])
+    expect(searchFtsQuery('renderer "force gate" audit')).toBe('"renderer"* AND "force gate" AND "audit"*')
   })
 
   it('indexes complete assistant and structured error text', () => {
@@ -38,5 +39,14 @@ describe('timeline history search', () => {
       expect.objectContaining({ session_id: 'chat-a', event_id: 'new-a', role: 'assistant' }),
       expect.objectContaining({ session_id: 'chat-b', event_id: 'user-b', role: 'user' })
     ])
+  })
+
+  it('keeps every in-chat match but collapses the global result list by chat', () => {
+    const first = { session_id: 'chat-a', event_id: 'first', seq: 1, role: 'assistant' as const, snippet: 'first' }
+    const second = { session_id: 'chat-a', event_id: 'second', seq: 2, role: 'assistant' as const, snippet: 'second' }
+    expect(mergeTimelineSearchResults([first, second], [], 10, false).map(result => result.event_id))
+      .toEqual(['second', 'first'])
+    expect(mergeTimelineSearchResults([first, second], [], 10, true).map(result => result.event_id))
+      .toEqual(['second'])
   })
 })

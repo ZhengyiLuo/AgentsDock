@@ -6,6 +6,18 @@ export function searchTokens(query: string): string[] {
     .filter(Boolean)
 }
 
+export function searchFtsQuery(query: string): string {
+  return [...query.matchAll(/"([^"]+)"|(\S+)/g)]
+    .map(match => {
+      const phrase = match[1]
+      const value = (phrase || match[2] || '').toLocaleLowerCase().replaceAll('"', '""')
+      if (!value) return ''
+      return phrase ? `"${value}"` : `"${value}"*`
+    })
+    .filter(Boolean)
+    .join(' AND ')
+}
+
 export function searchableEventText(event: Event): string {
   const error = typeof event.error === 'string' ? event.error : event.error ? JSON.stringify(event.error) : ''
   return [
@@ -14,6 +26,15 @@ export function searchableEventText(event: Event): string {
     event.artifact?.title, event.artifact?.filename,
     event.file?.title, event.file?.filename
   ].filter(Boolean).join('\n').replace(/\s+/g, ' ').trim()
+}
+
+export function isSearchableEvent(event: Event): boolean {
+  return [
+    'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
+    'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
+    'artifact_created', 'artifact_error', 'file_uploaded',
+    'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted', 'handoff_digest_sent'
+  ].includes(event.type) || event.type.endsWith('_error')
 }
 
 export function searchEventRole(event: Event): TimelineSearchResult['role'] {
@@ -59,4 +80,21 @@ export function searchEventsAcrossSessions(events: Iterable<Event>, query: strin
     if (results.length >= Math.max(1, Math.min(100, limit))) break
   }
   return results
+}
+
+export function mergeTimelineSearchResults(
+  preferred: TimelineSearchResult[],
+  fallback: TimelineSearchResult[],
+  limit: number,
+  onePerSession: boolean
+): TimelineSearchResult[] {
+  const unique = new Map<string, TimelineSearchResult>()
+  for (const result of [...preferred, ...fallback]) {
+    const key = onePerSession ? result.session_id : `${result.session_id}:${result.event_id}`
+    const current = unique.get(key)
+    if (!current || result.seq > current.seq) unique.set(key, result)
+  }
+  return [...unique.values()]
+    .sort((left, right) => String(right.ts ?? '').localeCompare(String(left.ts ?? '')) || right.seq - left.seq)
+    .slice(0, Math.max(1, Math.min(100, limit)))
 }

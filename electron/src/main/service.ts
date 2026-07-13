@@ -45,6 +45,7 @@ import { AgentServerClient, type TerminalConnection } from './server-client'
 import { SettingsStore } from './settings'
 import { appLog } from './logger'
 import { SubagentEventProjector } from './subagent-projection'
+import { mergeTimelineSearchResults } from './search'
 
 const INITIAL_TAIL_EVENT_LIMIT = 480
 const HISTORY_PAGE_EVENT_LIMIT = 480
@@ -65,6 +66,7 @@ export class AppService {
   private eventCacheTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
   private jobsPollTimer: NodeJS.Timeout | null = null
+  private searchBackfillTimer: NodeJS.Timeout | null = null
   private health: Health | null = null
   private sessions: Session[] = []
   private jobs: Job[] = []
@@ -100,13 +102,16 @@ export class AppService {
     void this.refreshAll(false)
     this.pollTimer = setInterval(() => void this.refreshAll(false, false), 5000)
     this.jobsPollTimer = setInterval(() => void this.refreshJobs(), 30_000)
+    this.scheduleSearchBackfill(1_000)
   }
 
   stop(): void {
     if (this.pollTimer) clearInterval(this.pollTimer)
     if (this.jobsPollTimer) clearInterval(this.jobsPollTimer)
+    if (this.searchBackfillTimer) clearTimeout(this.searchBackfillTimer)
     this.pollTimer = null
     this.jobsPollTimer = null
+    this.searchBackfillTimer = null
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
     this.timelineLease += 1
@@ -156,6 +161,7 @@ export class AppService {
   async listSessions(): Promise<Session[]> {
     this.sessions = await this.client.sessions()
     this.cache.putSessions(this.serverId, this.sessions)
+    this.scheduleSearchBackfill()
     this.emit('server:sessions', this.sessions)
     return this.sessions
   }
@@ -314,28 +320,53 @@ export class AppService {
   async searchTimeline(sessionId: string, query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const clean = query.trim()
     if (clean.length < 2) return []
+    const local = this.cache.searchEvents(this.serverId, sessionId, clean, limit)
     try {
-      return await this.client.searchTimeline(sessionId, clean, limit)
+      const remote = await this.client.searchTimeline(sessionId, clean, limit)
+      return mergeTimelineSearchResults(remote, local, limit, false)
     } catch (error) {
       appLog('search', 'server history search unavailable; using local cache', {
         sessionId,
         error: error instanceof Error ? error.message : String(error)
       })
-      return this.cache.searchEvents(this.serverId, sessionId, clean, limit)
+      return local
     }
   }
 
   async searchSessions(query: string, limit = 40): Promise<TimelineSearchResult[]> {
     const clean = query.trim()
     if (clean.length < 2) return []
+    const activeSessionIds = new Set(this.sessions.filter(session => !session.archived).map(session => session.id))
+    const local = this.cache.searchSessions(this.serverId, clean, limit)
+      .filter(result => activeSessionIds.has(result.session_id))
     try {
-      return await this.client.searchSessions(clean, limit)
+      const remote = (await this.client.searchSessions(clean, limit))
+        .filter(result => activeSessionIds.has(result.session_id))
+      return mergeTimelineSearchResults(remote, local, limit, true)
     } catch (error) {
       appLog('search', 'server-wide history search unavailable; using local cache', {
         error: error instanceof Error ? error.message : String(error)
       })
-      return this.cache.searchSessions(this.serverId, clean, limit)
+      return local
     }
+  }
+
+  private backfillSearchIndex(): void {
+    this.searchBackfillTimer = null
+    try {
+      const indexed = this.cache.backfillSearchIndexBatch()
+      if (indexed > 0) this.scheduleSearchBackfill(75)
+    } catch (error) {
+      appLog('search', 'local history index backfill paused', {
+        error: error instanceof Error ? error.message : String(error)
+      })
+      this.scheduleSearchBackfill(5_000)
+    }
+  }
+
+  private scheduleSearchBackfill(delay = 25): void {
+    if (this.searchBackfillTimer) return
+    this.searchBackfillTimer = setTimeout(() => this.backfillSearchIndex(), delay)
   }
 
   async subscribeTimeline(sessionId: string, after: number): Promise<void> {
@@ -574,6 +605,7 @@ export class AppService {
         this.sessions = sessions.value
         if (changed) {
           this.cache.putSessions(this.serverId, sessions.value)
+          this.scheduleSearchBackfill()
           this.emit('server:sessions', sessions.value)
         }
       }
@@ -796,6 +828,7 @@ export class AppService {
     if (index >= 0) this.sessions = this.sessions.map(candidate => candidate.id === session.id ? session : candidate)
     else this.sessions = [...this.sessions, session]
     this.cache.putSession(this.serverId, session)
+    this.scheduleSearchBackfill()
     this.emit('server:sessions', this.sessions)
   }
 
