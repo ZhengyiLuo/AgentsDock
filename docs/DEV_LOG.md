@@ -40,6 +40,14 @@ painful to rediscover later.
   cached events.
 - Expanded media in the resizable preview so images and videos use the complete
   available stage while preserving their aspect ratio.
+- All 165 Electron tests, TypeScript validation, Python compilation, and diff
+  checks pass. The signed local bundle was rebuilt at
+  `/Users/zen/agi/ZenithDock/dist/AgentsDock.app` and synced directly to
+  `/Users/zen/agi/AgentsDock.app` on the MacBook Air; both signatures verify.
+- Standalone server commit `6f87ad5` is on GitHub and deployed to `sonic`.
+  The initial incremental index pass completed without errors, and an
+  authenticated real `/api/search` smoke query returned in 13 ms.
+- No TestFlight build was uploaded for this change.
 
 ## 2026-07-13 - Rotation-safe mobile media grids and previews
 
