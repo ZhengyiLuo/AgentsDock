@@ -43,6 +43,14 @@ painful to rediscover later.
   verified portrait/landscape/return cycles on both without missing controls or
   stale timeline geometry.
 - Aligned the native React iOS project with TestFlight build `64`.
+- Archived the signed arm64 iPhone/iPad application as version `0.1.1 (64)`.
+  App Store Connect accepted the upload and reports the package processing;
+  only the established non-blocking dSYM warnings for prebuilt Expo, React,
+  Hermes, and SDWebImage frameworks remain.
+- Confirmed the embedded and standalone server sources are byte-identical,
+  redeployed the standalone source to `sonic`, restarted
+  `zenithbot-agent.service`, and observed the authenticated health endpoint
+  return after the normal state-reload window.
 
 ## 2026-07-12 - Persisted iOS/iPadOS chat text sizing
 
