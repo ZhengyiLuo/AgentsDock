@@ -14,6 +14,7 @@ export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: st
   const loading = useAppStore(state => state.loadingSessionId === sessionId)
   const loadingOlder = useAppStore(state => state.loadingOlder)
   const loadOlder = useAppStore(state => state.loadOlder)
+  const fontScale = useAppStore(state => state.fontScale)
   const list = useRef<FlashListRef<TimelineRow>>(null)
   const [nearBottom, setNearBottom] = useState(true)
   const rows = useMemo(() => projectTimeline(snapshot?.events ?? [], snapshot?.files ?? []), [snapshot?.events, snapshot?.files])
@@ -38,7 +39,7 @@ export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: st
         data={rows}
         keyExtractor={row => row.key}
         getItemType={row => row.kind}
-        renderItem={({ item }) => <TimelineRowView row={item} sessionId={sessionId} onReview={onReview} />}
+        renderItem={({ item }) => <TimelineRowView row={item} sessionId={sessionId} onReview={onReview} fontScale={fontScale} />}
         ItemSeparatorComponent={Separator}
         contentContainerStyle={styles.content}
         keyboardDismissMode="interactive"

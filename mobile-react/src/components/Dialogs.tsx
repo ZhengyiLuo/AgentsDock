@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as Clipboard from 'expo-clipboard'
-import { Check, ChevronDown, Copy, Search, SquareTerminal, X } from 'lucide-react-native'
+import { Check, ChevronDown, Copy, Minus, Plus, Search, SquareTerminal, X } from 'lucide-react-native'
+import { CHAT_FONT_SCALE_MAX, CHAT_FONT_SCALE_MIN, CHAT_FONT_SCALE_STEP, scaleChatFont } from '../lib/typography'
 import { client, useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import type { Backend, CreateJobInput, RuntimeOption, Session, UpdateJobInput } from '../types'
@@ -14,7 +15,9 @@ export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose
   const currentURL = useAppStore(state => state.serverURL)
   const currentToken = useAppStore(state => state.token)
   const connecting = useAppStore(state => state.connecting)
+  const fontScale = useAppStore(state => state.fontScale)
   const apply = useAppStore(state => state.applySettings)
+  const setFontScale = useAppStore(state => state.setFontScale)
   const [url, setURL] = useState(currentURL)
   const [token, setToken] = useState(currentToken)
   useEffect(() => { if (visible) { setURL(currentURL); setToken(currentToken) } }, [currentToken, currentURL, visible])
@@ -22,6 +25,16 @@ export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose
     <Label text="Server address" /><TextInput value={url} onChangeText={setURL} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="100.x.y.z:7850" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Label text="Access token" /><TextInput value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Server token" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Text style={[styles.help, { color: colors.muted }]}>The address stays exactly as typed while editing. It is normalized only after Apply. HTTP is allowed for private LAN and Tailscale servers.</Text>
+    <Label text="Chat text size" />
+    <View style={[styles.fontScale, { backgroundColor: colors.raised, borderColor: colors.border }]}>
+      <IconButton icon={Minus} disabled={fontScale <= CHAT_FONT_SCALE_MIN} label="Decrease chat text size" onPress={() => setFontScale(fontScale - CHAT_FONT_SCALE_STEP)} />
+      <View style={styles.fontScalePreview}>
+        <Text style={[styles.fontScaleValue, { color: colors.muted }]}>{Math.round(fontScale * 100)}%</Text>
+        <Text numberOfLines={2} style={{ color: colors.text, fontSize: scaleChatFont(15.5, fontScale), lineHeight: scaleChatFont(21, fontScale) }}>Messages and code resize immediately.</Text>
+      </View>
+      <IconButton icon={Plus} disabled={fontScale >= CHAT_FONT_SCALE_MAX} label="Increase chat text size" onPress={() => setFontScale(fontScale + CHAT_FONT_SCALE_STEP)} />
+    </View>
+    <Text style={[styles.help, { color: colors.muted }]}>Applies to chat messages, traces, queued turns, and the composer. Navigation stays compact.</Text>
     <PrimaryButton label={connecting ? 'Connecting…' : 'Apply & reconnect'} disabled={connecting || !url.trim()} onPress={() => void apply(url, token).then(onClose)} />
   </Sheet>
 }
@@ -234,4 +247,5 @@ const styles = StyleSheet.create({
   preview: { maxHeight: 280, borderRadius: 6, padding: 10 }, presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 }, preset: { minWidth: 42, minHeight: 29, borderRadius: 5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }, toggle: { minHeight: 42, flexDirection: 'row', alignItems: 'center' },
   process: { minHeight: 58, borderRadius: 6, padding: 9, marginBottom: 6, flexDirection: 'row', gap: 8 }, processDot: { width: 7, height: 7, borderRadius: 4, marginTop: 5 }, log: { padding: 10, borderRadius: 6, fontFamily: 'Menlo', fontSize: 11, lineHeight: 16 },
   outputHeader: { minHeight: 34, flexDirection: 'row', alignItems: 'center' }, outputTitle: { flex: 1, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  fontScale: { minHeight: 74, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }, fontScalePreview: { flex: 1, gap: 3 }, fontScaleValue: { fontSize: 10, fontWeight: '800' },
 })

@@ -5,6 +5,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, P
 import type { TimelineRow } from '../lib/timeline'
 import { isTimelineError, rowText } from '../lib/timeline'
 import { formatTime, messageText } from '../lib/format'
+import { scaleChatFont } from '../lib/typography'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import { IconButton } from './ui'
@@ -13,15 +14,15 @@ import { MediaGrid } from './MediaGrid'
 
 const FOLD_AT = 5_000
 
-export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, onReview }: { row: TimelineRow; sessionId: string; onReview: (runId: string) => void }) {
-  if (row.kind === 'message') return <MessageRowView row={row} sessionId={sessionId} />
-  if (row.kind === 'trace') return <TraceRowView row={row} onReview={onReview} />
+export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, onReview, fontScale }: { row: TimelineRow; sessionId: string; onReview: (runId: string) => void; fontScale: number }) {
+  if (row.kind === 'message') return <MessageRowView row={row} sessionId={sessionId} fontScale={fontScale} />
+  if (row.kind === 'trace') return <TraceRowView row={row} onReview={onReview} fontScale={fontScale} />
   if (row.kind === 'media') return <MediaRowView row={row} sessionId={sessionId} />
-  if (row.kind === 'job') return <JobRowView row={row} />
-  return <SystemRowView row={row} />
+  if (row.kind === 'job') return <JobRowView row={row} fontScale={fontScale} />
+  return <SystemRowView row={row} fontScale={fontScale} />
 })
 
-function MessageRowView({ row, sessionId }: { row: Extract<TimelineRow, { kind: 'message' }>; sessionId: string }) {
+function MessageRowView({ row, sessionId, fontScale }: { row: Extract<TimelineRow, { kind: 'message' }>; sessionId: string; fontScale: number }) {
   const colors = usePalette()
   const pin = useAppStore(state => state.pinMessage)
   const removePin = useAppStore(state => state.removePin)
@@ -40,7 +41,7 @@ function MessageRowView({ row, sessionId }: { row: Extract<TimelineRow, { kind: 
           <IconButton icon={Pin} size={13} selected={pinned} label={pinned ? 'Unpin message' : 'Pin message'} onPress={() => void (pinned ? removePin(`message:${event.id}`) : pin(sessionId, event, full))} />
           <IconButton icon={Copy} size={13} label="Copy full text" onPress={() => void Clipboard.setStringAsync(full)} />
         </View>
-        <MarkdownContent value={visible} />
+        <MarkdownContent value={visible} fontScale={fontScale} />
         {folded ? (
           <Pressable onPress={() => setExpanded(true)} style={[styles.fold, { borderColor: colors.blue, backgroundColor: colors.raised }]}>
             <Text style={{ color: colors.blue, fontSize: 12, fontWeight: '700' }}>{full.length - FOLD_AT} characters hidden · Show full text</Text>
@@ -54,7 +55,7 @@ function MessageRowView({ row, sessionId }: { row: Extract<TimelineRow, { kind: 
   )
 }
 
-function TraceRowView({ row, onReview }: { row: Extract<TimelineRow, { kind: 'trace' }>; onReview: (runId: string) => void }) {
+function TraceRowView({ row, onReview, fontScale }: { row: Extract<TimelineRow, { kind: 'trace' }>; onReview: (runId: string) => void; fontScale: number }) {
   const colors = usePalette()
   const [open, setOpen] = useState(false)
   const tools = row.events.filter(event => event.type === 'tool_started' || event.type === 'tool_finished')
@@ -73,7 +74,7 @@ function TraceRowView({ row, onReview }: { row: Extract<TimelineRow, { kind: 'tr
         {row.events.filter(event => event.type !== 'raw_event').map(event => (
           <View key={event.id} style={styles.traceEvent}>
             {event.type.includes('tool') ? <Wrench size={13} color={colors.orange} /> : <Code2 size={13} color={colors.blue} />}
-            <View style={{ flex: 1 }}><Text style={[styles.traceEventType, { color: colors.muted }]}>{event.tool?.name || event.type.replaceAll('_', ' ')}</Text>{messageText(event).trim() ? <Text selectable style={[styles.traceText, { color: colors.text }]}>{messageText(event)}</Text> : null}</View>
+            <View style={{ flex: 1 }}><Text style={[styles.traceEventType, { color: colors.muted }]}>{event.tool?.name || event.type.replaceAll('_', ' ')}</Text>{messageText(event).trim() ? <Text selectable style={[styles.traceText, { color: colors.text, fontSize: scaleChatFont(12, fontScale), lineHeight: scaleChatFont(17, fontScale) }]}>{messageText(event)}</Text> : null}</View>
           </View>
         ))}
       </View> : null}
@@ -86,23 +87,23 @@ function MediaRowView({ row, sessionId }: { row: Extract<TimelineRow, { kind: 'm
   return <View style={[styles.mediaRow, { borderColor: colors.border, backgroundColor: colors.surface }]}><Text style={[styles.mediaTitle, { color: colors.text }]}>Files & media <Text style={{ color: colors.muted }}>{row.files.length}</Text></Text><MediaGrid files={row.files} sessionId={sessionId} /></View>
 }
 
-function JobRowView({ row }: { row: Extract<TimelineRow, { kind: 'job' }> }) {
+function JobRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind: 'job' }>; fontScale: number }) {
   const colors = usePalette()
   const [open, setOpen] = useState(false)
   const latest = row.events.at(-1)!
   return <Pressable onPress={() => setOpen(value => !value)} style={[styles.job, { borderColor: colors.orange, backgroundColor: `${colors.orange}18` }]}>
     <View style={styles.jobHeader}><Clock3 size={16} color={colors.orange} /><Text style={[styles.jobTitle, { color: colors.text }]}>{row.title}</Text><Text style={[styles.time, { color: colors.muted }]}>{row.events.length} updates · {formatTime(latest.ts)}</Text>{open ? <ChevronDown size={15} color={colors.muted} /> : <ChevronRight size={15} color={colors.muted} />}</View>
-    <Text selectable style={[styles.jobText, { color: colors.text }]} numberOfLines={open ? undefined : 3}>{open ? row.events.map(messageText).filter(Boolean).join('\n\n') : messageText(latest) || `Scheduled job ${latest.type.replaceAll('_', ' ')}`}</Text>
+    <Text selectable style={[styles.jobText, { color: colors.text, fontSize: scaleChatFont(14, fontScale), lineHeight: scaleChatFont(20, fontScale) }]} numberOfLines={open ? undefined : 3}>{open ? row.events.map(messageText).filter(Boolean).join('\n\n') : messageText(latest) || `Scheduled job ${latest.type.replaceAll('_', ' ')}`}</Text>
   </Pressable>
 }
 
-function SystemRowView({ row }: { row: Extract<TimelineRow, { kind: 'system' }> }) {
+function SystemRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind: 'system' }>; fontScale: number }) {
   const colors = usePalette()
   const error = isTimelineError(row.event)
   const text = messageText(row.event) || row.event.type.replaceAll('_', ' ')
   return <View style={[styles.system, { backgroundColor: error ? `${colors.red}18` : colors.surface, borderColor: error ? colors.red : colors.border }]}>
     {error ? <AlertTriangle size={16} color={colors.red} /> : <Check size={16} color={colors.blue} />}
-    <View style={{ flex: 1 }}><Text style={[styles.systemTitle, { color: error ? colors.red : colors.muted }]}>{row.event.type.replaceAll('_', ' ')}</Text><Text selectable style={[styles.systemText, { color: error ? colors.red : colors.text }]}>{text}</Text></View>
+    <View style={{ flex: 1 }}><Text style={[styles.systemTitle, { color: error ? colors.red : colors.muted }]}>{row.event.type.replaceAll('_', ' ')}</Text><Text selectable style={[styles.systemText, { color: error ? colors.red : colors.text, fontSize: scaleChatFont(13.5, fontScale), lineHeight: scaleChatFont(19, fontScale) }]}>{text}</Text></View>
   </View>
 }
 

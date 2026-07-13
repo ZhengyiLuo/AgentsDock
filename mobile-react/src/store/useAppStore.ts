@@ -22,6 +22,7 @@ import type {
 } from '../types'
 import { AgentServerClient } from '../api/AgentServerClient'
 import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../lib/format'
+import { CHAT_FONT_SCALE_DEFAULT, clampChatFontScale } from '../lib/typography'
 import {
   loadCachedSessions,
   loadPins,
@@ -70,6 +71,7 @@ interface AppState {
   uploadPending: Record<string, UploadRef[]>
   pins: PinnedItem[]
   folderOrder: string[]
+  fontScale: number
   searchResults: TimelineSearchResult[]
   searchBusy: boolean
   timelineIndex: Record<string, TimelineIndex>
@@ -97,6 +99,7 @@ interface AppState {
   markRead(sessionId: string): Promise<void>
   markUnread(sessionId: string): Promise<void>
   setFolderOrder(order: string[]): void
+  setFontScale(value: number): void
   updateQueued(sessionId: string, queuedId: string, prompt: string): Promise<boolean>
   removeQueued(sessionId: string, queuedId: string): Promise<boolean>
   moveQueued(sessionId: string, queuedId: string, direction: 'up' | 'down'): Promise<boolean>
@@ -140,6 +143,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   uploadPending: {},
   pins: [],
   folderOrder: [],
+  fontScale: CHAT_FONT_SCALE_DEFAULT,
   searchResults: [],
   searchBusy: false,
   timelineIndex: {},
@@ -155,7 +159,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const selected = settings.selectedSessionId && sessions.some(value => value.id === settings.selectedSessionId)
       ? settings.selectedSessionId
       : sessions.find(value => !value.archived)?.id ?? null
-    set({ initialized: true, serverURL, token, sessions, pins, selectedSessionId: selected, folderOrder: settings.folderOrder ?? [] })
+    set({ initialized: true, serverURL, token, sessions, pins, selectedSessionId: selected, folderOrder: settings.folderOrder ?? [], fontScale: settings.fontScale })
     if (selected) {
       const cached = await loadSnapshot(serverURL, selected)
       if (cached) set(state => ({ snapshots: { ...state.snapshots, [selected]: cached } }))
@@ -173,7 +177,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const serverURL = normalizeServerURL(rawURL)
     streamStop?.(); streamStop = null
     client.configure(serverURL, token)
-    await Promise.all([saveToken(token), saveSettings({ serverURL, selectedSessionId: null, folderOrder: [] })])
+    await Promise.all([saveToken(token), saveSettings({ serverURL, selectedSessionId: null, folderOrder: [], fontScale: get().fontScale })])
     const [sessions, pins] = await Promise.all([loadCachedSessions(serverURL), loadPins(serverURL)])
     set({ serverURL, token, sessions, pins, selectedSessionId: null, snapshots: {}, jobs: [], runtime: null, health: null, connected: false, liveConnected: false, folderOrder: [] })
     await get().reconnect()
@@ -192,7 +196,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ connected: true, connecting: false, health, sessions, runtime, jobs, activeSessionIds, selectedSessionId: selected })
       await Promise.all([
         saveCachedSessions(get().serverURL, sessions),
-        saveSettings({ serverURL: get().serverURL, selectedSessionId: selected, folderOrder: get().folderOrder }),
+        saveSettings({ serverURL: get().serverURL, selectedSessionId: selected, folderOrder: get().folderOrder, fontScale: get().fontScale }),
       ])
       if (selected) await get().selectSession(selected)
     } catch (error) {
@@ -221,7 +225,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const epoch = ++selectionEpoch
     streamStop?.(); streamStop = null
     set({ selectedSessionId: sessionId, error: null })
-    void saveSettings({ serverURL: get().serverURL, selectedSessionId: sessionId, folderOrder: get().folderOrder })
+    void saveSettings({ serverURL: get().serverURL, selectedSessionId: sessionId, folderOrder: get().folderOrder, fontScale: get().fontScale })
     let snapshot: Snapshot | undefined = get().snapshots[sessionId]
     if (!snapshot) {
       snapshot = await loadSnapshot(get().serverURL, sessionId) ?? undefined
@@ -422,7 +426,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setFolderOrder(order) {
     set({ folderOrder: order })
-    void saveSettings({ serverURL: get().serverURL, selectedSessionId: get().selectedSessionId, folderOrder: order })
+    void saveSettings({ serverURL: get().serverURL, selectedSessionId: get().selectedSessionId, folderOrder: order, fontScale: get().fontScale })
+  },
+  setFontScale(value) {
+    const fontScale = clampChatFontScale(value)
+    set({ fontScale })
+    void saveSettings({ serverURL: get().serverURL, selectedSessionId: get().selectedSessionId, folderOrder: get().folderOrder, fontScale })
   },
 
   async updateQueued(sessionId, queuedId, prompt) { return queueAction(sessionId, () => client.updateQueued(sessionId, queuedId, prompt), set, get) },

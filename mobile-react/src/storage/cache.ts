@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
 import type { PinnedItem, Session, Snapshot } from '../types'
 import { normalizeServerURL } from '../lib/format'
+import { CHAT_FONT_SCALE_DEFAULT, clampChatFontScale } from '../lib/typography'
 
 const SETTINGS_KEY = 'agentsdock.react.settings.v1'
 const TOKEN_KEY = 'agentsdock.react.access-token'
@@ -9,18 +10,35 @@ const TOKEN_FALLBACK_KEY = 'agentsdock.react.access-token.simulator-fallback'
 const SESSION_LIMIT = 10
 const EVENT_LIMIT = 720
 
-export interface StoredSettings { serverURL: string; selectedSessionId?: string | null; folderOrder?: string[] }
+export interface StoredSettings {
+  serverURL: string
+  selectedSessionId?: string | null
+  folderOrder?: string[]
+  fontScale: number
+}
 
 export async function loadSettings(): Promise<StoredSettings> {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY)
-    if (raw) return JSON.parse(raw) as StoredSettings
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<StoredSettings>
+      return {
+        serverURL: typeof parsed.serverURL === 'string' ? parsed.serverURL : 'http://127.0.0.1:7850',
+        selectedSessionId: parsed.selectedSessionId ?? null,
+        folderOrder: Array.isArray(parsed.folderOrder) ? parsed.folderOrder : [],
+        fontScale: clampChatFontScale(parsed.fontScale),
+      }
+    }
   } catch { /* a corrupt preference must not block startup */ }
-  return { serverURL: 'http://127.0.0.1:7850', selectedSessionId: null, folderOrder: [] }
+  return { serverURL: 'http://127.0.0.1:7850', selectedSessionId: null, folderOrder: [], fontScale: CHAT_FONT_SCALE_DEFAULT }
 }
 
 export async function saveSettings(value: StoredSettings): Promise<void> {
-  await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...value, serverURL: normalizeServerURL(value.serverURL) }))
+  await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({
+    ...value,
+    serverURL: normalizeServerURL(value.serverURL),
+    fontScale: clampChatFontScale(value.fontScale),
+  }))
 }
 
 export async function loadToken(): Promise<string> {

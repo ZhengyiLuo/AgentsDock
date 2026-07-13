@@ -22,6 +22,21 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-12 - Persisted iOS/iPadOS chat text sizing
+
+- Added a `Chat text size` stepper to mobile Settings with a live preview and
+  an intentionally bounded `80%` to `140%` range. Changes apply immediately;
+  navigation, buttons, and other compact app chrome retain stable dimensions.
+- Applied the selected size consistently to Markdown messages, headings, code
+  blocks, expanded trace output, job/system responses, queued turns, and the
+  message composer.
+- Persisted the preference in the existing local settings record, migrated old
+  installs to `100%`, and included it in every settings rewrite path so server
+  reconnects, chat switches, and folder reordering cannot reset it.
+- React typecheck, `git diff --check`, and Release builds pass for both iPhone
+  17 Pro and iPad Pro 13-inch simulators. Both built apps install and launch.
+- Advanced the React iOS/iPadOS TestFlight build from 62 to 63.
+
 ## 2026-07-12 - Mobile keyboard, dismissal, media, and queue UX audit
 
 - Wrapped the active chat workspace in iOS keyboard avoidance so the composer

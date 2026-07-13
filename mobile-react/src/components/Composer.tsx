@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import * as DocumentPicker from 'expo-document-picker'
 import { ArrowDown, ArrowUp, CornerDownRight, Paperclip, Send, Square, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../store/useAppStore'
+import { scaleChatFont } from '../lib/typography'
 import { usePalette } from '../theme'
 import type { AgentFile, QueuedTurn, UploadRef } from '../types'
 import { BackendMark } from './BackendMark'
@@ -20,6 +21,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
   const snapshot = useAppStore(state => state.snapshots[sessionId])
   const session = useAppStore(state => state.sessions.find(value => value.id === sessionId))
   const active = useAppStore(state => state.activeSessionIds.has(sessionId))
+  const fontScale = useAppStore(state => state.fontScale)
   const setDraft = useAppStore(state => state.setDraft)
   const sendPrompt = useAppStore(state => state.sendPrompt)
   const stopTurn = useAppStore(state => state.stopTurn)
@@ -57,7 +59,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
           textAlignVertical="top"
           scrollEnabled
           autoCorrect
-          style={[styles.input, { color: colors.text }]}
+          style={[styles.input, { color: colors.text, fontSize: scaleChatFont(15.5, fontScale), lineHeight: scaleChatFont(21, fontScale) }]}
         />
         <View style={styles.toolbar}>
           <IconButton icon={Paperclip} onPress={() => void pick()} label="Attach files" />
@@ -82,6 +84,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
 
 function QueueShelf({ sessionId, onSent }: { sessionId: string; onSent: () => void }) {
   const colors = usePalette()
+  const fontScale = useAppStore(state => state.fontScale)
   const turns = useAppStore(state => state.snapshots[sessionId]?.queuedTurns) ?? EMPTY_QUEUE
   const update = useAppStore(state => state.updateQueued)
   const remove = useAppStore(state => state.removeQueued)
@@ -106,7 +109,7 @@ function QueueShelf({ sessionId, onSent }: { sessionId: string; onSent: () => vo
       {turns.map((turn, index) => {
         const busy = busyTurn === turn.queued_id
         return <View key={turn.queued_id} style={[styles.queueRow, { backgroundColor: colors.queued, borderColor: colors.yellow }]}>
-          {editing === turn.queued_id ? <TextInput autoFocus value={editText} onChangeText={setEditText} multiline style={[styles.queueInput, { color: colors.text }]} onBlur={() => void commitEdit(turn)} /> : <Pressable style={styles.queuePrompt} onPress={() => { setEditing(turn.queued_id); setEditText(turn.prompt) }}><Text style={[styles.queueText, { color: colors.text }]} numberOfLines={3}>{turn.display_prompt || turn.prompt}</Text></Pressable>}
+          {editing === turn.queued_id ? <TextInput autoFocus value={editText} onChangeText={setEditText} multiline style={[styles.queueInput, { color: colors.text, fontSize: scaleChatFont(12.5, fontScale), lineHeight: scaleChatFont(17, fontScale) }]} onBlur={() => void commitEdit(turn)} /> : <Pressable style={styles.queuePrompt} onPress={() => { setEditing(turn.queued_id); setEditText(turn.prompt) }}><Text style={[styles.queueText, { color: colors.text, fontSize: scaleChatFont(12.5, fontScale), lineHeight: scaleChatFont(17, fontScale) }]} numberOfLines={3}>{turn.display_prompt || turn.prompt}</Text></Pressable>}
           <Pressable accessibilityRole="button" accessibilityLabel="Send queued message now" disabled={Boolean(busyTurn)} onPress={() => void act(turn.queued_id, () => runNow(sessionId, turn.queued_id)).then(sent => { if (sent) onSent() })} style={({ pressed }) => [styles.runNow, { opacity: pressed || busyTurn && !busy ? 0.45 : 1 }]}>
             {busy ? <ActivityIndicator size="small" color={colors.yellow} /> : <CornerDownRight size={14} color={colors.yellow} />}
             <Text style={{ color: colors.yellow, fontSize: 11, fontWeight: '800' }}>Send now</Text>
