@@ -36,6 +36,15 @@ painful to rediscover later.
 - The release script runs TypeScript validation and the complete Electron test
   suite before packaging. The first artifact is smoke-tested on a real x86_64
   Linux host before being considered complete.
+- Produced `AgentsDock-0.1.1-linux-x86_64.AppImage` (131 MB) and
+  `AgentsDock-0.1.1-linux-x64.tar.gz` (123 MB) under `dist/linux/`; all 165
+  Electron tests passed during the final build.
+- Verified the AppImage as an x86-64 ELF, transferred it to `sonic` with an
+  identical SHA-256, extracted it, and launched it far enough to initialize
+  Electron 43.1.0, settings, SQLite cache, server client, and IPC. The headless
+  host has no X/Wayland display, so the GUI-window boundary was not exercised.
+- Rebuilt the canonical macOS app after the shared menu changes and synced the
+  signature-verified direct bundle to the MacBook Air.
 
 ## 2026-07-13 - Prepare Electron macOS TestFlight build 62
 
