@@ -44,6 +44,13 @@ painful to rediscover later.
   builds passed using the established simulator cache.
 - Advanced the React iOS/iPadOS release metadata from build 61 to build 62 for
   TestFlight distribution.
+- Archived the signed arm64 iPhone/iPad application as version `0.1.1 (62)`.
+  App Store Connect accepted the upload and reports the package processing.
+  Missing dSYM warnings remain limited to prebuilt Expo, React, Hermes, and
+  SDWebImage frameworks and did not block the upload.
+- Verified that embedded, standalone, and live `sonic` server sources are
+  byte-identical. The live service is active and the standalone GitHub branch
+  is up to date, so the healthy identical service was not restarted.
 
 ## 2026-07-12 - Restore iPhone edge-swipe navigation in build 61
 
