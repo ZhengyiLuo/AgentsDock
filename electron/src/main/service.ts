@@ -224,11 +224,11 @@ export class AppService {
     return page
   }
 
-  async openTimeline(sessionId: string): Promise<SessionSnapshot> {
+  async openTimeline(sessionId: string, forceRemote = false): Promise<SessionSnapshot> {
     const lease = this.beginTimelineSelection(sessionId)
     const cached = this.cache.snapshot(this.serverId, sessionId)
     const cachedLast = cached?.events.at(-1)?.seq ?? 0
-    if (cached) {
+    if (cached && !forceRemote) {
       queueMicrotask(() => void this.reconcileTimelineAndStream(sessionId, cachedLast, lease))
       return cached
     }
@@ -675,7 +675,7 @@ export class AppService {
       const verifiedLatestSeq = mode === 'replace' ? page.latest_seq : auditPage?.latest_seq
       const knownTotal = mode === 'replace' ? page.total : auditPage?.total
       this.cache.putTimelineState(this.serverId, sessionId, hasMoreEvents, verifiedLatestSeq, knownTotal)
-      const snapshot: SessionSnapshot = mode === 'replace' ? (this.cache.snapshot(this.serverId, sessionId) ?? {
+      const snapshot: SessionSnapshot = mode === 'replace' ? { ...(this.cache.snapshot(this.serverId, sessionId) ?? {
         session: page.session,
         events: page.events,
         queuedTurns: page.queued_turns ?? [],
@@ -684,12 +684,13 @@ export class AppService {
         eventsTotal: knownTotal ?? before?.eventsTotal ?? null,
         filesTotal: before?.filesTotal ?? 0,
         cachedAt: Date.now()
-      }) : {
+      }), historyVerified: true } : {
         session: page.session,
         events: page.events,
         queuedTurns: page.queued_turns ?? [],
         files: [],
         hasMoreEvents,
+        historyVerified: true,
         eventsTotal: before?.eventsTotal ?? auditPage?.total ?? null,
         filesTotal: before?.filesTotal ?? 0,
         cachedAt: Date.now(),
@@ -722,6 +723,7 @@ export class AppService {
       session: page.session,
       queuedTurns: page.queued_turns ?? [],
       hasMoreEvents: Boolean(page.has_more),
+      historyVerified: true,
       eventsTotal: page.total ?? cached.eventsTotal ?? null,
       cachedAt: Date.now()
     } : {
@@ -730,6 +732,7 @@ export class AppService {
       queuedTurns: page.queued_turns ?? [],
       files: [],
       hasMoreEvents: Boolean(page.has_more),
+      historyVerified: true,
       eventsTotal: page.total ?? null,
       filesTotal: 0,
       cachedAt: Date.now()

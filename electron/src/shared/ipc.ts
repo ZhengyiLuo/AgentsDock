@@ -58,7 +58,7 @@ export interface AgentsDockAPI {
   }
   timeline: {
     cached(sessionId: string): Promise<SessionSnapshot | null>
-    open(sessionId: string): Promise<SessionSnapshot>
+    open(sessionId: string, forceRemote?: boolean): Promise<SessionSnapshot>
     older(sessionId: string, before: number, limit?: number): Promise<TimelinePage>
     around(sessionId: string, anchorSeq: number, limit?: number): Promise<TimelinePage>
     index(sessionId: string): Promise<TimelineIndex>

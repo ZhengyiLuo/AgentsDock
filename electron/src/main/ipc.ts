@@ -29,7 +29,7 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
   handle('sessions:import-history', (sessionId, force) => service.importHistory(sessionId, force))
 
   handle('timeline:cached', sessionId => service.cachedTimeline(sessionId))
-  handle('timeline:open', sessionId => service.openTimeline(sessionId))
+  handle('timeline:open', (sessionId, forceRemote) => service.openTimeline(sessionId, forceRemote))
   handle('timeline:older', (sessionId, before, limit) => service.olderTimeline(sessionId, before, limit))
   handle('timeline:around', (sessionId, anchorSeq, limit) => service.timelineAround(sessionId, anchorSeq, limit))
   handle('timeline:index', sessionId => service.timelineIndex(sessionId))

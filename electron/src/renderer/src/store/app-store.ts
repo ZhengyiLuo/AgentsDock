@@ -188,7 +188,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async selectSession(sessionId, force = false) {
-    if (!force && get().selectedSessionId === sessionId && get().snapshots[sessionId]) {
+    const initialSnapshot = get().snapshots[sessionId]
+    if (!force && get().selectedSessionId === sessionId && initialSnapshot && !snapshotNeedsAuthoritativeTail(initialSnapshot)) {
       touchSnapshot(sessionId)
       if (get().loadingSessionId === sessionId) set({ loadingSessionId: null })
       return
@@ -204,13 +205,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     }))
     touchSnapshot(sessionId)
     const existing = get().snapshots[sessionId]
-    if (existing) {
+    if (existing && !snapshotNeedsAuthoritativeTail(existing)) {
       if (get().loadingSessionId === sessionId) set({ loadingSessionId: null })
       subscribeToTimeline(sessionId, existing.events.at(-1)?.seq ?? 0, request)
       logTimelineSelection('selection painted from memory', { sessionId, request, events: existing.events.length })
       return
     }
     set({ loadingSessionId: sessionId, error: null })
+    let forceRemote = Boolean(existing)
 
     try {
       const cached = await withDeadline(
@@ -219,7 +221,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         'Local timeline cache did not respond'
       )
       if (request !== selectionEpoch || get().selectedSessionId !== sessionId) return
-      if (cached) {
+      if (cached && !snapshotNeedsAuthoritativeTail(cached)) {
         set(state => ({
           snapshots: cacheSnapshot(state.snapshots, sessionId, mergeSnapshots(state.snapshots[sessionId], cached), sessionId),
           loadingSessionId: null
@@ -227,6 +229,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         subscribeToTimeline(sessionId, cached.events.at(-1)?.seq ?? 0, request)
         logTimelineSelection('selection painted from disk cache', { sessionId, request, events: cached.events.length })
         return
+      }
+      if (cached) {
+        forceRemote = true
+        logTimelineSelection('empty cache requires authoritative tail', {
+          sessionId, request, events: cached.events.length, eventsTotal: cached.eventsTotal,
+          latestAgentSequence: cached.session.latest_agent_event_seq ?? 0
+        })
       }
     } catch (error) {
       logTimelineSelection('disk cache unavailable; opening from server', { sessionId, request, error: errorMessage(error) })
@@ -238,7 +247,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       logTimelineSelection('cold timeline open started', { sessionId, request, attempt })
       try {
         const snapshot = await withDeadline(
-          window.agentsDock.timeline.open(sessionId),
+          window.agentsDock.timeline.open(sessionId, forceRemote),
           TIMELINE_OPEN_TIMEOUT_MS,
           `Timeline open attempt ${attempt} timed out`
         )
@@ -256,7 +265,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (request === selectionEpoch && get().selectedSessionId === sessionId) {
-      set({ loadingSessionId: null, error: `Could not load this chat. ${errorMessage(lastError)}` })
+      set(state => {
+        const snapshots = { ...state.snapshots }
+        if (snapshotNeedsAuthoritativeTail(snapshots[sessionId])) delete snapshots[sessionId]
+        return { snapshots, loadingSessionId: null, error: `Could not load this chat. ${errorMessage(lastError)}` }
+      })
     }
   },
 
@@ -555,8 +568,9 @@ function mergeSnapshots(previous: SessionSnapshot | undefined, next: SessionSnap
   const queuedTurns = stableArray(previous.queuedTurns, next.queuedTurns)
   const session = jsonEquivalent(previous.session, next.session) ? previous.session : next.session
   const eventsTotal = next.eventsTotal ?? previous.eventsTotal
-  if (events === previous.events && files === previous.files && session === previous.session && queuedTurns === previous.queuedTurns && previous.hasMoreEvents === next.hasMoreEvents && previous.eventsTotal === eventsTotal) return previous
-  return { ...next, session, queuedTurns, viewState: next.viewState ?? previous.viewState, events, files, eventsTotal, generation: previous.generation }
+  const historyVerified = next.historyVerified ?? previous.historyVerified
+  if (events === previous.events && files === previous.files && session === previous.session && queuedTurns === previous.queuedTurns && previous.hasMoreEvents === next.hasMoreEvents && previous.historyVerified === historyVerified && previous.eventsTotal === eventsTotal) return previous
+  return { ...next, session, queuedTurns, viewState: next.viewState ?? previous.viewState, events, files, historyVerified, eventsTotal, generation: previous.generation }
 }
 
 function replaceSnapshot(previous: SessionSnapshot | undefined, next: SessionSnapshot): SessionSnapshot {
@@ -739,6 +753,14 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 function jsonEquivalent(a: unknown, b: unknown): boolean { return a === b || JSON.stringify(a) === JSON.stringify(b) }
 function primaryTimelineRows(events: Event[], files: AgentFile[]): number {
   return renderTimelineItems(projectTimeline(events, files)).filter(item => item.kind !== 'trace').length
+}
+
+export function snapshotNeedsAuthoritativeTail(snapshot: SessionSnapshot | undefined): boolean {
+  if (!snapshot) return false
+  if (renderTimelineItems(projectTimeline(snapshot.events, snapshot.files)).length > 0) return false
+  if ((snapshot.eventsTotal ?? 0) > 0) return true
+  if (snapshot.historyVerified) return false
+  return (snapshot.session.latest_agent_event_seq ?? 0) > 0 || snapshot.events.length > 0
 }
 function normalizeSessionPatch(patch: Partial<Session>) { return { title: patch.title, folder: patch.folder ?? undefined, cwd: patch.cwd ?? undefined, backend: patch.backend, model: patch.model, effort: patch.effort, pinned: patch.pinned ?? undefined, archived: patch.archived ?? undefined } }
 function applyPendingSessionPatches(sessions: Session[]): Session[] {

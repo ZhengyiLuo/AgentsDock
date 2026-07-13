@@ -166,6 +166,81 @@ describe('older timeline paging', () => {
 })
 
 describe('chat selection', () => {
+  it('bypasses a false-empty memory cache and fetches an authoritative tail', async () => {
+    const stale = falseEmptySnapshot('chat-a', 42)
+    const fresh = { ...snapshot('chat-a', [eventFor('chat-a', 40)]), historyVerified: true }
+    const open = vi.fn().mockResolvedValue(fresh)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { cached: vi.fn().mockResolvedValue(stale), open, subscribe: vi.fn() } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-b', loadingSessionId: null,
+      sessions: [sessionFor('chat-a'), sessionFor('chat-b')], snapshots: { 'chat-a': stale }, error: null
+    })
+
+    await useAppStore.getState().selectSession('chat-a')
+
+    expect(open).toHaveBeenCalledWith('chat-a', true)
+    expect(useAppStore.getState().snapshots['chat-a'].events.map(item => item.seq)).toEqual([40])
+    expect(useAppStore.getState().loadingSessionId).toBeNull()
+  })
+
+  it('bypasses a false-empty disk cache instead of painting conversation start', async () => {
+    const stale = falseEmptySnapshot('chat-a', 42)
+    const fresh = { ...snapshot('chat-a', [eventFor('chat-a', 41)]), historyVerified: true }
+    const open = vi.fn().mockResolvedValue(fresh)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { cached: vi.fn().mockResolvedValue(stale), open, subscribe: vi.fn() } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ selectedSessionId: null, loadingSessionId: null, sessions: [sessionFor('chat-a')], snapshots: {}, error: null })
+
+    await useAppStore.getState().selectSession('chat-a')
+
+    expect(open).toHaveBeenCalledWith('chat-a', true)
+    expect(useAppStore.getState().snapshots['chat-a'].events.map(item => item.seq)).toEqual([41])
+  })
+
+  it('accepts a server-verified empty chat without refetching it', async () => {
+    const empty = { ...falseEmptySnapshot('chat-a', 42), historyVerified: true, eventsTotal: 0 }
+    const subscribe = vi.fn().mockResolvedValue(undefined)
+    const open = vi.fn()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { cached: vi.fn(), open, subscribe } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-b', loadingSessionId: null,
+      sessions: [sessionFor('chat-a'), sessionFor('chat-b')], snapshots: { 'chat-a': empty }, error: null
+    })
+
+    await useAppStore.getState().selectSession('chat-a')
+    await Promise.resolve()
+
+    expect(open).not.toHaveBeenCalled()
+    expect(subscribe).toHaveBeenCalledWith('chat-a', 0)
+  })
+
+  it('repairs a verified cache whose known event total contradicts its empty rows', async () => {
+    const stale = { ...falseEmptySnapshot('chat-a', 42), historyVerified: true, eventsTotal: 42 }
+    const fresh = { ...snapshot('chat-a', [eventFor('chat-a', 42)]), historyVerified: true, eventsTotal: 42 }
+    const open = vi.fn().mockResolvedValue(fresh)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { cached: vi.fn().mockResolvedValue(stale), open, subscribe: vi.fn() } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      selectedSessionId: 'chat-b', loadingSessionId: null,
+      sessions: [sessionFor('chat-a'), sessionFor('chat-b')], snapshots: { 'chat-a': stale }, error: null
+    })
+
+    await useAppStore.getState().selectSession('chat-a')
+
+    expect(open).toHaveBeenCalledWith('chat-a', true)
+    expect(useAppStore.getState().snapshots['chat-a'].events.map(item => item.seq)).toEqual([42])
+  })
+
   it('activates an in-memory chat without waiting for the stream subscription', async () => {
     const subscribe = vi.fn(() => new Promise<void>(() => undefined))
     const open = vi.fn()
@@ -335,4 +410,11 @@ function sessionFor(id: string): Session { return { id, title: id, backend: 'cod
 function eventFor(sessionId: string, seq: number, patch: Partial<Event> = {}): Event { return { id: `${sessionId}-${seq}`, session_id: sessionId, seq, type: 'assistant_text', ts: '2026-07-09T10:00:00Z', text: String(seq), ...patch } }
 function snapshot(id: string, events: Event[], hasMoreEvents = false): SessionSnapshot {
   return { session: sessionFor(id), events, queuedTurns: [], files: [], hasMoreEvents, filesTotal: 0, cachedAt: 0 }
+}
+function falseEmptySnapshot(id: string, latestAgentSequence: number): SessionSnapshot {
+  return {
+    ...snapshot(id, []),
+    session: { ...sessionFor(id), latest_agent_event_seq: latestAgentSequence },
+    historyVerified: false
+  }
 }

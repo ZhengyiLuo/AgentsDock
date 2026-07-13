@@ -362,6 +362,7 @@ export class LocalCache {
       queuedTurns: this.queuedTurns(serverId, sessionId),
       files,
       hasMoreEvents: localHasMore || (timeline ? Boolean(timeline.has_more) : (events[0]?.seq ?? 1) > 1),
+      historyVerified: Boolean(timeline && (timeline.verified_latest_seq != null || timeline.known_total != null)),
       eventsTotal: timeline?.known_total ?? null,
       filesTotal: fileCount,
       cachedAt: timeline?.updated_at ?? row.updated_at,

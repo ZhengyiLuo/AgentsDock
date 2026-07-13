@@ -28,7 +28,7 @@ const api: AgentsDockAPI = {
   },
   timeline: {
     cached: sessionId => ipcRenderer.invoke('timeline:cached', sessionId),
-    open: sessionId => ipcRenderer.invoke('timeline:open', sessionId),
+    open: (sessionId, forceRemote) => ipcRenderer.invoke('timeline:open', sessionId, forceRemote),
     older: (sessionId, before, limit) => ipcRenderer.invoke('timeline:older', sessionId, before, limit),
     around: (sessionId, anchorSeq, limit) => ipcRenderer.invoke('timeline:around', sessionId, anchorSeq, limit),
     index: sessionId => ipcRenderer.invoke('timeline:index', sessionId),

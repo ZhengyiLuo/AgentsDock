@@ -3,7 +3,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, ArrowUp, LoaderCircle, Paperclip, Search, X } from 'lucide-react'
 import type { NativeFileRef, SessionSnapshot, TimelineIndex, TimelinePage, TimelineSearchResult, ViewState } from '@shared/types'
 import { isAgentVisibleEvent, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
-import { useAppStore } from '../store/app-store'
+import { snapshotNeedsAuthoritativeTail, useAppStore } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
 import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { buildTimelineLandmarks, mergeTimelineLandmarks, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
@@ -40,16 +40,17 @@ export function Timeline() {
   const snapshot = useAppStore(state => state.selectedSessionId ? state.snapshots[state.selectedSessionId] : undefined)
   const loading = useAppStore(state => state.loadingSessionId === state.selectedSessionId)
   const [showColdLoader, setShowColdLoader] = useState(false)
+  const recoveringEmptyCache = Boolean(snapshot && snapshotNeedsAuthoritativeTail(snapshot))
 
   useEffect(() => {
-    if (!loading || snapshot) { setShowColdLoader(false); return }
+    if (!loading || (snapshot && !recoveringEmptyCache)) { setShowColdLoader(false); return }
     const timer = window.setTimeout(() => setShowColdLoader(true), 160)
     return () => window.clearTimeout(timer)
-  }, [loading, snapshot, sessionId])
+  }, [loading, recoveringEmptyCache, snapshot, sessionId])
 
   if (!sessionId) return <div className="timeline-empty"><div className="empty-symbol">⌁</div><h2>No chat selected</h2><p>Create or select a chat to start.</p></div>
-  if (!snapshot && loading) return showColdLoader
-    ? <div className="timeline-loading"><LoaderCircle className="spin" size={18} /><span>Loading this chat for the first time</span></div>
+  if (loading && (!snapshot || recoveringEmptyCache)) return showColdLoader
+    ? <div className="timeline-loading"><LoaderCircle className="spin" size={18} /><span>Loading latest messages</span></div>
     : <div className="timeline-pending" />
   if (!snapshot) return <div className="timeline-empty"><h2>Conversation unavailable</h2><button className="primary-button" onClick={() => void useAppStore.getState().selectSession(sessionId)}>Try again</button></div>
   return <TimelineSession key={sessionId} sessionId={sessionId} snapshot={snapshot} />

@@ -7790,3 +7790,18 @@ Release result:
   XCUITest flows on iPhone 17 Pro and iPad Pro 13-inch covering digest preview
   and send, job creation and display, multiline composition, and keyboard
   clearance.
+
+## 2026-07-13 - Repair false-empty Electron chat opens
+
+- Distinguished a server-verified empty conversation from an empty or
+  non-renderable local cache entry. The latter no longer paints “Beginning of
+  conversation” while an authoritative tail is still needed.
+- Added a force-remote timeline-open contract across the renderer, preload,
+  IPC, and main service. Contradictory memory and disk caches now take one
+  bounded cold-open path; ordinary cached chats remain instant.
+- Persisted timeline verification metadata, preserved it through incremental
+  snapshot merges, and removed a false-empty snapshot after a failed recovery
+  so the UI offers Retry instead of confidently presenting an empty chat.
+- Added regressions for false-empty memory caches, false-empty disk caches,
+  corrupted verified totals, and genuinely empty verified chats. TypeScript
+  and all 159 Electron tests pass.

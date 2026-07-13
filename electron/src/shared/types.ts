@@ -341,6 +341,8 @@ export interface SessionSnapshot {
   queuedTurns: QueuedTurn[]
   files: AgentFile[]
   hasMoreEvents: boolean
+  /** True after the server has confirmed the current tail, including a genuinely empty chat. */
+  historyVerified?: boolean
   eventsTotal?: number | null
   filesTotal: number
   cachedAt: number
