@@ -22,6 +22,16 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-13 - Prepare Electron macOS TestFlight build 62
+
+- Advanced the Electron macOS build from 61 to 62 for the indexed whole-history
+  search, responsive media preview, and all committed desktop improvements since
+  the previous TestFlight upload.
+- Kept the mobile React worktree changes out of this release commit; this build
+  changes only the Electron/macOS artifact.
+- The matching standalone server revision is `6f87ad5`, already pushed to
+  GitHub and deployed to the active `sonic` service.
+
 ## 2026-07-13 - Index whole-history search off the request path
 
 - Removed the server-wide JSONL walk from `/api/search`. A background task now
