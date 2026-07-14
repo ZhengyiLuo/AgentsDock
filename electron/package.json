@@ -21,7 +21,7 @@
   "build": {
     "appId": "com.zhengyiluo.ZenithDock",
     "productName": "AgentsDock",
-    "buildVersion": "63",
+    "buildVersion": "64",
     "asar": true,
     "directories": {
       "output": "dist"

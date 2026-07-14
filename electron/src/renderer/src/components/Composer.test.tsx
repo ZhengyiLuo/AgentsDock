@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
+import type { AgentFile } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { Composer } from './Composer'
 
@@ -32,6 +33,36 @@ describe('Composer', () => {
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
+  })
+
+  it('sends a frequent phrase immediately without consuming the current composer', async () => {
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+      queued: false,
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        turns: { send },
+      } as unknown as AgentsDockAPI,
+    })
+    const attachment: AgentFile = { id: 'file-1', filename: 'notes.txt', content_type: 'text/plain' }
+    useAppStore.setState({
+      drafts: { 'chat-1': 'Unfinished draft' },
+      uploadsBySession: { 'chat-1': [attachment] },
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.click(screen.getByTitle('Add'))
+    await user.click(await screen.findByText('Status report'))
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'chat-1', prompt: 'Status report', fileIds: [],
+    })))
+    expect(screen.getByPlaceholderText('Message')).toHaveValue('Unfinished draft')
+    expect(useAppStore.getState().uploadsBySession['chat-1']).toEqual([attachment])
   })
 
   it('shows an actionable provider warning and preserves the draft when the CLI is unavailable', async () => {

@@ -23,6 +23,10 @@ interface ModalState {
   review: boolean
 }
 
+interface SendPromptOptions {
+  consumeComposer?: boolean
+}
+
 interface AppState {
   initialized: boolean
   connected: boolean
@@ -54,7 +58,7 @@ interface AppState {
   selectAdjacent(direction: 1 | -1): Promise<void>
   setDraft(text: string): void
   setDraftForSession(sessionId: string, text: string): void
-  sendPrompt(promptOverride?: string, steer?: boolean): Promise<boolean>
+  sendPrompt(promptOverride?: string, steer?: boolean, options?: SendPromptOptions): Promise<boolean>
   stopTurn(): Promise<void>
   attachPaths(files: NativeFileRef[]): Promise<void>
   removeUpload(fileId: string): void
@@ -358,20 +362,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(state => ({ drafts: { ...state.drafts, [sessionId]: text } }))
   },
 
-  async sendPrompt(promptOverride, steer = false) {
+  async sendPrompt(promptOverride, steer = false, options) {
     const sessionId = get().selectedSessionId
     if (!sessionId) return false
     const prompt = (promptOverride ?? get().drafts[sessionId] ?? '').trim()
     if (!prompt) return false
+    const consumeComposer = options?.consumeComposer ?? true
     const session = get().sessions.find(candidate => candidate.id === sessionId)
     const queuedBeforeSend = new Set((get().snapshots[sessionId]?.queuedTurns ?? []).map(turn => turn.queued_id))
-    const uploads = get().uploadsBySession[sessionId] ?? []
-    const uploadPaths = get().uploadPathsBySession[sessionId] ?? []
-    set(state => ({
-      drafts: { ...state.drafts, [sessionId]: '' },
-      uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
-      uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
-    }))
+    const uploads = consumeComposer ? get().uploadsBySession[sessionId] ?? [] : []
+    const uploadPaths = consumeComposer ? get().uploadPathsBySession[sessionId] ?? [] : []
+    if (consumeComposer) {
+      set(state => ({
+        drafts: { ...state.drafts, [sessionId]: '' },
+        uploadsBySession: { ...state.uploadsBySession, [sessionId]: [] },
+        uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: [] }
+      }))
+    }
     try {
       const response = await window.agentsDock.turns.send({
         sessionId, prompt, fileIds: uploads.map(file => file.id), model: session?.model, effort: session?.effort
@@ -399,12 +406,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.dispatchEvent(new CustomEvent('agentsdock:local-send', { detail: { sessionId } }))
       return true
     } catch (error) {
-      set(state => ({
-        drafts: { ...state.drafts, [sessionId]: state.drafts[sessionId]?.trim() ? state.drafts[sessionId] : prompt },
-        uploadsBySession: { ...state.uploadsBySession, [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], uploads) },
-        uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], uploadPaths) },
-        error: errorMessage(error)
-      }))
+      if (consumeComposer) {
+        set(state => ({
+          drafts: { ...state.drafts, [sessionId]: state.drafts[sessionId]?.trim() ? state.drafts[sessionId] : prompt },
+          uploadsBySession: { ...state.uploadsBySession, [sessionId]: mergeFiles(state.uploadsBySession[sessionId] ?? [], uploads) },
+          uploadPathsBySession: { ...state.uploadPathsBySession, [sessionId]: mergeUploadPaths(state.uploadPathsBySession[sessionId] ?? [], uploadPaths) },
+          error: errorMessage(error)
+        }))
+      } else {
+        set({ error: errorMessage(error) })
+      }
       return false
     }
   },

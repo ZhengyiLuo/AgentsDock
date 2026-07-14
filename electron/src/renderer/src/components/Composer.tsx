@@ -70,21 +70,23 @@ export function Composer() {
     if (storedDraft && !draft && selectedId === useAppStore.getState().selectedSessionId) setDraft(storedDraft)
   }, [storedDraft])
 
-  const send = async (steer = false) => {
-    const outgoing = draft.trim()
+  const send = async (steer = false, promptOverride?: string, consumeComposer = true) => {
+    const outgoing = (promptOverride ?? draft).trim()
     if (!outgoing) return
     const diagnostic = session ? runtimeDiagnosticFor(health, catalog, session.backend) : null
     if (diagnostic && !['ready', 'unknown'].includes(diagnostic.status)) {
       useAppStore.getState().setError([diagnostic.message, diagnostic.action].filter(Boolean).join(' '))
       return
     }
-    setDraft('')
-    if (selectedId) {
-      useAppStore.getState().setDraftForSession(selectedId, '')
-      void window.agentsDock.preferences.set(`draft:${selectedId}`, '')
+    if (consumeComposer) {
+      setDraft('')
+      if (selectedId) {
+        useAppStore.getState().setDraftForSession(selectedId, '')
+        void window.agentsDock.preferences.set(`draft:${selectedId}`, '')
+      }
     }
-    const sent = await useAppStore.getState().sendPrompt(outgoing, steer)
-    if (!sent && useAppStore.getState().selectedSessionId === selectedId) {
+    const sent = await useAppStore.getState().sendPrompt(outgoing, steer, { consumeComposer })
+    if (!sent && consumeComposer && useAppStore.getState().selectedSessionId === selectedId) {
       setDraft(current => !current.trim() || current === outgoing ? outgoing : `${outgoing}\n\n${current}`)
     }
   }
@@ -144,7 +146,7 @@ export function Composer() {
             <DropdownMenu.Item className="menu-item" onSelect={() => void window.agentsDock.files.choose().then(addFiles)}><Paperclip size={14} /> Attach files</DropdownMenu.Item>
             <DropdownMenu.Separator className="menu-separator" />
             <DropdownMenu.Label className="menu-label">Frequent phrases</DropdownMenu.Label>
-            {['Status report', 'Keep going.', 'Verify the result carefully.'].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => setDraft(draft ? `${draft}\n${phrase}` : phrase)}>{phrase}</DropdownMenu.Item>)}
+            {['Status report', 'Keep going.', 'Verify the result carefully.'].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => void send(false, phrase, false)}>{phrase}</DropdownMenu.Item>)}
           </DropdownMenu.Content></DropdownMenu.Portal>
         </DropdownMenu.Root>
         <BackendMenu session={session} />

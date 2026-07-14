@@ -8113,3 +8113,13 @@ Release result:
 - Release verification passed seven isolated runtime-diagnostic server tests,
   both client TypeScript checks, all 184 Electron tests, archive metadata and
   signing inspection, and authenticated live API v7 checks.
+
+## 2026-07-14 - Send frequent phrases immediately
+
+- Changed the composer frequent-phrase actions from draft insertion to a
+  one-click normal send. If an agent is active, the existing server behavior
+  queues the phrase exactly like any other user message.
+- Kept unfinished draft text and staged attachments untouched; canned phrases
+  are sent without silently consuming files intended for a different prompt.
+- Added a focused renderer regression covering direct submission and composer
+  preservation, and prepared Electron macOS build 64.
