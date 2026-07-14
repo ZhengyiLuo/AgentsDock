@@ -8008,6 +8008,18 @@ Release result:
   suite, built a Release simulator app, and visually checked the offline/cache/
   retry states on iPhone 17 Pro and iPad Pro 13-inch.
 
+## 2026-07-13 - Release mobile build 68
+
+- Archived and uploaded AgentsDock iOS/iPadOS `0.1.1 (68)` to TestFlight with
+  the selected-chat sync recovery and visible connection lifecycle.
+- Verified the embedded bundle version, identifier, Release simulator build,
+  TypeScript checks, guardrail suite, and focused iPhone/iPad runtime logs.
+- Kept the standalone server repository matched to the app repository, deployed
+  it to the active host, restarted the user service, and passed authenticated
+  API v6 health verification.
+- Build 66 was also uploaded from stale checked-in release metadata before the
+  existing build 67 was noticed; it is obsolete and should be ignored.
+
 ## 2026-07-13 - Restore typed context-digest handoffs
 
 - Replaced the target chat's plain Markdown prompt delivery with an explicit
