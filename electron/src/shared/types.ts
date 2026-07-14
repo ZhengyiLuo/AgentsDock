@@ -2,6 +2,7 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
 export type Backend = 'claude' | 'codex'
+export type ChatSyncStatus = 'idle' | 'cached' | 'syncing' | 'live' | 'reconnecting' | 'offline' | 'error'
 
 export interface Session {
   id: string
@@ -455,6 +456,7 @@ export interface NativeFileRef {
 export interface AppEventMap {
   'app:update': AppUpdateStatus
   'server:connection': { connected: boolean; health?: Health; error?: string }
+  'server:sync': { sessionId: string; state: ChatSyncStatus; error?: string }
   'server:sessions': Session[]
   'server:event': Event
   'server:jobs': Job[]

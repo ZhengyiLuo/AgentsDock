@@ -1,10 +1,10 @@
 import { memo, useEffect, useMemo, useState } from 'react'
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Pin, Wrench } from 'lucide-react-native'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Pin, Sparkles, Wrench } from 'lucide-react-native'
 import type { TimelineRow } from '../lib/timeline'
-import { isTimelineError, rowText } from '../lib/timeline'
+import { isHandoffDigestEvent, isTimelineError, rowText } from '../lib/timeline'
 import { formatTime, messageText } from '../lib/format'
 import { scaleChatFont } from '../lib/typography'
 import { useAppStore } from '../store/useAppStore'
@@ -130,11 +130,31 @@ function JobRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind: 'job
 function SystemRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind: 'system' }>; fontScale: number }) {
   const colors = usePalette()
   const error = isTimelineError(row.event)
-  const text = messageText(row.event) || row.event.type.replaceAll('_', ' ')
-  return <View style={[styles.system, { backgroundColor: error ? `${colors.red}18` : colors.surface, borderColor: error ? colors.red : colors.border }]}>
-    {error ? <AlertTriangle size={16} color={colors.red} /> : <Check size={16} color={colors.blue} />}
-    <View style={{ flex: 1 }}><Text style={[styles.systemTitle, { color: error ? colors.red : colors.muted }]}>{row.event.type.replaceAll('_', ' ')}</Text><Text selectable style={[styles.systemText, { color: error ? colors.red : colors.text, fontSize: scaleChatFont(13.5, fontScale), lineHeight: scaleChatFont(19, fontScale) }]}>{text}</Text></View>
+  const digest = isHandoffDigestEvent(row.event)
+  const generating = digest && !['handoff_digest_received', 'handoff_digest_sent', 'handoff_digest_error'].includes(row.event.type)
+  const title = digest ? digestStatusTitle(row.event) : row.event.type.replaceAll('_', ' ')
+  const text = digest ? digestStatusText(row.event) : messageText(row.event) || title
+  const digestBody = row.event.type === 'handoff_digest_received' ? row.event.digest?.trim() : ''
+  const [showDigest, setShowDigest] = useState(false)
+  const accent = error ? colors.red : digest ? colors.orange : colors.blue
+  return <View style={[styles.system, { backgroundColor: error ? `${colors.red}18` : digest ? `${colors.orange}18` : colors.surface, borderColor: accent }]}>
+    {error ? <AlertTriangle size={16} color={accent} /> : generating ? <ActivityIndicator size="small" color={accent} style={styles.digestSpinner} /> : digest ? <Sparkles size={16} color={accent} /> : <Check size={16} color={accent} />}
+    <View style={{ flex: 1 }}><Text style={[styles.systemTitle, { color: error ? colors.red : colors.muted }]}>{title}</Text><Text selectable style={[styles.systemText, { color: error ? colors.red : colors.text, fontSize: scaleChatFont(13.5, fontScale), lineHeight: scaleChatFont(19, fontScale) }]}>{text}</Text>{digestBody ? <><Pressable onPress={() => setShowDigest(value => !value)} style={styles.digestToggle}><Text style={{ color: colors.blue, fontSize: 12, fontWeight: '700' }}>{showDigest ? 'Hide digest' : 'View digest'}</Text></Pressable>{showDigest ? <MarkdownContent value={digestBody} fontScale={fontScale} /> : null}</> : null}</View>
   </View>
+}
+
+function digestStatusTitle(event: Extract<TimelineRow, { kind: 'system' }>['event']): string {
+  if (event.type === 'handoff_digest_received') return 'Context Digest'
+  if (event.type.endsWith('_sent')) return 'Digest Sent'
+  if (event.type.endsWith('_error')) return 'Digest Failed'
+  return 'Creating Digest'
+}
+
+function digestStatusText(event: Extract<TimelineRow, { kind: 'system' }>['event']): string {
+  if (event.type === 'handoff_digest_received' || event.type.endsWith('_sent') || event.type.endsWith('_error')) {
+    return messageText(event) || (event.type.endsWith('_sent') ? 'Context digest created and sent.' : 'Context digest generation failed.')
+  }
+  return 'Creating a context digest from this chat and sending it to the target chat.'
 }
 
 const styles = StyleSheet.create({
@@ -148,4 +168,6 @@ const styles = StyleSheet.create({
   mediaRow: { marginHorizontal: 14, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, padding: 10, gap: 10 }, mediaTitle: { fontSize: 12, fontWeight: '800' },
   job: { marginHorizontal: 14, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, padding: 12, gap: 8 }, jobHeader: { flexDirection: 'row', alignItems: 'center', gap: 7 }, jobTitle: { flex: 1, fontSize: 12, fontWeight: '800' }, jobText: { fontSize: 14, lineHeight: 20 },
   system: { marginHorizontal: 14, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, padding: 12, flexDirection: 'row', gap: 10 }, systemTitle: { fontSize: 10, fontWeight: '800', textTransform: 'capitalize' }, systemText: { fontSize: 13.5, lineHeight: 19, marginTop: 4 },
+  digestSpinner: { width: 16, height: 16 },
+  digestToggle: { alignSelf: 'flex-start', paddingTop: 8, paddingBottom: 4 },
 })

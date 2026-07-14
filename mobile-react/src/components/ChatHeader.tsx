@@ -9,13 +9,13 @@ export function ChatHeader({ sessionId, compact, onBack, onOptions, onSearch, on
   const colors = usePalette()
   const session = useAppStore(state => state.sessions.find(value => value.id === sessionId))
   const connected = useAppStore(state => state.connected)
+  const connecting = useAppStore(state => state.connecting)
   const syncSessionId = useAppStore(state => state.syncSessionId)
   const syncStatus = useAppStore(state => state.syncStatus)
-  const reconnect = useAppStore(state => state.reconnect)
-  const syncSelectedSession = useAppStore(state => state.syncSelectedSession)
+  const retryConnection = useAppStore(state => state.retryConnection)
   if (!session) return null
   const selectedStatus = syncSessionId === sessionId ? syncStatus : 'cached'
-  const status = !connected ? 'offline' : selectedStatus
+  const status = !connected ? (connecting ? 'reconnecting' : 'offline') : selectedStatus
   const statusLabel = status === 'live' ? 'Live'
     : status === 'syncing' ? 'Syncing'
       : status === 'reconnecting' ? 'Retrying'
@@ -28,14 +28,13 @@ export function ChatHeader({ sessionId, compact, onBack, onOptions, onSearch, on
         : colors.muted
   const isSpinning = status === 'syncing' || status === 'reconnecting'
   const handleStatusPress = () => {
-    if (!connected) void reconnect()
-    else if (status === 'error' || status === 'reconnecting' || status === 'cached') void syncSelectedSession('manual')
-    else onOptions()
+    if (status === 'live') onOptions()
+    else void retryConnection()
   }
   return <View style={[styles.root, { backgroundColor: colors.background, borderColor: colors.border }]}>
     {compact ? <IconButton icon={ArrowLeft} onPress={onBack} label="Chats" /> : null}
     <View style={styles.titleWrap}><Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>{session.title}</Text><Text style={[styles.subtitle, { color: colors.muted }]} numberOfLines={1}>{runtimeSummary(session)}{session.session_id || session.codex_thread_id || session.claude_session_id ? ` · session ${(session.session_id || session.codex_thread_id || session.claude_session_id)?.slice(0, 12)}` : ''}</Text></View>
-    <IconButton icon={RefreshCw} onPress={() => void syncSelectedSession('manual')} label="Refresh" />
+    <IconButton icon={RefreshCw} onPress={() => void retryConnection()} label="Refresh" />
     <IconButton icon={Search} onPress={onSearch} label="Find in chat" />
     {!compact ? <IconButton icon={PanelRight} onPress={onToggleInspector} label="Toggle details" /> : null}
     <Pressable testID="chat-details" accessibilityRole="button" accessibilityLabel={`${statusLabel}. ${status === 'live' ? 'Open chat details' : 'Retry chat sync'}`} onPress={handleStatusPress} style={[styles.online, { backgroundColor: colors.raised }]}>

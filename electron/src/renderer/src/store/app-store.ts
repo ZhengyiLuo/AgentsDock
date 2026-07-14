@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type {
-  AgentFile, BootstrapPayload, Event, Health, Job, NativeFileRef, QueuedTurn,
+  AgentFile, BootstrapPayload, ChatSyncStatus, Event, Health, Job, NativeFileRef, QueuedTurn,
   RuntimeCatalog, Session, SessionSnapshot
 } from '@shared/types'
 import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
@@ -27,6 +27,9 @@ interface AppState {
   initialized: boolean
   connected: boolean
   connectionError: string | null
+  syncSessionId: string | null
+  syncStatus: ChatSyncStatus
+  syncError: string | null
   health: Health | null
   sessions: Session[]
   jobs: Job[]
@@ -91,6 +94,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   initialized: false,
   connected: false,
   connectionError: null,
+  syncSessionId: null,
+  syncStatus: 'idle',
+  syncError: null,
   health: null,
   sessions: [],
   jobs: [],
@@ -112,7 +118,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async initialize() {
     if (get().initialized || initializationInFlight) return
     if (!window.agentsDock) {
-      set({ initialized: true, connected: false, error: 'The secure Electron bridge did not load. See the AgentsDock startup log.' })
+      set({ initialized: true, connected: false, syncStatus: 'offline', error: 'The secure Electron bridge did not load. See the AgentsDock startup log.' })
       return
     }
     void window.agentsDock.native.log('bootstrap', 'initialize started')
@@ -129,10 +135,33 @@ export const useAppStore = create<AppState>((set, get) => ({
         const connected = payload.connected && !incompatible
         const health = payload.health ?? current.health
         const activeSessionIds = healthActiveSessionIDs(health)
-        if (current.connected !== connected || current.connectionError !== error || !setsEqual(current.activeSessionIds, activeSessionIds) || !jsonEquivalent(current.health, health)) {
-          set({ connected, health, connectionError: error, activeSessionIds })
+        const syncStatus = !connected && current.selectedSessionId
+          ? 'offline'
+          : connected && current.syncStatus === 'offline'
+            ? 'syncing'
+            : current.syncStatus
+        if (current.connected !== connected || current.connectionError !== error || current.syncStatus !== syncStatus || !setsEqual(current.activeSessionIds, activeSessionIds) || !jsonEquivalent(current.health, health)) {
+          set({ connected, health, connectionError: error, activeSessionIds, syncStatus, syncError: connected ? null : error })
         }
         if (incompatible && get().error !== error) set({ error })
+      }),
+      window.agentsDock.events.on('server:sync', payload => {
+        const current = get()
+        if (current.selectedSessionId !== payload.sessionId) return
+        const compatible = healthIsCompatible(current.health)
+        const streamProvesConnected = payload.state === 'live' && compatible
+        const state = !compatible
+          ? 'offline'
+          : !current.connected && payload.state !== 'idle' && payload.state !== 'live'
+            ? 'offline'
+            : payload.state
+        set({
+          connected: streamProvesConnected ? true : current.connected,
+          connectionError: streamProvesConnected ? null : current.connectionError,
+          syncSessionId: payload.sessionId,
+          syncStatus: state,
+          syncError: payload.error ?? (state === 'live' ? null : current.syncError)
+        })
       }),
       window.agentsDock.events.on('server:sessions', incoming => {
         const sessions = applyPendingSessionPatches(incoming)
@@ -177,11 +206,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       const selected = payload.selectedSessionId && payload.sessions.some(session => session.id === payload.selectedSessionId)
         ? payload.selectedSessionId
         : payload.sessions.find(session => !session.archived)?.id ?? null
-      set({ initialized: true, selectedSessionId: selected })
+      set({
+        initialized: true,
+        selectedSessionId: selected,
+        syncSessionId: selected,
+        syncStatus: selected ? (payload.health?.ok ? 'syncing' : 'offline') : 'idle'
+      })
       if (selected) await get().selectSession(selected)
     } catch (error) {
       void window.agentsDock.native.log('bootstrap', 'initialize failed', { error: errorMessage(error) })
-      set({ initialized: true, connected: false, error: errorMessage(error) })
+      set({ initialized: true, connected: false, syncStatus: 'offline', syncError: errorMessage(error), error: errorMessage(error) })
     } finally {
       initializationInFlight = false
     }
@@ -201,17 +235,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedSessionId: sessionId,
       snapshots: pruneArchivedSnapshots(state.snapshots, state.sessions, sessionId),
       loadingSessionId: null,
+      syncSessionId: sessionId,
+      syncStatus: state.connected ? (state.snapshots[sessionId] ? 'cached' : 'syncing') : 'offline',
+      syncError: null,
       error: null
     }))
     touchSnapshot(sessionId)
     const existing = get().snapshots[sessionId]
-    if (existing && !snapshotNeedsAuthoritativeTail(existing)) {
+    if (existing && !force && !snapshotNeedsAuthoritativeTail(existing)) {
       if (get().loadingSessionId === sessionId) set({ loadingSessionId: null })
       subscribeToTimeline(sessionId, existing.events.at(-1)?.seq ?? 0, request)
       logTimelineSelection('selection painted from memory', { sessionId, request, events: existing.events.length })
       return
     }
-    set({ loadingSessionId: sessionId, error: null })
+    set({
+      loadingSessionId: sessionId,
+      syncSessionId: sessionId,
+      syncStatus: get().connected ? 'syncing' : 'offline',
+      syncError: null,
+      error: null
+    })
     let forceRemote = Boolean(existing)
 
     try {
@@ -268,7 +311,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => {
         const snapshots = { ...state.snapshots }
         if (snapshotNeedsAuthoritativeTail(snapshots[sessionId])) delete snapshots[sessionId]
-        return { snapshots, loadingSessionId: null, error: `Could not load this chat. ${errorMessage(lastError)}` }
+        const message = `Could not load this chat. ${errorMessage(lastError)}`
+        return {
+          snapshots,
+          loadingSessionId: null,
+          syncSessionId: sessionId,
+          syncStatus: state.connected ? 'error' : 'offline',
+          syncError: message,
+          error: message
+        }
       })
     }
   },
@@ -554,6 +605,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 function applyBootstrap(payload: BootstrapPayload, set: (value: Partial<AppState>) => void): void {
   set({
     connected: Boolean(payload.health?.ok), health: payload.health ?? null, sessions: payload.sessions,
+    syncStatus: payload.health?.ok ? 'idle' : 'offline', syncError: null,
     jobs: payload.jobs, runtimeCatalog: payload.runtimeCatalog ?? null, folderOrder: payload.folderOrder,
     collapsedFolders: new Set(payload.collapsedFolders), archivedCollapsed: payload.archivedCollapsed,
     inspectorVisible: payload.inspectorVisible, activeSessionIds: healthActiveSessionIDs(payload.health)
@@ -671,6 +723,9 @@ function mergeUploadPaths(a: NativeFileRef[], b: NativeFileRef[]): NativeFileRef
 }
 function stableArray<T>(previous: T[], next: T[]): T[] { return jsonEquivalent(previous, next) ? previous : next }
 function healthActiveSessionIDs(health?: Health | null): Set<string> { return new Set(health?.active ?? health?.active_sessions ?? []) }
+function healthIsCompatible(health?: Health | null): boolean {
+  return (health?.api_contract_version ?? MINIMUM_AGENT_API_CONTRACT) >= MINIMUM_AGENT_API_CONTRACT
+}
 
 async function findNewQueuedTurn(sessionId: string, prompt: string, previousIDs: ReadonlySet<string>): Promise<string | null> {
   const turns = await window.agentsDock.queue.list(sessionId)
@@ -723,7 +778,17 @@ function enqueueLiveEvent(event: Event): void {
     useAppStore.setState(state => {
       let activeSessionIds = state.activeSessionIds
       let snapshots = state.snapshots
+      let connected = state.connected
+      let connectionError = state.connectionError
+      let syncStatus = state.syncStatus
+      let syncError = state.syncError
       for (const [sessionId, events] of batches) {
+        if (sessionId === state.selectedSessionId && healthIsCompatible(state.health)) {
+          connected = true
+          connectionError = null
+          syncStatus = 'live'
+          syncError = null
+        }
         for (const event of events) activeSessionIds = updateActiveSessions(activeSessionIds, event)
         const snapshot = snapshots[sessionId]
         if (!snapshot) continue
@@ -743,7 +808,7 @@ function enqueueLiveEvent(event: Event): void {
           filesTotal: Math.max(snapshot.filesTotal, mergedFiles.length)
         }, state.selectedSessionId)
       }
-      return { activeSessionIds, snapshots }
+      return { activeSessionIds, snapshots, connected, connectionError, syncStatus, syncError }
     })
   })
 }

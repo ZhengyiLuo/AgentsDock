@@ -49,7 +49,7 @@ let selectionEpoch = 0
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null
 let appStateSubscription: { remove(): void } | null = null
-let refreshFailureCount = 0
+let healthFailureCount = 0
 let syncInFlight: { sessionId: string; epoch: number; promise: Promise<void> } | null = null
 let readReceiptTimer: ReturnType<typeof setTimeout> | null = null
 let pinSaveQueue: Promise<void> = Promise.resolve()
@@ -98,6 +98,7 @@ interface AppState {
   initialize(): Promise<void>
   applySettings(serverURL: string, token: string): Promise<void>
   reconnect(): Promise<void>
+  retryConnection(): Promise<void>
   refreshSessions(): Promise<void>
   selectSession(sessionId: string): Promise<void>
   syncSelectedSession(reason?: SyncReason): Promise<void>
@@ -212,7 +213,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (nextState !== 'active') return
         if (get().connected) {
           void get().refreshSessions()
-          void get().syncSelectedSession('foreground')
+          if (get().liveConnected || !hasSelectedStream(get().selectedSessionId)) void get().syncSelectedSession('foreground')
         } else {
           void get().reconnect()
         }
@@ -250,32 +251,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async reconnect() {
     if (get().connecting) return
+    if (!get().connected) stopSelectedStream()
     set(state => ({
       connecting: true,
       error: null,
-      syncStatus: state.selectedSessionId ? 'syncing' : state.syncStatus,
+      syncStatus: state.selectedSessionId
+        ? (state.syncStatus === 'offline' || state.syncStatus === 'reconnecting' ? 'reconnecting' : 'syncing')
+        : state.syncStatus,
       syncError: null,
     }))
+    const requestServerURL = get().serverURL
+    const requestToken = get().token
+    const sessionsRequest = Promise.allSettled([client.sessions()] as const)
+    const optionalRequests = Promise.allSettled([client.runtimeCatalog(), client.jobs()] as const)
+    let health: Health
     try {
-      const [health, sessions, runtime, jobs] = await Promise.all([client.health(), client.sessions(), client.runtimeCatalog(), client.jobs()])
+      health = await client.health()
       const contract = health.api_contract_version ?? MIN_API_CONTRACT
       if (contract < MIN_API_CONTRACT) throw new Error(`Server upgrade required: app needs API v${MIN_API_CONTRACT}, server reports v${contract}.`)
-      const activeSessionIds = healthActiveSessions(health)
-      let selected = get().selectedSessionId
-      if (!selected || !sessions.some(value => value.id === selected)) selected = sessions.find(value => !value.archived)?.id ?? null
-      refreshFailureCount = 0
-      set({ connected: true, connecting: false, health, sessions, runtime, jobs, activeSessionIds, selectedSessionId: selected })
-      await Promise.all([
-        saveCachedSessions(get().serverURL, sessions),
-        saveSettings({ serverURL: get().serverURL, selectedSessionId: selected, folderOrder: get().folderOrder, fontScale: get().fontScale }),
-      ])
-      if (selected) await get().selectSession(selected)
-      else {
-        stopSelectedStream()
-        set({ syncSessionId: null, syncStatus: 'idle', syncError: null, lastTimelineSyncAt: null })
-      }
     } catch (error) {
       const message = errorMessage(error)
+      stopSelectedStream()
       set(state => ({
         connected: false,
         connecting: false,
@@ -285,15 +281,82 @@ export const useAppStore = create<AppState>((set, get) => ({
         syncStatus: state.selectedSessionId ? 'offline' : 'idle',
         syncError: message,
       }))
+      return
     }
+
+    const activeSessionIds = healthActiveSessions(health)
+    healthFailureCount = 0
+    set({ connected: true, health, activeSessionIds })
+
+    void optionalRequests.then(([runtimeResult, jobsResult]) => {
+      if (get().serverURL !== requestServerURL || get().token !== requestToken) return
+      set(state => ({
+        runtime: runtimeResult.status === 'fulfilled' ? runtimeResult.value : state.runtime,
+        jobs: jobsResult.status === 'fulfilled' ? jobsResult.value : state.jobs,
+      }))
+    })
+
+    const [sessionsResult] = await sessionsRequest
+    const sessions = sessionsResult.status === 'fulfilled' ? sessionsResult.value : get().sessions
+    let selected = get().selectedSessionId
+    if (sessionsResult.status === 'fulfilled' && (!selected || !sessions.some(value => value.id === selected))) {
+      selected = sessions.find(value => !value.archived)?.id ?? null
+    }
+    set({
+      connected: true,
+      connecting: false,
+      health,
+      sessions,
+      activeSessionIds,
+      selectedSessionId: selected,
+      error: sessionsResult.status === 'rejected' ? errorMessage(sessionsResult.reason) : null,
+    })
+    const saves: Promise<void>[] = [
+      saveSettings({ serverURL: get().serverURL, selectedSessionId: selected, folderOrder: get().folderOrder, fontScale: get().fontScale }),
+    ]
+    if (sessionsResult.status === 'fulfilled') saves.push(saveCachedSessions(get().serverURL, sessions))
+    void Promise.all(saves).catch(error => set({ error: errorMessage(error) }))
+    if (selected) {
+      try {
+        await get().selectSession(selected)
+      } catch (error) {
+        const message = errorMessage(error)
+        set({ error: message, loadingSessionId: null, liveConnected: false, syncSessionId: selected, syncStatus: 'error', syncError: message })
+      }
+    } else {
+      stopSelectedStream()
+      set({ syncSessionId: null, syncStatus: 'idle', syncError: null, lastTimelineSyncAt: null })
+    }
+  },
+
+  async retryConnection() {
+    const { connected, connecting, liveConnected, selectedSessionId } = get()
+    if (connecting) return
+    if (!connected) {
+      stopSelectedStream()
+      await get().reconnect()
+      return
+    }
+    if (!selectedSessionId) {
+      await get().refreshSessions()
+      return
+    }
+    if (hasSelectedStream(selectedSessionId) && !liveConnected) stopSelectedStream()
+    await get().syncSelectedSession('manual')
   },
 
   async refreshSessions() {
     if (!get().connected) return
-    try {
-      const before = new Map(get().sessions.map(value => [value.id, value.latest_agent_event_seq ?? 0]))
-      const [sessions, health] = await Promise.all([client.sessions(), client.health()])
-      refreshFailureCount = 0
+    const before = new Map(get().sessions.map(value => [value.id, value.latest_agent_event_seq ?? 0]))
+    const [sessionsResult, healthResult] = await Promise.allSettled([client.sessions(), client.health()] as const)
+    if (healthResult.status === 'fulfilled') {
+      const health = healthResult.value
+      healthFailureCount = 0
+      if (sessionsResult.status === 'rejected') {
+        set({ connected: true, health, activeSessionIds: healthActiveSessions(health) })
+        return
+      }
+      const sessions = sessionsResult.value
       set(state => ({ connected: true, sessions: mergeSessionState(sessions, state.sessions), health, activeSessionIds: healthActiveSessions(health) }))
       void saveCachedSessions(get().serverURL, sessions)
       void updateBadge(sessions)
@@ -308,21 +371,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         const remote = sessions.find(value => value.id === selectedId)
         const localSeq = get().snapshots[selectedId]?.latestSeq ?? 0
         const remoteSeq = remote?.latest_event_seq ?? 0
-        if (remoteSeq > localSeq) void get().syncSelectedSession('server-ahead')
-        else if (!get().liveConnected || ['reconnecting', 'error', 'offline'].includes(get().syncStatus)) void get().syncSelectedSession('recovery')
+        const streamExists = hasSelectedStream(selectedId)
+        if (remoteSeq > localSeq && (get().liveConnected || !streamExists)) void get().syncSelectedSession('server-ahead')
+        else if (!streamExists && (!get().liveConnected || ['reconnecting', 'error', 'offline'].includes(get().syncStatus))) void get().syncSelectedSession('recovery')
       }
-    } catch (error) {
-      refreshFailureCount += 1
-      const message = errorMessage(error)
-      set(state => ({
-        connected: refreshFailureCount < 2 ? state.connected : false,
-        liveConnected: refreshFailureCount < 2 ? state.liveConnected : false,
-        syncStatus: state.selectedSessionId
-          ? (refreshFailureCount < 2 && state.liveConnected ? 'live' : refreshFailureCount < 2 ? 'reconnecting' : 'offline')
-          : state.syncStatus,
-        syncError: state.selectedSessionId && !(refreshFailureCount < 2 && state.liveConnected) ? message : state.syncError,
-      }))
+      return
     }
+
+    healthFailureCount += 1
+    const offline = healthFailureCount >= 2
+    const message = errorMessage(healthResult.reason)
+    if (offline) stopSelectedStream()
+    set(state => ({
+      connected: offline ? false : state.connected,
+      liveConnected: offline ? false : state.liveConnected,
+      syncStatus: state.selectedSessionId
+        ? (!offline && state.liveConnected ? 'live' : !offline ? 'reconnecting' : 'offline')
+        : state.syncStatus,
+      syncError: state.selectedSessionId && !(!offline && state.liveConnected) ? message : state.syncError,
+    }))
   },
 
   async selectSession(sessionId) {
@@ -364,7 +431,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const promise = (async () => {
       const existingAtStart = get().snapshots[sessionId]
       const fullTail = reason === 'selection' || reason === 'manual' || reason === 'foreground' || !existingAtStart
-      const exposeProgress = fullTail || get().syncStatus !== 'live'
+      const streamIsLive = get().liveConnected && hasSelectedStream(sessionId)
+      const exposeProgress = !streamIsLive && (fullTail || get().syncStatus !== 'live')
       if (exposeProgress) set({ syncSessionId: sessionId, syncStatus: 'syncing', syncError: null })
       try {
         const after = snapshotLatestSeq(existingAtStart)
@@ -398,7 +466,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           sessions: state.sessions.map(value => value.id === sessionId ? page.session : value),
           loadingSessionId: null,
           syncSessionId: sessionId,
-          syncStatus: state.liveConnected && streamSessionId === sessionId ? 'live' : 'syncing',
+          syncStatus: hasSelectedStream(sessionId) ? (state.liveConnected ? 'live' : 'reconnecting') : 'syncing',
           syncError: null,
           lastTimelineSyncAt: now,
         }))
@@ -408,18 +476,22 @@ export const useAppStore = create<AppState>((set, get) => ({
           void get().refreshTimelineIndex(sessionId)
         }
 
-        const shouldRestartStream = streamSessionId !== sessionId
-          || !streamStop
-          || reason === 'selection'
-          || reason === 'manual'
-          || reason === 'foreground'
-          || reason === 'recovery'
-        if (shouldRestartStream) startSelectedStream(sessionId, next.latestSeq ?? snapshotLatestSeq(next), epoch, set, get)
+        if (!hasSelectedStream(sessionId)) startSelectedStream(sessionId, next.latestSeq ?? snapshotLatestSeq(next), epoch, set, get)
         else if (get().liveConnected) set({ syncStatus: 'live' })
         void get().markRead(sessionId)
       } catch (error) {
         if (epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
         const message = errorMessage(error)
+        if (hasSelectedStream(sessionId)) {
+          set({
+            loadingSessionId: null,
+            syncSessionId: sessionId,
+            syncStatus: get().liveConnected ? 'live' : 'reconnecting',
+            syncError: get().liveConnected ? null : message,
+            ...(reason === 'manual' ? { error: message } : {}),
+          })
+          return
+        }
         set({
           loadingSessionId: null,
           liveConnected: false,
@@ -822,7 +894,6 @@ function startSelectedStream(
         })
       } else {
         set({ liveConnected: false, syncSessionId: sessionId, syncStatus: 'reconnecting' })
-        scheduleSelectedRecovery(sessionId, epoch, get)
       }
     },
   )
@@ -832,9 +903,13 @@ function scheduleSelectedRecovery(sessionId: string, epoch: number, get: () => A
   if (recoveryTimer) clearTimeout(recoveryTimer)
   recoveryTimer = setTimeout(() => {
     recoveryTimer = null
-    if (NativeAppState.currentState !== 'active' || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
+    if (NativeAppState.currentState !== 'active' || epoch !== selectionEpoch || get().selectedSessionId !== sessionId || hasSelectedStream(sessionId)) return
     void get().syncSelectedSession('recovery')
   }, delay)
+}
+
+function hasSelectedStream(sessionId: string | null): boolean {
+  return Boolean(sessionId && streamSessionId === sessionId && streamStop)
 }
 
 function snapshotLatestSeq(snapshot?: Snapshot): number {

@@ -8050,3 +8050,24 @@ Release result:
   stored as plain `# ZenithDock Context Digest` prompts.
 - Added server contract tests plus renderer, folded-card, and queue regressions.
   TypeScript and all 175 Electron tests pass.
+
+## 2026-07-14 - Harden cross-platform sync and durable digest recovery
+
+- Audited the Electron, React Native, and server implementations as one shared
+  contract. Both clients now distinguish `Syncing`, `Live`, `Retrying`,
+  `Cached`, and `Offline`; auxiliary catalog or job failures no longer make a
+  healthy agent server appear offline.
+- Added stream connection watchdogs, single-owner reconnects, and a two-miss
+  health threshold while allowing a live timeline stream to remain
+  authoritative through a transient REST health failure.
+- Made context-digest handoffs durable across server restarts with a persisted
+  job ledger, event-based recovery for older jobs, restart-safe source and
+  delivery reconciliation, queue cancellation handling, and replay of a
+  delivery interrupted between target turn start and ledger persistence.
+- Ported the folded digest lifecycle to iPhone and iPad. Source generation,
+  ready, sent, and failure states render as one compact amber card; the hidden
+  target delivery prompt is not exposed as an ordinary user message.
+- Verification: all 177 Electron tests passed, Electron production packaging
+  compiled, React Native TypeScript passed, all 17 server regressions passed,
+  and the native iOS simulator workspace built successfully for the generic
+  iPhone/iPad target. No TestFlight upload was performed in this pass.

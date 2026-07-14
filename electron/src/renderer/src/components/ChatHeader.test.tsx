@@ -6,7 +6,7 @@ import { useAppStore } from '../store/app-store'
 import { ChatHeader } from './ChatHeader'
 
 describe('ChatHeader', () => {
-  afterEach(cleanup)
+  afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
   beforeEach(() => {
     Object.defineProperty(window, 'agentsDock', {
@@ -21,6 +21,9 @@ describe('ChatHeader', () => {
     useAppStore.setState({
       connected: false,
       connectionError: 'Server unavailable',
+      syncSessionId: null,
+      syncStatus: 'idle',
+      syncError: null,
       sessions: [],
       selectedSessionId: null,
       modals: {
@@ -39,12 +42,33 @@ describe('ChatHeader', () => {
   it('opens connection settings from the disconnected startup header', async () => {
     render(<ChatHeader />)
 
-    const button = screen.getByRole('button', { name: 'Server connection: Offline' })
+    const button = screen.getByRole('button', { name: 'Chat connection: Offline' })
     expect(button).toHaveClass('offline')
 
     await userEvent.setup().click(button)
 
     expect(useAppStore.getState().modals.settings).toBe(true)
+  })
+
+  it('shows retrying separately from offline and retries the selected chat', async () => {
+    const retry = vi.spyOn(useAppStore.getState(), 'selectSession').mockResolvedValue(undefined)
+    useAppStore.setState({
+      connected: true,
+      connectionError: null,
+      sessions: [{ id: 'chat', title: 'Chat', backend: 'codex' }],
+      selectedSessionId: 'chat',
+      syncSessionId: 'chat',
+      syncStatus: 'reconnecting',
+      syncError: 'Live updates disconnected'
+    })
+    render(<ChatHeader />)
+
+    const button = screen.getByRole('button', { name: 'Chat connection: Retrying' })
+    expect(button).toHaveClass('pending')
+    expect(button.querySelector('.connection-spinner')).not.toBeNull()
+    await userEvent.setup().click(button)
+
+    expect(retry).toHaveBeenCalledWith('chat', true)
   })
 
   it('toggles the docked terminal without replacing the chat workspace', async () => {

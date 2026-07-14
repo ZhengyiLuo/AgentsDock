@@ -431,14 +431,37 @@ export class AgentServerClient {
     let retryDelay = 500
     let socket: WebSocket | null = null
     let retry: NodeJS.Timeout | null = null
+    let connectWatchdog: NodeJS.Timeout | null = null
     const connect = (): void => {
       if (stopped) return
       const url = new URL(endpoint)
       url.searchParams.set('after', String(lastSeq))
       if (this.token) url.searchParams.set('token', this.token)
-      socket = new WebSocket(url)
-      socket.addEventListener('open', () => { retryDelay = 500; onState(true) })
-      socket.addEventListener('message', message => {
+      const current = new WebSocket(url)
+      socket = current
+      let disconnected = false
+      const disconnect = (error?: string): void => {
+        if (stopped || disconnected) return
+        disconnected = true
+        if (connectWatchdog) clearTimeout(connectWatchdog)
+        connectWatchdog = null
+        onState(false, error)
+        const jitter = Math.floor(Math.random() * Math.min(250, retryDelay / 3))
+        retry = setTimeout(connect, retryDelay + jitter)
+        retryDelay = Math.min(10_000, retryDelay * 2)
+      }
+      connectWatchdog = setTimeout(() => {
+        if (stopped || disconnected || current.readyState !== 0) return
+        current.close()
+        disconnect('Live updates timed out')
+      }, 10_000)
+      current.addEventListener('open', () => {
+        if (connectWatchdog) clearTimeout(connectWatchdog)
+        connectWatchdog = null
+        retryDelay = 500
+        onState(true)
+      })
+      current.addEventListener('message', message => {
         try {
           const event = JSON.parse(String(message.data)) as Event
           if (!Number.isFinite(event.seq) || event.seq <= lastSeq) return
@@ -446,19 +469,17 @@ export class AgentServerClient {
           onEvent(event)
         } catch { /* ignore malformed packets */ }
       })
-      socket.addEventListener('close', () => {
-        if (stopped) return
-        onState(false)
-        const jitter = Math.floor(Math.random() * Math.min(250, retryDelay / 3))
-        retry = setTimeout(connect, retryDelay + jitter)
-        retryDelay = Math.min(10_000, retryDelay * 2)
+      current.addEventListener('close', () => disconnect())
+      current.addEventListener('error', () => {
+        current.close()
+        disconnect('Live updates disconnected')
       })
-      socket.addEventListener('error', () => { if (!stopped) onState(false, 'Live updates disconnected') })
     }
     connect()
     return () => {
       stopped = true
       if (retry) clearTimeout(retry)
+      if (connectWatchdog) clearTimeout(connectWatchdog)
       socket?.close()
     }
   }

@@ -17,7 +17,7 @@ export function Timeline({ sessionId, scrollRequest, keyboardVisible, bottomInse
   const syncSessionId = useAppStore(state => state.syncSessionId)
   const syncStatus = useAppStore(state => state.syncStatus)
   const syncError = useAppStore(state => state.syncError)
-  const syncSelectedSession = useAppStore(state => state.syncSelectedSession)
+  const retryConnection = useAppStore(state => state.retryConnection)
   const fontScale = useAppStore(state => state.fontScale)
   const list = useRef<FlashListRef<TimelineRow>>(null)
   const [nearBottom, setNearBottom] = useState(true)
@@ -97,7 +97,7 @@ export function Timeline({ sessionId, scrollRequest, keyboardVisible, bottomInse
           ? <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>Messages unavailable</Text>
             <Text style={[styles.emptyDetail, { color: colors.muted }]} numberOfLines={3}>{syncError || 'The server could not sync this chat.'}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Retry chat sync" onPress={() => void syncSelectedSession('manual')} style={[styles.retry, { backgroundColor: colors.raised, borderColor: colors.border }]}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Retry chat sync" onPress={() => void retryConnection()} style={[styles.retry, { backgroundColor: colors.raised, borderColor: colors.border }]}>
               <RefreshCw size={14} color={colors.text} />
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12 }}>Retry</Text>
             </Pressable>

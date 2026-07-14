@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { ALargeSmall, Check, MoreHorizontal, PanelRight, PanelRightClose, Pin, RefreshCw, Search, SquareTerminal } from 'lucide-react'
+import { ALargeSmall, Check, LoaderCircle, MoreHorizontal, PanelRight, PanelRightClose, Pin, RefreshCw, Search, SquareTerminal } from 'lucide-react'
 import { runtimeLabel, shortId } from '../lib/format'
 import { useAppStore } from '../store/app-store'
 
@@ -63,6 +63,30 @@ function applyFont(size: number, family: string) {
 export function ConnectionStatus() {
   const connected = useAppStore(state => state.connected)
   const error = useAppStore(state => state.connectionError)
-  const label = connected ? 'Online' : 'Offline'
-  return <button type="button" className={`connection-status ${connected ? 'online' : 'offline'}`} aria-label={`Server connection: ${label}`} title={error || (connected ? 'Server connected' : 'Open connection settings')} onClick={() => useAppStore.getState().setModal('settings', true)}><span />{label}<MoreHorizontal size={13} /></button>
+  const selectedSessionId = useAppStore(state => state.selectedSessionId)
+  const syncSessionId = useAppStore(state => state.syncSessionId)
+  const selectedStatus = useAppStore(state => state.syncStatus)
+  const syncError = useAppStore(state => state.syncError)
+  const status = !connected
+    ? 'offline'
+    : selectedSessionId && syncSessionId === selectedSessionId
+      ? selectedStatus
+      : 'live'
+  const label = status === 'live' ? 'Live'
+    : status === 'syncing' ? 'Syncing'
+      : status === 'reconnecting' ? 'Retrying'
+        : status === 'error' ? 'Sync paused'
+          : status === 'offline' ? 'Offline'
+            : 'Cached'
+  const tone = status === 'live' ? 'online'
+    : status === 'offline' || status === 'error' ? 'offline'
+      : status === 'syncing' || status === 'reconnecting' ? 'pending'
+        : 'cached'
+  const spinning = status === 'syncing' || status === 'reconnecting'
+  const retryable = Boolean(selectedSessionId && ['cached', 'error', 'reconnecting'].includes(status))
+  const activate = () => {
+    if (retryable && selectedSessionId) void useAppStore.getState().selectSession(selectedSessionId, true)
+    else useAppStore.getState().setModal('settings', true)
+  }
+  return <button type="button" className={`connection-status ${tone}`} aria-label={`Chat connection: ${label}`} title={syncError || error || (status === 'live' ? 'Live trace connected' : retryable ? 'Retry chat sync' : 'Open connection settings')} onClick={activate}>{spinning ? <LoaderCircle className="spin connection-spinner" size={11} /> : <span />}{label}<MoreHorizontal size={13} /></button>
 }

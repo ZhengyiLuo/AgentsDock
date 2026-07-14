@@ -45,6 +45,25 @@ describe('AgentServerClient live stream', () => {
     expect(second.closed).toBe(true)
   })
 
+  it('times out a stalled websocket handshake and keeps retrying', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const states: Array<{ connected: boolean; error?: string }> = []
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const stop = client.stream('chat', 0, () => {}, (connected, error) => states.push({ connected, error }))
+    const first = FakeWebSocket.instances[0]
+    first.readyState = 0
+
+    vi.advanceTimersByTime(10_000)
+    expect(first.closed).toBe(true)
+    expect(states).toEqual([{ connected: false, error: 'Live updates timed out' }])
+    vi.advanceTimersByTime(500)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+
+    stop()
+  })
+
   it('can issue a lightweight visible tail check after the cached sequence', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       session: { id: 'chat', title: 'Chat', backend: 'codex' },

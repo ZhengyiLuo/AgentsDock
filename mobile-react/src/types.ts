@@ -82,7 +82,9 @@ export interface Event {
   position?: number | null
   purpose?: string | null
   digest_job_id?: string | null
+  source_session_id?: string | null
   target_session_id?: string | null
+  digest?: string | null
   backend?: Backend | null
   prompt?: string | null
   file_ids?: string[] | null

@@ -161,6 +161,9 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .connection-status > span, .server-pill > span, .server-health > span { width: 7px; height: 7px; border-radius: 50%; }
 .connection-status.online > span, .server-pill.online > span, .server-health.online > span { background: var(--green); }
 .connection-status.offline > span, .server-pill.offline > span, .server-health.offline > span { background: var(--danger); }
+.connection-status.pending { color: var(--amber); }
+.connection-status.cached > span { background: var(--faint); }
+.connection-status .connection-spinner { flex: 0 0 auto; }
 
 /* Persistent terminal */
 .terminal-workspace { min-width: 0; min-height: 0; position: relative; display: grid; grid-template-rows: 39px minmax(0, 1fr); overflow: hidden; background: #111212; border-top: 1px solid #303131; box-shadow: 0 -10px 30px #0003; }

@@ -30,6 +30,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   const items: Array<Turn | SystemRow | JobRow> = []
   const turns = new Map<string, Turn>()
   const jobRows = new Map<string, JobRow>()
+  const digestRows = new Map<string, SystemRow>()
   let active: Turn | null = null
 
   const turnFor = (event: Event): Turn => {
@@ -42,7 +43,38 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     return turn
   }
 
+  const appendDigestEvent = (event: Event): void => {
+    const digestId = String(event.digest_job_id || '').trim()
+    if (!digestId) return
+    const existing = digestRows.get(digestId)
+    if (existing) {
+      const nextPriority = digestDisplayPriority(event)
+      const currentPriority = digestDisplayPriority(existing.event)
+      if (nextPriority > currentPriority || nextPriority === currentPriority && event.seq >= existing.event.seq) {
+        existing.event = event
+      }
+      return
+    }
+    const row: SystemRow = { kind: 'system', key: `digest:${digestId}`, seq: event.seq, event }
+    digestRows.set(digestId, row)
+    items.push(row)
+  }
+
   for (const event of events) {
+    const legacyDigest = legacyDigestBody(event)
+    if (legacyDigest) {
+      appendDigestEvent({
+        ...event,
+        type: 'handoff_digest_received',
+        digest_job_id: `legacy-${event.run_id || event.id}`,
+        digest: legacyDigest,
+        message: 'Context digest was delivered to this chat.',
+      })
+    }
+    if (isHandoffDigestEvent(event)) {
+      appendDigestEvent(event)
+      continue
+    }
     if (hidden.has(event.type)) continue
     if (jobs.has(event.type) || event.purpose === 'scheduled_job') {
       const id = event.job_id || event.job?.id || event.run_id || `seq-${event.seq}`
@@ -61,7 +93,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     }
     if (event.type === 'turn_started') {
       active = turnFor(event)
-      active.user = event
+      if (!isDigestDeliveryTurn(event)) active.user = event
       for (const id of event.file_ids ?? []) {
         const file = filesById.get(id)
         if (file && !active.files.some(value => value.id === id)) active.files.push(file)
@@ -100,6 +132,11 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   return rows
 }
 
+export function isHandoffDigestEvent(event: Event): boolean {
+  return Boolean(event.digest_job_id)
+    && (event.purpose === 'handoff_digest' || event.type.startsWith('handoff_digest_'))
+}
+
 export function rowText(row: TimelineRow): string {
   if (row.kind === 'message') return row.events.map(messageText).map(value => value.trim()).filter(Boolean).join('\n\n')
   if (row.kind === 'trace') return row.events.map(messageText).filter(Boolean).join('\n')
@@ -123,4 +160,22 @@ function appendAssistant(previous: Event[], event: Event, candidate: string, agg
   if (!normalized || prior.includes(normalized)) return
   if (aggregate && prior.length && prior.every(part => normalized.includes(part))) previous.splice(0, previous.length, event)
   else previous.push(event)
+}
+
+function legacyDigestBody(event: Event): string {
+  if (event.type !== 'turn_started') return ''
+  const prompt = event.prompt?.trim() || ''
+  return prompt.startsWith('# ZenithDock Context Digest') ? prompt : ''
+}
+
+function isDigestDeliveryTurn(event: Event): boolean {
+  return event.purpose === 'handoff_digest_delivery' || Boolean(legacyDigestBody(event))
+}
+
+function digestDisplayPriority(event: Event): number {
+  if (event.type === 'handoff_digest_error') return 50
+  if (event.type === 'handoff_digest_sent' || event.type === 'handoff_digest_received') return 40
+  if (event.type === 'handoff_digest_ready' || event.type === 'handoff_digest_submitted') return 30
+  if (event.type === 'handoff_digest_started') return 20
+  return event.purpose === 'handoff_digest' ? 10 : 0
 }

@@ -66,6 +66,8 @@ export class AppService {
   private selectedSessionId: string | null = null
   private stopTimelineStream: (() => void) | null = null
   private timelineLease = 0
+  private timelineStreamConnected = false
+  private healthFailureCount = 0
   private pendingEventCache = new Map<string, Event[]>()
   private eventCacheTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
@@ -122,6 +124,7 @@ export class AppService {
     this.searchBackfillTimer = null
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
+    this.timelineStreamConnected = false
     this.timelineLease += 1
     this.disconnectAllTerminals()
     this.flushEventCache()
@@ -156,6 +159,8 @@ export class AppService {
     this.subagentProjector.reset()
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
+    this.timelineStreamConnected = false
+    this.healthFailureCount = 0
     this.timelineLease += 1
     this.selectedSessionId = null
     this.settings.update(value)
@@ -241,6 +246,7 @@ export class AppService {
 
   async openTimeline(sessionId: string, forceRemote = false): Promise<SessionSnapshot> {
     const lease = this.beginTimelineSelection(sessionId)
+    this.emit('server:sync', { sessionId, state: 'syncing' })
     const cached = this.cache.snapshot(this.serverId, sessionId)
     const cachedLast = cached?.events.at(-1)?.seq ?? 0
     if (cached && !forceRemote) {
@@ -380,12 +386,14 @@ export class AppService {
 
   async subscribeTimeline(sessionId: string, after: number): Promise<void> {
     const lease = this.beginTimelineSelection(sessionId)
+    this.emit('server:sync', { sessionId, state: 'syncing' })
     queueMicrotask(() => void this.reconcileTimelineAndStream(sessionId, after, lease))
   }
 
   private beginTimelineSelection(sessionId: string): number {
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
+    this.timelineStreamConnected = false
     const lease = ++this.timelineLease
     this.selectedSessionId = sessionId
     this.putPreference('selectedSessionId', sessionId)
@@ -406,7 +414,12 @@ export class AppService {
       this.enqueueEventCache(event)
     }, (connected, error) => {
       if (!this.isCurrentTimeline(sessionId, lease)) return
-      this.emit('server:connection', { connected, health: this.health ?? undefined, error })
+      this.timelineStreamConnected = connected
+      this.emit('server:sync', {
+        sessionId,
+        state: connected ? 'live' : 'reconnecting',
+        error
+      })
     })
   }
 
@@ -415,6 +428,8 @@ export class AppService {
     this.timelineLease += 1
     this.stopTimelineStream?.()
     this.stopTimelineStream = null
+    this.timelineStreamConnected = false
+    this.emit('server:sync', { sessionId, state: 'idle' })
   }
 
   viewState(sessionId: string): ViewState | null { return this.cache.viewState(this.serverId, sessionId) }
@@ -607,11 +622,22 @@ export class AppService {
     try {
       const [health, sessions, jobs] = await Promise.allSettled([this.client.health(), this.client.sessions(), includeJobs ? this.client.jobs() : Promise.resolve(this.jobs)])
       if (health.status === 'fulfilled') {
+        this.healthFailureCount = 0
         this.adoptHealth(health.value)
         this.emit('server:connection', { connected: true, health: health.value })
+        if (this.selectedSessionId && this.timelineStreamConnected) {
+          this.emit('server:sync', { sessionId: this.selectedSessionId, state: 'live' })
+        }
         void this.refreshRuntime()
       } else {
-        this.emit('server:connection', { connected: false, error: errorText(health.reason) })
+        this.healthFailureCount += 1
+        const error = errorText(health.reason)
+        if (this.selectedSessionId && !this.timelineStreamConnected) {
+          this.emit('server:sync', { sessionId: this.selectedSessionId, state: 'reconnecting', error })
+        }
+        if (this.healthFailureCount >= 2 && !this.timelineStreamConnected) {
+          this.emit('server:connection', { connected: false, error })
+        }
         if (announce) throw health.reason
       }
       if (sessions.status === 'fulfilled') {
