@@ -38,8 +38,9 @@ import {
 } from '../storage/cache'
 
 const MIN_API_CONTRACT = 7
-const TAIL_LIMIT = 240
-const OLDER_LIMIT = 180
+const TAIL_LIMIT = 420
+const OLDER_LIMIT = 300
+const MAX_LOADED_EVENTS = 3_600
 const STREAM_RECOVERY_DELAY_MS = 2_500
 const BACKGROUND_REFRESH_MS = 12_000
 let streamStop: (() => void) | null = null
@@ -528,24 +529,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!sessionId || get().loadingOlder[sessionId]) return 0
     const snapshot = get().snapshots[sessionId]
     if (!snapshot?.hasMore || !snapshot.events.length) return 0
+    if (snapshot.events.length >= MAX_LOADED_EVENTS) return 0
+    const before = snapshot.events[0].seq
+    const previousTail = snapshotLatestSeq(snapshot)
+    const epoch = selectionEpoch
+    const remainingCapacity = Math.max(0, MAX_LOADED_EVENTS - snapshot.events.length)
+    const limit = Math.min(OLDER_LIMIT, remainingCapacity)
     set(state => ({ loadingOlder: { ...state.loadingOlder, [sessionId]: true } }))
     try {
-      const page = await client.sessionPage(sessionId, { before: snapshot.events[0].seq, limit: OLDER_LIMIT, tail: false, visible: true })
+      const page = await client.sessionPage(sessionId, { before, limit, tail: false, visible: true })
+      if (epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return 0
       const latest = get().snapshots[sessionId]
       if (!latest) return 0
+      if (latest.events[0]?.seq !== before) return 0
+      const loaded = new Set(latest.events.map(event => event.seq))
+      const accepted = page.events
+        .filter(event => event.seq < before && !loaded.has(event.seq))
+        .slice(-remainingCapacity)
       const next: Snapshot = {
         ...latest,
         session: page.session,
-        events: mergeEvents(page.events, latest.events),
+        events: mergeEvents(accepted, latest.events),
         queuedTurns: page.queued_turns.length ? page.queued_turns : latest.queuedTurns,
-        files: mergeFiles(latest.files, filesFromEvents(page.events)),
-        hasMore: page.has_more,
+        files: mergeFiles(latest.files, filesFromEvents(accepted)),
+        hasMore: page.has_more && accepted.length > 0 && latest.events.length + accepted.length < MAX_LOADED_EVENTS,
         total: page.total ?? latest.total,
+        latestSeq: Math.max(previousTail, latest.latestSeq ?? 0, page.latest_seq ?? 0),
         cachedAt: Date.now(),
       }
       set(state => ({ snapshots: { ...state.snapshots, [sessionId]: next } }))
       void saveSnapshot(get().serverURL, next)
-      return page.events.length
+      return accepted.length
     } catch (error) { set({ error: errorMessage(error) }); return 0 }
     finally {
       set(state => {

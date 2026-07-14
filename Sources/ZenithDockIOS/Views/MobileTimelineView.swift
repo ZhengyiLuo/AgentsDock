@@ -17,7 +17,7 @@ struct MobileTimelineView: View {
     @State private var reviewRoute: MobileCodeReviewRoute?
     @State private var olderHistoryLoadArmed = true
     @State private var suppressScrollHistoryLoadUntilTopLeaves = false
-    @State private var visibleRowLimit = 110
+    @State private var visibleRowLimit = 180
     @State private var isFileDropTargeted = false
     @State private var historyLoadSuppressedUntil = Date.distantPast
     @State private var lastObservedEventSeq = 0
@@ -27,8 +27,8 @@ struct MobileTimelineView: View {
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var bottomMarkerMaxY: CGFloat?
     private let bottomID = "mobile-timeline-bottom"
-    private let defaultVisibleRowLimit = 110
-    private let rowPageSize = 36
+    private let defaultVisibleRowLimit = 180
+    private let rowPageSize = 72
     private let bottomVisibilityThreshold: CGFloat = 42
 
     var body: some View {

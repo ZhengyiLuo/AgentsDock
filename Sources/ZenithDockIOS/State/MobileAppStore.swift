@@ -69,12 +69,13 @@ final class MobileAppStore: ObservableObject {
     )
     @Published private(set) var timelineNavigationTarget: MobileTimelineNavigationTarget?
 
-    private let initialEventLimit = 160
-    private let olderHistoryPageLimit = 160
+    private let initialEventLimit = 360
+    private let olderHistoryPageLimit = 240
+    private let maxLoadedTimelineEvents = 2_400
     private let largeTimelineBatchEventThreshold = 80
     private let largeTimelineBatchCharacterThreshold = 14_000
     private let maxMemoryCachedChats = 8
-    private let maxMemoryCachedEvents = 360
+    private let maxMemoryCachedEvents = 720
     private var webSocket: URLSessionWebSocketTask?
     private var loadingSessionID: String?
     private var liveTrackingStarted = false
@@ -379,7 +380,9 @@ final class MobileAppStore: ObservableObject {
     }
 
     var canLoadOlderHistory: Bool {
-        omittedHistoryEventCount > 0 && !isLoadingOlderHistory
+        omittedHistoryEventCount > 0 &&
+            events.count < maxLoadedTimelineEvents &&
+            !isLoadingOlderHistory
     }
 
     var sessionVideos: [ZFile] {
@@ -1528,9 +1531,12 @@ final class MobileAppStore: ObservableObject {
         guard let sid = selectedSessionID,
               omittedHistoryEventCount > 0,
               !isLoadingOlderHistory,
+              events.count < maxLoadedTimelineEvents,
               let before = events.map(\.seq).min() else {
             return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
         }
+        let generation = selectionGeneration
+        let requestedCapacity = maxLoadedTimelineEvents - events.count
 
         isLoadingOlderHistory = true
         defer { isLoadingOlderHistory = false }
@@ -1546,14 +1552,15 @@ final class MobileAppStore: ObservableObject {
             var latestSession: ZSession?
             var knownIDs = Set(events.map(\.id))
             var older: [ZEvent] = []
-            var firstAddedEventID: String?
 
             for _ in 0..<8 {
+                let remainingCapacity = requestedCapacity - older.count
+                guard remainingCapacity > 0 else { break }
                 let res: Response = try await api.get(
                     "/api/sessions/\(sid)",
                     queryItems: [
                         URLQueryItem(name: "before", value: "\(cursorBefore)"),
-                        URLQueryItem(name: "limit", value: "\(olderHistoryPageLimit)"),
+                        URLQueryItem(name: "limit", value: "\(min(olderHistoryPageLimit, remainingCapacity))"),
                         URLQueryItem(name: "tail", value: "true"),
                         URLQueryItem(name: "visible", value: "true")
                     ]
@@ -1567,10 +1574,10 @@ final class MobileAppStore: ObservableObject {
                     return true
                 }
                 older.append(contentsOf: visibleOlder)
-                if firstAddedEventID == nil {
-                    firstAddedEventID = visibleOlder.first(where: isPrimaryTimelinePageEvent)?.id ?? visibleOlder.first?.id
-                }
-                if visibleOlder.contains(where: isPrimaryTimelinePageEvent) || res.events.isEmpty || remainingOmitted <= 0 {
+                if visibleOlder.contains(where: isPrimaryTimelinePageEvent) ||
+                    res.events.isEmpty ||
+                    remainingOmitted <= 0 ||
+                    older.count >= requestedCapacity {
                     break
                 }
 
@@ -1581,17 +1588,39 @@ final class MobileAppStore: ObservableObject {
                 cursorBefore = nextBefore
             }
 
+            guard selectedSessionID == sid, selectionGeneration == generation else {
+                return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
+            }
+
+            let currentBefore = events.map(\.seq).min()
+            guard currentBefore == before else {
+                return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
+            }
+
+            let currentIDs = Set(events.map(\.id))
+            let sortedOlder = older
+                .filter { $0.seq < before && !currentIDs.contains($0.id) }
+                .sorted { $0.seq < $1.seq }
+            let availableCapacity = max(0, maxLoadedTimelineEvents - events.count)
+            let acceptedOlder = Array(sortedOlder.suffix(availableCapacity))
+            let droppedFetchedCount = sortedOlder.count - acceptedOlder.count
+            let nextOmittedHistoryEventCount = remainingOmitted + droppedFetchedCount
+            let firstAddedEventID = acceptedOlder.first(where: isPrimaryTimelinePageEvent)?.id ?? acceptedOlder.first?.id
+            let previousTailSeq = events.map(\.seq).max() ?? 0
+
             if let latestSession {
                 replaceSessionFromServer(latestSession)
             }
-            events = (older + events).sorted { $0.seq < $1.seq }
-            omittedHistoryEventCount = remainingOmitted
-            latestSeenSeq = max(latestSeenSeq, events.map(\.seq).max() ?? 0)
-            refreshSessionFilesFromLoadedEvents()
-            hydrateReferencedFilesIfNeeded(from: older)
-            rebuildDisplayEvents()
+            if !acceptedOlder.isEmpty {
+                events = (acceptedOlder + events).sorted { $0.seq < $1.seq }
+                latestSeenSeq = max(latestSeenSeq, previousTailSeq)
+                refreshSessionFilesFromLoadedEvents()
+                hydrateReferencedFilesIfNeeded(from: acceptedOlder)
+                rebuildDisplayEvents()
+            }
+            omittedHistoryEventCount = nextOmittedHistoryEventCount
             rememberSelectedChat()
-            return OlderHistoryLoadResult(addedCount: older.count, firstAddedEventID: firstAddedEventID)
+            return OlderHistoryLoadResult(addedCount: acceptedOlder.count, firstAddedEventID: firstAddedEventID)
         } catch {
             report(error)
             return OlderHistoryLoadResult(addedCount: 0, firstAddedEventID: nil)
