@@ -8083,3 +8083,21 @@ Release result:
 - Added focused regressions for forward selection and upward wraparound. The
   focused dialog suite passed all five tests and the local macOS app was
   repackaged at `dist/AgentsDock.app`. No TestFlight upload was performed.
+
+## 2026-07-14 - Diagnose backend runtimes separately from server connectivity
+
+- Bumped the shared server contract to API v7 and added cached, privacy-safe
+  Claude Code and Codex probes for executable discovery, version, and
+  authentication state. Health now distinguishes `ready`, `missing`,
+  `unauthenticated`, and probe failures without returning account details.
+- Preflight every turn before appending timeline activity. Missing or signed-out
+  runtimes now return an actionable structured error and release the reserved
+  run slot; ordinary provider/thread errors remain ordinary run failures.
+- Added selected-backend warnings and a manual runtime refresh panel to the
+  Electron and React Native apps. HTTP connectivity remains a separate status,
+  and failed sends restore the complete draft and attachments.
+- Verified both live CLI probe contracts without exposing identity data, passed
+  seven isolated server regressions in the production virtual environment,
+  passed both TypeScript builds, and passed all 184 Electron tests.
+- Prepared Electron macOS build 63 and React Native iOS/iPadOS build 69 for the
+  matching API v7 release.

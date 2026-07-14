@@ -67,7 +67,9 @@ export class AgentServerClient {
   }
 
   async health(): Promise<Health> { return this.get('/api/health') }
-  async runtimeCatalog(): Promise<RuntimeCatalog> { return this.get('/api/runtime/catalog') }
+  async runtimeCatalog(refresh = false): Promise<RuntimeCatalog> {
+    return this.get(`/api/runtime/catalog${refresh ? '?refresh=true' : ''}`)
+  }
   async sessions(): Promise<Session[]> { return (await this.get<{ sessions: Session[] }>('/api/sessions')).sessions }
   async jobs(): Promise<Job[]> { return (await this.get<{ jobs: Job[] }>('/api/jobs')).jobs }
 
@@ -497,8 +499,7 @@ export class AgentServerClient {
       let detail = `${response.status} ${response.statusText}`
       try {
         const body = await response.json() as { detail?: unknown }
-        if (typeof body.detail === 'string') detail = body.detail
-        else if (body.detail) detail = JSON.stringify(body.detail)
+        detail = formatServerDetail(body.detail, detail)
       } catch { /* keep HTTP status */ }
       throw new ServerError(response.status, detail)
     }
@@ -514,8 +515,7 @@ export class AgentServerClient {
       let detail = `${response.status} ${response.statusText}`
       try {
         const body = await response.json() as { detail?: unknown }
-        if (typeof body.detail === 'string') detail = body.detail
-        else if (body.detail) detail = JSON.stringify(body.detail)
+        detail = formatServerDetail(body.detail, detail)
       } catch { /* keep HTTP status */ }
       throw new ServerError(response.status, detail)
     }
@@ -526,4 +526,16 @@ export class AgentServerClient {
   private applyAuth(headers: Headers): void {
     if (this.token) headers.set('X-ZenithDock-Token', this.token)
   }
+}
+
+function formatServerDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object') {
+    const value = detail as { message?: unknown; action?: unknown }
+    const message = typeof value.message === 'string' ? value.message.trim() : ''
+    const action = typeof value.action === 'string' ? value.action.trim() : ''
+    if (message || action) return [message, action].filter(Boolean).join(' ')
+    try { return JSON.stringify(detail) } catch { return fallback }
+  }
+  return fallback
 }

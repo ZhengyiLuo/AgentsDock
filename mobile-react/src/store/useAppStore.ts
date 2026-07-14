@@ -37,7 +37,7 @@ import {
   saveToken,
 } from '../storage/cache'
 
-const MIN_API_CONTRACT = 6
+const MIN_API_CONTRACT = 7
 const TAIL_LIMIT = 240
 const OLDER_LIMIT = 180
 const STREAM_RECOVERY_DELAY_MS = 2_500
@@ -99,6 +99,7 @@ interface AppState {
   applySettings(serverURL: string, token: string): Promise<void>
   reconnect(): Promise<void>
   retryConnection(): Promise<void>
+  refreshRuntime(): Promise<void>
   refreshSessions(): Promise<void>
   selectSession(sessionId: string): Promise<void>
   syncSelectedSession(reason?: SyncReason): Promise<void>
@@ -263,7 +264,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const requestServerURL = get().serverURL
     const requestToken = get().token
     const sessionsRequest = Promise.allSettled([client.sessions()] as const)
-    const optionalRequests = Promise.allSettled([client.runtimeCatalog(), client.jobs()] as const)
+    const optionalRequests = Promise.allSettled([client.runtimeCatalog(true), client.jobs()] as const)
     let health: Health
     try {
       health = await client.health()
@@ -343,6 +344,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     if (hasSelectedStream(selectedSessionId) && !liveConnected) stopSelectedStream()
     await get().syncSelectedSession('manual')
+  },
+
+  async refreshRuntime() {
+    if (!get().connected) return
+    try {
+      const [runtime, health] = await Promise.all([client.runtimeCatalog(true), client.health()])
+      set({ runtime, health, activeSessionIds: healthActiveSessions(health), error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
   },
 
   async refreshSessions() {

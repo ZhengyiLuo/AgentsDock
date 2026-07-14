@@ -64,7 +64,9 @@ export class AgentServerClient {
   authHeaders(): Record<string, string> { return this.token ? { 'X-ZenithDock-Token': this.token } : {} }
 
   health(): Promise<Health> { return this.get('/api/health') }
-  runtimeCatalog(): Promise<RuntimeCatalog> { return this.get('/api/runtime/catalog') }
+  runtimeCatalog(refresh = false): Promise<RuntimeCatalog> {
+    return this.get(`/api/runtime/catalog${refresh ? '?refresh=true' : ''}`)
+  }
   async sessions(): Promise<Session[]> { return (await this.get<{ sessions: Session[] }>('/api/sessions')).sessions }
   async jobs(): Promise<Job[]> { return (await this.get<{ jobs: Job[] }>('/api/jobs')).jobs }
 
@@ -325,8 +327,20 @@ export class AgentServerClient {
     let detail = `${response.status} ${response.statusText}`
     try {
       const body = await response.json() as { detail?: unknown }
-      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body)
+      detail = formatServerDetail(body.detail ?? body, detail)
     } catch { /* retain status */ }
     return new ServerError(response.status, detail)
   }
+}
+
+function formatServerDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object') {
+    const value = detail as { message?: unknown; action?: unknown }
+    const message = typeof value.message === 'string' ? value.message.trim() : ''
+    const action = typeof value.action === 'string' ? value.action.trim() : ''
+    if (message || action) return [message, action].filter(Boolean).join(' ')
+    try { return JSON.stringify(detail) } catch { return fallback }
+  }
+  return fallback
 }

@@ -32,11 +32,26 @@ export interface Session {
 }
 
 export interface RuntimeOption { value: string; label: string }
+export type RuntimeDiagnosticStatus = 'unknown' | 'ready' | 'missing' | 'unauthenticated' | 'error'
+export interface RuntimeDiagnostic {
+  backend: Backend
+  status: RuntimeDiagnosticStatus
+  available: boolean
+  installed?: boolean | null
+  authenticated?: boolean | null
+  version?: string | null
+  message: string
+  action?: string | null
+  checked_at?: string | null
+  last_error?: string | null
+  last_error_at?: string | null
+}
 export interface RuntimeBackendCatalog {
   models: RuntimeOption[]
   efforts: RuntimeOption[]
   default_model?: string | null
   default_effort?: string | null
+  diagnostic?: RuntimeDiagnostic | null
 }
 export interface RuntimeCatalog { backends: Record<string, RuntimeBackendCatalog>; generated_at?: string | null }
 
@@ -185,7 +200,8 @@ export interface Health {
   max_active_agent_runs?: number
   default_cwd?: string | null
   queued?: Record<string, number>
-  [key: string]: JsonValue | undefined
+  runtimes?: Record<string, RuntimeDiagnostic>
+  [key: string]: JsonValue | Record<string, RuntimeDiagnostic> | undefined
 }
 
 export interface TimelinePage {

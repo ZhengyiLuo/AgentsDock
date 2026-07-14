@@ -10,6 +10,7 @@ import { digestTargetSections, rankSessionsForSearch, sessionNameMatchRank } fro
 import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
+import { RuntimeHealthPanel } from './RuntimeHealth'
 
 export function Dialogs() {
   return <>
@@ -110,6 +111,7 @@ function SettingsDialog() {
         <button type="button" className={appearance === 'dark' ? 'active' : ''} onClick={() => chooseAppearance('dark')}><Moon size={14} />Dark</button>
       </div></fieldset>
       <div className={`server-health ${connected ? 'online' : 'offline'}`}><span /><div><strong>{connected ? 'Connected' : 'Offline'}</strong><small>{health?.server_identity || 'Connection settings are stored on this Mac.'}</small></div></div>
+      <RuntimeHealthPanel />
       <label><span>Server URL</span><div className="input-with-icon"><Server size={14} /><input value={url} onChange={event => setURL(event.target.value)} placeholder="100.73.184.23:7850" autoCapitalize="none" autoCorrect="off" /></div></label>
       <label><span>Access token</span><input type="password" value={token} onChange={event => setToken(event.target.value)} placeholder="Leave blank to keep saved token" autoComplete="off" /></label>
       {update && <div className="update-panel">

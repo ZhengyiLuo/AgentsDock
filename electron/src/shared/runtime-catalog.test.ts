@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { RuntimeCatalog } from './types'
-import { runtimeCatalogHasSelectableModels, runtimeCatalogOptions } from './runtime-catalog'
+import type { Health, RuntimeCatalog, RuntimeDiagnostic } from './types'
+import { runtimeCatalogHasSelectableModels, runtimeCatalogOptions, runtimeDiagnosticFor, runtimeDiagnosticLabel, runtimeDiagnosticNeedsAttention } from './runtime-catalog'
 
 const validCatalog: RuntimeCatalog = {
   backends: {
@@ -48,5 +48,34 @@ describe('runtimeCatalogOptions', () => {
       { value: '', label: 'Loading model choices…' },
       { value: 'claude-fable-5', label: 'claude-fable-5' }
     ])
+  })
+})
+
+describe('runtime diagnostics', () => {
+  const ready = (checked_at: string): RuntimeDiagnostic => ({
+    backend: 'codex', status: 'ready', available: true, installed: true, authenticated: true,
+    message: 'Codex is ready.', checked_at,
+  })
+
+  it('uses the newest diagnostic across health and catalog responses', () => {
+    const health = { ok: true, runtimes: { codex: ready('2026-07-14T10:00:00Z') } } as Health
+    const catalog: RuntimeCatalog = {
+      ...validCatalog,
+      backends: {
+        ...validCatalog.backends,
+        codex: {
+          ...validCatalog.backends.codex,
+          diagnostic: { ...ready('2026-07-14T10:01:00Z'), status: 'unauthenticated', available: false, authenticated: false, message: 'Sign in.' },
+        },
+      },
+    }
+    expect(runtimeDiagnosticFor(health, catalog, 'codex')?.status).toBe('unauthenticated')
+  })
+
+  it('surfaces a failed run without claiming the CLI is unavailable', () => {
+    const diagnostic = { ...ready('2026-07-14T10:00:00Z'), last_error: 'Latest provider run failed.' }
+    expect(runtimeDiagnosticNeedsAttention(diagnostic)).toBe(true)
+    expect(runtimeDiagnosticLabel(diagnostic)).toBe('Latest run failed')
+    expect(diagnostic.available).toBe(true)
   })
 })

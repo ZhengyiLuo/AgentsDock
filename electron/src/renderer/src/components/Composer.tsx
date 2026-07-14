@@ -3,11 +3,12 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core'
 import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, File, GripVertical, ListOrdered, MoreHorizontal, Paperclip, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react'
 import type { AgentFile, NativeFileRef, QueuedTurn, Session } from '@shared/types'
-import { runtimeCatalogOptions } from '@shared/runtime-catalog'
+import { runtimeCatalogOptions, runtimeDiagnosticFor } from '@shared/runtime-catalog'
 import { formatBytes, runtimeLabel } from '../lib/format'
 import { isUserQueuedTurn, steerFirstQueuedTurn, steerQueuedTurn } from '../lib/queue-actions'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
+import { RuntimeHealthNotice } from './RuntimeHealth'
 
 const EMPTY_UPLOADS: AgentFile[] = []
 const EMPTY_UPLOAD_PATHS: NativeFileRef[] = []
@@ -23,6 +24,7 @@ export function Composer() {
   const uploadPaths = useAppStore(state => state.selectedSessionId ? state.uploadPathsBySession[state.selectedSessionId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)
   const running = useAppStore(state => state.selectedSessionId ? state.activeSessionIds.has(state.selectedSessionId) : false)
   const catalog = useAppStore(state => state.runtimeCatalog)
+  const health = useAppStore(state => state.health)
   const draftRef = useRef(storedDraft)
   const draftSessionRef = useRef(selectedId)
   const [draft, setDraft] = useState(storedDraft)
@@ -71,6 +73,11 @@ export function Composer() {
   const send = async (steer = false) => {
     const outgoing = draft.trim()
     if (!outgoing) return
+    const diagnostic = session ? runtimeDiagnosticFor(health, catalog, session.backend) : null
+    if (diagnostic && !['ready', 'unknown'].includes(diagnostic.status)) {
+      useAppStore.getState().setError([diagnostic.message, diagnostic.action].filter(Boolean).join(' '))
+      return
+    }
     setDraft('')
     if (selectedId) {
       useAppStore.getState().setDraftForSession(selectedId, '')
@@ -114,6 +121,7 @@ export function Composer() {
     >
       <QueueShelf sessionId={session.id} turns={visibleQueuedTurns} />
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf files={uploads} pending={uploadPaths} />}
+      <RuntimeHealthNotice backend={session.backend} />
       <textarea
         value={draft}
         rows={1}

@@ -83,6 +83,26 @@ describe('AgentServerClient live stream', () => {
     expect(new Headers(init.headers).get('X-ZenithDock-Token')).toBe('secret')
   })
 
+  it('can force a fresh provider runtime probe', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ backends: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await client.runtimeCatalog(true)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://example.test:7850/api/runtime/catalog?refresh=true')
+  })
+
+  it('renders structured runtime preflight errors as actionable text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: { code: 'runtime_unavailable', message: 'Codex is not installed.', action: 'Install Codex, then refresh runtime status.' }
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await expect(client.runtimeCatalog()).rejects.toThrow('Codex is not installed. Install Codex, then refresh runtime status.')
+  })
+
   it('requests the adjacent previous page and preserves directional pagination metadata', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       session: { id: 'chat', title: 'Chat', backend: 'codex' },

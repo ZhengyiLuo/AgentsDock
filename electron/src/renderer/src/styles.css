@@ -384,6 +384,23 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .composer.disabled { min-height: 70px; display: flex; align-items: center; justify-content: center; color: var(--faint); }
 .composer > textarea { display: block; width: 100%; min-height: 46px; max-height: 190px; field-sizing: content; resize: none; padding: 7px 6px; overflow-y: auto; color: #f2f2f0; background: transparent; border: 0; outline: 0; font-size: 14px; line-height: 1.5; }
 .composer > textarea::placeholder { color: #6e6e6b; }
+.runtime-health-panel { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.runtime-health-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.runtime-health-panel > header > div { display: grid; gap: 2px; }
+.runtime-health-panel > header small { color: var(--muted); font-size: 10px; }
+.runtime-health-list { display: grid; gap: 5px; }
+.runtime-health-row { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--muted); }
+.runtime-health-row > div { min-width: 0; display: grid; gap: 2px; }
+.runtime-health-row strong { color: var(--text); font-size: 11px; }
+.runtime-health-row strong span { margin-left: 5px; color: var(--muted); font-weight: 600; }
+.runtime-health-row small { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.runtime-health-row .runtime-action { color: var(--text); }
+.runtime-health-row code { max-width: 190px; color: var(--faint); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-health-row.ready > svg { color: var(--green); }
+.runtime-health-row.warning > svg { color: var(--amber); }
+.runtime-health-row.error > svg { color: var(--danger); }
+.runtime-health-row.compact { grid-template-columns: 16px minmax(0, 1fr); margin: 0 2px 6px; padding: 7px 8px; border-color: color-mix(in srgb, var(--amber) 42%, var(--border)); background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
+.runtime-health-row.compact code, .runtime-health-row.compact .runtime-action { display: none; }
 .composer-bar { height: 34px; display: flex; align-items: center; gap: 5px; }
 .composer-spacer { flex: 1; }
 .backend-chip, .runtime-chip { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: #bbb; background: #292929; border-radius: 7px; font-size: 11px; font-weight: 650; }

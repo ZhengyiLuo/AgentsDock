@@ -73,7 +73,7 @@ export function registerIpc(service: AppService, updater: AppUpdateManager): voi
 
   handle('digest:preview', input => service.previewDigest(input))
   handle('digest:send', input => service.sendDigest(input))
-  handle('runtime:catalog', () => service.runtime())
+  handle('runtime:catalog', refresh => service.runtime(Boolean(refresh)))
   handle('processes:list', sessionId => service.processes(sessionId))
   handle('processes:tail', (sessionId, path, lines) => service.processLog(sessionId, path, lines))
   handle('tmux:list', (sessionId, includeAll) => service.tmux(sessionId, includeAll))

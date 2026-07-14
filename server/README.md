@@ -17,6 +17,25 @@ ssh <ssh-host> 'systemctl --user status zenithbot-agent.service --no-pager -l'
 ssh <ssh-host> 'curl -s http://127.0.0.1:7850/api/health'
 ```
 
+## Backend Runtime Health
+
+API contract v7 reports Claude Code and Codex readiness independently from
+basic HTTP connectivity. `GET /api/health` includes cached `runtimes` status,
+and `GET /api/runtime/catalog?refresh=true` forces a safe version and
+authentication probe for both CLIs. Responses distinguish `ready`, `missing`,
+`unauthenticated`, and probe `error` states without exposing account or token
+details.
+
+The server rejects a new turn with an actionable `503 runtime_unavailable`
+response when its selected CLI cannot launch safely. A provider failure after
+launch is retained as `last_error` while the installed/authenticated runtime
+remains available, so an ordinary model or conversation error is not confused
+with a missing executable.
+
+Use `CLAUDE_BIN` and `CODEX_BIN` when either executable is outside the standard
+server runner path. Runtime probes are cached for 60 seconds by default; set
+`ZENITHBOT_RUNTIME_DIAGNOSTIC_TTL_SECONDS` to tune that interval.
+
 ## Access Token
 
 Set `ZENITHDOCK_AGENT_TOKEN` on the agent host to require a shared bearer token for

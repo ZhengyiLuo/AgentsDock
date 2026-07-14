@@ -23,13 +23,37 @@ describe('Composer', () => {
       uploadPathsBySession: {},
       drafts: {},
       activeSessionIds: new Set(),
-      runtimeCatalog: null
+      runtimeCatalog: null,
+      health: null,
+      error: null,
     })
   })
 
   it('mounts with empty per-chat upload state without an external-store render loop', () => {
     render(<Composer />)
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
+  })
+
+  it('shows an actionable provider warning and preserves the draft when the CLI is unavailable', async () => {
+    useAppStore.setState({
+      health: {
+        ok: true,
+        runtimes: {
+          codex: {
+            backend: 'codex', status: 'missing', available: false, installed: false, authenticated: false,
+            message: 'Codex is not installed on the server.', action: 'Install Codex and refresh runtime status.',
+          },
+        },
+      },
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.getByText('Codex is not installed on the server.')).toBeInTheDocument()
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, 'Keep this draft')
+    await user.click(screen.getByTitle('Send message'))
+    expect(editor).toHaveValue('Keep this draft')
+    expect(useAppStore.getState().error).toContain('Install Codex')
   })
 
   it('renders queued turns in a compact action shelf above the editor', () => {

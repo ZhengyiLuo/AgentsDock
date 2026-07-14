@@ -77,7 +77,7 @@ const api: AgentsDockAPI = {
     preview: input => ipcRenderer.invoke('digest:preview', input),
     send: input => ipcRenderer.invoke('digest:send', input)
   },
-  runtime: { catalog: () => ipcRenderer.invoke('runtime:catalog') },
+  runtime: { catalog: refresh => ipcRenderer.invoke('runtime:catalog', refresh) },
   processes: {
     list: sessionId => ipcRenderer.invoke('processes:list', sessionId),
     tail: (sessionId, path, lines) => ipcRenderer.invoke('processes:tail', sessionId, path, lines)

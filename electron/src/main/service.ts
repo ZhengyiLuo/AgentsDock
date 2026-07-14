@@ -554,8 +554,8 @@ export class AppService {
 
   previewDigest(input: DigestInput): Promise<string> { return this.client.previewDigest(input.sourceSessionId, input.targetSessionId, input.detail, input.userPrompt) }
   sendDigest(input: DigestInput): Promise<boolean> { return this.client.sendDigest(input.sourceSessionId, input.targetSessionId, input.detail, input.userPrompt) }
-  async runtime(): Promise<RuntimeCatalog> {
-    await this.refreshRuntime(true)
+  async runtime(refresh = false): Promise<RuntimeCatalog> {
+    await this.refreshRuntime(true, refresh)
     if (!this.runtimeCatalog) throw new Error('The server runtime catalog is unavailable. Check the server version and connection, then retry.')
     return this.runtimeCatalog
   }
@@ -688,20 +688,20 @@ export class AppService {
     }
   }
 
-  private refreshRuntime(force = false): Promise<void> {
+  private refreshRuntime(force = false, forceProbe = false): Promise<void> {
     if (this.runtimeRefreshInFlight) return this.runtimeRefreshInFlight
     if (!force && Date.now() < this.runtimeRefreshNextAt) return Promise.resolve()
-    const task = this.loadRuntimeCatalog()
+    const task = this.loadRuntimeCatalog(forceProbe)
     this.runtimeRefreshInFlight = task
     return task.finally(() => {
       if (this.runtimeRefreshInFlight === task) this.runtimeRefreshInFlight = null
     })
   }
 
-  private async loadRuntimeCatalog(): Promise<void> {
+  private async loadRuntimeCatalog(forceProbe = false): Promise<void> {
     const started = Date.now()
     try {
-      const catalog = await this.client.runtimeCatalog()
+      const catalog = await this.client.runtimeCatalog(forceProbe)
       if (!runtimeCatalogHasSelectableModels(catalog)) {
         throw new Error('Server returned no selectable Claude/Codex models')
       }

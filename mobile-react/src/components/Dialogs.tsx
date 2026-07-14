@@ -10,6 +10,7 @@ import { usePalette } from '../theme'
 import type { Backend, CreateJobInput, RuntimeOption, Session, UpdateJobInput } from '../types'
 import { BackendMark } from './BackendMark'
 import { IconButton } from './ui'
+import { RuntimeHealthPanel } from './RuntimeHealth'
 
 export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const colors = usePalette()
@@ -23,6 +24,7 @@ export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose
   const [token, setToken] = useState(currentToken)
   useEffect(() => { if (visible) { setURL(currentURL); setToken(currentToken) } }, [currentToken, currentURL, visible])
   return <Sheet visible={visible} title="Settings" onClose={onClose}>
+    <RuntimeHealthPanel />
     <Label text="Server address" /><TextInput testID="settings-server-url" accessibilityLabel="Server address" value={url} onChangeText={setURL} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="100.x.y.z:7850" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Label text="Access token" /><TextInput testID="settings-access-token" accessibilityLabel="Access token" value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Server token" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Text style={[styles.help, { color: colors.muted }]}>The address stays exactly as typed while editing. It is normalized only after Apply. HTTP is allowed for private LAN and Tailscale servers.</Text>

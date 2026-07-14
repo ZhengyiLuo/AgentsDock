@@ -108,7 +108,7 @@ export interface AgentsDockAPI {
     send(input: DigestInput): Promise<boolean>
   }
   runtime: {
-    catalog(): Promise<RuntimeCatalog>
+    catalog(refresh?: boolean): Promise<RuntimeCatalog>
   }
   processes: {
     list(sessionId: string): Promise<ProcessSnapshot>
