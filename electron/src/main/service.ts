@@ -40,6 +40,7 @@ import type {
 } from '../shared/types'
 import { updateQueuedTurns } from '../shared/queue'
 import { timelineCacheHasGap } from '../shared/history'
+import { runtimeCatalogHasSelectableModels } from '../shared/runtime-catalog'
 import { LocalCache } from './persistence'
 import { AgentServerClient, type TerminalConnection } from './server-client'
 import { SettingsStore } from './settings'
@@ -51,6 +52,9 @@ const INITIAL_TAIL_EVENT_LIMIT = 480
 const HISTORY_PAGE_EVENT_LIMIT = 480
 const HISTORY_AROUND_EVENT_LIMIT = 1_200
 const FILE_PAGE_LIMIT = 60
+const RUNTIME_CATALOG_CACHE_KEY = 'runtimeCatalog:v1'
+const RUNTIME_CATALOG_RETRY_MS = 30_000
+const RUNTIME_CATALOG_REFRESH_MS = 15 * 60_000
 
 export class AppService {
   readonly settings: SettingsStore
@@ -71,6 +75,8 @@ export class AppService {
   private sessions: Session[] = []
   private jobs: Job[] = []
   private runtimeCatalog: RuntimeCatalog | null = null
+  private runtimeRefreshInFlight: Promise<void> | null = null
+  private runtimeRefreshNextAt = 0
   private refreshInFlight = false
   private lastSyncState = ''
   private filesRefreshInFlight = new Set<string>()
@@ -90,6 +96,8 @@ export class AppService {
     appLog('startup', 'local cache ready')
     this.client = new AgentServerClient(this.settings.serverUrl(), this.settings.accessToken())
     this.serverId = this.settings.publicSettings().serverIdentity || this.settings.serverUrl()
+    const cachedRuntime = this.cache.preference(this.serverId, RUNTIME_CATALOG_CACHE_KEY, null as RuntimeCatalog | null)
+    this.runtimeCatalog = runtimeCatalogHasSelectableModels(cachedRuntime) ? cachedRuntime : null
     appLog('startup', 'server client ready', { serverId: this.serverId })
   }
 
@@ -124,7 +132,7 @@ export class AppService {
     const cachedSessions = this.cache.sessions(this.serverId)
     if (!this.sessions.length) this.sessions = cachedSessions
     if (!this.jobs.length) this.jobs = this.cache.jobs(this.serverId)
-    queueMicrotask(() => void this.refreshRuntime())
+    queueMicrotask(() => void this.refreshRuntime(true))
     const payload = {
       settings: this.settings.publicSettings(),
       health: this.health,
@@ -155,6 +163,7 @@ export class AppService {
     const health = await this.client.health()
     this.adoptHealth(health)
     await this.refreshAll(true)
+    void this.refreshRuntime(true)
     return health
   }
 
@@ -530,7 +539,11 @@ export class AppService {
 
   previewDigest(input: DigestInput): Promise<string> { return this.client.previewDigest(input.sourceSessionId, input.targetSessionId, input.detail, input.userPrompt) }
   sendDigest(input: DigestInput): Promise<boolean> { return this.client.sendDigest(input.sourceSessionId, input.targetSessionId, input.detail, input.userPrompt) }
-  runtime(): Promise<RuntimeCatalog> { return this.client.runtimeCatalog() }
+  async runtime(): Promise<RuntimeCatalog> {
+    await this.refreshRuntime(true)
+    if (!this.runtimeCatalog) throw new Error('The server runtime catalog is unavailable. Check the server version and connection, then retry.')
+    return this.runtimeCatalog
+  }
   processes(sessionId: string): Promise<ProcessSnapshot> { return this.client.processes(sessionId) }
   processLog(sessionId: string, path: string, lines?: number): Promise<string> { return this.client.processLog(sessionId, path, lines) }
   tmux(sessionId: string, includeAll?: boolean): Promise<TmuxPane[]> { return this.client.tmux(sessionId, includeAll) }
@@ -596,6 +609,7 @@ export class AppService {
       if (health.status === 'fulfilled') {
         this.adoptHealth(health.value)
         this.emit('server:connection', { connected: true, health: health.value })
+        void this.refreshRuntime()
       } else {
         this.emit('server:connection', { connected: false, error: errorText(health.reason) })
         if (announce) throw health.reason
@@ -648,11 +662,44 @@ export class AppService {
     }
   }
 
-  private async refreshRuntime(): Promise<void> {
+  private refreshRuntime(force = false): Promise<void> {
+    if (this.runtimeRefreshInFlight) return this.runtimeRefreshInFlight
+    if (!force && Date.now() < this.runtimeRefreshNextAt) return Promise.resolve()
+    const task = this.loadRuntimeCatalog()
+    this.runtimeRefreshInFlight = task
+    return task.finally(() => {
+      if (this.runtimeRefreshInFlight === task) this.runtimeRefreshInFlight = null
+    })
+  }
+
+  private async loadRuntimeCatalog(): Promise<void> {
+    const started = Date.now()
     try {
-      this.runtimeCatalog = await this.client.runtimeCatalog()
-      this.emit('server:runtime', this.runtimeCatalog)
-    } catch { /* runtime controls remain usable with the session's saved values */ }
+      const catalog = await this.client.runtimeCatalog()
+      if (!runtimeCatalogHasSelectableModels(catalog)) {
+        throw new Error('Server returned no selectable Claude/Codex models')
+      }
+      this.runtimeCatalog = catalog
+      this.cache.putPreference(this.serverId, RUNTIME_CATALOG_CACHE_KEY, catalog)
+      this.runtimeRefreshNextAt = Date.now() + RUNTIME_CATALOG_REFRESH_MS
+      this.emit('server:runtime', catalog)
+      appLog('runtime', 'catalog refreshed', {
+        durationMs: Date.now() - started,
+        serverId: this.serverId,
+        claudeModels: catalog.backends.claude.models.filter(option => option.value).length,
+        codexModels: catalog.backends.codex.models.filter(option => option.value).length,
+        claudeSource: catalog.backends.claude.model_source,
+        codexSource: catalog.backends.codex.model_source
+      })
+    } catch (error) {
+      this.runtimeRefreshNextAt = Date.now() + RUNTIME_CATALOG_RETRY_MS
+      appLog('runtime', 'catalog refresh failed; retaining cached choices', {
+        durationMs: Date.now() - started,
+        serverId: this.serverId,
+        cached: Boolean(this.runtimeCatalog),
+        error: errorText(error)
+      })
+    }
   }
 
   private adoptHealth(health: Health): void {
@@ -663,6 +710,10 @@ export class AppService {
       this.settings.setServerIdentity(identity)
       const cached = this.cache.sessions(identity)
       if (cached.length) this.sessions = cached
+      const cachedRuntime = this.cache.preference(identity, RUNTIME_CATALOG_CACHE_KEY, null as RuntimeCatalog | null)
+      this.runtimeCatalog = runtimeCatalogHasSelectableModels(cachedRuntime) ? cachedRuntime : null
+      this.runtimeRefreshNextAt = 0
+      if (this.runtimeCatalog) this.emit('server:runtime', this.runtimeCatalog)
     }
   }
 

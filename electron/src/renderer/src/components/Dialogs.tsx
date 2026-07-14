@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, Clock3, Command, Download, FileText, GitFork, LoaderCircle, Monitor, Moon, RefreshCw, Search, Server, Sparkles, Sun, X } from 'lucide-react'
 import type { AppUpdateStatus, Backend, CreateJobInput, Job, Session, UpdateJobInput } from '@shared/types'
+import { runtimeCatalogOptions } from '@shared/runtime-catalog'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
 import { runtimeLabel } from '../lib/format'
 import { historyResultsBySession, openSessionHistoryResult, useSessionHistorySearch } from '../lib/session-history-search'
@@ -146,7 +147,8 @@ function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       await useAppStore.getState().refreshSessions(); useAppStore.getState().setModal(mode, false); await useAppStore.getState().selectSession(session.id)
     } catch (error) { useAppStore.getState().setError(message(error)) } finally { setSaving(false) }
   }
-  const backendCatalog = catalog?.backends[backend]
+  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model)
+  const effortOptions = runtimeCatalogOptions(catalog, backend, 'efforts', effort)
   return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal(mode, value)} title={mode === 'newChat' ? 'New chat' : 'Resume a provider session'} description={mode === 'resume' ? 'Import a rough transcript and continue from an existing Claude or Codex ID.' : 'Choose the workspace and runtime for this conversation.'}>
     <form onSubmit={submit} className="dialog-form two-column-form">
       {mode === 'resume' && <label className="span-two"><span>Claude session or Codex thread ID</span><input value={providerId} onChange={event => setProviderId(event.target.value)} placeholder="Session ID" required /></label>}
@@ -154,8 +156,8 @@ function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       <label><span>Folder</span><input value={folder} onChange={event => setFolder(event.target.value)} list="folder-list" /><datalist id="folder-list">{folders.map(item => <option key={item}>{item}</option>)}</datalist></label>
       <label><span>Working directory</span><input value={cwd} onChange={event => setCwd(event.target.value)} placeholder={defaultCwd || 'Server default'} /></label>
       <fieldset className="span-two"><legend>Backend</legend><div className="segmented">{(['claude', 'codex'] as Backend[]).map(value => <button type="button" className={backend === value ? 'active' : ''} key={value} onClick={() => { setBackend(value); setModel(''); setEffort('') }}><BackendMark backend={value} size={16} />{value === 'claude' ? 'Claude' : 'Codex'}</button>)}</div></fieldset>
-      <label><span>Model</span><select value={model} onChange={event => setModel(event.target.value)}><option value="">{backendCatalog?.default_model || 'Server model'}</option>{backendCatalog?.models.filter(item => item.value).map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
-      <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}><option value="">{backendCatalog?.default_effort || 'Default effort'}</option>{backendCatalog?.efforts.filter(item => item.value).map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
+      <label><span>Model</span><select value={model} onChange={event => setModel(event.target.value)}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>
+      <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>
       <footer className="span-two"><button type="button" className="quiet-button" onClick={() => useAppStore.getState().setModal(mode, false)}>Cancel</button><button className="primary-button" disabled={saving || mode === 'resume' && !providerId.trim()}>{saving && <LoaderCircle className="spin" size={14} />}{mode === 'newChat' ? 'Create chat' : 'Resume chat'}</button></footer>
     </form>
   </Shell>

@@ -3,6 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core'
 import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, File, GripVertical, ListOrdered, MoreHorizontal, Paperclip, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react'
 import type { AgentFile, NativeFileRef, QueuedTurn, Session } from '@shared/types'
+import { runtimeCatalogOptions } from '@shared/runtime-catalog'
 import { formatBytes, runtimeLabel } from '../lib/format'
 import { steerFirstQueuedTurn, steerQueuedTurn } from '../lib/queue-actions'
 import { useAppStore } from '../store/app-store'
@@ -151,9 +152,8 @@ export function Composer() {
 
 function RuntimeMenu({ session }: { session: Session }) {
   const catalog = useAppStore(state => state.runtimeCatalog)
-  const options = catalog?.backends[session.backend]
-  const models = withCurrentRuntime(options?.models ?? [], session.model)
-  const efforts = withCurrentRuntime(options?.efforts ?? [], session.effort)
+  const models = runtimeCatalogOptions(catalog, session.backend, 'models', session.model)
+  const efforts = runtimeCatalogOptions(catalog, session.backend, 'efforts', session.effort)
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild><button className="runtime-chip"><span>{runtimeLabel(session, catalog)}</span><ChevronDown size={13} /></button></DropdownMenu.Trigger>
@@ -172,12 +172,6 @@ function BackendMenu({ session }: { session: Session }) {
   const chip = <button className="backend-chip" title={isBackendLocked(session) ? 'Backend is fixed after the provider session starts' : 'Change backend'} disabled={isBackendLocked(session)}><BackendMark backend={session.backend} size={17} /><span>{session.backend === 'codex' ? 'Codex' : 'Claude'}</span>{!isBackendLocked(session) && <ChevronDown size={12} />}</button>
   if (isBackendLocked(session)) return chip
   return <DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{(['claude', 'codex'] as const).map(backend => <DropdownMenu.CheckboxItem key={backend} className="menu-item" checked={session.backend === backend} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backend === 'claude' ? 'Claude' : 'Codex'}</DropdownMenu.CheckboxItem>)}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
-}
-
-function withCurrentRuntime(options: Array<{ value: string; label: string }>, current?: string | null): Array<{ value: string; label: string }> {
-  const values = options.some(option => option.value === '') ? options : [{ value: '', label: 'Server default' }, ...options]
-  if (!current || values.some(option => option.value === current)) return values
-  return [...values, { value: current, label: current }]
 }
 
 function AttachmentShelf({ files, pending }: { files: AgentFile[]; pending: NativeFileRef[] }) {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Archive, Bot, ChevronDown, ChevronRight, Clock3, Copy, Download, ExternalLink, File, FileStack, FolderOpen, GitFork, LoaderCircle, MoreHorizontal, Pause, Pin, Play, RefreshCw, Server, SquareTerminal, Trash2, Unplug, X } from 'lucide-react'
 import type { AgentFile, AgentProcess, Event as AgentEvent, Job, PinnedItem, TmuxPane } from '@shared/types'
+import { runtimeCatalogOptions } from '@shared/runtime-catalog'
 import { formatBytes, formatTime, runtimeLabel } from '../lib/format'
 import { isSubagentActive, subagentLogText, subagentsFromEvents } from '../lib/subagents'
 import { useAppStore } from '../store/app-store'
@@ -63,9 +64,9 @@ export function Inspector() {
           <SessionField label="Name" value={session.title} onSave={value => useAppStore.getState().updateSession(session.id, { title: value })} />
           <div className="runtime-summary"><BackendMark backend={session.backend} size={18} /><span><strong>{session.backend === 'codex' ? 'Codex' : 'Claude'}</strong><small>{runtimeLabel(session, catalog)}</small></span></div>
           {!isBackendLocked(session) && <div className="segmented inspector-backend">{(['claude', 'codex'] as const).map(backend => <button className={session.backend === backend ? 'active' : ''} key={backend} onClick={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={14} />{backend === 'claude' ? 'Claude' : 'Codex'}</button>)}</div>}
-          <label><span>Model</span><select value={session.model ?? ''} onChange={event => void useAppStore.getState().updateSession(session.id, { model: event.target.value || null })}>{runtimeOptions(session.backend, 'models', session.model)}</select></label>
+          <label><span>Model</span><select value={session.model ?? ''} onChange={event => void useAppStore.getState().updateSession(session.id, { model: event.target.value || null })}>{runtimeCatalogOptions(catalog, session.backend, 'models', session.model).map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>
           <SessionField label="Custom model" value={session.model || ''} allowEmpty onSave={value => useAppStore.getState().updateSession(session.id, { model: value || null })} />
-          <label><span>Reasoning</span><select value={session.effort ?? ''} onChange={event => void useAppStore.getState().updateSession(session.id, { effort: event.target.value || null })}>{runtimeOptions(session.backend, 'efforts', session.effort)}</select></label>
+          <label><span>Reasoning</span><select value={session.effort ?? ''} onChange={event => void useAppStore.getState().updateSession(session.id, { effort: event.target.value || null })}>{runtimeCatalogOptions(catalog, session.backend, 'efforts', session.effort).map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>
           <SessionField label="Folder" value={session.folder || 'General'} onSave={value => useAppStore.getState().updateSession(session.id, { folder: value })} />
           <SessionField label="Working directory" value={session.cwd || ''} onSave={value => useAppStore.getState().updateSession(session.id, { cwd: value })} />
           <div className="session-id-row"><span>{session.backend === 'codex' ? 'Thread' : 'Session'}</span><code>{session.codex_thread_id || session.claude_session_id || session.session_id || 'Starts on first message'}</code></div>
@@ -92,12 +93,6 @@ export function Inspector() {
     </div>
   </aside>
 
-  function runtimeOptions(backend: string, type: 'models' | 'efforts', current?: string | null) {
-    const options = catalog?.backends[backend]
-    const label = type === 'models' ? options?.default_model || 'Server model' : options?.default_effort || 'Default effort'
-    const available = (options?.[type] ?? []).filter(option => option.value)
-    return <><option value="">{label}</option>{available.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}{current && !available.some(option => option.value === current) && <option value={current}>{current}</option>}</>
-  }
 }
 
 const EMPTY_EVENTS: AgentEvent[] = []

@@ -7930,5 +7930,24 @@ Release result:
   are never replayed.
 - A second silent completion now produces an explicit timeline error instead
   of an invisible empty `turn_finished` event.
-- Added eight focused server regression tests and ran them with the production
+- Added nine focused server regression tests and ran them with the production
   server virtual environment.
+
+## 2026-07-13 - Make runtime discovery resilient and bound stalled resumes
+
+- Confirmed the live runtime endpoint advertises concrete Claude and Codex
+  choices. The misleading `Server model`-only menu came from an Electron boot
+  race: one failed catalog request was swallowed and never retried.
+- Cache the last valid runtime catalog per stable server identity, retain it
+  across transient reconnect failures, retry discovery after 30 seconds, and
+  refresh a healthy catalog periodically. Empty synthetic catalogs are no
+  longer accepted as authoritative.
+- Centralized runtime options across the composer, inspector, and create/resume
+  dialogs. While a first catalog is loading, the UI says so and preserves any
+  saved custom model instead of presenting `Server model` as the only choice.
+- Added a two-minute no-activity watchdog for imported Codex threads. Before
+  any assistant, reasoning, tool, or artifact activity, a stalled resume gets
+  the same one-shot bounded-memory continuation as a silent exit; turns with
+  possible side effects are never replayed.
+- TypeScript passed, all 171 Electron tests passed, and all nine server recovery
+  tests passed under the production virtual environment.
