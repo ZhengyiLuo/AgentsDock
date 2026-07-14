@@ -54,6 +54,7 @@ let syncInFlight: { sessionId: string; epoch: number; promise: Promise<void> } |
 let readReceiptTimer: ReturnType<typeof setTimeout> | null = null
 let pinSaveQueue: Promise<void> = Promise.resolve()
 const notifiedEvents = new Set<string>()
+let foregroundRepairInFlight: Promise<void> | null = null
 
 export type ChatSyncStatus = 'idle' | 'cached' | 'syncing' | 'live' | 'reconnecting' | 'offline' | 'error'
 type SyncReason = 'selection' | 'manual' | 'foreground' | 'server-ahead' | 'recovery'
@@ -80,7 +81,7 @@ interface AppState {
   selectedSessionId: string | null
   snapshots: Record<string, Snapshot>
   loadingSessionId: string | null
-  loadingOlder: boolean
+  loadingOlder: Record<string, boolean>
   activeSessionIds: Set<string>
   jobs: Job[]
   drafts: Record<string, string>
@@ -107,6 +108,7 @@ interface AppState {
   refreshFiles(sessionId?: string, append?: boolean): Promise<void>
   refreshTimelineIndex(sessionId?: string): Promise<void>
   setDraft(text: string): void
+  setSessionDraft(sessionId: string, text: string): void
   sendPrompt(steer?: boolean): Promise<boolean>
   stopTurn(): Promise<void>
   attachFiles(files: UploadRef[]): Promise<void>
@@ -159,7 +161,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedSessionId: null,
   snapshots: {},
   loadingSessionId: null,
-  loadingOlder: false,
+  loadingOlder: {},
   activeSessionIds: new Set(),
   jobs: [],
   drafts: {},
@@ -212,6 +214,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!appStateSubscription) {
       appStateSubscription = NativeAppState.addEventListener('change', nextState => {
         if (nextState !== 'active') return
+        void repairSelectedSnapshotFromCache(get, set)
         if (get().connected) {
           void get().refreshSessions()
           if (get().liveConnected || !hasSelectedStream(get().selectedSessionId)) void get().syncSelectedSession('foreground')
@@ -406,22 +409,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectSession(sessionId) {
     const epoch = ++selectionEpoch
     stopSelectedStream()
+    const existing = get().snapshots[sessionId]
     set({
       selectedSessionId: sessionId,
       error: null,
       liveConnected: false,
       syncSessionId: sessionId,
-      syncStatus: get().snapshots[sessionId] ? 'cached' : 'syncing',
+      syncStatus: existing ? 'cached' : 'syncing',
       syncError: null,
-      loadingSessionId: null,
+      loadingSessionId: existing ? null : sessionId,
     })
     void saveSettings({ serverURL: get().serverURL, selectedSessionId: sessionId, folderOrder: get().folderOrder, fontScale: get().fontScale })
-    let snapshot: Snapshot | undefined = get().snapshots[sessionId]
+    let snapshot: Snapshot | undefined = existing
     if (!snapshot) {
       snapshot = await loadSnapshot(get().serverURL, sessionId) ?? undefined
       if (snapshot && epoch === selectionEpoch) set(state => ({
         snapshots: { ...state.snapshots, [sessionId]: snapshot! },
         syncStatus: 'cached',
+        loadingSessionId: null,
       }))
     }
     if (!snapshot && epoch === selectionEpoch) set({ loadingSessionId: sessionId })
@@ -520,10 +525,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async loadOlder(sessionId = get().selectedSessionId ?? undefined) {
-    if (!sessionId || get().loadingOlder) return 0
+    if (!sessionId || get().loadingOlder[sessionId]) return 0
     const snapshot = get().snapshots[sessionId]
     if (!snapshot?.hasMore || !snapshot.events.length) return 0
-    set({ loadingOlder: true })
+    set(state => ({ loadingOlder: { ...state.loadingOlder, [sessionId]: true } }))
     try {
       const page = await client.sessionPage(sessionId, { before: snapshot.events[0].seq, limit: OLDER_LIMIT, tail: false, visible: true })
       const latest = get().snapshots[sessionId]
@@ -542,7 +547,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       void saveSnapshot(get().serverURL, next)
       return page.events.length
     } catch (error) { set({ error: errorMessage(error) }); return 0 }
-    finally { set({ loadingOlder: false }) }
+    finally {
+      set(state => {
+        const next = { ...state.loadingOlder }
+        delete next[sessionId]
+        return { loadingOlder: next }
+      })
+    }
   },
 
   async refreshFiles(sessionId = get().selectedSessionId ?? undefined, append = false) {
@@ -571,6 +582,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = get().selectedSessionId
     if (id) set(state => ({ drafts: { ...state.drafts, [id]: text } }))
   },
+  setSessionDraft(sessionId, text) {
+    set(state => ({ drafts: { ...state.drafts, [sessionId]: text } }))
+  },
 
   async sendPrompt(steer = false) {
     const sessionId = get().selectedSessionId
@@ -584,7 +598,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const response = await client.sendTurn(sessionId, prompt, files.map(file => file.id), session?.model, session?.effort)
       set(state => ({ sessions: state.sessions.map(value => value.id === sessionId ? response.session : value) }))
       if (response.event) applyLiveEvent(response.event, set, get)
-      if (steer && response.queued_id) return await get().runQueuedNow(sessionId, response.queued_id)
+      if (steer && response.queued_id) {
+        const ran = await get().runQueuedNow(sessionId, response.queued_id)
+        if (!ran) {
+          await get().syncSelectedSession('recovery')
+        }
+        return ran
+      }
+      void get().syncSelectedSession('recovery')
       return true
     } catch (error) {
       set(state => ({ drafts: { ...state.drafts, [sessionId]: prompt }, uploads: { ...state.uploads, [sessionId]: files }, error: errorMessage(error) }))
@@ -720,6 +741,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const refreshed = await client.queue(sessionId).catch(() => null)
     if (refreshed) setSnapshotQueue(sessionId, refreshed, set, get)
+    if (get().selectedSessionId === sessionId) {
+      void get().syncSelectedSession('recovery')
+    }
     set(state => {
       const active = new Set(state.activeSessionIds)
       active.add(sessionId)
@@ -962,6 +986,9 @@ async function queueAction(sessionId: string, action: () => Promise<void>, set: 
   try {
     await action()
     setSnapshotQueue(sessionId, await client.queue(sessionId), set, get)
+    if (get().selectedSessionId === sessionId) {
+      void get().syncSelectedSession('recovery')
+    }
     return true
   } catch (error) {
     const refreshed = await client.queue(sessionId).catch(() => null)
@@ -977,6 +1004,27 @@ function setSnapshotQueue(sessionId: string, queuedTurns: QueuedTurn[], set: (va
   const next = { ...snapshot, queuedTurns, cachedAt: Date.now() }
   set({ snapshots: { ...get().snapshots, [sessionId]: next } })
   void saveSnapshot(get().serverURL, next)
+}
+
+async function repairSelectedSnapshotFromCache(
+  get: () => AppState,
+  set: (value: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+): Promise<void> {
+  if (foregroundRepairInFlight) return foregroundRepairInFlight
+  foregroundRepairInFlight = (async () => {
+    const sessionId = get().selectedSessionId
+    if (!sessionId || get().snapshots[sessionId]) return
+    const cached = await loadSnapshot(get().serverURL, sessionId)
+    if (!cached || get().selectedSessionId !== sessionId || get().snapshots[sessionId]) return
+    set(state => ({
+      snapshots: { ...state.snapshots, [sessionId]: cached },
+      syncSessionId: sessionId,
+      syncStatus: state.connected ? 'cached' : 'offline',
+      loadingSessionId: null,
+    }))
+  })()
+  try { await foregroundRepairInFlight }
+  finally { foregroundRepairInFlight = null }
 }
 
 function healthActiveSessions(health: Health): Set<string> {

@@ -7,7 +7,7 @@ import { CHAT_FONT_SCALE_DEFAULT, clampChatFontScale } from '../lib/typography'
 const SETTINGS_KEY = 'agentsdock.react.settings.v1'
 const TOKEN_KEY = 'agentsdock.react.access-token'
 const TOKEN_FALLBACK_KEY = 'agentsdock.react.access-token.simulator-fallback'
-const SESSION_LIMIT = 10
+const SESSION_LIMIT = 28
 const EVENT_LIMIT = 720
 
 export interface StoredSettings {

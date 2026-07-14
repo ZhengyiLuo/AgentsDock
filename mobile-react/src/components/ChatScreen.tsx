@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View, useWindowDimensions, type KeyboardEvent, type KeyboardMetrics } from 'react-native'
+import { useEffect, useMemo, useState } from 'react'
+import { AppState, Keyboard, Platform, StyleSheet, View, useWindowDimensions, type KeyboardEvent, type KeyboardMetrics } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { usePalette } from '../theme'
 import { ChatHeader } from './ChatHeader'
@@ -17,7 +17,14 @@ export function ChatScreen({ sessionId, compact, onBack, onOptions, onSearch, on
   const [composerHeight, setComposerHeight] = useState(0)
   const backend = useAppStore(state => state.sessions.find(value => value.id === sessionId)?.backend)
   const keyboardVisible = keyboardFrame != null
-  const keyboardInset = Platform.OS === 'ios' && keyboardFrame != null ? Math.max(0, windowHeight - keyboardFrame.screenY) : 0
+  const keyboardInset = useMemo(() => {
+    if (Platform.OS !== 'ios' || keyboardFrame == null) return 0
+    const overlap = Math.max(0, windowHeight - keyboardFrame.screenY)
+    const frameHeight = Math.max(0, keyboardFrame.height)
+    const saneOverlap = overlap > windowHeight * 0.72 ? frameHeight : overlap
+    return Math.min(Math.max(0, saneOverlap), windowHeight * 0.62)
+  }, [keyboardFrame, windowHeight])
+  const timelineBottomInset = composerHeight + keyboardInset
   useEffect(() => {
     const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow', (event: KeyboardEvent) => {
       if (Platform.OS === 'ios') Keyboard.scheduleLayoutAnimation(event)
@@ -29,13 +36,19 @@ export function ChatScreen({ sessionId, compact, onBack, onOptions, onSearch, on
     })
     return () => { show.remove(); hide.remove() }
   }, [])
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active') setKeyboardFrame(null)
+    })
+    return () => subscription.remove()
+  }, [])
   return <View style={[styles.root, { backgroundColor: colors.background }]}>
     <ChatHeader sessionId={sessionId} compact={compact} onBack={onBack} onOptions={onOptions} onSearch={onSearch} onToggleInspector={onToggleInspector} />
     {backend ? <RuntimeHealthNotice backend={backend} /> : null}
     <View style={styles.body}>
-      <KeyboardAvoidingView style={styles.timeline} behavior={Platform.OS === 'ios' ? 'height' : undefined}>
-        <Timeline sessionId={sessionId} scrollRequest={scrollRequest} keyboardVisible={keyboardVisible} bottomInset={composerHeight} onReview={onReview} />
-      </KeyboardAvoidingView>
+      <View style={styles.timeline}>
+        <Timeline sessionId={sessionId} scrollRequest={scrollRequest} keyboardVisible={keyboardVisible} bottomInset={timelineBottomInset} onReview={onReview} />
+      </View>
       <View
         onLayout={event => setComposerHeight(Math.ceil(event.nativeEvent.layout.height))}
         style={[styles.composerDock, { bottom: keyboardInset, paddingBottom: keyboardVisible ? 0 : insets.bottom }]}

@@ -23,7 +23,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
   const session = useAppStore(state => state.sessions.find(value => value.id === sessionId))
   const active = useAppStore(state => state.activeSessionIds.has(sessionId))
   const fontScale = useAppStore(state => state.fontScale)
-  const setDraft = useAppStore(state => state.setDraft)
+  const setSessionDraft = useAppStore(state => state.setSessionDraft)
   const sendPrompt = useAppStore(state => state.sendPrompt)
   const stopTurn = useAppStore(state => state.stopTurn)
   const attachFiles = useAppStore(state => state.attachFiles)
@@ -55,7 +55,7 @@ export function Composer({ sessionId, onSent }: { sessionId: string; onSent: () 
           testID="chat-composer-input"
           accessibilityLabel="Message"
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={text => setSessionDraft(sessionId, text)}
           placeholder={active ? 'Queue a follow-up…' : 'Message'}
           placeholderTextColor={colors.muted}
           multiline

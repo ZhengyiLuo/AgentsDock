@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native'
+import { Keyboard, NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native'
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react-native'
 import { projectTimeline, type TimelineRow } from '../lib/timeline'
@@ -12,7 +12,7 @@ export function Timeline({ sessionId, scrollRequest, keyboardVisible, bottomInse
   const colors = usePalette()
   const snapshot = useAppStore(state => state.snapshots[sessionId])
   const loading = useAppStore(state => state.loadingSessionId === sessionId)
-  const loadingOlder = useAppStore(state => state.loadingOlder)
+  const loadingOlder = useAppStore(state => Boolean(state.loadingOlder[sessionId]))
   const loadOlder = useAppStore(state => state.loadOlder)
   const syncSessionId = useAppStore(state => state.syncSessionId)
   const syncStatus = useAppStore(state => state.syncStatus)
@@ -81,6 +81,7 @@ export function Timeline({ sessionId, scrollRequest, keyboardVisible, bottomInse
         contentContainerStyle={{ paddingTop: 12, paddingBottom: bottomInset + 18 }}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={() => Keyboard.dismiss()}
         maintainVisibleContentPosition={{ startRenderingFromBottom: true, autoscrollToBottomThreshold: -1 }}
         drawDistance={700}
         onStartReached={() => { if (snapshot?.hasMore && !loadingOlder) void loadOlder(sessionId) }}
