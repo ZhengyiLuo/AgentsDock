@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, File, GripVertical, L
 import type { AgentFile, NativeFileRef, QueuedTurn, Session } from '@shared/types'
 import { runtimeCatalogOptions } from '@shared/runtime-catalog'
 import { formatBytes, runtimeLabel } from '../lib/format'
-import { steerFirstQueuedTurn, steerQueuedTurn } from '../lib/queue-actions'
+import { isUserQueuedTurn, steerFirstQueuedTurn, steerQueuedTurn } from '../lib/queue-actions'
 import { useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 
@@ -17,7 +17,7 @@ export function Composer() {
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   const selectedId = useAppStore(state => state.selectedSessionId)
   const queuedTurns = useAppStore(state => state.selectedSessionId ? state.snapshots[state.selectedSessionId]?.queuedTurns ?? EMPTY_QUEUED_TURNS : EMPTY_QUEUED_TURNS)
-  const visibleQueuedTurns = useMemo(() => queuedTurns.filter(turn => turn.purpose !== 'handoff_digest'), [queuedTurns])
+  const visibleQueuedTurns = useMemo(() => queuedTurns.filter(isUserQueuedTurn), [queuedTurns])
   const storedDraft = useAppStore(state => state.selectedSessionId ? state.drafts[state.selectedSessionId] ?? '' : '')
   const uploads = useAppStore(state => state.selectedSessionId ? state.uploadsBySession[state.selectedSessionId] ?? EMPTY_UPLOADS : EMPTY_UPLOADS)
   const uploadPaths = useAppStore(state => state.selectedSessionId ? state.uploadPathsBySession[state.selectedSessionId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)

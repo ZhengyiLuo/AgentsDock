@@ -103,21 +103,23 @@ function SystemView({ item, sessionId, pinned }: { item: SystemItem; sessionId: 
   const event = item.event
   const error = isTimelineError(event)
   const digest = isHandoffDigestEvent(event)
-  const generating = digest && !event.type.endsWith('_sent') && !event.type.endsWith('_error')
+  const generating = digest && !['handoff_digest_received', 'handoff_digest_sent', 'handoff_digest_error'].includes(event.type)
   const icon = error ? <AlertTriangle size={15} /> : generating ? <LoaderCircle className="spin" size={15} /> : digest ? <Sparkles size={15} /> : <TerminalSquare size={15} />
   const title = digest ? digestStatusTitle(event) : titleCase(event.type)
   const text = digest ? digestStatusText(event) : messageText(event) || titleCase(event.type)
-  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{title}</strong><time>{formatTime(event.ts)}</time><button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin item' : 'Pin item'} onClick={() => void toggleSystemPin(event, sessionId, pinned, title, text)}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact /></div></article>
+  const digestBody = event.type === 'handoff_digest_received' ? event.digest?.trim() : ''
+  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{title}</strong><time>{formatTime(event.ts)}</time><button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin item' : 'Pin item'} onClick={() => void toggleSystemPin(event, sessionId, pinned, title, digestBody || text)}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact />{digestBody && <details className="digest-body"><summary>View digest</summary><MarkdownContent text={digestBody} sessionId={sessionId} /></details>}</div></article>
 }
 
 function digestStatusTitle(event: Event): string {
+  if (event.type === 'handoff_digest_received') return 'Context Digest'
   if (event.type.endsWith('_sent')) return 'Digest Sent'
   if (event.type.endsWith('_error')) return 'Digest Failed'
   return 'Creating Digest'
 }
 
 function digestStatusText(event: Event): string {
-  if (event.type.endsWith('_sent') || event.type.endsWith('_error')) {
+  if (event.type === 'handoff_digest_received' || event.type.endsWith('_sent') || event.type.endsWith('_error')) {
     return messageText(event) || (event.type.endsWith('_sent') ? 'Context digest created and sent.' : 'Context digest generation failed.')
   }
   return 'Creating a context digest from this chat and sending it to the target chat.'

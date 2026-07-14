@@ -34,4 +34,22 @@ describe('timeline pin state', () => {
     expect(screen.getByText('Context digest from Source was sent to Target.')).toBeInTheDocument()
     expect(screen.queryByText('ZenithDock Context Digest')).not.toBeInTheDocument()
   })
+
+  it('renders a received digest as a folded target-chat handoff', () => {
+    const event: Event = {
+      id: 'digest-received', session_id: 'chat-2', seq: 9, type: 'handoff_digest_received',
+      ts: '2026-07-10T14:30:00Z', digest_job_id: 'digest-1', source_session_id: 'chat-1',
+      message: 'Context digest from Source was delivered to this chat.',
+      digest: '# ZenithDock Context Digest\n\nPrivate handoff body'
+    }
+    const item: SystemItem = {
+      kind: 'system', id: 'digest:digest-1', key: 'digest:digest-1', seq: 9, event
+    }
+    render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+
+    expect(screen.getByText('Context Digest')).toBeInTheDocument()
+    expect(screen.getByText('Context digest from Source was delivered to this chat.')).toBeInTheDocument()
+    expect(screen.getByText('View digest')).toBeInTheDocument()
+    expect(screen.getByText('ZenithDock Context Digest')).not.toBeVisible()
+  })
 })

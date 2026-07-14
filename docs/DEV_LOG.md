@@ -8007,3 +8007,20 @@ Release result:
 - Added mobile sync regression guards, passed TypeScript and the complete guard
   suite, built a Release simulator app, and visually checked the offline/cache/
   retry states on iPhone 17 Pro and iPad Pro 13-inch.
+
+## 2026-07-13 - Restore typed context-digest handoffs
+
+- Replaced the target chat's plain Markdown prompt delivery with an explicit
+  `handoff_digest_received` event and a typed `handoff_digest_delivery` agent
+  turn. The handoff now appears as one folded yellow digest card; only the
+  target agent's response appears as an ordinary assistant message.
+- Keep source generation as a real source-agent turn while collapsing its
+  queued, running, sent, and failed states into one stable lifecycle card.
+  Terminal failures cannot be overwritten by delayed provider output.
+- Persist the hidden digest instruction, display prompt, runtime, purpose, and
+  source/target identity in queued-turn events so a server restart cannot
+  reconstruct a digest as normal user work.
+- Added a renderer migration for historical target digests that were already
+  stored as plain `# ZenithDock Context Digest` prompts.
+- Added server contract tests plus renderer, folded-card, and queue regressions.
+  TypeScript and all 175 Electron tests pass.

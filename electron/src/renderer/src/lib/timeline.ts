@@ -120,8 +120,13 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     const existing = digestById.get(digestId)
     if (existing) {
       // Keep one stable row at the point where creation began, while its
-      // visible status advances from queued/running to sent or failed.
-      existing.event = event
+      // visible status advances from queued/running to sent or failed. Late
+      // provider events must not regress a terminal lifecycle state.
+      const nextPriority = digestDisplayPriority(event)
+      const currentPriority = digestDisplayPriority(existing.event)
+      if (nextPriority > currentPriority || nextPriority === currentPriority && event.seq >= existing.event.seq) {
+        existing.event = event
+      }
       return
     }
     const item: SystemItem = {
@@ -146,6 +151,16 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   }
 
   for (const event of events) {
+    const legacyDigest = legacyDigestBody(event)
+    if (legacyDigest) {
+      appendDigestEvent({
+        ...event,
+        type: 'handoff_digest_received',
+        digest_job_id: `legacy-${event.run_id || event.id}`,
+        digest: legacyDigest,
+        message: 'Context digest was delivered to this chat.'
+      })
+    }
     // Digest generation intentionally runs as a real turn in the source
     // provider session so it can use that chat's context. It is workflow
     // plumbing, though, not a user/assistant exchange. Collapse every event
@@ -175,7 +190,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     if (event.type === 'turn_started') {
       const prior = event.run_id ? turnByRun.get(event.run_id) : activeTurn
       activeTurn = ensureTurn(event, Boolean(prior?.user))
-      activeTurn.user = event
+      if (!isDigestDeliveryTurn(event)) activeTurn.user = event
       activeTurn.seq = Math.min(activeTurn.seq, event.seq)
       activeTurn.startedAt = event.ts
       activeTurn.purpose = event.purpose
@@ -222,6 +237,24 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   }
 
   return items.sort((a, b) => a.seq - b.seq)
+}
+
+function legacyDigestBody(event: Event): string {
+  if (event.type !== 'turn_started') return ''
+  const prompt = event.prompt?.trim() || ''
+  return prompt.startsWith('# ZenithDock Context Digest') ? prompt : ''
+}
+
+function isDigestDeliveryTurn(event: Event): boolean {
+  return event.purpose === 'handoff_digest_delivery' || Boolean(legacyDigestBody(event))
+}
+
+function digestDisplayPriority(event: Event): number {
+  if (event.type === 'handoff_digest_error') return 50
+  if (event.type === 'handoff_digest_sent' || event.type === 'handoff_digest_received') return 40
+  if (event.type === 'handoff_digest_ready' || event.type === 'handoff_digest_submitted') return 30
+  if (event.type === 'handoff_digest_started') return 20
+  return event.purpose === 'handoff_digest' ? 10 : 0
 }
 
 export function reconcileTimelineItems(previous: TimelineItem[], next: TimelineItem[]): TimelineItem[] {

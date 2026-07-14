@@ -375,7 +375,7 @@ export class LocalCache {
             'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
             'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
             'artifact_created', 'artifact_error', 'file_uploaded',
-            'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted', 'handoff_digest_sent'
+            'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_received', 'handoff_digest_submitted', 'handoff_digest_sent'
           ) OR json_extract(events.json, '$.type') LIKE '%_error'
         )
       ORDER BY events.server_id, events.session_id, events.seq

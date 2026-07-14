@@ -74,4 +74,12 @@ describe('steerFirstQueuedTurn', () => {
     await expect(steerFirstQueuedTurn('chat-1')).resolves.toEqual({ steered: true, turns: [digest] })
     expect(runNow).toHaveBeenCalledWith('chat-1', 'user')
   })
+
+  it('does not expose an internal digest-delivery turn as steerable user work', async () => {
+    const delivery = { queued_id: 'delivery', session_id: 'chat-1', prompt: 'Context digest from Source.', file_ids: [], position: 1, purpose: 'handoff_digest_delivery' }
+    list.mockResolvedValue([delivery])
+
+    await expect(steerFirstQueuedTurn('chat-1')).resolves.toEqual({ steered: false, turns: [delivery] })
+    expect(runNow).not.toHaveBeenCalled()
+  })
 })

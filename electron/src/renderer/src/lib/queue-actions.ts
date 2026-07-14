@@ -5,6 +5,10 @@ export type SteerFirstQueuedResult = {
   turns: QueuedTurn[]
 }
 
+export function isUserQueuedTurn(turn: QueuedTurn): boolean {
+  return turn.purpose !== 'handoff_digest' && turn.purpose !== 'handoff_digest_delivery'
+}
+
 export async function steerQueuedTurn(sessionId: string, queuedId: string): Promise<QueuedTurn[]> {
   try {
     await window.agentsDock.queue.runNow(sessionId, queuedId)
@@ -19,7 +23,7 @@ export async function steerQueuedTurn(sessionId: string, queuedId: string): Prom
 export async function steerFirstQueuedTurn(sessionId: string): Promise<SteerFirstQueuedResult> {
   const turns = await window.agentsDock.queue.list(sessionId)
   const first = turns
-    .filter(turn => turn.purpose !== 'handoff_digest')
+    .filter(isUserQueuedTurn)
     .map((turn, index) => ({ turn, index }))
     .sort((a, b) => (a.turn.position ?? Number.MAX_SAFE_INTEGER) - (b.turn.position ?? Number.MAX_SAFE_INTEGER) || a.index - b.index)[0]?.turn
 

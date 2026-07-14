@@ -90,13 +90,55 @@ describe('projectTimeline', () => {
     expect(renderTimelineItems(items)).toHaveLength(1)
   })
 
-  it('keeps a target-chat digest delivery as one ordinary incoming turn', () => {
+  it('renders a target digest as a folded handoff followed by the agent response', () => {
     const rows = renderTimelineItems(projectTimeline([
-      event(1, 'turn_started', { run_id: 'target-run', prompt: '# ZenithDock Context Digest\n\nDelivered context' })
+      event(1, 'handoff_digest_received', {
+        digest_job_id: 'digest-1', source_session_id: 'chat-source', target_session_id: 'chat-1',
+        message: 'Context digest from Source was delivered to this chat.',
+        digest: '# ZenithDock Context Digest\n\nDelivered context'
+      }),
+      event(2, 'turn_started', {
+        run_id: 'target-run', purpose: 'handoff_digest_delivery', digest_job_id: 'digest-1',
+        source_session_id: 'chat-source', target_session_id: 'chat-1', prompt: 'Context digest from Source.'
+      }),
+      event(3, 'assistant_text', {
+        run_id: 'target-run', purpose: 'handoff_digest_delivery', digest_job_id: 'digest-1',
+        source_session_id: 'chat-source', target_session_id: 'chat-1', text: 'I have the context.'
+      })
     ], []))
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ kind: 'message', role: 'user' })
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ kind: 'system', event: { type: 'handoff_digest_received' } })
+    expect(rows[1]).toMatchObject({ kind: 'message', role: 'assistant' })
+    expect(rows).not.toContainEqual(expect.objectContaining({ kind: 'message', role: 'user' }))
+  })
+
+  it('migrates a legacy plain target digest into the folded handoff presentation', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', {
+        run_id: 'legacy-target-run', prompt: '# ZenithDock Context Digest\n\nLegacy delivered context'
+      }),
+      event(2, 'assistant_text', { run_id: 'legacy-target-run', text: 'Legacy response.' })
+    ], []))
+
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      kind: 'system', event: { type: 'handoff_digest_received', digest: '# ZenithDock Context Digest\n\nLegacy delivered context' }
+    })
+    expect(rows[1]).toMatchObject({ kind: 'message', role: 'assistant' })
+  })
+
+  it('does not let a late source-provider event overwrite a failed digest lifecycle', () => {
+    const digest = { purpose: 'handoff_digest', digest_job_id: 'digest-1', target_session_id: 'chat-2' }
+    const items = projectTimeline([
+      event(1, 'handoff_digest_started', { digest_job_id: 'digest-1', target_session_id: 'chat-2' }),
+      event(2, 'handoff_digest_error', { digest_job_id: 'digest-1', target_session_id: 'chat-2', message: 'Digest timed out.' }),
+      event(3, 'assistant_text', { ...digest, run_id: 'run-digest', text: 'Late generated output' }),
+      event(4, 'turn_finished', { ...digest, run_id: 'run-digest', result_text: 'Late generated output' })
+    ], [])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'system', event: { type: 'handoff_digest_error', message: 'Digest timed out.' } })
   })
 
   it('folds a scheduled agent run into its job card, including legacy job_ran links', () => {

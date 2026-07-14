@@ -315,6 +315,10 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .system-row { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 6px; margin: 8px 0; padding: 10px 12px; color: #bebebb; background: #202020; border: 1px solid #292929; border-radius: 7px; }
 .system-row.error { color: #ffbbb8; background: var(--danger-surface); border-color: #67302d; }
 .system-row.digest { color: #e8d9a7; background: #2d291c; border-color: #584c25; }
+.digest-body { margin-top: 8px; border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
+.digest-body > summary { padding: 8px 0 2px; color: inherit; font-size: 11px; font-weight: 650; cursor: pointer; user-select: none; }
+.digest-body[open] > summary { margin-bottom: 8px; }
+.digest-body .markdown { max-height: min(52vh, 640px); overflow: auto; padding: 10px 12px; color: var(--text); background: color-mix(in srgb, var(--surface-1) 78%, transparent); border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 6px; }
 .system-icon { padding-top: 2px; color: inherit; }
 .job-row { margin: 9px 0; padding: 10px 12px; background: #2b221c; border: 1px solid #614021; border-radius: 7px; }
 .job-summary { width: 100%; display: flex; align-items: center; gap: 9px; color: #e0c59d; background: transparent; text-align: left; }

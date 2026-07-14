@@ -21,7 +21,7 @@ export function searchFtsQuery(query: string): string {
 export function searchableEventText(event: Event): string {
   const error = typeof event.error === 'string' ? event.error : event.error ? JSON.stringify(event.error) : ''
   return [
-    event.result_text, event.text, event.prompt, event.message, error,
+    event.result_text, event.text, event.prompt, event.digest, event.message, error,
     event.job?.title, event.job?.prompt,
     event.artifact?.title, event.artifact?.filename,
     event.file?.title, event.file?.filename
@@ -33,7 +33,7 @@ export function isSearchableEvent(event: Event): boolean {
     'turn_started', 'assistant_text', 'turn_finished', 'reasoning_summary', 'error',
     'job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error',
     'artifact_created', 'artifact_error', 'file_uploaded',
-    'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_submitted', 'handoff_digest_sent'
+    'handoff_digest_started', 'handoff_digest_ready', 'handoff_digest_received', 'handoff_digest_submitted', 'handoff_digest_sent'
   ].includes(event.type) || event.type.endsWith('_error')
 }
 
