@@ -46,6 +46,15 @@ painful to rediscover later.
   independent adjacent Pin/Copy actions, pin persistence across relaunch, the
   complete keyboard-raised composer, and clean two-pane iPad layout were
   verified; simulator logs contain no JavaScript or layout faults.
+- Advanced the React iPhone/iPad release to build `65`. The signed arm64
+  archive is version `0.1.1 (65)`, and App Store Connect accepted the upload
+  for TestFlight processing. Missing dSYMs remain limited to the established
+  prebuilt Expo, React, Hermes, and SDWebImage frameworks and did not block it.
+- Confirmed embedded and standalone server sources share SHA-256
+  `752dda7531a637a55860027c72fed1afed5b24542af72b30b9b9d8d9eb6ff9cc`.
+  Standalone revision `23e7c55` is on GitHub. Redeployed that exact source to
+  `sonic`, restarted `zenithbot-agent.service`, and verified authenticated
+  contract-v6 health with zero active runs after startup.
 
 ## 2026-07-13 - Add the first Linux desktop build
 
