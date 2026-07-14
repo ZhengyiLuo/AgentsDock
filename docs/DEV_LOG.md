@@ -7985,3 +7985,25 @@ Release result:
   possible side effects are never replayed.
 - TypeScript passed, all 171 Electron tests passed, and all nine server recovery
   tests passed under the production virtual environment.
+
+## 2026-07-13 - Recover silently stalled mobile chat sync
+
+- Split selected-chat synchronization from the global server connection. The
+  iPhone and iPad headers now show `Cached`, `Syncing`, `Live`, `Retrying`,
+  `Sync paused`, or `Offline`, and every non-live state is directly retryable.
+- Keep cached messages visible while reconciling the authoritative server tail.
+  A failed uncached request now offers Retry instead of incorrectly presenting
+  an empty conversation.
+- Reconcile when a chat is selected, the app returns to the foreground, session
+  metadata proves the server is ahead, or the live stream disconnects. A
+  connection watchdog prevents a WebSocket from remaining silently stuck in
+  its connecting state.
+- Scope every timeline request and stream callback to the current selection
+  generation so a late response from the previous chat cannot corrupt the new
+  chat. Concurrent recovery requests for the same chat are coalesced.
+- Update session metadata and unread state directly from streamed events. Full
+  session-list refreshes no longer run for every assistant message; they remain
+  at authoritative turn/file/artifact boundaries.
+- Added mobile sync regression guards, passed TypeScript and the complete guard
+  suite, built a Release simulator app, and visually checked the offline/cache/
+  retry states on iPhone 17 Pro and iPad Pro 13-inch.

@@ -31,6 +31,9 @@ interface SessionResponse {
   event_count?: number
 }
 
+const TIMELINE_REQUEST_TIMEOUT_MS = 12_000
+const STREAM_CONNECT_TIMEOUT_MS = 10_000
+
 export class ServerError extends Error {
   constructor(public status: number, message: string) { super(message) }
 }
@@ -105,7 +108,7 @@ export class AgentServerClient {
     query.set('limit', String(options.limit ?? 240))
     query.set('tail', String(options.tail ?? true))
     query.set('visible', String(options.visible ?? true))
-    const response = await this.get<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}?${query}`)
+    const response = await this.get<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}?${query}`, TIMELINE_REQUEST_TIMEOUT_MS)
     return {
       session: response.session,
       events: response.events,
@@ -221,13 +224,31 @@ export class AgentServerClient {
     let lastSeq = after
     let retryDelay = 500
     let retry: ReturnType<typeof setTimeout> | null = null
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null
+    let reportedState: boolean | null = null
+    const reportState = (connected: boolean) => {
+      if (reportedState === connected) return
+      reportedState = connected
+      onState(connected)
+    }
+    const clearConnectTimeout = () => {
+      if (connectTimeout) clearTimeout(connectTimeout)
+      connectTimeout = null
+    }
     const connect = () => {
       if (stopped) return
+      clearConnectTimeout()
       const url = new URL(endpoint)
       url.searchParams.set('after', String(lastSeq))
       if (this.token) url.searchParams.set('token', this.token)
       socket = new WebSocket(url.toString())
-      socket.onopen = () => { retryDelay = 500; onState(true) }
+      const connectingSocket = socket
+      connectTimeout = setTimeout(() => {
+        if (stopped || socket !== connectingSocket || connectingSocket.readyState !== WebSocket.CONNECTING) return
+        reportState(false)
+        connectingSocket.close()
+      }, STREAM_CONNECT_TIMEOUT_MS)
+      socket.onopen = () => { clearConnectTimeout(); retryDelay = 500; reportState(true) }
       socket.onmessage = message => {
         try {
           const event = JSON.parse(String(message.data)) as Event
@@ -235,15 +256,16 @@ export class AgentServerClient {
         } catch { /* malformed packets are ignored */ }
       }
       socket.onclose = () => {
-        onState(false)
+        clearConnectTimeout()
         if (stopped) return
+        reportState(false)
         retry = setTimeout(connect, retryDelay)
         retryDelay = Math.min(10_000, retryDelay * 2)
       }
-      socket.onerror = () => onState(false)
+      socket.onerror = () => { if (!stopped) reportState(false) }
     }
     connect()
-    return () => { stopped = true; if (retry) clearTimeout(retry); socket?.close() }
+    return () => { stopped = true; clearConnectTimeout(); if (retry) clearTimeout(retry); socket?.close() }
   }
 
   terminal(sessionId: string, columns: number, rows: number, cwd: string | null, onData: (data: string) => void, onState: (connected: boolean, name?: string) => void): TerminalConnection {
@@ -274,7 +296,7 @@ export class AgentServerClient {
     }
   }
 
-  private get<T>(path: string): Promise<T> { return this.request(path) }
+  private get<T>(path: string, timeoutMs?: number): Promise<T> { return this.request(path, {}, timeoutMs) }
   private post<T>(path: string, body: unknown): Promise<T> { return this.request(path, { method: 'POST', body: JSON.stringify(body) }) }
   private patch<T>(path: string, body: unknown): Promise<T> { return this.request(path, { method: 'PATCH', body: JSON.stringify(body) }) }
   private delete<T>(path: string): Promise<T> { return this.request(path, { method: 'DELETE' }) }
@@ -284,18 +306,18 @@ export class AgentServerClient {
     if (!response.ok) throw await this.serverError(response)
     return response.text()
   }
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async request<T>(path: string, init: RequestInit = {}, timeoutMs = 30_000): Promise<T> {
     const headers = new Headers(init.headers)
     for (const [key, value] of Object.entries(this.authHeaders())) headers.set(key, value)
     if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
-    const response = await this.fetchWithTimeout(this.url(path), { ...init, headers })
+    const response = await this.fetchWithTimeout(this.url(path), { ...init, headers }, timeoutMs)
     if (!response.ok) throw await this.serverError(response)
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
   }
-  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 30_000): Promise<Response> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 30_000)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try { return await fetch(url, { ...init, signal: init.signal ?? controller.signal }) }
     finally { clearTimeout(timer) }
   }

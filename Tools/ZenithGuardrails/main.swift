@@ -87,6 +87,23 @@ func checkComposerDraftPersistence() throws {
     try assert(!macComposer.contains("parent.text ="), "Mac native composer must still avoid publishing full draft text per keystroke")
 }
 
+func checkReactMobileChatSyncRecovery() throws {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let store = try String(contentsOf: cwd.appendingPathComponent("mobile-react/src/store/useAppStore.ts"), encoding: .utf8)
+    let client = try String(contentsOf: cwd.appendingPathComponent("mobile-react/src/api/AgentServerClient.ts"), encoding: .utf8)
+    let header = try String(contentsOf: cwd.appendingPathComponent("mobile-react/src/components/ChatHeader.tsx"), encoding: .utf8)
+    let timeline = try String(contentsOf: cwd.appendingPathComponent("mobile-react/src/components/Timeline.tsx"), encoding: .utf8)
+
+    try assert(store.contains("export type ChatSyncStatus") && store.contains("syncSelectedSession(reason?: SyncReason)"), "React mobile must model selected-chat sync independently from global connectivity")
+    try assert(store.contains("NativeAppState.addEventListener('change'") && store.contains("syncSelectedSession('foreground')"), "React mobile must reconcile the selected chat when returning to the foreground")
+    try assert(store.contains("remoteSeq > localSeq") && store.contains("syncSelectedSession('server-ahead')"), "React mobile session refresh must repair a selected timeline that is behind the server")
+    try assert(store.contains("streamGeneration") && store.contains("generation !== streamGeneration"), "React mobile must ignore callbacks from stale chat streams")
+    try assert(client.contains("STREAM_CONNECT_TIMEOUT_MS") && client.contains("connectingSocket.readyState !== WebSocket.CONNECTING"), "React mobile streams must not remain silently stuck while connecting")
+    try assert(header.contains("'Retrying'") && header.contains("'Sync paused'") && header.contains("syncSelectedSession('manual')"), "React mobile must expose recoverable selected-chat sync status")
+    try assert(timeline.contains("Messages unavailable") && timeline.contains("Retry chat sync"), "React mobile must not present a failed uncached timeline as an empty conversation")
+    try assert(!store.contains("['assistant_text', 'turn_finished', 'artifact_created', 'file_uploaded'].includes(event.type)) void get().refreshSessions()"), "React mobile must not launch a full session-list refresh for every streamed assistant text event")
+}
+
 func checkEndpointCacheKeysAreServerScoped() throws {
     let sessionID = "sess_same_after_copy"
     let fallback = "http://127.0.0.1:7850"
@@ -151,7 +168,15 @@ func checkRuntimeDefaultLabels() throws {
     try assert(server.contains("\"gpt-5.6-sol\": \"priority\""), "Server must launch GPT-5.6 Sol on the required priority service tier")
     try assert(server.contains("except ModuleNotFoundError:  # Python 3.10 agent hosts") && server.contains("load_codex_user_config(path)"), "Server config discovery must remain compatible with Python 3.10 agent hosts")
     try assert(server.contains("is_codex_compaction_failure(terminal_error)") && server.contains("allow_compaction_rollover=False"), "Codex remote-compaction failures must retry at most once on a fresh provider thread")
-    try assert(server.contains("and not text_parts") && server.contains("and not started_tool_ids") && server.contains("and not seen_artifacts"), "Codex provider rollover must never replay a turn after visible output or side effects")
+    try assert(
+        server.contains("produced_activity = bool(")
+            && server.contains("or seen_reasoning")
+            && server.contains("or started_tool_ids")
+            && server.contains("or finished_tool_ids")
+            && server.contains("or seen_artifacts")
+            && server.contains("produced_activity=produced_activity"),
+        "Codex provider rollover must never replay a turn after visible output or side effects"
+    )
     try assert(server.contains("exclude_run_id=run_id") && server.contains("old_provider_session_id"), "Codex provider rollover memory must exclude the failed turn and retain provider audit metadata")
     try assert(server.contains("not sess.get(\"memory_seed_used\") or not session_provider_id(sess)"), "A failed fresh-thread launch must be able to reapply its saved memory seed")
     try assert(server.contains("normalize_runtime_effort(backend, req.effort, strict=True)"), "New sessions must validate effort against the selected backend")
@@ -1770,6 +1795,7 @@ do {
     try checkTextPresenceGateBehavior()
     try checkComposerUsesPresenceGate()
     try checkComposerDraftPersistence()
+    try checkReactMobileChatSyncRecovery()
     try checkEndpointCacheKeysAreServerScoped()
     try checkRuntimeDefaultLabels()
     try checkBackendLocksAfterProviderStart()
