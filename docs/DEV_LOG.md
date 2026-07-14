@@ -8101,3 +8101,15 @@ Release result:
   passed both TypeScript builds, and passed all 184 Electron tests.
 - Prepared Electron macOS build 63 and React Native iOS/iPadOS build 69 for the
   matching API v7 release.
+
+## 2026-07-14 - Release API v7 runtime diagnostics
+
+- Deployed the API v7 server to the active host and verified authenticated
+  health plus forced catalog refreshes report both Claude Code and Codex as
+  ready, including their installed versions and available model catalogs.
+- Uploaded AgentsDock Electron macOS `0.1.1 (63)` and AgentsDock React Native
+  iOS/iPadOS `0.1.1 (69)` to App Store Connect/TestFlight. Both uploads were
+  accepted; prebuilt framework dSYM warnings were non-blocking.
+- Release verification passed seven isolated runtime-diagnostic server tests,
+  both client TypeScript checks, all 184 Electron tests, archive metadata and
+  signing inspection, and authenticated live API v7 checks.
