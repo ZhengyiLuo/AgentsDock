@@ -537,7 +537,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const limit = Math.min(OLDER_LIMIT, remainingCapacity)
     set(state => ({ loadingOlder: { ...state.loadingOlder, [sessionId]: true } }))
     try {
-      const page = await client.sessionPage(sessionId, { before, limit, tail: false, visible: true })
+      // For before-cursor paging the server's tail=true means "the page immediately
+      // before this cursor". tail=false returns the oldest matching page, which
+      // makes long iOS histories look scrambled after Load Older.
+      const page = await client.sessionPage(sessionId, { before, limit, tail: true, visible: true })
       if (epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return 0
       const latest = get().snapshots[sessionId]
       if (!latest) return 0
