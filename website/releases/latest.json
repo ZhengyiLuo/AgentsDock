@@ -1,7 +1,7 @@
 {
   "version": "0.1.1-preview",
   "published_at": "2026-07-13",
-  "notes_url": "https://github.com/ZhengyiLuo/ZenithDock/releases",
+  "notes_url": "./releases/",
   "platforms": {
     "macos": {
       "available": false,

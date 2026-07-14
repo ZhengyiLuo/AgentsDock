@@ -57,9 +57,33 @@
       </section>
 
       <section class="product-stage" aria-label="AgentsDock product view">
-        <div class="product-frame">
+        <div class="product-frame product-mock" aria-label="AgentsDock anonymized product preview">
           <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span><strong>AgentsDock</strong></div>
-          <img src="./assets/agentsdock-terminal.png" alt="AgentsDock showing a research conversation, inspector, scheduled jobs, and a persistent tmux terminal" />
+          <div class="mock-app" aria-hidden="true">
+            <aside class="mock-sidebar">
+              <div class="mock-search"></div>
+              <div class="mock-chat active"><b>Experiment Review</b><span>Codex · GPT-5.6 · running</span></div>
+              <div class="mock-chat"><b>Dataset Audit</b><span>Claude · Opus · new</span></div>
+              <div class="mock-chat"><b>Render Queue</b><span>Codex · GPT-5.6</span></div>
+              <div class="mock-chat"><b>Training Notes</b><span>Claude · Fable</span></div>
+            </aside>
+            <section class="mock-timeline">
+              <div class="mock-title"><strong>Experiment Review</strong><span>Online</span></div>
+              <div class="mock-message assistant">The latest run completed. I found three useful outputs and grouped the media below.</div>
+              <div class="mock-trace">Ran 4 tools · collapsed trace</div>
+              <div class="mock-message user">Create a digest and send the key files to the next agent.</div>
+              <div class="mock-media-grid">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="mock-terminal">tmux · persistent workspace</div>
+            </section>
+            <aside class="mock-inspector">
+              <div class="mock-status">Online</div>
+              <div class="mock-panel"><b>Pinned</b><span>3 important items</span></div>
+              <div class="mock-panel media"><b>Media & files</b><span></span><span></span><span></span><span></span></div>
+              <div class="mock-panel"><b>Jobs</b><span>2 scheduled</span></div>
+            </aside>
+          </div>
         </div>
         <div class="stage-notes" aria-label="Product highlights">
           <article><span>01</span><strong>Keep every run in context</strong><p>Chats, jobs, files, and terminals remain attached to the same research thread.</p></article>
@@ -88,7 +112,7 @@
           <p class="section-kicker">Fully self-hosted</p>
           <h2 id="hosted-title">The app is remote. The control stays yours.</h2>
           <p>Run the lightweight AgentsDock server beside Claude Code and Codex CLI. The desktop app connects over your network or Tailscale, while source code, credentials, chat history, terminals, and large artifacts remain on infrastructure you control.</p>
-          <a href="https://github.com/ZhengyiLuo/ZenithBotServer" target="_blank" rel="noreferrer">View the server on GitHub <span aria-hidden="true">↗</span></a>
+          <a href="#downloads">Get the self-hosted server <span aria-hidden="true">↗</span></a>
         </div>
         <div class="architecture" aria-label="AgentsDock self-hosted architecture">
           <div class="arch-node client"><small>Mac or Linux</small><strong>AgentsDock</strong><span>Chat · Media · Terminal</span></div>
@@ -133,7 +157,7 @@
     <footer>
       <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
       <p>Claude and Codex, built for research that keeps moving.</p>
-      <div><a href="https://github.com/ZhengyiLuo/ZenithDock">GitHub</a><a href="#self-hosted">Server setup</a><a href="#downloads">Downloads</a></div>
+      <div><a href="#self-hosted">Server setup</a><a href="#downloads">Downloads</a><a href="#product">Product</a></div>
     </footer>
 
     <script src="./app.js" type="module"></script>
