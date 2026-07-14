@@ -7916,3 +7916,19 @@ Release result:
   the server index contains remote landmarks beyond the loaded row mapping.
 - Added a regression for a partially loaded tail whose final local row maps
   before later whole-chat landmarks.
+
+## 2026-07-13 - Recover silent external Codex resumes
+
+- Confirmed from live event logs that imported Codex threads could emit only
+  provider lifecycle events, exit successfully, and produce no assistant
+  reply. The server previously recorded those empty turns as successful.
+- Treat a resumed turn with no assistant, reasoning, tool, or artifact activity
+  as a failed continuation. It now retries once on a fresh Codex thread seeded
+  with bounded recent ZenithDock history.
+- Kept the retry side-effect safe: stopped turns, broken streams, unrelated
+  authentication/time-out failures, and any turn that already started a tool
+  are never replayed.
+- A second silent completion now produces an explicit timeline error instead
+  of an invisible empty `turn_finished` event.
+- Added eight focused server regression tests and ran them with the production
+  server virtual environment.
