@@ -366,6 +366,10 @@ export function messageText(event: Event): string {
   return event.result_text || event.text || event.prompt || printableEventValue(event.message) || printableEventValue(event.error) || event.output || ''
 }
 
+export function eventErrorText(event: Event): string {
+  return printableEventValue(event.error) || printableEventValue(event.message) || event.output || event.text || ''
+}
+
 export function messageItemText(item: MessageItem): string {
   return item.events.map(messageText).map(value => value.trim()).filter(Boolean).join('\n\n')
 }

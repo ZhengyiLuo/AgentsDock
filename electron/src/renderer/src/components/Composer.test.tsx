@@ -87,6 +87,41 @@ describe('Composer', () => {
     expect(useAppStore.getState().error).toContain('Install Codex')
   })
 
+  it('prefers the current chat provider error over a generic runtime failure banner', () => {
+    useAppStore.setState({
+      health: {
+        ok: true,
+        runtimes: {
+          codex: {
+            backend: 'codex', status: 'ready', available: true, installed: true, authenticated: true,
+            message: 'Codex is ready.',
+            last_error: 'The latest provider run failed. Open the chat error for details, then retry or refresh runtime status.',
+          },
+        },
+      },
+      snapshots: {
+        'chat-1': {
+          session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
+          events: [{
+            id: 'err-1', seq: 12, session_id: 'chat-1', type: 'error', ts: '2026-07-14T19:00:00Z',
+            backend: 'codex', message: 'Invalid value: max. Supported values are: none, minimal, low, medium, high, and xhigh.',
+          }],
+          queuedTurns: [],
+          files: [],
+          hasMoreEvents: false,
+          filesTotal: 0,
+          cachedAt: 0
+        }
+      }
+    })
+
+    render(<Composer />)
+
+    expect(screen.getByText('Latest chat error')).toBeInTheDocument()
+    expect(screen.getByText(/Invalid value: max/)).toBeInTheDocument()
+    expect(screen.queryByText(/Open the chat error/)).not.toBeInTheDocument()
+  })
+
   it('renders queued turns in a compact action shelf above the editor', () => {
     useAppStore.setState({
       snapshots: {
