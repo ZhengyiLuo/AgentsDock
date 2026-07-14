@@ -108,6 +108,15 @@ export class AppService {
     window.on('closed', () => this.windows.delete(window))
   }
 
+  focusMainWindow(): BrowserWindow | null {
+    const window = [...this.windows].find(candidate => !candidate.isDestroyed()) ?? null
+    if (!window) return null
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+    return window
+  }
+
   start(): void {
     void this.refreshAll(false)
     this.pollTimer = setInterval(() => void this.refreshAll(false, false), 5000)
@@ -606,9 +615,12 @@ export class AppService {
     if (!Notification.isSupported()) return
     const notification = new Notification({ title, body, silent: false })
     notification.on('click', () => {
-      const window = [...this.windows][0]
-      window?.show(); window?.focus()
-      if (sessionId) this.emit('native:menu', { command: `open-session:${sessionId}` })
+      const window = this.focusMainWindow()
+      if (sessionId && window) {
+        setTimeout(() => {
+          if (!window.isDestroyed()) window.webContents.send('native:menu', { command: `open-session:${sessionId}` })
+        }, 80)
+      }
     })
     notification.show()
   }
