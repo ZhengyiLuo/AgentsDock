@@ -43,6 +43,7 @@ const OLDER_LIMIT = 180
 let streamStop: (() => void) | null = null
 let selectionEpoch = 0
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let pinSaveQueue: Promise<void> = Promise.resolve()
 const notifiedEvents = new Set<string>()
 
 Notifications.setNotificationHandler({
@@ -111,9 +112,9 @@ interface AppState {
   runJob(jobId: string): Promise<void>
   search(query: string, sessionId?: string): Promise<void>
   clearSearch(): void
-  pinMessage(sessionId: string, event: Event, body: string): Promise<void>
-  pinFile(sessionId: string, file: AgentFile): Promise<void>
-  removePin(id: string): Promise<void>
+  pinMessage(sessionId: string, event: Event, body: string): Promise<boolean>
+  pinFile(sessionId: string, file: AgentFile): Promise<boolean>
+  removePin(id: string): Promise<boolean>
   inspectProcesses(sessionId?: string): Promise<void>
   inspectTmux(sessionId?: string, includeAll?: boolean): Promise<void>
   clearError(): void
@@ -502,19 +503,39 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async pinMessage(sessionId, event, body) {
     const pin: PinnedItem = { id: `message:${event.id}`, sessionId, kind: 'message', eventId: event.id, title: body.split('\n')[0].slice(0, 80) || 'Message', body, createdAt: Date.now() }
-    const pins = [pin, ...get().pins.filter(value => value.id !== pin.id)]
-    set({ pins }); await savePins(get().serverURL, pins)
+    return persistPins([pin, ...get().pins.filter(value => value.id !== pin.id)], set, get)
   },
   async pinFile(sessionId, file) {
     const pin: PinnedItem = { id: `file:${file.id}`, sessionId, kind: 'file', fileId: file.id, title: file.title || file.filename, createdAt: Date.now() }
-    const pins = [pin, ...get().pins.filter(value => value.id !== pin.id)]
-    set({ pins }); await savePins(get().serverURL, pins)
+    return persistPins([pin, ...get().pins.filter(value => value.id !== pin.id)], set, get)
   },
-  async removePin(id) { const pins = get().pins.filter(value => value.id !== id); set({ pins }); await savePins(get().serverURL, pins) },
+  async removePin(id) { return persistPins(get().pins.filter(value => value.id !== id), set, get) },
   async inspectProcesses(sessionId = get().selectedSessionId ?? undefined) { if (sessionId) try { const value = await client.processes(sessionId); set(state => ({ processes: { ...state.processes, [sessionId]: value } })) } catch (error) { set({ error: errorMessage(error) }) } },
   async inspectTmux(sessionId = get().selectedSessionId ?? undefined, includeAll = false) { if (sessionId) try { const value = await client.tmux(sessionId, includeAll); set(state => ({ tmuxPanes: { ...state.tmuxPanes, [sessionId]: value } })) } catch (error) { set({ error: errorMessage(error) }) } },
   clearError() { set({ error: null }) },
 }))
+
+async function persistPins(
+  pins: PinnedItem[],
+  set: (value: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  get: () => AppState,
+): Promise<boolean> {
+  const previous = get().pins
+  const serverURL = get().serverURL
+  set({ pins })
+  const write = pinSaveQueue.catch(() => undefined).then(() => savePins(serverURL, pins))
+  pinSaveQueue = write.catch(() => undefined)
+  try {
+    await write
+    return true
+  } catch (error) {
+    set(state => ({
+      ...(state.pins === pins ? { pins: previous } : {}),
+      error: `Could not save pinned items: ${errorMessage(error)}`,
+    }))
+    return false
+  }
+}
 
 function applyLiveEvent(event: Event, set: (value: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void, get: () => AppState): void {
   const sessionId = event.session_id

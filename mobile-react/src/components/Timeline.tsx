@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native'
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { ArrowDown, ArrowUp } from 'lucide-react-native'
@@ -8,7 +8,7 @@ import { usePalette } from '../theme'
 import { Loading } from './ui'
 import { TimelineRowView } from './TimelineRows'
 
-export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: string; scrollRequest: number; onReview: (runId: string) => void }) {
+export function Timeline({ sessionId, scrollRequest, keyboardVisible, bottomInset, onReview }: { sessionId: string; scrollRequest: number; keyboardVisible: boolean; bottomInset: number; onReview: (runId: string) => void }) {
   const colors = usePalette()
   const snapshot = useAppStore(state => state.snapshots[sessionId])
   const loading = useAppStore(state => state.loadingSessionId === sessionId)
@@ -21,10 +21,19 @@ export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: st
   const [viewportWidth, setViewportWidth] = useState(0)
   const rows = useMemo(() => projectTimeline(snapshot?.events ?? [], snapshot?.files ?? []), [snapshot?.events, snapshot?.files])
   const lastSession = useRef(sessionId)
+  const lastKeyboardVisible = useRef(keyboardVisible)
+  const keyboardBottomAnchor = useRef(false)
+
+  useLayoutEffect(() => {
+    if (lastKeyboardVisible.current === keyboardVisible) return
+    lastKeyboardVisible.current = keyboardVisible
+    keyboardBottomAnchor.current = nearBottomRef.current
+  }, [keyboardVisible])
 
   useEffect(() => {
     if (lastSession.current !== sessionId) {
       lastSession.current = sessionId
+      nearBottomRef.current = true
       setNearBottom(true)
     }
   }, [sessionId])
@@ -32,13 +41,24 @@ export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: st
     if (!scrollRequest || !rows.length) return
     requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }))
   }, [rows.length, scrollRequest])
+  useEffect(() => {
+    if (!keyboardBottomAnchor.current || !rows.length) return
+    keyboardBottomAnchor.current = false
+    let secondFrame: number | null = null
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }))
+    })
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame != null) cancelAnimationFrame(secondFrame)
+    }
+  }, [keyboardVisible])
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     const width = Math.round(event.nativeEvent.layout.width)
     if (!width || Math.abs(width - viewportWidth) < 2) return
     setViewportWidth(width)
     requestAnimationFrame(() => {
       list.current?.recomputeViewableItems()
-      if (nearBottomRef.current) list.current?.scrollToEnd({ animated: false })
     })
   }, [viewportWidth])
 
@@ -53,7 +73,7 @@ export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: st
         renderItem={({ item }) => <TimelineRowView row={item} sessionId={sessionId} onReview={onReview} fontScale={fontScale} layoutWidth={viewportWidth} />}
         extraData={`${fontScale}:${viewportWidth}`}
         ItemSeparatorComponent={Separator}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={{ paddingTop: 12, paddingBottom: bottomInset + 18 }}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         maintainVisibleContentPosition={{ startRenderingFromBottom: true, autoscrollToBottomThreshold: -1 }}
@@ -70,7 +90,7 @@ export function Timeline({ sessionId, scrollRequest, onReview }: { sessionId: st
         ListHeaderComponent={snapshot?.hasMore ? <Pressable onPress={() => void loadOlder(sessionId)} style={[styles.older, { borderColor: colors.border, backgroundColor: colors.surface }]}>{loadingOlder ? <Text style={{ color: colors.muted }}>Loading…</Text> : <><ArrowUp size={14} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 12 }}>Load older messages</Text></>}</Pressable> : null}
         ListEmptyComponent={<View style={styles.empty}><Text style={{ color: colors.muted }}>No messages yet.</Text></View>}
       />
-      {!nearBottom && rows.length ? <Pressable onPress={() => list.current?.scrollToEnd({ animated: true })} style={[styles.bottom, { backgroundColor: colors.raised, borderColor: colors.border }]}><ArrowDown size={17} color={colors.text} /></Pressable> : null}
+      {!nearBottom && rows.length ? <Pressable onPress={() => list.current?.scrollToEnd({ animated: true })} style={[styles.bottom, { bottom: bottomInset + 12, backgroundColor: colors.raised, borderColor: colors.border }]}><ArrowDown size={17} color={colors.text} /></Pressable> : null}
     </View>
   )
 }
@@ -81,8 +101,8 @@ function distanceFromBottom(event: NativeSyntheticEvent<NativeScrollEvent>): num
 }
 function Separator() { return <View style={{ height: 10 }} /> }
 const styles = StyleSheet.create({
-  root: { flex: 1 }, content: { paddingTop: 12, paddingBottom: 18 },
+  root: { flex: 1 },
   older: { minHeight: 38, marginHorizontal: 14, marginBottom: 10, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   empty: { minHeight: 220, alignItems: 'center', justifyContent: 'center' },
-  bottom: { position: 'absolute', right: 17, bottom: 12, width: 36, height: 36, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+  bottom: { position: 'absolute', right: 17, width: 36, height: 36, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
 })

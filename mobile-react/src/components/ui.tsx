@@ -3,17 +3,17 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import type { LucideIcon } from 'lucide-react-native'
 import { usePalette } from '../theme'
 
-export function IconButton({ icon: Icon, onPress, disabled, selected, size = 18, label, testID }: { icon: LucideIcon; onPress: () => void; disabled?: boolean; selected?: boolean; size?: number; label?: string; testID?: string }) {
+export function IconButton({ icon: Icon, onPress, disabled, selected, size = 18, touchSize = 40, label, testID }: { icon: LucideIcon; onPress: () => void; disabled?: boolean; selected?: boolean; size?: number; touchSize?: number; label?: string; testID?: string }) {
   const colors = usePalette()
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled), selected: Boolean(selected) }}
       testID={testID}
       disabled={disabled}
-      hitSlop={8}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, { backgroundColor: selected ? colors.raised : 'transparent', opacity: disabled ? 0.35 : pressed ? 0.65 : 1 }]}
+      style={({ pressed }) => [styles.iconButton, { width: touchSize, height: touchSize, backgroundColor: selected ? colors.raised : 'transparent', opacity: disabled ? 0.35 : pressed ? 0.65 : 1 }]}
     >
       <Icon size={size} color={selected ? colors.blue : colors.muted} strokeWidth={1.8} />
     </Pressable>
@@ -42,7 +42,7 @@ export function EmptyState({ title, body }: { title: string; body?: string }) {
 }
 
 const styles = StyleSheet.create({
-  iconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
+  iconButton: { alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
   sectionHeader: { minHeight: 28, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitle: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   pill: { minHeight: 24, minWidth: 0, maxWidth: 190, flexShrink: 1, borderRadius: 6, paddingHorizontal: 8, justifyContent: 'center' },

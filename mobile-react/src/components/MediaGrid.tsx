@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   caption: { paddingHorizontal: 9, paddingTop: 7, minHeight: 48 },
   fileTitle: { fontSize: 12, fontWeight: '700' },
   fileMeta: { fontSize: 10, marginTop: 2 },
-  tileActions: { height: 32, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 2 },
+  tileActions: { minHeight: 40, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 2 },
   fileList: { gap: 6 },
   fileRow: { minHeight: 48, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 5 },
   fileIcon: { width: 32, height: 32, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },

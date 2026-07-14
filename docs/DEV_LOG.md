@@ -22,6 +22,31 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-13 - Harden mobile message actions and keyboard anchoring
+
+- Repaired mobile message Pin and Copy actions. Adjacent 36-point controls had
+  overlapping `hitSlop`, so a visible icon could dispatch to its neighbor.
+  Mobile icon controls now use non-overlapping 40-point targets with explicit
+  accessibility state.
+- Copy always writes the complete grouped message, including text hidden by
+  folding, and reports success or failure with inline feedback, haptics, and an
+  accessibility announcement.
+- Pinning is optimistic but serialized per local write queue. A failed
+  server-scoped persistence write rolls back only its own optimistic state and
+  surfaces the error instead of silently losing the pin.
+- Rebuilt keyboard handling around the actual iOS keyboard frame and measured
+  composer height. The timeline reserves that exact space, follows floating or
+  rotated keyboard frame changes, and only restores the bottom anchor when the
+  user was already near the bottom before the keyboard transition.
+- Removed duplicate layout-triggered bottom scrolling. Sending a message still
+  performs the one intentional animated scroll; incoming agent events preserve
+  the reader's position.
+- React typecheck and `git diff --check` pass. The final bundle was installed
+  on iPhone 17 Pro and iPad Pro 13-inch simulators. Full-message clipboard data,
+  independent adjacent Pin/Copy actions, pin persistence across relaunch, the
+  complete keyboard-raised composer, and clean two-pane iPad layout were
+  verified; simulator logs contain no JavaScript or layout faults.
+
 ## 2026-07-13 - Add the first Linux desktop build
 
 - Added a repeatable Electron Linux pipeline that cross-builds x64 by default,

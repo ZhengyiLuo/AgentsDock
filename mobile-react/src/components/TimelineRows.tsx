@@ -1,6 +1,7 @@
-import { memo, useMemo, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { memo, useEffect, useMemo, useState } from 'react'
+import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
+import * as Haptics from 'expo-haptics'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Pin, Wrench } from 'lucide-react-native'
 import type { TimelineRow } from '../lib/timeline'
 import { isTimelineError, rowText } from '../lib/timeline'
@@ -32,17 +33,43 @@ function MessageRowView({ row, sessionId, fontScale }: { row: Extract<TimelineRo
   const pinned = useAppStore(state => state.pins.some(value => value.id === `message:${row.events.at(-1)?.id}`))
   const full = useMemo(() => rowText(row), [row])
   const [expanded, setExpanded] = useState(false)
+  const [feedback, setFeedback] = useState<'Copied' | 'Pinned' | 'Unpinned' | 'Copy failed' | 'Pin failed' | null>(null)
   const folded = full.length > FOLD_AT && !expanded
   const visible = folded ? `${full.slice(0, FOLD_AT).trimEnd()}\n\n…` : full
   const event = row.events.at(-1)!
+  useEffect(() => {
+    if (!feedback) return
+    const timer = setTimeout(() => setFeedback(null), 1_500)
+    return () => clearTimeout(timer)
+  }, [feedback])
+  const copyFullText = async () => {
+    try {
+      await Clipboard.setStringAsync(full)
+      setFeedback('Copied')
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined)
+      void AccessibilityInfo.announceForAccessibility('Copied full message')
+    } catch {
+      setFeedback('Copy failed')
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined)
+    }
+  }
+  const togglePin = async () => {
+    const next = pinned ? 'Unpinned' : 'Pinned'
+    const saved = pinned ? await removePin(`message:${event.id}`) : await pin(sessionId, event, full)
+    setFeedback(saved ? next : 'Pin failed')
+    void Haptics.notificationAsync(saved ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error).catch(() => undefined)
+    if (saved) void AccessibilityInfo.announceForAccessibility(`${next} message`)
+  }
   return (
     <View style={[styles.messageWrap, row.role === 'user' && styles.userAlign]}>
       <View style={[styles.message, row.role === 'user' ? { backgroundColor: colors.user, borderColor: colors.green } : { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.metaRow}>
           <Text style={[styles.author, { color: colors.muted }]}>{row.role === 'user' ? 'You' : 'Assistant'}</Text>
           <Text style={[styles.time, { color: colors.muted }]}>{formatTime(event.ts)}</Text>
-          <IconButton icon={Pin} size={13} selected={pinned} label={pinned ? 'Unpin message' : 'Pin message'} onPress={() => void (pinned ? removePin(`message:${event.id}`) : pin(sessionId, event, full))} />
-          <IconButton icon={Copy} size={13} label="Copy full text" onPress={() => void Clipboard.setStringAsync(full)} />
+          <View style={styles.metaSpacer} />
+          {feedback ? <Text testID={`message-action-feedback-${event.id}`} style={[styles.feedback, { color: feedback.includes('failed') ? colors.red : colors.green }]}>{feedback}</Text> : null}
+          <IconButton testID={`message-pin-${event.id}`} icon={Pin} size={15} selected={pinned} label={pinned ? 'Unpin message' : 'Pin message'} onPress={() => void togglePin()} />
+          <IconButton testID={`message-copy-${event.id}`} icon={feedback === 'Copied' ? Check : Copy} size={15} selected={feedback === 'Copied'} label="Copy full text" onPress={() => void copyFullText()} />
         </View>
         <MarkdownContent value={visible} fontScale={fontScale} />
         {folded ? (
@@ -113,7 +140,7 @@ function SystemRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind: '
 const styles = StyleSheet.create({
   messageWrap: { width: '100%', paddingHorizontal: 14 }, userAlign: { alignItems: 'flex-end' },
   message: { width: '100%', maxWidth: 940, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingTop: 9, paddingBottom: 12 },
-  metaRow: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 4 }, author: { fontSize: 10, fontWeight: '700' }, time: { fontSize: 10, marginRight: 'auto' },
+  metaRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4 }, metaSpacer: { flex: 1 }, author: { fontSize: 10, fontWeight: '700' }, time: { fontSize: 10 }, feedback: { fontSize: 10, fontWeight: '800' },
   fold: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 5, borderWidth: StyleSheet.hairlineWidth }, collapse: { alignSelf: 'flex-start', paddingVertical: 5 },
   traceWrap: { paddingHorizontal: 14 }, traceHeader: { minHeight: 48, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
   traceTitle: { fontSize: 12, fontWeight: '700' }, traceMeta: { fontSize: 11, flex: 1 }, review: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 5 },
