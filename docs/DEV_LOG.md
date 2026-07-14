@@ -8122,4 +8122,5 @@ Release result:
 - Kept unfinished draft text and staged attachments untouched; canned phrases
   are sent without silently consuming files intended for a different prompt.
 - Added a focused renderer regression covering direct submission and composer
-  preservation, and prepared Electron macOS build 64.
+  preservation. All 185 Electron tests passed, and AgentsDock macOS `0.1.1
+  (64)` was accepted by App Store Connect/TestFlight.
