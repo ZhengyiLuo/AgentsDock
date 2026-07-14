@@ -22,6 +22,20 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-13 - Preserve the first terminal row on compact screens
+
+- Removed the server's hidden 40-column/12-row minimum for persistent tmux
+  terminals. Electron and mobile xterm clients can legitimately fit a smaller
+  grid, especially in a short dock or narrow split view; forcing tmux larger
+  than the rendered xterm caused cursor-addressed output to scroll the first
+  command row out of view.
+- Kept the existing 500-column/200-row safety ceiling and the 120x36 default,
+  while accepting xterm's real 2-column/1-row minimum. Verified that the
+  production tmux version preserves a 2x1 pane on an isolated socket.
+- Added compact, default, and oversized terminal geometry regressions, then
+  passed the authenticated live terminal smoke at 20x5 through WebSocket
+  attach, persistence, reattach, window close, pane split, and cleanup.
+
 ## 2026-07-13 - Harden mobile message actions and keyboard anchoring
 
 - Repaired mobile message Pin and Copy actions. Adjacent 36-point controls had

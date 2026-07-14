@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto'
 const baseURL = (process.env.AGENTSDOCK_SERVER_URL || 'http://127.0.0.1:7850').replace(/\/$/, '')
 const token = process.env.AGENTSDOCK_TOKEN || ''
 const cwd = process.env.AGENTSDOCK_TERMINAL_CWD || process.env.HOME || '/tmp'
+const terminalColumns = Number(process.env.AGENTSDOCK_TERMINAL_COLUMNS || 100)
+const terminalRows = Number(process.env.AGENTSDOCK_TERMINAL_ROWS || 30)
 const marker = `PTY_${randomUUID().replaceAll('-', '')}`
 let sessionId = null
 
@@ -22,8 +24,8 @@ function openTerminal(id) {
   return new Promise((resolve, reject) => {
     const url = new URL(`${baseURL}/api/sessions/${encodeURIComponent(id)}/terminal/ws`)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-    url.searchParams.set('columns', '100')
-    url.searchParams.set('rows', '30')
+    url.searchParams.set('columns', String(terminalColumns))
+    url.searchParams.set('rows', String(terminalRows))
     if (token) url.searchParams.set('token', token)
     const socket = new WebSocket(url)
     socket.binaryType = 'arraybuffer'
@@ -46,6 +48,8 @@ function openTerminal(id) {
         if (control.type === 'ready') {
           resolve({
             socket,
+            columns: Number(control.columns),
+            rows: Number(control.rows),
             send: text => socket.send(new TextEncoder().encode(text)),
             waitFor(text, timeout = 10_000) {
               if (output.includes(text)) return Promise.resolve()
@@ -97,6 +101,9 @@ try {
   sessionId = created.session.id
 
   const first = await openTerminal(sessionId)
+  if (first.columns !== terminalColumns || first.rows !== terminalRows) {
+    throw new Error(`Terminal geometry changed during attach: requested ${terminalColumns}x${terminalRows}, received ${first.columns}x${first.rows}`)
+  }
   first.send(`export AGENTSDOCK_TERMINAL_SMOKE=${marker}; printf 'attached\\n'\r`)
   await first.waitFor('attached')
   await closeSocket(first.socket)
@@ -149,7 +156,7 @@ try {
   }
   if (!finalWindowProtected) throw new Error('The final tmux window was not protected')
 
-  console.log('Terminal smoke passed: attach, persistent state, local selection, mouse toggle, reattach, window close, final-window guard, split pane')
+  console.log(`Terminal smoke passed at ${terminalColumns}x${terminalRows}: attach, persistent state, local selection, mouse toggle, reattach, window close, final-window guard, split pane`)
 } finally {
   if (sessionId) {
     await request(`/api/sessions/${encodeURIComponent(sessionId)}/terminal`, { method: 'DELETE' }).catch(() => {})
