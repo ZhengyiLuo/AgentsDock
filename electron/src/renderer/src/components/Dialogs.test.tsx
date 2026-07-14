@@ -2,8 +2,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
+import type { Session } from '@shared/types'
 import { useAppStore } from '../store/app-store'
-import { DigestDialog } from './Dialogs'
+import { DigestDialog, SearchDialog } from './Dialogs'
 
 const preview = vi.fn()
 const send = vi.fn()
@@ -90,5 +91,62 @@ describe('DigestDialog', () => {
       detail: 'deep',
       userPrompt: 'Focus on deployment'
     })
+  })
+})
+
+const searchSessions: Session[] = [
+  { id: 'alpha', title: 'Alpha', backend: 'codex', folder: 'Pinned' },
+  { id: 'beta', title: 'Beta', backend: 'claude', folder: 'General' },
+  { id: 'gamma', title: 'Gamma', backend: 'codex', folder: 'General' },
+]
+
+describe('SearchDialog keyboard navigation', () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        sessions: { searchHistory: vi.fn().mockResolvedValue([]) },
+      } as unknown as AgentsDockAPI,
+    })
+    useAppStore.setState(state => ({
+      sessions: searchSessions,
+      selectedSessionId: null,
+      runtimeCatalog: null,
+      modals: { ...state.modals, digest: false, search: true },
+    }))
+  })
+
+  it('moves the active result with arrow keys and opens it with Enter', async () => {
+    const selectSession = vi.spyOn(useAppStore.getState(), 'selectSession').mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<SearchDialog />)
+
+    const input = screen.getByRole('combobox')
+    const options = screen.getAllByRole('option')
+    expect(options[0]).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(input)
+    await user.keyboard('{ArrowDown}')
+    expect(options[1]).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-search-option-1')
+
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(selectSession).toHaveBeenCalledWith('beta'))
+    expect(useAppStore.getState().modals.search).toBe(false)
+  })
+
+  it('wraps ArrowUp from the first result to the last result', async () => {
+    const user = userEvent.setup()
+    render(<SearchDialog />)
+
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.keyboard('{ArrowUp}')
+
+    const options = screen.getAllByRole('option')
+    expect(options[options.length - 1]).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveAttribute('aria-activedescendant', `command-search-option-${options.length - 1}`)
   })
 })

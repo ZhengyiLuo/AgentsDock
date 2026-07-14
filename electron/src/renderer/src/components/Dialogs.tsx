@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, Clock3, Command, Download, FileText, GitFork, LoaderCircle, Monitor, Moon, RefreshCw, Search, Server, Sparkles, Sun, X } from 'lucide-react'
 import type { AppUpdateStatus, Backend, CreateJobInput, Job, Session, UpdateJobInput } from '@shared/types'
@@ -163,29 +163,44 @@ function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   </Shell>
 }
 
-function SearchDialog() {
+export function SearchDialog() {
   const open = useAppStore(state => state.modals.search)
   const sessions = useAppStore(state => state.sessions)
   const [query, setQuery] = useState('')
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const resultRefs = useRef<Array<HTMLButtonElement | null>>([])
   const historySearch = useSessionHistorySearch(query)
   const historyResults = useMemo(() => historyResultsBySession(historySearch.results), [historySearch.results])
   const filtered = useMemo(
     () => rankSessionsForSearch(sessions, query, new Set(historyResults.keys())).slice(0, 18),
     [historyResults, query, sessions]
   )
-  useEffect(() => { if (open) setQuery('') }, [open])
+  useEffect(() => { if (open) { setQuery(''); setSelectedIndex(0) } }, [open])
+  useEffect(() => {
+    setSelectedIndex(current => Math.min(current, Math.max(0, filtered.length - 1)))
+  }, [filtered.length])
+  useEffect(() => {
+    resultRefs.current[selectedIndex]?.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedIndex])
   const openSession = (session: Session) => {
     useAppStore.getState().setModal('search', false)
     const historyResult = sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined
     void openSessionHistoryResult(session.id, historyResult)
   }
   return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('search', value)} title="Open chat" className="command-dialog">
-    <label className="command-search">{historySearch.loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}<input autoFocus value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && filtered[0]) openSession(filtered[0]) }} placeholder="Search chats and full history" /></label>
-    <div className="command-results">{filtered.map(session => {
+    <label className="command-search">{historySearch.loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}<input autoFocus role="combobox" aria-autocomplete="list" aria-controls="command-search-results" aria-activedescendant={filtered.length ? `command-search-option-${selectedIndex}` : undefined} aria-expanded={open} value={query} onChange={event => { setQuery(event.target.value); setSelectedIndex(0) }} onKeyDown={event => {
+      if (!filtered.length) return
+      if (event.key === 'ArrowDown') { event.preventDefault(); setSelectedIndex(current => (current + 1) % filtered.length) }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); setSelectedIndex(current => (current - 1 + filtered.length) % filtered.length) }
+      else if (event.key === 'Home') { event.preventDefault(); setSelectedIndex(0) }
+      else if (event.key === 'End') { event.preventDefault(); setSelectedIndex(filtered.length - 1) }
+      else if (event.key === 'Enter') { event.preventDefault(); openSession(filtered[selectedIndex] ?? filtered[0]) }
+    }} placeholder="Search chats and full history" /></label>
+    <div className="command-results" id="command-search-results" role="listbox" aria-label="Chats and message matches">{filtered.map((session, index) => {
       const match = sessionNameMatchRank(session, query) == null ? historyResults.get(session.id) : undefined
-      return <button key={session.id} onClick={() => openSession(session)}><BackendMark backend={session.backend} size={18} /><span><strong>{session.title}</strong><small>{session.folder || 'General'} · {runtimeLabel(session, useAppStore.getState().runtimeCatalog)}</small>{match && <small className="history-match">{match.snippet}</small>}</span></button>
+      return <button ref={element => { resultRefs.current[index] = element }} id={`command-search-option-${index}`} role="option" aria-selected={index === selectedIndex} className={index === selectedIndex ? 'selected' : ''} key={session.id} onMouseEnter={() => setSelectedIndex(index)} onClick={() => openSession(session)}><BackendMark backend={session.backend} size={18} /><span><strong>{session.title}</strong><small>{session.folder || 'General'} · {runtimeLabel(session, useAppStore.getState().runtimeCatalog)}</small>{match && <small className="history-match">{match.snippet}</small>}</span></button>
     })}{!filtered.length && <p>{historySearch.loading ? 'Searching full history…' : 'No matching chats.'}</p>}</div>
-    <div className="command-hint"><Command size={12} /> P searches chats and messages · Control Tab switches chats</div>
+    <div className="command-hint"><Command size={12} /> P searches · ↑↓ selects · Return opens · Control Tab switches chats</div>
   </Shell>
 }
 

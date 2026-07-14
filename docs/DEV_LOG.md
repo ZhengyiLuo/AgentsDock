@@ -8071,3 +8071,15 @@ Release result:
   compiled, React Native TypeScript passed, all 17 server regressions passed,
   and the native iOS simulator workspace built successfully for the generic
   iPhone/iPad target. No TestFlight upload was performed in this pass.
+
+## 2026-07-14 - Add keyboard navigation to chat search
+
+- Made the Command-P chat search a real keyboard listbox: Up and Down move the
+  active result with wraparound, Home and End jump to either edge, and Return
+  opens the active chat instead of always opening the first result.
+- Keep mouse hover and keyboard selection synchronized, scroll the active row
+  into view, and expose the combobox/listbox relationship to accessibility
+  APIs.
+- Added focused regressions for forward selection and upward wraparound. The
+  focused dialog suite passed all five tests and the local macOS app was
+  repackaged at `dist/AgentsDock.app`. No TestFlight upload was performed.

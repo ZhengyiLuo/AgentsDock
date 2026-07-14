@@ -607,7 +607,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .command-search input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; font-size: 15px; }
 .command-results { max-height: 420px; overflow: auto; padding: 6px; }
 .command-results > button { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 9px; color: #ddd; background: transparent; border-radius: 6px; text-align: left; }
-.command-results > button:hover { background: #303030; }
+.command-results > button:hover, .command-results > button.selected { background: #303030; }
 .command-results > button > span { min-width: 0; display: flex; flex-direction: column; }
 .command-results strong, .command-results small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .command-results small { color: var(--muted); font-size: 10px; }
@@ -873,7 +873,8 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 :root[data-theme="light"] .server-health,
 :root[data-theme="light"] .update-panel { background: #f1f1ee; border-color: #ddddda; }
 :root[data-theme="light"] .command-results > button { color: #383834; }
-:root[data-theme="light"] .command-results > button:hover { background: #ecece8; }
+:root[data-theme="light"] .command-results > button:hover,
+:root[data-theme="light"] .command-results > button.selected { background: #ecece8; }
 :root[data-theme="light"] .review-dialog { background: #fbfbfa; border-color: #ccccC7; box-shadow: 0 28px 100px #1b1b1840; }
 :root[data-theme="light"] .review-header,
 :root[data-theme="light"] .diff-file-header { color: #333330; background: #eeeeeb; border-color: #d6d6d1; }
