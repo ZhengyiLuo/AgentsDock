@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { LoaderCircle, X } from 'lucide-react'
+import { Download, LoaderCircle, X } from 'lucide-react'
+import type { AppUpdateStatus } from '@shared/types'
 import { ChatHeader } from './components/ChatHeader'
 import { CodeReview } from './components/CodeReview'
 import { Composer } from './components/Composer'
@@ -125,8 +126,32 @@ export function App() {
         onRequestClose={() => setTerminalOpen(selectedSession.id, false)}
       />}
       {error && <div className="error-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
+      <UpdateNotice />
       <Dialogs />
       <CodeReview target={reviewTarget} onClose={() => setReviewTarget(null)} />
     </main>
   )
+}
+
+function UpdateNotice() {
+  const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void window.agentsDock.updates.status().then(status => { if (active) setUpdate(status) })
+    const unsubscribe = window.agentsDock.events.on('app:update', status => {
+      setUpdate(status)
+      if (status.state === 'downloaded') setDismissedVersion(current => current === status.availableVersion ? current : null)
+    })
+    return () => { active = false; unsubscribe() }
+  }, [])
+
+  if (!update || update.channel !== 'direct' || update.state !== 'downloaded' || dismissedVersion === update.availableVersion) return null
+  return <aside className="update-toast" role="status" aria-live="polite">
+    <Download size={17} />
+    <div><strong>AgentsDock {update.availableVersion} is ready</strong><span>Your chats stay on the server. Restart when convenient.</span></div>
+    <button className="primary-button" onClick={() => void window.agentsDock.updates.install()}>Restart</button>
+    <button className="icon-button" aria-label="Later" title="Later" onClick={() => setDismissedVersion(update.availableVersion ?? '')}><X size={14} /></button>
+  </aside>
 }

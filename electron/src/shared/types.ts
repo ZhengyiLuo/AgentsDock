@@ -292,7 +292,7 @@ export interface PublicServerSettings {
   serverIdentity?: string | null
 }
 
-export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
+export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
 export type AppUpdateChannel = 'development' | 'direct' | 'app-store'
 export interface AppUpdateStatus {
   state: AppUpdateState
@@ -302,6 +302,7 @@ export interface AppUpdateStatus {
   progress?: number
   message?: string
   checkedAt?: string
+  downloadedAt?: string
 }
 
 export interface TimelinePage {

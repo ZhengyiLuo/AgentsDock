@@ -696,6 +696,12 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .error-toast { position: fixed; z-index: 2000; right: 18px; bottom: 18px; max-width: 480px; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: #ffd4d1; background: #482725; border: 1px solid #743a37; border-radius: 8px; box-shadow: 0 12px 30px #0009; }
 .error-toast span { flex: 1; user-select: text; }
 .error-toast button { color: #ffaaa5; background: transparent; }
+.update-toast { position: fixed; z-index: 1900; right: 18px; top: 50px; max-width: 520px; display: flex; align-items: center; gap: 10px; padding: 11px 12px; color: #e8f3ff; background: #202b37; border: 1px solid #38526d; border-radius: 8px; box-shadow: 0 12px 30px #0009; }
+.update-toast > svg { flex: none; color: #58a6ff; }
+.update-toast > div { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.update-toast strong, .update-toast span { overflow-wrap: anywhere; }
+.update-toast span { color: #aebed0; font-size: 12px; }
+.update-toast .primary-button, .update-toast .icon-button { flex: none; }
 
 /* Appearance */
 :root[data-theme="light"] {
@@ -888,6 +894,8 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 :root[data-theme="light"] .digest-preview > header strong { color: #444440; }
 :root[data-theme="light"] .server-health,
 :root[data-theme="light"] .update-panel { background: #f1f1ee; border-color: #ddddda; }
+:root[data-theme="light"] .update-toast { color: #182536; background: #f5f9fe; border-color: #b7cde3; box-shadow: 0 12px 30px #6f819233; }
+:root[data-theme="light"] .update-toast span { color: #526477; }
 :root[data-theme="light"] .command-results > button { color: #383834; }
 :root[data-theme="light"] .command-results > button:hover,
 :root[data-theme="light"] .command-results > button.selected { background: #ecece8; }

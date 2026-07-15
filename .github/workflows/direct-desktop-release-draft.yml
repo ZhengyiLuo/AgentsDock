@@ -1,0 +1,121 @@
+name: Prepare direct desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer version, without a leading v
+        required: true
+        type: string
+      release_notes:
+        description: Short release notes for the draft
+        required: true
+        type: string
+
+concurrency:
+  group: agentsdock-direct-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-draft:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/agentsdock-release.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/agentsdock-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | openssl base64 -d -A -out "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Install dependencies
+        working-directory: electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Stamp release version
+        working-directory: electron
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be valid SemVer without a leading v." >&2
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=require('./package.json'); p.version=process.env.RELEASE_VERSION; p.build.buildVersion=process.env.BUILD_NUMBER; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n')"
+
+      - name: Write App Store Connect key
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/private_keys"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | openssl base64 -d -A -out "$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+      - name: Build, sign, notarize, and verify
+        env:
+          APPLE_API_KEY: ${{ runner.temp }}/private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: ./scripts/build_electron_release.sh
+
+      - name: Write release integrity manifest
+        working-directory: electron/dist-release
+        run: shasum -a 256 AgentsDock-* latest-mac.yml > SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AgentsDock-${{ inputs.version }}-verified
+          path: |
+            electron/dist-release/AgentsDock-*
+            electron/dist-release/latest-mac.yml
+            electron/dist-release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create reviewed GitHub draft
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          TAG="v${RELEASE_VERSION}"
+          if gh release view "$TAG" --repo ZhengyiLuo/ZenithBotServer >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite immutable update assets." >&2
+            exit 1
+          fi
+          printf '%s\n\nSource commit: %s\n' "$RELEASE_NOTES" "$SOURCE_SHA" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" \
+            electron/dist-release/AgentsDock-* \
+            electron/dist-release/latest-mac.yml \
+            electron/dist-release/SHA256SUMS \
+            --repo ZhengyiLuo/ZenithBotServer \
+            --draft \
+            --title "AgentsDock ${RELEASE_VERSION}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"

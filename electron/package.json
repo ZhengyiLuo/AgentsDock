@@ -32,6 +32,7 @@
     ],
     "mac": {
       "icon": "build/AgentsDock.icns",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "category": "public.app-category.developer-tools",
       "target": [
         "zip",
@@ -73,7 +74,7 @@
         "provider": "github",
         "owner": "ZhengyiLuo",
         "repo": "ZenithBotServer",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ]
   },

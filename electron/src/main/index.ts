@@ -22,11 +22,17 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   let mainWindow: BrowserWindow | null = null
   let service: AppService | null = null
-  const updater = new AppUpdateManager(status => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send('app:update', status)
+  const updater = new AppUpdateManager(
+    status => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('app:update', status)
+      }
+    },
+    {
+      beforeInstall: () => service?.stop(),
+      installFailed: () => service?.start()
     }
-  })
+  )
 
   app.on('second-instance', () => {
     if (!mainWindow) return

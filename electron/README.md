@@ -14,13 +14,16 @@ From the repository root:
 ```
 
 The script runs TypeScript checks, the regression suite, the production Vite
-build, and an unsigned local Electron package. It installs the result at:
+build, and an ad-hoc signed local Electron package. It installs the result at:
 
 ```text
-dist/AgentsDock-Electron.app
+dist/AgentsDock.app
 ```
 
-It never replaces `dist/AgentsDock.app`, which is the Swift development app.
+The local app contains an update-disable marker and cannot consume or replace a
+signed production release. Direct desktop releases are built and notarized in
+CI, then pass through a reviewed GitHub draft. See
+[`../docs/DIRECT_RELEASES.md`](../docs/DIRECT_RELEASES.md).
 
 ## Development
 

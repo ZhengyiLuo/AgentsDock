@@ -116,8 +116,9 @@ function SettingsDialog() {
       <label><span>Access token</span><input type="password" value={token} onChange={event => setToken(event.target.value)} placeholder="Leave blank to keep saved token" autoComplete="off" /></label>
       {update && <div className="update-panel">
         <div className="update-copy"><strong>App updates <small>v{update.currentVersion}</small></strong><span>{update.message}</span></div>
-        {update.channel === 'direct' && update.state !== 'downloaded' && <button type="button" className="quiet-button" disabled={update.state === 'checking' || update.state === 'downloading'} onClick={() => void window.agentsDock.updates.check()}>{update.state === 'checking' || update.state === 'downloading' ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} Check now</button>}
+        {update.channel === 'direct' && update.state !== 'downloaded' && update.state !== 'installing' && <button type="button" className="quiet-button" disabled={update.state === 'checking' || update.state === 'available' || update.state === 'downloading'} onClick={() => void window.agentsDock.updates.check()}>{update.state === 'checking' || update.state === 'available' || update.state === 'downloading' ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} Check now</button>}
         {update.state === 'downloaded' && <button type="button" className="primary-button" onClick={() => void window.agentsDock.updates.install()}><Download size={13} /> Restart to update</button>}
+        {update.state === 'installing' && <span className="update-channel"><LoaderCircle className="spin" size={13} /> Restarting…</span>}
         {update.channel === 'app-store' && <span className="update-channel">TestFlight</span>}
         {update.state === 'downloading' && <div className="update-progress"><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
       </div>}

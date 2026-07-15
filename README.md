@@ -106,10 +106,12 @@ requires a Developer ID Application certificate and notarization:
 
 ```bash
 ./scripts/build_electron_release.sh
-
-# Build and publish the signed zip/dmg plus latest-mac.yml.
-GH_TOKEN=... AGENTSDOCK_PUBLISH_MODE=always ./scripts/build_electron_release.sh
 ```
+
+The script builds and verifies but never publishes. Production uses separate
+manual GitHub Actions for preparing a signed/notarized draft and publishing it
+through a protected environment. See [`docs/DIRECT_RELEASES.md`](docs/DIRECT_RELEASES.md)
+for secrets, verification, pilot testing, publication, and rollback.
 
 The Mac App Store/TestFlight build is a separate sandboxed target. It never
 runs the direct updater because Apple owns updates for that channel. Xcode

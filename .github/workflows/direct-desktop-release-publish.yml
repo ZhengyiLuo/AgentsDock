@@ -1,0 +1,68 @@
+name: Publish direct desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing draft SemVer version, without a leading v
+        required: true
+        type: string
+
+concurrency:
+  group: agentsdock-direct-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-publish:
+    runs-on: macos-15
+    timeout-minutes: 20
+    environment: direct-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download and validate draft assets
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be valid SemVer without a leading v." >&2
+            exit 1
+          fi
+          TAG="v${RELEASE_VERSION}"
+          RELEASE_JSON="$(gh release view "$TAG" --repo ZhengyiLuo/ZenithBotServer --json isDraft,assets)"
+          test "$(printf '%s' "$RELEASE_JSON" | jq -r '.isDraft')" = "true" || { echo "$TAG is not a draft" >&2; exit 1; }
+          ASSET_NAMES="$(printf '%s' "$RELEASE_JSON" | jq -r '.assets[].name')"
+          printf '%s\n' "$ASSET_NAMES" | grep -qx 'latest-mac.yml'
+          printf '%s\n' "$ASSET_NAMES" | grep -qx 'SHA256SUMS'
+          printf '%s\n' "$ASSET_NAMES" | grep -Eq '^AgentsDock-.*-mac-universal\.zip$'
+          printf '%s\n' "$ASSET_NAMES" | grep -Eq '^AgentsDock-.*-mac-universal\.zip\.blockmap$'
+          printf '%s\n' "$ASSET_NAMES" | grep -Eq '^AgentsDock-.*-mac-universal\.dmg$'
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$TAG" --repo ZhengyiLuo/ZenithBotServer --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          shasum -a 256 -c SHA256SUMS
+          "$GITHUB_WORKSPACE/scripts/verify_electron_release.sh" "$RUNNER_TEMP/release" "$RELEASE_VERSION"
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ secrets.AGENTSDOCK_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: gh release edit "v${RELEASE_VERSION}" --repo ZhengyiLuo/ZenithBotServer --draft=false --latest
+
+      - name: Verify public updater metadata
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            REMOTE_VERSION="$(curl -fsSL https://github.com/ZhengyiLuo/ZenithBotServer/releases/latest/download/latest-mac.yml | awk '/^version:/ { print $2; exit }' | tr -d '\"\047')" || true
+            if test "$REMOTE_VERSION" = "$RELEASE_VERSION"; then exit 0; fi
+            sleep 10
+          done
+          echo "Published updater metadata did not resolve to $RELEASE_VERSION" >&2
+          exit 1

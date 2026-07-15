@@ -7,6 +7,18 @@ import { appLog } from './logger'
 
 const STARTUP_CHECK_DELAY_MS = 15_000
 const PERIODIC_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000
+const CHECK_BLOCKING_STATES = new Set<AppUpdateStatus['state']>([
+  'checking',
+  'available',
+  'downloading',
+  'downloaded',
+  'installing'
+])
+
+export interface AppUpdateLifecycle {
+  beforeInstall?: () => void
+  installFailed?: () => void
+}
 
 export class AppUpdateManager {
   private value: AppUpdateStatus
@@ -14,8 +26,12 @@ export class AppUpdateManager {
   private periodicTimer: NodeJS.Timeout | null = null
   private manualCheck = false
   private started = false
+  private checkInFlight: Promise<void> | null = null
 
-  constructor(private readonly publish: (status: AppUpdateStatus) => void) {
+  constructor(
+    private readonly publish: (status: AppUpdateStatus) => void,
+    private readonly lifecycle: AppUpdateLifecycle = {}
+  ) {
     this.value = initialStatus()
   }
 
@@ -53,7 +69,9 @@ export class AppUpdateManager {
     }
 
     autoUpdater.autoDownload = true
-    autoUpdater.autoInstallOnAppQuit = true
+    // Installing only after an explicit user action avoids surprising an
+    // operator who merely quit while long-running chats were active.
+    autoUpdater.autoInstallOnAppQuit = false
     autoUpdater.allowDowngrade = false
     autoUpdater.allowPrerelease = false
     this.bindEvents()
@@ -65,22 +83,42 @@ export class AppUpdateManager {
 
   async check(manual = true): Promise<AppUpdateStatus> {
     if (this.value.channel !== 'direct') return this.status()
-    if (this.value.state === 'checking' || this.value.state === 'downloading') return this.status()
+    if (CHECK_BLOCKING_STATES.has(this.value.state)) return this.status()
+    if (this.checkInFlight) {
+      await this.checkInFlight
+      return this.status()
+    }
     this.manualCheck = manual
     this.set({ state: 'checking', message: 'Checking for updates…', progress: undefined })
-    try {
-      await autoUpdater.checkForUpdates()
-    } catch (error) {
-      this.fail(error)
-    }
+    this.checkInFlight = autoUpdater.checkForUpdates()
+      .then(() => undefined)
+      .catch(error => this.fail(error))
+      .finally(() => { this.checkInFlight = null })
+    await this.checkInFlight
     return this.status()
   }
 
   install(): boolean {
     if (this.value.state !== 'downloaded') return false
     appLog('updater', 'installing downloaded update', { version: this.value.availableVersion })
-    autoUpdater.quitAndInstall(false, true)
-    return true
+    this.set({
+      state: 'installing',
+      message: `Restarting into AgentsDock ${this.value.availableVersion ?? 'update'}…`
+    })
+    try {
+      this.lifecycle.beforeInstall?.()
+      autoUpdater.quitAndInstall(false, true)
+      return true
+    } catch (error) {
+      this.lifecycle.installFailed?.()
+      const message = error instanceof Error ? error.message : String(error)
+      appLog('updater', 'could not install downloaded update', { message })
+      this.set({
+        state: 'downloaded',
+        message: `The update is still downloaded, but AgentsDock could not restart: ${message}`
+      })
+      return false
+    }
   }
 
   stop(): void {
@@ -117,6 +155,7 @@ export class AppUpdateManager {
         state: 'not-available',
         availableVersion: undefined,
         progress: undefined,
+        downloadedAt: undefined,
         message: 'AgentsDock is up to date.',
         checkedAt: now()
       })
@@ -129,7 +168,8 @@ export class AppUpdateManager {
         availableVersion: info.version,
         progress: 100,
         message: `AgentsDock ${info.version} is ready to install.`,
-        checkedAt: now()
+        checkedAt: now(),
+        downloadedAt: now()
       })
       this.manualCheck = false
     })
