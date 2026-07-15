@@ -203,6 +203,7 @@ export class AppService {
 
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
     const session = await this.client.updateSession(sessionId, patch)
+    if (session.archived) this.disconnectTerminal(sessionId)
     this.upsertSession(session)
     return session
   }

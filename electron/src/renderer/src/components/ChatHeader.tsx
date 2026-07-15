@@ -24,13 +24,13 @@ export function ChatHeader({ terminalOpen = false, onTerminalToggle }: { termina
         <button className="icon-button" title="Find in chat" onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:find-in-chat'))}><Search size={15} /></button>
         <button className="icon-button" title={session.pinned ? 'Unpin chat' : 'Pin chat'} onClick={() => void useAppStore.getState().updateSession(session.id, { pinned: !session.pinned })}><Pin size={15} fill={session.pinned ? 'currentColor' : 'none'} /></button>
         <FontMenu />
-        <button
+        {onTerminalToggle && <button
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}
           aria-label={terminalOpen ? 'Close terminal panel' : 'Open terminal panel'}
           aria-pressed={terminalOpen}
           title={`${terminalOpen ? 'Close' : 'Open'} terminal panel (⌃\`)`}
           onClick={onTerminalToggle}
-        ><SquareTerminal size={16} /></button>
+        ><SquareTerminal size={16} /></button>}
         <ConnectionStatus />
         <button className="icon-button inspector-toggle" title={`${inspector ? 'Hide' : 'Show'} right panel (⌘L)`} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button>
       </div>

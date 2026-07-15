@@ -32,7 +32,7 @@ export function App() {
       return Object.fromEntries(Object.entries(legacy).map(([sessionId, mode]) => [sessionId, mode === 'terminal']))
     } catch { return {} }
   })
-  const terminalOpen = selectedSessionId ? terminalOpenBySession[selectedSessionId] ?? false : false
+  const terminalOpen = selectedSessionId && !selectedSession?.archived ? terminalOpenBySession[selectedSessionId] ?? false : false
 
   useEffect(() => { void initialize() }, [initialize])
   useEffect(() => {
@@ -52,6 +52,15 @@ export function App() {
   useEffect(() => {
     setReviewTarget(current => reviewTargetBelongsToSession(current, selectedSessionId) ? current : null)
   }, [selectedSessionId])
+  useEffect(() => {
+    if (!selectedSession?.archived || !terminalOpenBySession[selectedSession.id]) return
+    setTerminalOpenBySession(current => {
+      if (!current[selectedSession.id]) return current
+      const next = { ...current, [selectedSession.id]: false }
+      localStorage.setItem('agentsdock:terminal-open', JSON.stringify(next))
+      return next
+    })
+  }, [selectedSession?.id, selectedSession?.archived, terminalOpenBySession])
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
       if (isTerminalToggleShortcut(event) && selectedSessionId) {
@@ -89,7 +98,7 @@ export function App() {
     return () => window.removeEventListener('agentsdock:close-surface', closeSurface)
   }, [reviewTarget, selectedSessionId, terminalOpen])
   const toggleTerminal = () => {
-    if (!selectedSessionId) return
+    if (!selectedSessionId || selectedSession?.archived) return
     setTerminalOpen(selectedSessionId, !terminalOpen)
   }
 
@@ -101,7 +110,7 @@ export function App() {
     <main className={`app-shell ${inspectorVisible ? 'inspector-open' : ''}`} style={columnStyle}>
       <Sidebar />
       <section className="conversation-pane">
-        <ChatHeader terminalOpen={terminalOpen} onTerminalToggle={toggleTerminal} />
+        <ChatHeader terminalOpen={terminalOpen} onTerminalToggle={selectedSession?.archived ? undefined : toggleTerminal} />
         <div className="chat-workspace">
           <Timeline />
           <Composer />

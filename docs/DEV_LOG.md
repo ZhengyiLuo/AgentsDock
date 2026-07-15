@@ -8124,3 +8124,16 @@ Release result:
 - Added a focused renderer regression covering direct submission and composer
   preservation. All 185 Electron tests passed, and AgentsDock macOS `0.1.1
   (64)` was accepted by App Store Connect/TestFlight.
+
+## 2026-07-14 - Tear down chat terminals on archive
+
+- Archiving a chat now kills its AgentsDock-owned persistent tmux session,
+  including every window and pane in that session.
+- The Electron service disconnects the local terminal transport after the
+  archive succeeds, and the renderer closes and forgets an open terminal dock
+  for that chat.
+- Archived chats cannot recreate a persistent terminal until they are
+  unarchived. Unrelated agent-launched training, render, or submitter tmux
+  sessions remain untouched.
+- Added server and Electron regressions for archive cleanup and ordinary
+  non-archive session edits.
