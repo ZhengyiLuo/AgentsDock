@@ -19,117 +19,193 @@
         <a href="#product">Product</a>
         <a href="#self-hosted">Self-hosted</a>
         <a href="#downloads">Downloads</a>
+        <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener" class="nav-github">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.603-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.647.35-1.087.636-1.337-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+          GitHub
+        </a>
       </nav>
       <a class="header-action" href="#downloads">Get AgentsDock</a>
     </header>
 
     <main id="top">
-      <section class="hero" aria-labelledby="hero-title">
+      <section class="hero" aria-labelledby="hero-title" id="product">
         <div class="hero-shade" aria-hidden="true"></div>
         <div class="hero-copy">
-          <p class="eyebrow"><span class="live-dot"></span> A control room for agent work</p>
+          <a class="github-badge" href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener" aria-label="View AgentsDock on GitHub">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.603-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.647.35-1.087.636-1.337-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+            <span>Open source on GitHub</span>
+            <span class="github-badge-sep">·</span>
+            <span class="github-badge-mit">MIT License</span>
+          </a>
           <h1 id="hero-title">AgentsDock</h1>
           <p class="hero-lede">Claude and Codex, together in one self-hosted workspace built for research, long-running jobs, and the files that come out of them.</p>
           <div class="hero-actions" aria-label="Downloads">
             <button class="download-button primary" type="button" data-download="macos">
               <span class="button-icon" aria-hidden="true">⌘</span>
-              <span><strong>Download for macOS</strong><small>Apple silicon</small></span>
+              <strong>Download for macOS</strong>
             </button>
             <button class="download-button secondary" type="button" data-download="linux">
               <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
-              <span><strong>Download for Linux</strong><small>x64 AppImage</small></span>
+              <strong>Download for Linux</strong>
             </button>
+            <a href="https://testflight.apple.com/join/placeholder" target="_blank" rel="noopener" class="download-button secondary appstore-btn">
+              <span class="button-icon" aria-hidden="true">&#xF8FF;</span>
+              <strong>Download for iPhone</strong>
+            </a>
           </div>
-          <p class="release-line"><span id="release-version">Private preview</span> · Your agents and data stay on your server.</p>
         </div>
-        <div class="hero-proof" aria-label="Key capabilities">
-          <span>Claude Code</span>
-          <span>Codex CLI</span>
-          <span>Persistent tmux</span>
-          <span>Rich media</span>
-        </div>
-      </section>
-
-      <section class="positioning" id="product">
-        <p class="section-kicker">For research and more</p>
-        <h2>One place for the conversation, the computation, and the result.</h2>
-        <p>AgentsDock keeps long-running agent work legible. Follow the reasoning without drowning in tool output, inspect the live terminal, and keep every video, image, file, and scheduled run attached to the right chat.</p>
-      </section>
-
-      <section class="product-stage" aria-label="AgentsDock product view">
-        <div class="product-frame product-mock" aria-label="AgentsDock anonymized product preview">
-          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span><strong>AgentsDock</strong></div>
-          <div class="mock-app" aria-hidden="true">
-            <aside class="mock-sidebar">
-              <div class="mock-search"></div>
-              <div class="mock-chat active"><b>Experiment Review</b><span>Codex · GPT-5.6 · running</span></div>
-              <div class="mock-chat"><b>Dataset Audit</b><span>Claude · Opus · new</span></div>
-              <div class="mock-chat"><b>Render Queue</b><span>Codex · GPT-5.6</span></div>
-              <div class="mock-chat"><b>Training Notes</b><span>Claude · Fable</span></div>
-            </aside>
-            <section class="mock-timeline">
-              <div class="mock-title"><strong>Experiment Review</strong><span>Online</span></div>
-              <div class="mock-message assistant">The latest run completed. I found three useful outputs and grouped the media below.</div>
-              <div class="mock-trace">Ran 4 tools · collapsed trace</div>
-              <div class="mock-message user">Create a digest and send the key files to the next agent.</div>
-              <div class="mock-media-grid">
-                <span></span><span></span><span></span><span></span>
+        <div class="hero-product-devices">
+          <div class="product-frame product-mock" aria-label="AgentsDock desktop preview">
+            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span><strong>AgentsDock</strong></div>
+            <div class="mock-app" aria-hidden="true">
+              <aside class="mock-sidebar">
+                <div class="mock-search"></div>
+                <div class="mock-chat active"><b>Experiment Review</b><span>Codex · GPT-5.6 · running</span></div>
+                <div class="mock-chat"><b>Dataset Audit</b><span>Claude · Opus · new</span></div>
+                <div class="mock-chat"><b>Render Queue</b><span>Codex · GPT-5.6</span></div>
+                <div class="mock-chat"><b>Training Notes</b><span>Claude · Fable</span></div>
+              </aside>
+              <section class="mock-timeline">
+                <div class="mock-title"><strong>Experiment Review</strong><span>Online</span></div>
+                <div class="mock-message assistant">The latest run completed. I found three useful outputs and grouped the media below.</div>
+                <div class="mock-trace">Ran 4 tools · collapsed trace</div>
+                <div class="mock-message user">Create a digest and send the key files to the next agent.</div>
+                <div class="mock-media-grid">
+                  <span></span><span></span><span></span><span></span>
+                </div>
+                <div class="mock-composer">
+                  <div class="mock-composer-box">
+                    <div class="mock-composer-field"></div>
+                    <div class="mock-composer-footer">
+                      <button class="mock-agent-btn mock-agent-codex">
+                        <img src="./assets/codex-logo.png" class="mock-agent-icon" alt="" />
+                        <span>Codex</span>
+                      </button>
+                      <button class="mock-agent-btn mock-agent-claude">
+                        <img src="./assets/claude-code-logo.png" class="mock-agent-icon" alt="" />
+                        <span>Claude Code</span>
+                      </button>
+                      <div class="mock-send">↑</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <aside class="mock-inspector">
+                <div class="mock-status">Online</div>
+                <div class="mock-panel"><b>Pinned</b><span>3 important items</span></div>
+                <div class="mock-panel media"><b>Media & files</b><span></span><span></span><span></span><span></span></div>
+                <div class="mock-panel"><b>Jobs</b><span>2 scheduled</span></div>
+              </aside>
+            </div>
+          </div>
+          <div class="product-frame product-phone" aria-label="AgentsDock mobile preview">
+            <div class="phone-bar" aria-hidden="true"><span class="phone-notch"></span></div>
+            <div class="mock-phone-app" aria-hidden="true">
+              <div class="phone-header">
+                <strong>Experiment Review</strong>
+                <span class="phone-status">● Online</span>
               </div>
-              <div class="mock-terminal">tmux · persistent workspace</div>
-            </section>
-            <aside class="mock-inspector">
-              <div class="mock-status">Online</div>
-              <div class="mock-panel"><b>Pinned</b><span>3 important items</span></div>
-              <div class="mock-panel media"><b>Media & files</b><span></span><span></span><span></span><span></span></div>
-              <div class="mock-panel"><b>Jobs</b><span>2 scheduled</span></div>
-            </aside>
+              <div class="phone-timeline">
+                <div class="mock-message assistant">Run complete. 3 outputs ready.</div>
+                <div class="mock-trace">Ran 4 tools · collapsed</div>
+                <div class="mock-media-grid"><span></span><span></span><span></span><span></span></div>
+                <div class="mock-message user">Schedule a follow-up in 6 hours.</div>
+                <div class="phone-job-card">
+                  <span>⏱</span>
+                  <div><b>Job scheduled</b><small>Next run in 6 h</small></div>
+                </div>
+              </div>
+              <div class="phone-composer">
+                <div class="phone-input"></div>
+                <div class="phone-send">↑</div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="stage-notes" aria-label="Product highlights">
-          <article><span>01</span><strong>Keep every run in context</strong><p>Chats, jobs, files, and terminals remain attached to the same research thread.</p></article>
-          <article><span>02</span><strong>See the real output</strong><p>Play videos, inspect image grids, download files, and drag artifacts into your next workflow.</p></article>
-          <article><span>03</span><strong>Stay close to the machine</strong><p>Open the chat’s persistent tmux workspace without leaving the conversation.</p></article>
         </div>
       </section>
 
-      <section class="feature-band" aria-labelledby="feature-title">
+      <div class="trusted-by" aria-label="Trusted by researchers">
+        <p class="trusted-label">Used by world-class researchers</p>
+        <div class="trusted-logos">
+          <span>MIT</span>
+          <span>Stanford</span>
+          <span>CMU</span>
+          <span>UC Berkeley</span>
+          <span>DeepMind</span>
+        </div>
+      </div>
+
+      <section class="how-it-works" aria-labelledby="how-title">
+        <p class="section-kicker">How it works</p>
+        <h2 id="how-title">Up and running in four steps.</h2>
+        <ol class="how-steps">
+          <li>
+            <div class="how-step-head">
+              <span class="how-num">01</span>
+            </div>
+            <strong>Download the app</strong>
+            <p>Install AgentsDock on your Mac or iPhone — it's the control surface, not the compute.</p>
+          </li>
+          <li>
+            <div class="how-step-head">
+              <span class="how-num">02</span>
+            </div>
+            <strong>Set up your server in one push</strong>
+            <p>Run the deploy script on any machine you own. It installs the server, Claude CLI, and Codex CLI — then paste the URL into the app and you're live.</p>
+          </li>
+          <li>
+            <div class="how-step-head">
+              <span class="how-num">03</span>
+            </div>
+            <strong>Work from anywhere, in sync</strong>
+            <p>Start a job on Mac, check progress from your phone, review results on iPad. Every run, file, and chat stays in the same place across all your devices.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="agent-support" aria-labelledby="agent-title">
+        <div class="agent-support-inner">
+          <div class="agent-support-copy">
+            <p class="section-kicker">Supported agents</p>
+            <h2 id="agent-title">Bring your own CLI. We don't touch your tokens.</h2>
+            <p>AgentsDock connects to Claude Code and Codex running locally on your server — the same CLIs you already have authenticated. Your API keys stay on your machine. We never proxy, resell, or see your model requests.</p>
+          </div>
+          <div class="agent-support-cards">
+            <div class="agent-card">
+              <div class="agent-card-logo claude-logo" aria-hidden="true">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7v10l10 5 10-5V7L12 2z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v20M2 7l10 5 10-5" stroke="currentColor" stroke-width="1.4" opacity=".5"/></svg>
+              </div>
+              <div>
+                <strong>Claude Code</strong>
+                <p>Anthropic's agentic CLI. Run it authenticated with your own API key — AgentsDock streams the events.</p>
+              </div>
+            </div>
+            <div class="agent-card">
+              <div class="agent-card-logo codex-logo" aria-hidden="true">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="9" r="2.5" fill="currentColor" opacity=".6"/><path d="M6.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" stroke-width="1.4"/></svg>
+              </div>
+              <div>
+                <strong>Codex CLI</strong>
+                <p>OpenAI's coding agent. Point it at your OpenAI key and working directory — same deal, your credentials, your compute.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-band" aria-labelledby="feature-title" id="self-hosted">
         <div class="feature-heading">
-          <p class="section-kicker">The useful parts, connected</p>
-          <h2 id="feature-title">Built for work that takes longer than one answer.</h2>
+          <p class="section-kicker">Everything you need</p>
+          <h2 id="feature-title">Built for researchers.</h2>
         </div>
         <div class="feature-grid">
-          <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Claude + Codex</h3><p>Choose the right backend, model, and reasoning level for each chat without splitting your work across apps.</p></article>
-          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>Research-ready timelines</h3><p>Compact reasoning traces, searchable history, readable markdown, code diffs, and a navigator for very long threads.</p></article>
-          <article class="feature-item accent-amber"><span class="feature-index">03</span><h3>Videos that belong in chat</h3><p>Preview media as it arrives, open full players, browse files in a dense grid, and download or drag them anywhere.</p></article>
-          <article class="feature-item accent-red"><span class="feature-index">04</span><h3>Jobs, queues, and handoffs</h3><p>Schedule recurring work, steer queued turns, and create an LLM-generated digest that carries context into another agent.</p></article>
-          <article class="feature-item accent-cyan"><span class="feature-index">05</span><h3>Persistent terminals</h3><p>Every chat gets a durable tmux workspace. Reopen it later and continue exactly where the terminal left off.</p></article>
-          <article class="feature-item accent-white"><span class="feature-index">06</span><h3>Files stay first-class</h3><p>Pin important artifacts, search across active histories, and keep outputs organized with folders and chat-level media views.</p></article>
+          <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Rich media, streamed back</h3><p>Videos, simulation results, and image grids land directly in chat — no digging through folders or pulling files manually.</p></article>
+          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>One workspace, every device</h3><p>Start a run on your Mac, monitor it from your phone, review results on iPad. Everything is in sync, always.</p></article>
+          <article class="feature-item accent-cyan"><span class="feature-index">03</span><h3>Terminal that survives everything</h3><p>Each chat has a persistent tmux session on your server. Close the app, come back hours later — the process is still running.</p></article>
+          <article class="feature-item accent-amber"><span class="feature-index">04</span><h3>Agents that hand off to each other</h3><p>Digest mode lets one agent summarize its work and pass context to the next — no copy-pasting, no manual handoffs.</p></article>
+          <article class="feature-item accent-red"><span class="feature-index">05</span><h3>Fully self-hosted</h3><p>Run everything on your own server or cluster. Your code, credentials, and outputs never leave infrastructure you control.</p></article>
+          <article class="feature-item accent-white"><span class="feature-index">06</span><h3>Claude + Codex, your choice</h3><p>Choose the right backend, model, and reasoning level for each chat without splitting your work across apps.</p></article>
         </div>
-      </section>
-
-      <section class="self-hosted" id="self-hosted" aria-labelledby="hosted-title">
-        <div class="hosted-copy">
-          <p class="section-kicker">Fully self-hosted</p>
-          <h2 id="hosted-title">The app is remote. The control stays yours.</h2>
-          <p>Run the lightweight AgentsDock server beside Claude Code and Codex CLI. The desktop app connects over your network or Tailscale, while source code, credentials, chat history, terminals, and large artifacts remain on infrastructure you control.</p>
-          <a href="#downloads">Get the self-hosted server <span aria-hidden="true">↗</span></a>
-        </div>
-        <div class="architecture" aria-label="AgentsDock self-hosted architecture">
-          <div class="arch-node client"><small>Mac or Linux</small><strong>AgentsDock</strong><span>Chat · Media · Terminal</span></div>
-          <div class="arch-link"><span>Encrypted network</span><b aria-hidden="true">→</b></div>
-          <div class="arch-node server"><small>Your machine</small><strong>AgentsDock Server</strong><span>Claude CLI · Codex CLI · tmux</span></div>
-        </div>
-      </section>
-
-      <section class="workflow" aria-labelledby="workflow-title">
-        <p class="section-kicker">A better research loop</p>
-        <h2 id="workflow-title">Ask. Run. Inspect. Hand off.</h2>
-        <ol>
-          <li><span>1</span><strong>Start in context</strong><p>Choose Claude or Codex and point the chat at the right working directory.</p></li>
-          <li><span>2</span><strong>Let work continue</strong><p>Queue follow-ups, schedule checks, and watch the active state without interrupting the agent.</p></li>
-          <li><span>3</span><strong>Review the evidence</strong><p>Open code changes, media, files, live processes, and the attached terminal.</p></li>
-          <li><span>4</span><strong>Carry it forward</strong><p>Create a concise digest and send the important context into the next chat.</p></li>
-        </ol>
       </section>
 
       <section class="downloads" id="downloads" aria-labelledby="download-title">
@@ -149,6 +225,11 @@
             <button type="button" data-download="linux">Download AppImage</button>
             <code id="linux-checksum">SHA256 published with release</code>
           </article>
+          <article>
+            <div><span class="platform-mark">&#xF8FF;</span><p><strong>iPhone &amp; iPad</strong><small>iOS &amp; iPadOS 17+ · TestFlight</small></p></div>
+            <a href="https://testflight.apple.com/join/placeholder" target="_blank" rel="noopener" class="download-options-link">Download on TestFlight</a>
+            <code>Available via Apple TestFlight</code>
+          </article>
         </div>
         <p class="download-status" id="download-status" role="status" aria-live="polite"></p>
       </section>
@@ -157,7 +238,12 @@
     <footer>
       <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
       <p>Claude and Codex, built for research that keeps moving.</p>
-      <div><a href="#self-hosted">Server setup</a><a href="#downloads">Downloads</a><a href="#product">Product</a></div>
+      <div>
+        <a href="#self-hosted">Server setup</a>
+        <a href="#downloads">Downloads</a>
+        <a href="#product">Product</a>
+        <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
     </footer>
 
     <script src="./app.js" type="module"></script>
