@@ -8154,4 +8154,5 @@ Release result:
 - Added a focused history-reconciliation regression suite, including the stale
   May-window case. The suite and React Native TypeScript check pass, and the
   Release simulator build was visually verified on iPhone and iPad fixtures.
-- Prepared React Native iOS/iPadOS build `73` for TestFlight.
+- Uploaded React Native iOS/iPadOS build `73` to App Store Connect/TestFlight;
+  the upload was accepted for processing.
