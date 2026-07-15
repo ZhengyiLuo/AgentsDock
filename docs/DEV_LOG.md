@@ -22,6 +22,20 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-14 - Make attachment download failures visible
+
+- Routed every timeline, preview, and inspector download action through one
+  renderer helper. Native save failures now produce a filename-specific error
+  instead of disappearing behind a discarded promise.
+- Added main-process diagnostics for the requested destination, completed save,
+  HTTP status/body detail, and failed transfer while retaining the existing
+  streamed `.part` file plus atomic rename behavior.
+- Added regressions for successful saves and sanitized IPC failures. TypeScript,
+  all 197 Electron tests, and the local macOS package pass.
+- Confirmed that direct app updates are a separate release issue: the configured
+  public GitHub feed currently has no published `latest` release, so draft-only
+  builds cannot be downloaded by installed clients.
+
 ## 2026-07-13 - Preserve the first terminal row on compact screens
 
 - Removed the server's hidden 40-column/12-row minimum for persistent tmux

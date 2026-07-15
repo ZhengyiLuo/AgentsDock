@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ChevronLeft, ChevronRight, Download, ExternalLink, File, FolderOpen, Maximize2, Pin, Play, Search, X } from 'lucide-react'
 import type { AgentFile, PinnedItem } from '@shared/types'
+import { saveAgentFile } from '../lib/file-actions'
 import { formatBytes } from '../lib/format'
 import { useTransientClose } from '../lib/transient-close'
 import { NativeFileDragSurface } from './NativeFileDragSurface'
@@ -51,7 +52,7 @@ const MediaTile = memo(function MediaTile({ file, sessionId, onPreview, onFind, 
   const actions = <div className="media-actions" data-native-drag-ignore>
     {media && <button title="Preview" onClick={onPreview}><Maximize2 size={12} /></button>}
     {onFind && <button title="Find in chat" onClick={() => onFind(file)}><Search size={12} /></button>}
-    <button title="Download" onClick={() => void window.agentsDock.files.save(file)}><Download size={12} /></button>
+    <button title="Download" onClick={() => void saveAgentFile(file)}><Download size={12} /></button>
     <button title="Reveal in Finder" onClick={() => void window.agentsDock.files.reveal(file)}><FolderOpen size={12} /></button>
     <button title="Open" onClick={() => void window.agentsDock.files.open(file)}><ExternalLink size={12} /></button>
     <button className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? 'Unpin file' : 'Pin file'} onClick={() => void togglePin()}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button>
@@ -155,7 +156,7 @@ export function MediaPreviewDialog({ file, files = EMPTY_MEDIA_FILES, onSelect, 
             {video ? <video key={file.id} src={source} controls autoPlay /> : <img key={file.id} src={source} alt={file.title || file.filename} />}
             {showNavigation && <button className="media-dialog-nav next" type="button" aria-label="Next media" title="Next media (Right Arrow)" disabled={!canGoNext} onClick={() => void navigate(1)}><ChevronRight size={22} /></button>}
           </div>
-          <div className="media-dialog-foot"><span>{formatBytes(file.size)}{showNavigation ? ` · ${index + 1} of ${gallery.length}` : ''}</span><button className="quiet-button" onClick={() => void window.agentsDock.files.save(file)}><Download size={14} /> Download</button><button className="quiet-button" onClick={() => void window.agentsDock.files.open(file)}><ExternalLink size={14} /> Open</button></div>
+          <div className="media-dialog-foot"><span>{formatBytes(file.size)}{showNavigation ? ` · ${index + 1} of ${gallery.length}` : ''}</span><button className="quiet-button" onClick={() => void saveAgentFile(file)}><Download size={14} /> Download</button><button className="quiet-button" onClick={() => void window.agentsDock.files.open(file)}><ExternalLink size={14} /> Open</button></div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

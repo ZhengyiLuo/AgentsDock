@@ -531,8 +531,15 @@ export class AppService {
   async saveFile(file: AgentFile): Promise<string | null> {
     const result = await dialog.showSaveDialog({ defaultPath: file.filename })
     if (result.canceled || !result.filePath) return null
-    await this.downloadFile(file, result.filePath)
-    return result.filePath
+    appLog('files', 'save requested', { fileId: file.id, filename: file.filename, destination: result.filePath })
+    try {
+      await this.downloadFile(file, result.filePath)
+      appLog('files', 'save completed', { fileId: file.id, filename: file.filename, destination: result.filePath })
+      return result.filePath
+    } catch (error) {
+      appLog('files', 'save failed', { fileId: file.id, filename: file.filename, destination: result.filePath, error: errorText(error) })
+      throw error
+    }
   }
 
   async openFile(file: AgentFile): Promise<void> { await shell.openPath(await this.ensureLocalFile(file)) }
@@ -949,7 +956,12 @@ export class AppService {
 
   private async downloadFile(file: AgentFile, path: string): Promise<void> {
     const response = await this.client.fileRequest(file.id)
-    if (!response.ok || !response.body) throw new Error(`Download failed: ${response.status}`)
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => '')).trim().slice(0, 500)
+      const status = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`
+      throw new Error(`Download failed (${status})${detail ? `: ${detail}` : ''}`)
+    }
+    if (!response.body) throw new Error('Download failed: server returned an empty response')
     await this.downloadResponse(response, path)
   }
 
