@@ -22,6 +22,18 @@ painful to rediscover later.
   active server and push the latest server repository/code to GitHub so app and
   server contract versions do not drift.
 
+## 2026-07-14 - Restore Claude reasoning choices
+
+- Fixed Claude runtime discovery after Claude Code moved the allowed `--effort`
+  values onto a wrapped help line. The single-line parser returned no choices,
+  which left Electron showing only Server default for Fable and other Claude
+  models.
+- Parse the effort declaration across line breaks and accept only safe option
+  tokens. The live Claude Code 2.1.207 catalog now returns low, medium, high,
+  xhigh, and max.
+- Added a wrapped-help regression and passed all eight runtime diagnostics tests
+  in the active server's production virtual environment before deployment.
+
 ## 2026-07-14 - Make attachment download failures visible
 
 - Routed every timeline, preview, and inspector download action through one
