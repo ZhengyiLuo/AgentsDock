@@ -618,7 +618,6 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .job-form fieldset { gap: 8px; }
 .run-count { width: 120px; }
 .checkbox-row { flex-direction: row !important; align-items: center; gap: 7px !important; }
-.checkbox-row svg { color: var(--green); }
 .command-dialog { width: 520px; top: 24%; }
 .command-search { height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #303030; }
 .command-search input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; font-size: 15px; }
