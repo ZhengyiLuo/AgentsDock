@@ -80,7 +80,7 @@ export function AppShell() {
   if (!initialized) return <View style={[styles.fill, { backgroundColor: colors.background }]}><Loading label="Starting AgentsDock" /></View>
 
   const sidebar = <Sidebar onSettings={() => setSettings(true)} onNewChat={() => setNewChat(true)} onOpenChat={openMobileChat} />
-  const chat = selected ? <ChatScreen sessionId={selected.id} compact={compact} onBack={closeMobileChat} onOptions={() => setOptions(true)} onSearch={() => setSearch(true)} onToggleInspector={() => setInspectorVisible(value => !value)} onReview={setReviewRun} /> : <NoChat connecting={connecting} onSettings={() => setSettings(true)} />
+  const chat = selected ? <ChatScreen key={selected.id} sessionId={selected.id} compact={compact} onBack={closeMobileChat} onOptions={() => setOptions(true)} onSearch={() => setSearch(true)} onToggleInspector={() => setInspectorVisible(value => !value)} onReview={setReviewRun} /> : <NoChat connecting={connecting} onSettings={() => setSettings(true)} />
 
   return <View style={[styles.fill, { backgroundColor: colors.background }]}>
     {compact ? <View style={styles.fill}>{sidebar}{mobileChatOpen && selected ? <MobileChatPane width={width} backgroundColor={colors.background} onClose={closeMobileChat}>{chat}</MobileChatPane> : null}</View> : <View style={styles.workspace}><View style={{ width: width >= 1180 ? 285 : 255 }}>{sidebar}</View><View style={styles.chat}>{chat}</View>{showInspector && selected ? <View style={{ width: Math.min(350, width * 0.29) }}><Inspector sessionId={selected.id} onDigest={() => setDigest(true)} onJob={jobId => setJobEditor(jobId ?? 'new')} onTerminal={() => setTerminal(true)} onProcesses={() => setProcesses(true)} onTmux={() => setTmux(true)} /></View> : null}</View>}

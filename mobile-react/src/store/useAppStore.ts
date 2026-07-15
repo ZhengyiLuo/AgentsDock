@@ -22,6 +22,7 @@ import type {
 } from '../types'
 import { AgentServerClient } from '../api/AgentServerClient'
 import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../lib/format'
+import { SNAPSHOT_CACHE_VERSION, shouldReplaceCachedTimeline, snapshotLatestSeq } from '../lib/history'
 import { CHAT_FONT_SCALE_DEFAULT, clampChatFontScale } from '../lib/typography'
 import {
   loadCachedSessions,
@@ -464,14 +465,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
 
         const current = get().snapshots[sessionId]
-        const replaceEvents = shouldReplaceCachedTimeline(current, page.events, page.latest_seq, page.has_more, fetchedFullTail)
+        const incomingEvents = page.events.filter(event => event.session_id === sessionId && Number.isFinite(event.seq))
+        const replaceEvents = shouldReplaceCachedTimeline(current, incomingEvents, page.latest_seq, page.has_more, fetchedFullTail)
         const now = Date.now()
-        const mergedEvents = replaceEvents ? page.events : mergeEvents(current?.events ?? [], page.events)
+        const mergedEvents = replaceEvents ? mergeEvents([], incomingEvents) : mergeEvents(current?.events ?? [], incomingEvents)
         const next: Snapshot = {
+          cacheVersion: SNAPSHOT_CACHE_VERSION,
           session: page.session,
           events: mergedEvents,
           queuedTurns: page.queued_turns,
-          files: mergeFiles(current?.files ?? [], filesFromEvents(page.events)),
+          files: mergeFiles(current?.files ?? [], filesFromEvents(incomingEvents)),
           filesTotal: current?.filesTotal ?? 0,
           hasMore: fetchedFullTail ? page.has_more : current?.hasMore ?? page.has_more,
           total: fetchedFullTail ? page.total : current?.total ?? null,
@@ -547,7 +550,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (latest.events[0]?.seq !== before) return 0
       const loaded = new Set(latest.events.map(event => event.seq))
       const accepted = page.events
-        .filter(event => event.seq < before && !loaded.has(event.seq))
+        .filter(event => event.session_id === sessionId && Number.isFinite(event.seq) && event.seq < before && !loaded.has(event.seq))
         .slice(-remainingCapacity)
       const next: Snapshot = {
         ...latest,
@@ -929,7 +932,7 @@ function startSelectedStream(
     sessionId,
     after,
     event => {
-      if (generation !== streamGeneration || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
+      if (event.session_id !== sessionId || generation !== streamGeneration || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
       applyLiveEvent(event, set, get)
     },
     connected => {
@@ -962,28 +965,6 @@ function scheduleSelectedRecovery(sessionId: string, epoch: number, get: () => A
 
 function hasSelectedStream(sessionId: string | null): boolean {
   return Boolean(sessionId && streamSessionId === sessionId && streamStop)
-}
-
-function snapshotLatestSeq(snapshot?: Snapshot): number {
-  let latest = snapshot?.latestSeq ?? 0
-  for (const event of snapshot?.events ?? []) latest = Math.max(latest, event.seq)
-  return latest
-}
-
-function shouldReplaceCachedTimeline(
-  current: Snapshot | undefined,
-  incoming: Event[],
-  latestSeq: number | null | undefined,
-  hasMore: boolean,
-  fullTail: boolean,
-): boolean {
-  if (!current?.events.length || !fullTail) return false
-  const currentLatest = snapshotLatestSeq(current)
-  if (latestSeq != null && latestSeq < currentLatest) return true
-  if (!hasMore || !incoming.length) return false
-  const currentSeqs = new Set(current.events.map(event => event.seq))
-  const overlaps = incoming.some(event => currentSeqs.has(event.seq))
-  return !overlaps && currentLatest < incoming[0].seq
 }
 
 function reduceQueue(current: QueuedTurn[], event: Event): QueuedTurn[] {

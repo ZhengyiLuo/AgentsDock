@@ -50,6 +50,7 @@
     "ios": "expo run:ios",
     "ios:phone": "expo run:ios --device 'iPhone 17 Pro'",
     "ios:pad": "expo run:ios --device 'iPad Pro 13-inch (M5)'",
+    "test:history": "node scripts/run-history-tests.mjs",
     "typecheck": "tsc --noEmit",
     "web": "expo start --web"
   },

@@ -8137,3 +8137,21 @@ Release result:
   sessions remain untouched.
 - Added server and Electron regressions for archive cleanup and ordinary
   non-archive session edits.
+
+## 2026-07-14 - Repair React iOS timeline cache ownership
+
+- Versioned the React Native snapshot cache and made the server's full latest
+  tail authoritative when migrating older snapshots. A disconnected legacy
+  window can no longer survive because one recent event happens to overlap;
+  unversioned snapshots are discarded once on upgrade rather than flashed as
+  current history while the authoritative tail loads.
+- Validate every cached, paged, and streamed event against its owning chat;
+  serialize per-chat cache writes; and remount the FlashList when chat identity
+  changes so recycled viewport state cannot display another chat's history.
+- Replaced the floating, manually offset composer with normal flex layout under
+  `KeyboardAvoidingView`. The timeline now ends above the composer on iPhone and
+  iPad and is clipped to its own layout region during keyboard transitions.
+- Added a focused history-reconciliation regression suite, including the stale
+  May-window case. The suite and React Native TypeScript check pass, and the
+  Release simulator build was visually verified on iPhone and iPad fixtures.
+- Prepared React Native iOS/iPadOS build `73` for TestFlight.

@@ -240,6 +240,7 @@ export interface TimelineIndex { session_id: string; landmarks: TimelineIndexLan
 export interface FilesPage { files: AgentFile[]; total: number; offset: number; limit: number; has_more: boolean }
 
 export interface Snapshot {
+  cacheVersion?: number
   session: Session
   events: Event[]
   queuedTurns: QueuedTurn[]

@@ -71,6 +71,7 @@ export function Timeline({ sessionId, scrollRequest, keyboardVisible, bottomInse
   return (
     <View style={styles.root} onLayout={handleLayout}>
       <FlashList
+        key={sessionId}
         ref={list}
         data={rows}
         keyExtractor={row => row.key}
