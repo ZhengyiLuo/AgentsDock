@@ -72,62 +72,18 @@
         </div>
       </div>
 
-      <section class="how-it-works" aria-labelledby="how-title">
-        <p class="section-kicker">How it works</p>
-        <h2 id="how-title">Up and running in three steps.</h2>
-        <ol class="how-steps">
-          <li>
-            <div class="how-step-head">
-              <span class="how-num">01</span>
-            </div>
-            <strong>Download the app</strong>
-            <p>Install AgentsDock on macOS or Linux — it's the control surface, not the compute.</p>
+      <section class="ways" aria-labelledby="ways-title">
+        <p class="ways-helper" id="ways-title">AgentsDock supports:</p>
+        <ul class="ways-grid">
+          <li class="ways-tile">
+            <span class="ways-icon"><img src="./assets/claude-code-logo.png" alt="" /></span>
+            <span class="ways-tile-label">Claude Code</span>
           </li>
-          <li>
-            <div class="how-step-head">
-              <span class="how-num">02</span>
-            </div>
-            <strong>Connect your server</strong>
-            <p>Run AgentsServer on a machine you control, then add its URL and access token in the app.</p>
+          <li class="ways-tile">
+            <span class="ways-icon"><img src="./assets/codex-logo.png" alt="" /></span>
+            <span class="ways-tile-label">Codex</span>
           </li>
-          <li>
-            <div class="how-step-head">
-              <span class="how-num">03</span>
-            </div>
-            <strong>Continue from any connected client</strong>
-            <p>Runs, files, and chats stay together on your server, so every connected client sees the same workspace.</p>
-          </li>
-        </ol>
-      </section>
-
-      <section class="agent-support" aria-labelledby="agent-title">
-        <div class="agent-support-inner">
-          <div class="agent-support-copy">
-            <p class="section-kicker">Supported agents</p>
-            <h2 id="agent-title">Bring your own CLI. Keep control of your credentials.</h2>
-            <p>AgentsDock connects to Claude Code and Codex running on your server — the same CLIs you already have authenticated. API keys stay on that machine, and AgentsDock does not proxy or resell model access.</p>
-          </div>
-          <div class="agent-support-cards">
-            <div class="agent-card">
-              <div class="agent-card-logo claude-logo" aria-hidden="true">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7v10l10 5 10-5V7L12 2z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v20M2 7l10 5 10-5" stroke="currentColor" stroke-width="1.4" opacity=".5"/></svg>
-              </div>
-              <div>
-                <strong>Claude Code</strong>
-                <p>Anthropic's agentic CLI. Run it authenticated with your own API key — AgentsDock streams the events.</p>
-              </div>
-            </div>
-            <div class="agent-card">
-              <div class="agent-card-logo codex-logo" aria-hidden="true">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="9" r="2.5" fill="currentColor" opacity=".6"/><path d="M6.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" stroke-width="1.4"/></svg>
-              </div>
-              <div>
-                <strong>Codex CLI</strong>
-                <p>OpenAI's coding agent. Point it at your OpenAI key and working directory — same deal, your credentials, your compute.</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        </ul>
       </section>
 
       <section class="feature-band" aria-labelledby="feature-title" id="self-hosted">
@@ -135,12 +91,12 @@
           <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span> Built for researchers.</h2>
         </div>
         <div class="feature-grid">
-          <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Synchronized agents accessible on multi-devices</h3><p>Start a run on your Mac and pick it up on your phone — state lives on your server, not the client.</p></article>
-          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>Chats support rich images and videos</h3><p>Plots, image grids, and video render inline in the timeline, so results land where you are working.</p></article>
-          <article class="feature-item accent-cyan"><span class="feature-index">03</span><h3>Your server is entirely self-hosted</h3><p>AgentsServer runs on a machine you own. Chats, files, and credentials stay on your infrastructure.</p></article>
-          <article class="feature-item accent-amber"><span class="feature-index">04</span><h3>Your mobile has access to full terminal</h3><p>Every chat keeps a persistent tmux session you can attach to from your phone, not just the desktop.</p></article>
-          <article class="feature-item accent-red"><span class="feature-index">05</span><h3>AgentsDock helps you schedule training jobs</h3><p>Queue interval and recurring jobs so long-running work starts without you sitting and waiting for it.</p></article>
-          <article class="feature-item accent-white"><span class="feature-index">06</span><h3>You can send messages between chats: we have a digest feature</h3><p>Digest summarises one chat's work and carries that context into the next, with no copy-pasting.</p></article>
+          <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Synchronized agents accessible on multi-devices</h3><p>Start a run and pick it up on any device.</p></article>
+          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>Chats support rich images and videos</h3><p>Check your job results with visuals.</p></article>
+          <article class="feature-item accent-cyan"><span class="feature-index">03</span><h3>Your server is entirely self-hosted</h3><p>AgentsServer runs on a machine you own.</p></article>
+          <article class="feature-item accent-amber"><span class="feature-index">04</span><h3>Your mobile has access to full terminal</h3><p>Every chat keeps a persistent tmux session you can attach to any device.</p></article>
+          <article class="feature-item accent-red"><span class="feature-index">05</span><h3>AgentsDock helps you schedule training jobs</h3><p>Queue interval and recurring jobs so long-running work starts without you baby-sitting.</p></article>
+          <article class="feature-item accent-white"><span class="feature-index">06</span><h3>You can send messages between chats</h3><p>Digest features summarises one chat's work and carries that context into the next.</p></article>
         </div>
       </section>
 

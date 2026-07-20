@@ -116,32 +116,17 @@ a { color: inherit; }
 .terminal-icon { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; }
 .release-line { margin: 24px auto 0; color: #9aa39e; font-size: 13px; }
 
-/* ── How it works ── */
-.how-it-works { padding: 112px max(5vw, 28px); background: var(--bg); color: var(--text); border-block: 1px solid var(--line); }
-.how-it-works h2 { max-width: 900px; margin: 0; font-size: 48px; line-height: 1.08; letter-spacing: 0; color: var(--text); }
-.how-steps { max-width: 1280px; margin: 72px auto 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); position: relative; }
-/* connecting line: from right-edge of circle 1 to left-edge of circle 3 */
-.how-steps::before { content: ''; position: absolute; top: 22px; left: 44px; right: calc(33.33%); height: 1px; background: var(--line); }
-.how-steps li { display: flex; flex-direction: column; align-items: flex-start; padding: 0 28px 0 0; }
-.how-steps li:last-child { padding-right: 0; }
-.how-step-head { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 28px; }
-.how-num { width: 44px; height: 44px; border-radius: 50%; background: var(--bg); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--green); font: 700 13px ui-monospace, SFMono-Regular, Menlo, monospace; flex-shrink: 0; position: relative; z-index: 1; margin-bottom: 24px; }
-.how-arrow { display: none; }
-.how-steps strong { display: block; font-size: 20px; font-weight: 660; margin-bottom: 12px; color: var(--text); line-height: 1.2; }
-.how-steps p { margin: 0; color: var(--muted); line-height: var(--line-loose); font-size: var(--body-2); font-weight: 400; }
-
-/* ── Supported agents ── */
-.agent-support { padding: 112px max(4vw, 24px); border-bottom: 1px solid var(--line); }
-.agent-support-inner { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
-.agent-support-copy h2 { max-width: 540px; font-size: 42px; line-height: 1.1; margin: 0 0 20px; letter-spacing: 0; }
-.agent-support-copy p { color: var(--muted); font-size: var(--body-1); line-height: var(--line-loose); margin: 0; font-weight: 400; }
-.agent-support-cards { display: flex; flex-direction: column; gap: 16px; }
-.agent-card { display: flex; gap: 20px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
-.agent-card-logo { flex-shrink: 0; width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-.claude-logo { background: rgba(91,157,255,.15); color: #8fb8ff; }
-.codex-logo { background: rgba(255,255,255,.06); color: #b0bab5; }
-.agent-card strong { display: block; font-size: 16px; font-weight: 660; margin-bottom: 6px; color: var(--text); }
-.agent-card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+/* ── Supported agents strip ──
+   Metrics from the Claude Code page's HeroWays tiles: 12px grid gap, 12px
+   radius, 5.5rem min tile, 16px/8px padding, 24px icon, 12px caption. */
+.ways { padding: 76px max(5vw, 24px); display: flex; flex-direction: column; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); }
+.ways-helper { margin: 0; color: var(--muted); font-size: 15px; }
+.ways-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.ways-tile { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; min-width: 5.5rem; padding: 16px 8px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); transition: box-shadow .2s ease-in-out; }
+.ways-tile:hover { box-shadow: 0 0 0 1px rgba(255,255,255,.28); }
+.ways-icon { height: 24px; display: flex; align-items: center; justify-content: center; }
+.ways-icon img { height: 24px; width: 24px; object-fit: contain; display: block; }
+.ways-tile-label { color: var(--muted); white-space: nowrap; font-size: 12px; }
 
 /* ── Hero agents widget ── */
 .agent-pill { display: flex; align-items: center; gap: 10px; padding: 12px 20px; background: rgba(20,26,24,.9); border: 1px solid var(--line); border-radius: 24px; backdrop-filter: blur(12px); color: #c8d4ce; font-size: 15px; font-weight: 500; }
@@ -545,13 +530,8 @@ footer a:hover { color: var(--text); }
   .hero-lede { font-size: 18px; }
   .hero-actions { flex-wrap: wrap; }
   .download-button { width: 100%; }
-  .how-steps { grid-template-columns: 1fr; }
-  .how-steps::before { display: none; }
-  .how-steps li { flex-direction: row; gap: 20px; align-items: flex-start; padding: 0 0 32px; border-left: 1px solid var(--line); padding-left: 24px; margin-left: 22px; }
-  .how-steps li:last-child { border-left: 0; padding-bottom: 0; }
   .how-step-head { margin-bottom: 0; flex-shrink: 0; margin-left: -36px; }
   .how-num { margin-bottom: 0; }
-  .agent-support-inner { grid-template-columns: 1fr; gap: 40px; }
   .quickstart { padding: 72px 22px; }
   .quickstart-inner { grid-template-columns: 1fr; gap: 36px; }
   .quickstart-copy h2 { font-size: 32px; }
