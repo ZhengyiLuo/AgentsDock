@@ -119,9 +119,9 @@ a { color: inherit; }
 /* ── Supported agents strip ──
    Metrics from the Claude Code page's HeroWays tiles: 12px grid gap, 12px
    radius, 5.5rem min tile, 16px/8px padding, 24px icon, 12px caption. */
-.ways { padding: 76px max(5vw, 24px); display: flex; flex-direction: column; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); }
-.ways-helper { margin: 0; color: var(--muted); font-size: 15px; }
-.ways-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.ways { margin-top: 30px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.ways-helper { margin: 0; color: var(--muted); font-size: 14px; }
+.ways-grid { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .ways-tile { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; min-width: 5.5rem; padding: 16px 8px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); transition: box-shadow .2s ease-in-out; }
 .ways-tile:hover { box-shadow: 0 0 0 1px rgba(255,255,255,.28); }
 .ways-icon { height: 24px; display: flex; align-items: center; justify-content: center; }
