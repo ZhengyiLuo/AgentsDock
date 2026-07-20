@@ -84,6 +84,7 @@ a { color: inherit; }
 .download-button.secondary { background: rgba(27,32,30,.9); border-color: #48514d; }
 .download-button:hover { transform: translateY(-1px); }
 .download-button.unavailable { opacity: .72; }
+.download-button[aria-disabled="true"] { cursor: default; }
 .download-button.unavailable:hover { transform: none; border-color: var(--amber); }
 .download-button strong, .download-button small { display: block; }
 .download-button small { margin-top: 3px; opacity: .64; font-size: 12px; }
@@ -323,7 +324,7 @@ a { color: inherit; }
   background: #1c2420;
   color: #b0bab5;
   font-size: 11px;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
 }
 .mock-agent-icon { width: 14px; height: 14px; object-fit: contain; }
@@ -422,6 +423,7 @@ a { color: inherit; }
 .download-options p, .download-options strong, .download-options small { margin: 0; display: block; }
 .download-options small { color: var(--muted); margin-top: 5px; }
 .download-options button, .download-options-link { padding: 10px 14px; border: 1px solid #4a544f; border-radius: 6px; background: var(--surface-2); color: var(--text); cursor: pointer; text-decoration: none; white-space: nowrap; }
+.download-options-link.unavailable { cursor: default; opacity: .65; }
 .download-options button.unavailable { opacity: .68; border-color: #66563d; }
 .download-options code { grid-column: 1 / -1; color: #727c77; font-size: 11px; overflow-wrap: anywhere; }
 .download-status { min-height: 24px; grid-column: 2; margin: -70px 0 0; color: var(--amber); font-size: 13px; }

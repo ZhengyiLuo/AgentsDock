@@ -19,10 +19,6 @@
         <a href="#product">Product</a>
         <a href="#self-hosted">Self-hosted</a>
         <a href="#downloads">Downloads</a>
-        <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener" class="nav-github">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.603-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.647.35-1.087.636-1.337-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
-          GitHub
-        </a>
       </nav>
       <a class="header-action" href="#downloads">Get AgentsDock</a>
     </header>
@@ -31,12 +27,11 @@
       <section class="hero" aria-labelledby="hero-title" id="product">
         <div class="hero-shade" aria-hidden="true"></div>
         <div class="hero-copy">
-          <a class="github-badge" href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener" aria-label="View AgentsDock on GitHub">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.603-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.647.35-1.087.636-1.337-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
-            <span>Open source on GitHub</span>
+          <div class="github-badge" aria-label="Self-hosted workspace for Claude and Codex">
+            <span>Self-hosted</span>
             <span class="github-badge-sep">·</span>
-            <span class="github-badge-mit">MIT License</span>
-          </a>
+            <span class="github-badge-mit">Claude + Codex</span>
+          </div>
           <h1 id="hero-title">AgentsDock</h1>
           <p class="hero-lede">Claude and Codex, together in one self-hosted workspace built for research, long-running jobs, and the files that come out of them.</p>
           <div class="hero-actions" aria-label="Downloads">
@@ -48,10 +43,10 @@
               <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
               <strong>Download for Linux</strong>
             </button>
-            <a href="https://testflight.apple.com/join/placeholder" target="_blank" rel="noopener" class="download-button secondary appstore-btn">
+            <span class="download-button secondary appstore-btn unavailable" aria-disabled="true">
               <span class="button-icon" aria-hidden="true">&#xF8FF;</span>
-              <strong>Download for iPhone</strong>
-            </a>
+              <strong>iPhone &amp; iPad — coming soon</strong>
+            </span>
           </div>
         </div>
         <div class="hero-product-devices">
@@ -77,14 +72,14 @@
                   <div class="mock-composer-box">
                     <div class="mock-composer-field"></div>
                     <div class="mock-composer-footer">
-                      <button class="mock-agent-btn mock-agent-codex">
+                      <span class="mock-agent-btn mock-agent-codex">
                         <img src="./assets/codex-logo.png" class="mock-agent-icon" alt="" />
                         <span>Codex</span>
-                      </button>
-                      <button class="mock-agent-btn mock-agent-claude">
+                      </span>
+                      <span class="mock-agent-btn mock-agent-claude">
                         <img src="./assets/claude-code-logo.png" class="mock-agent-icon" alt="" />
                         <span>Claude Code</span>
-                      </button>
+                      </span>
                       <div class="mock-send">↑</div>
                     </div>
                   </div>
@@ -124,41 +119,41 @@
         </div>
       </section>
 
-      <div class="trusted-by" aria-label="Trusted by researchers">
-        <p class="trusted-label">Used by world-class researchers</p>
+      <div class="trusted-by" aria-label="AgentsDock product capabilities">
+        <p class="trusted-label">Built for serious research workflows</p>
         <div class="trusted-logos">
-          <span>MIT</span>
-          <span>Stanford</span>
-          <span>CMU</span>
-          <span>UC Berkeley</span>
-          <span>DeepMind</span>
+          <span>Self-hosted</span>
+          <span>Claude + Codex</span>
+          <span>Persistent terminals</span>
+          <span>Files &amp; media</span>
+          <span>Scheduled jobs</span>
         </div>
       </div>
 
       <section class="how-it-works" aria-labelledby="how-title">
         <p class="section-kicker">How it works</p>
-        <h2 id="how-title">Up and running in four steps.</h2>
+        <h2 id="how-title">Up and running in three steps.</h2>
         <ol class="how-steps">
           <li>
             <div class="how-step-head">
               <span class="how-num">01</span>
             </div>
             <strong>Download the app</strong>
-            <p>Install AgentsDock on your Mac or iPhone — it's the control surface, not the compute.</p>
+            <p>Install AgentsDock on macOS or Linux — it's the control surface, not the compute.</p>
           </li>
           <li>
             <div class="how-step-head">
               <span class="how-num">02</span>
             </div>
-            <strong>Set up your server in one push</strong>
-            <p>Run the deploy script on any machine you own. It installs the server, Claude CLI, and Codex CLI — then paste the URL into the app and you're live.</p>
+            <strong>Connect your server</strong>
+            <p>Run AgentsServer on a machine you control, then add its URL and access token in the app.</p>
           </li>
           <li>
             <div class="how-step-head">
               <span class="how-num">03</span>
             </div>
-            <strong>Work from anywhere, in sync</strong>
-            <p>Start a job on Mac, check progress from your phone, review results on iPad. Every run, file, and chat stays in the same place across all your devices.</p>
+            <strong>Continue from any connected client</strong>
+            <p>Runs, files, and chats stay together on your server, so every connected client sees the same workspace.</p>
           </li>
         </ol>
       </section>
@@ -167,8 +162,8 @@
         <div class="agent-support-inner">
           <div class="agent-support-copy">
             <p class="section-kicker">Supported agents</p>
-            <h2 id="agent-title">Bring your own CLI. We don't touch your tokens.</h2>
-            <p>AgentsDock connects to Claude Code and Codex running locally on your server — the same CLIs you already have authenticated. Your API keys stay on your machine. We never proxy, resell, or see your model requests.</p>
+            <h2 id="agent-title">Bring your own CLI. Keep control of your credentials.</h2>
+            <p>AgentsDock connects to Claude Code and Codex running on your server — the same CLIs you already have authenticated. API keys stay on that machine, and AgentsDock does not proxy or resell model access.</p>
           </div>
           <div class="agent-support-cards">
             <div class="agent-card">
@@ -200,23 +195,23 @@
         </div>
         <div class="feature-grid">
           <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Rich media, streamed back</h3><p>Videos, simulation results, and image grids land directly in chat — no digging through folders or pulling files manually.</p></article>
-          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>One workspace, every device</h3><p>Start a run on your Mac, monitor it from your phone, review results on iPad. Everything is in sync, always.</p></article>
+          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>One workspace, every client</h3><p>Runs, files, and chats stay together on your server, so connected clients share the same workspace.</p></article>
           <article class="feature-item accent-cyan"><span class="feature-index">03</span><h3>Terminal that survives everything</h3><p>Each chat has a persistent tmux session on your server. Close the app, come back hours later — the process is still running.</p></article>
           <article class="feature-item accent-amber"><span class="feature-index">04</span><h3>Agents that hand off to each other</h3><p>Digest mode lets one agent summarize its work and pass context to the next — no copy-pasting, no manual handoffs.</p></article>
-          <article class="feature-item accent-red"><span class="feature-index">05</span><h3>Fully self-hosted</h3><p>Run everything on your own server or cluster. Your code, credentials, and outputs never leave infrastructure you control.</p></article>
+          <article class="feature-item accent-red"><span class="feature-index">05</span><h3>Fully self-hosted</h3><p>AgentsServer runs on infrastructure you control. Claude and Codex communicate according to the provider settings you choose.</p></article>
           <article class="feature-item accent-white"><span class="feature-index">06</span><h3>Claude + Codex, your choice</h3><p>Choose the right backend, model, and reasoning level for each chat without splitting your work across apps.</p></article>
         </div>
       </section>
 
       <section class="downloads" id="downloads" aria-labelledby="download-title">
         <div>
-          <p class="section-kicker">Desktop preview</p>
+          <p class="section-kicker" id="release-version">Loading current release</p>
           <h2 id="download-title">Bring your agents into the Dock.</h2>
           <p>Install the desktop client, connect it to your AgentsDock server, and keep Claude and Codex available from every machine you use.</p>
         </div>
         <div class="download-options">
           <article>
-            <div><span class="platform-mark">⌘</span><p><strong>macOS</strong><small>Apple silicon · macOS 14+</small></p></div>
+            <div><span class="platform-mark">⌘</span><p><strong>macOS</strong><small>Universal · macOS 14+</small></p></div>
             <button type="button" data-download="macos">Download .dmg</button>
             <code id="macos-checksum">SHA256 published with release</code>
           </article>
@@ -227,8 +222,8 @@
           </article>
           <article>
             <div><span class="platform-mark">&#xF8FF;</span><p><strong>iPhone &amp; iPad</strong><small>iOS &amp; iPadOS 17+ · TestFlight</small></p></div>
-            <a href="https://testflight.apple.com/join/placeholder" target="_blank" rel="noopener" class="download-options-link">Download on TestFlight</a>
-            <code>Available via Apple TestFlight</code>
+            <span class="download-options-link unavailable" aria-disabled="true">Coming soon</span>
+            <code>App Store release in preparation</code>
           </article>
         </div>
         <p class="download-status" id="download-status" role="status" aria-live="polite"></p>
@@ -242,7 +237,6 @@
         <a href="#self-hosted">Server setup</a>
         <a href="#downloads">Downloads</a>
         <a href="#product">Product</a>
-        <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
     </footer>
 

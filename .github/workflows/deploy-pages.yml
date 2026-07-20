@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: website-georgia
 
       - name: Validate static site
         shell: bash
@@ -38,7 +40,18 @@ jobs:
           test -s website/styles.css
           test -s website/app.js
           test "$(tr -d '\r\n' < website/CNAME)" = "agentsdock.net"
-          jq -e 'type == "object"' website/releases/latest.json >/dev/null
+          jq -e '
+            (.version | type == "string" and length > 0) and
+            ([.platforms.macos, .platforms.linux] | all(
+              .available == true and
+              (.url | startswith("https://")) and
+              (.sha256 | test("^[0-9a-f]{64}$"))
+            ))
+          ' website/releases/latest.json >/dev/null
+          if grep -RInE 'testflight\.apple\.com/join/placeholder|/Users/' website --include='*.html' --include='*.js' --include='*.json'; then
+            echo "Public-site placeholder or private path detected" >&2
+            exit 1
+          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
