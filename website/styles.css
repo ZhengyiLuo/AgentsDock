@@ -151,7 +151,7 @@ a { color: inherit; }
 
 /* ── Trusted by ── */
 .trusted-by { padding: 60px max(5vw, 24px); border-block: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 30px; background: #0b0e12; }
-.trusted-label { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.trusted-label { margin: 0; font-size: 14px; font-weight: 500; letter-spacing: .01em; color: var(--muted); }
 /* Logo wall sized from the Claude Code page: 40px max logo height in a 64px
    slot, flex-wrapped and centred with a 24px column gap. */
 .trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: 24px; row-gap: 32px; flex-wrap: wrap; }
@@ -161,12 +161,12 @@ a { color: inherit; }
 /* The logos are colour-varied and mostly dark on transparent, so greyscale+invert
    normalises them to one light monochrome layer against the dark background. */
 .trusted-logos img {
-  height: 64px;
-  max-height: 64px;
-  width: 200px;
+  height: 96px;
+  max-height: 96px;
+  width: 240px;
   object-fit: contain;
   display: block;
-  padding: 12px 0;
+  padding: 16px 0;
   filter: grayscale(1) invert(1);
   opacity: .55;
   transition: opacity .25s ease;
