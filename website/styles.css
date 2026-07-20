@@ -152,13 +152,25 @@ a { color: inherit; }
 /* ── Trusted by ── */
 .trusted-by { padding: 60px max(5vw, 24px); border-block: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 30px; background: #0b0e12; }
 .trusted-label { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
-.trusted-logos { display: flex; align-items: center; justify-content: center; gap: clamp(28px, 5.5vw, 68px); flex-wrap: wrap; }
+/* Logo wall sized from the Claude Code page: 40px max logo height in a 64px
+   slot, flex-wrapped and centred with a 24px column gap. */
+.trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: 24px; row-gap: 32px; flex-wrap: wrap; }
 .trusted-logos > * { animation: logoRise .6s ease both; }
 .trusted-logos span { font-family: var(--display); font-size: clamp(17px, 2vw, 23px); font-weight: 600; color: #58657a; letter-spacing: .005em; transition: color .25s ease; }
 .trusted-logos span:hover { color: #b4c0d2; }
-/* Logos are colour-varied and mostly dark on transparent, so greyscale+invert
-   normalises them to a single light monochrome against the dark background. */
-.trusted-logos img { height: 30px; width: auto; display: block; filter: grayscale(1) invert(1); opacity: .55; transition: opacity .25s ease; }
+/* The logos are colour-varied and mostly dark on transparent, so greyscale+invert
+   normalises them to one light monochrome layer against the dark background. */
+.trusted-logos img {
+  height: 64px;
+  max-height: 64px;
+  width: 200px;
+  object-fit: contain;
+  display: block;
+  padding: 12px 0;
+  filter: grayscale(1) invert(1);
+  opacity: .55;
+  transition: opacity .25s ease;
+}
 .trusted-logos img:hover { opacity: .85; }
 .trusted-logos span:nth-child(1) { animation-delay: .04s; }
 .trusted-logos span:nth-child(2) { animation-delay: .12s; }
