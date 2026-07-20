@@ -153,8 +153,13 @@ a { color: inherit; }
 .trusted-by { padding: 60px max(5vw, 24px); border-block: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 30px; background: #0b0e12; }
 .trusted-label { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
 .trusted-logos { display: flex; align-items: center; justify-content: center; gap: clamp(28px, 5.5vw, 68px); flex-wrap: wrap; }
-.trusted-logos span { font-family: var(--display); font-size: clamp(17px, 2vw, 23px); font-weight: 600; color: #58657a; letter-spacing: .005em; transition: color .25s ease; animation: logoRise .6s ease both; }
+.trusted-logos > * { animation: logoRise .6s ease both; }
+.trusted-logos span { font-family: var(--display); font-size: clamp(17px, 2vw, 23px); font-weight: 600; color: #58657a; letter-spacing: .005em; transition: color .25s ease; }
 .trusted-logos span:hover { color: #b4c0d2; }
+/* Logos are colour-varied and mostly dark on transparent, so greyscale+invert
+   normalises them to a single light monochrome against the dark background. */
+.trusted-logos img { height: 30px; width: auto; display: block; filter: grayscale(1) invert(1); opacity: .55; transition: opacity .25s ease; }
+.trusted-logos img:hover { opacity: .85; }
 .trusted-logos span:nth-child(1) { animation-delay: .04s; }
 .trusted-logos span:nth-child(2) { animation-delay: .12s; }
 .trusted-logos span:nth-child(3) { animation-delay: .20s; }
