@@ -16,7 +16,8 @@ async function loadRelease() {
   } catch {
     release = fallbackRelease
   }
-  document.querySelector('#release-version').textContent = release.version ? `Version ${release.version}` : 'Private preview'
+  const releaseVersion = document.querySelector('#release-version')
+  if (releaseVersion) releaseVersion.textContent = release.version ? `Version ${release.version}` : 'Private preview'
   updatePlatform('macos')
   updatePlatform('linux')
 }
