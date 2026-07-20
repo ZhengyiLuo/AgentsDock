@@ -17,8 +17,8 @@
   --cyan: #38bdf8;
   --clay: #5b9dff;
   --muted-2: #ccd4e0;
-  /* half-transparent grey outline shared by the hero screenshots */
-  --shot-outline: rgba(163,177,198,.5);
+  /* thin, half-transparent grey outline shared by the hero screenshots */
+  --shot-outline: rgba(163,177,198,.22);
   --display: "Space Grotesk", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   /* Body face: free grotesque standing in for the reference site's proprietary anthropicSans */
   --body-font: "Instrument Sans", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -96,19 +96,23 @@ a { color: inherit; }
    has transparent rounded corners, so a plain border would miss them — stacked
    1px drop-shadows trace its alpha shape instead. The mobile PNG is an opaque
    rectangle, so a box-shadow ring follows its border-radius exactly. */
-.hero-desktop-shot {
-  flex: 1 1 auto;
-  min-width: 0;
+/* Identical treatment on both shots. Applying it to the wrapper means the
+   outline traces each image's real silhouette — the desktop PNG's baked-in
+   rounded corners, and the mobile PNG's CSS border-radius. */
+.hero-desktop-shot,
+.hero-mobile-shot {
   filter:
     drop-shadow(1px 0 0 var(--shot-outline))
     drop-shadow(-1px 0 0 var(--shot-outline))
     drop-shadow(0 1px 0 var(--shot-outline))
     drop-shadow(0 -1px 0 var(--shot-outline))
-    drop-shadow(0 40px 90px rgba(0,0,0,.5));
+    drop-shadow(0 30px 70px rgba(0,0,0,.42));
 }
-.hero-desktop-shot img { display: block; width: 100%; height: auto; }
-.hero-mobile-shot { flex: 0 0 23%; filter: drop-shadow(0 30px 70px rgba(0,0,0,.5)); }
-.hero-mobile-shot img { display: block; width: 100%; height: auto; border-radius: 22px; box-shadow: 0 0 0 1px var(--shot-outline); }
+.hero-desktop-shot { flex: 1 1 auto; min-width: 0; }
+.hero-mobile-shot { flex: 0 0 23%; }
+.hero-desktop-shot img,
+.hero-mobile-shot img { display: block; width: 100%; height: auto; }
+.hero-mobile-shot img { border-radius: 22px; }
 .eyebrow, .section-kicker { margin: 0 0 20px; color: var(--clay); font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .live-dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 16px rgba(91,157,255,.9); }
 .hero h1 { margin: 0; font-size: clamp(54px, 8.5vw, 96px); line-height: .98; letter-spacing: -.02em; }
