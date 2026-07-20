@@ -418,10 +418,10 @@ a { color: inherit; }
 .feature-heading { max-width: 1220px; margin: 0 auto 54px; }
 .heading-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: .85em; margin-right: 6px; }
 .feature-grid { max-width: 1220px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-.feature-item { position: relative; min-height: 148px; padding: 26px 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.feature-item { position: relative; min-height: 200px; padding: 26px 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .feature-index { font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.feature-item h3 { margin: 26px 0 0; font-size: 20px; line-height: 1.3; font-weight: 500; }
-.feature-item p { margin: 0; color: var(--muted); font-size: var(--body-2); line-height: var(--line-loose); font-weight: 400; }
+.feature-item h3 { margin: 26px 0 10px; font-size: 20px; line-height: 1.3; font-weight: 500; }
+.feature-item p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; font-weight: 400; }
 .accent-blue .feature-index { color: var(--blue); }
 .accent-green .feature-index { color: var(--green); }
 .accent-amber .feature-index { color: var(--amber); }
