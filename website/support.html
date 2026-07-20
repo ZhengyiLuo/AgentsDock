@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to contact us about the AgentsDock apps for macOS, iOS, iPadOS, and Linux." />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Support · AgentsDock</title>
+    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html#top" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html#product">Product</a>
+        <a href="./index.html#self-hosted">Self-hosted</a>
+        <a href="./index.html#downloads">Downloads</a>
+      </nav>
+      <a class="header-action" href="./index.html#downloads">Get AgentsDock</a>
+    </header>
+
+    <main>
+      <article class="legal">
+        <p class="section-kicker">Support</p>
+        <h1>AgentsDock Support</h1>
+        <p class="legal-meta">Last updated: July 19, 2026</p>
+
+        <p class="legal-lead">AgentsDock is a self-hosted workspace for Claude Code and Codex. The app on your Mac, iPhone, or iPad is the control surface; the work runs on an AgentsDock server you install on a machine you own. Below is how to get set up, fix the most common problems, and reach us.</p>
+
+        <h2>Contact us</h2>
+        <p>The fastest way to get help:</p>
+        <ul>
+          <li><strong>Email:</strong> <a href="mailto:contact@agentsdock.net">contact@agentsdock.net</a> — we aim to reply within 2 business days.</li>
+          <li><strong>GitHub issues:</strong> <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">github.com/ZhengyiLuo/AgentsDock</a> — best for bug reports and feature requests.</li>
+        </ul>
+        <p>When reporting a problem, it helps to include your app version, your device and OS version, and whether the server is reachable from a browser.</p>
+
+        <h2>System requirements</h2>
+        <ul>
+          <li><strong>iPhone and iPad:</strong> iOS / iPadOS 17 or later.</li>
+          <li><strong>Mac:</strong> macOS 14 or later, Apple silicon.</li>
+          <li><strong>Linux:</strong> x86_64, distributed as an AppImage.</li>
+          <li><strong>Server:</strong> a macOS or Linux machine you control, with <code>tmux</code> installed and the Claude Code and/or Codex CLI authenticated.</li>
+        </ul>
+
+        <h2>Getting started</h2>
+        <p>The app needs a server to talk to. Install one on any machine you own:</p>
+        <ul>
+          <li>Clone the server repository and run its installer: <code>git clone https://github.com/ZhengyiLuo/AgentsServer.git</code>, then <code>cd AgentsServer</code> and <code>./install.sh</code>.</li>
+          <li>The installer sets up the runtime under <code>~/.local/share/agents-server</code> and stores chat state under <code>~/.agentsdock</code>.</li>
+          <li>Open the app, enter your server URL, and paste the access token if server authentication is enabled.</li>
+        </ul>
+        <p>If AgentsDock and your server are on different machines or networks, we recommend connecting them with <a href="https://tailscale.com" target="_blank" rel="noopener">Tailscale</a> and using the Tailscale hostname as your server URL.</p>
+
+        <h2>Troubleshooting</h2>
+
+        <h2 style="font-size:19px">The app can't connect to my server</h2>
+        <p>Confirm the server is running and reachable by opening the same URL in a browser on the same device. Check that you included the port, that the device is on the same network (or the same Tailscale network), and that any firewall allows the connection. A URL that works on your desktop will not work on your phone unless both can route to that address.</p>
+
+        <h2 style="font-size:19px">It says my access token is invalid</h2>
+        <p>When server authentication is enabled, the same token is required for API calls, uploads, live traces, and file previews. On the Mac app the token is shown in the right inspector under Security; on iPhone and iPad it is in the sidebar server card. Copy it exactly, with no surrounding whitespace.</p>
+
+        <h2 style="font-size:19px">My terminal session disappeared</h2>
+        <p>Each chat owns a persistent <code>tmux</code> session on your server. Disconnecting the app detaches the client but leaves shells and long-running processes alive, so reopening the Terminal tab should reattach. If the tab will not open, verify <code>tmux</code> is installed on the server. Note that closing the final terminal tab intentionally ends that chat's tmux session.</p>
+
+        <h2 style="font-size:19px">An agent isn't responding</h2>
+        <p>AgentsDock runs the Claude Code and Codex CLIs on your server using your own credentials. Confirm the relevant CLI is installed and authenticated on the server, and that the account has remaining quota with the model provider. AgentsDock does not proxy model requests, so provider-side errors surface directly in the chat.</p>
+
+        <h2 style="font-size:19px">Media or files won't preview</h2>
+        <p>File and video previews are fetched from your server and require the same access token as the rest of the API. If previews fail while chat works, re-enter the token and confirm the server has enough free disk space.</p>
+
+        <h2>Privacy and data</h2>
+        <p>Your chats, code, files, and credentials stay on the server you operate. For details on what the apps do and do not collect, see our <a href="./privacy.html">Privacy Policy</a>.</p>
+
+        <h2>Documentation</h2>
+        <p>Full setup instructions, release notes, and architecture documentation live in the <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">AgentsDock repository</a>.</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>A dock for all your agents.<span class="footer-copyright">© 2026 Zhengyi Luo</span></p>
+      <div>
+        <a href="./index.html#self-hosted">Server setup</a>
+        <a href="./index.html#downloads">Downloads</a>
+        <a href="./support.html">Support</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock privacy policy — a self-hosted research workspace for Claude Code and Codex. Your agents, credentials, and data stay on infrastructure you control." />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Privacy Policy · AgentsDock</title>
+    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html#top" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html#product">Product</a>
+        <a href="./index.html#self-hosted">Self-hosted</a>
+        <a href="./index.html#downloads">Downloads</a>
+      </nav>
+      <a class="header-action" href="./index.html#downloads">Get AgentsDock</a>
+    </header>
+
+    <main>
+      <article class="legal">
+        <p class="section-kicker">Legal</p>
+        <h1>Privacy Policy</h1>
+        <p class="legal-meta">Last updated: July 19, 2026</p>
+
+        <p class="legal-lead">AgentsDock is a <strong>self-hosted</strong> workspace. You run your own AgentsDock server, and your chats, files, terminals, and credentials stay on infrastructure you control. This policy explains what the AgentsDock apps (macOS, Linux, iOS, and iPadOS) do and do not collect.</p>
+
+        <h2>1. Who we are</h2>
+        <p>AgentsDock ("AgentsDock", "we", "us") provides desktop and mobile client applications that connect to an <strong>AgentsDock server that you install and operate yourself</strong>. Because the server runs on your own machine or cluster, you are the controller of the content you create with it.</p>
+
+        <h2>2. Information the app does not collect</h2>
+        <p>The AgentsDock client apps are designed to minimize data collection. We do <strong>not</strong> operate a cloud backend that receives your content, and specifically we do not collect, transmit to us, sell, or share:</p>
+        <ul>
+          <li>Your chat messages, prompts, or agent responses;</li>
+          <li>Your source code, files, media, or command output;</li>
+          <li>Your model provider API keys or access tokens;</li>
+          <li>Your terminal sessions or scheduled jobs.</li>
+        </ul>
+        <p>This content is stored on the AgentsDock server you run (by default under <code>~/.agentsdock</code>) and is exchanged directly between the app and your server over a network connection you configure, such as your local network or Tailscale.</p>
+
+        <h2>3. Information stored on your device</h2>
+        <p>To connect to your server, the app stores configuration locally on your device, including your <strong>server URL</strong> and, where applicable, an <strong>access token</strong> (kept in the operating system's secure storage, such as the Apple Keychain). This information stays on your device and is used only to reach the server you specify. Removing the app removes this local configuration.</p>
+
+        <h2>4. Third-party services</h2>
+        <p>Depending on how you use AgentsDock, the following third parties may be involved. Their handling of data is governed by their own policies:</p>
+        <ul>
+          <li><strong>AI model providers.</strong> Your AgentsDock server runs command-line agents such as Claude Code and Codex using API keys you provide. When an agent runs, your server sends requests directly to that provider (for example, Anthropic or OpenAI) under your own account. AgentsDock does not proxy, resell, or observe these requests. See the applicable provider's privacy policy.</li>
+          <li><strong>Apple.</strong> If you install the app from the App Store or TestFlight, Apple may collect information related to distribution, and any crash diagnostics you choose to share are handled by Apple under Apple's privacy policy.</li>
+        </ul>
+
+        <h2>5. Analytics and tracking</h2>
+        <p>The AgentsDock apps do not include third-party advertising SDKs and do not track you across other apps or websites. We do not sell personal data.</p>
+
+        <h2>6. Data retention and deletion</h2>
+        <p>Because your content lives on your own server, you control its retention. You can delete chats, files, and jobs from within the app, and you can remove all stored state by deleting the server's data directory (by default <code>~/.agentsdock</code>). Uninstalling the client app removes the locally stored connection settings from your device.</p>
+
+        <h2>7. Security</h2>
+        <p>We recommend running your AgentsDock server over a private network or an encrypted connection such as Tailscale, enabling server authentication, and keeping your device and server operating systems up to date. No method of transmission or storage is completely secure, but the self-hosted design keeps your data within your own environment.</p>
+
+        <h2>8. Children</h2>
+        <p>AgentsDock is a developer and research tool and is not directed to children under the age of 13, and we do not knowingly collect personal information from children.</p>
+
+        <h2>9. Changes to this policy</h2>
+        <p>We may update this policy from time to time. When we do, we will revise the "Last updated" date above and post the new version at this URL.</p>
+
+        <h2>10. Contact</h2>
+        <p>If you have questions about this policy or AgentsDock's privacy practices, contact us at <a href="mailto:contact@agentsdock.net">contact@agentsdock.net</a> or open an issue on <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">our GitHub repository</a>.</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>A dock for all your agents.<span class="footer-copyright">© 2026 Zhengyi Luo</span></p>
+      <div>
+        <a href="./index.html#self-hosted">Server setup</a>
+        <a href="./index.html#downloads">Downloads</a>
+        <a href="./support.html">Support</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </footer>
+  </body>
+</html>

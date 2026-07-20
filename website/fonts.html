@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>AgentsDock — Title font options</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Syne:wght@500;600;700;800&family=Manrope:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Instrument+Serif:ital@0;1&family=Chivo:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #0d1013; --surface: #141922; --line: #2b333f;
+        --text: #f1f4f8; --muted: #9aa4b2; --blue: #5b9dff; --blue-2: #8aa4ff;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text);
+        font-family: Inter, ui-sans-serif, -apple-system, sans-serif; }
+      header { padding: 64px max(5vw, 28px) 28px; border-bottom: 1px solid var(--line);
+        background: radial-gradient(120% 90% at 50% 0%, rgba(91,157,255,.14), transparent 55%); }
+      header p.kicker { margin: 0 0 12px; color: var(--blue); font-family: "Space Grotesk", sans-serif;
+        font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+      header h1 { margin: 0 0 12px; font-family: "Space Grotesk", sans-serif; font-weight: 600;
+        font-size: clamp(30px, 5vw, 46px); letter-spacing: -.02em; }
+      header p.sub { margin: 0; max-width: 720px; color: var(--muted); font-size: 17px; line-height: 1.6; }
+      .grid { max-width: 1080px; margin: 0 auto; padding: 40px max(5vw, 24px) 96px;
+        display: flex; flex-direction: column; gap: 20px; }
+      .card { border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+        padding: 30px 34px; }
+      .card .label { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+        margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px dashed #2b333f; }
+      .card .label b { font-family: Inter, sans-serif; font-size: 13px; font-weight: 600;
+        color: var(--blue-2); letter-spacing: .04em; text-transform: uppercase; }
+      .card .label small { font-family: Inter, sans-serif; font-size: 13px; color: var(--muted); }
+      .card .num { font-family: "Space Grotesk", monospace; font-size: 12px; color: #5b6674;
+        border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+      .title { margin: 0 0 10px; font-weight: 600; font-size: clamp(46px, 7vw, 74px);
+        line-height: .98; letter-spacing: -.02em; }
+      .h2 { margin: 0 0 16px; font-weight: 600; font-size: clamp(24px, 3.4vw, 34px);
+        letter-spacing: -.01em; color: #dfe6ef; }
+      .body { margin: 0; max-width: 640px; color: var(--muted); font-size: 16px; line-height: 1.65;
+        font-family: Inter, sans-serif; }
+
+      .f-space   .title, .f-space   .h2 { font-family: "Space Grotesk", sans-serif; }
+      .f-sora    .title, .f-sora    .h2 { font-family: "Sora", sans-serif; }
+      .f-outfit  .title, .f-outfit  .h2 { font-family: "Outfit", sans-serif; }
+      .f-bricol  .title, .f-bricol  .h2 { font-family: "Bricolage Grotesque", sans-serif; }
+      .f-syne    .title, .f-syne    .h2 { font-family: "Syne", sans-serif; font-weight: 700; letter-spacing: -.01em; }
+      .f-manrope .title, .f-manrope .h2 { font-family: "Manrope", sans-serif; }
+      .f-chivo   .title, .f-chivo   .h2 { font-family: "Chivo", sans-serif; }
+      .f-fraunce .title, .f-fraunce .h2 { font-family: "Fraunces", serif; font-weight: 500; }
+      .f-instr   .title, .f-instr   .h2 { font-family: "Instrument Serif", serif; font-weight: 400; letter-spacing: 0; }
+
+      .bodyfonts { max-width: 1080px; margin: 0 auto; padding: 0 max(5vw, 24px) 100px; }
+      .bodyfonts h3 { font-family: "Space Grotesk", sans-serif; font-size: 22px; letter-spacing: -.01em;
+        margin: 0 0 6px; }
+      .bodyfonts .hint { color: var(--muted); margin: 0 0 24px; font-size: 15px; }
+      .bodyrow { border-top: 1px solid var(--line); padding: 22px 0; }
+      .bodyrow b { display: block; font-size: 13px; color: var(--blue-2); text-transform: uppercase;
+        letter-spacing: .04em; margin-bottom: 8px; font-weight: 600; }
+      .bodyrow p { margin: 0; max-width: 720px; font-size: 17px; line-height: 1.65; color: #cdd5e0; }
+      .b-inter p  { font-family: "Inter", sans-serif; }
+      .b-manrope p{ font-family: "Manrope", sans-serif; }
+      .b-sora p   { font-family: "Sora", sans-serif; }
+      .b-outfit p { font-family: "Outfit", sans-serif; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="kicker">Pick a title font</p>
+      <h1>AgentsDock — title font options</h1>
+      <p class="sub">Each card shows the <strong>AgentsDock</strong> wordmark and a section heading in a candidate font, with body copy in Inter for reference. Tell me the number (or name) you like and I'll wire it into the live site. Nothing here is the real page — it's just a sampler.</p>
+    </header>
+
+    <div class="grid">
+      <div class="card f-space">
+        <div class="label"><span class="num">01</span><b>Space Grotesk</b><small>geometric, techy — current default</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-sora">
+        <div class="label"><span class="num">02</span><b>Sora</b><small>clean, modern, neutral</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-outfit">
+        <div class="label"><span class="num">03</span><b>Outfit</b><small>friendly geometric, rounded</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-bricol">
+        <div class="label"><span class="num">04</span><b>Bricolage Grotesque</b><small>characterful, editorial display</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-syne">
+        <div class="label"><span class="num">05</span><b>Syne</b><small>distinctive, arty / tech-forward</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-manrope">
+        <div class="label"><span class="num">06</span><b>Manrope</b><small>clean, safe, highly legible</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-chivo">
+        <div class="label"><span class="num">07</span><b>Chivo</b><small>grotesque, sturdy, industrial</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-fraunce">
+        <div class="label"><span class="num">08</span><b>Fraunces</b><small>serif alt — warmer, not the Claude serif</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+      <div class="card f-instr">
+        <div class="label"><span class="num">09</span><b>Instrument Serif</b><small>editorial serif alt — light, elegant</small></div>
+        <p class="title">AgentsDock</p>
+        <p class="h2">Built for work that takes longer than one answer.</p>
+        <p class="body">Claude and Codex, together in one self-hosted workspace for research and long-running jobs.</p>
+      </div>
+    </div>
+
+    <div class="bodyfonts">
+      <h3>Body / description font</h3>
+      <p class="hint">Same paragraph in each option — this is the text used in section descriptions and the hero lede.</p>
+      <div class="bodyrow b-inter"><b>Inter — current</b><p>AgentsDock keeps long-running agent work legible: follow the reasoning without drowning in tool output, inspect the live terminal, and keep every video, image, file, and scheduled run attached to the right chat.</p></div>
+      <div class="bodyrow b-manrope"><b>Manrope</b><p>AgentsDock keeps long-running agent work legible: follow the reasoning without drowning in tool output, inspect the live terminal, and keep every video, image, file, and scheduled run attached to the right chat.</p></div>
+      <div class="bodyrow b-sora"><b>Sora</b><p>AgentsDock keeps long-running agent work legible: follow the reasoning without drowning in tool output, inspect the live terminal, and keep every video, image, file, and scheduled run attached to the right chat.</p></div>
+      <div class="bodyrow b-outfit"><b>Outfit</b><p>AgentsDock keeps long-running agent work legible: follow the reasoning without drowning in tool output, inspect the live terminal, and keep every video, image, file, and scheduled run attached to the right chat.</p></div>
+    </div>
+  </body>
+</html>

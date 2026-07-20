@@ -3,10 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock is a self-hosted research workspace for Claude Code and Codex, with persistent chats, rich media, scheduled jobs, and integrated terminals." />
-    <meta name="theme-color" content="#111412" />
-    <title>AgentsDock - Claude and Codex, built for serious work</title>
+    <meta name="description" content="A dock for all your agents. AgentsDock is a self-hosted workspace for Claude Code and Codex, with persistent chats, rich media, scheduled jobs, and terminals." />
+    <meta name="theme-color" content="#0d1013" />
+    <title>AgentsDock — A dock for all your agents</title>
     <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -41,86 +44,26 @@
           <p class="hero-lede">Claude and Codex, together in one self-hosted workspace built for research, long-running jobs, and the files that come out of them.</p>
           <div class="hero-actions" aria-label="Downloads">
             <button class="download-button primary" type="button" data-download="macos">
-              <span class="button-icon" aria-hidden="true">⌘</span>
+              <svg class="button-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.04c-.03-2.6 2.12-3.85 2.22-3.9-1.21-1.77-3.1-2.02-3.77-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.9-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.78 1.3 10.32.86 1.24 1.89 2.63 3.24 2.58 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.39.81 1.4-.02 2.29-1.26 3.15-2.51.99-1.44 1.4-2.83 1.42-2.9-.03-.01-2.73-1.05-2.76-4.15zM14.6 4.2c.72-.87 1.2-2.08 1.07-3.28-1.03.04-2.28.69-3.02 1.56-.66.77-1.24 2-1.08 3.18 1.15.09 2.32-.58 3.03-1.46z"/></svg>
               <strong>Download for macOS</strong>
             </button>
+            <a href="https://testflight.apple.com/join/placeholder" target="_blank" rel="noopener" class="download-button secondary appstore-btn">
+              <svg class="button-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.04c-.03-2.6 2.12-3.85 2.22-3.9-1.21-1.77-3.1-2.02-3.77-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.9-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.78 1.3 10.32.86 1.24 1.89 2.63 3.24 2.58 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.39.81 1.4-.02 2.29-1.26 3.15-2.51.99-1.44 1.4-2.83 1.42-2.9-.03-.01-2.73-1.05-2.76-4.15zM14.6 4.2c.72-.87 1.2-2.08 1.07-3.28-1.03.04-2.28.69-3.02 1.56-.66.77-1.24 2-1.08 3.18 1.15.09 2.32-.58 3.03-1.46z"/></svg>
+              <strong>Download for iPhone</strong>
+            </a>
             <button class="download-button secondary" type="button" data-download="linux">
               <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
               <strong>Download for Linux</strong>
             </button>
-            <a href="https://testflight.apple.com/join/placeholder" target="_blank" rel="noopener" class="download-button secondary appstore-btn">
-              <span class="button-icon" aria-hidden="true">&#xF8FF;</span>
-              <strong>Download for iPhone</strong>
-            </a>
           </div>
           <p class="release-line"><span id="release-version">Private preview</span> · Your agents and data stay on your server.</p>
         </div>
         <div class="hero-product-devices">
-          <div class="product-frame product-mock" aria-label="AgentsDock desktop preview">
-            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span><strong>AgentsDock</strong></div>
-            <div class="mock-app" aria-hidden="true">
-              <aside class="mock-sidebar">
-                <div class="mock-search"></div>
-                <div class="mock-chat active"><b>Experiment Review</b><span>Codex · GPT-5.6 · running</span></div>
-                <div class="mock-chat"><b>Dataset Audit</b><span>Claude · Opus · new</span></div>
-                <div class="mock-chat"><b>Render Queue</b><span>Codex · GPT-5.6</span></div>
-                <div class="mock-chat"><b>Training Notes</b><span>Claude · Fable</span></div>
-              </aside>
-              <section class="mock-timeline">
-                <div class="mock-title"><strong>Experiment Review</strong><span>Online</span></div>
-                <div class="mock-message assistant">The latest run completed. I found three useful outputs and grouped the media below.</div>
-                <div class="mock-trace">Ran 4 tools · collapsed trace</div>
-                <div class="mock-message user">Create a digest and send the key files to the next agent.</div>
-                <div class="mock-media-grid">
-                  <span></span><span></span><span></span><span></span>
-                </div>
-                <div class="mock-composer">
-                  <div class="mock-composer-box">
-                    <div class="mock-composer-field"></div>
-                    <div class="mock-composer-footer">
-                      <button class="mock-agent-btn mock-agent-codex">
-                        <img src="./assets/codex-logo.png" class="mock-agent-icon" alt="" />
-                        <span>Codex</span>
-                      </button>
-                      <button class="mock-agent-btn mock-agent-claude">
-                        <img src="./assets/claude-code-logo.png" class="mock-agent-icon" alt="" />
-                        <span>Claude Code</span>
-                      </button>
-                      <div class="mock-send">↑</div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-              <aside class="mock-inspector">
-                <div class="mock-status">Online</div>
-                <div class="mock-panel"><b>Pinned</b><span>3 important items</span></div>
-                <div class="mock-panel media"><b>Media & files</b><span></span><span></span><span></span><span></span></div>
-                <div class="mock-panel"><b>Jobs</b><span>2 scheduled</span></div>
-              </aside>
-            </div>
+          <div class="hero-desktop-shot" aria-label="AgentsDock desktop app">
+            <img src="./assets/app-desktop.png" alt="AgentsDock desktop app showing a Codex research chat with a reasoning trace, a files and media grid, and the session inspector panel" loading="eager" />
           </div>
-          <div class="product-frame product-phone" aria-label="AgentsDock mobile preview">
-            <div class="phone-bar" aria-hidden="true"><span class="phone-notch"></span></div>
-            <div class="mock-phone-app" aria-hidden="true">
-              <div class="phone-header">
-                <strong>Experiment Review</strong>
-                <span class="phone-status">● Online</span>
-              </div>
-              <div class="phone-timeline">
-                <div class="mock-message assistant">Run complete. 3 outputs ready.</div>
-                <div class="mock-trace">Ran 4 tools · collapsed</div>
-                <div class="mock-media-grid"><span></span><span></span><span></span><span></span></div>
-                <div class="mock-message user">Schedule a follow-up in 6 hours.</div>
-                <div class="phone-job-card">
-                  <span>⏱</span>
-                  <div><b>Job scheduled</b><small>Next run in 6 h</small></div>
-                </div>
-              </div>
-              <div class="phone-composer">
-                <div class="phone-input"></div>
-                <div class="phone-send">↑</div>
-              </div>
-            </div>
+          <div class="hero-mobile-shot" aria-label="AgentsDock on iPhone">
+            <img src="./assets/app-mobile.png" alt="AgentsDock iPhone app showing the chat list with a connected Mac Mini server and recent Claude and Codex sessions" loading="eager" />
           </div>
         </div>
       </section>
@@ -132,7 +75,7 @@
           <span>Stanford</span>
           <span>CMU</span>
           <span>UC Berkeley</span>
-          <span>DeepMind</span>
+          <span>NVIDIA</span>
         </div>
       </div>
 
@@ -209,6 +152,27 @@
         </div>
       </section>
 
+      <section class="quickstart" aria-labelledby="quickstart-title">
+        <div class="quickstart-inner">
+          <div class="quickstart-copy">
+            <p class="section-kicker">Quick start</p>
+            <h2 id="quickstart-title">Stand up your server in three commands.</h2>
+            <p>Clone the server, run the idempotent installer, then paste the URL into the app. It installs the versioned runtime plus the Claude and Codex CLIs — your chat state lives under <code>~/.agentsdock</code>, on infrastructure you control.</p>
+            <a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">Read the full setup guide <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="code-card" aria-label="Install commands">
+            <div class="code-card-bar" aria-hidden="true"><span></span><span></span><span></span><em>bash</em></div>
+            <pre class="code-card-body"><code><span class="tok-comment"># 1 · Install the AgentsDock server</span>
+<span class="tok-prompt">$</span> git clone https://github.com/ZhengyiLuo/AgentsServer.git
+<span class="tok-prompt">$</span> cd AgentsServer
+<span class="tok-prompt">$</span> ./install.sh
+
+<span class="tok-comment"># 2 · Launch the app and paste your server URL</span>
+<span class="tok-prompt">$</span> open -a AgentsDock</code></pre>
+          </div>
+        </div>
+      </section>
+
       <section class="downloads" id="downloads" aria-labelledby="download-title">
         <div>
           <p class="section-kicker">Desktop preview</p>
@@ -238,11 +202,13 @@
 
     <footer>
       <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
-      <p>Claude and Codex, built for research that keeps moving.</p>
+      <p>A dock for all your agents.<span class="footer-copyright">© 2026 Zhengyi Luo</span></p>
       <div>
         <a href="#self-hosted">Server setup</a>
         <a href="#downloads">Downloads</a>
         <a href="#product">Product</a>
+        <a href="./support.html">Support</a>
+        <a href="./privacy.html">Privacy</a>
         <a href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
     </footer>
