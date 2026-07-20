@@ -2,12 +2,19 @@ name: Deploy website to GitHub Pages
 
 # Publishes the static site in website/ to GitHub Pages.
 # Branch-based Pages sources can only serve the repo root or /docs, so this
-# uploads website/ as the Pages artifact instead. Requires the repository's
-# Settings -> Pages -> Source to be set to "GitHub Actions".
+# uploads website/ as the Pages artifact instead.
+#
+# Setup required in the repository settings:
+#   1. Settings -> Pages -> Source = "GitHub Actions"
+#   2. Settings -> Environments -> github-pages -> Deployment branches:
+#      allow "website-georgia". Pages restricts this environment to the
+#      default branch by default, and deploys from other branches fail with
+#      "Branch is not allowed to deploy to github-pages due to environment
+#      protection rules" until the branch is added.
 
 on:
   push:
-    branches: [main]
+    branches: [website-georgia]
     paths:
       - 'website/**'
       - '.github/workflows/deploy-website.yml'
