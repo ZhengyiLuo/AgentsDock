@@ -18,7 +18,7 @@
   --clay: #5b9dff;
   --muted-2: #ccd4e0;
   /* thin, half-transparent grey outline shared by the hero screenshots */
-  --shot-outline: rgba(163,177,198,.22);
+  --shot-outline: rgba(163,177,198,.32);
   --display: "Space Grotesk", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   /* Body face: free grotesque standing in for the reference site's proprietary anthropicSans */
   --body-font: "Instrument Sans", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -106,7 +106,9 @@ a { color: inherit; }
     drop-shadow(-1px 0 0 var(--shot-outline))
     drop-shadow(0 1px 0 var(--shot-outline))
     drop-shadow(0 -1px 0 var(--shot-outline))
-    drop-shadow(0 30px 70px rgba(0,0,0,.42));
+    /* A black shadow is invisible against this near-black page, so depth comes
+       from a faint cool halo instead. */
+    drop-shadow(0 0 28px rgba(150,170,200,.12));
 }
 .hero-desktop-shot { flex: 1 1 auto; min-width: 0; }
 .hero-mobile-shot { flex: 0 0 23%; }
