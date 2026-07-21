@@ -500,15 +500,16 @@ a { color: inherit; }
 .guide-note p { margin: 0; color: var(--muted-2); }
 
 /* ── Docs layout (setup guide): sticky sidebar TOC + wide content ── */
-.docs { max-width: 1160px; margin: 0 auto; padding: 132px max(6vw, 22px) 96px; display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 64px; align-items: start; }
+.docs { max-width: 1440px; margin: 0 auto; padding: 132px max(5vw, 22px) 96px; display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 72px; align-items: start; }
 .docs-nav { position: sticky; top: 96px; align-self: start; }
 .docs-nav-title { margin: 0 0 16px; font-family: var(--display); font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
 .docs-nav nav { display: flex; flex-direction: column; border-left: 1px solid var(--line); }
 .docs-nav a { padding: 8px 0 8px 18px; margin-left: -1px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35; transition: color .15s ease, border-color .15s ease; }
 .docs-nav a:hover { color: var(--text); }
 .docs-nav a.active { color: var(--blue); border-left-color: var(--blue); }
-/* Reuse the .legal prose styles but drop its narrow-column container box. */
-.docs .legal { max-width: 800px; margin: 0; padding: 0; }
+/* Reuse the .legal prose styles but drop its narrow-column container box —
+   the content fills the full width of the docs grid column. */
+.docs .legal { max-width: none; margin: 0; padding: 0; }
 .docs .legal h2 { scroll-margin-top: 88px; }
 
 @media (max-width: 900px) {
