@@ -492,6 +492,12 @@ a { color: inherit; }
 .legal a:hover { color: var(--blue-2); text-decoration: underline; }
 .legal code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; color: var(--blue-2); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; }
 .legal .legal-lead { font-size: 18px; color: var(--muted-2); line-height: 1.65; margin-bottom: 32px; }
+/* Setup-guide extras */
+.legal pre { margin: 0 0 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #090b0f; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.75; color: #d3dbe6; }
+.legal pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+.step-n { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-right: 12px; border-radius: 999px; background: var(--accent-soft); color: var(--blue); font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: 0; vertical-align: 2px; }
+.guide-note { margin: 0 0 24px; padding: 14px 18px; border-left: 3px solid var(--blue); border-radius: 0 8px 8px 0; background: var(--accent-soft); }
+.guide-note p { margin: 0; color: var(--muted-2); }
 
 footer { min-height: 150px; padding: 42px max(4vw, 28px); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .footer-brand { color: var(--text); }
