@@ -27,15 +27,27 @@
       <a class="header-action" href="./index.html#downloads">Get AgentsDock</a>
     </header>
 
-    <main>
-      <article class="legal">
+    <main class="docs">
+      <aside class="docs-nav" aria-label="On this page">
+        <p class="docs-nav-title">Quick setup guide</p>
+        <nav>
+          <a href="#prereqs">What you'll need</a>
+          <a href="#step-1">1 · Tailscale network</a>
+          <a href="#step-2">2 · Install AgentsServer</a>
+          <a href="#step-3">3 · Sign in to the CLIs</a>
+          <a href="#step-4">4 · Connect the app</a>
+          <a href="#troubleshoot">Not connecting?</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
         <p class="section-kicker">Setup guide</p>
         <h1>Quick setup guide</h1>
-        <p class="legal-meta">Last updated: July 20, 2026</p>
+        <p class="legal-meta">Last updated: July 20, 2026 · about 15 minutes</p>
 
-        <p class="legal-lead">AgentsDock has two halves: the <strong>app</strong> on your Mac, iPhone, or iPad, and the <strong>AgentsServer</strong> that runs the real work on a remote machine you own. This guide gets them talking to each other. Plan on about 15 minutes.</p>
+        <p class="legal-lead">AgentsDock has two halves: the <strong>app</strong> on your Mac, iPhone, or iPad, and the <strong>AgentsServer</strong> that runs the real work on a remote machine you own. This guide gets them talking to each other.</p>
 
-        <h2>What you'll need</h2>
+        <h2 id="prereqs">What you'll need</h2>
         <ul>
           <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — with <code>tmux</code> installed. This runs the AgentsServer.</li>
           <li>A <strong>Tailscale</strong> account, so the app can reach the server securely from anywhere.</li>
@@ -46,22 +58,22 @@
           <p>AgentsDock is fully self-hosted. Your chats, files, and API keys stay on your server — the app is just a window into it.</p>
         </div>
 
-        <h2><span class="step-n">1</span>Put both machines on the same Tailscale network</h2>
+        <h2 id="step-1"><span class="step-n">1</span>Put both machines on the same Tailscale network</h2>
         <p>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> and <strong>sign in with the same account on both</strong> the remote machine <em>and</em> every device you'll open AgentsDock from. This is what lets your laptop or phone reach the server without opening any ports to the public internet.</p>
         <p>Once both are logged in, note the remote machine's Tailscale address — it looks like <code>100.x.x.x</code>, or you can use its Tailscale hostname. You'll need it in step 4.</p>
 
-        <h2><span class="step-n">2</span>Install the AgentsServer on the remote</h2>
+        <h2 id="step-2"><span class="step-n">2</span>Install the AgentsServer on the remote</h2>
         <p>On the remote machine, clone the server and run its installer:</p>
         <pre><code>git clone https://github.com/ZhengyiLuo/AgentsServer.git
 cd AgentsServer
 ./install.sh</code></pre>
         <p>The server listens on port <strong>7850</strong> by default. Leave it running on the remote machine — that's the piece the app connects to.</p>
 
-        <h2><span class="step-n">3</span>Sign in to Claude Code and Codex on the remote</h2>
+        <h2 id="step-3"><span class="step-n">3</span>Sign in to Claude Code and Codex on the remote</h2>
         <p>AgentsDock runs the Claude Code and Codex CLIs <strong>on your server, using your own accounts</strong> — it never proxies or sees your model requests. So the CLIs have to be installed and signed in <em>on the remote machine</em>, not on your phone or laptop.</p>
         <p>On the remote, make sure each CLI you plan to use is installed and authenticated (run each one once and complete its sign-in). If a CLI isn't signed in, AgentsDock will show that backend as unavailable when you try to use it.</p>
 
-        <h2><span class="step-n">4</span>Connect the app to your server</h2>
+        <h2 id="step-4"><span class="step-n">4</span>Connect the app to your server</h2>
         <p>Open AgentsDock and add your server with two things:</p>
         <ul>
           <li><strong>Server URL</strong> — your remote's Tailscale address and the port, for example <code>http://100.x.x.x:7850</code>. A bare <code>host:7850</code> works too; the app adds <code>http://</code> for you.</li>
@@ -69,7 +81,7 @@ cd AgentsServer
         </ul>
         <p>Save it, and you're connected. Start a chat, pick Claude Code or Codex, and point it at a working directory on your server.</p>
 
-        <h2>Not connecting?</h2>
+        <h2 id="troubleshoot">Not connecting?</h2>
         <ul>
           <li>Confirm the server URL opens in a browser <em>on the same device</em> — if the browser can't reach it, the app can't either.</li>
           <li>Check that Tailscale is active and signed in on <em>both</em> ends, and that you used the Tailscale address (not a local IP that only works on the server's own network).</li>
@@ -90,5 +102,27 @@ cd AgentsServer
         <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord ↗</a>
       </div>
     </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
   </body>
 </html>
