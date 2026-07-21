@@ -507,8 +507,9 @@ a { color: inherit; }
 .docs-nav a { padding: 8px 0 8px 18px; margin-left: -1px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35; transition: color .15s ease, border-color .15s ease; }
 .docs-nav a:hover { color: var(--text); }
 .docs-nav a.active { color: var(--blue); border-left-color: var(--blue); }
-.docs-nav-group { margin: 18px 0 4px; padding-left: 18px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #6a7688; }
-.docs-nav-group:first-of-type { margin-top: 22px; }
+.docs-nav-part { margin-top: 20px; font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: .01em; color: #cbd3df; }
+.docs-nav-part:hover { color: var(--text); }
+.docs-nav-part.active { color: var(--blue); border-left-color: var(--blue); }
 /* Reuse the .legal prose styles but drop its narrow-column container box —
    the content fills the full width of the docs grid column. */
 .docs .legal { max-width: none; margin: 0; padding: 0; }

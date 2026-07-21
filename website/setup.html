@@ -32,15 +32,14 @@
         <p class="docs-nav-title">Quick setup guide</p>
         <nav>
           <a href="#prereqs">Before you start</a>
-          <p class="docs-nav-group">Part 1 · The remote</p>
-          <a href="#remote-tailscale">1 · Install Tailscale</a>
-          <a href="#remote-server">2 · Install AgentsServer</a>
-          <a href="#remote-cli">3 · Sign in to the CLIs</a>
-          <p class="docs-nav-group">Part 2 · Your device</p>
+          <a class="docs-nav-part" href="#part-remote">Part 1 · Set up the remote</a>
+          <a href="#remote-server">1 · Install AgentsServer</a>
+          <a href="#remote-cli">2 · Sign in to the CLIs</a>
+          <a href="#remote-tailscale">3 · Install Tailscale</a>
+          <a class="docs-nav-part" href="#part-device">Part 2 · Connect your device</a>
           <a href="#device-app">1 · Download the app</a>
           <a href="#device-tailscale">2 · Install Tailscale</a>
           <a href="#device-connect">3 · Connect</a>
-          <p class="docs-nav-group">Help</p>
           <a href="#troubleshoot">Not connecting?</a>
         </nav>
       </aside>
@@ -66,36 +65,31 @@
         <h2 class="docs-part" id="part-remote"><span class="docs-part-label">Part 1</span>Set up the remote</h2>
         <p>Do this once, on the machine that will do the work. It stays running and your devices connect to it.</p>
 
-        <h3 class="docs-step" id="remote-tailscale"><span class="step-n">1</span>Install Tailscale on the remote</h3>
-        <p>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> on the remote machine and sign in. This gives the machine a private <code>100.x.x.x</code> address that your other devices can reach — without opening any ports to the public internet. Note that address (or the machine's Tailscale hostname); you'll enter it in Part 2.</p>
-
-        <h3 class="docs-step" id="remote-server"><span class="step-n">2</span>Install the AgentsServer</h3>
+        <h3 class="docs-step" id="remote-server"><span class="step-n">1</span>Install the AgentsServer</h3>
         <p>Clone the server and run its installer on the remote:</p>
         <pre><code>git clone https://github.com/ZhengyiLuo/AgentsServer.git
 cd AgentsServer
 ./install.sh</code></pre>
         <p>The server listens on port <strong>7850</strong> by default and stays running on the remote — that's the piece your devices connect to. It's authorized with an <strong>access token</strong>; keep that token handy for Part 2.</p>
-        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">View the AgentsServer repository on GitHub <span aria-hidden="true">→</span></a></p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">View the AgentsServer repository on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h3 class="docs-step" id="remote-cli"><span class="step-n">3</span>Sign in to Claude Code and Codex on the remote</h3>
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Sign in to Claude Code and Codex on the remote</h3>
         <p>AgentsDock runs the Claude Code and Codex CLIs <strong>on the remote, using your own accounts</strong> — it never proxies or sees your model requests. So the CLIs must be installed and signed in <em>on the remote machine</em>, not on your phone or laptop. Run each CLI you plan to use once and complete its sign-in. If a CLI isn't signed in, AgentsDock shows that backend as unavailable.</p>
+
+        <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>Install Tailscale on the remote</h3>
+        <p>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> on the remote machine and sign in. This gives the machine a private <code>100.x.x.x</code> address that your other devices can reach — without opening any ports to the public internet. Note that address (or the machine's Tailscale hostname); you'll enter it in Part 2.</p>
 
         <h2 class="docs-part" id="part-device"><span class="docs-part-label">Part 2</span>Connect from your device</h2>
         <p>Repeat this on any Mac, iPhone, or iPad you want to use.</p>
 
         <h3 class="docs-step" id="device-app"><span class="step-n">1</span>Download AgentsDock</h3>
-        <p><a href="./index.html#downloads">Get the app</a> for your device and open it.</p>
+        <p><a href="./index.html#downloads">Get the app</a> for macOS, iPhone, or iPad — the platforms available today — and open it.</p>
 
         <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>Install Tailscale on the device</h3>
         <p>Install Tailscale on this device too and sign in with the <strong>same account</strong> you used on the remote. That's what puts them on the same private network so the app can reach the server.</p>
 
         <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>Connect to your server</h3>
-        <p>In AgentsDock, add your server with the remote's address and the access token:</p>
-        <ul>
-          <li><strong>On Mac</strong> — enter the <strong>Server URL</strong> as <code>host:7850</code> or <code>http://100.x.x.x:7850</code>, then the <strong>Access token</strong>.</li>
-          <li><strong>On iPhone &amp; iPad</strong> — fill in <strong>Host</strong> (the remote's <code>100.x.x.x</code> Tailscale address), <strong>Port</strong> (<code>7850</code>), and <strong>Access token</strong>.</li>
-        </ul>
-        <p>The access token is the same one your AgentsServer is configured with in Part 1. Save it, and you're connected — start a chat, pick Claude Code or Codex, and point it at a working directory on your remote.</p>
+        <p>In AgentsDock, add a server with the remote's <strong>address</strong> — its Tailscale <code>100.x.x.x</code> address and port <code>7850</code> — and the <strong>access token</strong> from Part 1. Save it, and you're connected: start a chat, pick Claude Code or Codex, and point it at a working directory on your remote.</p>
 
         <h2 id="troubleshoot">Not connecting?</h2>
         <ul>
