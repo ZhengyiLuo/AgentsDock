@@ -146,13 +146,12 @@ a { color: inherit; }
 .trusted-logos span:hover { color: #b4c0d2; }
 /* The logos are colour-varied and mostly dark on transparent, so greyscale+invert
    normalises them to one light monochrome layer against the dark background. */
+/* Equal height, natural width — the logos are wordmarks of different aspect
+   ratios, so a fixed box would make them look uneven. */
 .trusted-logos img {
-  height: 96px;
-  max-height: 96px;
-  width: 240px;
-  object-fit: contain;
+  height: 44px;
+  width: auto;
   display: block;
-  padding: 16px 0;
   filter: grayscale(1) invert(1);
   opacity: .55;
   transition: opacity .25s ease;
