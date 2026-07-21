@@ -75,7 +75,6 @@ a { color: inherit; }
     radial-gradient(120% 78% at 50% 0%, rgba(91,157,255,.16), transparent 56%),
     repeating-linear-gradient(180deg, rgba(255,255,255,.045) 0 1px, transparent 1px 46px),
     linear-gradient(180deg, #131110 0%, #0f1211 48%, #0e1110 100%);
-  border-bottom: 1px solid var(--line);
 }
 .hero-shade {
   position: absolute;
@@ -136,11 +135,11 @@ a { color: inherit; }
 .appstore-btn { text-decoration: none; }
 
 /* ── Trusted by ── */
-.trusted-by { padding: 60px max(5vw, 24px); border-block: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 30px; background: #0b0e12; }
+.trusted-by { padding: 72px max(5vw, 24px); display: flex; flex-direction: column; align-items: center; }
 .trusted-label { margin: 0; font-size: 14px; font-weight: 500; letter-spacing: .01em; color: var(--muted); }
 /* Logo wall sized from the Claude Code page: 40px max logo height in a 64px
    slot, flex-wrapped and centred with a 24px column gap. */
-.trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: clamp(44px, 6vw, 80px); row-gap: 32px; flex-wrap: wrap; }
+.trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: clamp(64px, 11vw, 168px); row-gap: 40px; flex-wrap: wrap; }
 .trusted-logos > * { animation: logoRise .6s ease both; }
 .trusted-logos span { font-family: var(--display); font-size: clamp(17px, 2vw, 23px); font-weight: 600; color: #58657a; letter-spacing: .005em; transition: color .25s ease; }
 .trusted-logos span:hover { color: #b4c0d2; }
@@ -149,7 +148,7 @@ a { color: inherit; }
 /* Equal height, natural width — the logos are wordmarks of different aspect
    ratios, so a fixed box would make them look uneven. */
 .trusted-logos img {
-  height: 44px;
+  height: 64px;
   width: auto;
   display: block;
   filter: grayscale(1) invert(1);
