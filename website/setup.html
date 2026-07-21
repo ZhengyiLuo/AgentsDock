@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Quick setup guide for AgentsDock — install the AgentsServer on a remote machine, connect over Tailscale, and pair the app with your server URL and access token." />
+    <meta name="description" content="Quick setup guide for AgentsDock — set up the AgentsServer on a remote machine, then connect from your Mac, iPhone, or iPad over Tailscale with the server's IP and access token." />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
     <title>Quick Setup Guide · AgentsDock</title>
@@ -31,11 +31,16 @@
       <aside class="docs-nav" aria-label="On this page">
         <p class="docs-nav-title">Quick setup guide</p>
         <nav>
-          <a href="#prereqs">What you'll need</a>
-          <a href="#step-1">1 · Tailscale network</a>
-          <a href="#step-2">2 · Install AgentsServer</a>
-          <a href="#step-3">3 · Sign in to the CLIs</a>
-          <a href="#step-4">4 · Connect the app</a>
+          <a href="#prereqs">Before you start</a>
+          <p class="docs-nav-group">Part 1 · The remote</p>
+          <a href="#remote-tailscale">1 · Install Tailscale</a>
+          <a href="#remote-server">2 · Install AgentsServer</a>
+          <a href="#remote-cli">3 · Sign in to the CLIs</a>
+          <p class="docs-nav-group">Part 2 · Your device</p>
+          <a href="#device-app">1 · Download the app</a>
+          <a href="#device-tailscale">2 · Install Tailscale</a>
+          <a href="#device-connect">3 · Connect</a>
+          <p class="docs-nav-group">Help</p>
           <a href="#troubleshoot">Not connecting?</a>
         </nav>
       </aside>
@@ -45,47 +50,58 @@
         <h1>Quick setup guide</h1>
         <p class="legal-meta">Last updated: July 20, 2026 · about 15 minutes</p>
 
-        <p class="legal-lead">AgentsDock has two halves: the <strong>app</strong> on your Mac, iPhone, or iPad, and the <strong>AgentsServer</strong> that runs the real work on a remote machine you own. This guide gets them talking to each other.</p>
+        <p class="legal-lead">AgentsDock has two halves. The <strong>AgentsServer</strong> runs the real work on a remote machine you own; the <strong>app</strong> on your Mac, iPhone, or iPad is your window into it. Set up the remote once, then connect as many devices as you like.</p>
 
-        <h2 id="prereqs">What you'll need</h2>
+        <h2 id="prereqs">Before you start</h2>
         <ul>
-          <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — with <code>tmux</code> installed. This runs the AgentsServer.</li>
-          <li>A <strong>Tailscale</strong> account, so the app can reach the server securely from anywhere.</li>
-          <li>Your <strong>Claude Code</strong> and/or <strong>Codex</strong> accounts, to sign the CLIs in on the server.</li>
-          <li>The AgentsDock app on the device you'll actually use — <a href="./index.html#downloads">download it here</a>.</li>
+          <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — with <code>tmux</code> installed. This runs the server.</li>
+          <li>A <strong>Tailscale</strong> account, so your devices can reach the remote securely from anywhere.</li>
+          <li>Your <strong>Claude Code</strong> and/or <strong>Codex</strong> accounts, to sign the CLIs in on the remote.</li>
+          <li>A <strong>Mac, iPhone, or iPad</strong> to run the app.</li>
         </ul>
         <div class="guide-note">
-          <p>AgentsDock is fully self-hosted. Your chats, files, and API keys stay on your server — the app is just a window into it.</p>
+          <p>AgentsDock is fully self-hosted. Your chats, files, and API keys stay on your remote machine — the app is just a window into it.</p>
         </div>
 
-        <h2 id="step-1"><span class="step-n">1</span>Put both machines on the same Tailscale network</h2>
-        <p>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> and <strong>sign in with the same account on both</strong> the remote machine <em>and</em> every device you'll open AgentsDock from. This is what lets your laptop or phone reach the server without opening any ports to the public internet.</p>
-        <p>Once both are logged in, note the remote machine's Tailscale address — it looks like <code>100.x.x.x</code>, or you can use its Tailscale hostname. You'll need it in step 4.</p>
+        <h2 class="docs-part" id="part-remote"><span class="docs-part-label">Part 1</span>Set up the remote</h2>
+        <p>Do this once, on the machine that will do the work. It stays running and your devices connect to it.</p>
 
-        <h2 id="step-2"><span class="step-n">2</span>Install the AgentsServer on the remote</h2>
-        <p>On the remote machine, clone the server and run its installer:</p>
+        <h3 class="docs-step" id="remote-tailscale"><span class="step-n">1</span>Install Tailscale on the remote</h3>
+        <p>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> on the remote machine and sign in. This gives the machine a private <code>100.x.x.x</code> address that your other devices can reach — without opening any ports to the public internet. Note that address (or the machine's Tailscale hostname); you'll enter it in Part 2.</p>
+
+        <h3 class="docs-step" id="remote-server"><span class="step-n">2</span>Install the AgentsServer</h3>
+        <p>Clone the server and run its installer on the remote:</p>
         <pre><code>git clone https://github.com/ZhengyiLuo/AgentsServer.git
 cd AgentsServer
 ./install.sh</code></pre>
-        <p>The server listens on port <strong>7850</strong> by default. Leave it running on the remote machine — that's the piece the app connects to.</p>
+        <p>The server listens on port <strong>7850</strong> by default and stays running on the remote — that's the piece your devices connect to. It's authorized with an <strong>access token</strong>; keep that token handy for Part 2.</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">View the AgentsServer repository on GitHub <span aria-hidden="true">→</span></a></p>
 
-        <h2 id="step-3"><span class="step-n">3</span>Sign in to Claude Code and Codex on the remote</h2>
-        <p>AgentsDock runs the Claude Code and Codex CLIs <strong>on your server, using your own accounts</strong> — it never proxies or sees your model requests. So the CLIs have to be installed and signed in <em>on the remote machine</em>, not on your phone or laptop.</p>
-        <p>On the remote, make sure each CLI you plan to use is installed and authenticated (run each one once and complete its sign-in). If a CLI isn't signed in, AgentsDock will show that backend as unavailable when you try to use it.</p>
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">3</span>Sign in to Claude Code and Codex on the remote</h3>
+        <p>AgentsDock runs the Claude Code and Codex CLIs <strong>on the remote, using your own accounts</strong> — it never proxies or sees your model requests. So the CLIs must be installed and signed in <em>on the remote machine</em>, not on your phone or laptop. Run each CLI you plan to use once and complete its sign-in. If a CLI isn't signed in, AgentsDock shows that backend as unavailable.</p>
 
-        <h2 id="step-4"><span class="step-n">4</span>Connect the app to your server</h2>
-        <p>Open AgentsDock and add your server with two things:</p>
+        <h2 class="docs-part" id="part-device"><span class="docs-part-label">Part 2</span>Connect from your device</h2>
+        <p>Repeat this on any Mac, iPhone, or iPad you want to use.</p>
+
+        <h3 class="docs-step" id="device-app"><span class="step-n">1</span>Download AgentsDock</h3>
+        <p><a href="./index.html#downloads">Get the app</a> for your device and open it.</p>
+
+        <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>Install Tailscale on the device</h3>
+        <p>Install Tailscale on this device too and sign in with the <strong>same account</strong> you used on the remote. That's what puts them on the same private network so the app can reach the server.</p>
+
+        <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>Connect to your server</h3>
+        <p>In AgentsDock, add your server with the remote's address and the access token:</p>
         <ul>
-          <li><strong>Server URL</strong> — your remote's Tailscale address and the port, for example <code>http://100.x.x.x:7850</code>. A bare <code>host:7850</code> works too; the app adds <code>http://</code> for you.</li>
-          <li><strong>Access token</strong> — the token your AgentsServer uses to authorize the app. Paste the same value the server is configured with. In the app you'll find this field under the server's <strong>Security</strong> section on Mac, or the <strong>server card</strong> in the sidebar on iPhone and iPad.</li>
+          <li><strong>On Mac</strong> — enter the <strong>Server URL</strong> as <code>host:7850</code> or <code>http://100.x.x.x:7850</code>, then the <strong>Access token</strong>.</li>
+          <li><strong>On iPhone &amp; iPad</strong> — fill in <strong>Host</strong> (the remote's <code>100.x.x.x</code> Tailscale address), <strong>Port</strong> (<code>7850</code>), and <strong>Access token</strong>.</li>
         </ul>
-        <p>Save it, and you're connected. Start a chat, pick Claude Code or Codex, and point it at a working directory on your server.</p>
+        <p>The access token is the same one your AgentsServer is configured with in Part 1. Save it, and you're connected — start a chat, pick Claude Code or Codex, and point it at a working directory on your remote.</p>
 
         <h2 id="troubleshoot">Not connecting?</h2>
         <ul>
           <li>Confirm the server URL opens in a browser <em>on the same device</em> — if the browser can't reach it, the app can't either.</li>
-          <li>Check that Tailscale is active and signed in on <em>both</em> ends, and that you used the Tailscale address (not a local IP that only works on the server's own network).</li>
-          <li>Make sure the port (<code>:7850</code>) is included and the access token matches exactly, with no extra spaces.</li>
+          <li>Check that Tailscale is active and signed in on <em>both</em> ends, and that you used the remote's <code>100.x.x.x</code> Tailscale address (not a local IP that only works on the remote's own network).</li>
+          <li>Make sure the port (<code>7850</code>) is included and the access token matches exactly, with no extra spaces.</li>
         </ul>
         <p>Still stuck? Head to <a href="./support.html">Support</a> or ask in our <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a>.</p>
       </article>

@@ -507,10 +507,16 @@ a { color: inherit; }
 .docs-nav a { padding: 8px 0 8px 18px; margin-left: -1px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35; transition: color .15s ease, border-color .15s ease; }
 .docs-nav a:hover { color: var(--text); }
 .docs-nav a.active { color: var(--blue); border-left-color: var(--blue); }
+.docs-nav-group { margin: 18px 0 4px; padding-left: 18px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #6a7688; }
+.docs-nav-group:first-of-type { margin-top: 22px; }
 /* Reuse the .legal prose styles but drop its narrow-column container box —
    the content fills the full width of the docs grid column. */
 .docs .legal { max-width: none; margin: 0; padding: 0; }
 .docs .legal h2 { scroll-margin-top: 88px; }
+/* Two-part dividers and their numbered sub-steps. */
+.docs-part { margin: 64px 0 6px; padding-top: 36px; border-top: 1px solid var(--line); font-size: 30px; scroll-margin-top: 88px; }
+.docs-part-label { display: block; margin-bottom: 8px; font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--blue); }
+.docs-step { display: flex; align-items: center; margin: 36px 0 12px; font-family: var(--display); font-weight: 500; font-size: 21px; letter-spacing: -.01em; color: var(--text); scroll-margin-top: 88px; }
 
 @media (max-width: 900px) {
   .docs { grid-template-columns: 1fr; gap: 0; padding: 112px max(6vw, 22px) 80px; }
