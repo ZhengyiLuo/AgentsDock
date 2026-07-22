@@ -171,6 +171,13 @@ a { color: inherit; }
 .quickstart-copy code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; color: var(--blue-2); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; }
 .quickstart-docs { display: inline-flex; align-items: center; gap: 7px; color: var(--blue); text-decoration: none; font-weight: 550; font-size: 15px; }
 .quickstart-docs:hover { color: var(--blue-2); }
+/* Numbered points, reusing the setup-guide step badge */
+.quickstart-points { list-style: none; margin: 24px 0 26px; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.quickstart-points li { display: flex; align-items: center; font-size: var(--body-1); line-height: 1.35; color: var(--muted-2); }
+/* Check list, styled after the t3.codes harness footer items */
+.check-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.check-list li { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); }
+.check-list li svg { color: #54d18c; flex-shrink: 0; }
 .code-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #090b0f; box-shadow: 0 24px 70px rgba(0,0,0,.4); }
 .code-card-bar { display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 16px; border-bottom: 1px solid #1c2430; background: #10141b; }
 .code-card-bar span { width: 10px; height: 10px; border-radius: 50%; background: #333d4c; }
