@@ -55,6 +55,8 @@ a { color: inherit; }
 
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 720; }
 .brand img { width: 30px; height: 30px; border-radius: 7px; }
+.beta-dot { width: 7px; height: 7px; border-radius: 50%; background: #54d18c; box-shadow: 0 0 0 3px rgba(84,209,140,.2); animation: betaPulse 2s ease-in-out infinite; }
+@keyframes betaPulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(84,209,140,.2); } 50% { box-shadow: 0 0 0 5px rgba(84,209,140,.08); } }
 .site-header nav { display: flex; gap: 28px; }
 .site-header nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
 .nav-github { display: flex; align-items: center; gap: 6px; }
