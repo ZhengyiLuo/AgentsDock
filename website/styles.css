@@ -136,7 +136,7 @@ a { color: inherit; }
 
 /* ── Trusted by ── */
 .trusted-by { padding: 72px max(5vw, 24px); display: flex; flex-direction: column; align-items: center; }
-.trusted-label { margin: 0; font-size: 14px; font-weight: 500; letter-spacing: .01em; color: var(--muted); }
+.trusted-label { margin: 0 0 84px; font-size: 13px; font-weight: 400; letter-spacing: .18em; text-transform: uppercase; color: rgba(255, 255, 255, .38); text-align: center; }
 /* Logo wall sized from the Claude Code page: 40px max logo height in a 64px
    slot, flex-wrapped and centred with a 24px column gap. */
 .trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: clamp(64px, 11vw, 168px); row-gap: 40px; flex-wrap: wrap; }
