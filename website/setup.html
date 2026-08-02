@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Quick setup guide for AgentsDock — set up the AgentsServer on a remote machine, then connect from your Mac, iPhone, or iPad over Tailscale with the server's IP and access token." />
+    <meta name="description" content="AgentsDock documentation — set up the AgentsServer on a remote machine and connect your devices, plus a tour of key features: terminal access, scheduled jobs, dispatch between chats, and file editing." />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>Quick Setup Guide · AgentsDock</title>
+    <title>Documentation · AgentsDock</title>
     <link rel="icon" href="./assets/agentsdock-icon.png" />
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
@@ -30,31 +30,31 @@
       </a>
       <nav aria-label="Primary navigation">
         <a href="./index.html">Home</a>
-        <a href="./setup.html">Setup guide</a>
+        <a href="./setup.html">Docs</a>
       </nav>
     </header>
 
     <main class="docs">
       <aside class="docs-nav" aria-label="On this page">
-        <p class="docs-nav-title">Quick setup guide</p>
+        <p class="docs-nav-title">Docs</p>
         <nav>
+          <a class="docs-nav-part active" href="./setup.html">Setup guide</a>
           <a href="#prereqs">Before you start</a>
-          <a class="docs-nav-part" href="#part-remote">Part 1 · Set up the remote</a>
-          <a href="#remote-server">1 · Install AgentsServer</a>
-          <a href="#remote-cli">2 · Sign in to the CLIs</a>
-          <a href="#remote-tailscale">3 · Install Tailscale</a>
-          <a class="docs-nav-part" href="#part-device">Part 2 · Connect your device</a>
-          <a href="#device-app">1 · Download the app</a>
-          <a href="#device-tailscale">2 · Install Tailscale</a>
-          <a href="#device-connect">3 · Connect</a>
+          <a href="#part-remote">Part 1 · Set up the remote</a>
+          <a href="#part-device">Part 2 · Connect your device</a>
           <a href="#troubleshoot">Not connecting?</a>
+          <a class="docs-nav-part" href="./features.html">Key features</a>
+          <a href="./features.html#feat-terminal">Terminal access</a>
+          <a href="./features.html#feat-schedule">Scheduled jobs</a>
+          <a href="./features.html#feat-digest">Digest</a>
+          <a href="./features.html#feat-files">View &amp; edit code</a>
         </nav>
       </aside>
 
       <article class="legal docs-body">
-        <p class="section-kicker">Setup guide</p>
-        <h1>Quick setup guide</h1>
-        <p class="legal-meta">Last updated: July 20, 2026 · about 15 minutes</p>
+        <p class="section-kicker">Docs</p>
+        <h1>Setup guide</h1>
+        <p class="legal-meta">Last updated: August 2, 2026 · about 15 minutes</p>
 
         <p class="legal-lead">AgentsDock has two halves. The <strong>AgentsServer</strong> runs the real work on a remote machine you own; the <strong>app</strong> on your Mac, iPhone, or iPad is your window into it. Set up the remote once, then connect as many devices as you like.</p>
 
@@ -109,6 +109,8 @@ cd AgentsServer
           <li>Make sure the port (<code>7850</code>) is included and the access token matches exactly, with no extra spaces.</li>
         </ul>
         <p>Still stuck? Head to <a href="./support.html">Support</a> or ask in our <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a>.</p>
+
+        <p>Connected? Explore what AgentsDock can do in <a href="./features.html">Key features &rarr;</a></p>
       </article>
     </main>
 
@@ -116,7 +118,7 @@ cd AgentsServer
       <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
       <p>A dock for all your agents.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
       <div>
-        <a href="./setup.html">Setup guide</a>
+        <a href="./setup.html">Docs</a>
         <a href="./support.html">Support</a>
         <a href="./privacy.html">Privacy</a>
         <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Key Features · AgentsDock</title>
+    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="./analytics.js" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="On this page">
+        <p class="docs-nav-title">Docs</p>
+        <nav>
+          <a class="docs-nav-part" href="./setup.html">Setup guide</a>
+          <a href="./setup.html#prereqs">Before you start</a>
+          <a href="./setup.html#part-remote">Part 1 · Set up the remote</a>
+          <a href="./setup.html#part-device">Part 2 · Connect your device</a>
+          <a href="./setup.html#troubleshoot">Not connecting?</a>
+          <a class="docs-nav-part active" href="./features.html">Key features</a>
+          <a href="#feat-terminal">1 · Terminal access</a>
+          <a href="#feat-schedule">2 · Scheduled jobs</a>
+          <a href="#feat-digest">3 · Digest</a>
+          <a href="#feat-files">4 · View &amp; edit code</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">Docs</p>
+        <h1>Key features</h1>
+        <p class="legal-lead">What AgentsDock gives you once you're connected — the same across desktop and mobile.</p>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-terminal"><span class="feature-doc-num">01</span><h2>Full terminal access from any device</h2></div>
+          <p class="feature-doc-desc">Attach to your chat's persistent <code>tmux</code> session from any device — the same shell on desktop and mobile.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-terminal-poster.jpg">
+              <source src="./assets/feature-terminal.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-schedule"><span class="feature-doc-num">02</span><h2>Scheduled jobs</h2></div>
+          <p class="feature-doc-desc">Queue interval and recurring jobs so long-running work runs on time, unattended.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-schedule-poster.jpg">
+              <source src="./assets/feature-schedule.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-digest"><span class="feature-doc-num">03</span><h2>Digest</h2></div>
+          <p class="feature-doc-desc">Send messages between chats to carry context from one to the next.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-digest-poster.jpg">
+              <source src="./assets/feature-digest.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-files"><span class="feature-doc-num">04</span><h2>View and edit your code</h2></div>
+          <p class="feature-doc-desc">Browse, preview, and edit files on your remote directly from the app.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-files-poster.jpg">
+              <source src="./assets/feature-files.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>A dock for all your agents.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

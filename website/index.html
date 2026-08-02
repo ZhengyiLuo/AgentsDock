@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="A dock for all your agents. AgentsDock is a self-hosted workspace for Claude Code and Codex, with persistent chats, rich media, scheduled jobs, and terminals." />
     <meta name="theme-color" content="#0d1013" />
-    <title>AgentsDock — A dock for all your agents</title>
+    <title>AgentsDock - A dock for all your agents</title>
     <link rel="icon" href="./assets/agentsdock-icon.png" />
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
@@ -18,7 +18,7 @@
     <script src="./analytics.js" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -29,7 +29,7 @@
       </a>
       <nav aria-label="Primary navigation">
         <a href="./index.html">Home</a>
-        <a href="./setup.html">Setup guide</a>
+        <a href="./setup.html">Docs</a>
       </nav>
     </header>
 
@@ -65,7 +65,7 @@
         </div>
         <div class="hero-product-devices">
           <div class="hero-desktop-shot" aria-label="AgentsDock desktop app">
-            <img src="./assets/app-desktop.png" alt="AgentsDock desktop app showing a Codex research chat with a reasoning trace, a files and media grid, and the session inspector panel" loading="eager" />
+            <img src="./assets/app-desktop.png" alt="AgentsDock desktop app showing a Codex chat with model training results, a files and media grid of plots, and the session inspector panel" loading="eager" />
           </div>
           <div class="hero-mobile-shot" aria-label="AgentsDock on iPhone">
             <img src="./assets/app-mobile.png" alt="AgentsDock iPhone app showing the chat list with a connected Mac Mini server and recent Claude and Codex sessions" loading="eager" />
@@ -125,15 +125,203 @@
 
       <section class="feature-band" aria-labelledby="feature-title" id="self-hosted">
         <div class="feature-heading">
-          <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span> Built for researchers.</h2>
+          <p class="section-kicker">Research workflow</p>
+          <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span>Built for researchers</h2>
         </div>
-        <div class="feature-grid">
-          <article class="feature-item accent-blue"><span class="feature-index">01</span><h3>Synchronized agents accessible on multi-devices</h3><p>Start a run and pick it up on any device.</p></article>
-          <article class="feature-item accent-green"><span class="feature-index">02</span><h3>Chats support rich images and videos</h3><p>Check your job results with visuals.</p></article>
-          <article class="feature-item accent-cyan"><span class="feature-index">03</span><h3>Your server is entirely self-hosted</h3><p>AgentsServer runs on a machine you own.</p></article>
-          <article class="feature-item accent-amber"><span class="feature-index">04</span><h3>Your mobile has access to full terminal</h3><p>Every chat keeps a persistent tmux session you can attach to any device.</p></article>
-          <article class="feature-item accent-red"><span class="feature-index">05</span><h3>AgentsDock helps you schedule training jobs</h3><p>Queue interval and recurring jobs so long-running work starts without you baby-sitting.</p></article>
-          <article class="feature-item accent-white"><span class="feature-index">06</span><h3>You can send messages between chats</h3><p>Digest features summarises one chat's work and carries that context into the next.</p></article>
+      </section>
+
+      <section class="showcase" aria-label="AgentsDock features">
+        <div class="showcase-row">
+          <figure class="showcase-media device-media" aria-hidden="true">
+            <div class="device-card-inner">
+              <p class="device-card-owner">Your AgentsDock devices</p>
+              <ul class="device-list">
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Georgia's MacBook
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="11" rx="1.5"/><path d="M2 20h20"/></svg>
+                    </span>
+                    <span class="device-ip">100.100.100.11</span>
+                  </span>
+                </li>
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Georgia's Mac mini
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+                      <span class="device-tag">self host server</span>
+                    </span>
+                    <span class="device-ip">100.100.100.12</span>
+                  </span>
+                </li>
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Georgia's iPad
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M11 18h2"/></svg>
+                    </span>
+                    <span class="device-ip">100.100.100.13</span>
+                  </span>
+                </li>
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Georgia's iPhone
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+                    </span>
+                    <span class="device-ip">100.100.100.14</span>
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Access from multiple personal devices</h3>
+            <p>One server, reachable from every device you own over your private Tailscale network.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media ide-media" aria-hidden="true">
+            <div class="ide-bar">
+              <span class="ide-tab">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                test_handoff_digest.py
+              </span>
+            </div>
+            <div class="ide-body">
+              <pre class="ide-code" id="ide-code"><div class="ide-line"><span class="ide-ln">1</span><span class="ide-tx"><span class="tok-kw">import</span> <span class="tok-mod">agent_server</span></span></div><div class="ide-line"><span class="ide-ln">2</span><span class="ide-tx"><span class="tok-kw">from</span> <span class="tok-mod">agent_server</span> <span class="tok-kw">import</span> <span class="tok-mod">digest</span></span></div><div class="ide-line"><span class="ide-ln">3</span><span class="ide-tx"></span></div><div class="ide-line"><span class="ide-ln">4</span><span class="ide-tx"><span class="tok-kw">def</span> <span class="tok-fn">send_handoff</span>(<span class="tok-var">source</span>, <span class="tok-var">target</span>):</span></div><div class="ide-line"><span class="ide-ln">5</span><span class="ide-tx">    <span class="tok-var">item</span> = <span class="tok-mod">digest</span>.<span class="tok-fn">build</span>(<span class="tok-var">source</span>)</span></div><div class="ide-line"><span class="ide-ln">6</span><span class="ide-tx">    <span class="tok-kw">return</span> <span class="tok-mod">digest</span>.<span class="tok-fn">dispatch</span>(<span class="tok-var">item</span>, <span class="tok-var">target</span>)</span></div><div class="ide-line"><span class="ide-ln">7</span><span class="ide-tx"></span></div><div class="ide-line"><span class="ide-ln">8</span><span class="ide-tx"><span class="tok-com"># hand context from one chat to the next</span></span></div><div class="ide-line"><span class="ide-ln">9</span><span class="ide-tx"><span class="ide-type"><span class="tok-fn">send_handoff</span>(<span class="tok-str">"chat-1"</span>, <span class="tok-str">"chat-2"</span>)</span></span></div></pre>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Open and edit code, like an IDE</h3>
+            <p>Open, edit, and syntax-highlight files on your remote — no separate editor needed.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media terminal-media" aria-hidden="true">
+            <pre class="terminal-card">georgia@georgia-mac-mini ZenithDock % python3
+Python 3.14.6 on darwin
+<span class="tprompt">&gt;&gt;&gt;</span>
+<span class="tprompt">&gt;&gt;&gt;</span> <span class="terminal-cursor"></span></pre>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Full terminal access from anywhere</h3>
+            <p>Attach to your chat's persistent <code>tmux</code> session from any device — the same shell, everywhere.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media chatmedia-media" aria-hidden="true">
+            <div class="cm-msg">
+              <span class="cm-avatar"><img src="./assets/codex-logo.png" alt="" /></span>
+              <div class="cm-bubble">
+                <p><strong>Simulation eval complete: humanoid loco-manipulation.</strong> Checkpoint <code>ckpt_0421_viral_best</code> passed the paper-readiness sweep.</p>
+                <div class="cm-metrics">
+                  <span><b>92.4%</b><small>success</small></span>
+                  <span><b>0.18 m</b><small>final error</small></span>
+                  <span><b>42k</b><small>steps</small></span>
+                </div>
+              </div>
+            </div>
+            <div class="cm-media">
+              <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-sim-poster.jpg">
+                <source src="./assets/feature-sim.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <p class="cm-caption">viral_loco_manip_rollout.mp4 · ckpt_0421_viral_best</p>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Results come back as media, not just text</h3>
+            <p>Agents return plots, images, and rendered rollouts inline — review a run's real output right in the chat.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media sched-media" aria-hidden="true">
+            <div class="sched-head">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <span>Schedule a job</span>
+            </div>
+            <div class="sched-body">
+              <div class="sched-field">
+                <label>Schedule</label>
+                <div class="seg" data-seg><span class="seg-on">Interval</span><span>Cron</span><span>RRULE</span></div>
+              </div>
+              <div class="sched-field">
+                <label>Interval</label>
+                <div class="sched-interval">
+                  <div class="sched-picker">
+                    <div class="sched-select" id="sched-interval"><span class="sched-interval-label">1 day</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></div>
+                    <div class="sched-menu" id="sched-menu">
+                      <span class="sched-option" data-label="1 hour" data-seconds="3600">1 hour</span>
+                      <span class="sched-option" data-label="4 hours" data-seconds="14400">4 hours</span>
+                      <span class="sched-option sched-option-on" data-label="1 day" data-seconds="86400">1 day</span>
+                      <span class="sched-option" data-label="1 week" data-seconds="604800">1 week</span>
+                    </div>
+                  </div>
+                  <span class="sched-seconds"><span id="sched-seconds">86400</span> s</span>
+                </div>
+              </div>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Schedule jobs, anytime</h3>
+            <p>Run a prompt on your own schedule — interval, cron, or recurring.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media fork-media" aria-hidden="true">
+            <div class="fork-card">
+              <ul class="fork-list">
+                <li class="fork-row">
+                  <span class="fork-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                  <span class="fork-meta"><span class="fork-name">SONIC motion-tracking sweep</span><span class="fork-sub">Codex · research notes</span></span>
+                </li>
+                <li class="fork-row fork-row-new">
+                  <span class="fork-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                  <span class="fork-meta"><span class="fork-name">Fork of SONIC motion-tracking sweep</span><span class="fork-sub">Codex · ablation branch</span></span>
+                </li>
+              </ul>
+            </div>
+            <div class="fork-connector"><span class="fork-dot"></span></div>
+            <div class="fork-btn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 8.5v7M18 9.5c0 4-6 2-6 6"/></svg>
+              Fork chat
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Fork any chat</h3>
+            <p>Branch any chat with one click to try a new direction — the original stays intact.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media digest-media" aria-hidden="true">
+            <p class="digest-head">Create context digest</p>
+            <div class="digest-flow">
+              <div class="digest-chat">
+                <span class="digest-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                <span class="digest-meta"><span class="digest-name">VIRAL sim-to-real review</span><span class="digest-role">Source</span></span>
+              </div>
+              <span class="digest-arrow">&rarr;</span>
+              <div class="digest-chat digest-chat-target">
+                <span class="digest-avatar"><img src="./assets/codex-logo.png" alt="" /></span>
+                <span class="digest-meta"><span class="digest-name">Doorman pixel-to-action transfer</span><span class="digest-role">Target</span></span>
+              </div>
+            </div>
+            <div class="digest-field">
+              <span class="digest-label">Focus for the target agent</span>
+              <div class="digest-prompt">Carry the humanoid policy-transfer findings and rollout metrics into the next experiment review.</div>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Send messages between chats</h3>
+            <p>Hand one focused turn from a source chat to another, so the next agent builds on the last.</p>
+          </div>
         </div>
       </section>
 
@@ -168,7 +356,7 @@
       <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
       <p>A dock for all your agents.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
       <div>
-        <a href="./setup.html">Setup guide</a>
+        <a href="./setup.html">Docs</a>
         <a href="./support.html">Support</a>
         <a href="./privacy.html">Privacy</a>
         <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
@@ -176,5 +364,71 @@
     </footer>
 
     <script src="./app.js" type="module"></script>
+    <script>
+      // IDE panel: the code sits static; only the last line types itself in, on a loop.
+      (function () {
+        var el = document.querySelector('.ide-type');
+        if (!el) return;
+        el.style.width = 'auto';
+        var full = el.offsetWidth;
+        el.style.width = '0px';
+        if (!full || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+          el.style.width = 'auto';
+          el.style.borderRight = '0';
+          return;
+        }
+        var steps = 32, w = 0, i = 0, timer, started = false;
+        function type() {
+          i++; w = Math.min(full, (full / steps) * i);
+          el.style.width = w + 'px';
+          if (i < steps) { timer = setTimeout(type, 75); }
+          else { timer = setTimeout(reset, 2400); }
+        }
+        function reset() { i = 0; w = 0; el.style.width = '0px'; timer = setTimeout(type, 350); }
+        function start() { if (!started) { started = true; type(); } }
+        if ('IntersectionObserver' in window) {
+          var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) { if (e.isIntersecting) start(); });
+          }, { threshold: 0.3 });
+          io.observe(el);
+        } else { start(); }
+      })();
+
+      // Make the mock panel controls feel interactive (visual only).
+      (function () {
+        document.querySelectorAll('[data-seg]').forEach(function (seg) {
+          seg.addEventListener('click', function (e) {
+            var t = e.target.closest('span');
+            if (!t || t.parentNode !== seg) return;
+            seg.querySelectorAll('span').forEach(function (s) { s.classList.remove('seg-on'); });
+            t.classList.add('seg-on');
+          });
+        });
+        var iv = document.getElementById('sched-interval');
+        if (iv) {
+          var label = iv.querySelector('.sched-interval-label');
+          var secs = document.getElementById('sched-seconds');
+          var picker = iv.closest('.sched-picker');
+          var options = document.querySelectorAll('.sched-option');
+          iv.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (picker) picker.classList.toggle('is-open');
+          });
+          options.forEach(function (option) {
+            option.addEventListener('click', function (e) {
+              e.stopPropagation();
+              options.forEach(function (item) { item.classList.remove('sched-option-on'); });
+              option.classList.add('sched-option-on');
+              label.textContent = option.dataset.label;
+              if (secs) secs.textContent = option.dataset.seconds;
+              if (picker) picker.classList.remove('is-open');
+            });
+          });
+          document.addEventListener('click', function () {
+            if (picker) picker.classList.remove('is-open');
+          });
+        }
+      })();
+    </script>
   </body>
 </html>
