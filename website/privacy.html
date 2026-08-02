@@ -8,6 +8,14 @@
     <meta name="robots" content="index,follow" />
     <title>Privacy Policy · AgentsDock</title>
     <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -29,7 +37,7 @@
       <article class="legal">
         <p class="section-kicker">Legal</p>
         <h1>Privacy Policy</h1>
-        <p class="legal-meta">Last updated: July 19, 2026</p>
+        <p class="legal-meta">Last updated: August 1, 2026</p>
 
         <p class="legal-lead">AgentsDock is a <strong>self-hosted</strong> workspace. You run your own AgentsDock server, and your chats, files, terminals, and credentials stay on infrastructure you control. This policy explains what the AgentsDock apps (macOS, Linux, iOS, and iPadOS) do and do not collect.</p>
 
@@ -57,7 +65,8 @@
         </ul>
 
         <h2>5. Analytics and tracking</h2>
-        <p>The AgentsDock apps do not include third-party advertising SDKs and do not track you across other apps or websites. We do not sell personal data.</p>
+        <p>The AgentsDock <strong>apps</strong> do not include third-party advertising SDKs and do not track you across other apps or websites. We do not sell personal data.</p>
+        <p>Our marketing <strong>website</strong> (agentsdock.net) uses Google Analytics to measure aggregate traffic — such as page views and clicks on outbound links — so we can understand how the site is used. This applies to the website only, not the apps, and we do not use it to identify individual visitors. See <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a> for how Google handles this data.</p>
 
         <h2>6. Data retention and deletion</h2>
         <p>Because your content lives on your own server, you control its retention. You can delete chats, files, and jobs from within the app, and you can remove all stored state by deleting the server's data directory (by default <code>~/.agentsdock</code>). Uninstalling the client app removes the locally stored connection settings from your device.</p>
