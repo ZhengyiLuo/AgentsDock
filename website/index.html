@@ -87,9 +87,9 @@
           <div class="quickstart-copy">
             <h2 id="quickstart-title">How it works</h2>
             <ul class="quickstart-points">
-              <li><span class="step-n">1</span>Set up your server in three commands</li>
+              <li><span class="step-n">1</span>Set up your server in simple commands</li>
               <li><span class="step-n">2</span>Access the server from any device</li>
-              <li><span class="step-n">3</span>Run and schedule your training jobs anywhere, anytime</li>
+              <li><span class="step-n">3</span>Have your agents do search and model training for you</li>
             </ul>
             <a class="quickstart-docs" href="./setup.html">Read the full setup guide <span aria-hidden="true">→</span></a>
             <div class="ways">
@@ -125,12 +125,23 @@
 
       <section class="feature-band" aria-labelledby="feature-title" id="self-hosted">
         <div class="feature-heading">
-          <p class="section-kicker">Research workflow</p>
-          <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span>Built for researchers</h2>
+          <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span> Built for AI researchers</h2>
         </div>
       </section>
 
       <section class="showcase" aria-label="AgentsDock features">
+        <div class="showcase-row">
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-agents-poster.jpg">
+              <source src="./assets/feature-agents.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <div class="showcase-copy">
+            <h3>A dock for all your agents</h3>
+            <p>Chat with different agents — Claude Code, Codex, and more — side by side in one place.</p>
+          </div>
+        </div>
+
         <div class="showcase-row">
           <figure class="showcase-media device-media" aria-hidden="true">
             <div class="device-card-inner">
@@ -183,16 +194,10 @@
         </div>
 
         <div class="showcase-row">
-          <figure class="showcase-media ide-media" aria-hidden="true">
-            <div class="ide-bar">
-              <span class="ide-tab">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
-                test_handoff_digest.py
-              </span>
-            </div>
-            <div class="ide-body">
-              <pre class="ide-code" id="ide-code"><div class="ide-line"><span class="ide-ln">1</span><span class="ide-tx"><span class="tok-kw">import</span> <span class="tok-mod">agent_server</span></span></div><div class="ide-line"><span class="ide-ln">2</span><span class="ide-tx"><span class="tok-kw">from</span> <span class="tok-mod">agent_server</span> <span class="tok-kw">import</span> <span class="tok-mod">digest</span></span></div><div class="ide-line"><span class="ide-ln">3</span><span class="ide-tx"></span></div><div class="ide-line"><span class="ide-ln">4</span><span class="ide-tx"><span class="tok-kw">def</span> <span class="tok-fn">send_handoff</span>(<span class="tok-var">source</span>, <span class="tok-var">target</span>):</span></div><div class="ide-line"><span class="ide-ln">5</span><span class="ide-tx">    <span class="tok-var">item</span> = <span class="tok-mod">digest</span>.<span class="tok-fn">build</span>(<span class="tok-var">source</span>)</span></div><div class="ide-line"><span class="ide-ln">6</span><span class="ide-tx">    <span class="tok-kw">return</span> <span class="tok-mod">digest</span>.<span class="tok-fn">dispatch</span>(<span class="tok-var">item</span>, <span class="tok-var">target</span>)</span></div><div class="ide-line"><span class="ide-ln">7</span><span class="ide-tx"></span></div><div class="ide-line"><span class="ide-ln">8</span><span class="ide-tx"><span class="tok-com"># hand context from one chat to the next</span></span></div><div class="ide-line"><span class="ide-ln">9</span><span class="ide-tx"><span class="ide-type"><span class="tok-fn">send_handoff</span>(<span class="tok-str">"chat-1"</span>, <span class="tok-str">"chat-2"</span>)</span></span></div></pre>
-            </div>
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-files-poster.jpg">
+              <source src="./assets/feature-files.mp4" type="video/mp4" />
+            </video>
           </figure>
           <div class="showcase-copy">
             <h3>View and edit code</h3>
@@ -201,11 +206,10 @@
         </div>
 
         <div class="showcase-row">
-          <figure class="showcase-media terminal-media" aria-hidden="true">
-            <pre class="terminal-card">georgia@georgia-mac-mini ZenithDock % python3
-Python 3.14.6 on darwin
-<span class="tprompt">&gt;&gt;&gt;</span>
-<span class="tprompt">&gt;&gt;&gt;</span> <span class="terminal-cursor"></span></pre>
+          <figure class="showcase-media">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-terminal-poster.jpg">
+              <source src="./assets/feature-terminal.mp4" type="video/mp4" />
+            </video>
           </figure>
           <div class="showcase-copy">
             <h3>Full terminal access from anywhere</h3>
@@ -335,17 +339,14 @@ Python 3.14.6 on darwin
           <article>
             <div><span class="platform-mark">⌘</span><p><strong>macOS</strong><small>Universal · macOS 14+</small></p></div>
             <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener" class="download-options-link">Download .dmg</a>
-            <code id="macos-checksum">SHA256 published with release</code>
           </article>
           <article>
             <div><span class="platform-mark terminal-icon">&gt;_</span><p><strong>Linux</strong><small>x86_64 · AppImage</small></p></div>
             <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener" class="download-options-link">Download AppImage</a>
-            <code id="linux-checksum">SHA256 published with release</code>
           </article>
           <article>
             <div><span class="platform-mark">&#xF8FF;</span><p><strong>iPhone &amp; iPad</strong><small>iOS &amp; iPadOS 17+ · TestFlight</small></p></div>
             <a href="https://testflight.apple.com/join/2JjWy2Z2" target="_blank" rel="noopener" class="download-options-link">Download on TestFlight</a>
-            <code>iOS &amp; iPadOS 17+ · via TestFlight</code>
           </article>
         </div>
         <p class="download-status" id="download-status" role="status" aria-live="polite"></p>

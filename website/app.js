@@ -30,8 +30,6 @@ function updatePlatform(platform) {
     button.dataset.status = entry.label || ''
     if (entry.available) button.setAttribute('aria-label', `Download AgentsDock ${entry.version || release.version} for ${platform}`)
   })
-  const checksum = document.querySelector(`#${platform}-checksum`)
-  if (checksum && entry.sha256) checksum.textContent = `SHA256 ${entry.sha256}`
 }
 
 document.addEventListener('click', event => {

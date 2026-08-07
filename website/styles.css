@@ -526,7 +526,7 @@ a { color: inherit; }
 .feature-heading { max-width: 1220px; margin: 0 auto; }
 .feature-heading .section-kicker { margin-bottom: 16px; }
 .feature-heading > p:not(.section-kicker) { max-width: 780px; margin: 22px 0 0; color: var(--muted); font-size: var(--body-1); line-height: var(--line-loose); font-weight: 400; }
-.heading-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: .85em; margin-right: 8px; }
+.heading-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: .85em; margin-right: 6px; }
 .heading-emoji:last-child { margin: 0 0 0 8px; }
 
 /* ── Benefit sections (alternating) ── */
