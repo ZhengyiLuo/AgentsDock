@@ -59,7 +59,8 @@ a { color: inherit; }
 @keyframes betaPulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(84,209,140,.2); } 50% { box-shadow: 0 0 0 5px rgba(84,209,140,.08); } }
 .site-header nav { display: flex; gap: 28px; }
 .site-header nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
-.nav-github { display: flex; align-items: center; gap: 6px; }
+.nav-github, .nav-discord { display: inline-flex; align-items: center; gap: 6px; }
+.nav-discord svg { flex-shrink: 0; }
 .site-header nav a:hover { color: var(--text); }
 .header-action { justify-self: end; display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 8px 12px; text-decoration: none; font-size: 15px; font-weight: 500; line-height: 1; border: none; border-radius: 8px; background: #f3f5f8; color: #10141b; transition: background-color .2s ease-in-out; }
 .header-action:hover { background: #fff; }
