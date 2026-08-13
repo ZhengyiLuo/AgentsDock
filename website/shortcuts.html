@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="description" content="AgentsDock keyboard shortcuts for Mac, Windows, and Linux — chats, navigation, terminal, and messaging." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
-    <meta property="og:title" content="Key Features · AgentsDock" />
-    <meta property="og:description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
-    <meta property="og:url" content="https://agentsdock.net/features.html" />
+    <meta property="og:title" content="Keyboard Shortcuts · AgentsDock" />
+    <meta property="og:description" content="AgentsDock keyboard shortcuts for Mac, Windows, and Linux — chats, navigation, terminal, and messaging." />
+    <meta property="og:url" content="https://agentsdock.net/shortcuts.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="AgentsDock — a dock for all your agents" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Key Features · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="twitter:title" content="Keyboard Shortcuts · AgentsDock" />
+    <meta name="twitter:description" content="AgentsDock keyboard shortcuts for Mac, Windows, and Linux." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>Key Features · AgentsDock</title>
+    <title>Keyboard Shortcuts · AgentsDock</title>
     <link rel="icon" href="./assets/agentsdock-icon.png" />
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
@@ -58,63 +58,75 @@
           <a href="./setup.html#part-remote">Part 1 · Set up the remote</a>
           <a href="./setup.html#part-device">Part 2 · Connect your device</a>
           <a href="./setup.html#troubleshoot">Not connecting?</a>
-          <a class="docs-nav-part active" href="./features.html">Key features</a>
-          <a href="#feat-terminal">1 · Terminal access</a>
-          <a href="#feat-schedule">2 · Scheduled jobs</a>
-          <a href="#feat-digest">3 · Digest</a>
-          <a href="#feat-files">4 · View &amp; edit code</a>
-          <a class="docs-nav-part" href="./shortcuts.html">Keyboard shortcuts</a>
-          <a href="./shortcuts.html#sc-general">General</a>
-          <a href="./shortcuts.html#sc-navigation">Navigation</a>
-          <a href="./shortcuts.html#sc-terminal">Terminal</a>
-          <a href="./shortcuts.html#sc-messaging">Messaging</a>
+          <a class="docs-nav-part" href="./features.html">Key features</a>
+          <a href="./features.html#feat-terminal">Terminal access</a>
+          <a href="./features.html#feat-schedule">Scheduled jobs</a>
+          <a href="./features.html#feat-digest">Digest</a>
+          <a href="./features.html#feat-files">View &amp; edit code</a>
+          <a class="docs-nav-part active" href="./shortcuts.html">Keyboard shortcuts</a>
+          <a href="#sc-general">General</a>
+          <a href="#sc-navigation">Navigation</a>
+          <a href="#sc-terminal">Terminal</a>
+          <a href="#sc-messaging">Messaging</a>
         </nav>
       </aside>
 
       <article class="legal docs-body">
         <p class="section-kicker">Docs</p>
-        <h1>Key features</h1>
-        <p class="legal-lead">What AgentsDock gives you once you're connected — the same across desktop and mobile.</p>
+        <h1>Keyboard shortcuts</h1>
+        <p class="legal-lead">Every keyboard shortcut in the AgentsDock desktop app, for Mac, Windows, and Linux.</p>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-terminal"><span class="feature-doc-num">01</span><h2>Full terminal access from any device</h2></div>
-          <p class="feature-doc-desc">Attach to your chat's persistent <code>tmux</code> session from any device — the same shell on desktop and mobile.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-terminal-poster.jpg">
-              <source src="./assets/feature-terminal.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
+        <h2 id="sc-general">General</h2>
+        <table class="sc-table">
+          <thead><tr><th>Action</th><th>Mac</th><th>Windows / Linux</th></tr></thead>
+          <tbody>
+            <tr><td>New chat</td><td><kbd>⌘N</kbd></td><td><kbd>Ctrl+N</kbd></td></tr>
+            <tr><td>Open workspace file</td><td><kbd>⌘O</kbd></td><td><kbd>Ctrl+O</kbd></td></tr>
+            <tr><td>Attach files</td><td><kbd>⇧⌘O</kbd></td><td><kbd>Ctrl+Shift+O</kbd></td></tr>
+            <tr><td>Settings</td><td><kbd>⌘,</kbd></td><td><kbd>Ctrl+,</kbd></td></tr>
+            <tr><td>Find chat</td><td><kbd>⌘P</kbd></td><td><kbd>Ctrl+P</kbd></td></tr>
+            <tr><td>Find in chat</td><td><kbd>⌘F</kbd></td><td><kbd>Ctrl+F</kbd></td></tr>
+            <tr><td>Close</td><td><kbd>⌘W</kbd></td><td><kbd>Ctrl+W</kbd></td></tr>
+          </tbody>
+        </table>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-schedule"><span class="feature-doc-num">02</span><h2>Scheduled jobs</h2></div>
-          <p class="feature-doc-desc">Queue interval and recurring jobs so long-running work runs on time, unattended.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-schedule-poster.jpg">
-              <source src="./assets/feature-schedule.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
+        <h2 id="sc-navigation">Navigation</h2>
+        <table class="sc-table">
+          <thead><tr><th>Action</th><th>Mac</th><th>Windows / Linux</th></tr></thead>
+          <tbody>
+            <tr><td>Next workspace tab</td><td><kbd>⌃⇥</kbd></td><td><kbd>Ctrl+Tab</kbd></td></tr>
+            <tr><td>Previous workspace tab</td><td><kbd>⌃⇧⇥</kbd></td><td><kbd>Ctrl+Shift+Tab</kbd></td></tr>
+            <tr><td>Focus left chat pane</td><td><kbd>⌥⌘←</kbd></td><td><kbd>Ctrl+Alt+←</kbd></td></tr>
+            <tr><td>Focus right chat pane</td><td><kbd>⌥⌘→</kbd></td><td><kbd>Ctrl+Alt+→</kbd></td></tr>
+            <tr><td>Next server</td><td><kbd>⇧⌘]</kbd></td><td><kbd>Ctrl+Shift+]</kbd></td></tr>
+            <tr><td>Previous server</td><td><kbd>⇧⌘[</kbd></td><td><kbd>Ctrl+Shift+[</kbd></td></tr>
+            <tr><td>Toggle inspector</td><td><kbd>⌘L</kbd></td><td><kbd>Ctrl+L</kbd></td></tr>
+            <tr><td>Jump to latest</td><td><kbd>⌘↓</kbd></td><td><kbd>Ctrl+↓</kbd></td></tr>
+          </tbody>
+        </table>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-digest"><span class="feature-doc-num">03</span><h2>Digest</h2></div>
-          <p class="feature-doc-desc">Send messages between chats to carry context from one to the next.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-digest-poster.jpg">
-              <source src="./assets/feature-digest.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
+        <h2 id="sc-terminal">Terminal</h2>
+        <table class="sc-table">
+          <thead><tr><th>Action</th><th>Mac</th><th>Windows / Linux</th></tr></thead>
+          <tbody>
+            <tr><td>Toggle terminal</td><td><kbd>⌃`</kbd></td><td><kbd>Ctrl+`</kbd></td></tr>
+            <tr><td>New tmux window</td><td><kbd>⌘T</kbd></td><td><kbd>Ctrl+T</kbd></td></tr>
+            <tr><td>Split pane right</td><td><kbd>⌘D</kbd></td><td><kbd>Ctrl+D</kbd></td></tr>
+            <tr><td>Split pane down</td><td><kbd>⇧⌘D</kbd></td><td><kbd>Ctrl+Shift+D</kbd></td></tr>
+            <tr><td>Find in terminal</td><td><kbd>⌘F</kbd></td><td><kbd>Ctrl+F</kbd></td></tr>
+          </tbody>
+        </table>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-files"><span class="feature-doc-num">04</span><h2>View and edit your code</h2></div>
-          <p class="feature-doc-desc">Browse, preview, and edit files on your remote directly from the app.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-files-poster.jpg">
-              <source src="./assets/feature-files.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
+        <h2 id="sc-messaging">Messaging</h2>
+        <table class="sc-table">
+          <thead><tr><th>Action</th><th>Mac</th><th>Windows / Linux</th></tr></thead>
+          <tbody>
+            <tr><td>Send message</td><td><kbd>↩</kbd></td><td><kbd>Enter</kbd></td></tr>
+            <tr><td>Steer now (queue while running)</td><td><kbd>⌘↩</kbd></td><td><kbd>Ctrl+Enter</kbd></td></tr>
+          </tbody>
+        </table>
+
+        <p class="sc-note">Standard system shortcuts (cut, copy, paste, undo, select all) work as usual. On Windows and Linux, <kbd>⌘</kbd> maps to <kbd>Ctrl</kbd>.</p>
       </article>
     </main>
 
