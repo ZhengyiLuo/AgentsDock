@@ -93,7 +93,9 @@
         <pre><code>git clone https://github.com/ZhengyiLuo/AgentsServer.git
 cd AgentsServer
 ./install.sh</code></pre>
-        <p>The server listens on port <strong>7850</strong> by default and stays running on the remote — that's the piece your devices connect to. It's authorized with an <strong>access token</strong>; keep that token handy for Part 2.</p>
+        <p>The server listens on port <strong>7850</strong> by default and stays running on the remote — that's the piece your devices connect to.</p>
+        <p>It's secured with an <strong>access token</strong> that the installer <strong>prints once</strong> when it finishes — copy it now; you'll enter it on each device in Part 2. To show it again later, run this on the remote:</p>
+        <pre><code>./install.sh --show-token</code></pre>
         <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">View the AgentsServer repository on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
         <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>Sign in to Claude Code and Codex on the remote</h3>
@@ -112,10 +114,18 @@ cd AgentsServer
         <p>Install Tailscale on this device too and sign in with the <strong>same account</strong> you used on the remote. That's what puts them on the same private network so the app can reach the server.</p>
 
         <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>Connect to your server</h3>
-        <p>In AgentsDock, add a server with the remote's <strong>address</strong> — its Tailscale <code>100.x.x.x</code> address and port <code>7850</code> — and the <strong>access token</strong> from Part 1. Save it, and you're connected: start a chat, pick Claude Code or Codex, and point it at a working directory on your remote.</p>
+        <p>In AgentsDock, add a server with the remote's <strong>address</strong> — its Tailscale <code>100.x.x.x</code> address and port <code>7850</code> — then paste the <strong>access token</strong> from Part 1 into the <strong>Access token</strong> field. It looks something like this:</p>
+        <pre><code>ad_tok_9f3b7c2e••••••••••••••••••••   (sample)</code></pre>
+        <p>This token lives on <strong>your server machine</strong> — the remote you set up in Part 1, <em>not</em> the device you're connecting from. To get it again, run this on the remote:</p>
+        <pre><code>./install.sh --show-token</code></pre>
+        <p>Click <strong>Test connection</strong> to confirm the app can reach the server, then <strong>Add &amp; switch</strong>. You're connected: start a chat, pick Claude Code or Codex, and point it at a working directory on your remote.</p>
+        <figure class="docs-shot">
+          <img src="./assets/setup-token.png" alt="AgentsDock connection form on macOS with the Access token field, a Test connection button, and Add and switch" loading="lazy" />
+          <figcaption>Paste your access token into the <strong>Access token</strong> field, then click <strong>Test connection</strong> to verify before you save.</figcaption>
+        </figure>
         <figure class="docs-shot">
           <img src="./assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux, Claude Code, and Codex status" loading="lazy" />
-          <figcaption>From the app's Settings, you can see and monitor the connection to your remote — and check that tmux, Claude Code, and Codex are ready on the server.</figcaption>
+          <figcaption>Once connected, the app's Settings let you monitor the connection and check that tmux, Claude Code, and Codex are ready on the server.</figcaption>
         </figure>
 
         <h2 id="troubleshoot">Not connecting?</h2>
