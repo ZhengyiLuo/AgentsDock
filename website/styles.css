@@ -636,6 +636,7 @@ a { color: inherit; }
 .docs-part { margin: 64px 0 6px; padding-top: 36px; border-top: 1px solid var(--line); font-size: 30px; scroll-margin-top: 88px; }
 .docs-part-label { display: block; margin-bottom: 8px; font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--blue); }
 .docs-step { display: flex; align-items: center; margin: 36px 0 12px; font-family: var(--display); font-weight: 500; font-size: 21px; letter-spacing: -.01em; color: var(--text); scroll-margin-top: 88px; }
+.docs-step-opt { margin-left: 12px; font-family: var(--body-font); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: rgba(255,255,255,.06); border: 1px solid var(--line); padding: 2px 9px; border-radius: 99px; }
 /* Plain sub-headings inside docs prose (e.g. the support troubleshooting Qs). */
 .legal h3:not(.docs-step) { margin: 30px 0 8px; font-family: var(--display); font-size: 18px; font-weight: 600; letter-spacing: -.01em; color: var(--text); scroll-margin-top: 88px; }
 /* In-guide screenshot. */
@@ -648,6 +649,8 @@ a { color: inherit; }
 .feature-doc-desc { margin: 0 0 24px; color: var(--muted); font-size: var(--body-1); line-height: var(--line-loose); max-width: 620px; }
 
 .docs-shot { margin: 26px 0; }
+.docs-shot.narrow { max-width: 250px; margin-left: auto; margin-right: auto; }
+.docs-shot.narrow figcaption { text-align: center; }
 .docs-shot img, .docs-shot video { display: block; width: 100%; height: auto; border-radius: 12px; box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(0,0,0,.4); }
 .docs-shot figcaption { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--muted); }
 /* Keyboard-shortcuts tables — each key is its own keycap */

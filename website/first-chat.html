@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="description" content="How to start your first conversation with an agent in AgentsDock — make sure your server is connected, then click New chat and pick Claude Code or Codex." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
-    <meta property="og:title" content="Key Features · AgentsDock" />
-    <meta property="og:description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
-    <meta property="og:url" content="https://agentsdock.net/features.html" />
+    <meta property="og:title" content="Start your first chat · AgentsDock" />
+    <meta property="og:description" content="How to start your first conversation with an agent in AgentsDock — connect to your server, then click New chat." />
+    <meta property="og:url" content="https://agentsdock.net/first-chat.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="AgentsDock — a dock for all your agents" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Key Features · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="twitter:title" content="Start your first chat · AgentsDock" />
+    <meta name="twitter:description" content="Connect to your server, then click New chat to start a conversation with Claude Code or Codex." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>Key Features · AgentsDock</title>
+    <title>Start Your First Chat · AgentsDock</title>
     <link rel="icon" href="./assets/agentsdock-icon.png" />
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
@@ -58,65 +58,53 @@
           <a href="./setup.html#part-remote">Part 1 · Set up the remote</a>
           <a href="./setup.html#part-device">Part 2 · Connect your device</a>
           <a href="./setup.html#troubleshoot">Not connecting?</a>
-          <a class="docs-nav-part" href="./first-chat.html">Start your first chat</a>
-          <a class="docs-nav-part active" href="./features.html">Key features</a>
-          <a href="#feat-terminal">1 · Terminal access</a>
-          <a href="#feat-schedule">2 · Scheduled jobs</a>
-          <a href="#feat-digest">3 · Digest</a>
-          <a href="#feat-files">4 · View &amp; edit code</a>
+          <a class="docs-nav-part active" href="./first-chat.html">Start your first chat</a>
+          <a href="#connect">Check you're connected</a>
+          <a href="#new-chat">Start a chat</a>
+          <a class="docs-nav-part" href="./features.html">Key features</a>
+          <a href="./features.html#feat-terminal">Terminal access</a>
+          <a href="./features.html#feat-schedule">Scheduled jobs</a>
+          <a href="./features.html#feat-digest">Digest</a>
+          <a href="./features.html#feat-files">View &amp; edit code</a>
           <a class="docs-nav-part" href="./shortcuts.html">Keyboard shortcuts</a>
         </nav>
       </aside>
 
       <article class="legal docs-body">
         <p class="section-kicker">Docs</p>
-        <h1>Key features</h1>
-        <p class="legal-lead">What AgentsDock gives you once you're connected — the same across desktop and mobile.</p>
+        <h1>Start your first chat</h1>
+        <p class="legal-lead">Once your server is set up and connected, starting a conversation with an agent takes one click.</p>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-terminal"><span class="feature-doc-num">01</span><h2>Full terminal access from any device</h2></div>
-          <p class="feature-doc-desc">Attach to your chat's persistent <code>tmux</code> session from any device — the same shell on desktop and mobile.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-terminal-poster.jpg">
-              <source src="./assets/feature-terminal.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
+        <h2 id="connect">First, check you're connected</h2>
+        <p>Open AgentsDock and check your server in the switcher. A <strong>green dot</strong> means the server is online and you're connected; a <strong>red dot</strong> means the app can't reach it.</p>
+        <figure class="docs-shot">
+          <img src="./assets/first-chat-servers.png" alt="AgentsDock server switcher — one server offline with a red dot, and the selected Mac Mini server online with a green dot" loading="lazy" />
+          <figcaption>Green = connected and online. Red = not reachable.</figcaption>
+        </figure>
+        <p>To connect to a server you need two things: its <strong>address</strong> — the server's IP or hostname with port <code>7850</code> — and its <strong>access token</strong>. Add them in the app, then hit <strong>Test connection</strong>.</p>
+        <figure class="docs-shot">
+          <img src="./assets/first-chat-addserver.png" alt="AgentsDock Add server form with a Server URL field, an Access token field, and a Test connection button" loading="lazy" />
+          <figcaption>Add a server with its URL and access token, then <strong>Test connection</strong>.</figcaption>
+        </figure>
+        <p>Haven't set your server up yet? The <a href="./setup.html">Setup guide</a> walks you through getting your server running and finding its address and access token, then connecting your device.</p>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-schedule"><span class="feature-doc-num">02</span><h2>Scheduled jobs</h2></div>
-          <p class="feature-doc-desc">Queue interval and recurring jobs so long-running work runs on time, unattended.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-schedule-poster.jpg">
-              <source src="./assets/feature-schedule.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
+        <h2 id="new-chat">Start a chat</h2>
+        <p>Click the <strong>+</strong> button at the top of the sidebar — the <strong>New chat</strong> button — or press <code>⌘N</code>.</p>
+        <figure class="docs-shot">
+          <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-agents-poster.jpg">
+            <source src="./assets/feature-agents.mp4" type="video/mp4" />
+          </video>
+          <figcaption>Click <strong>+</strong> to start a new chat and pick an agent.</figcaption>
+        </figure>
+        <p>In the dialog, choose:</p>
+        <ul>
+          <li>a <strong>backend</strong> — <strong>Claude Code</strong> or <strong>Codex</strong>, running on your remote under your own account;</li>
+          <li>a <strong>working directory</strong> — the folder on your remote the agent will work in.</li>
+        </ul>
+        <p>Then type your first message and press <code>Enter</code> to send. That's it — the agent runs on your server in that directory, and the chat keeps its own persistent terminal you can attach to from any device, anytime.</p>
 
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-digest"><span class="feature-doc-num">03</span><h2>Digest</h2></div>
-          <p class="feature-doc-desc">Send messages between chats to carry context from one to the next.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-digest-poster.jpg">
-              <source src="./assets/feature-digest.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
-
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-files"><span class="feature-doc-num">04</span><h2>View and edit your code</h2></div>
-          <p class="feature-doc-desc">Browse, preview, and edit files on your remote directly from the app.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-files-poster.jpg">
-              <source src="./assets/feature-files.mp4" type="video/mp4" />
-            </video>
-          </figure>
-          <p>The files you can open are the ones under the chat's <strong>working directory</strong> — the folder on your remote that this chat's agent works in. Set it when you create the chat, or change it anytime from the <strong>Session</strong> panel on the right.</p>
-          <figure class="docs-shot narrow">
-            <img src="./assets/feat-files-workingdir.png" alt="AgentsDock Session panel on the right, showing the chat's Working directory field" loading="lazy" />
-            <figcaption>Find and change the chat's <strong>Working directory</strong> in the Session panel on the right.</figcaption>
-          </figure>
-        </section>
+        <h2 id="next">What next</h2>
+        <p>Explore what else AgentsDock can do in <a href="./features.html">Key features</a>, or speed things up with <a href="./shortcuts.html">Keyboard shortcuts</a>.</p>
       </article>
     </main>
 
