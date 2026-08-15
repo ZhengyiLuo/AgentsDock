@@ -77,7 +77,7 @@
 
         <h2 id="prereqs">Before you start</h2>
         <ul>
-          <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — with <code>tmux</code> installed. This runs the server.</li>
+          <li>A <strong>remote machine</strong> you control — a macOS or Linux computer that stays on — to run the server. <code>tmux</code> is optional, only needed for the in-app terminal.</li>
           <li>A <strong>Tailscale</strong> account <em>(optional)</em> — only needed to reach the remote from <strong>outside its local network</strong>. On the same Wi&#8209;Fi you can use the machine's local IP address; Tailscale is what lets you connect securely from anywhere else.</li>
           <li>Your <strong>Claude Code</strong> and/or <strong>Codex</strong> accounts, to sign the CLIs in on the remote.</li>
           <li>A <strong>Mac, iPhone, or iPad</strong> to run the app.</li>
@@ -112,8 +112,8 @@ cd AgentsServer
         <h3 class="docs-step" id="device-app"><span class="step-n">1</span>Download AgentsDock</h3>
         <p><a href="./index.html#downloads">Get the app</a> for macOS, iPhone, or iPad — the platforms available today — and open it.</p>
 
-        <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>Install Tailscale on the device</h3>
-        <p>Install Tailscale on this device too and sign in with the <strong>same account</strong> you used on the remote. That's what puts them on the same private network so the app can reach the server.</p>
+        <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>Install Tailscale on the device <span class="docs-step-opt">optional</span></h3>
+        <p>Only needed if you installed Tailscale on the remote. Install it on this device too and sign in with the <strong>same account</strong>, so both are on the same private network and the app can reach the server. On the same local network, skip this and use the remote's local IP.</p>
 
         <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>Connect to your server</h3>
         <p>In AgentsDock, add a server with the remote's <strong>address</strong> — its Tailscale <code>100.x.x.x</code> address and port <code>7850</code> — then paste the <strong>access token</strong> from Part 1 into the <strong>Access token</strong> field. It looks something like this:</p>
