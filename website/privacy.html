@@ -53,9 +53,9 @@
       <article class="legal">
         <p class="section-kicker">Legal</p>
         <h1>Privacy Policy</h1>
-        <p class="legal-meta">Last updated: August 1, 2026</p>
+        <p class="legal-meta">Last updated: August 15, 2026</p>
 
-        <p class="legal-lead">AgentsDock is a <strong>self-hosted</strong> workspace. You run your own AgentsDock server, and your chats, files, terminals, and credentials stay on infrastructure you control. This policy explains what the AgentsDock apps (macOS, Linux, iOS, and iPadOS) do and do not collect.</p>
+        <p class="legal-lead">AgentsDock is a <strong>self-hosted</strong> workspace. You run your own AgentsDock server, and your chats, files, terminals, and credentials stay on infrastructure you control. This policy explains what the AgentsDock apps (macOS, Windows, Linux, iOS, iPadOS, and Android) do and do not collect.</p>
 
         <h2>1. Who we are</h2>
         <p>AgentsDock ("AgentsDock", "we", "us") provides desktop and mobile client applications that connect to an <strong>AgentsDock server that you install and operate yourself</strong>. Because the server runs on your own machine or cluster, you are the controller of the content you create with it.</p>
@@ -71,21 +71,26 @@
         <p>This content is stored on the AgentsDock server you run (by default under <code>~/.agentsdock</code>) and is exchanged directly between the app and your server over a network connection you configure, such as your local network or Tailscale.</p>
 
         <h2>3. Information stored on your device</h2>
-        <p>To connect to your server, the app stores configuration locally on your device, including your <strong>server URL</strong> and, where applicable, an <strong>access token</strong> (kept in the operating system's secure storage, such as the Apple Keychain). This information stays on your device and is used only to reach the server you specify. Removing the app removes this local configuration.</p>
+        <p>To connect to your server, the app stores configuration locally on your device, including your <strong>server URL</strong> and, where applicable, an <strong>access token</strong> (kept in the operating system's secure storage, such as the Apple Keychain). This information stays on your device and is used only to reach the server you specify. You can remove saved server profiles and credentials in the app. Uninstall behavior varies by platform: desktop app data and operating-system secure storage, including Keychain entries, may remain until you clear them through the applicable operating-system controls.</p>
 
         <h2>4. Third-party services</h2>
         <p>Depending on how you use AgentsDock, the following third parties may be involved. Their handling of data is governed by their own policies:</p>
         <ul>
           <li><strong>AI model providers.</strong> Your AgentsDock server runs command-line agents such as Claude Code and Codex using API keys you provide. When an agent runs, your server sends requests directly to that provider (for example, Anthropic or OpenAI) under your own account. AgentsDock does not proxy, resell, or observe these requests. See the applicable provider's privacy policy.</li>
           <li><strong>Apple.</strong> If you install the app from the App Store or TestFlight, Apple may collect information related to distribution, and any crash diagnostics you choose to share are handled by Apple under Apple's privacy policy.</li>
+          <li><strong>Mixpanel.</strong> If you explicitly turn on optional usage analytics, the app sends the limited product-interaction events described below to Mixpanel. See <a href="https://mixpanel.com/legal/privacy-policy/" target="_blank" rel="noopener">Mixpanel's Privacy Policy</a>.</li>
         </ul>
 
         <h2>5. Analytics and tracking</h2>
-        <p>The AgentsDock <strong>apps</strong> do not include third-party advertising SDKs and do not track you across other apps or websites. We do not sell personal data.</p>
+        <p>The AgentsDock <strong>apps</strong> do not include third-party advertising SDKs, do not track you across other apps or websites, and do not sell personal data.</p>
+        <p>Optional usage analytics are <strong>off by default</strong>. On first run, the app asks whether you want to share them, and choosing “Not now” keeps them off. You can change your choice at any time in Settings.</p>
+        <p>If you opt in, the app sends a small, fixed set of product-interaction events to Mixpanel, such as launching the app, opening a chat, sending a message, opening a terminal or file viewer, using search or digests, scheduling a job, and testing, adding, or switching a server. Events include the app platform, a random app-install analytics ID, the event time, and limited success/failure flags where relevant. The ID is pseudonymous: it does not contain your name or contact details, but it lets Mixpanel link events from the same app installation. Events do <strong>not</strong> include chat content, prompts, agent responses, source code, file names or contents, working-directory paths, server names or addresses, access tokens, terminal output, scheduled-job content, screen recordings, automatic UI capture, or IP-derived location.</p>
+        <p>Turning analytics off stops future analytics collection and clears the app-install analytics ID stored by the app. It does not automatically delete events Mixpanel already received. To request deletion of previously sent analytics, email <a href="mailto:contact@agentsdock.net">contact@agentsdock.net</a> and, if available, include the analytics ID shown in Settings before you turn analytics off.</p>
         <p>Our marketing <strong>website</strong> (agentsdock.net) uses Google Analytics to measure aggregate traffic — such as page views and clicks on outbound links — so we can understand how the site is used. This applies to the website only, not the apps, and we do not use it to identify individual visitors. See <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a> for how Google handles this data.</p>
 
         <h2>6. Data retention and deletion</h2>
-        <p>Because your content lives on your own server, you control its retention. You can delete chats, files, and jobs from within the app, and you can remove all stored state by deleting the server's data directory (by default <code>~/.agentsdock</code>). Uninstalling the client app removes the locally stored connection settings from your device.</p>
+        <p>Because your content lives on your own server, you control its retention. You can delete chats, files, and jobs from within the app, and you can remove all stored server state by deleting the server's data directory (by default <code>~/.agentsdock</code>). Client connection settings and credentials can be removed in the app. Uninstalling alone may not clear desktop app data or operating-system secure storage, so complete client-data removal may also require clearing those stores through your operating system.</p>
+        <p>If you opt in, analytics events are managed under our Mixpanel project's retention controls and retained only while needed to measure feature-adoption and platform-reliability trends. We periodically review that need and delete analytics when they are no longer needed or after a verified deletion request. Turning analytics off clears the local app-install analytics ID and stops future collection but does not by itself delete events already received; contact <a href="mailto:contact@agentsdock.net">contact@agentsdock.net</a> to request that deletion.</p>
 
         <h2>7. Security</h2>
         <p>We recommend running your AgentsDock server over a private network or an encrypted connection such as Tailscale, enabling server authentication, and keeping your device and server operating systems up to date. No method of transmission or storage is completely secure, but the self-hosted design keeps your data within your own environment.</p>
