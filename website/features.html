@@ -21,7 +21,9 @@
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
     <title>Key Features · AgentsDock</title>
-    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
     <script>
@@ -65,6 +67,7 @@
           <a href="#feat-schedule">2 · Scheduled jobs</a>
           <a href="#feat-digest">3 · Digest</a>
           <a href="#feat-files">4 · View &amp; edit code</a>
+          <a href="#feat-resume">5 · Resume chat</a>
           <a class="docs-nav-part" href="./shortcuts.html">Keyboard shortcuts</a>
         </nav>
       </aside>
@@ -117,6 +120,17 @@
             <img src="./assets/feat-files-workingdir.png" alt="AgentsDock Session panel on the right, showing the chat's Working directory field" loading="lazy" />
             <figcaption>Find and change the chat's <strong>Working directory</strong> in the Session panel on the right.</figcaption>
           </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-resume"><span class="feature-doc-num">05</span><h2>Resume chats from outside AgentsDock</h2></div>
+          <p class="feature-doc-desc">Bring a Claude Code or Codex chat you started outside AgentsDock into the app — by its session ID.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-resume-poster.jpg">
+              <source src="./assets/feature-resume.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <p>Started a Claude Code or Codex session in your own terminal, before or outside AgentsDock? Every session has a <strong>session ID</strong> — paste it in and AgentsDock resumes that conversation in the app, full history and context intact, so you can carry it on from any device. It works for chats you began <em>outside</em> AgentsDock, not just ones started in the app.</p>
         </section>
       </article>
     </main>
