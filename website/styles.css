@@ -593,7 +593,10 @@ a { color: inherit; }
 .download-options-link.unavailable { cursor: default; opacity: .65; }
 .download-options button.unavailable { opacity: .68; }
 .download-options code { grid-column: 1 / -1; color: #727c77; font-size: 11px; overflow-wrap: anywhere; }
-.download-status { min-height: 24px; grid-column: 2; margin: -70px 0 0; color: var(--amber); font-size: 13px; }
+.download-seeall { margin: 18px 0 0; font-size: 15px; }
+.download-seeall a { color: var(--blue); text-decoration: none; font-weight: 500; transition: color .2s ease-in-out; }
+.download-seeall a:hover { color: var(--blue-2); }
+.download-arch { display: inline-flex; gap: 8px; }
 
 /* ── Legal / prose pages ── */
 .legal { max-width: 820px; margin: 0 auto; padding: 152px max(6vw, 24px) 96px; }
