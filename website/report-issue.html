@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="How to start your first conversation with an agent in AgentsDock — make sure your server is connected, then click New chat and pick Claude Code or Codex." />
+    <meta name="description" content="How to report a bug or request a feature in AgentsDock — use the /feedback slash command in a chat, open an issue on GitHub, or ask on Discord." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
-    <meta property="og:title" content="Start your first chat · AgentsDock" />
-    <meta property="og:description" content="How to start your first conversation with an agent in AgentsDock — connect to your server, then click New chat." />
-    <meta property="og:url" content="https://agentsdock.net/first-chat.html" />
+    <meta property="og:title" content="Report an Issue · AgentsDock" />
+    <meta property="og:description" content="Report a bug or request a feature — use the /feedback slash command, open a GitHub issue, or ask on Discord." />
+    <meta property="og:url" content="https://agentsdock.net/report-issue.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="AgentsDock — a dock for all your agents" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Start your first chat · AgentsDock" />
-    <meta name="twitter:description" content="Connect to your server, then click New chat to start a conversation with Claude Code or Codex." />
+    <meta name="twitter:title" content="Report an Issue · AgentsDock" />
+    <meta name="twitter:description" content="Report a bug or request a feature — use the /feedback slash command, open a GitHub issue, or ask on Discord." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>Start Your First Chat · AgentsDock</title>
+    <title>Report an Issue · AgentsDock</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
@@ -61,9 +61,7 @@
           <a href="./setup.html#part-device">Part 2 · Connect your device</a>
           <a href="./setup.html#troubleshoot">Not connecting?</a>
           <a class="docs-nav-part" href="./iphone.html">Install on iPhone &amp; iPad</a>
-          <a class="docs-nav-part active" href="./first-chat.html">Start your first chat</a>
-          <a href="#connect">Check you're connected</a>
-          <a href="#new-chat">Start a chat</a>
+          <a class="docs-nav-part" href="./first-chat.html">Start your first chat</a>
           <a class="docs-nav-part" href="./features.html">Key features</a>
           <a href="./features.html#feat-terminal">Terminal access</a>
           <a href="./features.html#feat-schedule">Scheduled jobs</a>
@@ -73,45 +71,38 @@
           <a href="./features.html#feat-slash">Slash commands</a>
           <a href="./features.html#feat-agent2agent">Agent-to-agent</a>
           <a class="docs-nav-part" href="./shortcuts.html">Keyboard shortcuts</a>
-          <a class="docs-nav-part" href="./report-issue.html">Report an issue</a>
+          <a class="docs-nav-part active" href="./report-issue.html">Report an issue</a>
+          <a href="#feedback">Send feedback from a chat</a>
+          <a href="#github">Open an issue on GitHub</a>
+          <a href="#discord">Prefer Discord?</a>
         </nav>
       </aside>
 
       <article class="legal docs-body">
         <p class="section-kicker">Docs</p>
-        <h1>Start your first chat</h1>
-        <p class="legal-lead">Once your server is set up and connected, starting a conversation with an agent takes one click.</p>
+        <h1>Report an issue</h1>
+        <p class="legal-lead">Hit a bug, or have a feature request? Issues live on <strong>GitHub</strong> — and the quickest way there is right from a chat.</p>
 
-        <h2 id="connect">First, check you're connected</h2>
-        <p>Open AgentsDock and check your server in the switcher. A <strong>green dot</strong> means the server is online and you're connected; a <strong>red dot</strong> means the app can't reach it.</p>
+        <h2 id="feedback">Send feedback from a chat</h2>
+        <p>Type <code>/feedback</code> in the message box — or pick <strong>Send feedback</strong> from the <code>/</code> menu. It takes you straight to the AgentsDock issue form on GitHub, so there's no repository to hunt for.</p>
         <figure class="docs-shot">
-          <img src="./assets/first-chat-servers.png" alt="AgentsDock server switcher — one server offline with a red dot, and the selected Mac Mini server online with a green dot" loading="lazy" />
-          <figcaption>Green = connected and online. Red = not reachable.</figcaption>
+          <img src="./assets/report-feedback.png" alt="AgentsDock slash-command menu with 'Send feedback — Open the public AgentsDock issue form' highlighted, mapped to the /feedback command" loading="lazy" />
+          <figcaption>Type <code>/feedback</code> in any chat — it opens the GitHub issue form.</figcaption>
         </figure>
-        <p>To connect to a server you need two things: its <strong>address</strong> — the server's IP or hostname with port <code>7850</code> — and its <strong>access token</strong>. Add them in the app, then hit <strong>Test connection</strong>.</p>
-        <figure class="docs-shot">
-          <img src="./assets/first-chat-addserver.png" alt="AgentsDock Add server form with a Server URL field, an Access token field, and a Test connection button" loading="lazy" />
-          <figcaption>Add a server with its URL and access token, then <strong>Test connection</strong>.</figcaption>
-        </figure>
-        <p>Haven't set your server up yet? The <a href="./setup.html">Setup guide</a> walks you through getting your server running and finding its address and access token, then connecting your device.</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new" target="_blank" rel="noopener">Open the AgentsDock issue form on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h2 id="new-chat">Start a chat</h2>
-        <p>Click the <strong>+</strong> button at the top of the sidebar — the <strong>New chat</strong> button — or press <code>⌘N</code>.</p>
+        <h2 id="github">…or open an issue on GitHub directly</h2>
+        <p>Same destination, if you'd rather go straight there. Open a new issue on the AgentsDock releases repository, give it a clear title and description — the steps to reproduce, what you expected, and what actually happened — and attach a screenshot or screen recording if you can. It really helps us track it down.</p>
         <figure class="docs-shot">
-          <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-agents-poster.jpg">
-            <source src="./assets/feature-agents.mp4" type="video/mp4" />
-          </video>
-          <figcaption>Click <strong>+</strong> to start a new chat and pick an agent.</figcaption>
+          <img src="./assets/report-issue-github.png" alt="GitHub 'Create new issue' page on the ZhengyiLuo/AgentsDock-Releases repository, showing the title field and description editor" loading="lazy" />
+          <figcaption>The AgentsDock issue form on GitHub — where <code>/feedback</code> lands too.</figcaption>
         </figure>
-        <p>In the dialog, choose:</p>
-        <ul>
-          <li>a <strong>backend</strong> — <strong>Claude Code</strong> or <strong>Codex</strong>, running on your remote under your own account;</li>
-          <li>a <strong>working directory</strong> — the folder on your remote the agent will work in.</li>
-        </ul>
-        <p>Then type your first message and press <code>Enter</code> to send. That's it — the agent runs on your server in that directory, and the chat keeps its own persistent terminal you can attach to from any device, anytime.</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new" target="_blank" rel="noopener">Open a new issue on GitHub <span aria-hidden="true">&rarr;</span></a></p>
+        <p class="legal-meta">It's worth a quick look through the <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues" target="_blank" rel="noopener">existing issues</a> first — someone may have already reported it.</p>
 
-        <h2 id="next">What next</h2>
-        <p>Explore what else AgentsDock can do in <a href="./features.html">Key features</a>, or speed things up with <a href="./shortcuts.html">Keyboard shortcuts</a>.</p>
+        <h2 id="discord">Prefer Discord?</h2>
+        <p>For quick questions, or if you're not sure whether something's a bug, come say hi in our community instead. We're active there and happy to help.</p>
+        <p><a class="quickstart-docs" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Join the AgentsDock Discord <span aria-hidden="true">&rarr;</span></a></p>
       </article>
     </main>
 
