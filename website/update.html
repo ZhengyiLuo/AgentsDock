@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="How to report a bug or request a feature in AgentsDock — use the /feedback slash command in a chat, open an issue on GitHub, or ask on Discord." />
+    <meta name="description" content="How to keep AgentsDock up to date — update the app and your AgentsServer together, and choose between the Stable and Beta channels." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
-    <meta property="og:title" content="Report an Issue · AgentsDock" />
-    <meta property="og:description" content="Report a bug or request a feature — use the /feedback slash command, open a GitHub issue, or ask on Discord." />
-    <meta property="og:url" content="https://agentsdock.net/report-issue.html" />
+    <meta property="og:title" content="Update to the Latest Version · AgentsDock" />
+    <meta property="og:description" content="Update the app and your AgentsServer together, and choose between the Stable and Beta channels." />
+    <meta property="og:url" content="https://agentsdock.net/update.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="AgentsDock — a dock for all your agents" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Report an Issue · AgentsDock" />
-    <meta name="twitter:description" content="Report a bug or request a feature — use the /feedback slash command, open a GitHub issue, or ask on Discord." />
+    <meta name="twitter:title" content="Update to the Latest Version · AgentsDock" />
+    <meta name="twitter:description" content="Update the app and your AgentsServer together, and choose between the Stable and Beta channels." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
-    <title>Report an Issue · AgentsDock</title>
+    <title>Update to the Latest Version · AgentsDock</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
@@ -64,39 +64,40 @@
           <a class="docs-nav-part" href="./first-chat.html">Start your first chat</a>
           <a class="docs-nav-part" href="./features.html">Key features</a>
           <a class="docs-nav-part" href="./shortcuts.html">Keyboard shortcuts</a>
-          <a class="docs-nav-part" href="./update.html">Updates</a>
-          <a class="docs-nav-part active" href="./report-issue.html">Report an issue</a>
-          <a href="#feedback">Send feedback from a chat</a>
-          <a href="#github">Open an issue on GitHub</a>
-          <a href="#discord">Prefer Discord?</a>
+          <a class="docs-nav-part active" href="./update.html">Updates</a>
+          <a href="#update">Update in the app</a>
+          <a href="#both">Update both together</a>
+          <a href="#channels">Stable vs. Beta</a>
+          <a class="docs-nav-part" href="./report-issue.html">Report an issue</a>
         </nav>
       </aside>
 
       <article class="legal docs-body">
         <p class="section-kicker">Docs</p>
-        <h1>Report an issue</h1>
-        <p class="legal-lead">Hit a bug, or have a feature request? Issues live on <strong>GitHub</strong> — and the quickest way there is right from a chat.</p>
+        <h1>Update to the latest version</h1>
+        <p class="legal-lead">AgentsDock updates in place — from the app's settings. You choose how new versions reach you with two channels: <strong>Stable</strong> and <strong>Beta</strong>.</p>
 
-        <h2 id="feedback">Send feedback from a chat</h2>
-        <p>Type <code>/feedback</code> in the message box — or pick <strong>Send feedback</strong> from the <code>/</code> menu. It takes you straight to the AgentsDock issue form on GitHub, so there's no repository to hunt for.</p>
+        <h2 id="update">How to update to the latest version in the app</h2>
+        <p>Open <strong>Settings</strong> and scroll to the update section. AgentsDock checks for new versions and shows what's available — click <strong>Check now</strong>, then <strong>Restart to update</strong> to install and relaunch on the latest build.</p>
         <figure class="docs-shot">
-          <img src="./assets/report-feedback.png" alt="AgentsDock slash-command menu with 'Send feedback — Open the public AgentsDock issue form' highlighted, mapped to the /feedback command" loading="lazy" />
-          <figcaption>Type <code>/feedback</code> in any chat — it opens the GitHub issue form.</figcaption>
+          <video autoplay muted loop playsinline preload="metadata" poster="./assets/update-channels-poster.jpg">
+            <source src="./assets/update-channels.mp4" type="video/mp4" />
+          </video>
+          <figcaption>Update the app and your AgentsServer from Settings — each with its own Stable / Beta switch.</figcaption>
         </figure>
-        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new" target="_blank" rel="noopener">Open the AgentsDock issue form on GitHub <span aria-hidden="true">&rarr;</span></a></p>
 
-        <h2 id="github">…or open an issue on GitHub directly</h2>
-        <p>Same destination, if you'd rather go straight there. Open a new issue on the AgentsDock releases repository, give it a clear title and description — the steps to reproduce, what you expected, and what actually happened — and attach a screenshot or screen recording if you can. It really helps us track it down.</p>
-        <figure class="docs-shot">
-          <img src="./assets/report-issue-github.png" alt="GitHub 'Create new issue' page on the ZhengyiLuo/AgentsDock-Releases repository, showing the title field and description editor" loading="lazy" />
-          <figcaption>The AgentsDock issue form on GitHub — where <code>/feedback</code> lands too.</figcaption>
-        </figure>
-        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new" target="_blank" rel="noopener">Open a new issue on GitHub <span aria-hidden="true">&rarr;</span></a></p>
-        <p class="legal-meta">It's worth a quick look through the <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues" target="_blank" rel="noopener">existing issues</a> first — someone may have already reported it.</p>
+        <h2 id="both">Update the app and server together</h2>
+        <p>AgentsDock has two halves — the <strong>app</strong> (the client on your Mac, iPhone, or iPad) and the <strong>AgentsServer</strong> (running on your remote). Each shows its own version and its own <strong>Check</strong> and update controls in the same panel.</p>
+        <p>When you update, <strong>bring both to the latest version at the same time</strong>. Keeping the app and server on matching releases avoids version mismatches — features and fixes often land on both sides together. Use <strong>Update server to Beta</strong> / <strong>Install or update AgentsServer</strong> for the remote, and <strong>Restart to update</strong> for the app.</p>
 
-        <h2 id="discord">Prefer Discord?</h2>
-        <p>For quick questions, or if you're not sure whether something's a bug, come say hi in our community instead. We're active there and happy to help.</p>
-        <p><a class="quickstart-docs" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Join the AgentsDock Discord <span aria-hidden="true">&rarr;</span></a></p>
+        <h2 id="channels">Stable vs. Beta</h2>
+        <p>Both the app and the server have a <strong>Stable</strong> / <strong>Beta</strong> switch:</p>
+        <ul>
+          <li><strong>Stable</strong> — polished, well-tested releases. The right choice for everyday use.</li>
+          <li><strong>Beta</strong> — the newest signed builds, with features and fixes before they reach Stable. Great if you want the latest, and don't mind the occasional rough edge.</li>
+        </ul>
+        <p>Pick the same channel on both sides so the app and server stay in step. Want to know exactly what changed in each version — and which are Stable vs. Beta? Every release and its notes are on GitHub.</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener">Browse releases &amp; release notes <span aria-hidden="true">&rarr;</span></a></p>
       </article>
     </main>
 

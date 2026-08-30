@@ -116,9 +116,9 @@
           <div class="quickstart-copy">
             <h2 id="quickstart-title">How it works</h2>
             <ul class="quickstart-points">
-              <li><span class="step-n">1</span>Set up your server in simple commands</li>
+              <li><span class="step-n">1</span>Set up your server with a few simple commands</li>
               <li><span class="step-n">2</span>Access the server from any device</li>
-              <li><span class="step-n">3</span>Have your agents do search and model training for you</li>
+              <li><span class="step-n">3</span>Have your agents do research and model training for you</li>
             </ul>
             <a class="quickstart-docs" href="./setup.html">Read the full setup guide <span aria-hidden="true">→</span></a>
             <div class="ways">
@@ -281,91 +281,6 @@
             <p>Agents return plots, images, and rendered rollouts inline — review a run's real output right in the chat.</p>
           </div>
         </div>
-
-        <div class="showcase-row">
-          <figure class="showcase-media sched-media" aria-hidden="true">
-            <div class="sched-head">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-              <span>Schedule a job</span>
-            </div>
-            <div class="sched-body">
-              <div class="sched-field">
-                <label>Schedule</label>
-                <div class="seg" data-seg><span class="seg-on">Interval</span><span>Cron</span><span>RRULE</span></div>
-              </div>
-              <div class="sched-field">
-                <label>Interval</label>
-                <div class="sched-interval">
-                  <div class="sched-picker">
-                    <div class="sched-select" id="sched-interval"><span class="sched-interval-label">1 day</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></div>
-                    <div class="sched-menu" id="sched-menu">
-                      <span class="sched-option" data-label="1 hour" data-seconds="3600">1 hour</span>
-                      <span class="sched-option" data-label="4 hours" data-seconds="14400">4 hours</span>
-                      <span class="sched-option sched-option-on" data-label="1 day" data-seconds="86400">1 day</span>
-                      <span class="sched-option" data-label="1 week" data-seconds="604800">1 week</span>
-                    </div>
-                  </div>
-                  <span class="sched-seconds"><span id="sched-seconds">86400</span> s</span>
-                </div>
-              </div>
-            </div>
-          </figure>
-          <div class="showcase-copy">
-            <h3>Schedule jobs ahead</h3>
-            <p>Run a prompt on your own schedule — interval, cron, or recurring.</p>
-          </div>
-        </div>
-
-        <div class="showcase-row">
-          <figure class="showcase-media fork-media" aria-hidden="true">
-            <div class="fork-card">
-              <ul class="fork-list">
-                <li class="fork-row">
-                  <span class="fork-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
-                  <span class="fork-meta"><span class="fork-name">SONIC motion-tracking sweep</span><span class="fork-sub">Codex · research notes</span></span>
-                </li>
-                <li class="fork-row fork-row-new">
-                  <span class="fork-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
-                  <span class="fork-meta"><span class="fork-name">Fork of SONIC motion-tracking sweep</span><span class="fork-sub">Codex · ablation branch</span></span>
-                </li>
-              </ul>
-            </div>
-            <div class="fork-connector"><span class="fork-dot"></span></div>
-            <div class="fork-btn">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 8.5v7M18 9.5c0 4-6 2-6 6"/></svg>
-              Fork chat
-            </div>
-          </figure>
-          <div class="showcase-copy">
-            <h3>Fork any chat</h3>
-            <p>Branch any chat with one click to try a new direction — the original stays intact.</p>
-          </div>
-        </div>
-
-        <div class="showcase-row">
-          <figure class="showcase-media digest-media" aria-hidden="true">
-            <p class="digest-head">Create context digest</p>
-            <div class="digest-flow">
-              <div class="digest-chat">
-                <span class="digest-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
-                <span class="digest-meta"><span class="digest-name">VIRAL sim-to-real review</span><span class="digest-role">Source</span></span>
-              </div>
-              <span class="digest-arrow">&rarr;</span>
-              <div class="digest-chat digest-chat-target">
-                <span class="digest-avatar"><img src="./assets/codex-logo.png" alt="" /></span>
-                <span class="digest-meta"><span class="digest-name">Doorman pixel-to-action transfer</span><span class="digest-role">Target</span></span>
-              </div>
-            </div>
-            <div class="digest-field">
-              <span class="digest-label">Focus for the target agent</span>
-              <div class="digest-prompt">Carry the humanoid policy-transfer findings and rollout metrics into the next experiment review.</div>
-            </div>
-          </figure>
-          <div class="showcase-copy">
-            <h3>Send messages between chats</h3>
-            <p>Hand one focused turn from a source chat to another, so the next agent builds on the last.</p>
-          </div>
-        </div>
       </section>
 
       <section class="downloads" id="downloads" aria-labelledby="download-title">
@@ -444,42 +359,6 @@
           }, { threshold: 0.3 });
           io.observe(el);
         } else { start(); }
-      })();
-
-      // Make the mock panel controls feel interactive (visual only).
-      (function () {
-        document.querySelectorAll('[data-seg]').forEach(function (seg) {
-          seg.addEventListener('click', function (e) {
-            var t = e.target.closest('span');
-            if (!t || t.parentNode !== seg) return;
-            seg.querySelectorAll('span').forEach(function (s) { s.classList.remove('seg-on'); });
-            t.classList.add('seg-on');
-          });
-        });
-        var iv = document.getElementById('sched-interval');
-        if (iv) {
-          var label = iv.querySelector('.sched-interval-label');
-          var secs = document.getElementById('sched-seconds');
-          var picker = iv.closest('.sched-picker');
-          var options = document.querySelectorAll('.sched-option');
-          iv.addEventListener('click', function (e) {
-            e.stopPropagation();
-            if (picker) picker.classList.toggle('is-open');
-          });
-          options.forEach(function (option) {
-            option.addEventListener('click', function (e) {
-              e.stopPropagation();
-              options.forEach(function (item) { item.classList.remove('sched-option-on'); });
-              option.classList.add('sched-option-on');
-              label.textContent = option.dataset.label;
-              if (secs) secs.textContent = option.dataset.seconds;
-              if (picker) picker.classList.remove('is-open');
-            });
-          });
-          document.addEventListener('click', function () {
-            if (picker) picker.classList.remove('is-open');
-          });
-        }
       })();
     </script>
   </body>
