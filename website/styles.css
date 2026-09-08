@@ -62,6 +62,8 @@ a { color: inherit; }
 .nav-github, .nav-discord { display: inline-flex; align-items: center; gap: 6px; }
 .nav-discord svg { flex-shrink: 0; }
 .site-header nav a:hover { color: var(--text); }
+/* Mobile primary-nav hamburger — hidden on desktop, revealed ≤900px (see media query). */
+.nav-toggle { display: none; }
 .header-action { justify-self: end; display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 8px 12px; text-decoration: none; font-size: 15px; font-weight: 500; line-height: 1; border: none; border-radius: 8px; background: #f3f5f8; color: #10141b; transition: background-color .2s ease-in-out; }
 .header-action:hover { background: #fff; }
 
@@ -631,9 +633,11 @@ a { color: inherit; }
 .docs-nav-part { margin-top: 20px; font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: .01em; color: #cbd3df; }
 .docs-nav-part:hover { color: var(--text); }
 .docs-nav-part.active { color: var(--blue); border-left-color: var(--blue); }
+/* Mobile docs directory toggle — hidden on desktop, revealed ≤900px (see media query). */
+.docs-menu-toggle { display: none; }
 /* Reuse the .legal prose styles but drop its narrow-column container box —
    the content fills the full width of the docs grid column. */
-.docs .legal { max-width: none; margin: 0; padding: 0; }
+.docs .legal { max-width: none; min-width: 0; margin: 0; padding: 0; }
 .docs .legal h2 { scroll-margin-top: 88px; }
 /* Two-part dividers and their numbered sub-steps. */
 .docs-part { margin: 64px 0 6px; padding-top: 36px; border-top: 1px solid var(--line); font-size: 30px; scroll-margin-top: 88px; }
@@ -674,9 +678,33 @@ a { color: inherit; }
 }
 
 @media (max-width: 900px) {
-  .docs { grid-template-columns: 1fr; gap: 0; padding: 112px max(6vw, 22px) 80px; }
-  .docs-nav { display: none; }
+  .docs { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 96px max(6vw, 22px) 80px; }
+
+  /* Collapsible directory button — sits just under the fixed 64px header. */
+  .docs-menu-toggle {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    width: 100%; margin: 0 0 26px; padding: 13px 16px;
+    background: rgba(20,24,23,.86); backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 12px;
+    color: var(--text); font: inherit; text-align: left; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    position: sticky; top: 64px; z-index: 6;
+  }
+  .docs-menu-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .docs-menu-kicker { font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .docs-menu-current { font-family: var(--display); font-size: 16px; font-weight: 600; color: var(--text); }
+  .docs-menu-chev { flex-shrink: 0; color: var(--muted); transition: transform .2s ease; }
+  .docs-menu-toggle.is-open .docs-menu-chev { transform: rotate(180deg); }
+
+  /* Sidebar becomes the expandable panel (collapsed by default on mobile). */
+  .docs-nav { display: none; position: static; top: auto; margin: 0 0 30px; }
+  .docs-nav.is-open { display: block; animation: docsNavIn .18s ease; }
+  .docs-nav-title { display: none; }
+  .docs-nav nav { border-left: 1px solid var(--line); }
+  .docs-nav a { padding: 11px 0 11px 18px; font-size: 15px; }
+  .docs-nav-part { margin-top: 16px; }
 }
+@keyframes docsNavIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 footer { min-height: 150px; padding: 42px max(4vw, 28px); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .footer-brand { color: var(--text); }
@@ -704,7 +732,31 @@ footer a:hover { color: var(--text); }
 
 @media (max-width: 900px) {
   .site-header { grid-template-columns: 1fr auto; padding: 0 18px; }
+  .nav-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; margin-right: -8px; padding: 0;
+    border: none; background: transparent; color: var(--text); cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .nav-toggle-close { display: none; }
+  .site-header.nav-open .nav-toggle-open { display: none; }
+  .site-header.nav-open .nav-toggle-close { display: block; }
+  /* Header links collapse behind the hamburger, dropping down as a panel when open. */
   .site-header nav { display: none; }
+  .site-header.nav-open nav {
+    display: flex; flex-direction: column; gap: 0;
+    position: absolute; top: 64px; left: 0; right: 0;
+    padding: 8px 18px 16px;
+    background: rgba(14,17,16,.97); backdrop-filter: blur(18px);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 24px 48px rgba(0,0,0,.4);
+    animation: docsNavIn .18s ease;
+  }
+  .site-header.nav-open nav a {
+    padding: 14px 6px; font-size: 16px; color: var(--text);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .site-header.nav-open nav a:last-child { border-bottom: none; }
   .hero { padding: 128px 22px 64px; display: flex; flex-direction: column; gap: 48px; align-items: center; }
   .hero-copy { min-width: 0; }
   .hero-product-devices { display: flex; flex-direction: column; align-items: center; gap: 24px; }
