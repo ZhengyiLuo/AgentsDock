@@ -625,14 +625,19 @@ a { color: inherit; }
 /* ── Docs layout (setup guide): sticky sidebar TOC + wide content ── */
 .docs { max-width: 1440px; margin: 0 auto; padding: 132px max(5vw, 22px) 96px; display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 72px; align-items: start; }
 .docs-nav { position: sticky; top: 96px; align-self: start; }
-.docs-nav-title { margin: 0 0 16px; font-family: var(--display); font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
-.docs-nav nav { display: flex; flex-direction: column; border-left: 1px solid var(--line); }
-.docs-nav a { padding: 8px 0 8px 18px; margin-left: -1px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35; transition: color .15s ease, border-color .15s ease; }
-.docs-nav a:hover { color: var(--text); }
-.docs-nav a.active { color: var(--blue); border-left-color: var(--blue); }
-.docs-nav-part { margin-top: 20px; font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: .01em; color: #cbd3df; }
-.docs-nav-part:hover { color: var(--text); }
-.docs-nav-part.active { color: var(--blue); border-left-color: var(--blue); }
+.docs-nav nav { display: flex; flex-direction: column; gap: 1px; }
+/* Small uppercase category label above each group of pages. */
+.docs-nav-label { margin: 26px 0 6px; padding: 0 10px; font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6b7583; }
+.docs-nav-label:first-child { margin-top: 0; }
+/* Top-level page links — clean rows, tinted pill for the current page. */
+.docs-nav-link { display: block; padding: 7px 10px; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.35; transition: color .15s ease, background-color .15s ease; }
+.docs-nav-link:hover { color: var(--text); background: rgba(255,255,255,.045); }
+.docs-nav-link.current { color: var(--blue); background: var(--accent-soft); font-weight: 600; }
+/* On-this-page anchors for the current page, nested under it with a thin rail. */
+.docs-nav-subs { display: flex; flex-direction: column; margin: 3px 0 4px 22px; padding-left: 0; border-left: 1px solid var(--line); }
+.docs-nav-subs a { margin-left: -1px; padding: 6px 0 6px 14px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 13px; line-height: 1.3; transition: color .15s ease, border-color .15s ease; }
+.docs-nav-subs a:hover { color: var(--text); }
+.docs-nav-subs a.active { color: var(--blue); border-left-color: var(--blue); }
 /* Mobile docs directory toggle — hidden on desktop, revealed ≤900px (see media query). */
 .docs-menu-toggle { display: none; }
 /* Reuse the .legal prose styles but drop its narrow-column container box —
@@ -699,10 +704,9 @@ a { color: inherit; }
   /* Sidebar becomes the expandable panel (collapsed by default on mobile). */
   .docs-nav { display: none; position: static; top: auto; margin: 0 0 30px; }
   .docs-nav.is-open { display: block; animation: docsNavIn .18s ease; }
-  .docs-nav-title { display: none; }
-  .docs-nav nav { border-left: 1px solid var(--line); }
-  .docs-nav a { padding: 11px 0 11px 18px; font-size: 15px; }
-  .docs-nav-part { margin-top: 16px; }
+  .docs-nav-label:first-child { margin-top: 4px; }
+  .docs-nav-link { padding: 11px 12px; font-size: 15px; }
+  .docs-nav-subs a { padding: 10px 0 10px 14px; font-size: 14px; }
 }
 @keyframes docsNavIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 

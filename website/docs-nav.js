@@ -8,7 +8,7 @@
   var nav = document.querySelector('.docs-nav');
   if (!nav || document.querySelector('.docs-menu-toggle')) return;
 
-  var active = nav.querySelector('.docs-nav-part.active');
+  var active = nav.querySelector('.docs-nav-link.current');
   var current = active ? active.textContent.trim() : 'Docs';
 
   var btn = document.createElement('button');
