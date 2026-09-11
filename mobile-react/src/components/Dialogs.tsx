@@ -3,11 +3,11 @@ import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, Sty
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { DateTimePicker } from '@expo/ui/community/datetime-picker'
 import * as Clipboard from 'expo-clipboard'
-import { Calendar, Check, ChevronDown, Clock, Copy, ExternalLink, KeyRound, Minus, Network, Plus, Search, Server, ShieldCheck, SquareTerminal, type LucideIcon } from 'lucide-react-native'
+import { Calendar, Check, ChevronDown, Clock, Copy, ExternalLink, KeyRound, Minus, Network, Plus, Search, Server, SquareTerminal, type LucideIcon } from 'lucide-react-native'
 import type { AgentServerClient } from '../api/AgentServerClient'
 import { defaultScheduleWallTime, effectiveScheduleKind, formatScheduleWallTime, JOB_INTERVAL_PRESETS_SECONDS, jobLoopsForever, jobNextRunUpdatePatch, jobScheduleFields, jobScheduleUpdatePatch, mergeScheduleWallTimePickerValue, parseScheduleWallTime, scheduleWallTimeAndroidDatePickerDate, scheduleWallTimePickerDate, type JobStartMode, validateJobNextRun, validateJobSchedule } from '../lib/job-schedule'
 import { AGENTS_SERVER_REPOSITORY_URL } from '../lib/server-setup'
-import { ANALYTICS_PRIVACY_POLICY_URL, getAndroidAnalyticsEnabled, setAndroidAnalyticsEnabled, trackEvent } from '../lib/analytics'
+import { trackEvent } from '../lib/analytics'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { backendLabel } from '../lib/format'
 import { serverSearchQuery } from '../lib/server-search'
@@ -26,6 +26,9 @@ import { RuntimeHealthPanel } from './RuntimeHealth'
 import { CodexServerSettings } from './CodexServerSettings'
 import appConfig from '../../app.json'
 import { AndroidUpdateSettings } from './AndroidUpdater'
+import { AnalyticsSettings } from './AnalyticsSettings'
+
+const PRIVACY_POLICY_URL = 'https://agentsdock.net/privacy.html'
 
 export function ServerSetupDialog({
   visible,
@@ -71,8 +74,8 @@ function SetupStep({ icon: Icon, text }: { icon: LucideIcon; text: string }) {
   return <View style={styles.setupStep}><Icon size={17} color={colors.muted} /><Text style={[styles.setupStepText, { color: colors.text }]}>{text}</Text></View>
 }
 
-function openAnalyticsPrivacyPolicy(): void {
-  void Linking.openURL(ANALYTICS_PRIVACY_POLICY_URL).catch(() => undefined)
+function openPrivacyPolicy(): void {
+  void Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)
 }
 
 export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -89,34 +92,18 @@ export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose
   const setChatDefaults = useAppStore(state => state.setChatDefaults)
   const [url, setURL] = useState(currentURL)
   const [token, setToken] = useState(currentToken)
-  const [analyticsEnabled, setAnalyticsEnabled] = useState(true)
-  const [analyticsBusy, setAnalyticsBusy] = useState(false)
   const [defaultFolder, setDefaultFolder] = useState(chatDefaults.folder)
   const [defaultCwd, setDefaultCwd] = useState(chatDefaults.cwd)
   useEffect(() => {
     if (!visible) return
-    let active = true
     setURL(currentURL)
     setToken(currentToken)
     setDefaultFolder(chatDefaults.folder)
     setDefaultCwd(chatDefaults.cwd)
-    if (Platform.OS !== 'android') return
-    void getAndroidAnalyticsEnabled().then(enabled => {
-      if (!active) return
-      setAnalyticsEnabled(enabled)
-    })
-    return () => { active = false }
   }, [chatDefaults.cwd, chatDefaults.folder, currentToken, currentURL, visible])
   const defaultServerCwd = health?.default_cwd?.trim() ?? ''
   const chatDefaultBackendOptions = selectableChatBackends(health)
   const chatDefaultModelOptions = runtimeCatalogOptions(runtime, chatDefaults.backend, 'models', chatDefaults.model)
-  const changeAndroidAnalytics = async (enabled: boolean) => {
-    if (analyticsBusy) return
-    setAnalyticsBusy(true)
-    setAnalyticsEnabled(enabled)
-    await setAndroidAnalyticsEnabled(enabled)
-    setAnalyticsBusy(false)
-  }
   return <Sheet visible={visible} title="Settings" onClose={onClose}>
     <AndroidUpdateSettings />
     <RuntimeHealthPanel />
@@ -152,13 +139,9 @@ export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose
     />
     <Text style={[styles.help, { color: colors.muted }]}>The + button uses this backend and model with the last-opened chat’s folder and working directory. These location defaults apply when no chat is open.</Text>
     <Label text="Privacy" />
-    {Platform.OS === 'android' ? <View style={[styles.analyticsSetting, { backgroundColor: colors.raised, borderColor: colors.border }]}>
-      <ShieldCheck size={18} color={colors.blue} />
-      <View style={{ flex: 1, gap: 3 }}><Text style={{ color: colors.text, fontWeight: '700' }}>Usage analytics</Text><Text style={{ color: colors.muted, fontSize: 10, lineHeight: 14 }}>{analyticsEnabled ? 'On. Sends ID-less usage events to Mixpanel—never chat, file, path, server, token, screen-replay, IP-location, or persistent identifier data.' : 'Off. No Mixpanel events are sent.'}</Text></View>
-      <Switch testID="settings-analytics-toggle" accessibilityLabel="Share usage analytics" value={analyticsEnabled} disabled={analyticsBusy} onValueChange={value => void changeAndroidAnalytics(value)} />
-    </View> : null}
-    <View style={styles.analyticsSettingsLinks}>
-      <Pressable testID="settings-privacy-policy" accessibilityRole="link" onPress={openAnalyticsPrivacyPolicy} style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.6 : 1 }]}><Text style={[styles.privacyLinkText, { color: colors.blue }]}>Privacy Policy</Text><ExternalLink size={13} color={colors.blue} /></Pressable>
+    <AnalyticsSettings visible={visible} />
+    <View style={styles.privacySettingsLinks}>
+      <Pressable testID="settings-privacy-policy" accessibilityRole="link" onPress={openPrivacyPolicy} style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.6 : 1 }]}><Text style={[styles.privacyLinkText, { color: colors.blue }]}>Privacy Policy</Text><ExternalLink size={13} color={colors.blue} /></Pressable>
     </View>
     <PrimaryButton testID="settings-apply" label={connecting ? 'Connecting…' : 'Apply & reconnect'} disabled={connecting || !url.trim()} onPress={() => void apply(url, token).then(onClose)} />
     <Text testID="settings-build" style={[styles.build, { color: colors.muted }]}>AgentsDock {appConfig.expo.version} · build {Platform.OS === 'android' ? appConfig.expo.android.versionCode : appConfig.expo.ios.buildNumber}</Text>
@@ -962,7 +945,7 @@ const styles = StyleSheet.create({
   process: { minHeight: 58, borderRadius: 6, padding: 9, marginBottom: 6, flexDirection: 'row', gap: 8 }, processDot: { width: 7, height: 7, borderRadius: 4, marginTop: 5 }, log: { padding: 10, borderRadius: 6, fontFamily: 'Menlo', fontSize: 11, lineHeight: 16 },
   outputHeader: { minHeight: 34, flexDirection: 'row', alignItems: 'center' }, outputTitle: { flex: 1, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
   fontScale: { minHeight: 74, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }, fontScalePreview: { flex: 1, gap: 3 }, fontScaleValue: { fontSize: 10, fontWeight: '800' },
-  analyticsSetting: { minHeight: 74, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 9 }, analyticsSettingsLinks: { minHeight: 34, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 }, privacyLink: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 5 }, privacyLinkText: { fontSize: 11, fontWeight: '700' },
+  privacySettingsLinks: { minHeight: 34, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 }, privacyLink: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 5 }, privacyLinkText: { fontSize: 11, fontWeight: '700' },
   setupIntro: { paddingTop: 4, flexDirection: 'row', alignItems: 'center', gap: 12 }, setupIcon: { width: 48, height: 48, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, setupCopy: { flex: 1, gap: 4 }, setupTitle: { fontSize: 18, fontWeight: '800' }, setupBody: { fontSize: 13, lineHeight: 18 },
   setupSteps: { paddingVertical: 8, gap: 4 }, setupStep: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 5 }, setupStepText: { flex: 1, fontSize: 13, lineHeight: 18 }, setupGuide: { minHeight: 44, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, setupGuideText: { fontSize: 13, fontWeight: '700' },
 })
