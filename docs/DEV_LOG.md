@@ -9,6 +9,17 @@
   preserve exact repairs through stale event replay and disk-cache reloads.
   No background refresh or polling is added. Historical repair requires the
   matching standalone server update.
+- Verified mixed Codex and Claude messages in the actual isolated Electron
+  service, SQLite, IPC and renderer: user input, quotations, public progress,
+  expanded tool details, final answers, goal activity, scheduled output and
+  passive purple mail remain visible. Runtime notices stay out of user bubbles
+  across stale replay and reopening. Transport was synthetic; unknown future
+  provider formats and live provider execution are not certified by this check.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `189`, source `864e15de`.
+  Developer ID signature and all 86 compiled archive files verified. Automatic
+  updates are disabled; the app is not notarized or publicly released. Historical
+  repair requires standalone server `0.1.26-beta.61`; the running app was left
+  untouched.
 
 ## 2026-09-11 — Codex interruption notice provenance
 
