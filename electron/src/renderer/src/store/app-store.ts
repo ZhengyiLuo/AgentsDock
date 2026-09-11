@@ -12,7 +12,7 @@ import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitio
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
 import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot } from '@shared/session-files'
-import { isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
+import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
 import { trackEvent } from '../lib/analytics'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
@@ -4358,7 +4358,7 @@ export function snapshotNeedsAuthoritativeTail(snapshot: SessionSnapshot | undef
   if (snapshot.historyDiscontinuity) return true
   if (snapshot.events.some(eventMayRenderInTimeline)) return false
   if (snapshot.historyVerified && snapshot.events.length > 0 && snapshot.events.every(event =>
-    isImportedClaudeControlCompanion(event) || isImportedCodexGoalContext(event)
+    isImportedClaudeControlCompanion(event) || isImportedCodexRuntimeContext(event)
   )) return false
   if ((snapshot.eventsTotal ?? 0) > 0) return true
   if (snapshot.historyVerified) return false
@@ -4366,7 +4366,7 @@ export function snapshotNeedsAuthoritativeTail(snapshot: SessionSnapshot | undef
 }
 
 function eventMayRenderInTimeline(event: Event): boolean {
-  if (isImportedClaudeControlCompanion(event) || isImportedCodexGoalContext(event)) return false
+  if (isImportedClaudeControlCompanion(event) || isImportedCodexRuntimeContext(event)) return false
   if (isImportedProviderInterruption(event)) return true
   if (event.type === 'turn_started' || isNativeGoalSteerEvent(event)) return Boolean(event.prompt?.trim() || event.file_ids?.length)
   if (event.type === 'assistant_text') return Boolean(event.text?.trim())

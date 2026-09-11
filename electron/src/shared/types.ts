@@ -849,7 +849,7 @@ export interface ProviderInterruptionOrigin {
 
 export interface ProviderHistoryOrigin {
   provider: 'claude' | 'codex'
-  kind?: 'assistant' | 'user'
+  kind?: 'assistant' | 'user' | 'subagent_notification'
   event_id?: string
   session_id?: string
   timestamp?: string
@@ -883,7 +883,7 @@ export interface Event {
   /** Provider control metadata; meaningful only with the exact provider import contract. */
   metadata_only?: boolean | null
   /** Server-verified Codex runtime context recovered from imported history. */
-  provider_runtime_context?: 'goal' | null
+  provider_runtime_context?: 'goal' | 'subagent_notification' | null
   /** Server-proven, in-place repair of an imported provider record. */
   provider_history_repair?: 'source_proven_import' | 'source_proven_assistant_replay' | 'source_proven_native_replay' | null
   /** Positive provider evidence that an imported input was authored by the user. */

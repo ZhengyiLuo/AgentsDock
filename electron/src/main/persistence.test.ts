@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
+import { createHash } from 'node:crypto'
 import type { Event, Job, PinnedItem, Session } from '../shared/types'
 import { TOOL_OUTPUT_PREVIEW_CHARS } from '../shared/event-compaction'
 
@@ -61,6 +62,28 @@ describe('prepared statement reuse', () => {
 })
 
 describe('source-proven import repair persistence', () => {
+  it('keeps a complete Codex runtime repair across stale long input and preserves a genuine quotation', () => {
+    const value = cache()
+    value.putSession('server', session('chat'))
+    const prompt = `<subagent_notification>${JSON.stringify({ agent_path: 'synthetic-worker',
+      status: { completed: 'Synthetic result '.repeat(1500) } })}</subagent_notification>`
+    const legacy: Event = { ...event('chat', 0, ''), type: 'turn_started', backend: 'codex',
+      run_id: 'import_history', imported: true, prompt }
+    const repaired: Event = { ...legacy, prompt: '', metadata_only: true, provider_runtime_context: 'subagent_notification',
+      provider_origin: { provider: 'codex', kind: 'subagent_notification', event_id: 'provider-item',
+        session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
+        source_text_sha256: createHash('sha256').update(prompt).digest('hex') } }
+    const manual: Event = { ...legacy, id: 'human-quote', seq: 2, provider_user_authored: true }
+    value.putEvents('server', 'chat', [legacy, manual])
+    value.putEvents('server', 'chat', [repaired])
+    value.putEvents('server', 'chat', [legacy])
+    const saved = value.snapshot('server', 'chat')?.events
+    expect(saved?.[0]).toEqual(repaired)
+    expect(saved?.[1]).toMatchObject({ id: 'human-quote', provider_user_authored: true, prompt })
+    value.putEvents('server', 'chat', [{ ...legacy, provider_user_authored: true }])
+    expect(value.snapshot('server', 'chat')?.events[0]).toMatchObject({ provider_user_authored: true, prompt })
+  })
+
   it('keeps an exact repair through stale replay and cached snapshots without touching manual text', () => {
     const value = cache()
     value.putSession('server', session('chat'))

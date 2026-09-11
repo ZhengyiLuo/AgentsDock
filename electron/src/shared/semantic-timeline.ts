@@ -1,5 +1,5 @@
 import type { Event } from './types'
-import { isImportedCodexGoalContext } from './provider-origin'
+import { isImportedCodexRuntimeContext } from './provider-origin'
 
 export const SEMANTIC_HIDDEN_EVENT_TYPES = [
   'turn_queued',
@@ -55,7 +55,7 @@ export function isNativeGoalSteerEvent(event: Event): boolean {
 }
 
 export function timelineSemanticUnits(events: Event[]): TimelineSemanticUnit[] {
-  const ordered = events.filter(event => !isImportedCodexGoalContext(event)).sort((left, right) => left.seq - right.seq)
+  const ordered = events.filter(event => !isImportedCodexRuntimeContext(event)).sort((left, right) => left.seq - right.seq)
   const occurrenceByEvent = new Map<Event, Map<string, string>>()
   const currentOccurrenceByRun = new Map<string, { key: string; started: boolean }>()
   for (const event of ordered) {
@@ -191,7 +191,7 @@ export function timelineSemanticItemCount(events: Event[]): number {
 }
 
 export function incompleteLeadingRunId(events: Event[]): string | null {
-  const ordered = events.filter(event => !isImportedCodexGoalContext(event)).sort((left, right) => left.seq - right.seq)
+  const ordered = events.filter(event => !isImportedCodexRuntimeContext(event)).sort((left, right) => left.seq - right.seq)
   const runId = ordered
     .map(event => event.run_id?.trim() || '')
     .find(Boolean)

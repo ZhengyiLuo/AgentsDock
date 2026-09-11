@@ -118,6 +118,29 @@ export function isImportedCodexGoalContext(event: Event): boolean {
   return !prompt || isExactGoalRuntimePrompt(prompt)
 }
 
+/** Only a source-proven runtime notification, never a matching user quotation. */
+export function isImportedCodexSubagentNotification(event: Event): boolean {
+  const origin = event.provider_origin
+  return isImportedHistoryRecord(event)
+    && event.type === 'turn_started' && event.backend === 'codex'
+    && event.provider_runtime_context === 'subagent_notification'
+    && event.metadata_only === true && event.prompt === ''
+    && origin?.provider === 'codex' && origin.kind === 'subagent_notification'
+    && ['event_id', 'session_id', 'turn_id'].every(key => {
+      const value = (origin as unknown as Record<string, unknown>)[key]
+      return typeof value === 'string' && value.trim().length > 0 && value.length <= 256
+    })
+    && typeof origin.timestamp === 'string' && sourceISOTimestamp.test(origin.timestamp)
+    && Number.isFinite(Date.parse(origin.timestamp))
+    && typeof origin.source_text_sha256 === 'string'
+    && /^[a-f0-9]{64}$/.test(origin.source_text_sha256)
+    && !hasProviderUserProvenance(event)
+}
+
+export function isImportedCodexRuntimeContext(event: Event): boolean {
+  return isImportedCodexGoalContext(event) || isImportedCodexSubagentNotification(event)
+}
+
 function isExactGoalRuntimePrompt(prompt: string): boolean {
   const envelope = /^<codex_internal_context source=(["'])goal\1>([\s\S]*)<\/codex_internal_context>$/.exec(prompt)
   if (!envelope) return false
@@ -147,7 +170,7 @@ export function hasProviderUserProvenance(event: Event): boolean {
 
 export function isImportedProviderControlMetadata(event: Event): boolean {
   return isImportedProviderInterruption(event) || isImportedClaudeControlCompanion(event)
-    || isImportedCodexGoalContext(event) || isImportedSourceProvenRepair(event)
+    || isImportedCodexRuntimeContext(event) || isImportedSourceProvenRepair(event)
     || isImportedSourceProvenAssistantReplay(event) || isImportedSourceProvenNativeReplay(event)
 }
 
@@ -157,6 +180,15 @@ export function isImportedProviderControlMetadata(event: Event): boolean {
  */
 export function mergeProviderInterruptionEvent(current: Event, incoming: Event): Event {
   if (current.id !== incoming.id || current.session_id !== incoming.session_id) return incoming
+  if (isImportedCodexSubagentNotification(current)
+    && incoming.seq === current.seq && incoming.type === current.type
+    && incoming.run_id === current.run_id && incoming.ts === current.ts
+    && incoming.imported === true && incoming.backend === 'codex'
+    && incoming.provider_runtime_context == null && incoming.metadata_only == null
+    && typeof incoming.prompt === 'string' && !hasProviderUserProvenance(incoming)
+    && current.provider_origin?.provider === 'codex'
+    && bytesToHex(sha256(utf8ToBytes(incoming.prompt))) === current.provider_origin.source_text_sha256
+  ) return current
   if (isImportedSourceProvenNativeReplay(current) && incoming.seq === current.seq
     && incoming.type === current.type && incoming.run_id === current.run_id && incoming.ts === current.ts
     && incoming.imported === true && incoming.backend === 'codex'

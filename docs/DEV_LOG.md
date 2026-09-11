@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-11 — Codex subagent notification provenance
+
+- Treat source-proven imported subagent completion notifications as runtime
+  metadata, not messages authored by the user. Preserve genuine quotations,
+  assistant answers, native subagent activity and original timestamps.
+- Keep the exact correction across stale same-ID events and disk-cache reloads;
+  require source identity, a full-text digest and no positive human provenance.
+- Verified the actual isolated Electron service, cache and renderer: the legacy
+  bubble is corrected, a genuine identical quotation remains, and stale replay,
+  switching chats and reloading do not restore the bogus input. Transport and
+  provider history were synthetic; no real provider turn was started.
+- Historical repair also requires the matching standalone server correction.
+  No mobile or public desktop release is included in this local change.
+
 ## 2026-09-11 — Storage recovery and native history replay
 
 - Keep the desktop open after local storage exhaustion. Preserve the original

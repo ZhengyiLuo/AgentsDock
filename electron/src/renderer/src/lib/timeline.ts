@@ -3,7 +3,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { hasTimelineChangeSignal } from '@shared/timeline-change-signal'
 import { agentFileBelongsToSession, eventFileForSession } from '@shared/session-files'
-import { hasProviderUserProvenance, isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay, isImportedSourceProvenNativeReplay } from '@shared/provider-origin'
+import { hasProviderUserProvenance, isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay, isImportedSourceProvenNativeReplay } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey, crossChatSemanticKey, isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, providerInteractionAuditKey } from '@shared/semantic-timeline'
 import { isChatMailboxEvent } from '@shared/chat-inbox'
 
@@ -417,9 +417,9 @@ export class TimelineProjector {
       if (event.run_id) this.silentInputRuns.add(event.run_id)
       return
     }
-    if (isImportedCodexGoalContext(event)) {
+    if (isImportedCodexRuntimeContext(event)) {
       // One import batch may first replay a suppressed native prompt/answer,
-      // then contain a genuinely new goal continuation. The metadata starts
+      // then contain a genuinely new runtime continuation. The metadata starts
       // a new input slice, even though it never becomes a user bubble.
       if (event.run_id) this.suppressedProviderEchoRuns.delete(event.run_id)
       return
