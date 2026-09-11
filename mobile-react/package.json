@@ -76,7 +76,7 @@
     "ios:phone": "expo run:ios --device 'iPhone 17 Pro'",
     "ios:pad": "expo run:ios --device 'iPad Pro 13-inch (M5)'",
     "test:history": "node scripts/run-history-tests.mjs",
-    "test:analytics": "node scripts/run-history-tests.mjs src/lib/analytics-payload.test.ts --native-mocks",
+    "test:analytics": "node scripts/run-history-tests.mjs src/lib/analytics-payload.test.ts --native-mocks && node scripts/run-history-tests.mjs src/lib/analytics-ios.test.ts --native-mocks",
     "test:upload": "node scripts/run-history-tests.mjs src/api/upload.test.ts --native-mocks",
     "test:downloads": "node scripts/run-file-transfer-tests.mjs",
     "test:terminal": "node --test tests/terminal-layout.test.mjs",

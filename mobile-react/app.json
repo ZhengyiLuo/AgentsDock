@@ -47,6 +47,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withIosNoAnalyticsPrivacy.cjs",
       "./plugins/withAndroidCleartextTraffic.cjs",
       "./plugins/withAndroidReleaseSigning.cjs",
       "./plugins/withAndroidSideloadUpdater.cjs",
