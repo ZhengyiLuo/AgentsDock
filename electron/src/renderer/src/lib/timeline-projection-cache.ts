@@ -1,5 +1,6 @@
 import type { AgentFile, Event } from '@shared/types'
 import { crossChatSemanticKey } from '@shared/semantic-timeline'
+import { isChatMailboxEvent } from '@shared/chat-inbox'
 import {
   TimelineProjector,
   reconcileRenderTimelineItems,
@@ -105,6 +106,18 @@ function renderAppendedTimeline(
   appended: Event[]
 ): { rendered: RenderTimelineItem[]; renderedSemanticCount: number } {
   let renderStart = firstChangedSemanticIndex(cached.semantic, semantic)
+  // A new mailbox arrival may join the immediately preceding sender group.
+  // Include that one group, not the rest of the historical timeline.
+  if (appended.some(isChatMailboxEvent) && renderStart > 0) {
+    const previous = semantic[renderStart - 1]
+    if (previous?.kind === 'system' && isChatMailboxEvent(previous.event)) {
+      const grouped = cached.rendered.find(row => row.kind === 'system'
+        && row.mailboxMessages?.some(message => message.key === previous.key))
+      const first = grouped?.kind === 'system' ? grouped.mailboxMessages?.[0].key : previous.key
+      const index = semantic.findIndex(item => item.key === first)
+      if (index >= 0) renderStart = Math.min(renderStart, index)
+    }
+  }
   // A newly sent message changes a system owner, not the sender's TurnItem.
   // Re-render the overlapping turn too: it now has an activity boundary.
   // This also preserves its final answer when an old receipt is updated.
@@ -146,7 +159,7 @@ function renderAppendedTimeline(
   // rendered suffix. Carry only those crossing system owners, not all the
   // intervening historical turns, into the incremental render.
   const crossingOwnerKeys = new Set(previousSuffix.flatMap(row =>
-    row.kind === 'system' && crossChatSemanticKey(row.event) !== null ? [systemRowOwnerKey(row)] : []))
+    row.kind === 'system' && crossChatSemanticKey(row.event) !== null ? systemRowOwnerKeys(row) : []))
   const crossingOwners = crossingOwnerKeys.size
     ? cached.semantic.slice(0, renderStart).filter(item =>
       item.kind === 'system' && crossingOwnerKeys.has(item.key))
@@ -188,7 +201,7 @@ function renderedCutForSemanticTail(
 
 function renderedRowBelongsTo(item: TimelineItem, row: RenderTimelineItem): boolean {
   if (item.kind !== 'turn') return row.key === item.key
-    || row.kind === 'system' && systemRowOwnerKey(row) === item.key
+    || row.kind === 'system' && systemRowOwnerKeys(row).includes(item.key)
   return row.key === `${item.key}:trace`
     || row.key === `${item.key}:activity`
     || row.key.startsWith(`${item.key}:activity:after:`)
@@ -204,6 +217,10 @@ function renderedRowBelongsTo(item: TimelineItem, row: RenderTimelineItem): bool
 function systemRowOwnerKey(row: Extract<RenderTimelineItem, { kind: 'system' }>): string {
   const suffix = row.crossChatLegId ? `:message:${row.crossChatLegId}` : ''
   return suffix && row.key.endsWith(suffix) ? row.key.slice(0, -suffix.length) : row.key
+}
+
+function systemRowOwnerKeys(row: Extract<RenderTimelineItem, { kind: 'system' }>): string[] {
+  return row.mailboxMessages?.map(systemRowOwnerKey) ?? [systemRowOwnerKey(row)]
 }
 
 function isCompactionEvent(event: Event): boolean {

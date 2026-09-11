@@ -30,6 +30,8 @@ import type {
   CodexRuntimeSnapshot,
   CodexShellInput,
   ChatReference,
+  ChatInboxPage,
+  ChatInboxDeleteReceipt,
   TeamReference,
   ChatSearchSnapshot,
   CreateAgentCrossChatRouteInput,
@@ -442,6 +444,10 @@ export interface AgentsDockAPI {
   handoffs: {
     get(envelopeId: string): Promise<CrossChatHandoff>
     cancel(envelopeId: string): Promise<CrossChatHandoffSummary>
+  }
+  chatInbox: {
+    list(scope: WorkspaceProfileScope, sessionId: string, cursor?: string | null, limit?: number): Promise<ChatInboxPage>
+    remove(scope: WorkspaceProfileScope, sessionId: string, messageId: string): Promise<ChatInboxDeleteReceipt>
   }
   exchanges: {
     get(exchangeId: string): Promise<CrossChatExchange>

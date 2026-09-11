@@ -5,6 +5,7 @@ import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
+import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
 import { inferredFileContentType } from '../shared/file-content-type'
 import {
   LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT,
@@ -1269,6 +1270,17 @@ export class AgentServerClient {
       {}
     )
     return response.handoff
+  }
+
+  async chatInbox(sessionId: string, cursor: string | null = null, limit = 25) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25 || cursor !== null && !/^\d+$/.test(cursor)) throw new Error('Invalid inbox page request.')
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (cursor !== null) query.set('cursor', cursor)
+    return parseChatInboxPage(await this.get<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox?${query}`), sessionId, limit)
+  }
+
+  async deleteChatInboxMessage(sessionId: string, messageId: string) {
+    return parseChatInboxDelete(await this.delete<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox/${encodeURIComponent(messageId)}`), sessionId, messageId)
   }
 
   async crossChatExchange(exchangeId: string): Promise<CrossChatExchange> {

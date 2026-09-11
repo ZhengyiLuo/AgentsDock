@@ -17,6 +17,8 @@ import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
+import { ChatInboxGroup } from './ChatInboxGroup'
+import { chatMailboxAvailable } from '@shared/chat-inbox'
 
 export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, profileScope, onFindFile, pinnedItemIds, codexLifecycleActive = false }: { item: RenderTimelineItem; sessionId: string; profileScope: WorkspaceProfileScope | null; onFindFile: (fileId: string) => void; pinnedItemIds: ReadonlySet<string>; codexLifecycleActive?: boolean }) {
   useLocale()
@@ -818,6 +820,7 @@ function SystemView({ item, sessionId, profileScope, pinned, codexLifecycleActiv
     </div>
   </article>
   if (item.importedDelivery) return <ImportedCrossChatDeliveryView item={item} sessionId={sessionId} />
+  if (item.mailboxMessages) return <ChatInboxGroup item={item} sessionId={sessionId} profileScope={profileScope} />
   if (item.crossChatMessage) return <CrossChatMessageView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (codexLifecycleSemanticKey(event)) return <CodexLifecycleView item={item} sessionId={sessionId} active={codexLifecycleActive} />
   if (item.key.startsWith('provider-interaction-audit:')) return <ProviderInteractionAuditView item={item} />
@@ -1237,6 +1240,7 @@ function exchangeFailureMessageIsPlainLanguage(value: string): boolean {
 
 function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
+  const mailboxAvailable = useAppStore(state => chatMailboxAvailable(state.health))
   const events = item.events ?? [item.event]
   const envelopeId = item.event.cross_chat_envelope_id?.trim() || item.event.handoff_id?.trim() || item.event.message_id?.trim() || ''
   const conversationId = latestExchangeString(events, event => event.conversation_id)
@@ -1258,6 +1262,8 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelledLocally, setCancelledLocally] = useState(false)
   const requestGeneration = useRef(0)
   useEffect(() => {
     requestGeneration.current++
@@ -1265,6 +1271,8 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
     setExpanded(false)
     setLoading(false)
     setLoadError('')
+    setCancelling(false)
+    setCancelledLocally(false)
     return () => { requestGeneration.current++ }
   }, [item.key, sessionId, bodyRevisionKey, profileScope?.profileId, profileScope?.profileGeneration, profileScope?.serverIdentity])
   const message: CrossChatMessageBody = {
@@ -1314,7 +1322,21 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
   }
   const status = latestExchangeString(events, event => event.handoff_status)
   const failed = status === 'failed' || item.event.type === 'chat_conversation_message_failed'
-  const cancelled = status === 'cancelled' || item.event.type === 'chat_conversation_message_cancelled'
+  const cancelled = cancelledLocally || status === 'cancelled' || item.event.inbox_state === 'cancelled' || item.event.type === 'chat_conversation_message_cancelled'
+  const cancelMailbox = async () => {
+    if (cancelling) return
+    const scope = captureTimelineWorkspaceScope(sessionId), request = requestGeneration.current
+    setCancelling(true)
+    try {
+      const receipt = await window.agentsDock.handoffs.cancel(envelopeId)
+      if (request !== requestGeneration.current || !timelineWorkspaceScopeCurrent(scope)) return
+      if (receipt.id !== envelopeId || receipt.source_session_id !== sourceId || receipt.target_session_id !== targetId
+        || receipt.conversation_id !== conversationId || receipt.status !== 'cancelled') throw Error('Receipt mismatch')
+      setCancelledLocally(true)
+    } catch {
+      if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setLoadError(t('timeline.inbox.cancelError'))
+    } finally { if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setCancelling(false) }
+  }
   return <article
     className={`cross-chat-message ${incoming ? 'incoming' : 'outgoing'}${failed ? ' failed' : ''}`}
     data-event-id={item.event.id}
@@ -1337,6 +1359,10 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
       >{loading ? t('timeline.ui.loadingFullMessage') : expanded ? t('timeline.ui.showLess') : t('timeline.ui.viewMessage')}</button>}
       {failed && <small className="cross-chat-message-error">{latestExchangeString(events, event => event.message) || t('timeline.ui.couldnTComplete')}</small>}
       {cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {!incoming && item.event.delivery_mode === 'mailbox' && (item.event.inbox_state === 'read' || item.event.inbox_state === 'deleted')
+        && <small>{t(`timeline.inbox.${item.event.inbox_state}`)}</small>}
+      {!incoming && item.event.delivery_mode === 'mailbox' && item.event.inbox_state === 'unread' && !cancelled && mailboxAvailable
+        && <button className="quiet-button" disabled={cancelling} onClick={() => void cancelMailbox()}>{t('timeline.inbox.cancel')}</button>}
       {loadError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {loadError}</small>}
     </div>
   </article>

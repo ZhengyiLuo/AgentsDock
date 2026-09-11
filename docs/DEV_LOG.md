@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-11 — Passive agent mailbox
+
+- Show passive incoming agent messages as compact purple sender groups in
+  chronological position. Only adjacent messages are grouped; human follow-ups
+  and progress remain boundaries. Preserve individual identities and replies.
+- Expand and delete exact messages on demand. Opening a message does not mark
+  it read by the agent. Long expanded bodies have a bounded scroll surface.
+- Use the existing event stream, without inbox polling or duplicate execution
+  queue rows. Grouping is linear and preserves immutable cached inputs.
+- Verified the actual desktop main process, cache, IPC and renderer with
+  synthetic transport: grouping, edited full-body scrolling, exact deletion,
+  read-state updates and reopening. This is not a live-provider execution test.
+- Requires the matching standalone server mailbox contract. No server
+  deployment or public release is included in this local implementation.
+
 ## 2026-09-11 — Scheduled history ownership
 
 - Keep explicitly job-owned output inside Scheduled Job cards even when a

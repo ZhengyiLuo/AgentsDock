@@ -3317,6 +3317,22 @@ export class AppService {
     return handoff
   }
 
+  async chatInbox(expected: WorkspaceProfileScope, sessionId: string, cursor: string | null = null, limit = 25) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    const page = await scope.client.chatInbox(sessionId, cursor, limit)
+    this.assertCurrentScope(scope)
+    return page
+  }
+
+  async deleteChatInboxMessage(expected: WorkspaceProfileScope, sessionId: string, messageId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    const receipt = await scope.client.deleteChatInboxMessage(sessionId, messageId)
+    this.assertCurrentScope(scope)
+    return receipt
+  }
+
   async cancelCrossChatHandoff(envelopeId: string): Promise<CrossChatHandoffSummary> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)

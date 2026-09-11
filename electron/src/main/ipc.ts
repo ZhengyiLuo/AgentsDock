@@ -306,6 +306,8 @@ export function registerIpc(
 
   handle('handoffs:get', envelopeId => service.crossChatHandoff(envelopeId))
   handle('handoffs:cancel', envelopeId => service.cancelCrossChatHandoff(envelopeId))
+  handle('chat-inbox:list', (scope, sessionId, cursor, limit) => service.chatInbox(scope, sessionId, cursor, limit))
+  handle('chat-inbox:remove', (scope, sessionId, messageId) => service.deleteChatInboxMessage(scope, sessionId, messageId))
   handle('exchanges:get', exchangeId => service.crossChatExchange(exchangeId))
   handle('exchanges:cancel', exchangeId => service.cancelCrossChatExchange(exchangeId))
 

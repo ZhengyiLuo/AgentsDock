@@ -239,6 +239,10 @@ const api: AgentsDockAPI = {
     get: envelopeId => ipcRenderer.invoke('handoffs:get', envelopeId),
     cancel: envelopeId => ipcRenderer.invoke('handoffs:cancel', envelopeId)
   },
+  chatInbox: {
+    list: (scope, sessionId, cursor, limit) => ipcRenderer.invoke('chat-inbox:list', scope, sessionId, cursor, limit),
+    remove: (scope, sessionId, messageId) => ipcRenderer.invoke('chat-inbox:remove', scope, sessionId, messageId)
+  },
   exchanges: {
     get: exchangeId => ipcRenderer.invoke('exchanges:get', exchangeId),
     cancel: exchangeId => ipcRenderer.invoke('exchanges:cancel', exchangeId)

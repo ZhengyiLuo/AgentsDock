@@ -5,6 +5,7 @@ import { hasTimelineChangeSignal } from '@shared/timeline-change-signal'
 import { agentFileBelongsToSession, eventFileForSession } from '@shared/session-files'
 import { hasProviderUserProvenance, isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey, crossChatSemanticKey, isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, providerInteractionAuditKey } from '@shared/semantic-timeline'
+import { isChatMailboxEvent } from '@shared/chat-inbox'
 
 export type TimelineItem = TurnItem | SystemItem | JobItem
 export type RenderTimelineItem = MessageItem | TraceItem | ProgressItem | MediaItem | SystemItem | JobItem
@@ -115,6 +116,8 @@ export interface SystemItem {
   importedDelivery?: ImportedCrossChatDelivery
   /** One explicitly negotiated asynchronous agent message, never a whole exchange panel. */
   crossChatMessage?: boolean
+  /** Adjacent incoming messages only; each child retains its exact semantic owner. */
+  mailboxMessages?: SystemItem[]
   /** One historical exchange leg, presented independently without changing its lifecycle. */
   crossChatLegId?: string
 }
@@ -1618,10 +1621,31 @@ function systemRowBelongsToTurn(row: SystemItem, turn: TurnItem | undefined): bo
 function interleaveChronologicalSystemRows(rows: RenderTimelineItem[]): RenderTimelineItem[] {
   const chronological = rows.filter(isChronologicalSystemRow)
   if (!chronological.length) return rows
-  return interleaveAnchoredRows(
+  return groupAdjacentMailboxRows(interleaveAnchoredRows(
     splitProgressAtMessages(rows.filter(row => !isChronologicalSystemRow(row)), chronological),
     chronological
-  )
+  ))
+}
+
+function groupAdjacentMailboxRows(rows: RenderTimelineItem[]): RenderTimelineItem[] {
+  const grouped: RenderTimelineItem[] = []
+  for (const row of rows) {
+    if (row.kind !== 'system' || !isChatMailboxEvent(row.event)
+      || row.event.target_session_id !== row.event.session_id || row.event.source_session_id === row.event.session_id) {
+      grouped.push(row)
+      continue
+    }
+    const previous = grouped.at(-1)
+    const messages = row.mailboxMessages ?? [row]
+    if (previous?.kind === 'system' && previous.mailboxMessages
+      && previous.event.source_session_id === row.event.source_session_id
+      && previous.event.target_session_id === row.event.target_session_id) {
+      // This array was allocated below for this rendering pass; inputs and
+      // previously cached rows remain immutable even for long sender bursts.
+      previous.mailboxMessages.push(...messages)
+    } else grouped.push({ ...row, mailboxMessages: [...messages] })
+  }
+  return grouped
 }
 
 function progressToolKey(event: Event): string {
@@ -1890,16 +1914,25 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
 
 function renderCrossChatMessage(item: SystemItem): SystemItem[] {
   const events = (item.events ?? [item.event]).filter(isAsyncCrossChatMessage)
-  const latest = events[events.length - 1]
+  let latest = events[events.length - 1]
   if (!latest) return []
   const incoming = latest.target_session_id === latest.session_id && latest.source_session_id !== latest.session_id
+  const mailbox = events.some(isChatMailboxEvent)
+  if (mailbox) {
+    const priority = { unread: 1, read: 2, cancelled: 3, deleted: 4 }
+    const terminal = events.reduce<Event | undefined>((current, event) => event.inbox_state
+      && priority[event.inbox_state] > (current?.inbox_state ? priority[current.inbox_state] : 0) ? event : current, undefined)
+    if (terminal?.inbox_state && latest.inbox_state !== terminal.inbox_state) latest = { ...latest, inbox_state: terminal.inbox_state }
+  }
+  if (mailbox && incoming && latest.inbox_state === 'deleted') return []
   // An incoming envelope owns only its ordinary queue row until provider
   // execution starts. Cancelling a pending message never creates a duplicate.
   const arrived = incoming ? events.find(event => (
-    event.type === 'chat_conversation_message_started' || event.type === 'chat_conversation_message_delivered'
+    mailbox && (event.type === 'chat_conversation_message_received' || event.type === 'chat_conversation_message_mailbox_migrated')
+    || event.type === 'chat_conversation_message_started' || event.type === 'chat_conversation_message_delivered'
   )) : events[0]
   return arrived ? [{
-    ...item, seq: arrived.seq, anchorTs: arrived.ts,
+    ...item, seq: arrived.seq, anchorTs: mailbox ? latest.received_at || arrived.ts : arrived.ts,
     event: latest, events, crossChatMessage: true
   }] : []
 }

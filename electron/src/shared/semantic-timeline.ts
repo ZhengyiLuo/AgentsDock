@@ -275,7 +275,8 @@ export function crossChatSemanticKey(event: Event): string | null {
 /** Only the negotiated one-way envelope protocol uses individual message cards. */
 export function isAsyncCrossChatMessage(event: Event): boolean {
   return event.conversation_mode === 'async_route_v1'
-    && /^chat_conversation_message_(registered|received|queued|started|delivered|cancelled|failed)$/.test(event.type)
+    && (/^chat_conversation_message_(registered|received|queued|started|delivered|cancelled|failed)$/.test(event.type)
+      || event.delivery_mode === 'mailbox' && /^chat_conversation_message_(mailbox_migrated|read|deleted)$/.test(event.type))
 }
 
 export function isNativeSteerTransitionStop(event: Event): boolean {
