@@ -9,10 +9,10 @@
       alt="AgentsDock website"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/latest">
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.13-beta.33">
     <img
-      src="https://img.shields.io/github/v/release/ZhengyiLuo/AgentsDock-Releases?label=desktop"
-      alt="Latest desktop release"
+      src="https://img.shields.io/badge/desktop-v0.2.13--beta.33-EA7233"
+      alt="Latest desktop beta"
     />
   </a>
   <a href="https://discord.gg/ZGDrhEWqPt">

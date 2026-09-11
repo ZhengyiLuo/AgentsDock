@@ -14,7 +14,7 @@
   keep the opening layout focused.
 - Updated the introduction to name the currently supported agent backends,
   speak directly to AI researchers, and provide direct current download links
-  for every available platform.
+  for every available platform with a matching desktop release badge.
 - Verified the README with GitHub's Markdown renderer and checked every new
   destination and badge URL before review. Reviewed the supplied image and its
   metadata before inclusion.
