@@ -7,6 +7,9 @@
 - Verified long Codex and Claude messages with wheel scrolling to the final
   paragraph, reachable queue actions, and collapse in light/dark narrow views
   using the actual desktop renderer and synthetic transport.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `183`, source
+  `a300d1d9`. Signature and compiled archive verified; not notarized or
+  published. No server update is required.
 
 ## 2026-09-11 — Chronological agent messages
 
