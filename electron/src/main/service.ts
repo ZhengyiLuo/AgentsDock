@@ -70,6 +70,7 @@ import type {
   ProfileNotificationPayload,
   ProfileNotificationRoute,
   ProfileSessionSearchResult,
+  ProviderCommandsSnapshot,
   PublicServerProfile,
   PublicServerSettings,
   QueuedCrossChatDeliveryIdentity,
@@ -2952,7 +2953,8 @@ export class AppService {
       input.effort,
       input.clientCapabilities ?? ['codex_interactive_v1'],
       input.chatReferences ?? [],
-      input.teamReferences ?? []
+      input.teamReferences ?? [],
+      input.skillSelection
     )
     this.assertCurrentScope(scope)
     this.upsertSession(scope, response.session)
@@ -2961,6 +2963,28 @@ export class AppService {
       this.applyEventToCaches(scope, response.event)
     }
     return response
+  }
+
+  async providerCommands(sessionId: string, refresh = false): Promise<ProviderCommandsSnapshot> {
+    const scope = this.captureScope()
+    await this.ensureValidatedScope(scope)
+    try {
+      const snapshot = await scope.client.providerCommands(sessionId, refresh)
+      this.assertCurrentScope(scope)
+      return snapshot
+    } catch (error) {
+      this.assertCurrentScope(scope)
+      if (error instanceof ServerError && [404, 405, 501].includes(error.status)) {
+        const backend = this.sessions.find(session => session.id === sessionId)?.backend ?? 'codex'
+        return {
+          backend,
+          revision: 'unsupported',
+          support: { available: false, mode: 'unsupported' },
+          commands: []
+        }
+      }
+      throw error
+    }
   }
 
   async stopTurn(sessionId: string): Promise<TurnStopResult> {

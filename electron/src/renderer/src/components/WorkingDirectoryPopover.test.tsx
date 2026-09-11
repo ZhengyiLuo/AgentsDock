@@ -27,10 +27,12 @@ describe('WorkingDirectoryPopover', () => {
     useAppStore.setState({ updateSession: realUpdateSession })
   })
 
-  it('opens a pasted path while preserving folder browsing and explicit selection', async () => {
+  it('loads typed paths automatically and treats Return as Choose', async () => {
     const complete = vi.fn(async (path: string) => path === '/srv/pasted'
       ? completion(path, ['nested'])
-      : completion(path, path === '/srv' ? ['project'] : []))
+      : path === '/srv/automatic'
+        ? completion(path, ['detected'])
+        : completion(path, path === '/srv' ? ['project'] : []))
     const updateSession = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -52,6 +54,7 @@ describe('WorkingDirectoryPopover', () => {
     await user.click(screen.getByRole('button', { name: 'Working directory: /srv' }))
     const path = await screen.findByRole('textbox', { name: 'Folder path' })
     expect(path).toHaveValue('/srv')
+    expect(screen.queryByRole('button', { name: 'Open path' })).not.toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Open project' })).toBeVisible()
 
     await user.clear(path)
@@ -61,13 +64,20 @@ describe('WorkingDirectoryPopover', () => {
 
     await user.keyboard('{Enter}')
     await waitFor(() => expect(complete).toHaveBeenCalledWith('/srv/pasted', 50))
-    await user.click(await screen.findByRole('button', { name: 'Open nested' }))
-    await waitFor(() => expect(complete).toHaveBeenCalledWith('/srv/pasted/nested', 50))
-    expect(path).toHaveValue('/srv/pasted/nested')
+    await waitFor(() => expect(updateSession).toHaveBeenCalledWith('chat-1', { cwd: '/srv/pasted' }))
+    expect(screen.queryByRole('textbox', { name: 'Folder path' })).not.toBeInTheDocument()
+
+    updateSession.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Working directory: /srv' }))
+    const reopenedPath = await screen.findByRole('textbox', { name: 'Folder path' })
+    await user.clear(reopenedPath)
+    await user.paste('/srv/automatic')
+    expect(await screen.findByRole('button', { name: 'Open detected' })).toBeVisible()
+    expect(reopenedPath).toHaveValue('/srv/automatic')
     expect(updateSession).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: 'Choose' }))
-    await waitFor(() => expect(updateSession).toHaveBeenCalledWith('chat-1', { cwd: '/srv/pasted/nested' }))
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(updateSession).toHaveBeenCalledWith('chat-1', { cwd: '/srv/automatic' }))
     expect(screen.queryByRole('textbox', { name: 'Folder path' })).not.toBeInTheDocument()
   })
 

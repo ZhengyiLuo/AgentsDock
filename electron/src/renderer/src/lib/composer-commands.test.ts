@@ -26,6 +26,11 @@ describe('composer slash commands', () => {
     expect(composerCommandTrigger('/', 1)).toEqual({ start: 0, end: 1, query: '' })
     expect(composerCommandTrigger('  /Mo', 5)).toEqual({ start: 2, end: 5, query: 'Mo' })
     expect(composerCommandTrigger('\n\t/reasoning', 12)).toEqual({ start: 2, end: 12, query: 'reasoning' })
+    expect(composerCommandTrigger('/plugin:review_code.v2', 22)).toEqual({
+      start: 0,
+      end: 22,
+      query: 'plugin:review_code.v2'
+    })
 
     expect(composerCommandTrigger('Ask /model', 10)).toBeNull()
     expect(composerCommandTrigger('https://example.com', 19)).toBeNull()
@@ -94,7 +99,8 @@ describe('groupComposerCommandsByCategory', () => {
   const categorized: readonly CategorizedCommand[] = [
     { id: 'model', label: 'Model', description: 'Choose a model', category: 'agentsdock' },
     { id: 'status', label: 'Status', description: 'Show chat status', category: 'agentsdock' },
-    { id: 'import', label: 'Import Chat', description: 'Bring in local history', category: 'skills' }
+    { id: 'import', label: 'Import Chat', description: 'Bring in local history', category: 'agentsdock' },
+    { id: 'provider-0', label: 'Review code', description: 'Local provider skill', category: 'skills' }
   ]
 
   it('groups by category in declared order and preserves each command\'s flat index', () => {
@@ -102,10 +108,11 @@ describe('groupComposerCommandsByCategory', () => {
     expect(groups.map(group => group.id)).toEqual(['agentsdock', 'skills'])
     expect(groups[0].items.map(item => [item.command.id, item.index])).toEqual([
       ['model', 0],
-      ['status', 1]
+      ['status', 1],
+      ['import', 2]
     ])
     expect(groups[1].items.map(item => [item.command.id, item.index])).toEqual([
-      ['import', 2]
+      ['provider-0', 3]
     ])
   })
 

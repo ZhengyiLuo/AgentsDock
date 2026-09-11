@@ -4,11 +4,12 @@ import { useLocale } from '../lib/i18n'
 import { forwardRef, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core'
-import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronDown, Columns2, CornerDownRight, File, FolderOpen, Gauge, GitFork, Goal, GripVertical, Import, ListOrdered, LoaderCircle, Mail, MessageSquarePlus, MessageSquareShare, MoreHorizontal, Network, Paperclip, Pencil, Plus, RadioTower, RotateCw, Send, Settings, Shield, Sparkles, Square, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronDown, Columns2, CornerDownRight, File, FolderOpen, Gauge, GitFork, Goal, GripVertical, Import, Info, ListOrdered, LoaderCircle, Mail, MessageSquarePlus, MessageSquareShare, MoreHorizontal, Network, Paperclip, Pencil, Plus, RadioTower, RotateCw, Send, Settings, Shield, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { effectiveFileContentType } from '@shared/file-content-type'
 import { localSessionImportSupported } from '@shared/local-session-import'
-import type { AgentCrossChatRoute, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
+import type { AgentCrossChatRoute, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
 import { teamAllServersAliasAvailable, teamBulletinAliasAvailable, type TeamNetworkServer } from '@shared/team-network'
 import { cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeDiagnosticFor, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
@@ -34,6 +35,7 @@ import {
 } from '../lib/team-network-snapshot-cache'
 import {
   filterComposerCommands,
+  composerCommandTrigger,
   groupComposerCommandsByCategory,
   matchComposerCommands,
   type ComposerCommandCategory,
@@ -252,28 +254,15 @@ export interface TeamMentionCandidate {
   target: TeamReferenceTarget
 }
 
-type ComposerCommandId =
-  | 'attach'
-  | 'chat'
-  | 'digest'
-  | 'feedback'
-  | 'goal'
-  | 'import'
-  | 'mail'
-  | 'mcp'
-  | 'model'
-  | 'new'
-  | 'permissions'
-  | 'plan'
-  | 'reasoning'
-  | 'schedule'
-  | 'settings'
-  | 'split'
-  | 'status'
-  | 'workdir'
+interface ProviderComposerCommandDetails {
+  command: ProviderCommand
+  selection: ProviderCommandSelection
+}
 
 interface ComposerCommand extends ComposerCommandMetadata {
-  id: ComposerCommandId
+  id: string
+  provider?: ProviderComposerCommandDetails
+  meta?: string
 }
 
 const COMPOSER_COMMANDS: readonly ComposerCommand[] = [
@@ -294,14 +283,125 @@ const COMPOSER_COMMANDS: readonly ComposerCommand[] = [
   { id: 'split', get label() { return t("ui.Composer.copy.split_chat_cb0026c") }, get description() { return t("ui.Composer.copy.open_another_chat_beside_this_one_869fbb4") }, keywords: ['pane', 'side-by-side'], category: 'agentsdock' },
   { id: 'status', get label() { return t("ui.Composer.copy.status_920e413") }, get description() { return t("ui.Composer.copy.show_chat_and_runtime_details_ed895b9") }, keywords: ['context', 'connection', 'session'], category: 'agentsdock' },
   { id: 'workdir', get label() { return t("ui.Composer.copy.working_directory_865e85c") }, get description() { return t("ui.Composer.copy.choose_the_folder_used_by_this_chat_28c7132") }, keywords: ['cwd', 'directory', 'folder', 'project'], category: 'agentsdock' },
-  { id: 'import', get label() { return t("ui.Composer.copy.import_chat_ed32942") }, get description() { return t("ui.Composer.copy.bring_in_your_claude_code_codex_history_fa549bd") }, keywords: ['bulk', 'resume', 'session', 'skills'], category: 'skills' }
+  { id: 'import', get label() { return t("ui.Composer.copy.import_chat_ed32942") }, get description() { return t("ui.Composer.copy.bring_in_your_claude_code_codex_history_fa549bd") }, keywords: ['bulk', 'resume', 'session'], category: 'agentsdock' }
 ]
 
 /** Display order + heading for each command category, top to bottom in the palette. */
 const COMPOSER_COMMAND_CATEGORIES: readonly ComposerCommandCategory[] = [
   { id: 'agentsdock', heading: 'AgentsDock' },
-  { id: 'skills', heading: 'Skills' }
+  { id: 'skills', get heading() { return t('composer.providerCommands.skillsHeading') } },
+  { id: 'claude-commands', get heading() { return t('composer.providerCommands.claudeHeading') } }
 ]
+
+const PROVIDER_COMMAND_CACHE_TTL_MS = 30_000
+const PROVIDER_COMMAND_CACHE_MAX_ENTRIES = 32
+const providerCommandCache = new Map<string, { snapshot: ProviderCommandsSnapshot; expiresAt: number }>()
+const providerCommandRequests = new Map<string, Promise<ProviderCommandsSnapshot>>()
+const AGENTSDOCK_COMMAND_IDS = new Set(COMPOSER_COMMANDS.map(command => command.id.toLocaleLowerCase()))
+
+interface BoundProviderCommand {
+  contextKey: string
+  invocation: string
+  name: string
+  kind: string
+  selection: ProviderCommandSelection
+}
+
+type ProviderCommandLoadState =
+  | { key: string | null; status: 'idle'; snapshot: null }
+  | { key: string | null; status: 'loading'; snapshot: ProviderCommandsSnapshot | null }
+  | { key: string | null; status: 'ready'; snapshot: ProviderCommandsSnapshot | null }
+  | { key: string | null; status: 'error'; snapshot: ProviderCommandsSnapshot | null }
+
+function providerCommandContextKey(
+  profileId: string | null,
+  profileGeneration: number,
+  connectionGeneration: number,
+  serverIdentity: string | null,
+  session: Session | null | undefined
+): string | null {
+  if (!session || session.backend === 'cursor') return null
+  return [
+    profileId ?? 'local',
+    profileGeneration,
+    connectionGeneration,
+    serverIdentity ?? 'unknown-server',
+    session.id,
+    session.backend,
+    session.cwd?.trim() ?? ''
+  ].join('\u0000')
+}
+
+function cacheProviderCommands(key: string, snapshot: ProviderCommandsSnapshot): void {
+  providerCommandCache.delete(key)
+  providerCommandCache.set(key, { snapshot, expiresAt: Date.now() + PROVIDER_COMMAND_CACHE_TTL_MS })
+  while (providerCommandCache.size > PROVIDER_COMMAND_CACHE_MAX_ENTRIES) {
+    const oldest = providerCommandCache.keys().next().value
+    if (typeof oldest !== 'string') return
+    providerCommandCache.delete(oldest)
+  }
+}
+
+function providerInvocation(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  if (value !== value.trim()) return null
+  const invocation = value
+  // An invocation is a single slash token, never a local path or an argument-bearing prompt.
+  return /^\/[\p{L}\p{N}_.:-]+$/u.test(invocation) ? invocation : null
+}
+
+function providerMetaPart(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const part = value.trim()
+  if (!part || /^(?:file:|[a-z]:[\\/]|[\\/]{1,2})/iu.test(part)) return null
+  return part
+}
+
+function providerComposerCommands(snapshot: ProviderCommandsSnapshot | null, backend: Session['backend']): ComposerCommand[] {
+  if (!snapshot || snapshot.support?.available !== true || snapshot.backend !== backend || backend === 'cursor' || !Array.isArray(snapshot.commands)) return []
+  const seenCommands = new Set<string>()
+  return snapshot.commands.flatMap((command, index) => {
+    if (!command || typeof command !== 'object') return []
+    const invocation = providerInvocation(command.invocation)
+    const opaqueId = typeof command.id === 'string' ? command.id.trim() : ''
+    const revision = typeof snapshot.revision === 'string' ? snapshot.revision.trim() : ''
+    const name = typeof command.name === 'string' ? command.name.trim() : ''
+    const kind = typeof command.kind === 'string' ? command.kind.trim() : ''
+    if (!invocation || !opaqueId || !revision || !name || !kind) return []
+    if (AGENTSDOCK_COMMAND_IDS.has(invocation.slice(1).toLocaleLowerCase())) return []
+    const label = typeof command.label === 'string' && command.label.trim() ? command.label.trim() : name
+    const description = typeof command.description === 'string' ? command.description.trim() : ''
+    const scope = providerMetaPart(command.scope)
+    const source = providerMetaPart(command.source)
+    const semanticKey = JSON.stringify([name, invocation, label, description, scope, source, kind])
+    if (seenCommands.has(semanticKey)) return []
+    seenCommands.add(semanticKey)
+    const metaParts = [scope, source]
+      .filter((value): value is string => Boolean(value))
+      .filter((value, partIndex, values) => values.indexOf(value) === partIndex)
+    return [{
+      id: `provider-${index}`,
+      label,
+      description,
+      keywords: [name, invocation.slice(1), kind, ...metaParts],
+      category: backend === 'claude' ? 'claude-commands' : 'skills',
+      meta: metaParts.join(' · '),
+      provider: {
+        command: { ...command, id: opaqueId, name, label, description, kind, invocation },
+        selection: { id: opaqueId, revision }
+      }
+    }]
+  })
+}
+
+function draftUsesProviderCommand(text: string, binding: BoundProviderCommand): boolean {
+  if (!text.startsWith(binding.invocation)) return false
+  if (text.length === binding.invocation.length) return true
+  // Keep this byte boundary identical to AgentsServer's revalidation rule.
+  // Vertical tab and form feed are whitespace to JavaScript, but are not
+  // valid provider-command argument separators on the wire.
+  return /[\t\n\r ]/u.test(text[binding.invocation.length] ?? '')
+}
 
 interface DraftContext {
   profileId: string | null
@@ -419,6 +519,13 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     serverIdentity,
     sessionId: selectedId
   } : null, [activeProfileId, profileGeneration, selectedId, serverIdentity])
+  const providerCommandsKey = useMemo(() => providerCommandContextKey(
+    activeProfileId,
+    profileGeneration,
+    connectionGeneration,
+    serverIdentity,
+    session
+  ), [activeProfileId, connectionGeneration, profileGeneration, serverIdentity, session?.backend, session?.cwd, session?.id])
   const draftRef = useRef(storedDraft)
   const draftDirtyRef = useRef(false)
   const referencesRef = useRef<ChatReference[]>(storedReferences)
@@ -433,6 +540,11 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   const pendingCaretRef = useRef<number | null>(null)
   const pendingSelectionRef = useRef<{ start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null>(null)
   const nativeEditSelectionRef = useRef<ComposerNativeEditSelection | null>(null)
+  const providerCommandBindingRef = useRef<BoundProviderCommand | null>(null)
+  const providerCommandRequestRef = useRef(0)
+  const providerCommandPaletteOpenRef = useRef(false)
+  const providerCommandsKeyRef = useRef(providerCommandsKey)
+  providerCommandsKeyRef.current = providerCommandsKey
   const mountedRef = useRef(true)
   const mentionPaletteId = `chat-mention-${useId().replace(/:/g, '')}`
   const teamMentionPaletteId = `team-mention-${useId().replace(/:/g, '')}`
@@ -450,11 +562,79 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   const [editorMirrorAligned, setEditorMirrorAligned] = useState(true)
   const [commandTrigger, setCommandTrigger] = useState<ComposerCommandTrigger | null>(null)
   const [commandIndex, setCommandIndex] = useState(0)
+  const [providerCommandState, setProviderCommandState] = useState<ProviderCommandLoadState>({
+    key: providerCommandsKey,
+    status: 'idle',
+    snapshot: null
+  })
   const [runtimeMenuOpen, setRuntimeMenuOpen] = useState(false)
   const [runtimeMenuSection, setRuntimeMenuSection] = useState<'model' | 'reasoning' | null>(null)
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false)
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false)
   const [workingDirectoryOpen, setWorkingDirectoryOpen] = useState(false)
+  useEffect(() => {
+    providerCommandRequestRef.current += 1
+    providerCommandBindingRef.current = null
+    setProviderCommandState({ key: providerCommandsKey, status: 'idle', snapshot: null })
+  }, [providerCommandsKey])
+
+  const loadProviderCommands = useCallback(async (refresh = false, discardSnapshot = false) => {
+    const key = providerCommandsKey
+    const list = window.agentsDock.providerCommands?.list
+    if (!key || !selectedId || !session || session.backend === 'cursor' || !connected || typeof list !== 'function') return
+    if (!refresh) {
+      const cached = providerCommandCache.get(key)
+      if (cached && cached.expiresAt > Date.now()) {
+        providerCommandCache.delete(key)
+        providerCommandCache.set(key, cached)
+        setProviderCommandState({ key, status: 'ready', snapshot: cached.snapshot })
+        return
+      }
+      if (cached) providerCommandCache.delete(key)
+    }
+    const requestId = ++providerCommandRequestRef.current
+    setProviderCommandState(previous => ({
+      key,
+      status: 'loading',
+      snapshot: !discardSnapshot && previous.key === key ? previous.snapshot : null
+    }))
+    const inFlightKey = `${key}\u0000${refresh ? 'refresh' : 'load'}`
+    let request = providerCommandRequests.get(inFlightKey)
+    if (!request) {
+      request = list(selectedId, refresh)
+      providerCommandRequests.set(inFlightKey, request)
+      void request.finally(() => {
+        if (providerCommandRequests.get(inFlightKey) === request) providerCommandRequests.delete(inFlightKey)
+      }).catch(() => undefined)
+    }
+    try {
+      const snapshot = await request
+      if (!mountedRef.current || providerCommandRequestRef.current !== requestId || providerCommandsKeyRef.current !== key) return
+      cacheProviderCommands(key, snapshot)
+      setProviderCommandState({ key, status: 'ready', snapshot })
+    } catch {
+      if (!mountedRef.current || providerCommandRequestRef.current !== requestId || providerCommandsKeyRef.current !== key) return
+      setProviderCommandState(previous => ({
+        key,
+        status: 'error',
+        snapshot: previous.key === key ? previous.snapshot : null
+      }))
+    }
+  }, [connected, providerCommandsKey, selectedId, session])
+
+  useEffect(() => {
+    const opened = Boolean(commandTrigger)
+    const wasOpen = providerCommandPaletteOpenRef.current
+    providerCommandPaletteOpenRef.current = opened
+    if (!opened || !providerCommandsKey || providerCommandState.key !== providerCommandsKey) return
+    if (wasOpen && providerCommandState.status !== 'idle') return
+    const cached = providerCommandCache.get(providerCommandsKey)
+    if (cached && cached.expiresAt <= Date.now()) {
+      void loadProviderCommands(true)
+    } else if (providerCommandState.status === 'idle' || !cached) {
+      void loadProviderCommands()
+    }
+  }, [commandTrigger, loadProviderCommands, providerCommandState.key, providerCommandState.status, providerCommandsKey])
   // A textarea and a mirror div do not wrap every pasted token identically in
   // Chromium. Native text remains authoritative; the mirror paints only chip
   // decorations when its geometry is safe.
@@ -573,6 +753,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   )
   const commandAvailable = useCallback((command: ComposerCommand): boolean => {
     if (!session) return false
+    if (command.provider) return command.provider.command.kind.length > 0
     if (command.id === 'chat') return crossChatSupported
     if (command.id === 'mail') return !teamMessagesAdvertised
     if (command.id === 'goal') {
@@ -600,16 +781,32 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     if (command.id === 'split') return !splitOpen
     return true
   }, [catalog, claudeControls?.permission_modes, claudeMcpAvailable, claudePermissionModes, claudePermissionsAvailable, codexControls?.available, codexControls?.features?.goals, codexPermissionsAvailable, codexRuntime.runtime?.goals_enabled, codexRuntime.supported, crossChatSupported, cursorPermissionsAvailable, healthRevision, session, splitOpen, teamMessagesAdvertised])
-  const commandCandidates = useMemo(
-    () => commandTrigger ? filterComposerCommands(COMPOSER_COMMANDS, commandTrigger.query, commandAvailable) : [],
-    [commandAvailable, commandTrigger, getLocale()]
+  const activeProviderCommandState: ProviderCommandLoadState = providerCommandState.key === providerCommandsKey
+    ? providerCommandState
+    : { key: providerCommandsKey, status: 'idle', snapshot: null }
+  const dynamicComposerCommands = useMemo(
+    () => providerComposerCommands(activeProviderCommandState.snapshot, session?.backend ?? 'cursor'),
+    [activeProviderCommandState.snapshot, session?.backend]
   )
+  const allComposerCommands = useMemo(
+    () => [...COMPOSER_COMMANDS, ...dynamicComposerCommands],
+    [dynamicComposerCommands, getLocale()]
+  )
+  const commandCandidates = useMemo(
+    () => commandTrigger ? filterComposerCommands(allComposerCommands, commandTrigger.query, commandAvailable) : [],
+    [allComposerCommands, commandAvailable, commandTrigger]
+  )
+  const commandPaletteVisible = Boolean(commandTrigger && (
+    commandCandidates.length > 0
+    || activeProviderCommandState.status === 'loading'
+    || activeProviderCommandState.status === 'error'
+  ))
   const steeringPending = useSyncExternalStore(
     subscribeSteeringPending,
     () => isSteeringPending(steeringScope),
     () => false
   )
-  useTransientClose(commandCandidates.length > 0, () => setCommandTrigger(null))
+  useTransientClose(commandPaletteVisible, () => setCommandTrigger(null))
   useTransientClose(runtimeMenuOpen, () => {
     setRuntimeMenuOpen(false)
     setRuntimeMenuSection(null)
@@ -975,6 +1172,15 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       return
     }
     const rawOutgoing = promptOverride ?? draft
+    const boundProviderCommand = consumeComposer
+      && providerCommandBindingRef.current
+      && providerCommandBindingRef.current.contextKey === providerCommandsKey
+      && draftUsesProviderCommand(rawOutgoing, providerCommandBindingRef.current)
+        ? providerCommandBindingRef.current
+        : null
+    if (consumeComposer && providerCommandBindingRef.current && !boundProviderCommand) {
+      providerCommandBindingRef.current = null
+    }
     if (consumeComposer && referencesRef.current.length > MAX_CHAT_REFERENCES) {
       liveState.setError(`A message can reference at most ${MAX_CHAT_REFERENCES} chats. Remove a chat reference and try again.`)
       return
@@ -1125,6 +1331,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       }
       if (!composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) return
       if (consumeComposer) {
+        providerCommandBindingRef.current = null
         draftRef.current = ''
         draftDirtyRef.current = false
         referencesRef.current = []
@@ -1154,12 +1361,18 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         admissionToken,
         chatReferences: outgoingReferences,
         teamReferences: outgoingTeamReferences,
+        skillSelection: boundProviderCommand?.selection,
         confirmSteer: steer
           ? () => Boolean(confirmInboundDeliveryInterruption(session.id, 'send_now', steerConsent))
           : undefined
       })
       if (sent) {
         trackEvent('message_sent')
+        if (boundProviderCommand) {
+          trackEvent(boundProviderCommand.kind.toLowerCase() === 'skill' ? 'slash_skill_used' : 'slash_command_used')
+        }
+        if (outgoingReferences.length > 0) trackEvent('chat_reference_sent')
+        if (outgoingTeamReferences.length > 0) trackEvent('team_reference_sent')
       }
       const current = useAppStore.getState()
       if (!sent && consumeComposer && mountedRef.current && current.activeProfileId === activeProfileId && current.profileGeneration === profileGeneration && activeIdentity(current) === serverIdentity && draftContextRef.current.sessionId === selectedId) {
@@ -1210,6 +1423,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         referencesDirtyRef.current = true
         teamReferencesRef.current = restoredTeamReferences
         teamReferencesDirtyRef.current = true
+        if (boundProviderCommand) {
+          providerCommandCache.delete(boundProviderCommand.contextKey)
+          void loadProviderCommands(true, true)
+        }
         setDraft(restored)
         setReferences(restoredReferences)
         setTeamReferences(restoredTeamReferences)
@@ -1309,14 +1526,23 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     setDraft(nextText)
     storeReferences(nextReferences.chatReferences)
     storeTeamReferences(nextReferences.teamReferences)
-    const commandMatch = matchComposerCommands(nextText, caret, COMPOSER_COMMANDS, commandAvailable)
-    const nextTeamMention = commandMatch
+    const commandMatch = matchComposerCommands(nextText, caret, allComposerCommands, commandAvailable)
+    const rawCommandTrigger = composerCommandTrigger(nextText, caret)
+    const waitForProviderCommands = Boolean(
+      rawCommandTrigger
+      && providerCommandsKey
+      && ['idle', 'loading', 'error'].includes(activeProviderCommandState.status)
+    )
+    const nextCommandTrigger = commandMatch?.trigger ?? (waitForProviderCommands ? rawCommandTrigger : null)
+    const binding = providerCommandBindingRef.current
+    if (binding && !draftUsesProviderCommand(nextText, binding)) providerCommandBindingRef.current = null
+    const nextTeamMention = nextCommandTrigger
       ? null
       : teamMentionTrigger(nextText, caret, nextReferences.chatReferences, nextReferences.teamReferences)
-    const nextMention = commandMatch || nextTeamMention
+    const nextMention = nextCommandTrigger || nextTeamMention
       ? null
       : chatMentionTrigger(nextText, caret, nextReferences.chatReferences)
-    setCommandTrigger(commandMatch?.trigger ?? null)
+    setCommandTrigger(nextCommandTrigger)
     setCommandIndex(0)
     setTeamMention(nextTeamMention)
     setTeamMentionCandidates([])
@@ -1343,6 +1569,24 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   }
   const chooseCommand = (command: ComposerCommand) => {
     if (!session || !commandTrigger || !commandAvailable(command)) return
+    if (command.provider) {
+      const invocation = command.provider.command.invocation
+      providerCommandBindingRef.current = {
+        contextKey: providerCommandsKey!,
+        invocation,
+        name: command.provider.command.name,
+        kind: command.provider.command.kind,
+        selection: command.provider.selection
+      }
+      // Provider selections must start at byte zero to match the server's
+      // revalidation contract. The general slash palette permits indentation,
+      // so canonicalize only dynamic provider invocations when selected.
+      const replacement = `${invocation} `
+      pendingCaretRef.current = replacement.length
+      updateComposerDraft(replacement, replacement.length)
+      window.requestAnimationFrame(() => textareaRef.current?.focus())
+      return
+    }
     if (command.id === 'chat') {
       replaceCommand('/chat ')
       return
@@ -1556,8 +1800,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
           aria-label={sessionId === undefined ? t("ui.Composer.Composer.message_2f77668") : t("ui.Composer.Composer.message_0429845", { "title": String(session.title) })}
           spellCheck
           aria-autocomplete="list"
-          aria-expanded={Boolean(commandCandidates.length || teamMention || mention)}
-          aria-controls={commandCandidates.length ? commandPaletteId : teamMention ? teamMentionPaletteId : mention ? mentionPaletteId : undefined}
+          aria-expanded={Boolean(commandPaletteVisible || teamMention || mention)}
+          aria-controls={commandPaletteVisible ? commandPaletteId : teamMention ? teamMentionPaletteId : mention ? mentionPaletteId : undefined}
           aria-activedescendant={commandCandidates[commandIndex]
             ? `${commandPaletteId}-${commandCandidates[commandIndex].id}`
             : teamMention && teamMentionCandidates[teamMentionIndex]
@@ -1624,14 +1868,21 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
               : rawCaret
             if (displayCaret !== rawCaret) event.currentTarget.setSelectionRange(displayCaret, displayCaret)
             const caret = composerDisplayToSource(projection, displayCaret)
-            const commandMatch = matchComposerCommands(draftRef.current, caret, COMPOSER_COMMANDS, commandAvailable)
-            const nextTeamMention = commandMatch
+            const commandMatch = matchComposerCommands(draftRef.current, caret, allComposerCommands, commandAvailable)
+            const rawCommandTrigger = composerCommandTrigger(draftRef.current, caret)
+            const waitForProviderCommands = Boolean(
+              rawCommandTrigger
+              && providerCommandsKey
+              && ['idle', 'loading', 'error'].includes(activeProviderCommandState.status)
+            )
+            const nextCommandTrigger = commandMatch?.trigger ?? (waitForProviderCommands ? rawCommandTrigger : null)
+            const nextTeamMention = nextCommandTrigger
               ? null
               : teamMentionTrigger(draftRef.current, caret, referencesRef.current, teamReferencesRef.current)
-            const nextMention = commandMatch || nextTeamMention
+            const nextMention = nextCommandTrigger || nextTeamMention
               ? null
               : chatMentionTrigger(draftRef.current, caret, referencesRef.current)
-            setCommandTrigger(commandMatch?.trigger ?? null)
+            setCommandTrigger(nextCommandTrigger)
             setCommandIndex(0)
             setTeamMention(nextTeamMention)
             setTeamMentionCandidates([])
@@ -1694,21 +1945,21 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
                 }
               }
             }
-            if (commandCandidates.length) {
+            if (commandPaletteVisible) {
               if (event.key === 'Escape') {
                 event.preventDefault()
                 event.stopPropagation()
                 setCommandTrigger(null)
                 return
               }
-              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              if (commandCandidates.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
                 event.preventDefault()
                 setCommandIndex(index => (
                   index + (event.key === 'ArrowDown' ? 1 : -1) + commandCandidates.length
                 ) % commandCandidates.length)
                 return
               }
-              if (event.key === 'Home' || event.key === 'End') {
+              if (commandCandidates.length && (event.key === 'Home' || event.key === 'End')) {
                 event.preventDefault()
                 setCommandIndex(event.key === 'Home' ? 0 : commandCandidates.length - 1)
                 return
@@ -1799,13 +2050,15 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
             ? ALL_SERVERS_NATIVE_UPDATE_REQUIRED
             : 'One or more Team Network references cannot be used. Delete the highlighted reference and select it again.'}</span>}
       </div>
-      {commandCandidates.length > 0 && <ComposerCommandPalette
+      {commandPaletteVisible && <ComposerCommandPalette
         id={commandPaletteId}
         commands={commandCandidates}
         selectedIndex={commandIndex}
         session={session}
         catalog={catalog}
         claudePermissionMode={claudePermissionMode ?? undefined}
+        loadStatus={activeProviderCommandState.status}
+        onRefresh={() => void loadProviderCommands(true)}
         onHighlight={setCommandIndex}
         onSelect={chooseCommand}
       />}
@@ -2400,6 +2653,8 @@ function ComposerCommandPalette({
   session,
   catalog,
   claudePermissionMode,
+  loadStatus,
+  onRefresh,
   onHighlight,
   onSelect
 }: {
@@ -2409,6 +2664,8 @@ function ComposerCommandPalette({
   session: Session
   catalog: RuntimeCatalog | null
   claudePermissionMode?: ClaudePermissionMode
+  loadStatus: ProviderCommandLoadState['status']
+  onRefresh: () => void
   onHighlight: (index: number) => void
   onSelect: (command: ComposerCommand) => void
 }) {
@@ -2437,11 +2694,23 @@ function ComposerCommandPalette({
         onClick={() => onSelect(command)}
       >
         <span className="composer-command-icon" aria-hidden="true">{composerCommandIcon(command)}</span>
-        <span className="composer-command-copy"><strong>{command.label}</strong><small>{command.description}</small></span>
+        <span className="composer-command-copy">
+          <strong>{command.label}{command.meta && <span className="composer-command-meta">{command.meta}</span>}</strong>
+          <small>{command.description}</small>
+        </span>
         <code className="composer-command-key" title={value}>{value}</code>
       </button>
       })}
     </div>)}
+    {loadStatus === 'loading' && <div className="composer-command-status" role="status">
+      <LoaderCircle className="spin" size={13} />{t('composer.providerCommands.loading')}
+    </div>}
+    {loadStatus === 'error' && <div className="composer-command-status composer-command-error" role="status">
+      <span>{t('composer.providerCommands.loadFailed')}</span>
+      <button type="button" className="quiet-button" onMouseDown={event => event.preventDefault()} onClick={onRefresh}>
+        {t('composer.providerCommands.retry')}
+      </button>
+    </div>}
     <div className="composer-command-footer" role="presentation" aria-hidden="true">
       <span><kbd>↑↓</kbd> choose</span>
       <span><kbd>↵</kbd> open</span>
@@ -2456,6 +2725,7 @@ function composerCommandValue(
   catalog: RuntimeCatalog | null,
   claudePermissionMode?: ClaudePermissionMode
 ): string {
+  if (command.provider) return command.provider.command.invocation
   if (command.id === 'model') {
     return runtimeCatalogOptions(catalog, session.backend, 'models', session.model)
       .find(option => option.value === (session.model ?? ''))?.label ?? 'Default'
@@ -2475,6 +2745,7 @@ function composerCommandValue(
 }
 
 function composerCommandIcon(command: ComposerCommand) {
+  if (command.provider) return <Sparkles size={15} />
   switch (command.id) {
     case 'attach': return <Paperclip size={15} />
     case 'chat': return <MessageSquareShare size={15} />
@@ -2872,12 +3143,22 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
         : t('ui.composer.changeAgent')
   const chip = <button className="backend-chip" title={title} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{backendLabel(session.backend)}</span>{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
-  return <DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(backend => {
+  return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(backend => {
     const unavailable = backend === 'cursor' && !cursorAvailable
-    return <DropdownMenu.CheckboxItem key={backend} className="menu-item" disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} checked={session.backend === backend} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend)}{unavailable ? <span className="menu-item-locked-hint">{" "}{t("ui.Composer.unavailable_ca18449")}</span> : null}</DropdownMenu.CheckboxItem>
-  })}{backends.includes('cursor') && !cursorAvailable && cursorUnavailableReason
-    ? <DropdownMenu.Label className="runtime-option-help">{cursorUnavailableReason}</DropdownMenu.Label>
-    : null}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
+    const unavailableReason = cursorUnavailableReason || t('ui.Composer.agentUnavailableFallback')
+    if (unavailable) return <Tooltip.Root key={backend}>
+      <Tooltip.Trigger asChild>
+        <DropdownMenu.Item className="menu-item backend-unavailable-item" aria-disabled="true" onSelect={event => event.preventDefault()}>
+          <BackendMark backend={backend} size={15} />
+          {backendLabel(backend)}
+          <span className="menu-item-locked-hint">{t("ui.Composer.unavailable_ca18449")}</span>
+          <span className="backend-unavailable-info" aria-hidden="true"><Info size={13} /></span>
+        </DropdownMenu.Item>
+      </Tooltip.Trigger>
+      <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
+    </Tooltip.Root>
+    return <DropdownMenu.CheckboxItem key={backend} className="menu-item" checked={session.backend === backend} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend)}</DropdownMenu.CheckboxItem>
+  })}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 
 function AttachmentShelf({ sessionId, profileId, profileGeneration, files, pending }: { sessionId: string; profileId: string | null; profileGeneration: number; files: AgentFile[]; pending: NativeFileRef[] }) {
@@ -3788,7 +4069,10 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
           className="queue-action"
           aria-label={t('composer.cancelQueuedJob')}
           title={t('composer.cancelQueuedJobHint')}
-          onClick={() => void runAndRefresh(() => window.agentsDock.queue.remove(sessionId, turn.queued_id))}
+          onClick={() => void runAndRefresh(async () => {
+            const removed = await window.agentsDock.queue.remove(sessionId, turn.queued_id)
+            if (removed) trackEvent('scheduled_job_run_cancelled')
+          })}
         ><Trash2 size={13} /></button>{reorderable && movementMenu}</div>
       : agentMessage
       ? <div className="queue-actions"><button

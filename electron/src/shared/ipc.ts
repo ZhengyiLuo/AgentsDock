@@ -56,6 +56,7 @@ import type {
   ProfileNotificationPayload,
   ProviderReloadResult,
   ProfileSessionSearchResult,
+  ProviderCommandsSnapshot,
   PublicServerProfile,
   PublicServerSettings,
   QueuedCrossChatDeliveryIdentity,
@@ -342,6 +343,9 @@ export interface AgentsDockAPI {
     importHistory(sessionId: string, force?: boolean): Promise<TimelinePage>
     listLocal(): Promise<LocalSessionCandidate[]>
     bulkImport(items: BulkImportSessionItem[]): Promise<BulkImportSessionResult[]>
+  }
+  providerCommands: {
+    list(sessionId: string, refresh?: boolean): Promise<ProviderCommandsSnapshot>
   }
   timeline: {
     cached(sessionId: string): Promise<SessionSnapshot | null>

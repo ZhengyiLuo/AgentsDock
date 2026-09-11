@@ -459,6 +459,40 @@ export interface ToolCall {
 }
 
 export interface QueuePosition { queued_id: string; position: number }
+
+export interface ProviderCommandSelection {
+  /** Opaque AgentsServer-owned identifier. The client must never send a filesystem path. */
+  id: string
+  /** Inventory revision used by AgentsServer to reject stale selections. */
+  revision: string
+}
+
+export interface ProviderCommand {
+  /** Opaque AgentsServer-owned identifier. */
+  id: string
+  name: string
+  label: string
+  description: string
+  scope?: string | null
+  source?: string | null
+  kind: string
+  /** Provider-approved visible slash token, for example `/pdf` or `/plugin:skill`. */
+  invocation: string
+}
+
+export interface ProviderCommandSupport {
+  available: boolean
+  mode: string
+  reason?: string | null
+}
+
+export interface ProviderCommandsSnapshot {
+  backend: Backend
+  revision: string
+  support: ProviderCommandSupport
+  commands: ProviderCommand[]
+}
+
 export interface QueuedTurn {
   queued_id: string
   session_id?: string | null
@@ -478,6 +512,8 @@ export interface QueuedTurn {
   target_session_id?: string | null
   chat_references?: ChatReference[] | null
   team_references?: TeamReference[] | null
+  /** Opaque, revision-bound local provider command selected for this turn. */
+  skill_selection?: ProviderCommandSelection | null
   /** Durable identity for a queued same-server delivery. */
   cross_chat_envelope_id?: string | null
   cross_chat_exchange_id?: string | null
@@ -970,6 +1006,8 @@ export interface Job {
   last_run_started_at?: string | null
   loop?: boolean | null
   enabled?: boolean | null
+  /** True while a user-requested Run once is waiting for admission. */
+  manual_run_pending?: boolean | null
   /** Missing on older servers/jobs; clients must treat an absent value as `chat`. */
   context_mode?: JobContextMode | null
   backend?: Backend | null
@@ -2029,6 +2067,8 @@ export interface SendTurnInput {
   clientCapabilities?: string[]
   chatReferences?: ChatReference[]
   teamReferences?: TeamReference[]
+  /** Opaque selection returned by the session-scoped provider command inventory. */
+  skillSelection?: ProviderCommandSelection
 }
 export interface CreateJobInput {
   session_id: string

@@ -2857,6 +2857,52 @@ describe('AgentServerClient live stream', () => {
     })
   })
 
+  it('lists session-scoped provider commands and forwards opaque skill selections without paths', async () => {
+    const selection = {
+      id: 'pcmd_0123456789abcdef0123456789abcdef',
+      revision: 'pcmdrev_0123456789abcdef0123456789abcdef'
+    }
+    const snapshot = {
+      backend: 'codex',
+      revision: selection.revision,
+      support: { available: true, mode: 'native' },
+      commands: [{
+        id: selection.id, name: 'review-code', label: 'Review code',
+        description: 'Review the current change', scope: 'project', source: 'codex',
+        kind: 'skill', invocation: '/review-code'
+      }]
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(snapshot), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(snapshot), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        session: { id: 'chat', title: 'Chat', backend: 'codex' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+
+    await expect(client.providerCommands('chat /?')).resolves.toEqual(snapshot)
+    await expect(client.providerCommands('chat /?', true)).resolves.toEqual(snapshot)
+    await client.sendTurn('chat', '/review-code focus on races', [], null, null, [], [], [], selection)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://example.test:7850/api/sessions/chat%20%2F%3F/provider-commands?refresh=false')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('http://example.test:7850/api/sessions/chat%20%2F%3F/provider-commands?refresh=true')
+    const [, init] = fetchMock.mock.calls[2] as [string, RequestInit]
+    const body = JSON.parse(String(init.body))
+    expect(body.skill_selection).toEqual(selection)
+    expect(JSON.stringify(body.skill_selection)).not.toContain('path')
+
+    await expect(client.sendTurn('chat', '/review-code', [], null, null, [], [], [], {
+      ...selection,
+      path: '/Users/example/.codex/skills/review-code'
+    } as typeof selection)).rejects.toThrow('Invalid provider command selection.')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('forwards an explicitly capability-gated Claude SDK opt-in', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       session: { id: 'chat', title: 'Chat', backend: 'claude' }
