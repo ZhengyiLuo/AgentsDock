@@ -44,7 +44,7 @@ import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../li
 import { reconcileHealthActiveSessions } from '../lib/active-sessions'
 import { shouldAutoConnectServer } from '../lib/first-launch'
 import { SNAPSHOT_CACHE_VERSION, shouldReplaceCachedTimeline, snapshotLatestSeq } from '../lib/history'
-import { crossChatQueueRefreshSessionId, isNativeGoalSteerEvent, isUserQueuedTurn, queueSnapshotRequiresRefresh, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier, resolveNewQueuedTurn, updateQueuedTurns } from '../lib/queue'
+import { asyncQueuedMessageControlsAvailable, crossChatQueueRefreshSessionId, isAsyncQueuedChatMessage, isNativeGoalSteerEvent, isUserQueuedTurn, queueSnapshotRequiresRefresh, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier, resolveNewQueuedTurn, updateQueuedTurns } from '../lib/queue'
 import { QueueReconciliationState } from '../lib/queue-reconciliation'
 import { isAgentActivityEvent } from '../lib/codex-controls'
 import {
@@ -234,17 +234,23 @@ export let client = activeConnection.client
 
 const agentRouteRefreshTokens = new Map<string, symbol>()
 const agentRouteMutationTokens = new Map<string, symbol>()
+const queuedAgentEditTokens = new Map<string, symbol>()
 
 function emptyAgentRouteState() {
   agentRouteRefreshTokens.clear()
   agentRouteMutationTokens.clear()
   queuedDeliverySkipTokens.clear()
+  queuedAgentEditTokens.clear()
+  queuedRunInFlight.clear()
   return {
     agentRoutesBySession: {},
     agentRouteErrorsBySession: {},
     agentRouteLoadingSessionIds: new Set<string>(),
     revokingAgentRouteIds: new Set<string>(),
     skippingQueuedDeliveryIds: new Set<string>(),
+    // Revalidation invalidates the operation, not just its late response. A
+    // hung old request must not leave the replacement workspace disabled.
+    pendingQueuedRunIds: new Set<string>(),
   }
 }
 
@@ -258,6 +264,12 @@ function captureAgentRouteGuard(scope: ConnectionScope, get: () => AppState): ()
     && get().connected && !get().connecting && !get().switchingProfileId && !get().workspaceAdopting
     && get().health?.server_identity === identity
     && get().health?.server_instance_id === instance
+}
+
+function queuedOperationKey(scope: ConnectionScope, sessionId: string, get: () => AppState, queuedId?: string): string {
+  return JSON.stringify([scope.generation, scope.client.validationRevision,
+    get().health?.server_identity ?? null, get().health?.server_instance_id ?? null,
+    sessionId, queuedId ?? null])
 }
 
 // Queue reads and stream packets share one observation clock per validated
@@ -543,6 +555,7 @@ interface AppState {
   setCollapsedFolders(folders: string[], expectedGeneration?: number): void
   setFontScale(value: number): void
   updateQueued(sessionId: string, queuedId: string, prompt: string, chatReferences?: ChatReference[], expectedGeneration?: number, teamReferencesInput?: TeamReference[]): Promise<boolean>
+  updateQueuedAgentMessage(sessionId: string, queuedId: string, prompt: string, expectedMessageRevision: number, expectedGeneration?: number): Promise<boolean>
   removeQueued(sessionId: string, queuedId: string, expectedGeneration?: number): Promise<boolean>
   skipQueuedDelivery(sessionId: string, queuedId: string, expectedGeneration?: number): Promise<boolean>
   moveQueued(sessionId: string, queuedId: string, direction: 'up' | 'down', expectedGeneration?: number): Promise<boolean>
@@ -598,7 +611,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   turnAdmissionTokens: {},
   sendingSessionIds: new Set(),
   stoppingSessionIds: new Set(),
-  pendingQueuedRunIds: new Set(),
   pendingJobRunIds: new Set(),
   queuedRunStatus: {},
   jobs: [],
@@ -2649,7 +2661,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'Wait for the active turn to finish before forking this chat.' })
       return
     }
-    if (state.turnAdmissionTokens[sessionId] || state.sendingSessionIds.has(sessionId) || queuedRunInFlight.has(inFlightKey)) {
+    if (state.turnAdmissionTokens[sessionId] || state.sendingSessionIds.has(sessionId)
+      || queuedRunInFlight.has(queuedOperationKey(scope, sessionId, get))) {
       set({ error: 'Wait for the message to be accepted before forking this chat.' })
       return
     }
@@ -2895,6 +2908,57 @@ export const useAppStore = create<AppState>((set, get) => ({
       get,
     )
   },
+  async updateQueuedAgentMessage(sessionId, queuedId, prompt, expectedMessageRevision, expectedGeneration) {
+    const scope = validatedConnectionOrReport(get, set, expectedGeneration)
+    if (!scope) return false
+    const guard = captureAgentRouteGuard(scope, get)
+    const capable = () => guard() && asyncQueuedMessageControlsAvailable(get().health)
+    const normalized = prompt.trim()
+    if (!capable() || !normalized || !Number.isSafeInteger(expectedMessageRevision) || expectedMessageRevision < 0) {
+      set({ error: 'This server cannot safely edit this queued agent message. Refresh the queue before retrying.' })
+      return false
+    }
+    const initial = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
+    const owner = editableQueuedAgentOwner(initial, sessionId)
+    if (!owner || initial?.message_revision !== expectedMessageRevision) {
+      set({ error: 'This message changed or has already started. Reopen its editor from the current queue.' })
+      return false
+    }
+    const key = queuedOperationKey(scope, sessionId, get, queuedId)
+    if (queuedAgentEditTokens.has(key)) return false
+    const token = Symbol()
+    queuedAgentEditTokens.set(key, token)
+    const current = () => capable() && queuedAgentEditTokens.get(key) === token
+    try {
+      const turns = await refreshSnapshotQueue(scope, sessionId, set, get, current)
+      if (!current() || !turns) return false
+      const fresh = turns.find(turn => turn.queued_id === queuedId)
+      const visible = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
+      if (editableQueuedAgentOwner(fresh, sessionId) !== owner || fresh?.message_revision !== expectedMessageRevision
+        || editableQueuedAgentOwner(visible, sessionId) !== owner || visible?.message_revision !== expectedMessageRevision) {
+        throw new Error('This message changed or has already started. Your draft was kept; reopen the current message before saving.')
+      }
+      // Recipient edits alter only this body at this revision. They cannot
+      // create route grants or smuggle user-composer reference metadata.
+      await scope.client.updateQueued(sessionId, queuedId, normalized, undefined, undefined, undefined, expectedMessageRevision)
+      if (!current()) return false
+      const refreshed = await refreshSnapshotQueue(scope, sessionId, set, get, current)
+      if (!current() || !refreshed) return false
+      const remaining = refreshed.find(turn => turn.queued_id === queuedId)
+      if (remaining && (editableQueuedAgentOwner(remaining, sessionId) !== owner
+        || (remaining.message_revision ?? -1) <= expectedMessageRevision)) {
+        throw new Error('The server has not confirmed this edit. Your draft was kept; refresh the queue before retrying.')
+      }
+      return true
+    } catch (error) {
+      if (!current()) return false
+      await refreshSnapshotQueue(scope, sessionId, set, get, current).catch(() => null)
+      if (current()) set({ error: errorMessage(error) })
+      return false
+    } finally {
+      if (queuedAgentEditTokens.get(key) === token) queuedAgentEditTokens.delete(key)
+    }
+  },
   async removeQueued(sessionId, queuedId, expectedGeneration) {
     const queued = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
     if (queued && !isUserQueuedTurn(queued)) {
@@ -2968,7 +3032,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   async runQueuedNow(sessionId, queuedId, expectedGeneration) {
     const queuedTurns = get().snapshots[sessionId]?.queuedTurns ?? []
     const queued = queuedTurns.find(turn => turn.queued_id === queuedId)
-    if (queued && !isUserQueuedTurn(queued)) {
+    const agentOwner = editableQueuedAgentOwner(queued, sessionId)
+    const agentMessage = Boolean(agentOwner && asyncQueuedMessageControlsAvailable(get().health))
+    if (queued && !isUserQueuedTurn(queued) && !agentMessage) {
       set(state => ({
         queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
           queued_id: queuedId,
@@ -2978,7 +3044,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       return false
     }
-    if (queuedTurnHasEarlierDeliveryBarrier(queuedTurns, queuedId)) {
+    if (queuedTurnHasEarlierDeliveryBarrier(queuedTurns, queuedId, asyncQueuedMessageControlsAvailable(get().health))) {
       set(state => ({
         queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
           queued_id: queuedId,
@@ -3002,19 +3068,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       return false
     }
-    const current = captureAgentRouteGuard(scope, get)
-    const inFlightKey = `${scope.generation}:${sessionId}`
+    const guard = captureAgentRouteGuard(scope, get)
+    if (!guard()) return false
+    const inFlightKey = queuedOperationKey(scope, sessionId, get)
     const pending = queuedRunInFlight.get(inFlightKey)
     if (pending) return pending.queuedId === queuedId ? pending.promise : false
-    set(state => {
-      const pendingQueuedRunIds = new Set(state.pendingQueuedRunIds)
-      pendingQueuedRunIds.add(queuedId)
-      return {
-        pendingQueuedRunIds,
-        queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId),
-      }
-    })
-    const operation = (async (): Promise<boolean> => {
+    const current = () => guard() && queuedRunInFlight.get(inFlightKey)?.promise === operation
+    // Install admission before beginning asynchronous work or notifying store
+    // subscribers, including subscribers that synchronously issue another tap.
+    const operation = Promise.resolve().then(async (): Promise<boolean> => {
+      if (!current()) return false
       const session = get().sessions.find(candidate => candidate.id === sessionId)
       if (session?.backend === 'codex') {
         try {
@@ -3024,7 +3087,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessionId,
           })
         } catch (error) {
-          if (connectionIsCurrent(scope)) set(state => ({
+          if (current()) set(state => ({
             queuedRunStatus: queuedRunStatusMap(
               state.queuedRunStatus,
               sessionId,
@@ -3033,7 +3096,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           }))
           return false
         }
-        if (!connectionIsCurrent(scope)) return false
+        if (!current()) return false
       }
       if (session?.backend === 'claude') {
         try {
@@ -3043,7 +3106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessionId,
           })
         } catch (error) {
-          if (connectionIsCurrent(scope)) set(state => ({
+          if (current()) set(state => ({
             queuedRunStatus: queuedRunStatusMap(
               state.queuedRunStatus,
               sessionId,
@@ -3052,10 +3115,30 @@ export const useAppStore = create<AppState>((set, get) => ({
           }))
           return false
         }
-        if (!connectionIsCurrent(scope)) return false
+        if (!current()) return false
       }
 
       if (!current()) return false
+      if (agentMessage) {
+        // Permission changes may wait arbitrarily long. Read only after those
+        // waits, then recheck the current projection without another await
+        // before POST: the GET publication itself can notify live subscribers.
+        const turns = await refreshSnapshotQueue(scope, sessionId, set, get, current).catch(() => null)
+        const currentTurns = get().snapshots[sessionId]?.queuedTurns
+        const validOwner = (values: QueuedTurn[] | null | undefined) => {
+          const latest = values?.find(turn => turn.queued_id === queuedId)
+          return Boolean(values && editableQueuedAgentOwner(latest, sessionId) === agentOwner
+            && latest?.message_revision === queued?.message_revision
+            && !queuedTurnHasEarlierDeliveryBarrier(values, queuedId, asyncQueuedMessageControlsAvailable(get().health)))
+        }
+        if (!current() || !asyncQueuedMessageControlsAvailable(get().health)
+          || !validOwner(turns) || !validOwner(currentTurns)) {
+          if (current()) set(state => ({ queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
+            queued_id: queuedId, tone: 'error', message: 'This agent message changed or has an earlier delivery. Refresh the queue before sending it now.',
+          }) }))
+          return false
+        }
+      }
       let response: QueuedRunNowResponse
       try {
         response = await scope.client.runQueuedNow(sessionId, queuedId)
@@ -3147,13 +3230,22 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       markQueuedRunAccepted(scope, sessionId, set, get)
       return true
-    })()
+    })
     queuedRunInFlight.set(inFlightKey, { queuedId, promise: operation })
+    set(state => {
+      const pendingQueuedRunIds = new Set(state.pendingQueuedRunIds)
+      pendingQueuedRunIds.add(queuedId)
+      return {
+        pendingQueuedRunIds,
+        queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId),
+      }
+    })
     try {
       return await operation
     } finally {
+      const ownsPresentation = current()
       if (queuedRunInFlight.get(inFlightKey)?.promise === operation) queuedRunInFlight.delete(inFlightKey)
-      if (connectionIsCurrent(scope)) {
+      if (ownsPresentation) {
         set(state => {
           const pendingQueuedRunIds = new Set(state.pendingQueuedRunIds)
           pendingQueuedRunIds.delete(queuedId)
@@ -4512,6 +4604,16 @@ function markQueuedRunAccepted(
     }
   })
   if (get().selectedSessionId === sessionId) void get().syncSelectedSession('recovery')
+}
+
+function editableQueuedAgentOwner(turn: QueuedTurn | undefined, sessionId: string): string | null {
+  if (!turn || !isAsyncQueuedChatMessage(turn) || turn.promoted
+    || turn.session_id && turn.session_id !== sessionId
+    || turn.target_session_id && turn.target_session_id !== sessionId
+    || !turn.source_session_id || turn.source_session_id === sessionId
+    || !turn.cross_chat_envelope_id
+    || !Number.isSafeInteger(turn.message_revision) || (turn.message_revision ?? -1) < 0) return null
+  return JSON.stringify([turn.queued_id, turn.cross_chat_envelope_id, turn.source_session_id, turn.target_session_id ?? sessionId])
 }
 
 async function queueAction(scope: ConnectionScope, sessionId: string, action: () => Promise<void>, set: (value: Partial<AppState>) => void, get: () => AppState): Promise<boolean> {

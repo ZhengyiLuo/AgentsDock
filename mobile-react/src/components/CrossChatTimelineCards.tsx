@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, MessageSquareShare } from 'lu
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import type { AgentServerClient } from '../api/AgentServerClient'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
+import { authenticatedChatMessageBody } from '../lib/chat-message-body'
 import { formatDateTime, messageText } from '../lib/format'
 import { timelineChatReferenceIsRemote, timelineChatReferenceKey } from '../lib/timeline-inline-references'
 import type {
@@ -122,7 +123,7 @@ interface TimelineWorkspaceScope {
   serverInstanceId: string | null
 }
 
-function captureTimelineWorkspaceScope(sessionId: string): TimelineWorkspaceScope {
+export function captureTimelineWorkspaceScope(sessionId: string): TimelineWorkspaceScope {
   const state = useAppStore.getState()
   return {
     profileId: state.activeProfileId,
@@ -136,7 +137,7 @@ function captureTimelineWorkspaceScope(sessionId: string): TimelineWorkspaceScop
   }
 }
 
-function timelineWorkspaceScopeCurrent(scope: TimelineWorkspaceScope): boolean {
+export function timelineWorkspaceScopeCurrent(scope: TimelineWorkspaceScope): boolean {
   const state = useAppStore.getState()
   return client === scope.connection
     && scope.connection.validationRevision === scope.validationRevision
@@ -163,7 +164,7 @@ function timelineWorkspaceProfileCurrent(scope: TimelineWorkspaceScope): boolean
     && !state.workspaceAdopting
 }
 
-function useTimelineWorkspaceRevision(sessionId: string): string {
+export function useTimelineWorkspaceRevision(sessionId: string): string {
   return useAppStore(state => JSON.stringify([
     state.activeProfileId,
     state.profileGeneration,
@@ -307,17 +308,23 @@ function CrossChatMessageCardScoped({
   const sourceId = latestExchangeString(lifecycle, value => value.source_session_id)
   const targetId = latestExchangeString(lifecycle, value => value.target_session_id)
   const incoming = targetId === sessionId && sourceId !== sessionId
+  const latestRevision = latestExchangeNumber(lifecycle, value => value.message_revision)
+  const editedByUser = incoming && (latestExchangeBoolean(lifecycle, value => value.message_edited_by_user) === true || (latestRevision ?? 0) > 0)
+  const messageRevision = editedByUser ? latestRevision : null
+  const bodyEvents = editedByUser ? lifecycle.filter(value => value.message_edited_by_user === true && value.message_revision === messageRevision) : lifecycle
+  const bodyRevisionKey = JSON.stringify([workspaceRevision, envelopeId, conversationId, sourceId, targetId, editedByUser, messageRevision])
   const counterpartId = incoming ? sourceId : targetId
   const currentTitle = useAppStore(state => state.sessions.find(value => value.id === counterpartId)?.title)
   const savedTitle = latestExchangeString(lifecycle, value => incoming ? value.source_title : value.target_title)
   const counterpartTitle = savedTitle || currentTitle || 'Unknown agent'
-  const preview = latestExchangeString(lifecycle, value => value.handoff_preview)
-  const bodyChars = latestExchangeNumber(lifecycle, value => value.handoff_body_chars)
-  const truncated = latestExchangeBoolean(lifecycle, value => value.handoff_body_truncated) === true
-  const bodyHash = latestExchangeString(lifecycle, value => value.handoff_body_sha256)
-  const moreBodyAvailable = truncated || (bodyChars ?? 0) > preview.length || /(?:…|\.\.\.)$/u.test(preview)
+  const preview = latestExchangeString(bodyEvents, value => value.message_body) || latestExchangeString(bodyEvents, value => value.handoff_preview)
+  const bodyChars = latestExchangeNumber(bodyEvents, value => value.handoff_body_chars)
+  const truncated = latestExchangeBoolean(bodyEvents, value => value.handoff_body_truncated) === true
+  const bodyHash = latestExchangeString(bodyEvents, value => value.handoff_body_sha256)
+  const moreBodyAvailable = !preview || truncated || (bodyChars ?? 0) > preview.length || /(?:…|\.\.\.)$/u.test(preview)
   const longBody = (bodyChars ?? preview.length) > CROSS_CHAT_LONG_MESSAGE_CHARS || preview.split('\n').length > CROSS_CHAT_LONG_MESSAGE_LINES
-  const [body, setBody] = useState<string | null>(null)
+  const [loadedBody, setLoadedBody] = useState<{ key: string; preview: string; hash: string; text: string } | null>(null)
+  const body = loadedBody?.key === bodyRevisionKey && loadedBody.preview === preview && loadedBody.hash === bodyHash ? loadedBody.text : null
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -326,12 +333,12 @@ function CrossChatMessageCardScoped({
   useEffect(() => {
     requestGeneration.current += 1
     loadingRef.current = false
-    setBody(null)
+    setLoadedBody(null)
     setExpanded(false)
     setLoading(false)
     setLoadError('')
     return () => { requestGeneration.current += 1; loadingRef.current = false }
-  }, [rowKey, sessionId, profileGeneration, workspaceRevision, envelopeId, conversationId, sourceId, targetId, preview, bodyHash])
+  }, [rowKey, sessionId, profileGeneration, workspaceRevision, envelopeId, conversationId, sourceId, targetId, preview, bodyHash, bodyRevisionKey])
 
   const showFullMessage = async () => {
     if (loadingRef.current) return
@@ -354,17 +361,13 @@ function CrossChatMessageCardScoped({
     try {
       const loaded = await scope.connection.crossChatHandoff(envelopeId)
       if (request !== requestGeneration.current || !timelineWorkspaceScopeCurrent(scope)) return
-      if (loaded.id !== envelopeId || loaded.message_id !== envelopeId
-        || loaded.conversation_id !== conversationId || loaded.conversation_mode !== 'async_route_v1') {
-        throw new Error('AgentsServer returned the wrong handoff')
-      }
-      if (loaded.source_session_id !== sourceId || loaded.target_session_id !== targetId) {
-        throw new Error('AgentsServer returned different message participants')
-      }
-      if (typeof loaded.body !== 'string' || !loaded.body.trim()) {
-        throw new Error('AgentsServer did not return a message body')
-      }
-      setBody(loaded.body)
+      const text = authenticatedChatMessageBody(loaded, {
+        messageId: envelopeId, conversationId, sourceSessionId: sourceId, targetSessionId: targetId,
+        incoming, editedByUser, messageRevision: editedByUser ? messageRevision ?? -1 : undefined,
+        bodyHash: bodyHash || undefined,
+      })
+      if (!text.trim()) throw new Error('AgentsServer did not return a message body')
+      setLoadedBody({ key: bodyRevisionKey, preview, hash: bodyHash, text })
       setExpanded(true)
     } catch (error) {
       if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setLoadError(timelineActionError(error))

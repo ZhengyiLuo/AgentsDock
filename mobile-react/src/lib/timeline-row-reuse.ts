@@ -28,11 +28,16 @@ export function sameTimelineRow(left: TimelineRow, right: TimelineRow): boolean 
   if (left.kind === 'trace' && right.kind === 'trace') {
     return left.runId === right.runId
       && left.active === right.active
+      && left.runActive === right.runActive
+      && left.afterSeq === right.afterSeq && left.throughSeq === right.throughSeq
+      && left.continues === right.continues && left.terminalSeq === right.terminalSeq
+      && sameToolStarts(left.toolStartSequences, right.toolStartSequences)
       && sameEvents(left.events, right.events)
       && sameReferences(left.promotedCommentaryIds, right.promotedCommentaryIds)
   }
   if (left.kind === 'progress' && right.kind === 'progress') {
     return left.hiddenCount === right.hiddenCount
+      && left.afterSeq === right.afterSeq && left.throughSeq === right.throughSeq && left.continues === right.continues
       && sameEvents(left.events, right.events)
   }
   if (left.kind === 'media' && right.kind === 'media') {
@@ -48,9 +53,23 @@ export function sameTimelineRow(left: TimelineRow, right: TimelineRow): boolean 
     && left.event === right.event
     && left.crossChatMessage === right.crossChatMessage
     && left.anchorTs === right.anchorTs
+    && sameMailboxChildren(left, right)
     && sameOptionalReferences(left.events, right.events)
     && sameOptionalReferences(left.representedEventIds, right.representedEventIds)
     && sameOptionalReferences(left.representedEventSeqs, right.representedEventSeqs)
+}
+
+function sameMailboxChildren(left: Extract<TimelineRow, { kind: 'system' }>, right: Extract<TimelineRow, { kind: 'system' }>): boolean {
+  const first = left.mailboxMessages, second = right.mailboxMessages
+  return first === second || Boolean(first && second && first.length === second.length
+    && first.every((child, index) => sameTimelineRow(child, second[index])))
+}
+
+function sameToolStarts(left?: Readonly<Record<string, number>>, right?: Readonly<Record<string, number>>): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every(key => left[key] === right[key])
 }
 
 function sameReferences(left: readonly unknown[], right: readonly unknown[]): boolean {

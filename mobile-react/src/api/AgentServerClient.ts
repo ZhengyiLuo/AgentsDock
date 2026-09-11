@@ -22,6 +22,8 @@ import type {
   ClaudeMcpSnapshot,
   ClaudeRuntimeSnapshot,
   ChatReference,
+  ChatInboxPage,
+  ChatInboxDeleteReceipt,
   TeamReference,
   CreateJobInput,
   CreateSessionInput,
@@ -65,6 +67,7 @@ import type {
 import { normalizeServerURL } from '../lib/format'
 import { createUploadFormData } from '../lib/upload-form'
 import { teamNetworkRequestPath } from '../lib/team-network'
+import { parseChatInboxDelete, parseChatInboxPage } from '../lib/chat-mailbox'
 
 interface SessionResponse {
   session: Session
@@ -618,12 +621,17 @@ export class AgentServerClient {
     chatReferences?: readonly ChatReference[],
     clientCapabilities?: readonly string[],
     teamReferences?: readonly TeamReference[],
+    expectedMessageRevision?: number,
   ): Promise<void> {
+    if (expectedMessageRevision !== undefined && (!Number.isSafeInteger(expectedMessageRevision) || expectedMessageRevision < 0)) {
+      throw new Error('Invalid queued message revision.')
+    }
     await this.patch(`/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}`, {
       prompt,
       ...(chatReferences ? { chat_references: chatReferences.map(reference => ({ ...reference })) } : {}),
       ...(clientCapabilities ? { client_capabilities: [...clientCapabilities] } : {}),
       ...(teamReferences ? { team_references: teamReferences.map(reference => ({ ...reference })) } : {}),
+      ...(expectedMessageRevision !== undefined ? { expected_message_revision: expectedMessageRevision } : {}),
     })
   }
   async crossChatHandoff(envelopeId: string): Promise<CrossChatHandoff> {
@@ -632,7 +640,16 @@ export class AgentServerClient {
     )).handoff
   }
   agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
-    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)
+  }
+  async chatInbox(sessionId: string, cursor: string | null = null, limit = 25): Promise<ChatInboxPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25 || cursor !== null && !/^\d+$/u.test(cursor)) throw new Error('Invalid inbox page request.')
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (cursor !== null) query.set('cursor', cursor)
+    return parseChatInboxPage(await this.get<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox?${query}`), sessionId, limit)
+  }
+  async deleteChatInboxMessage(sessionId: string, messageId: string): Promise<ChatInboxDeleteReceipt> {
+    return parseChatInboxDelete(await this.delete<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox/${encodeURIComponent(messageId)}`), sessionId, messageId)
   }
   deleteAgentHandoffRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
     if (!expectedRevision.trim()) throw new Error('Refresh this grant before revoking it.')

@@ -599,7 +599,8 @@ export interface AgentCrossChatRoute {
 
 export interface AgentCrossChatRoutesSnapshot {
   routes: AgentCrossChatRoute[]
-  max_routes: number
+  /** Null is the negotiated unlimited-route contract; legacy servers return a number. */
+  max_routes: number | null
 }
 
 export interface DeleteAgentCrossChatRouteResponse {
@@ -642,6 +643,42 @@ export interface TeamReference {
   grant_intent: true
 }
 
+export type ChatInboxState = 'unread' | 'read' | 'cancelled' | 'deleted'
+
+export interface ChatInboxMessage {
+  message_id: string
+  conversation_id: string
+  conversation_mode: 'async_route_v1'
+  delivery_mode: 'mailbox'
+  source_session_id: string
+  source_title: string
+  target_session_id: string
+  state: ChatInboxState
+  created_at: string
+  received_at: string | null
+  read_at: string | null
+  reply_to_message_id: string | null
+  body: string
+  body_chars: number
+  body_sha256: string
+  message_revision: number
+}
+
+export interface ChatInboxPage {
+  session_id: string
+  messages: ChatInboxMessage[]
+  next_cursor: string | null
+  has_more: boolean
+  senders: Array<{ source_session_id: string; source_title: string; unread_count: number }>
+}
+
+export interface ChatInboxDeleteReceipt {
+  ok: true
+  session_id: string
+  message_id: string
+  state: 'deleted'
+}
+
 export interface CrossChatHandoffSummary {
   id: string
   kind: ChatReferenceAction
@@ -650,6 +687,8 @@ export interface CrossChatHandoffSummary {
   target_session_id: string
   action: ChatReferenceAction
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  inbox_state?: ChatInboxState | null
   conversation_id?: string | null
   message_id?: string | null
   status: string
@@ -665,6 +704,10 @@ export interface CrossChatHandoff extends CrossChatHandoffSummary {
   body: string
   body_chars: number
   body_sha256: string
+  /** Recipient-effective text; body remains the sender's original. */
+  target_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
 }
 
 export type CrossChatExchangeStatus = 'waiting_request' | 'active' | 'completed' | 'failed' | 'cancelled' | 'expired'
@@ -734,6 +777,10 @@ export interface QueuedTurn {
   target_session_id?: string | null
   source_title?: string | null
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  message_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
   cross_chat_envelope_id?: string | null
   cross_chat_exchange_id?: string | null
   cross_chat_exchange_leg_id?: string | null
@@ -815,6 +862,14 @@ export interface Event {
   cross_chat_envelope_id?: string | null
   watch_id?: string | null
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  inbox_state?: ChatInboxState | null
+  received_at?: string | null
+  read_at?: string | null
+  reply_to_message_id?: string | null
+  message_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
   conversation_id?: string | null
   message_id?: string | null
   correlation_id?: string | null
@@ -1114,12 +1169,15 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     agent_ambient_local_handoffs?: boolean
     exact_queued_delivery_skip?: boolean
     exact_queued_delivery_reorder?: boolean
+    async_queued_message_controls?: boolean
+    chat_mailbox_v1?: boolean
     exact_queued_peer_delivery_skip?: boolean
     secure_peer_fifo_barriers?: boolean
     async_route_v1?: boolean
     [key: string]: JsonValue | undefined
   }
   agent_routes?: {
+    chat_mailbox_v1?: { available?: boolean }
     async_route_v1?: {
       available?: boolean
       client_capability?: string
@@ -1127,7 +1185,7 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     }
     client_capability?: string
     policy?: 'default_deny'
-    max_routes_per_chat?: number
+    max_routes_per_chat?: number | null
     transcript_access?: boolean
     actions?: Array<'instruction' | 'request_reply'>
     [key: string]: JsonValue | Array<'instruction' | 'request_reply'> | undefined

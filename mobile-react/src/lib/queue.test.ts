@@ -5,6 +5,9 @@ import {
   isUserQueuedTurn,
   isVisibleQueuedTurn,
   isNativeGoalSteerEvent,
+  asyncQueuedMessageControlsAvailable,
+  isAsyncQueuedChatMessage,
+  isScheduledJobQueuedTurn,
   queueSnapshotRequiresRefresh,
   queuedMoveCrossesDeliveryBarrier,
   queuedTurnHasEarlierDeliveryBarrier,
@@ -67,6 +70,33 @@ const securePeer = updateQueuedTurns([], event('turn_queued', { queued_id: 'secu
 assert(!isUserQueuedTurn(securePeer), 'secure-peer delivery plumbing must never become user-editable')
 assert(!isVisibleQueuedTurn(securePeer), 'secure-peer delivery plumbing must stay hidden from the local queue shelf')
 assert(isDeliveryBarrierQueuedTurn(securePeer), 'hidden secure-peer deliveries must still participate in FIFO barrier ordering')
+const scheduled = { ...securePeer, purpose: 'scheduled_job' }
+assert(isScheduledJobQueuedTurn(scheduled), 'scheduled queue ownership must be explicit')
+assert(!isUserQueuedTurn(scheduled) && !isVisibleQueuedTurn(scheduled), 'scheduled work must never acquire user edit/send controls')
+assert(isDeliveryBarrierQueuedTurn(scheduled), 'hidden scheduled work must retain its immutable FIFO position')
+const mailbox = { ...crossChat, conversation_mode: 'async_route_v1' as const, delivery_mode: 'mailbox' as const }
+assert(!isAsyncQueuedChatMessage(mailbox) && !isVisibleQueuedTurn(mailbox), 'passive mail must never appear as ordinary queued provider work')
+assert(asyncQueuedMessageControlsAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: { available: true, features: { async_queued_message_controls: true } } } }), 'async recipient controls require an explicit gate')
+assert(!asyncQueuedMessageControlsAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: { available: true, features: {} } } }), 'older servers cannot acquire recipient edit/send controls')
+
+let editedQueue = updateQueuedTurns([], event('turn_queued', {
+  queued_id: 'edited', purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1',
+  prompt: 'Preview', message_body: 'Full original message', message_revision: 0, message_edited_by_user: false,
+}))
+assert(editedQueue[0].prompt === 'Full original message', 'full recipient body must replace only the public preview')
+editedQueue = updateQueuedTurns(editedQueue, event('turn_queue_updated', { queued_id: 'edited', message_body: 'Recipient edit', message_revision: 2, message_edited_by_user: true }))
+for (const receipt of [
+  event('turn_queue_updated', { queued_id: 'edited', prompt: 'Stale preview', message_body: 'Old full body', message_revision: 1, message_edited_by_user: false }),
+  event('turn_queue_updated', { queued_id: 'edited', prompt: 'Partial revision', message_revision: 3 }),
+  event('turn_queue_delivery_fenced', { queued_id: 'edited', purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1', prompt: 'Fenced preview' }),
+  event('turn_queue_delivery_fenced', { queued_id: 'edited', prompt: 'Sparse fenced preview' }),
+]) {
+  editedQueue = updateQueuedTurns(editedQueue, receipt)
+  assert(editedQueue[0].prompt === 'Recipient edit' && editedQueue[0].message_revision === 2 && editedQueue[0].message_edited_by_user === true, 'old, partial, or fenced receipts cannot downgrade an atomic recipient edit')
+  assert(isAsyncQueuedChatMessage(editedQueue[0]) && !isUserQueuedTurn(editedQueue[0]), 'a sparse receipt must not reclassify an exact delivery owner as editable ordinary user work')
+}
+const invalidRevision = updateQueuedTurns([], event('turn_queued', { queued_id: 'invalid', purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1', prompt: 'Preview', message_body: 'Unbound body', message_revision: -1, message_edited_by_user: true }))
+assert(invalidRevision[0].message_body === undefined && invalidRevision[0].prompt === 'Preview', 'invalid revision must not bind a body to recipient controls')
 
 const barrierQueue: QueuedTurn[] = [
   { queued_id: 'after-secure', session_id: 'chat-1', prompt: 'After secure', file_ids: [], position: 4 },
@@ -83,6 +113,19 @@ assert(!queuedMoveCrossesDeliveryBarrier(barrierQueue, 'before', 'up'), 'moving 
 assert(!queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'before'), 'run now should remain available before all delivery barriers')
 assert(queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-local'), 'run now must remain FIFO behind a local cross-chat delivery')
 assert(queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-secure'), 'run now must remain FIFO behind a hidden secure-peer delivery')
+assert(!queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-secure', true), 'the exact async controls contract permits an explicit run-now priority change')
+assert(queuedTurnHasEarlierDeliveryBarrier([
+  { queued_id: 'promoted', prompt: 'In flight', file_ids: [], position: 0, promoted: true },
+  { queued_id: 'next', prompt: 'Next', file_ids: [], position: 1 },
+], 'next', true), 'even negotiated priority cannot overtake an already promoted owner')
+for (const capability of [
+  { available: false, features: { async_queued_message_controls: true } },
+  { available: true, features: { async_queued_message_controls: false } },
+  { available: true, features: { async_queued_message_controls: 'true' as unknown as boolean } },
+]) {
+  const supported = asyncQueuedMessageControlsAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: capability } })
+  assert(!supported && queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-secure', supported), 'near-miss capability flags must retain every legacy FIFO barrier')
+}
 
 const existing: QueuedTurn = { queued_id: 'existing', session_id: 'chat-1', prompt: 'Earlier', file_ids: [] }
 const created: QueuedTurn = { queued_id: 'created', session_id: 'chat-1', prompt: 'Send this now', file_ids: [] }

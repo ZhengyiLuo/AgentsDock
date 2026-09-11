@@ -1,5 +1,26 @@
 # Public development log
 
+## Mobile compact panels and cross-chat catch-up — 0.1.1 (173)
+
+- Collapse goals and queued messages by default into touch-sized summary
+  headers. Expanded content stays scrollable within a shared composer height
+  budget; folding preserves queued edits and hidden editors release focus.
+- Add the desktop's passive sender-grouped chat inbox with bounded Markdown,
+  per-message receipt state/time, full-body loading, pagination and confirmed
+  deletion. Opening it does not mark messages read or start agent work.
+- Keep cross-chat activity in chronological segments, including lazy-loaded
+  traces and tool results that finish after a message was sent. Preserve the
+  visible live-progress tail and avoid repeating commentary in earlier traces.
+- Support revision-safe recipient editing and Run now only when explicitly
+  advertised by the server. Validate message identity and body hashes, retain
+  the sender's original body, and fence stale reconnect/permission-wait actions.
+- Retain build 172's delivered-queue reconciliation and the main repository's
+  iOS/iPadOS analytics removal. Nullable route limits now mean unlimited access.
+- Extend CI with mailbox, body verification, activity chronology, queue control
+  races, folding and actual rendered-button regressions. Native-host tests do
+  not claim physical-device or simulator pixel acceptance; broader desktop
+  workflow and import-history parity remain documented follow-up work.
+
 ## Mobile queue reconciliation — 0.1.1 (172)
 
 - Apple validation and processing completed successfully; build 172 is active

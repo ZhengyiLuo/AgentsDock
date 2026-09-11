@@ -1,6 +1,8 @@
 import type { AgentFile, CodexPendingInteraction, Event, JsonValue, Snapshot } from '../types'
 import { mergeEvents, mergeFiles, stripInjectedProviderAuthority } from './format'
 import { boundImportedCrossChatDeliveryPrompt } from './imported-cross-chat-delivery'
+import { crossChatSemanticKey, isAsyncCrossChatMessage } from './timeline'
+import { isChatMailboxEvent } from './chat-mailbox'
 
 export const LIVE_TIMELINE_EVENT_LIMIT = 720
 export const HISTORY_WINDOW_EVENT_LIMIT = 2_400
@@ -48,6 +50,14 @@ const historicalTraceAnchorTypes = new Set([
 export function historicalTimelineEvents(events: Event[], contextEvents: readonly Event[] = []): Event[] {
   const successorSeqByRun = new Map<string, number>()
   const latestTraceAnchorByRun = new Map<string, Event>()
+  const messageAnchors = historicalCrossChatAnchors([...contextEvents, ...events])
+  const toolStarts = new Map<string, Event>()
+  const toolKey = (event: Event): string => `${event.run_id?.trim() || ''}:${event.tool_id?.trim() || event.tool?.id?.trim() || ''}`
+  for (const event of [...contextEvents, ...events]) {
+    if (event.type !== 'tool_started' || !(event.tool_id?.trim() || event.tool?.id?.trim())) continue
+    const key = toolKey(event), previous = toolStarts.get(key)
+    if (!previous || event.seq < previous.seq) toolStarts.set(key, event)
+  }
   const completedRunIds = new Set(
     [...contextEvents, ...events]
       .filter(event => ['turn_finished', 'turn_stopped', 'error'].includes(event.type))
@@ -68,10 +78,24 @@ export function historicalTimelineEvents(events: Event[], contextEvents: readonl
     const runId = event.run_id?.trim()
     if (!runId || !completedRunIds.has(runId) || !historicalTraceAnchorTypes.has(event.type)) continue
     if (event.type === 'reasoning_summary' && !event.text?.trim()) continue
-    const current = latestTraceAnchorByRun.get(runId)
-    if (!current || event.seq > current.seq) latestTraceAnchorByRun.set(runId, event)
+    const anchorSeq = event.type === 'tool_finished' ? toolStarts.get(toolKey(event))?.seq ?? event.seq : event.seq
+    let low = 0, high = messageAnchors.length
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (messageAnchors[middle] < anchorSeq) low = middle + 1
+      else high = middle
+    }
+    const segmentKey = `${runId}\0${low}`
+    const current = latestTraceAnchorByRun.get(segmentKey)
+    if (!current || event.seq > current.seq) latestTraceAnchorByRun.set(segmentKey, event)
   }
   const traceAnchorIds = new Set([...latestTraceAnchorByRun.values()].map(event => event.id))
+  for (const event of latestTraceAnchorByRun.values()) {
+    if (event.type === 'tool_finished') {
+      const start = toolStarts.get(toolKey(event))
+      if (start) traceAnchorIds.add(start.id)
+    }
+  }
 
   return events.filter(event => {
     if (!historicalTraceTypes.has(event.type)) return true
@@ -92,6 +116,26 @@ export function historicalTimelineEvents(events: Event[], contextEvents: readonl
   })
 }
 
+/** Retain one lazy trace anchor around each actual message, not every receipt. */
+function historicalCrossChatAnchors(events: readonly Event[]): number[] {
+  const anchors = new Map<string, number>()
+  const deleted = new Set<string>()
+  for (const event of events) {
+    const key = crossChatSemanticKey(event)
+    if (!key || !Number.isFinite(event.seq)) continue
+    const incoming = event.target_session_id === event.session_id && event.source_session_id !== event.session_id
+    if (isChatMailboxEvent(event) && incoming && event.inbox_state === 'deleted') deleted.add(key)
+    if (isAsyncCrossChatMessage(event) && incoming) {
+      const arrived = isChatMailboxEvent(event)
+        ? event.type === 'chat_conversation_message_received' || event.type === 'chat_conversation_message_mailbox_migrated'
+        : event.type === 'chat_conversation_message_started' || event.type === 'chat_conversation_message_delivered'
+      if (!arrived) continue
+    }
+    anchors.set(key, Math.min(anchors.get(key) ?? Infinity, event.seq))
+  }
+  return [...anchors].filter(([key]) => !deleted.has(key)).map(([, seq]) => seq).sort((left, right) => left - right)
+}
+
 /** Bound untrusted server text before it enters long-lived state or native views. */
 export function sanitizeTimelineEvent(event: Event): Event {
   const next: Event = {
@@ -107,6 +151,10 @@ export function sanitizeTimelineEvent(event: Event): Event {
     message: truncateText(event.message, MESSAGE_FIELD_LIMIT),
     digest: truncateText(event.digest, MESSAGE_FIELD_LIMIT),
     handoff_preview: truncateText(event.handoff_preview, MESSAGE_FIELD_LIMIT),
+    // Never label a truncated recipient body as the complete CAS revision.
+    // Full expansion can refetch the exact handoff; queue snapshots retain it.
+    message_body: typeof event.message_body === 'string' && event.message_body.length > MESSAGE_FIELD_LIMIT ? undefined : event.message_body,
+    handoff_body_truncated: event.handoff_body_truncated === true || (typeof event.message_body === 'string' && event.message_body.length > MESSAGE_FIELD_LIMIT) || event.handoff_body_truncated,
     source_title: truncateText(event.source_title, TIMELINE_LABEL_LIMIT),
     target_title: truncateText(event.target_title, TIMELINE_LABEL_LIMIT),
     requester_title: truncateText(event.requester_title, TIMELINE_LABEL_LIMIT),

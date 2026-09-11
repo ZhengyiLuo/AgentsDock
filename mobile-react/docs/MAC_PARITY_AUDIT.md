@@ -1,6 +1,44 @@
-# Mobile / Mac parity — 2026-09-10
+# Mobile / Mac parity — 2026-09-11
 
-## Current cross-chat update
+## Build 173: compact goals, queues, and current cross-chat behavior
+
+This focused pass follows the desktop's passive sender-grouped inbox, revised
+queued-agent-message controls, and chronological async-message activity. It also
+retains the delivered-queue reconciliation fixes in build 172 and the main
+repository's removal of custom analytics on iOS/iPadOS.
+
+| Surface | Change | Verification |
+| --- | --- | --- |
+| Goal panel | Collapsed by default; one-line objective and status; expanded actions and scrollable objective share a bounded body | Actual rendered goal and combined Composer tests; long objectives, errors, polling, profile changes, and Pause/Resume/Edit/Clear |
+| Queue panel | Collapsed count/status header; bounded list, full-body viewer and editor; folding preserves edit drafts | Actual Composer handlers; 50-message queue, reconnects, long drafts, uncertainty badges, and stale actions |
+| Shared composer space | Goal and queue use the same auxiliary height budget; hidden editor blurs without discarding the draft or taking focus from the main composer | Narrow/tablet and keyboard/rotation state tests using native hosts |
+| Passive chat inbox | Initially folded, adjacent messages grouped by exact sender/recipient; per-message state, time, Markdown, full-body disclosure, paging and confirmed Delete | API/projection and rendered read-only-open, exact identity/hash, pagination, duplicate-tap, deletion, revision and reconnect tests |
+| Async activity order | Activity before and after a cross-chat message remains on the correct side; late tool results stay with their original call; live tail remains visible | Live/stopped/completed projection, lazy trace rendering, cache hydration, and row-reuse tests |
+| Queued recipient edits | Exact feature gate and revision-based save; no composer reference grants; sender's original body remains unchanged | Store/API CAS, body/revision/hash, conflict/retry, permission-wait and validated-instance races |
+| Run now and route limits | Advertised async controls permit eligible queued messages without bypassing promoted-delivery barriers; nullable route capacity means unlimited | Store and rendered capability/owner/barrier checks and route/API regressions |
+
+Opening the inbox only performs authenticated reads. It never marks messages
+read, starts a turn, resumes a goal, or creates route grants. Passive mailbox and
+scheduled-job work do not appear as editable user queue entries. Older servers
+retain their existing immutable incoming-delivery controls.
+
+Native-host component tests execute React state, effects, and handlers with
+synthetic transport; they are not physical-device touch or pixel acceptance.
+The existing external-volume CoreSimulator privacy denial still prevents native
+runtime QA. No installed Mac app, live chat, goal, or server was modified to test
+this release. Signed archive and TestFlight acceptance are recorded separately
+in the public development log after verification.
+
+## Remaining Mac differences
+
+This is not a claim of complete Mac parity. New desktop workflow commands,
+provider-session resume browsing, working-directory browsing, private Team Mail
+composition/routing, Team attachment opening and human invitation management
+remain separate work. Desktop disk-exhaustion recovery and additional proven
+import-history replay handling also need their own mobile design and tests.
+The larger mobile navigation simplification remains deferred as requested.
+
+## Previous build 171 cross-chat update
 
 Mobile now follows the current desktop source snapshot for async agent-message
 negotiation and display, durable route access management, and supported `@@`
@@ -15,10 +53,10 @@ supported without relaxing internal-wrapper provenance checks.
 | `@@` discovery | Offline inboxes, separate Bulletin and all-server targets under native/Hub capability gates | Helper, composer and send/queued-edit tests for capability loss, wrong scope and stale candidates |
 | Reconnect behavior | Old callbacks cannot act on refreshed recipients or unlock newer queue/revoke requests | Synthetic-host tests for hung requests, revalidation and same-tick Save/Remove/Revoke |
 
-Native simulator touch/pixel QA is unavailable in the current build environment.
+At build 171, native simulator touch/pixel QA was unavailable in the build environment.
 Dark/light and narrow/tablet synthetic-host checks exercise render trees and
-handlers; they do not claim measured native layouts. The broad baseline suite
-also has an unrelated existing privacy-policy wording assertion failure.
+handlers; they do not claim measured native layouts. The former privacy wording
+failure is no longer present after merging the iOS analytics removal.
 
 Accepted release: **0.1.1 (171)**, active for internal TestFlight testing.
 Final checks passed: 112 focused rendered/contract tests, 19 protocol/route-store
