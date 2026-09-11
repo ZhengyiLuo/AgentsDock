@@ -17,6 +17,15 @@
   successful explicit retry using the actual desktop service, SQLite, IPC,
   preload and renderer with isolated fault injection. The system disk was not
   filled, and no provider turn was started by this check.
+- Verified the native replay correction in the actual isolated Electron UI:
+  duplicate history is removed while the original human message, scheduled
+  report and genuine later question remain, including after switching chats
+  and reloading. Preserve unmatched output across silent imported boundaries.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `186`, source `a4fc5ba1`.
+  Developer ID signature and all 86 compiled archive files verified. Automatic
+  updates are disabled; the app is not notarized or publicly released, and the
+  installed/running app was not replaced. Historical corrections and passive
+  mailbox reads require standalone server `0.1.26-beta.61`.
 
 ## 2026-09-11 — Passive agent mailbox
 
