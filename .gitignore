@@ -1,0 +1,35 @@
+.DS_Store
+
+# SwiftPM / Xcode build products
+.build/
+build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Local packaged app artifacts
+dist/
+local-builds/
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Logs and local env
+*.log
+.env
+.env.*
+
+# Local dependencies, credentials, and private development state
+node_modules/
+.venv/
+.test-state/
+.claude/
+.codex/
+.agentsdock/
+tmp/
+*.p12
+*.p8
+*.pfx
+*.mobileprovision

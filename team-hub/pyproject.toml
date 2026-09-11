@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentsdock-team-hub"
+version = "0.0.1"
+description = "AgentsDock Team Hub service foundation"
+requires-python = ">=3.10"
+dependencies = [
+  "cryptography>=44,<48",
+  "fastapi>=0.116,<1",
+  "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+agentsdock-team-hub = "agentsdock_team_hub.cli:main"
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agentsdock_team_hub = ["migrations/*.sql"]

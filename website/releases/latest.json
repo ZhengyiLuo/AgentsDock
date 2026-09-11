@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "published_at": "2026-07-19T03:09:44Z",
+  "notes_url": "https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.0",
+  "platforms": {
+    "macos": {
+      "available": true,
+      "filename": "AgentsDock-0.2.0-mac-universal.dmg",
+      "url": "https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.0/AgentsDock-0.2.0-mac-universal.dmg",
+      "sha256": "84a942617fb849fde74cb9e98cfe42aa3919f360e8e09ea73475fbdb91264b34",
+      "label": "Universal macOS build for Apple silicon and Intel, signed with Developer ID and notarized by Apple."
+    },
+    "linux": {
+      "available": true,
+      "filename": "AgentsDock-0.2.0-linux-x86_64.AppImage",
+      "url": "https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.0/AgentsDock-0.2.0-linux-x86_64.AppImage",
+      "sha256": "a5b40e14211c6da1874cb12a5b203c46ebe24c7cda6ed1e033580f3d3d256a1e",
+      "label": "Linux x64 AppImage with automatic stable updates; a portable tarball is also available in the release notes."
+    }
+  }
+}

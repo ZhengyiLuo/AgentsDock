@@ -1,0 +1,76 @@
+{
+  "expo": {
+    "name": "AgentsDock",
+    "slug": "agentsdock-react",
+    "version": "0.1.1",
+    "scheme": "com.zhengyiluo.ZenithDock",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zhengyiluo.ZenithDock",
+      "buildNumber": "170",
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyCollectedDataTypes": []
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocalNetworkUsageDescription": "AgentsDock connects to your private agent server on your LAN or Tailscale network.",
+        "UIRequiresFullScreen": false
+      }
+    },
+    "android": {
+      "package": "com.zhengyiluo.agentsdock",
+      "versionCode": 10,
+      "usesCleartextTraffic": true,
+      "allowBackup": false,
+      "softwareKeyboardLayoutMode": "resize",
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "./plugins/withAndroidCleartextTraffic.cjs",
+      "./plugins/withAndroidReleaseSigning.cjs",
+      "./plugins/withAndroidSideloadUpdater.cjs",
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-video",
+      "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow AgentsDock to access photos you choose to attach to agent messages.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#2563EB",
+          "defaultChannel": "default"
+        }
+      ],
+      "expo-document-picker"
+    ]
+  }
+}

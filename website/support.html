@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock support — setup help, troubleshooting, system requirements, and how to reach us about the AgentsDock apps for macOS, iOS, iPadOS, and Linux." />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Support · AgentsDock</title>
+    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <!-- Analytics is disabled in the source snapshot. Configure your own deployment explicitly. -->
+    <script src="./analytics.js" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="On this page">
+        <p class="docs-nav-title">Support</p>
+        <nav>
+          <a href="#contact">Contact us</a>
+          <a href="#requirements">System requirements</a>
+          <a href="#getting-started">Getting started</a>
+          <a href="#troubleshooting">Troubleshooting</a>
+          <a href="#privacy">Privacy &amp; data</a>
+          <a href="#docs">Docs &amp; community</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">Support</p>
+        <h1>AgentsDock Support</h1>
+        <p class="legal-meta">Last updated: July 20, 2026</p>
+
+        <p class="legal-lead">AgentsDock is a self-hosted workspace for Claude Code and Codex. The app on your Mac, iPhone, or iPad is the control surface; the work runs on an AgentsDock server you install on a machine you own. Below is how to get set up, fix the most common problems, and reach us.</p>
+
+        <h2 id="contact">Contact us</h2>
+        <p>The fastest way to get help — and to reach the team and other users directly — is our Discord:</p>
+        <ul>
+          <li><strong>Discord</strong> — <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Join the AgentsDock Discord</a> to ask questions, report bugs, and hear about releases.</li>
+        </ul>
+        <p>When reporting a problem, it helps to include your app version, your device and OS version, and whether the server is reachable from a browser.</p>
+
+        <h2 id="requirements">System requirements</h2>
+        <ul>
+          <li><strong>iPhone and iPad:</strong> iOS / iPadOS 17 or later.</li>
+          <li><strong>Mac:</strong> macOS 14 or later, Apple silicon.</li>
+          <li><strong>Linux:</strong> x86_64, distributed as an AppImage.</li>
+          <li><strong>Server:</strong> a macOS or Linux machine you control, with <code>tmux</code> installed and the Claude Code and/or Codex CLI authenticated.</li>
+        </ul>
+
+        <h2 id="getting-started">Getting started</h2>
+        <p>The app needs a server to talk to. Install one on any machine you own:</p>
+        <ul>
+          <li>Clone the server repository and run its installer: <code>git clone https://github.com/ZhengyiLuo/AgentsServer.git</code>, then <code>cd AgentsServer</code> and <code>./install.sh</code>.</li>
+          <li>The server listens on port <code>7850</code>. Sign the Claude Code and Codex CLIs in on that machine.</li>
+          <li>Open the app and connect to the server with its address and access token.</li>
+        </ul>
+        <p>For the full walkthrough — including Tailscale — see the <a href="./setup.html">Quick setup guide</a>.</p>
+
+        <h2 id="troubleshooting">Troubleshooting</h2>
+
+        <h3>The app can't connect to my server</h3>
+        <p>Confirm the server is running and reachable by opening the same URL in a browser on the same device. Check that you included the port, that the device is on the same network (or the same Tailscale network), and that any firewall allows the connection. A URL that works on your desktop will not work on your phone unless both can route to that address.</p>
+
+        <h3>It says my access token is invalid</h3>
+        <p>When server authentication is enabled, the same token is required for API calls, uploads, live traces, and file previews. On the Mac app the token is shown in the right inspector under Security; on iPhone and iPad it is in the sidebar server card. Copy it exactly, with no surrounding whitespace.</p>
+
+        <h3>My terminal session disappeared</h3>
+        <p>Each chat owns a persistent <code>tmux</code> session on your server. Disconnecting the app detaches the client but leaves shells and long-running processes alive, so reopening the Terminal tab should reattach. If the tab will not open, verify <code>tmux</code> is installed on the server. Note that closing the final terminal tab intentionally ends that chat's tmux session.</p>
+
+        <h3>An agent isn't responding</h3>
+        <p>AgentsDock runs the Claude Code and Codex CLIs on your server using your own credentials. Confirm the relevant CLI is installed and authenticated on the server, and that the account has remaining quota with the model provider. AgentsDock does not proxy model requests, so provider-side errors surface directly in the chat.</p>
+
+        <h3>Media or files won't preview</h3>
+        <p>File and video previews are fetched from your server and require the same access token as the rest of the API. If previews fail while chat works, re-enter the token and confirm the server has enough free disk space.</p>
+
+        <h2 id="privacy">Privacy and data</h2>
+        <p>Your chats, code, files, and credentials stay on the server you operate. For details on what the apps do and do not collect, see our <a href="./privacy.html">Privacy Policy</a>.</p>
+
+        <h2 id="docs">Docs and community</h2>
+        <p>Full setup instructions, release notes, and architecture documentation live in the <a href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">AgentsServer repository</a>, and the community is on <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a>.</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>A dock for all your agents.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

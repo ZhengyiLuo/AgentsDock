@@ -1,0 +1,82 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import test from 'node:test'
+
+const composer = fs.readFileSync(path.resolve('src/components/Composer.tsx'), 'utf8')
+
+test('touch-first composer offers a searchable adaptive target-chat picker', () => {
+  assert.match(composer, /const options = \['Reference another chat', 'Photo Library', 'Files', 'Reference a server \(@@\)', 'Cancel'\]/)
+  assert.match(composer, /chatMentionTrigger\(draftRef\.current, selection\.start, referencesRef\.current\)/)
+  assert.doesNotMatch(composer, /trigger\.kind === '@' && !trigger\.query\.trim\(\)/)
+  assert.match(composer, /presentationStyle=\{Platform\.OS === 'ios' \? tablet \? 'formSheet' : 'pageSheet' : 'fullScreen'\}/)
+  assert.match(composer, /allowSwipeDismissal/)
+  assert.match(composer, /onShow=\{\(\) => searchInputRef\.current\?\.focus\(\)\}/)
+  assert.match(composer, /onDismiss=\{onDidDismiss\}/)
+  assert.match(composer, /visible=\{!welcome && pickerTrigger != null && pickerTrigger\.kind !== '@@'\}/)
+  assert.match(composer, /\{visible \? <SafeAreaView[\s\S]*?<\/SafeAreaView> : null\}/)
+  assert.match(composer, /restoreInputAfterPickerRef\.current = true/)
+  assert.match(composer, /if \(Platform\.OS !== 'ios'\) requestAnimationFrame\(finishTargetPickerDismissal\)/)
+  assert.match(composer, /testID="chat-target-picker-close"/)
+  assert.match(composer, /testID="chat-target-search"/)
+  assert.match(composer, /testID="chat-target-list"/)
+  assert.match(composer, /keyboardShouldPersistTaps="always"/)
+  assert.match(composer, /keyboardDismissMode="on-drag"/)
+  assert.match(composer, /onScrollBeginDrag=\{dismissAppKeyboard\}/)
+  assert.match(composer, /candidate\.id !== sourceSessionId[\s\S]*?!candidate\.archived[\s\S]*?supportedTargetBackends\.includes\(candidate\.backend\)/)
+  assert.match(composer, /Try another title, folder, backend, or chat ID\./)
+  assert.match(composer, /targetRow: \{ minHeight: 66/)
+  assert.match(composer, /referenceAction: \{[^}]*height: 44/)
+  assert.match(composer, /touchSize=\{44\}/)
+  assert.match(composer, /referencesRef\.current\.length >= MAX_CHAT_REFERENCES/)
+  assert.match(composer, /testID="chat-target-reference-limit"/)
+  assert.match(composer, /accessibilityState=\{\{ disabled: referenceLimitReached \}\}/)
+  assert.match(composer, /disabled=\{referenceLimitReached\}/)
+})
+
+test('closed composer avoids high-frequency whole-session subscriptions', () => {
+  const composerBody = composer.slice(composer.indexOf('export function Composer'), composer.indexOf('function ChatReferenceShelf'))
+  assert.doesNotMatch(composerBody, /useAppStore\(state => state\.sessions\)/)
+  assert.match(composerBody, /useAppStore\(useShallow\(state => \{[\s\S]*?state\.sessions\.find\(value => value\.id === sessionId\)/)
+  assert.match(composerBody, /referencedTargetIds[\s\S]*?return target \? `\$\{target\.id\}:\$\{target\.backend\}:\$\{target\.archived \? 1 : 0\}`/)
+  assert.match(composer, /state\.sessions\.filter\(candidate => \([\s\S]*?\) : EMPTY_SESSIONS\)\)/)
+})
+
+test('selected chats are explicit removable authority chips with all Mac actions', () => {
+  assert.match(composer, /insertChatReference\(currentDraft, currentTrigger, target, action\)/)
+  assert.match(composer, /reconcileChatReferences\(currentDraft, inserted\.text, currentReferences\)/)
+  assert.match(composer, /testID="composer-chat-references"/)
+  assert.match(composer, /Remove reference to \$\{reference\.display_title_snapshot\}/)
+  assert.match(composer, /if \(action === 'request_reply'\) return 'Ask & return reply'/)
+  assert.match(composer, /if \(action === 'final_result'\) return 'Send my final result'/)
+  assert.match(composer, /return 'Send only'/)
+  assert.match(composer, /This server cannot deliver one or more selected actions or target chats\./)
+  assert.match(composer, /\|\| !referencesSupported/)
+  assert.match(composer, /hasAuxiliaryContent = mailCommandSuggested \|\| references\.length > 0/)
+  assert.ok(composer.indexOf('testID="composer-chat-references"') < composer.indexOf('{queued.length || queuedRunStatus'))
+})
+
+test('composer edits reconcile grants and sends only validated references', () => {
+  assert.match(composer, /const previousDraft = draftRef\.current/)
+  assert.match(composer, /const nextReferences = reconcileChatReferences\(previousDraft, text, referencesRef\.current\)/)
+  assert.match(composer, /const caret = caretAfterTextChange\(previousDraft, text, previousSelection\)/)
+  assert.match(composer, /chatMentionTrigger\(text, caret, nextReferences\)/)
+  assert.match(composer, /setChatReferencesForSession\(sessionId, nextReferences, profileGeneration\)/)
+  assert.match(composer, /const currentDraft = consumeComposer \? currentState\.drafts\[sessionId\] \?\? draftRef\.current : ''/)
+  assert.match(composer, /const currentReferences = consumeComposer \? currentState\.chatReferencesBySession\[sessionId\] \?\? referencesRef\.current : EMPTY_CHAT_REFERENCES/)
+  assert.match(composer, /const currentSendDisabled = networkDisabled[\s\S]*?currentState\.sendingSessionIds\.has\(sessionId\)[\s\S]*?!currentReferencesSupported/)
+  assert.match(composer, /validChatReferences\(currentDraft, currentReferences, sessionId\)/)
+  assert.match(composer, /outgoingReferences\.length !== currentReferences\.length/)
+  assert.match(composer, /chatReferences: outgoingReferences/)
+})
+
+test('queued edits preserve, reconcile, validate, and explicitly save chat actions', () => {
+  assert.match(composer, /parseStoredChatReferences\(turn\.chat_references, text, sessionId\)/)
+  assert.match(composer, /const nextReferences = reconcileChatReferences\(editTextRef\.current, next, editReferencesRef\.current\)/)
+  assert.match(composer, /editTextRef\.current = next[\s\S]*?editReferencesRef\.current = nextReferences/)
+  assert.match(composer, /await update\(sessionId, turn\.queued_id, prompt, references, profileGeneration, teamReferences\)/)
+  assert.match(composer, /testID=\{`queued-chat-references-\$\{turn\.queued_id\}`\}/)
+  assert.match(composer, /accessibilityLabel="Cancel queued message edit"/)
+  assert.match(composer, /accessibilityLabel="Save queued message"/)
+  assert.doesNotMatch(composer, /onBlur=\{\(\) => void commitEdit\(turn\)\}/)
+})

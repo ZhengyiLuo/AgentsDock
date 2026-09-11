@@ -1,0 +1,112 @@
+import type { Event, QueuedTurn } from '../types'
+
+export function isUserQueuedTurn(turn: QueuedTurn): boolean {
+  return turn.purpose !== 'handoff_digest'
+    && turn.purpose !== 'handoff_digest_delivery'
+    && turn.purpose !== 'cross_chat_handoff_delivery'
+    && turn.purpose !== 'secure_peer_handoff_delivery'
+}
+
+export function isCrossChatDeliveryQueuedTurn(turn: QueuedTurn): boolean {
+  return turn.purpose === 'cross_chat_handoff_delivery'
+}
+
+export function isDeliveryBarrierQueuedTurn(turn: QueuedTurn): boolean {
+  return turn.purpose === 'cross_chat_handoff_delivery'
+    || turn.purpose === 'secure_peer_handoff_delivery'
+}
+
+export function isVisibleQueuedTurn(turn: QueuedTurn): boolean {
+  // Delivery lifecycle belongs to the chronological timeline. Keep delivery
+  // turns in the raw queue for FIFO fencing, but never duplicate them in the
+  // user-editable composer shelf.
+  return isUserQueuedTurn(turn)
+}
+
+export function queuedTurnHasEarlierDeliveryBarrier(turns: readonly QueuedTurn[], queuedId: string): boolean {
+  const ordered = orderedQueuedTurns(turns)
+  const index = ordered.findIndex(turn => turn.queued_id === queuedId)
+  return index > 0 && ordered.slice(0, index).some(isDeliveryBarrierQueuedTurn)
+}
+
+export function queuedMoveCrossesDeliveryBarrier(
+  turns: readonly QueuedTurn[],
+  queuedIdOrIndex: string | number,
+  direction: 'up' | 'down',
+): boolean {
+  const queuedId = typeof queuedIdOrIndex === 'number' ? turns[queuedIdOrIndex]?.queued_id : queuedIdOrIndex
+  if (!queuedId) return false
+  const ordered = orderedQueuedTurns(turns)
+  const index = ordered.findIndex(turn => turn.queued_id === queuedId)
+  if (index < 0) return false
+  const adjacent = ordered[index + (direction === 'up' ? -1 : 1)]
+  return Boolean(adjacent && (isDeliveryBarrierQueuedTurn(ordered[index]) || isDeliveryBarrierQueuedTurn(adjacent)))
+}
+
+export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTurn[] {
+  if ((event.type === 'turn_queued' || event.type === 'turn_queue_delivery_fenced') && event.queued_id) {
+    const prompt = event.display_prompt ?? event.prompt ?? event.request_prompt ?? ''
+    const turn: QueuedTurn = {
+      queued_id: event.queued_id,
+      session_id: event.session_id,
+      prompt,
+      display_prompt: prompt,
+      file_ids: event.display_file_ids ?? event.file_ids ?? [],
+      backend: event.backend,
+      model: event.model,
+      effort: event.effort,
+      position: event.position ?? (event.type === 'turn_queue_delivery_fenced' ? 0 : null),
+      purpose: event.purpose,
+      digest_job_id: event.digest_job_id,
+      source_session_id: event.source_session_id,
+      target_session_id: event.target_session_id,
+      chat_references: event.chat_references,
+      created_at: event.ts,
+      paused: event.paused,
+      pause_reason: event.pause_reason,
+    }
+    return [...current.filter(value => value.queued_id !== turn.queued_id), turn].sort(queueSort)
+  }
+  if ((event.type === 'turn_unqueued' || event.type === 'turn_started' || event.type === 'turn_queue_run_now') && event.queued_id) {
+    return current.filter(value => value.queued_id !== event.queued_id)
+  }
+  if (event.type === 'turn_queue_updated' && event.queued_id) {
+    return current.map(value => value.queued_id === event.queued_id ? {
+      ...value,
+      prompt: event.prompt ?? value.prompt,
+      display_prompt: event.prompt ?? value.display_prompt,
+      file_ids: event.file_ids ?? value.file_ids,
+      chat_references: event.chat_references ?? value.chat_references,
+      position: event.position ?? value.position,
+      paused: event.paused ?? value.paused,
+      pause_reason: event.pause_reason ?? value.pause_reason,
+    } : value).sort(queueSort)
+  }
+  if (event.type === 'turn_queue_paused' && event.queued_id) {
+    return current.map(value => value.queued_id === event.queued_id ? {
+      ...value,
+      paused: event.paused ?? true,
+      pause_reason: event.pause_reason ?? value.pause_reason,
+    } : value)
+  }
+  if (event.positions?.length) {
+    const positions = new Map(event.positions.map(value => [value.queued_id, value.position]))
+    return current.map(value => ({ ...value, position: positions.get(value.queued_id) ?? value.position })).sort(queueSort)
+  }
+  return current
+}
+
+export function resolveNewQueuedTurn(prompt: string, previousIds: ReadonlySet<string>, turns: readonly QueuedTurn[]): string | null {
+  const created = turns.filter(turn => !previousIds.has(turn.queued_id))
+  const cleanPrompt = prompt.trim()
+  return created.find(turn => (turn.display_prompt || turn.prompt).trim() === cleanPrompt)?.queued_id
+    ?? (created.length === 1 ? created[0].queued_id : null)
+}
+
+function queueSort(left: QueuedTurn, right: QueuedTurn): number {
+  return (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER)
+}
+
+function orderedQueuedTurns(turns: readonly QueuedTurn[]): QueuedTurn[] {
+  return [...turns].sort(queueSort)
+}

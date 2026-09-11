@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docs — ZenithDock</title>
+  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="docs.css?v=2" />
+</head>
+<body>
+  <p style="padding: 1rem; text-align: center;">Archived legacy documentation. These historical setup instructions are not current. See the <a href="../website/setup.html">current setup guide</a>.</p>
+
+  <!-- Nav -->
+  <nav>
+    <div class="nav-inner">
+      <a class="logo" href="index.html">ZenithDock</a>
+      <div class="nav-links">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#setup">Setup</a>
+        <a href="docs.html" class="nav-active">Docs</a>
+        <a href="https://github.com/ZhengyiLuo/ZenithDock" target="_blank">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+
+    <!-- Sidebar TOC -->
+    <aside class="docs-toc">
+      <nav>
+        <p class="toc-heading">Getting Started</p>
+        <a href="#quick-start">Quick Start</a>
+        <a href="#connecting">Server Setup &amp; Connecting</a>
+
+        <p class="toc-heading">Chat</p>
+        <a href="#new-chat">Creating a Chat</a>
+        <a href="#sending">Sending Messages</a>
+        <a href="#backend">Backend &amp; Model</a>
+        <a href="#drafts">Drafts</a>
+        <a href="#fork">Forking a Chat</a>
+        <a href="#resume">Resume by ID</a>
+
+        <p class="toc-heading">Organization</p>
+        <a href="#folders">Folders</a>
+        <a href="#search">Search</a>
+        <a href="#pin-archive">Pin &amp; Archive</a>
+        <a href="#reorder">Reorder</a>
+
+        <p class="toc-heading">Timeline</p>
+        <a href="#streaming">Live Streaming</a>
+        <a href="#older">Loading Older Messages</a>
+        <a href="#unread">Unread Tracking</a>
+
+        <p class="toc-heading">Files &amp; Artifacts</p>
+        <a href="#uploads">File Uploads</a>
+        <a href="#artifacts">Artifacts &amp; Media</a>
+        <a href="#pinned">Pinned Items</a>
+
+        <p class="toc-heading">Advanced</p>
+        <a href="#queue">Message Queue</a>
+        <a href="#jobs">Scheduled Jobs</a>
+        <a href="#digest">Handoff Digest</a>
+        <a href="#security">Security &amp; Tokens</a>
+        <a href="#shortcuts">Keyboard Shortcuts</a>
+        <a href="#common-issues">Common Issues</a>
+      </nav>
+    </aside>
+
+    <!-- Main content -->
+    <main class="docs-main">
+
+      <!-- Quick Start -->
+      <section id="quick-start">
+        <h1>Documentation</h1>
+        <h2>Quick Start</h2>
+        <p>ZenithDock is a native macOS, iOS, and iPadOS client that connects to a self-hosted agent server running Claude or Codex. Here's the minimum to get a conversation going:</p>
+
+        <div class="callout callout-warn">
+          <strong>Prerequisites:</strong> You need at least one AI CLI installed and authenticated on your server machine before the agent can run:
+          <ul style="margin: 8px 0 0; padding-left: 18px;">
+            <li><strong>Claude:</strong> Install <a href="https://claude.ai/download" target="_blank">Claude Code CLI</a> and run <code>claude login</code> to authenticate.</li>
+            <li><strong>Codex:</strong> Install <a href="https://github.com/openai/codex" target="_blank">Codex CLI</a> and set your <code>OPENAI_API_KEY</code>.</li>
+          </ul>
+        </div>
+
+        <ol>
+          <li>Install and authenticate Claude CLI and/or Codex CLI on your agent machine.</li>
+          <li>Clone and start <a href="https://github.com/ZhengyiLuo/ZenithBotServer" target="_blank">ZenithBotServer</a> (see <a href="#connecting">Server Setup</a> below).</li>
+          <li>Open ZenithDock and point it at your server (Inspector → Security → server URL → Apply &amp; Reconnect).</li>
+          <li>Click <strong>New Chat</strong> in the sidebar.</li>
+          <li>Type a message and press <kbd>⌘ Return</kbd> (Mac) or the send button (iOS).</li>
+        </ol>
+        <div class="callout">
+          <strong>Tip:</strong> The input field is disabled until a chat is selected. Always click <strong>New Chat</strong> first.
+        </div>
+      </section>
+
+      <!-- Connecting -->
+      <section id="connecting">
+        <h2>Server Setup &amp; Connecting</h2>
+        <p>ZenithDock requires <a href="https://github.com/ZhengyiLuo/ZenithBotServer" target="_blank">ZenithBotServer</a> — a self-hosted FastAPI server that runs Claude/Codex agents and streams events back to the app.</p>
+
+        <div class="doc-setup-steps">
+
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h3>Install the server</h3>
+              <p>Run this on any Linux or macOS machine where you want agents to execute:</p>
+              <pre><code>git clone https://github.com/ZhengyiLuo/ZenithBotServer
+cd ZenithBotServer
+uv venv && source .venv/bin/activate
+uv pip install fastapi "uvicorn[standard]" python-multipart pydantic</code></pre>
+              <div class="callout callout-warn">
+                <strong>uv not installed?</strong> Run: <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h3>Start the server</h3>
+              <pre><code>uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</code></pre>
+              <p>Verify it's running:</p>
+              <pre><code>curl http://localhost:7850/api/health
+# → {"ok": true, ...}</code></pre>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h3>Keep it running — systemd (Linux)</h3>
+              <pre><code>cp systemd/zenithbot-agent.service ~/.config/systemd/user/
+systemctl --user enable --now zenithbot-agent.service</code></pre>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h3>Connect the app</h3>
+              <ol>
+                <li>Open ZenithDock on your Mac or iPhone.</li>
+                <li>Open the <strong>Inspector</strong> panel (right side on Mac, swipe from right on iOS).</li>
+                <li>Under <strong>Security</strong>, enter your server URL: <code>http://&lt;server-ip&gt;:7850</code></li>
+                <li>Click <strong>Apply &amp; Reconnect</strong>.</li>
+              </ol>
+              <p>The status dot turns green (<strong>Online</strong>) when connected.</p>
+              <div class="callout callout-warn">
+                <strong>Remote access:</strong> Use Tailscale to reach the server outside your local network instead of exposing port 7850 publicly.
+              </div>
+              <div class="callout callout-warn">
+                <strong>iOS local network:</strong> Grant Local Network permission in System Settings → Privacy &amp; Security → Local Network.
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- New Chat -->
+      <section id="new-chat">
+        <h2>Creating a Chat</h2>
+        <p>Each chat is an independent conversation thread on the server. Chats are grouped into folders and persist across sessions.</p>
+        <ul>
+          <li><strong>Mac:</strong> Click <strong>+ New Chat</strong> in the sidebar. The chat appears in the <em>General</em> folder by default.</li>
+          <li><strong>iOS:</strong> Tap the compose icon or pull out the sidebar and tap <strong>New Chat</strong>.</li>
+        </ul>
+        <p>To rename a chat, open the Inspector → <strong>Session</strong> section → edit the name field → click <strong>Save</strong>.</p>
+        <p>To move a chat to a different folder, right-click it in the sidebar → <strong>Move to Folder</strong>, or edit the Folder field in the Inspector.</p>
+      </section>
+
+      <!-- Sending -->
+      <section id="sending">
+        <h2>Sending Messages</h2>
+        <p>Type in the composer at the bottom of the chat window.</p>
+        <ul>
+          <li><kbd>⌘ Return</kbd> — send the message</li>
+          <li><kbd>Shift Return</kbd> — insert a newline without sending</li>
+          <li>Tap the <strong>↑ arrow</strong> button to send on iOS</li>
+        </ul>
+        <p>The composer grows to fit multiple lines. Your unsent draft is saved automatically when you switch chats and restored when you return.</p>
+        <p>If the agent is already running when you send, the message enters the <a href="#queue">queue shelf</a> and runs after the current turn finishes.</p>
+      </section>
+
+      <!-- Backend & Model -->
+      <section id="backend">
+        <h2>Backend &amp; Model</h2>
+        <p>Each chat uses either <strong>Claude</strong> or <strong>Codex</strong> as its backend. You can change the backend and model before sending the first message.</p>
+
+        <h3>Switching backend</h3>
+        <p>In the composer bar, click the <strong>Claude / Codex</strong> button to toggle. The backend locks after the first message — to switch, fork the chat or create a new one.</p>
+
+        <h3>Selecting a model</h3>
+        <p>Click the model button in the composer bar (shows the current model name) to pick from the server's catalog. You can also type a custom model ID in the Inspector under <strong>Custom model ID</strong>.</p>
+        <p><strong>Claude models:</strong> Sonnet (default), Opus, Haiku, or any custom model ID.</p>
+        <p><strong>Codex models:</strong> GPT-5.5 default, or a custom model ID.</p>
+
+        <h3>Effort level</h3>
+        <p>Click the effort button in the composer bar or use the Inspector <strong>Effort</strong> menu. Options: <em>low, medium, high, xhigh, max</em>. Higher effort uses more compute and may be slower but produces better reasoning on complex tasks.</p>
+      </section>
+
+      <!-- Drafts -->
+      <section id="drafts">
+        <h2>Drafts</h2>
+        <p>ZenithDock saves your unsent text per chat. When you switch to another chat and come back, your draft is exactly where you left it. Drafts are scoped to the server — the same chat on a different server endpoint has its own draft.</p>
+      </section>
+
+      <!-- Fork -->
+      <section id="fork">
+        <h2>Forking a Chat</h2>
+        <p>Forking creates a new independent chat that inherits the source chat's backend, model, and working directory. It does <em>not</em> copy the message history — it is a clean starting point with the same configuration.</p>
+        <ul>
+          <li>Right-click a chat in the sidebar → <strong>Fork Chat</strong></li>
+          <li>Or use the fork button in the chat header</li>
+        </ul>
+        <p>The forked chat appears directly below the source in the same folder. Use forking to experiment with a different prompt or backend without losing the original conversation.</p>
+      </section>
+
+      <!-- Resume by ID -->
+      <section id="resume">
+        <h2>Resume by ID</h2>
+        <p>If you have an existing Claude or Codex conversation ID from outside ZenithDock, you can resume it directly:</p>
+        <ol>
+          <li>Click <strong>Resume ID</strong> in the sidebar.</li>
+          <li>Select the backend (Claude or Codex).</li>
+          <li>Paste the provider session or thread ID.</li>
+          <li>Optionally set a title, folder, and working directory.</li>
+          <li>Confirm — the full history loads from the provider.</li>
+        </ol>
+      </section>
+
+      <!-- Folders -->
+      <section id="folders">
+        <h2>Folders</h2>
+        <p>Chats are organized into folders in the sidebar. There are three special sections:</p>
+        <ul>
+          <li><strong>Pinned</strong> — chats you pin; always at the top, never collapses.</li>
+          <li><strong>Folders</strong> — your custom folders; collapsible.</li>
+          <li><strong>Archived</strong> — archived chats; collapsed by default.</li>
+        </ul>
+
+        <h3>Creating a folder</h3>
+        <p>Click <strong>Create Folder</strong> in the sidebar and enter a name.</p>
+
+        <h3>Moving a chat</h3>
+        <p>Right-click the chat → <strong>Move to Folder</strong>. You can also drag within the same section in Reorder mode.</p>
+
+        <h3>Reordering folders</h3>
+        <p>Click <strong>Reorder</strong> in the sidebar to enter reorder mode, drag folder headers or chat rows, then click <strong>Done</strong>.</p>
+      </section>
+
+      <!-- Search -->
+      <section id="search">
+        <h2>Search</h2>
+        <p>There are two ways to find chats:</p>
+        <ul>
+          <li><strong>Sidebar search:</strong> Type in the search field at the top of the chat list. Results filter in place. Press <strong>X</strong> to clear.</li>
+          <li><strong>Quick Open (<kbd>⌘ P</kbd>):</strong> Opens a floating palette. Type to fuzzy-search all chats, use arrow keys to navigate, press <kbd>Return</kbd> to open. (Mac only)</li>
+        </ul>
+        <div class="callout">Searching disables Reorder mode. Clear the search field to re-enable it.</div>
+      </section>
+
+      <!-- Pin & Archive -->
+      <section id="pin-archive">
+        <h2>Pin &amp; Archive</h2>
+        <h3>Pinning a chat</h3>
+        <p>Pinned chats stay at the top of the sidebar across all folders. To pin: open the Inspector → <strong>Run</strong> section → toggle <strong>Pin Chat</strong>. To unpin, toggle it off.</p>
+
+        <h3>Archiving a chat</h3>
+        <p>Archived chats are hidden in a collapsed section. To archive: Inspector → <strong>Run</strong> → <strong>Archive Chat</strong>. To unarchive, expand the Archived section in the sidebar and unarchive from there.</p>
+
+        <h3>Marking as unread</h3>
+        <p>Right-click any chat in the sidebar → <strong>Mark as Unread</strong>. The unread indicator reappears until you scroll to the bottom of that chat.</p>
+      </section>
+
+      <!-- Reorder -->
+      <section id="reorder">
+        <h2>Reorder Mode</h2>
+        <p>Click <strong>Reorder</strong> in the sidebar to enable drag-reordering for chats and folders. Drag rows to change their order, then click <strong>Done</strong>.</p>
+        <div class="callout callout-warn">
+          Chats can only be dragged within their own section (pinned ↔ pinned, folder ↔ same folder, archived ↔ archived). To move a chat between folders, use <strong>Move to Folder</strong> instead.
+        </div>
+      </section>
+
+      <!-- Streaming -->
+      <section id="streaming">
+        <h2>Live Streaming</h2>
+        <p>ZenithDock connects to the server over WebSocket and streams every event in real time as the agent works. You see text appear word by word, tool calls as they happen, and artifacts as soon as files stabilize.</p>
+        <p>The timeline auto-scrolls to the latest message while you're at the bottom. If you scroll up to read earlier messages, a <strong>↓ New</strong> button appears — click it to jump back to the latest and mark messages as read.</p>
+      </section>
+
+      <!-- Older Messages -->
+      <section id="older">
+        <h2>Loading Older Messages</h2>
+        <p>Long chats are paginated. When older messages exist above the visible timeline, a <strong>Show Older</strong> banner appears at the top (Mac) or a <strong>Load Older</strong> button (iOS). Tap it to load the previous page of messages. You can page back as many times as needed.</p>
+      </section>
+
+      <!-- Unread -->
+      <section id="unread">
+        <h2>Unread Tracking</h2>
+        <p>When a chat receives new messages while you're elsewhere, it shows an unread indicator in the sidebar. Switching to the chat and scrolling to the bottom marks it as read and syncs the read cursor to the server.</p>
+        <p>A visual separator line in the timeline marks where unread messages begin.</p>
+      </section>
+
+      <!-- Uploads -->
+      <section id="uploads">
+        <h2>File Uploads</h2>
+        <p>You can send files to the agent server alongside your message.</p>
+        <ul>
+          <li><strong>Click + (attach):</strong> Opens a file picker in the composer bar.</li>
+          <li><strong>Drag &amp; drop:</strong> Drag files onto the composer — the border highlights to confirm the drop zone is active.</li>
+          <li><strong>Paste:</strong> <kbd>⌘ V</kbd> a file copied from Finder.</li>
+        </ul>
+        <p>Selected files appear as chips below the text field. Click <strong>✕</strong> on a chip to remove it before sending. All attached files are uploaded when you send the message.</p>
+        <p>Uploaded files appear in the timeline as an attachment grid and are listed in the Inspector's <strong>Files</strong> section. Use the download button to save them locally.</p>
+      </section>
+
+      <!-- Artifacts -->
+      <section id="artifacts">
+        <h2>Artifacts &amp; Media</h2>
+        <p>When the agent produces output files — images, videos, code — they appear as artifact cards in the timeline, often before the turn finishes (as soon as the file is stable on the server).</p>
+        <ul>
+          <li><strong>Images:</strong> Shown as thumbnails; click to open a full-size preview.</li>
+          <li><strong>Videos:</strong> Shown with a poster frame; click to play inline with native controls.</li>
+          <li><strong>Other files:</strong> Shown as a downloadable link with file name and type.</li>
+        </ul>
+        <p>All artifacts are also listed in the Inspector's <strong>Files &amp; Videos</strong> section for the current chat. On Mac, click <strong>Download</strong> to save a file via the system save dialog. On iOS, use the share button to save or share.</p>
+      </section>
+
+      <!-- Pinned Items -->
+      <section id="pinned">
+        <h2>Pinned Items</h2>
+        <p>Any message, artifact, or file in the timeline can be pinned to the Inspector's <strong>Pinned</strong> shelf for quick reference.</p>
+        <ul>
+          <li><strong>Pin:</strong> Hover over a message (Mac) or long-press (iOS) → click the pin icon.</li>
+          <li><strong>Find in timeline:</strong> Click a pinned item in the Inspector to scroll to it in the timeline.</li>
+          <li><strong>Copy:</strong> Copy the full text of a pinned message.</li>
+          <li><strong>Unpin:</strong> Click <strong>Unpin</strong> on any pinned item.</li>
+        </ul>
+        <p>Pinned items are stored per chat and persist across app launches.</p>
+      </section>
+
+      <!-- Queue -->
+      <section id="queue">
+        <h2>Message Queue</h2>
+        <p>If you send a message while the agent is running, it enters the <strong>queue shelf</strong> — a row below the composer showing all pending messages.</p>
+        <p>From the queue shelf you can:</p>
+        <ul>
+          <li><strong>Send Now:</strong> Interrupt the current run and start this message immediately.</li>
+          <li><strong>Edit:</strong> Modify the queued text before it runs.</li>
+          <li><strong>Move Up / Down:</strong> Reorder queued messages.</li>
+          <li><strong>Remove:</strong> Delete a queued message.</li>
+        </ul>
+        <div class="callout">
+          <strong>Stop vs Send Now:</strong> The <strong>Stop</strong> button halts the current run but leaves the queue intact. <strong>Send Now</strong> interrupts the current run and immediately starts the selected queued item.
+        </div>
+      </section>
+
+      <!-- Jobs -->
+      <section id="jobs">
+        <h2>Scheduled Jobs</h2>
+        <p>Schedule a recurring prompt to run automatically in a chat at a set interval.</p>
+
+        <h3>Creating a job</h3>
+        <ol>
+          <li>Open the Inspector → scroll to the <strong>Jobs</strong> section → click <strong>Schedule Job…</strong></li>
+          <li>Fill in the title, prompt text, and interval.</li>
+          <li>Choose a first-run time: <em>Now</em>, <em>After interval</em>, <em>In N minutes</em>, or a custom date/time.</li>
+          <li>Set the run mode: <em>Loop forever</em> or <em>Run N times</em>.</li>
+          <li>Save.</li>
+        </ol>
+
+        <h3>Interval presets</h3>
+        <p>30 seconds · 1 min · 5 min · 15 min · 1 hour · 6 hours · 12 hours · 24 hours — or enter a custom value in seconds.</p>
+
+        <h3>Job status in the timeline</h3>
+        <ul>
+          <li><strong>Yellow card:</strong> Job created.</li>
+          <li><strong>Orange card:</strong> Job ran — shows duration and result summary.</li>
+          <li><strong>Orange "Deferred" card:</strong> Server was busy; the job will retry later. This is not an error.</li>
+          <li><strong>Red card:</strong> Job failed with an error.</li>
+        </ul>
+
+        <h3>Editing a job</h3>
+        <p>Open the Inspector → click the job → modify fields → save. Changing the interval or prompt does not reset the next run time unless you explicitly reschedule it.</p>
+      </section>
+
+      <!-- Digest -->
+      <section id="digest">
+        <h2>Handoff Digest</h2>
+        <p>A handoff digest summarizes one chat and sends that context to another chat — useful for passing context between different agents or starting a focused follow-up conversation.</p>
+
+        <h3>Creating a digest</h3>
+        <ol>
+          <li>Open the Inspector → <strong>Run</strong> section → click <strong>Create Digest</strong>.</li>
+          <li>Pick the <strong>target chat</strong> that should receive the context.</li>
+          <li>Choose a <strong>detail level</strong>: Short, Normal, or Deep.</li>
+          <li>Optionally add a prompt to guide the summary.</li>
+          <li>Click <strong>Preview</strong> to see the digest before sending, or <strong>Send</strong> to deliver it directly.</li>
+        </ol>
+        <p>The digest runs as a visible turn in the source chat (using its backend and model), then the result is forwarded to the target chat as a new turn.</p>
+      </section>
+
+      <!-- Security -->
+      <section id="security">
+        <h2>Security &amp; Access Tokens</h2>
+        <p>By default the server accepts connections from anyone on the network. To restrict access, set the <code>ZENITHDOCK_AGENT_TOKEN</code> environment variable on the server:</p>
+        <pre><code># systemd override
+[Service]
+Environment=ZENITHDOCK_AGENT_TOKEN=your-long-random-token</code></pre>
+        <p>Then enter the same token in the app: Inspector → <strong>Security</strong> → <strong>Agent access token</strong> → <strong>Apply &amp; Reconnect</strong>.</p>
+        <p>When a token is set, all API calls, file uploads, WebSocket streams, and file/video previews require it. The token is stored in the system Keychain on Mac and iOS.</p>
+      </section>
+
+      <!-- Shortcuts -->
+      <section id="shortcuts">
+        <h2>Keyboard Shortcuts (Mac)</h2>
+        <table class="shortcuts-table">
+          <thead>
+            <tr><th>Action</th><th>Shortcut</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Send message</td><td><kbd>⌘ Return</kbd></td></tr>
+            <tr><td>New line in composer</td><td><kbd>Shift Return</kbd></td></tr>
+            <tr><td>Quick Open (find chat)</td><td><kbd>⌘ P</kbd></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Common Issues -->
+      <section id="common-issues">
+        <h2>Common Issues</h2>
+
+        <h3>Can't type in the message input</h3>
+        <p>The composer is disabled until a chat is selected. Click <strong>New Chat</strong> in the sidebar first, then click the chat to select it. The input should become active automatically.</p>
+
+        <h3>Server shows "Offline" / red dot</h3>
+        <ul>
+          <li>Make sure the server is running: <code>curl http://&lt;server-ip&gt;:7850/api/health</code> should return <code>{"ok": true}</code>.</li>
+          <li>Double-check the URL in the Inspector — it should be <code>http://&lt;ip&gt;:7850</code>, not <code>https://</code>.</li>
+          <li>If connecting over the internet, use Tailscale instead of exposing the port directly.</li>
+        </ul>
+
+        <h3>Messages send but get no response / spinner never stops</h3>
+        <p>This usually means WebSocket streaming is broken. On the server, check that <code>uvicorn[standard]</code> is installed (not bare <code>uvicorn</code>) — it includes the <code>websockets</code> library required for live streaming:</p>
+        <pre><code>uv pip install "uvicorn[standard]"</code></pre>
+        <p>Then restart the server. You should <em>not</em> see <code>No supported WebSocket library detected</code> in the server logs.</p>
+
+        <h3>Old chats return 404 after server restart</h3>
+        <p>The server stores session state on disk under <code>~/.zenithbot-agent/</code>. If you restarted the server and a session disappears, it may have been created while using a different state directory. Create a new chat — existing sessions that are on disk will reload on next access.</p>
+
+        <h3>iOS can't reach the server on local network</h3>
+        <p>Go to <strong>Settings → Privacy &amp; Security → Local Network</strong> and make sure ZenithDock has permission. If that doesn't help, check that your Mac/server and iPhone are on the same Wi-Fi network and that the firewall isn't blocking port 7850.</p>
+
+        <h3>Backend locked — can't switch from Claude to Codex</h3>
+        <p>The backend locks after the first message is sent in a chat. To use a different backend, either fork the chat (Inspector → Run → Fork Chat) or create a new chat and switch before sending anything.</p>
+
+        <h3>uv command not found</h3>
+        <p>Install <code>uv</code> and add it to your PATH:</p>
+        <pre><code>curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env  # or restart your terminal</code></pre>
+
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>ZenithDock &mdash; Built for macOS, iOS &amp; iPadOS</p>
+      <p><a href="https://github.com/ZhengyiLuo/ZenithDock" target="_blank">GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>

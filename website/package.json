@@ -1,0 +1,9 @@
+{
+  "name": "agentsdock-website",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m http.server 4175",
+    "preview": "python3 -m http.server 4175"
+  }
+}

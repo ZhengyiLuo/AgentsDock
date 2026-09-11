@@ -1,0 +1,73 @@
+name: Verify source
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-source-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  electron:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: electron/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: electron
+      - run: pnpm typecheck
+        working-directory: electron
+      - run: pnpm test
+        working-directory: electron
+      - run: pnpm build
+        working-directory: electron
+
+  mobile-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.9.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: mobile-react/pnpm-lock.yaml
+      # Keep source validation independent of native generation and signing.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: mobile-react
+      - run: pnpm typecheck
+        working-directory: mobile-react
+      - run: pnpm test:history
+        working-directory: mobile-react
+      - run: pnpm test:server-setup
+        working-directory: mobile-react
+      - run: node scripts/run-history-tests.mjs src/lib/team-references.test.ts
+        working-directory: mobile-react
+      - run: node --test tests/ios-release-metadata.test.mjs
+        working-directory: mobile-react
+
+# This workflow verifies source only. It has no signing credentials, deployment
+# authority, release publishing steps, or artifact uploads.

@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a problem with the AgentsDock app
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. The more detail you give, the faster it can be fixed.
+        Please do NOT paste access tokens, server URLs/IPs, or private file contents.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which app is affected?
+      options:
+        - macOS (desktop)
+        - Windows (desktop)
+        - Linux (desktop)
+        - iOS / iPadOS
+        - Android
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: "Shown in the app's About screen, e.g. 0.2.10 or 0.2.10-beta.11. Put 'unknown' if unsure."
+      placeholder: "0.2.10"
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug. What did you see go wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do right before it happened?
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. See ...
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: false
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Often
+        - Occasionally
+        - Only happened once
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else? (screenshots, screen recordings, notes)
+      description: Screenshots or a short screen recording help a lot. Drag files here.
+    validations:
+      required: false

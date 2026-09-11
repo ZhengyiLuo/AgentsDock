@@ -1,0 +1,200 @@
+{
+  "name": "agentsdock-electron",
+  "productName": "AgentsDock",
+  "desktopName": "agentsdock.desktop",
+  "version": "0.2.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "description": "AgentsDock cross-platform Electron client",
+  "author": "AgentsDock",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && node ../scripts/verify_electron_compile_output.mjs .",
+    "build:icon": "../scripts/build_electron_icon.sh",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run && node --test ../scripts/tests/verify_electron_compile_output.test.mjs",
+    "test:watch": "vitest",
+    "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac zip dmg",
+    "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas",
+    "package:linux": "../scripts/build_electron_linux.sh",
+    "package:win": "pwsh -NoProfile -File ../scripts/build_electron_windows.ps1"
+  },
+  "build": {
+    "appId": "com.zhengyiluo.AgentsDock",
+    "productName": "AgentsDock",
+    "buildVersion": "85",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "protocols": [
+      {
+        "name": "AgentsDock secure server invite",
+        "schemes": [
+          "agentsdock"
+        ]
+      }
+    ],
+    "files": [
+      "out/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/*.{ts,tsx}",
+      "!**/*.{d.ts,d.mts,d.cts}",
+      "!**/{test,tests,__tests__,docs,examples}/**"
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
+    "mac": {
+      "icon": "build/AgentsDock.icns",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "zip",
+        "dmg"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "packaging/entitlements.mac.plist",
+      "entitlementsInherit": "packaging/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "ElectronTeamID": "KRR35MWWHD",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "AgentsDock uses the microphone only when you choose voice input."
+      }
+    },
+    "mas": {
+      "entitlements": "packaging/entitlements.mas.plist",
+      "entitlementsInherit": "packaging/entitlements.mas.inherit.plist",
+      "hardenedRuntime": false,
+      "preAutoEntitlements": false
+    },
+    "masDev": {
+      "entitlements": "packaging/entitlements.mas.plist",
+      "entitlementsInherit": "packaging/entitlements.mas.inherit.plist",
+      "hardenedRuntime": false,
+      "preAutoEntitlements": false
+    },
+    "linux": {
+      "icon": "build/AgentsDock.png",
+      "category": "Development",
+      "syncDesktopName": true,
+      "executableArgs": [],
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ]
+    },
+    "win": {
+      "icon": "build/AgentsDock.png",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "verifyUpdateCodeSignature": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AgentsDock",
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ZhengyiLuo",
+        "repo": "AgentsDock-Releases",
+        "channel": "latest",
+        "releaseType": "draft"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.1",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/legacy-modes": "^6.5.3",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.6",
+    "@lezer/highlight": "^1.2.3",
+    "@radix-ui/react-checkbox": "^1.3.7",
+    "@radix-ui/react-context-menu": "^2.3.3",
+    "@radix-ui/react-dialog": "^1.1.19",
+    "@radix-ui/react-dropdown-menu": "^2.1.20",
+    "@radix-ui/react-popover": "^1.1.19",
+    "@radix-ui/react-select": "^2.3.3",
+    "@radix-ui/react-slider": "^1.4.3",
+    "@radix-ui/react-switch": "^1.3.3",
+    "@radix-ui/react-tabs": "^1.1.17",
+    "@radix-ui/react-tooltip": "^1.2.12",
+    "@tanstack/react-query": "^5.101.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "codemirror": "^6.0.2",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.47",
+    "lucide-react": "^1.23.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.12.1",
+    "react-virtuoso": "^4.18.10",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14",
+    "@electron/osx-sign": "^2.5.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "43.1.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
+  }
+}

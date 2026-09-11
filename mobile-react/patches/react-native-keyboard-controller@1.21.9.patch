@@ -1,0 +1,19 @@
+diff --git a/src/components/KeyboardAvoidingView/index.tsx b/src/components/KeyboardAvoidingView/index.tsx
+index ec2ee2961c89f815bcd2a2b710df52ef898c8fe9..fe6763f19f78b5b05b188d491562d9c6f2ebace9 100644
+--- a/src/components/KeyboardAvoidingView/index.tsx
++++ b/src/components/KeyboardAvoidingView/index.tsx
+@@ -166,6 +166,14 @@ const KeyboardAvoidingView = forwardRef<
+ 
+     const animatedStyle = useAnimatedStyle(() => {
+       if (!enabled) {
++        // Reanimated keeps the last native value for properties omitted from
++        // a later animated-style object. Explicitly clear padding behavior so
++        // disabling avoidance after an app resume cannot leave keyboard-sized
++        // padding attached to this view.
++        if (behavior === "padding") {
++          return { paddingBottom: 0 };
++        }
++
+         return {};
+       }
+ 

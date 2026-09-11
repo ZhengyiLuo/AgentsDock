@@ -1,0 +1,220 @@
+/* ── Docs layout ── */
+.docs-layout {
+  display: flex;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: calc(100vh - 56px - 80px);
+  padding: 0 24px;
+  gap: 48px;
+}
+
+/* ── TOC sidebar ── */
+.docs-toc {
+  flex-shrink: 0;
+  width: 200px;
+  padding: 40px 0;
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+
+.docs-toc nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.toc-heading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 20px 0 6px;
+}
+
+.toc-heading:first-child { margin-top: 0; }
+
+.docs-toc a {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  padding: 3px 0;
+  transition: color 0.15s;
+  text-decoration: none;
+}
+
+.docs-toc a:hover { color: var(--text); }
+.docs-toc a.active { color: var(--accent); }
+
+/* ── Main content ── */
+.docs-main {
+  flex: 1;
+  min-width: 0;
+  padding: 40px 0 80px;
+}
+
+.docs-main h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 8px;
+}
+
+.docs-main section {
+  margin-bottom: 56px;
+  padding-bottom: 56px;
+  border-bottom: 1px solid var(--border);
+}
+
+.docs-main section:last-child {
+  border-bottom: none;
+}
+
+.docs-main h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+  padding-top: 8px;
+  color: var(--text);
+}
+
+.docs-main h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 24px 0 8px;
+  color: var(--text);
+}
+
+.docs-main p {
+  color: var(--text-muted);
+  font-size: 0.93rem;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+
+.docs-main ul,
+.docs-main ol {
+  color: var(--text-muted);
+  font-size: 0.93rem;
+  line-height: 1.7;
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+
+.docs-main li { margin-bottom: 6px; }
+
+.docs-main a { color: var(--accent); }
+
+.docs-main strong { color: var(--text); font-weight: 600; }
+
+/* ── Callouts ── */
+.callout {
+  background: rgba(79, 142, 247, 0.08);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.callout strong { color: var(--accent); }
+
+.callout-warn {
+  background: rgba(255, 180, 60, 0.08);
+  border-left-color: #ffb43c;
+}
+
+.callout-warn strong { color: #ffb43c; }
+
+/* ── Code ── */
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: #a8c4f0;
+}
+
+p code, li code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.82rem;
+  color: #a8c4f0;
+}
+
+/* ── Keyboard keys ── */
+kbd {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+/* ── Shortcuts table ── */
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.shortcuts-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.shortcuts-table tr:last-child td { border-bottom: none; }
+.shortcuts-table td:first-child { color: var(--text); }
+
+/* ── Numbered steps in docs (reuses .step/.step-num/.step-body from style.css) ── */
+.doc-setup-steps { display: flex; flex-direction: column; gap: 32px; margin-top: 20px; }
+
+/* ── Nav active state ── */
+.nav-active { color: var(--text) !important; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .docs-layout { flex-direction: column; gap: 0; }
+  .docs-toc {
+    width: 100%;
+    position: static;
+    height: auto;
+    padding: 24px 0 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .docs-toc nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+  }
+  .toc-heading { display: none; }
+}

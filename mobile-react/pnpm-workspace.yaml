@@ -1,0 +1,4 @@
+allowBuilds:
+  esbuild: true
+patchedDependencies:
+  react-native-keyboard-controller@1.21.9: patches/react-native-keyboard-controller@1.21.9.patch

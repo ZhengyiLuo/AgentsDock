@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import test from 'node:test'
+
+const dialogs = fs.readFileSync(path.resolve('src/components/Dialogs.tsx'), 'utf8')
+const app = fs.readFileSync(path.resolve('App.tsx'), 'utf8')
+const analytics = fs.readFileSync(path.resolve('src/lib/analytics.ts'), 'utf8')
+const analyticsPayload = fs.readFileSync(path.resolve('src/lib/analytics-payload.ts'), 'utf8')
+const policy = fs.readFileSync(path.resolve('../website/privacy.html'), 'utf8')
+
+test('mobile opens without an analytics prompt and keeps Android opt-out platform-scoped', () => {
+  assert.match(app, /<AppShell \/>/)
+  assert.doesNotMatch(app, /AnalyticsConsentDialog|analyticsConsentResolved/)
+  assert.doesNotMatch(dialogs, /AnalyticsConsentDialog|analytics-consent-(?:accept|decline)/)
+  assert.match(dialogs, /openAnalyticsPrivacyPolicy[\s\S]*?Linking\.openURL\(ANALYTICS_PRIVACY_POLICY_URL\)/)
+  assert.match(dialogs, /Platform\.OS === 'android' \? <View[\s\S]*?testID="settings-analytics-toggle"[\s\S]*?: null\}/)
+  assert.match(dialogs, /accessibilityLabel="Share usage analytics"/)
+  assert.match(dialogs, /Sends ID-less usage events to Mixpanel/)
+  assert.match(dialogs, /testID="settings-privacy-policy"[\s\S]*?onPress=\{openAnalyticsPrivacyPolicy\}/)
+  assert.doesNotMatch(dialogs, /settings-copy-analytics-id/)
+})
+
+test('mobile analytics is ID-less, Android-only, default-on unless explicitly denied, and safely revocable', () => {
+  assert.match(analytics, /SecureStore\.deleteItemAsync\(LEGACY_DISTINCT_ID_KEY\)/)
+  assert.match(analytics, /value !== 'denied'/)
+  assert.match(analytics, /if \(Platform\.OS !== 'android'\) return/)
+  assert.match(analytics, /invokedRevision !== preferenceRevision/)
+  assert.match(analytics, /MIXPANEL_TRACK_URL/)
+  assert.match(analyticsPayload, /distinct_id: ''/)
+  assert.match(analytics, /preferencePersistenceQueue/)
+  assert.match(analytics, /androidAnalyticsEnabled = enabled[\s\S]*?if \(!enabled\)[\s\S]*?controller\.abort\(\)[\s\S]*?const cleanup = clearLegacyDistinctId\(\)/)
+  assert.match(analytics, /for \(const controller of inFlightRequests\) controller\.abort\(\)/)
+  assert.match(analytics, /setTimeout\(\(\) => controller\.abort\(\), TRACK_TIMEOUT_MS\)/)
+  assert.match(analytics, /signal: controller\.signal/)
+  assert.doesNotMatch(analytics, /generateDistinctId|getOrCreateDistinctId|getAnalyticsDistinctId/)
+})
+
+test('privacy policy explains platform-specific identifier-free analytics, opt-out, and retention', () => {
+  assert.match(policy, /macOS, Windows, Linux, and Android apps, limited usage analytics are <strong>on by default<\/strong>, without a first-run analytics prompt/)
+  assert.match(policy, /turn them off at any time in Settings/)
+  assert.match(policy, /iOS and iPadOS apps do not send Mixpanel events or other custom usage analytics and do not create or store an app analytics identifier/)
+  assert.match(policy, /empty <code>distinct_id<\/code>/)
+  assert.match(policy, /does not create or send a persistent app analytics identifier/)
+  assert.match(policy, /IP-based geolocation disabled \(<code>ip=0<\/code>\)/)
+  assert.match(policy, /aggregate event counts without an app-provided identifier/)
+  assert.match(policy, /do <strong>not<\/strong> include chat content, prompts, agent responses, source code, file names or contents, working-directory paths, server names or addresses, access tokens, terminal output, scheduled-job content, screen recordings, automatic UI capture, or IP-derived location/)
+  assert.match(policy, /Mixpanel remains a third-party processor and may handle network request metadata under its own privacy policy/)
+  assert.match(policy, /does not automatically delete event records Mixpanel already received/)
+  assert.match(policy, /generally cannot associate or select previously received events for one particular user or installation/)
+  assert.match(policy, /retained only while needed to measure feature-adoption and platform-reliability trends/)
+  assert.match(policy, /periodically review that need/)
+  assert.match(policy, /Google Analytics is scoped to the website and does not run inside the AgentsDock apps/)
+  assert.match(policy, /Google may process request information and identifiers under its own privacy policy/)
+  assert.match(policy, /Uninstall behavior varies by platform/)
+  assert.match(policy, /Uninstalling alone may not clear desktop app data or operating-system secure storage/)
+  assert.match(policy, /contact@agentsdock\.net/)
+  assert.doesNotMatch(policy, /random app-install analytics ID/)
+  assert.doesNotMatch(policy, /pseudonymous/)
+  assert.doesNotMatch(policy, /If you opt in/)
+  assert.doesNotMatch(policy, /analytics ID shown in Settings/)
+})

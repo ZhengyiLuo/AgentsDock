@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DERIVED_DATA="${ROOT}/build/DerivedDataLocalMac"
+BUILT_APP="${DERIVED_DATA}/Build/Products/Release/AgentsDock.app"
+DIST_DIR="${ROOT}/dist"
+DIST_APP="${DIST_DIR}/AgentsDock.app"
+
+cd "${ROOT}"
+
+xcodebuild \
+  -scheme AgentsDockMac \
+  -configuration Release \
+  -destination platform=macOS \
+  -derivedDataPath "${DERIVED_DATA}" \
+  CODE_SIGN_IDENTITY=- \
+  CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= \
+  build \
+  -quiet
+
+rm -rf "${DIST_APP}"
+mkdir -p "${DIST_DIR}"
+ditto "${BUILT_APP}" "${DIST_APP}"
+
+SIGN_IDENTITY="${ZENITHDOCK_CODESIGN_IDENTITY:-}"
+if [[ -z "${SIGN_IDENTITY}" ]]; then
+  SIGN_IDENTITY="$(
+    security find-identity -v -p codesigning 2>/dev/null \
+      | awk '/"Apple Development:/ { print $2; exit }' \
+      || true
+  )"
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+echo "Local signing identity: ${SIGN_IDENTITY}"
+
+if [[ -n "${SIGN_IDENTITY}" ]]; then
+  if [[ -d "${DIST_APP}/Contents/Frameworks" ]]; then
+    while IFS= read -r -d '' framework; do
+      if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+        codesign --force --sign - "${framework}"
+      else
+        codesign --force --sign "${SIGN_IDENTITY}" --options runtime "${framework}"
+      fi
+    done < <(find "${DIST_APP}/Contents/Frameworks" -maxdepth 1 -name "*.framework" -print0)
+  fi
+  if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+    codesign --force --sign - "${DIST_APP}"
+  else
+    SIGN_ARGS=(
+      --force
+      --sign "${SIGN_IDENTITY}"
+      --options runtime
+    )
+    if [[ -n "${ZENITHDOCK_LOCAL_ENTITLEMENTS:-}" ]]; then
+      SIGN_ARGS+=(--entitlements "${ZENITHDOCK_LOCAL_ENTITLEMENTS}")
+    fi
+    codesign "${SIGN_ARGS[@]}" "${DIST_APP}"
+  fi
+fi
+
+codesign --verify --deep --strict --verbose=2 "${DIST_APP}"
+
+MBA_HOST="${ZENITHDOCK_MBA_HOST:-}"
+MBA_DEST="${ZENITHDOCK_MBA_DEST:-}"
+if [[ -z "$MBA_HOST" || -z "$MBA_DEST" ]]; then
+  echo "Remote sync disabled; set ZENITHDOCK_MBA_HOST and ZENITHDOCK_MBA_DEST to opt in."
+elif ssh -o BatchMode=yes -o ConnectTimeout=5 "${MBA_HOST}" "mkdir -p '${MBA_DEST}'" >/dev/null 2>&1; then
+  rsync -a --delete "${DIST_APP}" "${MBA_HOST}:${MBA_DEST}/"
+  echo "Synced MBA: ${MBA_HOST}:${MBA_DEST}/AgentsDock.app"
+else
+  echo "Skipped MBA sync: ${MBA_HOST} is not reachable over SSH" >&2
+fi
+
+echo "${DIST_APP}"

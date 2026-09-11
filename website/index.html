@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A dock for all your agents. AgentsDock is a self-hosted workspace for Claude Code and Codex, with persistent chats, rich media, scheduled jobs, and terminals." />
+    <meta name="theme-color" content="#0d1013" />
+    <title>AgentsDock - A dock for all your agents</title>
+    <link rel="icon" href="./assets/agentsdock-icon.png" />
+    <!-- Analytics is disabled in the source snapshot. Configure your own deployment explicitly. -->
+    <script src="./analytics.js" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title" id="product">
+        <div class="hero-shade" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <a class="github-badge" href="https://github.com/ZhengyiLuo/AgentsDock" target="_blank" rel="noopener" aria-label="AgentsDock source on GitHub — now in beta testing">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.603-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.647.35-1.087.636-1.337-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+            <span>GitHub</span>
+            <span class="github-badge-sep">·</span>
+            <span class="github-badge-accent">Source repository</span>
+            <span class="github-badge-sep">·</span>
+            <span class="beta-dot" aria-hidden="true"></span>
+            <span>Beta testing now</span>
+          </a>
+          <h1 id="hero-title">AgentsDock</h1>
+          <p class="hero-lede">The dock for all your agents. Consistent terminal access from desktop and mobile.</p>
+          <div class="hero-actions" aria-label="Downloads">
+            <a class="download-button primary" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener">
+              <svg class="button-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.04c-.03-2.6 2.12-3.85 2.22-3.9-1.21-1.77-3.1-2.02-3.77-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.9-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.78 1.3 10.32.86 1.24 1.89 2.63 3.24 2.58 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.39.81 1.4-.02 2.29-1.26 3.15-2.51.99-1.44 1.4-2.83 1.42-2.9-.03-.01-2.73-1.05-2.76-4.15zM14.6 4.2c.72-.87 1.2-2.08 1.07-3.28-1.03.04-2.28.69-3.02 1.56-.66.77-1.24 2-1.08 3.18 1.15.09 2.32-.58 3.03-1.46z"/></svg>
+              <strong>Download for macOS</strong>
+            </a>
+            <a class="download-button secondary appstore-btn" href="https://testflight.apple.com/join/2JjWy2Z2" target="_blank" rel="noopener">
+              <span class="button-icon" aria-hidden="true">&#xF8FF;</span>
+              <strong>Download for iPhone &amp; iPad</strong>
+            </a>
+            <a class="download-button secondary" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener">
+              <span class="button-icon terminal-icon" aria-hidden="true">&gt;_</span>
+              <strong>Download for Linux</strong>
+            </a>
+          </div>
+        </div>
+        <p class="source-media-note">Desktop and mobile clients share your self-hosted agent workspace. Product screenshots are omitted from this source snapshot pending publication review.</p>
+      </section>
+
+      <section class="quickstart" aria-labelledby="quickstart-title">
+        <div class="quickstart-inner">
+          <div class="quickstart-copy">
+            <h2 id="quickstart-title">How it works</h2>
+            <ul class="quickstart-points">
+              <li><span class="step-n">1</span>Set up your server in three commands</li>
+              <li><span class="step-n">2</span>Access the server from any device</li>
+              <li><span class="step-n">3</span>Run and schedule your training jobs anywhere, anytime</li>
+            </ul>
+            <a class="quickstart-docs" href="./setup.html">Read the full setup guide <span aria-hidden="true">→</span></a>
+            <div class="ways">
+              <p class="ways-helper">We support:</p>
+              <ul class="ways-grid">
+                <li class="ways-tile">
+                  <span class="ways-icon"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                  <span class="ways-tile-label">Claude Code</span>
+                </li>
+                <li class="ways-tile">
+                  <span class="ways-icon"><img src="./assets/codex-logo.png" alt="" /></span>
+                  <span class="ways-tile-label">Codex</span>
+                </li>
+              </ul>
+              <ul class="check-list">
+                <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>Tailscale</li>
+                <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>tmux <span class="check-opt">(optional)</span></li>
+              </ul>
+            </div>
+          </div>
+          <div class="code-card" aria-label="Install commands">
+            <div class="code-card-bar" aria-hidden="true"><span></span><span></span><span></span><em>bash</em></div>
+            <pre class="code-card-body"><code><span class="tok-comment"># 1 · Install the AgentsDock server</span>
+<span class="tok-prompt">$</span> git clone https://github.com/ZhengyiLuo/AgentsServer.git
+<span class="tok-prompt">$</span> cd AgentsServer
+<span class="tok-prompt">$</span> ./install.sh
+
+<span class="tok-comment"># 2 · Launch the app and paste your server URL</span>
+<span class="tok-prompt">$</span> open -a AgentsDock</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-band" aria-labelledby="feature-title" id="self-hosted">
+        <div class="feature-heading">
+          <p class="section-kicker">Research workflow</p>
+          <h2 id="feature-title"><span class="heading-emoji" aria-hidden="true">💻</span>Built for researchers</h2>
+        </div>
+      </section>
+
+      <section class="showcase" aria-label="AgentsDock features">
+        <div class="showcase-row">
+          <figure class="showcase-media device-media" aria-hidden="true">
+            <div class="device-card-inner">
+              <p class="device-card-owner">Your AgentsDock devices</p>
+              <ul class="device-list">
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Example MacBook
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="11" rx="1.5"/><path d="M2 20h20"/></svg>
+                    </span>
+                    <span class="device-ip">server.example</span>
+                  </span>
+                </li>
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Example Mac mini
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+                      <span class="device-tag">self host server</span>
+                    </span>
+                    <span class="device-ip">server.example</span>
+                  </span>
+                </li>
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Example iPad
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M11 18h2"/></svg>
+                    </span>
+                    <span class="device-ip">tablet.example</span>
+                  </span>
+                </li>
+                <li class="device-row">
+                  <span class="device-dot"></span>
+                  <span class="device-meta">
+                    <span class="device-name">Example iPhone
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+                    </span>
+                    <span class="device-ip">phone.example</span>
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Access your agent from all your devices</h3>
+            <p>One server, reachable from every device you own over your private Tailscale network.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media ide-media" aria-hidden="true">
+            <div class="ide-bar">
+              <span class="ide-tab">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                test_handoff_digest.py
+              </span>
+            </div>
+            <div class="ide-body">
+              <pre class="ide-code" id="ide-code"><div class="ide-line"><span class="ide-ln">1</span><span class="ide-tx"><span class="tok-kw">import</span> <span class="tok-mod">agent_server</span></span></div><div class="ide-line"><span class="ide-ln">2</span><span class="ide-tx"><span class="tok-kw">from</span> <span class="tok-mod">agent_server</span> <span class="tok-kw">import</span> <span class="tok-mod">digest</span></span></div><div class="ide-line"><span class="ide-ln">3</span><span class="ide-tx"></span></div><div class="ide-line"><span class="ide-ln">4</span><span class="ide-tx"><span class="tok-kw">def</span> <span class="tok-fn">send_handoff</span>(<span class="tok-var">source</span>, <span class="tok-var">target</span>):</span></div><div class="ide-line"><span class="ide-ln">5</span><span class="ide-tx">    <span class="tok-var">item</span> = <span class="tok-mod">digest</span>.<span class="tok-fn">build</span>(<span class="tok-var">source</span>)</span></div><div class="ide-line"><span class="ide-ln">6</span><span class="ide-tx">    <span class="tok-kw">return</span> <span class="tok-mod">digest</span>.<span class="tok-fn">dispatch</span>(<span class="tok-var">item</span>, <span class="tok-var">target</span>)</span></div><div class="ide-line"><span class="ide-ln">7</span><span class="ide-tx"></span></div><div class="ide-line"><span class="ide-ln">8</span><span class="ide-tx"><span class="tok-com"># hand context from one chat to the next</span></span></div><div class="ide-line"><span class="ide-ln">9</span><span class="ide-tx"><span class="ide-type"><span class="tok-fn">send_handoff</span>(<span class="tok-str">"chat-1"</span>, <span class="tok-str">"chat-2"</span>)</span></span></div></pre>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>View and edit code</h3>
+            <p>Open, edit, and syntax-highlight files on your remote — no separate editor needed.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media terminal-media" aria-hidden="true">
+            <pre class="terminal-card">user@example-host AgentsDock % python3
+Python 3.14.6 on darwin
+<span class="tprompt">&gt;&gt;&gt;</span>
+<span class="tprompt">&gt;&gt;&gt;</span> <span class="terminal-cursor"></span></pre>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Full terminal access from anywhere</h3>
+            <p>Attach to your chat's persistent <code>tmux</code> session from any device — the same shell, everywhere.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media chatmedia-media" aria-hidden="true">
+            <div class="cm-msg">
+              <span class="cm-avatar"><img src="./assets/codex-logo.png" alt="" /></span>
+              <div class="cm-bubble">
+                <p>Example experiment complete. Review the returned video, plots, and summary in the conversation.</p>
+                <div class="cm-metrics">
+                  <span><b>92.4%</b><small>success</small></span>
+                  <span><b>0.18 m</b><small>final error</small></span>
+                  <span><b>42k</b><small>steps</small></span>
+                </div>
+              </div>
+            </div>
+            <div class="cm-media">
+              <p class="source-media-note">Video previews display returned artifacts here. Demo recording omitted pending publication review.</p>
+            </div>
+            <p class="cm-caption">Example video artifact</p>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Check video job results</h3>
+            <p>Agents return plots, images, and rendered rollouts inline — review a run's real output right in the chat.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media sched-media" aria-hidden="true">
+            <div class="sched-head">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <span>Schedule a job</span>
+            </div>
+            <div class="sched-body">
+              <div class="sched-field">
+                <label>Schedule</label>
+                <div class="seg" data-seg><span class="seg-on">Interval</span><span>Cron</span><span>RRULE</span></div>
+              </div>
+              <div class="sched-field">
+                <label>Interval</label>
+                <div class="sched-interval">
+                  <div class="sched-picker">
+                    <div class="sched-select" id="sched-interval"><span class="sched-interval-label">1 day</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></div>
+                    <div class="sched-menu" id="sched-menu">
+                      <span class="sched-option" data-label="1 hour" data-seconds="3600">1 hour</span>
+                      <span class="sched-option" data-label="4 hours" data-seconds="14400">4 hours</span>
+                      <span class="sched-option sched-option-on" data-label="1 day" data-seconds="86400">1 day</span>
+                      <span class="sched-option" data-label="1 week" data-seconds="604800">1 week</span>
+                    </div>
+                  </div>
+                  <span class="sched-seconds"><span id="sched-seconds">86400</span> s</span>
+                </div>
+              </div>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Schedule jobs ahead</h3>
+            <p>Run a prompt on your own schedule — interval, cron, or recurring.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media fork-media" aria-hidden="true">
+            <div class="fork-card">
+              <ul class="fork-list">
+                <li class="fork-row">
+                  <span class="fork-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                  <span class="fork-meta"><span class="fork-name">Example experiment</span><span class="fork-sub">Codex · research notes</span></span>
+                </li>
+                <li class="fork-row fork-row-new">
+                  <span class="fork-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                  <span class="fork-meta"><span class="fork-name">Fork of Example experiment</span><span class="fork-sub">Codex · ablation branch</span></span>
+                </li>
+              </ul>
+            </div>
+            <div class="fork-connector"><span class="fork-dot"></span></div>
+            <div class="fork-btn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 8.5v7M18 9.5c0 4-6 2-6 6"/></svg>
+              Fork chat
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Fork any chat</h3>
+            <p>Branch any chat with one click to try a new direction — the original stays intact.</p>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <figure class="showcase-media digest-media" aria-hidden="true">
+            <p class="digest-head">Create context digest</p>
+            <div class="digest-flow">
+              <div class="digest-chat">
+                <span class="digest-avatar"><img src="./assets/claude-code-logo.png" alt="" /></span>
+                <span class="digest-meta"><span class="digest-name">VIRAL sim-to-real review</span><span class="digest-role">Source</span></span>
+              </div>
+              <span class="digest-arrow">&rarr;</span>
+              <div class="digest-chat digest-chat-target">
+                <span class="digest-avatar"><img src="./assets/codex-logo.png" alt="" /></span>
+                <span class="digest-meta"><span class="digest-name">Doorman pixel-to-action transfer</span><span class="digest-role">Target</span></span>
+              </div>
+            </div>
+            <div class="digest-field">
+              <span class="digest-label">Focus for the target agent</span>
+              <div class="digest-prompt">Carry the humanoid policy-transfer findings and rollout metrics into the next experiment review.</div>
+            </div>
+          </figure>
+          <div class="showcase-copy">
+            <h3>Send messages between chats</h3>
+            <p>Hand one focused turn from a source chat to another, so the next agent builds on the last.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="downloads" id="downloads" aria-labelledby="download-title">
+        <div>
+          <p class="section-kicker" id="release-version">Loading current release</p>
+          <h2 id="download-title">Bring your agents into the Dock.</h2>
+          <p>Install the desktop client, connect it to your AgentsDock server, and keep Claude and Codex available from every machine you use.</p>
+        </div>
+        <div class="download-options">
+          <article>
+            <div><span class="platform-mark">⌘</span><p><strong>macOS</strong><small>Universal · macOS 14+</small></p></div>
+            <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener" class="download-options-link">Download .dmg</a>
+            <code id="macos-checksum">SHA256 published with release</code>
+          </article>
+          <article>
+            <div><span class="platform-mark terminal-icon">&gt;_</span><p><strong>Linux</strong><small>x86_64 · AppImage</small></p></div>
+            <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener" class="download-options-link">Download AppImage</a>
+            <code id="linux-checksum">SHA256 published with release</code>
+          </article>
+          <article>
+            <div><span class="platform-mark">&#xF8FF;</span><p><strong>iPhone &amp; iPad</strong><small>iOS &amp; iPadOS 17+ · TestFlight</small></p></div>
+            <a href="https://testflight.apple.com/join/2JjWy2Z2" target="_blank" rel="noopener" class="download-options-link">Download on TestFlight</a>
+            <code>iOS &amp; iPadOS 17+ · via TestFlight</code>
+          </article>
+        </div>
+        <p class="download-status" id="download-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>A dock for all your agents.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script src="./app.js" type="module"></script>
+    <script>
+      // IDE panel: the code sits static; only the last line types itself in, on a loop.
+      (function () {
+        var el = document.querySelector('.ide-type');
+        if (!el) return;
+        el.style.width = 'auto';
+        var full = el.offsetWidth;
+        el.style.width = '0px';
+        if (!full || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+          el.style.width = 'auto';
+          el.style.borderRight = '0';
+          return;
+        }
+        var steps = 32, w = 0, i = 0, timer, started = false;
+        function type() {
+          i++; w = Math.min(full, (full / steps) * i);
+          el.style.width = w + 'px';
+          if (i < steps) { timer = setTimeout(type, 75); }
+          else { timer = setTimeout(reset, 2400); }
+        }
+        function reset() { i = 0; w = 0; el.style.width = '0px'; timer = setTimeout(type, 350); }
+        function start() { if (!started) { started = true; type(); } }
+        if ('IntersectionObserver' in window) {
+          var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) { if (e.isIntersecting) start(); });
+          }, { threshold: 0.3 });
+          io.observe(el);
+        } else { start(); }
+      })();
+
+      // Make the mock panel controls feel interactive (visual only).
+      (function () {
+        document.querySelectorAll('[data-seg]').forEach(function (seg) {
+          seg.addEventListener('click', function (e) {
+            var t = e.target.closest('span');
+            if (!t || t.parentNode !== seg) return;
+            seg.querySelectorAll('span').forEach(function (s) { s.classList.remove('seg-on'); });
+            t.classList.add('seg-on');
+          });
+        });
+        var iv = document.getElementById('sched-interval');
+        if (iv) {
+          var label = iv.querySelector('.sched-interval-label');
+          var secs = document.getElementById('sched-seconds');
+          var picker = iv.closest('.sched-picker');
+          var options = document.querySelectorAll('.sched-option');
+          iv.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (picker) picker.classList.toggle('is-open');
+          });
+          options.forEach(function (option) {
+            option.addEventListener('click', function (e) {
+              e.stopPropagation();
+              options.forEach(function (item) { item.classList.remove('sched-option-on'); });
+              option.classList.add('sched-option-on');
+              label.textContent = option.dataset.label;
+              if (secs) secs.textContent = option.dataset.seconds;
+              if (picker) picker.classList.remove('is-open');
+            });
+          });
+          document.addEventListener('click', function () {
+            if (picker) picker.classList.remove('is-open');
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

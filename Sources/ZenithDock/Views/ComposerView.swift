@@ -1,0 +1,976 @@
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+import ZenithCore
+
+struct ComposerView: View {
+    @EnvironmentObject private var store: AppStore
+    @Binding var importerOpen: Bool
+    @State private var draftPrompt = ""
+    @State private var editorResetID = 0
+    @State private var editorSubmitRevision = 0
+    @State private var editorHasVisibleText = false
+    @State private var isAttachmentDropTargeted = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 7) {
+                if !store.uploads.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(store.uploads) { file in
+                                UploadChip(file: file, url: store.fileURL(file)) {
+                                    store.removeUpload(file)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                }
+
+                if !store.pendingQueuedTurns.isEmpty {
+                    QueuedTurnShelf()
+                }
+
+                StablePromptEditor(
+                    text: $draftPrompt,
+                    isEditable: store.selectedSession != nil,
+                    resetID: editorResetID,
+                    submitRevision: editorSubmitRevision,
+                    draftSessionID: store.selectedSessionID
+                ) {
+                    sendDraft($0)
+                } onDropFiles: { urls in
+                    uploadDroppedFiles(urls)
+                } onDraftChange: { text, sessionID in
+                    store.rememberDraftPrompt(text, for: sessionID)
+                } onTextPresenceChange: { hasText in
+                    if editorHasVisibleText != hasText {
+                        editorHasVisibleText = hasText
+                    }
+                }
+                .equatable()
+                .frame(height: promptHeight)
+                .overlay(alignment: .topLeading) {
+                    if !editorHasVisibleText {
+                        Text("Message")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+                commandBar
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.card)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isAttachmentDropTargeted ? Color.accentColor.opacity(0.80) : Theme.line, lineWidth: isAttachmentDropTargeted ? 2 : 1)
+            }
+            .overlay {
+                if isAttachmentDropTargeted {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.85), style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+                        .allowsHitTesting(false)
+                }
+            }
+            .onDrop(of: TimelineFileDrop.supportedTypes, isTargeted: $isAttachmentDropTargeted) { providers in
+                acceptAttachmentDrop(providers)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Theme.panel)
+        .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            restoreDraft(for: store.selectedSessionID)
+        }
+        .onChange(of: store.selectedSessionID) {
+            restoreDraft(for: store.selectedSessionID)
+        }
+    }
+
+    private var promptHeight: CGFloat {
+        store.pendingQueuedTurns.isEmpty ? 58 : 44
+    }
+
+    @ViewBuilder
+    private var commandBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                importerOpen = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 27, height: 27)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(store.selectedSession == nil ? .tertiary : .secondary)
+            .disabled(store.selectedSession == nil)
+            .help("Attach files")
+
+            if let session = store.selectedSession {
+                backendMenu(for: session)
+                runtimeMenu(for: session)
+            }
+
+            Spacer(minLength: 8)
+
+            if store.isRunning {
+                ComposerActivityIndicator(backend: store.selectedSession?.backend ?? "agent") {
+                    Task { await store.stop() }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+
+            Button {
+                editorSubmitRevision += 1
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 29, height: 29)
+                    .background(canSend ? Color.accentColor : Color.secondary.opacity(0.18))
+                    .foregroundStyle(canSend ? Color.white : Color.secondary)
+                    .clipShape(Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .help(store.isRunning ? "Queue message" : "Send message")
+        }
+        .frame(minHeight: 31)
+    }
+
+    private var canSend: Bool {
+        store.selectedSession != nil && editorHasVisibleText
+    }
+
+    @ViewBuilder
+    private func backendMenu(for session: ZSession) -> some View {
+        if session.isBackendLocked {
+            composerBackendChip(session.backend)
+                .help("Backend is locked after chat starts. Fork or create a new chat to use another backend.")
+        } else {
+            backendPickerMenu(for: session)
+        }
+    }
+
+    private func backendPickerMenu(for session: ZSession) -> some View {
+        Menu {
+            Button {
+                setBackend("claude")
+            } label: {
+                optionLabel("Claude", selected: session.backend == "claude")
+            }
+            Button {
+                setBackend("codex")
+            } label: {
+                optionLabel("Codex", selected: session.backend == "codex")
+            }
+        } label: {
+            composerBackendChip(session.backend)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Backend")
+    }
+
+    private func runtimeMenu(for session: ZSession) -> some View {
+        Menu {
+            Section("Model") {
+                ForEach(modelOptions(for: session)) { option in
+                    Button {
+                        setModel(option.value)
+                    } label: {
+                        optionLabel(option.label, selected: selected(session.model, matches: option.value))
+                    }
+                }
+            }
+
+            Section("Effort") {
+                ForEach(effortOptions(for: session)) { option in
+                    Button {
+                        setEffort(option.value)
+                    } label: {
+                        optionLabel(option.label, selected: selected(session.effort, matches: option.value))
+                    }
+                }
+            }
+        } label: {
+            composerChip(
+                icon: "gauge.with.dots.needle.67percent",
+                text: runtimeBarLabel(for: session),
+                tint: .primary,
+                trailingChevron: true
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: true, vertical: false)
+        .help(store.runtimeCatalog.compactSummary(for: session))
+    }
+
+    private func composerChip(icon: String, text: String, tint: Color, trailingChevron: Bool = false) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if trailingChevron {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .frame(height: 27)
+        .background(Color.primary.opacity(0.055))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+    }
+
+    private func composerBackendChip(_ backend: String) -> some View {
+        HStack(spacing: 5) {
+            BackendLogo(backend: backend, size: 13)
+            Text(backend.capitalized)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .frame(height: 27)
+        .background(Color.primary.opacity(0.055))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+    }
+
+    private func optionLabel(_ text: String, selected: Bool) -> some View {
+        Label(text, systemImage: selected ? "checkmark" : "circle")
+    }
+
+    private func runtimeLabel(for session: ZSession) -> String {
+        let model = store.runtimeCatalog.modelLabel(session.model, backend: session.backend)
+        let effort = store.runtimeCatalog.effortLabel(session.effort, backend: session.backend)
+        let compactModel = model == "Default" ? "" : model
+        let compactEffort = effort == "Default" ? "" : effort
+        return [compactModel, compactEffort].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func runtimeBarLabel(for session: ZSession) -> String {
+        let label = runtimeLabel(for: session)
+        let compact = label
+            .replacingOccurrences(of: "Server default (", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "Extra High", with: "XHigh")
+        return compact.isEmpty ? "Runtime" : compact
+    }
+
+    private func modelOptions(for session: ZSession) -> [ZRuntimeOption] {
+        optionsWithCurrent(store.runtimeCatalog.models(for: session.backend), current: session.model)
+    }
+
+    private func effortOptions(for session: ZSession) -> [ZRuntimeOption] {
+        optionsWithCurrent(store.runtimeCatalog.efforts(for: session.backend), current: session.effort)
+    }
+
+    private func optionsWithCurrent(_ options: [ZRuntimeOption], current: String?) -> [ZRuntimeOption] {
+        let clean = current?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !clean.isEmpty, !options.contains(where: { $0.value == clean }) else {
+            return options
+        }
+        return options + [ZRuntimeOption(value: clean, label: clean)]
+    }
+
+    private func selected(_ current: String?, matches value: String) -> Bool {
+        (current?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") == value
+    }
+
+    private func setBackend(_ backend: String) {
+        guard let session = store.selectedSession, session.backend != backend else { return }
+        let sessionID = session.id
+        store.stageSelectedRuntime(backend: backend, model: "", effort: "")
+        Task { await store.updateSession(sessionID, backend: backend, model: "", effort: "", applyOptimistic: false) }
+    }
+
+    private func setModel(_ model: String) {
+        guard let sessionID = store.selectedSession?.id else { return }
+        let cleanModel = ZRuntimeCatalog.cleanForAPI(model)
+        store.stageSelectedRuntime(model: cleanModel)
+        Task { await store.updateSession(sessionID, model: cleanModel, applyOptimistic: false) }
+    }
+
+    private func setEffort(_ effort: String) {
+        guard let sessionID = store.selectedSession?.id else { return }
+        let cleanEffort = ZRuntimeCatalog.cleanForAPI(effort)
+        store.stageSelectedRuntime(effort: cleanEffort)
+        Task { await store.updateSession(sessionID, effort: cleanEffort, applyOptimistic: false) }
+    }
+
+    private func sendDraft(_ submitted: String) {
+        guard let sessionID = store.selectedSessionID else { return }
+        guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let uploadIDs = store.uploads.map(\.id)
+        store.clearDraftPrompt(for: sessionID)
+        draftPrompt = ""
+        editorHasVisibleText = false
+        editorResetID += 1
+        Task {
+            let accepted = await store.sendPrompt(to: sessionID, prompt: submitted, fileIDs: uploadIDs)
+            if accepted {
+                await MainActor.run {
+                    store.clearUploadsIfCurrent(fileIDs: uploadIDs, for: sessionID)
+                }
+            } else {
+                await MainActor.run {
+                    if draftPrompt.isEmpty {
+                        draftPrompt = submitted
+                        store.rememberDraftPrompt(submitted, for: sessionID)
+                        editorHasVisibleText = true
+                        editorResetID += 1
+                    }
+                }
+            }
+        }
+    }
+
+    private func restoreDraft(for sessionID: String?) {
+        let restored = store.draftPrompt(for: sessionID)
+        draftPrompt = restored
+        editorHasVisibleText = !restored.isEmpty
+        editorResetID += 1
+    }
+
+    private func acceptAttachmentDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard store.selectedSessionID != nil else { return false }
+        Task {
+            let urls = await TimelineFileDrop.urls(from: providers)
+            guard !urls.isEmpty else { return }
+            await store.upload(urls: urls)
+        }
+        return true
+    }
+
+    private func uploadDroppedFiles(_ urls: [URL]) {
+        guard store.selectedSessionID != nil, !urls.isEmpty else { return }
+        Task { await store.upload(urls: urls) }
+    }
+}
+
+private struct ComposerActivityIndicator: View {
+    var backend: String
+    var stop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.68)
+                .frame(width: 13, height: 13)
+            Button(role: .destructive) {
+                stop()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 18, height: 18)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Stop current turn")
+        }
+        .foregroundStyle(backend == "codex" ? .orange : .blue)
+        .help("\(backend.capitalized) is running. New sends will queue.")
+    }
+}
+
+private struct QueuedTurnShelf: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                Text("Queued \(store.pendingQueuedTurns.count)")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            ScrollView {
+                VStack(alignment: .trailing, spacing: 6) {
+                    ForEach(store.pendingQueuedTurns) { turn in
+                        QueuedTurnRow(turn: turn)
+                    }
+                }
+            }
+            .frame(height: shelfHeight)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var shelfHeight: CGFloat {
+        min(CGFloat(store.pendingQueuedTurns.count) * 38, 128)
+    }
+}
+
+private struct QueuedTurnRow: View {
+    @EnvironmentObject private var store: AppStore
+    let turn: ZQueuedTurn
+    @State private var editOpen = false
+    @State private var draft = ""
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.yellow)
+            Text(store.queuedPrompt(for: turn))
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: 420, alignment: .leading)
+
+            Button {
+                Task { await store.runQueuedNow(turn) }
+            } label: {
+                Label("Send Now", systemImage: "arrow.turn.down.right")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.borderless)
+            .help("Interrupt the current turn and send this queued message now")
+
+            Button {
+                Task { await store.moveQueued(turn, direction: "up") }
+            } label: {
+                Image(systemName: "arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .help("Move queued message up")
+
+            Button {
+                Task { await store.moveQueued(turn, direction: "down") }
+            } label: {
+                Image(systemName: "arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .help("Move queued message down")
+
+            Button {
+                Task { await store.unqueue(turn) }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Remove from queue")
+
+            Menu {
+                Button("Edit Message") {
+                    draft = store.queuedPrompt(for: turn)
+                    editOpen = true
+                }
+                Button("Send Now") {
+                    Task { await store.runQueuedNow(turn) }
+                }
+                Divider()
+                Button("Move Up") {
+                    Task { await store.moveQueued(turn, direction: "up") }
+                }
+                Button("Move Down") {
+                    Task { await store.moveQueued(turn, direction: "down") }
+                }
+                Divider()
+                Button("Remove", role: .destructive) {
+                    Task { await store.unqueue(turn) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(minHeight: 32)
+        .background(Color.yellow.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.yellow.opacity(0.28), lineWidth: 1)
+        }
+        .popover(isPresented: $editOpen) {
+            QueuedTurnEditor(
+                draft: $draft,
+                onCancel: { editOpen = false },
+                onSave: {
+                    let next = draft
+                    editOpen = false
+                    Task { await store.updateQueued(turn, prompt: next) }
+                }
+            )
+        }
+    }
+}
+
+private struct QueuedTurnEditor: View {
+    @Binding var draft: String
+    var onCancel: () -> Void
+    var onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Edit Queued Message")
+                .font(.headline)
+            TextEditor(text: $draft)
+                .font(.body)
+                .frame(width: 420, height: 160)
+                .scrollContentBackground(.hidden)
+                .background(Theme.window)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Theme.line, lineWidth: 1)
+                }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save", action: onSave)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(14)
+    }
+}
+
+private struct StablePromptEditor: View, Equatable {
+    @Binding var text: String
+    var isEditable: Bool
+    var resetID: Int
+    var submitRevision: Int
+    var draftSessionID: String?
+    var onSubmit: (String) -> Void
+    var onDropFiles: ([URL]) -> Void
+    var onDraftChange: (String, String?) -> Void
+    var onTextPresenceChange: (Bool) -> Void
+
+    nonisolated static func == (lhs: StablePromptEditor, rhs: StablePromptEditor) -> Bool {
+        lhs.isEditable == rhs.isEditable &&
+            lhs.resetID == rhs.resetID &&
+            lhs.submitRevision == rhs.submitRevision &&
+            lhs.draftSessionID == rhs.draftSessionID
+    }
+
+    var body: some View {
+        PromptTextView(
+            text: $text,
+            isEditable: isEditable,
+            resetID: resetID,
+            submitRevision: submitRevision,
+            draftSessionID: draftSessionID,
+            onSubmit: onSubmit,
+            onDropFiles: onDropFiles,
+            onDraftChange: onDraftChange,
+            onTextPresenceChange: onTextPresenceChange
+        )
+    }
+}
+
+struct PromptTextView: NSViewRepresentable {
+    @Binding var text: String
+    var isEditable: Bool
+    var resetID: Int
+    var submitRevision: Int
+    var draftSessionID: String?
+    var onSubmit: (String) -> Void
+    var onDropFiles: ([URL]) -> Void = { _ in }
+    var onDraftChange: (String, String?) -> Void = { _, _ in }
+    var onTextPresenceChange: (Bool) -> Void = { _ in }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = .allowed
+
+        let textView = SubmitTextView()
+        textView.delegate = context.coordinator
+        textView.drawsBackground = false
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .controlAccentColor
+        textView.textContainerInset = NSSize(width: 7, height: 4)
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.importsGraphics = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.smartInsertDeleteEnabled = false
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.layoutManager?.allowsNonContiguousLayout = true
+        textView.layoutManager?.backgroundLayoutEnabled = true
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
+        textView.onSubmitText = { context.coordinator.submit(textView: textView) }
+        textView.onDropFiles = onDropFiles
+        textView.registerForDraggedTypes([.fileURL, .URL])
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? SubmitTextView else { return }
+        let previousParent = context.coordinator.parent
+        if previousParent.draftSessionID != draftSessionID {
+            context.coordinator.flushDraft(textView: textView, parent: previousParent)
+        }
+        context.coordinator.parent = self
+        if context.coordinator.lastAppliedResetID != resetID {
+            textView.string = text
+            context.coordinator.lastAppliedResetID = resetID
+            context.coordinator.publishPresence(textView)
+        }
+        if context.coordinator.lastHandledSubmitRevision != submitRevision {
+            context.coordinator.lastHandledSubmitRevision = submitRevision
+            context.coordinator.submit(textView: textView)
+        }
+        textView.isEditable = isEditable
+        textView.onSubmitText = { context.coordinator.submit(textView: textView) }
+        textView.onDropFiles = onDropFiles
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: PromptTextView
+        private var presenceGate = ZTextPresenceGate()
+        private var pendingDraftWorkItem: DispatchWorkItem?
+        var lastAppliedResetID = 0
+        var lastHandledSubmitRevision = 0
+
+        init(_ parent: PromptTextView) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            scheduleDraftChange(textView)
+            publishPresence(textView)
+        }
+
+        func submit(textView: NSTextView) {
+            pendingDraftWorkItem?.cancel()
+            pendingDraftWorkItem = nil
+            let submitted = textView.string
+            parent.onSubmit(submitted)
+            guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            textView.string = ""
+            parent.onDraftChange("", parent.draftSessionID)
+            publishPresence(textView)
+        }
+
+        func flushDraft(textView: NSTextView, parent draftParent: PromptTextView) {
+            pendingDraftWorkItem?.cancel()
+            pendingDraftWorkItem = nil
+            draftParent.onDraftChange(textView.string, draftParent.draftSessionID)
+        }
+
+        private func scheduleDraftChange(_ textView: NSTextView) {
+            pendingDraftWorkItem?.cancel()
+            let draftParent = parent
+            let item = DispatchWorkItem { [weak textView] in
+                guard let textView else { return }
+                draftParent.onDraftChange(textView.string, draftParent.draftSessionID)
+            }
+            pendingDraftWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: item)
+        }
+
+        func publishPresence(_ textView: NSTextView) {
+            // Guardrail: publishing on every keystroke reintroduces SwiftUI
+            // invalidation while typing. Only cross the bridge when the
+            // placeholder state actually changes.
+            let hasText = (textView.textStorage?.length ?? textView.string.utf16.count) > 0
+            guard presenceGate.shouldPublish(hasText: hasText) else { return }
+            parent.onTextPresenceChange(hasText)
+        }
+    }
+
+    final class SubmitTextView: NSTextView {
+        var onSubmitText: (() -> Void)?
+        var onDropFiles: (([URL]) -> Void)?
+
+        override func keyDown(with event: NSEvent) {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isReturn = event.keyCode == 36 || event.keyCode == 76
+            let wantsNewline = flags.contains(.shift) || flags.contains(.option) || flags.contains(.control)
+            if isReturn && !wantsNewline {
+                onSubmitText?()
+                return
+            }
+            super.keyDown(with: event)
+        }
+
+        override func paste(_ sender: Any?) {
+            if handleAttachmentPaste(from: NSPasteboard.general) {
+                return
+            }
+            super.paste(sender)
+        }
+
+        override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+            if item.action == #selector(paste(_:)),
+               Self.hasAttachmentPaste(in: NSPasteboard.general) {
+                return true
+            }
+            return super.validateUserInterfaceItem(item)
+        }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if flags == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "v",
+               handleAttachmentPaste(from: NSPasteboard.general) {
+                return true
+            }
+            return super.performKeyEquivalent(with: event)
+        }
+
+        private func handleAttachmentPaste(from pasteboard: NSPasteboard) -> Bool {
+            AppLogger.info("composer paste types=\((pasteboard.types ?? []).map(\.rawValue).joined(separator: ",")) items=\(pasteboard.pasteboardItems?.count ?? 0)")
+            if let urls = Self.fileURLs(from: pasteboard), !urls.isEmpty {
+                onDropFiles?(urls)
+                return true
+            }
+            if let imageURL = Self.writeImageFromPasteboard(pasteboard) {
+                AppLogger.info("composer pasted image url=\(imageURL.path)")
+                onDropFiles?([imageURL])
+                return true
+            }
+            AppLogger.info("composer paste had no attachment payload")
+            return false
+        }
+
+        private static func hasAttachmentPaste(in pasteboard: NSPasteboard) -> Bool {
+            if fileURLs(from: pasteboard)?.isEmpty == false {
+                return true
+            }
+            if !(imagePasteboardTypes(in: pasteboard).isEmpty) {
+                return true
+            }
+            return (pasteboard.pasteboardItems ?? []).contains { !imagePasteboardTypes(in: $0).isEmpty }
+        }
+
+        override func pasteAsPlainText(_ sender: Any?) {
+            let pasteboard = NSPasteboard.general
+            if handleAttachmentPaste(from: pasteboard) {
+                return
+            }
+            super.pasteAsPlainText(sender)
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            draggedFileURLs(from: sender).isEmpty ? super.draggingEntered(sender) : .copy
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            let urls = draggedFileURLs(from: sender)
+            guard !urls.isEmpty else {
+                return super.performDragOperation(sender)
+            }
+            onDropFiles?(urls)
+            return true
+        }
+
+        private func draggedFileURLs(from sender: NSDraggingInfo) -> [URL] {
+            Self.fileURLs(from: sender.draggingPasteboard) ?? []
+        }
+
+        private static func fileURLs(from pasteboard: NSPasteboard) -> [URL]? {
+            if let urls = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL] {
+                let fileURLs = urls.filter(\.isFileURL)
+                if !fileURLs.isEmpty {
+                    return fileURLs
+                }
+            }
+
+            let itemURLs = (pasteboard.pasteboardItems ?? []).compactMap { item in
+                if let string = item.string(forType: .fileURL), let url = URL(string: string), url.isFileURL {
+                    return url
+                }
+                if let string = item.string(forType: .URL), let url = URL(string: string), url.isFileURL {
+                    return url
+                }
+                return nil
+            }
+            return itemURLs.isEmpty ? nil : itemURLs
+        }
+
+        private static func writeImageFromPasteboard(_ pasteboard: NSPasteboard) -> URL? {
+            guard let data = imagePNGData(from: pasteboard) else {
+                return nil
+            }
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ZenithDockPasteboardImages", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let url = directory.appendingPathComponent("clipboard-image-\(UUID().uuidString).png")
+                try data.write(to: url, options: .atomic)
+                return url
+            } catch {
+                return nil
+            }
+        }
+
+        private static func imagePNGData(from pasteboard: NSPasteboard) -> Data? {
+            for type in imagePasteboardTypes(in: pasteboard) {
+                guard let data = pasteboard.data(forType: type),
+                      let png = pngData(fromImageData: data) else { continue }
+                return png
+            }
+
+            for item in pasteboard.pasteboardItems ?? [] {
+                for type in imagePasteboardTypes(in: item) {
+                    guard let data = item.data(forType: type),
+                          let png = pngData(fromImageData: data) else { continue }
+                    return png
+                }
+            }
+
+            guard let image = NSImage(pasteboard: pasteboard),
+                  let tiff = image.tiffRepresentation else {
+                return nil
+            }
+            return pngData(fromImageData: tiff)
+        }
+
+        private static func imagePasteboardTypes(in pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
+            (pasteboard.types ?? []).filter(isImagePasteboardType)
+        }
+
+        private static func imagePasteboardTypes(in item: NSPasteboardItem) -> [NSPasteboard.PasteboardType] {
+            item.types.filter(isImagePasteboardType)
+        }
+
+        private static func isImagePasteboardType(_ type: NSPasteboard.PasteboardType) -> Bool {
+            if [.png, .tiff].contains(type) {
+                return true
+            }
+            guard let utType = UTType(type.rawValue) else {
+                return false
+            }
+            return utType.conforms(to: .image)
+        }
+
+        private static func pngData(fromImageData data: Data) -> Data? {
+            guard let image = NSImage(data: data),
+                  let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff) else {
+                return nil
+            }
+            return rep.representation(using: .png, properties: [:])
+        }
+    }
+}
+
+struct UploadChip: View {
+    let file: ZFile
+    let url: URL
+    var onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            preview
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.filename)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let size = file.size {
+                    Text(byteString(size))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Button {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+            .help("Remove attachment")
+        }
+        .font(.caption)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: 240)
+        .background(.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if file.content_type?.hasPrefix("image/") == true {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 42, height: 42)
+            .background(.black.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            Image(systemName: icon)
+                .frame(width: 28, height: 28)
+                .background(.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    var icon: String {
+        if file.content_type?.hasPrefix("video/") == true { return "film" }
+        if file.content_type?.hasPrefix("image/") == true { return "photo" }
+        return "doc"
+    }
+}

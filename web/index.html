@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZenithDock</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <p style="padding: 1rem; text-align: center;">Archived legacy site. These historical setup instructions are not current. See the <a href="../website/index.html">AgentsDock site</a> or <a href="../README.md">current source guide</a>.</p>
+
+  <!-- Nav -->
+  <nav>
+    <div class="nav-inner">
+      <span class="logo">
+        <img src="icon.png" alt="ZenithDock" class="nav-logo-icon" />
+        ZenithDock
+      </span>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#setup">Setup</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/ZhengyiLuo/ZenithDock" target="_blank">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="hero-inner">
+      <img src="icon.png" alt="ZenithDock" class="hero-icon" />
+      <h1>Your Lab Never Sleeps.<br/>Neither Does Your Agent.</h1>
+      <p class="subtitle">
+        Schedule AI jobs from your phone. Get results streamed back while you're away from the lab.
+      </p>
+      <div class="hero-actions">
+        <a class="btn-primary" href="#setup">Get Started</a>
+        <a class="btn-secondary" href="https://github.com/ZhengyiLuo/ZenithDock" target="_blank">View on GitHub</a>
+      </div>
+      <div class="platform-badges">
+        <span class="badge">🖥 macOS 14+</span>
+        <span class="badge">⬜ iPadOS 17+</span>
+      </div>
+      <div class="hero-store">
+        <a href="https://testflight.apple.com/join/placeholder" target="_blank" class="appstore-btn">
+          <img src="appstore-badge.svg" alt="Download on the App Store" />
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Features -->
+  <section id="features" class="section">
+    <div class="container">
+      <h2 class="section-title">Built for Researchers Who Hate Babysitting Terminals</h2>
+      <div class="features-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128197;</div>
+          <h3>Schedule Jobs</h3>
+          <p>Queue experiments to run every N minutes, hours, or days. Kick off an eval sweep before you leave the lab — results are waiting when you're back.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#127916;</div>
+          <h3>Results Stream Back</h3>
+          <p>Rendered videos, plots, and output artifacts land directly in your timeline the moment the agent writes them. No SSH tunnel. No stale screen session.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#9889;</div>
+          <h3>Live Run Trace</h3>
+          <p>Every tool call, code execution, and reasoning step streams in real time over WebSocket. Know exactly what your agent is doing — and when it's going off the rails.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128172;</div>
+          <h3>Per-Experiment Chats</h3>
+          <p>Separate chats per experiment, organized into folders. Fork a promising run into a new branch. Your agent history is actually navigable for once.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128196;</div>
+          <h3>Push Config &amp; Data Anywhere</h3>
+          <p>Drop a config file, checkpoint path, or prompt update from your phone mid-commute. The server picks it up immediately — no laptop required.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128274;</div>
+          <h3>Private by Default</h3>
+          <p>Bearer token auth on every API call, upload, and WebSocket stream. Self-hosted means your model outputs and data never touch a third-party server.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section section-alt">
+    <div class="container">
+      <h2 class="section-title">How It Works</h2>
+      <p style="text-align:center; color: var(--text-muted); max-width: 560px; margin: -28px auto 48px; font-size: 0.95rem;">
+        You run a lightweight server on the machine with compute. ZenithDock is the remote control.
+      </p>
+      <div class="how-grid">
+        <div class="how-step">
+          <div class="how-num">①</div>
+          <h3>Server runs on your machine</h3>
+          <p>ZenithBotServer sits on your lab workstation, cloud VM, or wherever Claude/Codex CLI is installed and authenticated.</p>
+        </div>
+        <div class="how-arrow">→</div>
+        <div class="how-step">
+          <div class="how-num">②</div>
+          <h3>You send jobs from your phone</h3>
+          <p>Open ZenithDock on iPhone, iPad, or Mac. Type a prompt, schedule a loop, or attach a file. The server picks it up instantly.</p>
+        </div>
+        <div class="how-arrow">→</div>
+        <div class="how-step">
+          <div class="how-num">③</div>
+          <h3>Results stream back live</h3>
+          <p>Agent output, videos, plots, and artifacts appear in your timeline in real time. Review results anywhere, even offline-first with local caching.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Setup -->
+  <section id="setup" class="section">
+    <div class="container">
+      <h2 class="section-title">Quick Setup</h2>
+
+      <div class="setup-steps">
+
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h3>Install Claude CLI or Codex CLI on your server machine</h3>
+            <p>The server needs at least one AI backend installed and authenticated:</p>
+            <pre><code># Claude (recommended)
+npm install -g @anthropic-ai/claude-code
+claude login
+
+# Codex
+npm install -g @openai/codex
+export OPENAI_API_KEY=your-key</code></pre>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h3>Clone &amp; Install ZenithBotServer</h3>
+            <p>On the same machine (Linux or macOS):</p>
+            <pre><code>git clone https://github.com/ZhengyiLuo/ZenithBotServer
+cd ZenithBotServer
+uv venv && source .venv/bin/activate
+uv pip install fastapi "uvicorn[standard]" python-multipart pydantic</code></pre>
+            <p>No <code>uv</code>? Install it: <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h3>Start the Server</h3>
+            <pre><code>uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</code></pre>
+            <p>Verify it's alive:</p>
+            <pre><code>curl http://localhost:7850/api/health
+# → {"ok": true, ...}</code></pre>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h3>Run as a Service (Optional but Recommended)</h3>
+            <p>Keep it running across reboots with systemd (Linux):</p>
+            <pre><code>cp systemd/zenithbot-agent.service ~/.config/systemd/user/
+systemctl --user enable --now zenithbot-agent.service</code></pre>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h3>Connect ZenithDock</h3>
+            <p>Open the app → Inspector panel → <strong>Security</strong> → set your server URL:</p>
+            <pre><code>http://&lt;your-server-ip&gt;:7850</code></pre>
+            <p>Click <strong>Apply &amp; Reconnect</strong>. Green dot = you're live. Create a new chat and start running jobs.</p>
+            <p style="color: var(--text-muted); font-size: 0.88rem;">
+              💡 Use <a href="https://tailscale.com" target="_blank">Tailscale</a> to reach your server from anywhere without exposing port 7850 to the internet.
+            </p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Docs -->
+  <section id="docs" class="section section-alt">
+    <div class="container">
+      <h2 class="section-title">Documentation</h2>
+      <div class="docs-grid">
+
+        <a class="doc-card" href="docs.html">
+          <h3>User Guide</h3>
+          <p>Full feature docs — scheduled jobs, chat organization, streaming, artifacts, pinned items, and more.</p>
+        </a>
+
+        <a class="doc-card" href="https://github.com/ZhengyiLuo/ZenithBotServer" target="_blank">
+          <h3>ZenithBotServer</h3>
+          <p>The self-hosted agent server. Clone it, run it on your compute machine, forget about it.</p>
+        </a>
+
+        <a class="doc-card" href="https://github.com/ZhengyiLuo/ZenithDock" target="_blank">
+          <h3>ZenithDock on GitHub</h3>
+          <p>Source for the macOS, iOS, and iPadOS app. Build it yourself or grab the latest TestFlight build.</p>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>ZenithDock &mdash; Run experiments from anywhere. Results come to you.</p>
+      <p><a href="https://github.com/ZhengyiLuo/ZenithDock" target="_blank">GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>

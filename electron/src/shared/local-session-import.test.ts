@@ -1,0 +1,116 @@
+import { describe, expect, it } from 'vitest'
+import type { Health } from './types'
+import {
+  localSessionImportBatchLimit,
+  localSessionImportCapability,
+  localSessionImportListLimit,
+  parseBulkImportSessionItems,
+  parseBulkImportSessionResultsResponse,
+  parseLocalSessionCandidatesResponse
+} from './local-session-import'
+
+function supportedHealth(overrides: Partial<Health> = {}): Health {
+  return {
+    ok: true,
+    api_contract_version: 15,
+    capabilities: {
+      local_session_import_v1: {
+        available: true,
+        required: false,
+        message: '',
+        action: null,
+        version: 1,
+        max_batch_items: 25,
+        max_list_items: 500
+      }
+    },
+    ...overrides
+  }
+}
+
+describe('local session import contract', () => {
+  it('requires API 15 and accepts additive capability versions at or above version 1', () => {
+    expect(localSessionImportCapability(supportedHealth())).not.toBeNull()
+    expect(localSessionImportCapability(supportedHealth({ api_contract_version: 14 }))).toBeNull()
+    expect(localSessionImportCapability(supportedHealth({ capabilities: {} }))).toBeNull()
+    expect(localSessionImportCapability(supportedHealth({
+      capabilities: {
+        local_session_import_v1: {
+          available: true,
+          required: false,
+          message: '',
+          action: null,
+          version: 2 as 1,
+          max_batch_items: 25,
+          max_list_items: 500
+        }
+      }
+    }))).not.toBeNull()
+  })
+
+  it('never exceeds the Electron hard limits when a server advertises larger values', () => {
+    const capability = localSessionImportCapability(supportedHealth({
+      capabilities: {
+        local_session_import_v1: {
+          available: true,
+          required: false,
+          message: '',
+          action: null,
+          version: 1,
+          max_batch_items: 1_000,
+          max_list_items: 10_000
+        }
+      }
+    }))!
+
+    expect(localSessionImportBatchLimit(capability)).toBe(25)
+    expect(localSessionImportListLimit(capability)).toBe(500)
+  })
+
+  it('sanitizes IPC items to the supported field set and rejects duplicate identities', () => {
+    expect(parseBulkImportSessionItems([{
+      provider_session_id: 'provider-1',
+      backend: 'claude',
+      cwd: '/work',
+      title: 'Chat',
+      injected: true
+    }])).toEqual([{
+      provider_session_id: 'provider-1',
+      backend: 'claude',
+      cwd: '/work',
+      title: 'Chat'
+    }])
+
+    expect(() => parseBulkImportSessionItems([
+      { provider_session_id: 'provider-1', backend: 'claude' },
+      { provider_session_id: 'provider-1', backend: 'claude' }
+    ])).toThrow(/duplicates an earlier provider session/i)
+  })
+
+  it('accepts duplicate provider strings across backends and preserves truthful result semantics', () => {
+    const requested = parseBulkImportSessionItems([
+      { provider_session_id: 'provider-1', backend: 'claude' },
+      { provider_session_id: 'provider-1', backend: 'codex' }
+    ])
+    expect(parseBulkImportSessionResultsResponse({
+      results: [
+        { provider_session_id: 'provider-1', backend: 'claude', session_id: 'chat-a', ok: true, imported: 3 },
+        { provider_session_id: 'provider-1', backend: 'codex', session_id: null, ok: false, imported: 0, code: 'empty', error: 'No messages' }
+      ]
+    }, requested)).toHaveLength(2)
+
+    expect(() => parseBulkImportSessionResultsResponse({
+      results: [
+        { provider_session_id: 'provider-1', backend: 'claude', session_id: 'chat-a', ok: true, imported: 0 },
+        { provider_session_id: 'provider-1', backend: 'codex', session_id: null, ok: false, imported: 0 }
+      ]
+    }, requested)).toThrow(/internally inconsistent/i)
+  })
+
+  it('rejects duplicate candidate identities returned by the server', () => {
+    expect(() => parseLocalSessionCandidatesResponse({ sessions: [
+      { provider_session_id: 'provider-1', backend: 'claude', label: 'One', updated_at: '2026-08-01T00:00:00Z', cwd: null },
+      { provider_session_id: 'provider-1', backend: 'claude', label: 'Two', updated_at: '2026-08-02T00:00:00Z', cwd: null }
+    ] })).toThrow(/duplicate local sessions/i)
+  })
+})

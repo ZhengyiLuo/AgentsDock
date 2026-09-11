@@ -1,0 +1,21 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "App.tsx",
+    "index.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "modules/**/*.ts",
+    "modules/**/*.tsx"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "build",
+    "ios/build",
+    "node_modules"
+  ]
+}
