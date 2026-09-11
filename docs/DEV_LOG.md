@@ -9,6 +9,9 @@
   emergency, Mail, and cross-chat receipts.
 - Older Claude imports also require the standalone server's source-proven
   historical-page correction; this desktop change does not replace that repair.
+- Local arm64 candidate: `0.2.13-beta.33` build `184`, source `3088ead6`.
+  Production build, signature and all compiled archive files verified; not
+  notarized or published. The installed/running app was left untouched.
 
 ## 2026-09-11 — Expanded queued messages
 
