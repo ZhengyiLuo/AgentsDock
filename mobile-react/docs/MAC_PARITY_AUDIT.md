@@ -20,6 +20,14 @@ Dark/light and narrow/tablet synthetic-host checks exercise render trees and
 handlers; they do not claim measured native layouts. The broad baseline suite
 also has an unrelated existing privacy-policy wording assertion failure.
 
+Accepted release: **0.1.1 (171)**, active for internal TestFlight testing.
+Final checks passed: 112 focused rendered/contract tests, 19 protocol/route-store
+regressions, all 75 library test modules, all 12 store/API test modules, goal and
+settings components, and file-transfer interactions. The signed native archive
+and exported IPA passed signature/ABI/metadata checks; the production bundle
+excludes the visual test fixture. These categories overlap and are not a unique
+test-case total. External beta review was not submitted.
+
 This source snapshot includes Mac's last-opened-chat location changes and mobile's instant creation,
 backend switching, lean Inspector, and photo-upload completion fixes.
 
