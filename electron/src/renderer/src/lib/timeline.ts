@@ -292,6 +292,7 @@ export class TimelineProjector {
   private readonly assistantByTurn = new Map<string, AssistantProjectionState>()
   private readonly rootThreadByRun = new Map<string, string>()
   private readonly suppressedProviderEchoRuns = new Set<string>()
+  private readonly silentInputRuns = new Set<string>()
   private nativeCommentaryRecords: NativeCommentaryRecord[] = []
   private discardedCommentaryThroughSecond = Number.NEGATIVE_INFINITY
   private readonly scope: TimelineProjectionScope
@@ -413,6 +414,7 @@ export class TimelineProjector {
         this.assistantByTurn.delete(prior.key)
       }
       this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior)))
+      if (event.run_id) this.silentInputRuns.add(event.run_id)
       return
     }
     if (isImportedCodexGoalContext(event)) {
@@ -689,7 +691,8 @@ export class TimelineProjector {
         this.activeTurn = null
       }
       const prior = event.run_id ? this.turnByRun.get(event.run_id) : this.activeTurn
-      this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior?.user)))
+      const followsSilentInput = event.run_id ? this.silentInputRuns.delete(event.run_id) : false
+      this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior?.user) || followsSilentInput))
       if (!isDigestDeliveryTurn(event)) this.activeTurn.user = event
       this.activeTurn.seq = Math.min(this.activeTurn.seq, event.seq)
       this.activeTurn.startedAt = event.ts
