@@ -1637,6 +1637,8 @@ button.tool-event-toggle:hover { background: #242424; }
 .queue-label b { min-width: 18px; height: 17px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; color: #d7d5cf; background: #30302f; border-radius: 9px; font-size: var(--text-size-meta); }
 .queue-label small { color: #c9a85a; font-size: var(--text-size-meta); font-weight: var(--text-weight-label); }
 .queue-list { min-width: 0; max-width: 100%; max-height: min(224px, calc(100vh - 330px)); display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+/* Expanded messages must grow the scroll content, not shrink and clip inside it. */
+.queue-list > .queued-row { flex-shrink: 0; }
 .queued-row { width: 100%; min-width: 0; max-width: 100%; min-height: 38px; position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 5px; padding: 3px 5px 3px 3px; overflow: hidden; color: #d4d4d1; background: #222; border-bottom: 1px solid #2c2c2c; font-size: var(--text-size-meta); transition: background-color 90ms ease, opacity 90ms ease; }
 .queued-row:last-child { border-bottom: 0; }
 .queued-row:hover { background: #272727; }

@@ -1,5 +1,13 @@
 # Public development log
 
+## 2026-09-11 — Expanded queued messages
+
+- Keep expanded message rows at their natural height so the queue scrolls
+  instead of clipping the body. The queue retains its existing height limit.
+- Verified long Codex and Claude messages with wheel scrolling to the final
+  paragraph, reachable queue actions, and collapse in light/dark narrow views
+  using the actual desktop renderer and synthetic transport.
+
 ## 2026-09-11 — Chronological agent messages
 
 - Place agent messages between the progress before and after their send or
