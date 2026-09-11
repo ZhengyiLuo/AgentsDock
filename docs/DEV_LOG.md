@@ -19,6 +19,11 @@
   updates are disabled; this candidate is not notarized or publicly released.
   The running app was left untouched. Historical corrections require standalone
   server `0.1.26-beta.61` and reopening the affected chat after the upgrade.
+- Published standalone server `0.1.26-beta.61` from `34b66875` after its full
+  release validation passed. Verified the downloaded manifest signature,
+  archive digest and all 67 packaged files against the committed source.
+  Managed activation is when-idle; publication does not imply installation.
+  No public desktop or mobile release was made in this pass.
 
 ## 2026-09-11 — Typed provider notice coverage
 
