@@ -9,6 +9,16 @@
   Repeated health responses do not trigger another invalidation. Version and
   verification changes share one transaction, preserving retryability if
   storage is exhausted. Failed or offline history requests keep cached content.
+- Verified the actual isolated Electron health-upgrade journey: one lazy
+  history audit corrects older runtime records, genuine inputs and answers
+  remain visible, and the unsent draft survives. Repeated health responses,
+  switching chats and reloading do not repeat the audit or fetch unopened
+  chats. Transport was synthetic; no live provider run was started.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `190`, source `fb986357`.
+  Developer ID signature and all 86 compiled archive files verified. Automatic
+  updates are disabled; this candidate is not notarized or publicly released.
+  The running app was left untouched. Historical corrections require standalone
+  server `0.1.26-beta.61` and reopening the affected chat after the upgrade.
 
 ## 2026-09-11 — Typed provider notice coverage
 
