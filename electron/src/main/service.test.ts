@@ -3762,6 +3762,64 @@ describe('semantic timeline paging', () => {
     expect(client.sessionPage).toHaveBeenCalledWith('chat', expect.objectContaining({ pageMode: 'semantic' }))
   })
 
+  it('lazily audits a verified tail once after a health version upgrade and keeps offline cache intact', async () => {
+    let version = '0.1.26-beta.60', offline = false
+    const session: Session = { id: 'chat', title: 'Chat', backend: 'codex', latest_event_seq: 90, last_read_agent_event_seq: 80 }
+    const old: Event = { id: 'same-import', session_id: 'chat', seq: 10, type: 'turn_started',
+      ts: '2026-09-11T12:00:00Z', backend: 'codex', imported: true, run_id: 'import_history',
+      prompt: '<turn_aborted>Synthetic previous turn interrupted.</turn_aborted>' }
+    const answer: Event = { id: 'real-answer', session_id: 'chat', seq: 90, type: 'assistant_text',
+      ts: old.ts, backend: 'codex', run_id: 'real-run', text: 'Keep the actual answer.' }
+    const repaired: Event = { ...old, prompt: '', metadata_only: true, provider_runtime_context: 'turn_aborted',
+      provider_origin: { provider: 'codex', kind: 'turn_aborted', event_id: 'source-item', session_id: 'source-thread',
+        turn_id: 'source-turn', timestamp: old.ts, source_text_sha256: createHash('sha256').update(old.prompt!).digest('hex') } }
+    const client = fakeClient({
+      health: async () => ({ ok: true, server_version: version }), sessions: async () => [session],
+      sessionPage: async (_id, options) => {
+        if (offline) throw new Error('Synthetic offline timeline')
+        return { session, events: options?.pageMode === 'semantic' ? [repaired, answer] : [], queued_turns: [],
+          has_more: false, latest_seq: 90, total: 2, semantic_paging: true, semantic_item_count: 1 }
+      }
+    })
+    const { service, cache } = createProfileService({ 'http://a.test:7850': [client] }, value => {
+      value.putSession('profile:a', session)
+      value.putEvents('profile:a', 'chat', [old, answer])
+      value.putTimelineState('profile:a', 'chat', false, 90, 2, null, true)
+      value.putTimelineState('profile:a', 'unopened', false, 5, 1, null, true)
+      value.putPreference('profile:a', 'serverVersion:v1', version)
+      value.putPreference('profile:a', 'draft:chat', 'Preserved unsent draft')
+    })
+    await service.refreshServer('a', 1)
+    expect((await service.openTimeline('chat')).events).toEqual([old, answer])
+    await settleBackgroundWork()
+    expect(client.sessionPage.mock.calls.some(([, options]) => options?.pageMode === 'semantic')).toBe(false)
+    service.unsubscribeTimeline('chat')
+    const priorCalls = client.sessionPage.mock.calls.length
+    version = '0.1.26-beta.61'
+    await service.refreshServer('a', 1)
+    expect(client.sessionPage).toHaveBeenCalledTimes(priorCalls)
+    expect(cache.timelineState('profile:a', 'unopened')?.pagingSchemaVersion).toBeNull()
+    offline = true
+    expect((await service.openTimeline('chat')).events).toEqual([old, answer])
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([old, answer])
+    expect(cache.timelineState('profile:a', 'chat')?.pagingSchemaVersion).toBeNull()
+    service.unsubscribeTimeline('chat')
+    offline = false
+    expect((await service.openTimeline('chat')).events).toEqual([old, answer])
+    await settleBackgroundWork()
+    expect(cache.snapshot('profile:a', 'chat')?.events).toEqual([repaired, answer])
+    expect(cache.timelineState('profile:a', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+    expect(cache.preference('profile:a', 'draft:chat', '')).toBe('Preserved unsent draft')
+    expect(cache.session('profile:a', 'chat')?.last_read_agent_event_seq).toBe(80)
+    const auditCalls = client.sessionPage.mock.calls.filter(([, options]) => options?.pageMode === 'semantic').length
+    await service.refreshServer('a', 1)
+    service.unsubscribeTimeline('chat')
+    await service.openTimeline('chat'); await settleBackgroundWork()
+    expect(client.sessionPage.mock.calls.filter(([, options]) => options?.pageMode === 'semantic')).toHaveLength(auditCalls)
+    expect(client.sessionPage.mock.calls.every(([id]) => id === 'chat')).toBe(true)
+  })
+
   it('re-audits a cached legacy page after the server gains semantic paging', async () => {
     const session: Session = { id: 'chat', title: 'Chat', backend: 'codex', latest_event_seq: 90 }
     const client = fakeClient({

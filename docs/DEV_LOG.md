@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-09-11 — Lazy history repair after server upgrades
+
+- On an observed server-version change, invalidate only that server's cached
+  history verification. Opening a chat then uses the existing bounded
+  authoritative history check so corrections to older messages are received.
+- Do not clear cached content on version change or refresh every chat.
+  Repeated health responses do not trigger another invalidation. Version and
+  verification changes share one transaction, preserving retryability if
+  storage is exhausted. Failed or offline history requests keep cached content.
+
 ## 2026-09-11 — Typed provider notice coverage
 
 - Extend the same source-proven runtime metadata contract to known provider

@@ -102,6 +102,35 @@ describe('source-proven import repair persistence', () => {
 })
 
 describe('transaction error preservation', () => {
+  it('atomically invalidates only upgraded-server verification while preserving data and rollback', () => {
+    const value = cache()
+    const database = cacheDatabase(value)
+    for (const serverId of ['server', 'unrelated']) {
+      value.putSession(serverId, { ...session('chat'), last_read_agent_event_seq: 8 })
+      value.putEvents(serverId, 'chat', [event('chat', 0, 'Cached content remains available')])
+      value.putTimelineState(serverId, 'chat', false, 8, 1, null, true)
+      value.putPreference(serverId, 'draft:chat', 'Unsaved user draft')
+      value.recordServerVersion(serverId, '0.1.26-beta.60')
+    }
+    const before = value.snapshot('server', 'chat')
+    database.exec(`CREATE TRIGGER fail_version_write BEFORE UPDATE ON preferences
+      WHEN NEW.key = 'serverVersion:v1'
+      BEGIN SELECT RAISE(ABORT, 'SQLITE_FULL: injected version write'); END;`)
+    expect(() => value.recordServerVersion('server', '0.1.26-beta.61')).toThrow('SQLITE_FULL')
+    expect(value.preference('server', 'serverVersion:v1', '')).toBe('0.1.26-beta.60')
+    expect(value.timelineState('server', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+    expect(value.snapshot('server', 'chat')).toEqual(before)
+    database.exec('DROP TRIGGER fail_version_write')
+    expect(value.recordServerVersion('server', '0.1.26-beta.61')).toBe(true)
+    expect(value.timelineState('server', 'chat')?.pagingSchemaVersion).toBeNull()
+    expect(value.timelineState('unrelated', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+    expect(value.snapshot('server', 'chat')).toMatchObject({ events: before!.events, session: before!.session })
+    expect(value.preference('server', 'draft:chat', '')).toBe('Unsaved user draft')
+    value.putTimelineState('server', 'chat', false, 8, 1, null, true)
+    expect(value.recordServerVersion('server', '0.1.26-beta.61')).toBe(false)
+    expect(value.timelineState('server', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+  })
+
   it('keeps the primary write error when SQLite has already rolled back the transaction', () => {
     const value = cache()
     const database = cacheDatabase(value)

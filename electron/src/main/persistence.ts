@@ -1395,6 +1395,26 @@ export class LocalCache {
     return row ? parseJSON(row.json, fallback) : this.savedJSON('preferences', serverId, key, fallback)
   }
 
+  /** A version change only invalidates verification; cached content stays usable. */
+  recordServerVersion(serverId: string, version: string): boolean {
+    const key = 'serverVersion:v1'
+    const previous = this.preference<string | null>(serverId, key, null)
+    if (!version || previous === version) return false
+    const changed = Boolean(previous)
+    this.db.exec('BEGIN')
+    try {
+      if (changed) this.statement(`
+        UPDATE timeline_state SET paging_schema_version = NULL WHERE server_id = ?
+      `).run(serverId)
+      this.putPreference(serverId, key, version)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.rollbackTransaction()
+      throw error
+    }
+    return changed
+  }
+
   putPreference<T>(serverId: string, key: string, value: T): void {
     if (!REBUILDABLE_PREFERENCES.has(key)) this.requireDurableStorage()
     this.statement(`

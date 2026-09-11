@@ -4815,7 +4815,9 @@ export class AppService {
     this.settings.markProfileServerSetupComplete(scope.profileId, identity)
     const serverVersion = health.server_version?.trim() || null
     if (serverVersion) {
-      this.cache.putPreference(scope.namespace, SERVER_VERSION_CACHE_KEY, serverVersion)
+      // Revalidate lazily on the next opened chat; never clear cached content
+      // or fan a server upgrade out into requests for every saved transcript.
+      this.cache.recordServerVersion(scope.namespace, serverVersion)
       this.setProfileRuntime(scope.profileId, { serverVersion })
     }
     this.health = health
