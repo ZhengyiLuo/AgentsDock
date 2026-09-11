@@ -8,8 +8,9 @@
   and the distinction between local builds and release publishing.
 - Checked development commands against package scripts and source CI, and
   checked installation guidance against the standalone server documentation.
-- Refreshed the public README hero with product navigation, community and
-  release badges, and a reserved location for an approved product screenshot.
+- Refreshed the public README hero with a centered product introduction,
+  website, community, and release badges, and a reserved location for an
+  approved product screenshot.
 - Verified the README with GitHub's Markdown renderer and checked every new
   destination and badge URL before review.
 

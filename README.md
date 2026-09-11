@@ -1,25 +1,4 @@
-<div align="center">
-  <a href="https://agentsdock.net">
-    <img
-      src="website/assets/agentsdock-icon.png"
-      alt="AgentsDock logo"
-      width="128"
-    />
-  </a>
-
-  <h1>AgentsDock</h1>
-
-  <p>
-    <a href="https://agentsdock.net">Home Page</a> |
-    <a href="https://agentsdock.net/setup.html">Documentation</a> |
-    <a href="https://agentsdock.net/features.html">Features</a> |
-    <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases">Downloads</a> |
-    <a href="https://discord.gg/ZGDrhEWqPt">Discord</a> |
-    <a href="https://github.com/ZhengyiLuo/AgentsServer">AgentsServer</a>
-  </p>
-</div>
-
-<br />
+<h1 align="center">AgentsDock</h1>
 
 <div align="center">
   <strong>A dock for all your agents.</strong>
@@ -45,6 +24,12 @@
 <br />
 
 <div align="center">
+  <a href="https://agentsdock.net">
+    <img
+      src="https://img.shields.io/badge/website-agentsdock.net-0EA5E9"
+      alt="AgentsDock website"
+    />
+  </a>
   <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/latest">
     <img
       src="https://img.shields.io/github/v/release/ZhengyiLuo/AgentsDock-Releases?label=desktop"
