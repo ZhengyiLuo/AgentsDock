@@ -46,14 +46,16 @@
 </p>
 
 <div align="center">
-  AgentsDock is a desktop and mobile workspace for Claude Code and Codex. Use
-  your agents for coding, research, and long-running work without living in a
-  terminal.
+  AgentsDock currently supports <strong>Claude Code</strong>,
+  <strong>Codex</strong>, and <strong>Cursor</strong> in one desktop and mobile
+  workspace. Use your agents for coding, research, and long-running work
+  without living in a terminal.
   <br />
   <br />
   Run agents on your own workstation or server, follow their progress, review
-  files and rich media, and continue the conversation from your computer,
-  iPhone, or iPad.
+  files and rich media, and continue from desktop or mobile.
+  <a href="https://agentsdock.net/#downloads">Download the latest version</a>
+  for macOS, Linux, Windows, iPhone, iPad, or Android.
   <br />
   <br />
   <strong>

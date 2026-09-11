@@ -12,6 +12,8 @@
   website, community, and release badges, and an approved desktop and mobile
   product image. Placed the introduction below a more compact product image to
   keep the opening layout focused.
+- Updated the introduction to name the currently supported agent backends and
+  link directly to the website's all-platform download section.
 - Verified the README with GitHub's Markdown renderer and checked every new
   destination and badge URL before review. Reviewed the supplied image and its
   metadata before inclusion.
