@@ -46,6 +46,9 @@
 </p>
 
 <div align="center">
+  <strong>Built for AI researchers.</strong>
+  <br />
+  <br />
   AgentsDock currently supports <strong>Claude Code</strong>,
   <strong>Codex</strong>, and <strong>Cursor</strong> in one desktop and mobile
   workspace. Use your agents for coding, research, and long-running work
@@ -54,8 +57,20 @@
   <br />
   Run agents on your own workstation or server, follow their progress, review
   files and rich media, and continue from desktop or mobile.
-  <a href="https://agentsdock.net/#downloads">Download the latest version</a>
-  for macOS, Linux, Windows, iPhone, iPad, or Android.
+  <br />
+  <br />
+  <strong>Download the latest version:</strong>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-mac-universal.dmg">macOS</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-x86_64.AppImage">Linux x86_64</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-arm64.AppImage">Linux ARM64</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-win-x64.exe">Windows</a>
+  ·
+  <a href="https://testflight.apple.com/join/2JjWy2Z2">iPhone &amp; iPad</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
   <br />
   <br />
   <strong>
