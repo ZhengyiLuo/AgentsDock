@@ -21,6 +21,8 @@ export const SEMANTIC_HIDDEN_EVENT_TYPES = [
   'codex_goal_cleared',
   // Usage is durable control/header state, not a transcript row.
   'codex_token_usage',
+  // Durable acknowledgement of an internal SDK context hook, not chat content.
+  'claude_background_task_reconciliation_consumed',
 ] as const
 
 export const SEMANTIC_JOB_EVENT_TYPES = [

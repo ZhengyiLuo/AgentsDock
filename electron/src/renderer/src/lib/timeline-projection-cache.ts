@@ -103,7 +103,7 @@ function renderAppendedTimeline(
   semantic: TimelineItem[],
   appended: Event[]
 ): { rendered: RenderTimelineItem[]; renderedSemanticCount: number } {
-  let renderStart = firstChangedSemanticIndex(cached.semantic, semantic)
+  const renderStart = firstChangedSemanticIndex(cached.semantic, semantic)
   if (renderStart === semantic.length && semantic.length === cached.semantic.length) {
     return { rendered: cached.rendered, renderedSemanticCount: 0 }
   }
@@ -123,13 +123,29 @@ function renderAppendedTimeline(
     ? renderedCutForSemanticTail(cached.semantic, cached.rendered, renderStart)
     : cached.rendered.length
   const suffixSemantic = semantic.slice(renderStart)
+  const previousSuffix = cached.rendered.slice(cut)
+  // One earlier exchange can own both an early request and a later reply.
+  // Chronological placement may put that reply inside the changed turn's
+  // rendered suffix. Carry only those crossing system owners, not all the
+  // intervening historical turns, into the incremental render.
+  const crossingOwnerKeys = new Set(previousSuffix.flatMap(row =>
+    row.kind === 'system' && row.crossChatLegId ? [systemRowOwnerKey(row)] : []))
+  const crossingOwners = crossingOwnerKeys.size
+    ? cached.semantic.slice(0, renderStart).filter(item =>
+      item.kind === 'system' && crossingOwnerKeys.has(item.key))
+    : []
+  const carriedKeys = new Set(crossingOwners.map(item => item.key))
+  const previousSuffixKeys = new Set(previousSuffix.map(row => row.key))
+  const renderedSemantic = [...crossingOwners, ...suffixSemantic]
   const suffixRendered = reconcileRenderTimelineItems(
-    cached.rendered.slice(cut),
-    renderTimelineItems(suffixSemantic)
+    previousSuffix,
+    renderTimelineItems(renderedSemantic).filter(row =>
+      row.kind !== 'system' || !carriedKeys.has(systemRowOwnerKey(row))
+      || previousSuffixKeys.has(row.key))
   )
   return {
     rendered: [...cached.rendered.slice(0, cut), ...suffixRendered],
-    renderedSemanticCount: suffixSemantic.length
+    renderedSemanticCount: renderedSemantic.length
   }
 }
 
@@ -155,13 +171,22 @@ function renderedCutForSemanticTail(
 
 function renderedRowBelongsTo(item: TimelineItem, row: RenderTimelineItem): boolean {
   if (item.kind !== 'turn') return row.key === item.key
+    || row.kind === 'system' && systemRowOwnerKey(row) === item.key
   return row.key === `${item.key}:trace`
     || row.key === `${item.key}:activity`
     || row.key.startsWith(`${item.key}:activity:after:`)
     || row.key === `${item.key}:assistant`
     || row.key.startsWith(`${item.key}:assistant:after:`)
     || row.key === `${item.key}:media`
+    || row.key === `${item.key}:delivery-files`
+    || Boolean(item.user && row.kind === 'system' && row.importedDelivery
+      && row.key === `imported-cross-chat-delivery:${item.user.id}`)
     || row.key === `${item.key}:user:${item.user?.id ?? ''}`
+}
+
+function systemRowOwnerKey(row: Extract<RenderTimelineItem, { kind: 'system' }>): string {
+  const suffix = row.crossChatLegId ? `:message:${row.crossChatLegId}` : ''
+  return suffix && row.key.endsWith(suffix) ? row.key.slice(0, -suffix.length) : row.key
 }
 
 function isCompactionEvent(event: Event): boolean {

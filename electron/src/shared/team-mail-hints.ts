@@ -13,6 +13,50 @@ export interface MailHintScope {
   recipientServerId: string
 }
 
+/** Quiet hints still require the exact authenticated server capability. */
+export const TEAM_MAIL_HINTS_ENABLED = true
+export const TEAM_MAIL_HINTS_PATH = '/api/team-mail-hints/events'
+export const TEAM_MAIL_HINTS_PROTOCOL = 'agentsdock.team-mail-hints.v1'
+export const TEAM_MAIL_HINTS_MAX_PACKET_CHARS = 2048
+
+export interface MailHintMailbox {
+  hub_id: string
+  team_id: string
+  /** A Member learns its exact owned recipient from the authenticated snapshot. */
+  recipient_server_id: string | null
+}
+
+export interface TeamMailHintsCapability {
+  enabled: boolean
+  version: 1
+  websocket_path: typeof TEAM_MAIL_HINTS_PATH
+  websocket_protocol: typeof TEAM_MAIL_HINTS_PROTOCOL
+  mailbox_coverage: true
+  mailbox: MailHintMailbox | null
+}
+
+export interface MailHintPacket {
+  type: 'snapshot' | 'hint'
+  server_identity: string
+  hub_id: string
+  stream_id: string
+  cursor: MailArrivalHint
+}
+
+/** Main-owned, body-free state; revision orders bootstrap against early events. */
+export interface MailHintProjection {
+  profileId: string
+  profileGeneration: number
+  revision: number
+  state: MailHintState | null
+}
+
+export interface MailHintPageAcknowledgment {
+  scope: MailHintScope
+  requestedAfter: MailArrivalCursor
+  coverage: MailboxCoverage
+}
+
 export interface MailArrivalCursor {
   through_sequence: number
   arrival_id: string | null
@@ -67,6 +111,35 @@ function identifier(value: unknown): value is string {
   return typeof value === 'string' && exactMatch(ID, value)
 }
 
+export function parseTeamMailHintsCapability(value: unknown): TeamMailHintsCapability {
+  const parsed = record(value, ['enabled', 'version', 'websocket_path', 'websocket_protocol', 'mailbox_coverage', 'mailbox'])
+  if (typeof parsed.enabled !== 'boolean' || parsed.version !== 1
+    || parsed.websocket_path !== TEAM_MAIL_HINTS_PATH || parsed.websocket_protocol !== TEAM_MAIL_HINTS_PROTOCOL
+    || parsed.mailbox_coverage !== true) throw new Error('Invalid Mail hint capability')
+  let mailbox: MailHintMailbox | null = null
+  if (parsed.mailbox !== null) {
+    const owned = record(parsed.mailbox, ['hub_id', 'team_id', 'recipient_server_id'])
+    if (!identifier(owned.hub_id) || typeof owned.team_id !== 'string' || !exactMatch(WIRE_ID, owned.team_id)
+      || (owned.recipient_server_id !== null && (typeof owned.recipient_server_id !== 'string'
+        || !exactMatch(WIRE_ID, owned.recipient_server_id)))) throw new Error('Invalid Mail hint mailbox')
+    mailbox = { hub_id: owned.hub_id, team_id: owned.team_id, recipient_server_id: owned.recipient_server_id as string | null }
+  }
+  if (parsed.enabled && !mailbox) throw new Error('Mail hint capability has no mailbox')
+  return { enabled: parsed.enabled, version: 1, websocket_path: TEAM_MAIL_HINTS_PATH,
+    websocket_protocol: TEAM_MAIL_HINTS_PROTOCOL, mailbox_coverage: true, mailbox }
+}
+
+export function parseMailHintPacket(value: unknown): MailHintPacket {
+  const parsed = record(value, ['type', 'server_identity', 'hub_id', 'stream_id', 'cursor'])
+  if ((parsed.type !== 'snapshot' && parsed.type !== 'hint') || !identifier(parsed.server_identity)
+    || !identifier(parsed.hub_id) || typeof parsed.stream_id !== 'string'
+    || !exactMatch(/^[0-9a-f]{32}$/, parsed.stream_id)) throw new Error('Invalid Mail hint packet')
+  const cursor = parseMailArrivalHint(parsed.cursor)
+  if (parsed.type === 'hint' && cursor.reset) throw new Error('Invalid Mail hint reset')
+  return { type: parsed.type, server_identity: parsed.server_identity, hub_id: parsed.hub_id,
+    stream_id: parsed.stream_id, cursor }
+}
+
 function cursor(value: Record<string, unknown>): MailArrivalCursor {
   const sequence = value.through_sequence
   const arrivalId = value.arrival_id
@@ -102,6 +175,15 @@ export function parseMailArrivalHint(value: unknown): MailArrivalHint {
   const parsed = record(value, [...COVERAGE_KEYS, 'reset'])
   if (typeof parsed.reset !== 'boolean') throw new Error('Invalid Mail hint reset')
   return { ...coverage(parsed), reset: parsed.reset }
+}
+
+export function parseMailHintPageAcknowledgment(value: unknown): MailHintPageAcknowledgment {
+  const input = record(value, ['scope', 'requestedAfter', 'coverage'])
+  const scope = record(input.scope, ['profileId', 'profileGeneration', 'streamId', 'serverIdentity', 'hubId', 'teamId', 'recipientServerId'])
+  // Reuse the same exact local-realm validation as a newly admitted stream.
+  const checkedScope = beginMailHintStream(scope as unknown as MailHintScope).scope
+  return { scope: { ...checkedScope }, requestedAfter: parseMailArrivalCursor(input.requestedAfter),
+    coverage: parseMailboxCoverage(input.coverage) }
 }
 
 /** Stable persistence key: no transient connection/generation and no secrets. */

@@ -33,13 +33,21 @@
   border: 1px solid #343e42; border-radius: var(--radius-selection); box-shadow: 0 12px 28px #0002;
   transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
 }
-.network-v2-card.message { padding: 0; }
+.network-v2-card.message { padding: 0; gap: 0; }
 .network-v2-card-open {
-  min-width: 0; min-height: 162px; flex: 1; display: flex; flex-direction: column; gap: 14px;
-  padding: 15px; color: inherit; text-align: left; background: transparent; border-radius: inherit;
+  min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 12px;
+  padding: 15px 15px 10px; color: inherit; text-align: left; background: transparent; border-radius: inherit;
 }
-.network-v2-card.message:has(.network-v2-message-actions) .network-v2-card-heading { padding-right: 92px; }
-.network-v2-card.message .network-v2-card-heading { grid-template-columns: 36px minmax(0, 1fr); }
+.network-v2-card.message .network-v2-card-heading { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+.network-v2-card.message .network-v2-card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; font-size: var(--text-size-title); font-weight: var(--text-weight-emphasis); line-height: 1.35; }
+.network-v2-card-metadata { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; line-height: 1.4; }
+.network-v2-card-sender { min-width: 0; flex: 1 1 60px; display: inline-flex; align-items: center; gap: 5px; }
+.network-v2-card-sender svg { flex: 0 0 auto; }
+.network-v2-card-sender > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-v2-card-metadata time { flex: 0 0 auto; }
+.network-v2-card.message > .network-v2-card-footer { padding: 0 15px 12px; min-height: 30px; }
+.network-v2-card-destination { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-v2-card-footer .network-v2-message-actions { position: static; flex: 0 0 auto; }
 .network-v2-message-actions {
   position: absolute; z-index: 1; top: 10px; right: 10px; display: inline-flex; gap: 6px;
 }
@@ -55,6 +63,16 @@
 .network-v2-route-menu { max-width: min(340px, calc(100vw - 24px)); max-height: min(380px, calc(100vh - 40px)); overflow-y: auto; }
 .network-v2-route-item { min-width: 220px; display: flex; justify-content: space-between; gap: 12px; }
 .network-v2-route-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-v2-route-search { width: calc(100% - 12px); margin: 2px 6px 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.network-v2-route-item small { display: block; font-size: 10px; opacity: .65; }
+.network-v2-mail-thread { display: flex; flex-direction: column; gap: 14px; }
+.network-v2-thread-message { width: min(92%, 760px); padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
+.network-v2-thread-message.outgoing { align-self: flex-end; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.network-v2-thread-actions { display: flex; justify-content: flex-end; }
+.network-v2-thread-message > header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.network-v2-thread-message > header > strong { min-width: 0; flex: 1 1 140px; }
+.network-v2-thread-message > header > time { margin-left: auto; color: var(--muted); font-size: 11px; }
+.network-v2-thread-recipients { margin-bottom: 10px; color: var(--muted); font-size: 11px; }
 .network-v2-card:hover, .network-v2-bundle:hover, .network-v2-skill-card:hover { border-color: #527e98; background: linear-gradient(145deg, #273034, #202527); transform: translateY(-1px); }
 .network-v2-card.skill { border-color: #514d72; background: linear-gradient(145deg, #29283b, #20202b); }
 .network-v2-card.legacy { opacity: .8; border-style: dashed; }
@@ -92,6 +110,7 @@
 }
 .network-v2-bulletin-card:hover { border-color: #527e98; background: linear-gradient(145deg, #273034, #202527); }
 .network-v2-bulletin-card.legacy { border-style: dashed; }
+.network-v2-bulletin-card .network-v2-message-actions button.route { min-width: max-content; white-space: nowrap; }
 .network-v2-bulletin-open {
   width: 100%; min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 10px;
   padding: 14px; color: var(--text); text-align: left; background: transparent;
@@ -231,6 +250,11 @@ button.network-v2-bulletin-open:hover { background: #ffffff08; }
 .network-v2-detail-header > div { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .network-v2-detail-header > div:nth-of-type(1) { flex: 1; }
 .network-v2-detail-header > div span:last-child { min-width: 0; }
+.network-v2-detail-header.mail { flex-wrap: wrap; }
+.network-v2-detail-header.mail > button { flex-shrink: 0; }
+.network-v2-detail-header.mail > div:nth-of-type(1) { flex: 1 1 240px; }
+.network-v2-detail-header.mail > .network-v2-detail-actions { flex-wrap: wrap; margin-left: auto; max-width: 100%; }
+.network-v2-detail-header.mail h1 { overflow-wrap: anywhere; }
 .network-v2-detail-actions { justify-content: flex-end; }
 .network-v2-message-list { display: flex; flex-direction: column; gap: 12px; padding: clamp(16px, 2.5vw, 28px); }
 .network-v2-message-list .network-v2-card { width: min(100%, 840px); min-height: 135px; margin: 0 auto; }

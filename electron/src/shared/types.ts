@@ -1,4 +1,5 @@
 import type { LanguagePreference } from './i18n'
+import type { MailHintProjection, TeamMailHintsCapability } from './team-mail-hints'
 
 export interface LanguageSettingsSnapshot {
   preference: LanguagePreference
@@ -459,6 +460,40 @@ export interface ToolCall {
 }
 
 export interface QueuePosition { queued_id: string; position: number }
+
+export interface ProviderCommandSelection {
+  /** Opaque AgentsServer-owned identifier. The client must never send a filesystem path. */
+  id: string
+  /** Inventory revision used by AgentsServer to reject stale selections. */
+  revision: string
+}
+
+export interface ProviderCommand {
+  /** Opaque AgentsServer-owned identifier. */
+  id: string
+  name: string
+  label: string
+  description: string
+  scope?: string | null
+  source?: string | null
+  kind: string
+  /** Provider-approved visible slash token, for example `/pdf` or `/plugin:skill`. */
+  invocation: string
+}
+
+export interface ProviderCommandSupport {
+  available: boolean
+  mode: string
+  reason?: string | null
+}
+
+export interface ProviderCommandsSnapshot {
+  backend: Backend
+  revision: string
+  support: ProviderCommandSupport
+  commands: ProviderCommand[]
+}
+
 export interface QueuedTurn {
   queued_id: string
   session_id?: string | null
@@ -478,6 +513,8 @@ export interface QueuedTurn {
   target_session_id?: string | null
   chat_references?: ChatReference[] | null
   team_references?: TeamReference[] | null
+  /** Opaque, revision-bound local provider command selected for this turn. */
+  skill_selection?: ProviderCommandSelection | null
   /** Durable identity for a queued same-server delivery. */
   cross_chat_envelope_id?: string | null
   cross_chat_exchange_id?: string | null
@@ -486,6 +523,11 @@ export interface QueuedTurn {
   /** Explicit asynchronous message/reply protocol; absent for legacy deliveries. */
   conversation_mode?: 'async_route_v1' | null
   source_title?: string | null
+  /** Public recipient-side body; never the provider delivery wrapper. */
+  message_body?: string | null
+  message_edited_by_user?: boolean | null
+  /** Compare-and-swap version for editing an async queued message. */
+  message_revision?: number | null
   /** Durable identity for a queued encrypted peer delivery. */
   secure_peer_envelope_id?: string | null
   position?: number | null
@@ -590,6 +632,25 @@ export interface AgentCrossChatRoute {
 
 export interface AgentCrossChatRoutesSnapshot {
   routes: AgentCrossChatRoute[]
+  /** Null means no stored-route limit; older servers retain their numeric hint. */
+  max_routes: number | null
+}
+
+export interface AgentTeamMailRoute {
+  route_id: string
+  revision: string
+  display_name: string
+  recipient_kind: 'server'
+  team_id: string
+  target_id: string
+  available: boolean
+  unavailable_reason: 'target_unavailable' | 'source_archived' | 'team_unavailable' | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentTeamMailRoutesSnapshot {
+  routes: AgentTeamMailRoute[]
   max_routes: number
 }
 
@@ -658,6 +719,10 @@ export interface CrossChatHandoff extends CrossChatHandoffSummary {
   body: string
   body_chars: number
   body_sha256: string
+  /** Recipient-effective text; body above always remains the sender's original. */
+  target_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
 }
 
 export type CrossChatExchangeStatus = 'waiting_request' | 'active' | 'completed' | 'failed' | 'cancelled' | 'expired'
@@ -744,6 +809,17 @@ export interface ProviderInterruptionOrigin {
   prompt_id?: string | null
 }
 
+export interface ProviderHistoryOrigin {
+  provider: 'claude'
+  kind?: 'assistant' | 'user'
+  event_id?: string
+  session_id?: string
+  timestamp?: string
+  parent_event_id?: string | null
+  prompt_id?: string | null
+  cause?: never
+}
+
 export interface Event {
   seq: number
   id: string
@@ -759,16 +835,20 @@ export interface Event {
   position?: number | null
   purpose?: string | null
   phase?: string | null
+  /** Provider message identity when supplied by native output or history. */
+  provider_message_id?: string | null
   /** True only for transcript records recovered by AgentsServer history import. */
   imported?: boolean | null
   /** Provider control metadata; meaningful only with the exact provider import contract. */
   metadata_only?: boolean | null
   /** Server-verified Codex runtime context recovered from imported history. */
   provider_runtime_context?: 'goal' | null
+  /** Server-proven, in-place repair of an imported provider record. */
+  provider_history_repair?: 'source_proven_import' | 'source_proven_assistant_replay' | null
   /** Positive provider evidence that an imported input was authored by the user. */
   provider_user_authored?: boolean | null
   /** Additive provenance; only the exact imported lifecycle contract is control metadata. */
-  provider_origin?: ProviderInterruptionOrigin | null
+  provider_origin?: ProviderInterruptionOrigin | ProviderHistoryOrigin | null
   digest_job_id?: string | null
   source_session_id?: string | null
   target_session_id?: string | null
@@ -787,6 +867,11 @@ export interface Event {
   handoff_preview?: string | null
   handoff_body_chars?: number | null
   handoff_body_sha256?: string | null
+  /** Recipient-side queued edit; the sender's original envelope remains unchanged. */
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
+  /** Native delivery run recorded by a legacy exchange-leg receipt. */
+  target_run_id?: string | null
   handoff_body_truncated?: boolean | null
   handoff_authorization_kind?: 'explicit_prompt' | 'configured_route' | null
   handoff_authorization_route_id?: string | null
@@ -1208,6 +1293,7 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     agent_ambient_local_handoffs?: boolean
     exact_queued_delivery_skip?: boolean
     exact_queued_delivery_reorder?: boolean
+    async_queued_message_controls?: boolean
     exact_queued_peer_delivery_skip?: boolean
     secure_peer_fifo_barriers?: boolean
     async_route_v1?: boolean
@@ -1218,10 +1304,13 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
       available?: boolean
       client_capability?: string
       mode?: 'async_route_v1'
+      max_handoffs_per_run?: number | null
+      rate_limit_per_source?: number | null
+      rate_limit_per_target?: number | null
     }
     client_capability?: string
     policy?: 'default_deny'
-    max_routes_per_chat?: number
+    max_routes_per_chat?: number | null
     max_handoffs_per_run?: number
     actions?: AgentCrossChatRouteAction[]
     default_actions?: AgentCrossChatRouteAction[]
@@ -1244,9 +1333,9 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     max_body_bytes?: number
     request_reply_max_legs?: number
     request_reply_ttl_seconds?: number
-    rate_window_seconds?: number
-    rate_limit_per_source?: number
-    rate_limit_per_target?: number
+    rate_window_seconds?: number | null
+    rate_limit_per_source?: number | null
+    rate_limit_per_target?: number | null
     transcript_access?: boolean
   }
 }
@@ -1352,6 +1441,7 @@ export interface TeamHubHostControlCapability {
   can_enable: boolean
   can_disable: boolean
   server_bootstrap?: boolean
+  rename_existing_host?: boolean
   status_path: '/api/admin/team-hub/host'
   enable_path: '/api/admin/team-hub/host/enable'
   disable_path: '/api/admin/team-hub/host/disable'
@@ -1422,6 +1512,7 @@ export interface HealthCapabilities {
   cursor_backend?: CursorBackendCapability
   agent_team_mail_v1?: AgentTeamMailCapability
   agent_team_messages_v1?: AgentTeamMessagesCapability
+  agent_team_mail_routes_v1?: { available: boolean; version: 1; max_routes: number }
   team_bulletin_alias_v1?: TeamBulletinAliasCapability
   team_all_servers_alias_v1?: TeamAllServersAliasCapability
   cross_chat_handoffs_v1?: CrossChatHandoffsCapability
@@ -1432,10 +1523,11 @@ export interface HealthCapabilities {
   local_session_import_v1?: LocalSessionImportCapability
   session_fork_completed_prefix_v1?: SessionForkCompletedPrefixCapability
   agent_emergency_alerts_v1?: AgentEmergencyAlertsCapability
+  team_mail_hints_v1?: TeamMailHintsCapability
   pinned_items?: PinnedItemsCapability
   port_forwarding_v1?: PortForwardingCapability
   websocket_auth_v1?: ServerCapability
-  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
+  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
 }
 
 export interface Health {
@@ -1925,6 +2017,7 @@ export interface TimelinePinsChanged {
 
 export interface BootstrapPayload {
   settings: PublicServerSettings
+  mailHints?: MailHintProjection | null
   health?: Health | null
   sessions: Session[]
   jobs: Job[]
@@ -2029,6 +2122,8 @@ export interface SendTurnInput {
   clientCapabilities?: string[]
   chatReferences?: ChatReference[]
   teamReferences?: TeamReference[]
+  /** Opaque selection returned by the session-scoped provider command inventory. */
+  skillSelection?: ProviderCommandSelection
 }
 export interface CreateJobInput {
   session_id: string
@@ -2082,6 +2177,7 @@ export interface NativeFileRef {
 }
 
 export interface AppEventMap {
+  'team:mail-hints': MailHintProjection
   'app:language': LanguageSettingsSnapshot
   'app:update': AppUpdateStatus
   'native:secure-peer-invite': { invite: string }

@@ -40,6 +40,37 @@ function peerPairingResponse(status = 'pending_approval') {
 }
 
 describe('TeamHubClient', () => {
+  it.each([undefined, null, { available: false, version: 1 }, { available: true, version: 2 },
+    { available: true, version: 1, extra: true }, { available: true, version: 1 }])('accepts only the exact optional host deletion capability %j', async advertised => {
+    const fetch = vi.fn().mockResolvedValue(response({ ok: true, service: 'agentsdock-team-hub', api_version: 1,
+      hub_id: 'hub-1', instance_id: 'instance-1', bootstrapped: true, bootstrap_required: false,
+      capabilities: { team_host_content_deletion_v1: advertised } }))
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch })
+    const health = await client.health()
+    expect(health.capabilities?.team_host_content_deletion_v1).toEqual(
+      JSON.stringify(advertised) === '{"available":true,"version":1}' ? { available: true, version: 1 } : undefined)
+  })
+  it('forwards negotiated Mail coverage with immutable predecessor and never drops it on revision fallback', async () => {
+    const anchor = `tmsg_${'a'.repeat(32)}`
+    const coverage = { version: 1, team_id: 'team-1', recipient_server_id: 'node-1', through_sequence: 3, arrival_id: anchor }
+    const calls: URL[] = []
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input)); calls.push(url)
+      if (calls.length === 1) return response({ error: { code: 'invalid_request', message: 'revision unsupported' } }, 422)
+      return response({ box: 'inbox', address: { kind: 'server', id: 'node-1' }, messages: [], next_after_sequence: 3,
+        has_more: false, mailbox_coverage: coverage })
+    })
+    const client = new TeamHubClient('http://127.0.0.1:7850/api/team-hub', { fetch: fetch as typeof globalThis.fetch })
+    const page = await client.teamMessages('access', 'team-1', { box: 'inbox', addressKind: 'server', addressId: 'node-1',
+      includeMailboxCoverage: true, afterSequence: 3, afterArrivalId: anchor })
+    expect(page.mailbox_coverage).toEqual(coverage)
+    expect(calls).toHaveLength(2)
+    for (const url of calls) {
+      expect(url.searchParams.get('include_mailbox_coverage')).toBe('1')
+      expect(url.searchParams.get('after_arrival_id')).toBe(anchor)
+      expect(url.searchParams.get('after_sequence')).toBe('3')
+    }
+  })
   it('opts into mailbox attention only after negotiation, clears it on downgrade, and forwards versioned writes', async () => {
     let advertised: unknown = { available: true, version: 1, address_kinds: ['server'] }
     const receipt = { kind: 'server', id: 'server-2', display_name: 'Recipient', state: 'read',

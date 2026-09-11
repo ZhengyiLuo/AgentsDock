@@ -11,7 +11,7 @@ import { trackEvent } from '../lib/analytics'
 import { saveAgentFile } from '../lib/file-actions'
 import { formatBytes } from '../lib/format'
 import { filePinHasExplicitOwner, pinnedItemsForSession } from '../lib/pinned-items'
-import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentsFromEvents, type SubagentActivity } from '../lib/subagents'
+import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents, type SubagentActivity } from '../lib/subagents'
 import { requestOpenAgentFile, requestOpenWorkspacePath, workspacePathForAgentFile } from '../lib/workspace-file-links'
 import { useAppStore } from '../store/app-store'
 import { LazyVideoThumbnail, MediaPreviewDialog } from './MediaGrid'
@@ -193,7 +193,7 @@ function SubagentList({ agents, onSelect, history = false }: { agents: SubagentA
   useLocale()
   return <div className={`subagent-list${history ? ' subagent-history-list' : ''}`}>{agents.map(agent => <button key={agent.key} onClick={() => onSelect(agent)}>
     <span className={`subagent-state ${agent.status}`} />
-    <div><strong>{subagentDisplayName(agent)}</strong><small>{agent.backend === 'claude' ? 'Claude' : 'Codex'} · {agent.status} · {subagentElapsed(agent.startedAt, agent.updatedAt, isSubagentActive(agent))}</small><code>{subagentDetailText(agent)}</code></div>
+    <div><strong>{subagentDisplayName(agent)}</strong><small>{agent.backend === 'claude' ? 'Claude' : 'Codex'} · {subagentStatusLabel(agent.status)} · {subagentElapsed(agent.startedAt, agent.updatedAt, isSubagentActive(agent))}</small><code>{subagentDetailText(agent)}</code></div>
   </button>)}</div>
 }
 

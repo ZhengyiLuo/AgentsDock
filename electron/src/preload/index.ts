@@ -4,6 +4,9 @@ import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
 
 const api: AgentsDockAPI = {
+  mailHints: {
+    acknowledgePage: input => ipcRenderer.invoke('team:mail-hints:acknowledge-page', input)
+  },
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
   language: {
     get: () => ipcRenderer.invoke('language:get'),
@@ -54,6 +57,7 @@ const api: AgentsDockAPI = {
     teamMessagesCapabilities: scope => ipcRenderer.invoke('team-hub:network:messages:capabilities', scope),
     teamMessages: (scope, query) => ipcRenderer.invoke('team-hub:network:messages:list', scope, query),
     teamMessage: (scope, teamId, messageId) => ipcRenderer.invoke('team-hub:network:message:get', scope, teamId, messageId),
+    teamMessageThread: (scope, query) => ipcRenderer.invoke('team-hub:network:message:thread', scope, query),
     createTeamMessage: (scope, input) => ipcRenderer.invoke('team-hub:network:message:create', scope, input),
     recordTeamMessageReceipt: (scope, input) => ipcRenderer.invoke('team-hub:network:message:receipt', scope, input),
     setTeamMessageMailboxState: (scope, input) => ipcRenderer.invoke('team-hub:network:message:mailbox-state', scope, input),
@@ -150,6 +154,9 @@ const api: AgentsDockAPI = {
     listLocal: () => ipcRenderer.invoke('sessions:list-local'),
     bulkImport: items => ipcRenderer.invoke('sessions:bulk-import', items)
   },
+  providerCommands: {
+    list: (sessionId, refresh) => ipcRenderer.invoke('provider-commands:list', sessionId, refresh)
+  },
   timeline: {
     cached: sessionId => ipcRenderer.invoke('timeline:cached', sessionId),
     open: (sessionId, forceRemote) => ipcRenderer.invoke('timeline:open', sessionId, forceRemote),
@@ -206,8 +213,9 @@ const api: AgentsDockAPI = {
   },
   queue: {
     list: sessionId => ipcRenderer.invoke('queue:list', sessionId),
-    update: (sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences) => (
-      ipcRenderer.invoke('queue:update', sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences)
+    update: (sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences, expectedMessageRevision) => (
+      ipcRenderer.invoke('queue:update', sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences,
+        ...(expectedMessageRevision !== undefined ? [expectedMessageRevision] : []))
     ),
     remove: (sessionId, queuedId) => ipcRenderer.invoke('queue:remove', sessionId, queuedId),
     skipCrossChatDelivery: (sessionId, queuedId, identity) => (
@@ -222,6 +230,10 @@ const api: AgentsDockAPI = {
     create: (scope, sessionId, input) => ipcRenderer.invoke('agent-routes:create', scope, sessionId, input),
     update: (scope, sessionId, routeId, input) => ipcRenderer.invoke('agent-routes:update', scope, sessionId, routeId, input),
     remove: (scope, sessionId, routeId, expectedRevision) => ipcRenderer.invoke('agent-routes:remove', scope, sessionId, routeId, expectedRevision)
+  },
+  agentTeamMailRoutes: {
+    list: (scope, sessionId) => ipcRenderer.invoke('agent-team-mail-routes:list', scope, sessionId),
+    remove: (scope, sessionId, routeId, expectedRevision) => ipcRenderer.invoke('agent-team-mail-routes:remove', scope, sessionId, routeId, expectedRevision)
   },
   handoffs: {
     get: envelopeId => ipcRenderer.invoke('handoffs:get', envelopeId),

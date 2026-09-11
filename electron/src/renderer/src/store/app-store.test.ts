@@ -5,6 +5,7 @@ import type {
 } from '@shared/types'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
+import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { CHAT_FONT_SIZES } from '../lib/chat-font'
 import { cancelPendingSteering, isSteeringPending, steerQueuedTurn, type SteeringScope } from '../lib/queue-actions'
 import { boundedDeferredTimelineEvents, cacheSnapshot, compactSnapshotEvents, crossChatQueueRefreshSessionId, handleMenuCommand, interactiveClientCapabilities, mergeEvents, mergeSnapshots, reconcileSessions, replaceSnapshot, snapshotNeedsAuthoritativeTail, syncSnapshotSessions, timelineReplacementIsDiscontinuous, updateActiveSessions, updateQueuedTurns, useAppStore } from './app-store'
@@ -252,6 +253,7 @@ describe('live run state', () => {
 
   it.each(['steer', 'stop', 'unknown'] as const)('does not change live run state for an imported %s interruption', cause => {
     const control = providerInterruption()
+    if (!isImportedProviderInterruption(control)) throw new Error('Invalid interruption fixture')
     control.provider_origin = { ...control.provider_origin!, cause }
     const idle = new Set<string>()
     const running = new Set(['chat-1'])
@@ -1479,6 +1481,31 @@ describe('send rollback', () => {
     expect(useAppStore.getState().error).toMatch(/route access limit/i)
   })
 
+  it('admits a new pending grant beyond sixteen stored routes when max_routes is null', async () => {
+    const routes: AgentCrossChatRoute[] = Array.from({ length: 20 }, (_, index) => ({
+      route_id: `route-${index}`, revision: `rev_${'a'.repeat(32)}`, alias: `Existing ${index}`,
+      target_session_id: `chat-existing-${index}`, actions: ['instruction'],
+      created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+      target: { title: `Existing ${index}`, folder: null, backend: 'codex', available: true, unavailable_reason: null }
+    }))
+    const snapshot = { routes, max_routes: null }
+    const send = vi.fn().mockResolvedValue({ session: sessionFor('chat-a'), queued: false })
+    const list = vi.fn().mockResolvedValue(snapshot)
+    Object.defineProperty(window, 'agentsDock', { configurable: true,
+      value: { turns: { send }, agentRoutes: { list } } as unknown as AgentsDockAPI })
+    const reference: ChatReference = { session_id: 'chat-new', display_title_snapshot: 'New',
+      source_text_start: 4, source_text_end: 8, action: 'route', grant_intent: true }
+    useAppStore.setState({ activeProfileId: 'profile-a', profileGeneration: 7, switchingProfileId: null,
+      profiles: [{ id: 'profile-a', name: 'Server', serverIdentity: 'server-a' } as PublicServerProfile],
+      selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: null },
+      sessions: [sessionFor('chat-a'), { ...sessionFor('chat-new'), title: 'New' }], snapshots: {},
+      health: durableRouteHealth(), drafts: { 'chat-a': 'Ask @New' }, chatReferencesBySession: { 'chat-a': [reference] },
+      uploadsBySession: {}, uploadPathsBySession: {}, agentRoutesBySession: { 'chat-a': snapshot }, error: null })
+    await expect(useAppStore.getState().sendPromptForSession('chat-a')).resolves.toBe(true)
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ chatReferences: [reference] }))
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('persists a pending @ grant only after ordinary turn admission succeeds, then refreshes the scoped grant list', async () => {
     const pendingSend = deferred<{ session: Session; queued: boolean }>()
     const send = vi.fn(() => pendingSend.promise)
@@ -2168,6 +2195,27 @@ describe('older timeline paging', () => {
 })
 
 describe('provider history refresh', () => {
+  it('replaces a proven import repair while preserving a same-prefix manual message', async () => {
+    const prompt = 'scheduled monitor '.repeat(800)
+    const legacy = eventFor('chat-a', 2, { type: 'turn_started', backend: 'claude',
+      imported: true, run_id: 'import_history', prompt })
+    const corrected: Event = { ...legacy, prompt: '', provider_history_repair: 'source_proven_import' }
+    const manual = eventFor('chat-a', 3, { type: 'turn_started', backend: 'claude', prompt: prompt + ' manual tail' })
+    const importHistory = vi.fn().mockResolvedValue({
+      session: sessionFor('chat-a'), events: [corrected], has_more: false
+    } satisfies TimelinePage)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true, value: { sessions: { importHistory } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      sessions: [sessionFor('chat-a')], snapshots: { 'chat-a': snapshot('chat-a', [legacy, manual]) }
+    })
+    await useAppStore.getState().importHistory('chat-a')
+    expect(useAppStore.getState().snapshots['chat-a'].events).toEqual([corrected, manual])
+    expect(mergeEvents([corrected, manual], [legacy])).toEqual([corrected, manual])
+  })
+
   it('accepts a proven same-ID correction without losing live history or remounting the timeline', async () => {
     const corrected = providerInterruption({ id: 'chat-a-2', session_id: 'chat-a', seq: 2 })
     const legacy = { ...corrected, type: 'turn_started', provider_origin: undefined, prompt: '[Request interrupted by user]' }

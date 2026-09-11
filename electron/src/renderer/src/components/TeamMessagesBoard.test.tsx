@@ -6,15 +6,20 @@ import userEvent from '@testing-library/user-event'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { TeamHubScope } from '@shared/team-hub'
 import type { NativeFileRef } from '@shared/types'
+import { setLocale } from '@shared/i18n'
+import { applyMailArrivalHint, applyMailPageCoverage, beginMailHintStream, type MailHintPageAcknowledgment, type MailHintProjection, type MailHintScope } from '@shared/team-mail-hints'
 import { TEAM_MESSAGES_SKILL_SLUG_PATTERN, type TeamAttachment, type TeamMessage, type TeamMessageCreateInput, type TeamMailboxStateInput, type TeamMessagePage, type TeamMessageSummary, type TeamMessagesCapability, type TeamNetworkBulletinPost, type TeamSkill, type TeamSkillDetails } from '@shared/team-network'
 import { resetTeamNetworkSnapshotCacheForTests } from '../lib/team-network-snapshot-cache'
 import { parseTeamMessageLink } from '../lib/team-message-links'
 import { TeamMessagesBoard } from './TeamMessagesBoard'
+import { selectMailHintPending, useAppStore } from '../store/app-store'
 
 const teamMessagesStyles = readFileSync(resolve(process.cwd(), 'src/renderer/src/components/TeamMessagesBoard.css'), 'utf8')
 
 afterEach(() => {
   cleanup()
+  setLocale('en')
+  useAppStore.setState({ mailHints: null })
   localStorage.clear()
   resetTeamNetworkSnapshotCacheForTests()
   document.head.querySelectorAll('style[data-team-messages-layout-test]').forEach(node => node.remove())
@@ -227,6 +232,179 @@ function installAPI(messages: TeamMessageSummary[], details: TeamMessage[] = [])
   return { teamMessages, teamMessage, recordTeamMessageReceipt, cacheTeamAttachment, networkDeletions }
 }
 
+describe('fresh exact-mailbox page acknowledgement', () => {
+  const hintScope: MailHintScope = {
+    profileId: scope.profileId, profileGeneration: scope.profileGeneration, serverIdentity: scope.serverIdentity,
+    streamId: 'stream-1', hubId: scope.hubIdentity!, teamId: 'team-1', recipientServerId: 'server-local'
+  }
+  const cursor = (through_sequence: number) => ({ through_sequence,
+    arrival_id: through_sequence ? `tmsg_${through_sequence.toString(16).padStart(32, '0')}` : null })
+  const coverage = (sequence: number) => ({ version: 1 as const, team_id: 'team-1', recipient_server_id: 'server-local', ...cursor(sequence) })
+  const summary = (sequence: number) => messageSummary(message({
+    id: cursor(sequence).arrival_id!, sequence, body: `Arrival ${sequence}`
+  }), { preview: `Arrival ${sequence}` })
+  const page = (sequence: number, hasMore = false): TeamMessagePage => ({
+    box: 'inbox', address: { kind: 'server', id: 'server-local' }, messages: sequence ? [summary(sequence)] : [],
+    next_after_sequence: sequence, has_more: hasMore, mailbox_coverage: coverage(sequence)
+  })
+  const board = (props: Partial<Parameters<typeof TeamMessagesBoard>[0]> = {}) => <TeamMessagesBoard
+    section="mail" scope={scope} teamId="team-1" capability={capability}
+    addresses={[{ kind: 'server', id: 'server-local', label: 'Local' }]} canWrite {...props} />
+  function installHints(latest: number | null = 900) {
+    const initial = beginMailHintStream(hintScope)
+    const state = latest === null ? initial : applyMailArrivalHint(initial, hintScope, 'snapshot', { ...coverage(latest), reset: false })
+    let revision = 1
+    useAppStore.setState({
+      activeProfileId: scope.profileId, profileGeneration: scope.profileGeneration, switchingProfileId: null,
+      profiles: [{ id: scope.profileId, name: 'Local', serverUrl: 'https://example.test', serverIdentity: scope.serverIdentity,
+        hasAccessToken: false, serverSetupComplete: true, connectionState: 'online', cachedUnreadCount: 0 }],
+      mailHints: { profileId: scope.profileId, profileGeneration: scope.profileGeneration, revision, state }
+    })
+    const acknowledgePage = vi.fn(async (input: MailHintPageAcknowledgment): Promise<MailHintProjection | null> => {
+      const current = useAppStore.getState().mailHints!
+      return { ...current, revision: ++revision, state: applyMailPageCoverage(current.state!, input.scope, input.requestedAfter, input.coverage) }
+    })
+    Object.assign(window.agentsDock, { mailHints: { acknowledgePage } })
+    return acknowledgePage
+  }
+
+  it('keeps the dot for arrivals beyond 16 capped pages and continues only with the immutable coverage anchor', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints()
+    api.teamMessages.mockImplementation((_scope, query: { afterSequence?: number }) => {
+      const after = query.afterSequence ?? 0
+      return Promise.resolve(after < 400
+        ? { ...page(after + 25, true), messages: Array.from({ length: 25 }, (_, index) => summary(after + index + 1)) }
+        : { ...page(900), messages: [] })
+    })
+    render(board())
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledTimes(16))
+    expect(api.teamMessages).toHaveBeenCalledTimes(16)
+    expect(useAppStore.getState().mailHints?.state?.seen.through_sequence).toBe(400)
+    expect(selectMailHintPending(useAppStore.getState())).toBe(true)
+    expect(api.teamMessages.mock.calls[0][1]).toMatchObject({ includeMailboxCoverage: true, afterSequence: 0 })
+    expect(api.teamMessages.mock.calls[0][1]).not.toHaveProperty('afterArrivalId')
+    expect(api.teamMessages.mock.calls[1][1]).toMatchObject({ includeMailboxCoverage: true, afterSequence: 25, afterArrivalId: cursor(25).arrival_id })
+    expect(acknowledgePage.mock.calls[15][0]).toEqual({ scope: hintScope, requestedAfter: cursor(375), coverage: coverage(400) })
+    expect(api.teamMessage).not.toHaveBeenCalled()
+    expect(api.recordTeamMessageReceipt).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledTimes(17))
+    expect(api.teamMessages.mock.calls[16][1]).toMatchObject({ afterSequence: 400, afterArrivalId: cursor(400).arrival_id })
+    expect(selectMailHintPending(useAppStore.getState())).toBe(false)
+  })
+
+  it('records an applied fresh page before its delayed arrival hint without making that reviewed page pending again', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(0)
+    api.teamMessages.mockResolvedValue(page(7))
+    render(board())
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledOnce())
+    expect(await screen.findByRole('button', { name: 'Open Arrival 7' })).toBeVisible()
+    const current = useAppStore.getState().mailHints!
+    act(() => useAppStore.setState({ mailHints: { ...current, revision: current.revision + 1,
+      state: applyMailArrivalHint(current.state!, hintScope, 'hint', { ...coverage(7), reset: false }) } }))
+    expect(selectMailHintPending(useAppStore.getState())).toBe(false)
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a fresh Inbox page usable without acknowledging when main omits unavailable optional coverage', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(7)
+    api.teamMessages.mockResolvedValue({ ...page(7), mailbox_coverage: undefined })
+    render(board())
+    expect(await screen.findByRole('button', { name: 'Open Arrival 7' })).toBeVisible()
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(selectMailHintPending(useAppStore.getState())).toBe(true)
+  })
+
+  it('does not turn a passive local acknowledgement failure into a Mail load error', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(7)
+    acknowledgePage.mockRejectedValue(new Error('Seen metadata temporarily unavailable'))
+    api.teamMessages.mockResolvedValue(page(7))
+    render(board())
+    expect(await screen.findByRole('button', { name: 'Open Arrival 7' })).toBeVisible()
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledOnce())
+    expect(screen.queryByText('Seen metadata temporarily unavailable')).not.toBeInTheDocument()
+    expect(selectMailHintPending(useAppStore.getState())).toBe(true)
+  })
+
+  it('does not acknowledge cached rows while their fresh revalidation is pending', async () => {
+    const api = installAPI([summary(7)])
+    const first = render(board({ lifecycleCacheKey: 'mail-hint-cache' }))
+    expect(await screen.findByRole('button', { name: 'Open Arrival 7' })).toBeVisible()
+    first.unmount()
+    const acknowledgePage = installHints(7)
+    const fresh = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValue(fresh.promise)
+    render(board({ lifecycleCacheKey: 'mail-hint-cache' }))
+    expect(screen.getByRole('button', { name: 'Open Arrival 7' })).toBeVisible()
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(selectMailHintPending(useAppStore.getState())).toBe(true)
+    await act(async () => fresh.resolve(page(7)))
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledOnce())
+    expect(selectMailHintPending(useAppStore.getState())).toBe(false)
+  })
+
+  it('does not acknowledge prefetched Bulletin pages even if they carry coverage-shaped metadata', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(7)
+    render(board({ section: 'feed', initialFeedLoad: Promise.resolve({ state: 'ready', page: { ...page(7), box: 'feed' } }) }))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(api.teamMessages).not.toHaveBeenCalled()
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(selectMailHintPending(useAppStore.getState())).toBe(true)
+  })
+
+  it.each(['profile', 'generation', 'identity', 'stream'] as const)('rejects a delayed page acknowledgement after the %s changes', async boundary => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(7)
+    const delayed = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValue(delayed.promise)
+    render(board())
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    const current = useAppStore.getState().mailHints!
+    act(() => useAppStore.setState(boundary === 'profile' ? { activeProfileId: 'another-profile' }
+      : boundary === 'generation' ? { profileGeneration: scope.profileGeneration + 1 }
+        : boundary === 'identity' ? { profiles: useAppStore.getState().profiles.map(profile => ({ ...profile, serverIdentity: 'another-identity' })) }
+          : { mailHints: { ...current, revision: 2, state: beginMailHintStream({ ...hintScope, streamId: 'stream-2' }, cursor(0), current.state!) } }))
+    await act(async () => delayed.resolve(page(7)))
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+  })
+
+  it('does not acknowledge or apply a late response after the mailbox request generation changes', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(7)
+    const delayed = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValueOnce(delayed.promise).mockResolvedValue({ ...page(0), mailbox_coverage: undefined })
+    const view = render(board())
+    view.rerender(board({ addresses: [{ kind: 'server', id: 'another-server', label: 'Other' }] }))
+    await act(async () => delayed.resolve(page(7)))
+    expect(screen.queryByText('Arrival 7')).not.toBeInTheDocument()
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(api.teamMessages).toHaveBeenCalledTimes(2)
+    expect(api.teamMessages.mock.calls[1][1]).not.toHaveProperty('includeMailboxCoverage')
+  })
+
+  it('declines missing or wrong-mailbox coverage and never invents the next immutable predecessor from cached maxima', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(900)
+    api.teamMessages.mockResolvedValueOnce({ ...page(7, true), mailbox_coverage: { ...coverage(7), recipient_server_id: 'other' } })
+      .mockResolvedValueOnce(page(9))
+    render(board())
+    expect(await screen.findByRole('button', { name: 'Open Arrival 9' })).toBeVisible()
+    expect(api.teamMessages).toHaveBeenCalledTimes(2)
+    expect(api.teamMessages.mock.calls[1][1]).toMatchObject({ afterSequence: 7 })
+    expect(api.teamMessages.mock.calls[1][1]).not.toHaveProperty('includeMailboxCoverage')
+    expect(api.teamMessages.mock.calls[1][1]).not.toHaveProperty('afterArrivalId')
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(selectMailHintPending(useAppStore.getState())).toBe(true)
+  })
+})
+
 describe('server inbox attention state', () => {
   const modern: TeamMessagesCapability = { ...capability, mailbox_state: { available: true, version: 1, address_kinds: ['server'] } }
   const receipt = { ...message().recipients[0], state: 'read' as const,
@@ -341,7 +519,7 @@ describe('server inbox attention state', () => {
   })
 })
 
-describe('human replies to exact server mail', () => {
+describe('agent replies to exact server mail', () => {
   const subjectsCapability: TeamMessagesCapability = {
     ...capability, mail_subjects: { available: true, version: 1, max_subject_chars: 160 }
   }
@@ -349,7 +527,8 @@ describe('human replies to exact server mail', () => {
   const subject = 'Review [phase 1] \\ **literal** 中文'
   const board = (props: Partial<Parameters<typeof TeamMessagesBoard>[0]> = {}) => <TeamMessagesBoard
     section="mail" scope={scope} teamId="team-1" capability={subjectsCapability}
-    addresses={[localAddress]} canWrite callerPostingKind="server" draftIdentity="reply-owner" {...props} />
+    addresses={[localAddress]} canWrite callerPostingKind="server" draftIdentity="reply-owner"
+    routeTargets={[{ id: 'chat-review', label: 'Review desk', current: false }]} onRouteMessage={() => undefined} {...props} />
   const incoming = (overrides: Partial<TeamMessage> = {}) => {
     const parent = message({ title: subject, ...overrides })
     return { ...parent, delivery: overrides.delivery === undefined ? parent.recipients[0] : overrides.delivery }
@@ -371,271 +550,82 @@ describe('human replies to exact server mail', () => {
     return screen.findByRole('button', { name: 'Reply' })
   }
   const openReply = async () => {
-    fireEvent.click(await openDetail())
-    return screen.findByRole('dialog', { name: 'Reply to Studio' })
+    await userEvent.click(await openDetail())
+    return screen.findByRole('menu')
   }
 
-  it('opens a reviewable literal-subject draft and sends once to the fanout parent’s sender', async () => {
-    const parent = incoming({ destination: 'all_servers', recipients: [
-      message().recipients[0], { ...message().recipients[0], id: 'server-other', display_name: 'Other' }
-    ] })
-    const api = installReplyAPI(parent)
-    const sending = deferred<TeamMessage>()
-    api.createTeamMessage.mockReturnValueOnce(sending.promise)
-    render(board())
-    const dialog = await openReply()
-    expect(within(dialog).getByText(subject, { exact: false })).toBeVisible()
-    expect(within(dialog).queryByText('Other')).not.toBeInTheDocument()
-    expect(api.teamMessage).toHaveBeenCalledTimes(1)
-    expect(api.createTeamMessage).not.toHaveBeenCalled()
-    const input = within(dialog).getByRole('textbox', { name: 'Reply message' })
-    fireEvent.change(input, { target: { value: '  Reviewed the exact message.  ' } })
-    const form = within(dialog).getByRole('form', { name: 'Reply to mail' })
-    fireEvent.submit(form)
-    fireEvent.submit(form)
-    await waitFor(() => expect(api.createTeamMessage).toHaveBeenCalledTimes(1))
-    const submitted = api.createTeamMessage.mock.calls[0][1]
-    expect(submitted).toEqual({
-      teamId: 'team-1', kind: 'message', title: subject, body: 'Reviewed the exact message.', bodyFormat: 'markdown',
-      recipients: [{ kind: 'server', id: 'server-remote' }], attachmentIds: [],
-      inReplyToMessageId: parent.id, provenance: { via: 'desktop' }, idempotencyKey: expect.any(String)
-    })
-    expect(api.teamMessage).toHaveBeenLastCalledWith(scope, 'team-1', parent.id)
-    expect(api.teamMessage).toHaveBeenCalledTimes(2)
-    expect(api.teamMessages).toHaveBeenCalledTimes(1)
-    expect(api.recordTeamMessageReceipt).toHaveBeenCalledTimes(1)
-    await act(async () => sending.resolve(replyResult(submitted)))
-    expect(await screen.findByText('Reply sent to Studio.')).toBeVisible()
+  it('chooses an exact local chat for an agent reply without a manual send or saved-draft mutation', async () => {
+    const api = installReplyAPI()
+    const onRouteMessage = vi.fn()
+    const savedKey = 'agentsdock:team-mail-reply:legacy-preserved'
+    localStorage.setItem(savedKey, JSON.stringify({ body: 'Unsent human draft', attempt: null }))
+    render(board({ onRouteMessage }))
+    const menu = await openReply()
+    expect(within(menu).getByText("Reply through a chat's agent")).toBeVisible()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(api.teamMessages).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Reply' }))
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('')
-  })
-
-  it('keeps typing in memory without synchronous storage or body serialization and batches one trailing write', async () => {
-    const api = installReplyAPI()
-    render(board({ draftIdentity: 'batched-typing' }))
-    await openReply()
-    vi.useFakeTimers()
-    const write = vi.spyOn(localStorage, 'setItem')
-    const remove = vi.spyOn(localStorage, 'removeItem')
-    const serialize = vi.spyOn(JSON, 'stringify')
-    const input = screen.getByRole('textbox', { name: 'Reply message' })
-    let body = ''
-    for (const character of 'Many typed characters') {
-      body += character
-      fireEvent.change(input, { target: { value: body } })
-      expect(write).not.toHaveBeenCalled()
-      expect(remove).not.toHaveBeenCalled()
-    }
-    expect(serialize.mock.calls.some(([value]) => value && typeof value === 'object' && 'body' in value)).toBe(false)
-    expect(input).toHaveValue(body)
-    await act(async () => vi.advanceTimersByTime(399))
-    expect(write).not.toHaveBeenCalled()
-    await act(async () => vi.advanceTimersByTime(1))
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(write.mock.calls[0][1])).toEqual({ body, attempt: null })
+    expect(screen.queryByRole('textbox', { name: 'Reply message' })).not.toBeInTheDocument()
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Review desk' }))
+    expect(onRouteMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'message-1', title: subject,
+      sender: expect.objectContaining({ id: 'server-remote' }) }), 'chat-review', 'reply')
     expect(api.createTeamMessage).not.toHaveBeenCalled()
     expect(api.teamMessages).toHaveBeenCalledTimes(1)
     expect(api.teamMessage).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(localStorage.getItem(savedKey)!)).toEqual({ body: 'Unsent human draft', attempt: null })
   })
 
-  it('flushes pending typing on close, page exit, and unmount without later duplicate writes', async () => {
-    installReplyAPI()
-    const view = render(board({ draftIdentity: 'flush-boundaries' }))
-    await openReply()
-    vi.useFakeTimers()
-    const write = vi.spyOn(localStorage, 'setItem')
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Close keeps this.' } })
-    expect(write).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Keep draft' }))
-    expect(write).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Reply' }))
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('Close keeps this.')
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Page exit keeps this.' } })
-    expect(write).toHaveBeenCalledTimes(1)
-    act(() => window.dispatchEvent(new Event('pagehide')))
-    expect(write).toHaveBeenCalledTimes(2)
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Unmount keeps this.' } })
-    view.unmount()
-    expect(write).toHaveBeenCalledTimes(3)
-    expect(JSON.parse(write.mock.calls[2][1]).body).toBe('Unmount keeps this.')
-    await act(async () => vi.advanceTimersByTime(1000))
-    expect(write).toHaveBeenCalledTimes(3)
-  })
-
-  it('flushes before parent validation and locks before POST without resurrecting a confirmed draft', async () => {
-    const parent = incoming()
-    const api = installReplyAPI(parent)
-    const checking = deferred<TeamMessage>()
-    render(board({ draftIdentity: 'flush-before-send' }))
-    await openReply()
-    vi.useFakeTimers()
-    const write = vi.spyOn(localStorage, 'setItem')
-    api.teamMessage.mockReturnValueOnce(checking.promise)
-    api.createTeamMessage.mockImplementation((_scope, input) => {
-      const saved = JSON.parse(localStorage.getItem(write.mock.calls[0][0])!)
-      expect(saved.attempt.idempotencyKey).toBe(input.idempotencyKey)
-      expect(saved.attempt.body).toBe(input.body)
-      return Promise.resolve(replyResult(input))
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'One confirmed reply.' } })
-    expect(write).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(write.mock.calls[0][1])).toEqual({ body: 'One confirmed reply.', attempt: null })
-    expect(api.createTeamMessage).not.toHaveBeenCalled()
-    await act(async () => checking.resolve(parent))
-    expect(api.createTeamMessage).toHaveBeenCalledTimes(1)
-    expect(write).toHaveBeenCalledTimes(2)
-    const key = write.mock.calls[0][0]
-    expect(localStorage.getItem(key)).toBeNull()
-    await act(async () => vi.advanceTimersByTime(1000))
-    expect(write).toHaveBeenCalledTimes(2)
-    expect(localStorage.getItem(key)).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Reply' }))
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('')
-  })
-
-  it('retains unsent drafts across closing, mailbox navigation, and remounting', async () => {
+  it('searches locally with autofocus, keyboard choice, duplicate-name identities and safe Escape', async () => {
     const api = installReplyAPI()
-    const view = render(board())
-    await openReply()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Review this draft first.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Keep draft' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    await openReply()
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('Review this draft first.')
-    view.unmount()
-    render(board())
-    await openReply()
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('Review this draft first.')
-    expect(api.createTeamMessage).not.toHaveBeenCalled()
-  })
-
-  it('retries an uncertain send unchanged with the same key after reopening', async () => {
-    const api = installReplyAPI()
-    api.createTeamMessage.mockRejectedValueOnce(new Error('Connection ended before confirmation'))
-    const view = render(board())
-    await openReply()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Only one committed reply.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Your draft is saved')
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveAttribute('readonly')
-    const first = api.createTeamMessage.mock.calls[0][1]
-    view.unmount()
-    render(board())
-    await openReply()
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue(first.body)
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'An accidental changed retry' } })
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue(first.body)
-    fireEvent.click(screen.getByRole('button', { name: 'Retry reply' }))
-    expect(await screen.findByText('Reply sent to Studio.')).toBeVisible()
-    expect(api.createTeamMessage).toHaveBeenCalledTimes(2)
-    expect(api.createTeamMessage.mock.calls[1][1]).toEqual(first)
-  })
-
-  it('keeps the draft editable when the exact parent was deleted before Send', async () => {
-    const api = installReplyAPI()
-    render(board())
-    await openReply()
-    api.teamMessage.mockRejectedValueOnce(new Error('Original message was deleted'))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Keep this body.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Original message was deleted')
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('Keep this body.')
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).not.toHaveAttribute('readonly')
+    const onRouteMessage = vi.fn()
+    render(board({ onRouteMessage, routeTargets: [
+      { id: 'chat-one', label: 'Review desk', current: true },
+      { id: 'chat-two', label: 'Review desk', current: false },
+      { id: 'chat-other', label: 'Build room', current: false }
+    ] }))
+    let menu = await openReply()
+    let search = within(menu).getByRole('textbox', { name: 'Search chats' })
+    await waitFor(() => expect(search).toHaveFocus())
+    await userEvent.type(search, 'REVIEW')
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2)
+    expect(within(menu).getByRole('menuitem', { name: /Review desk.*chat-two/ })).toBeVisible()
+    await userEvent.clear(search)
+    await userEvent.type(search, 'absent')
+    expect(within(menu).getByText('No matching chats')).toBeVisible()
+    await userEvent.keyboard('{Enter}')
+    expect(onRouteMessage).not.toHaveBeenCalled()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reply' }))
+    menu = await screen.findByRole('menu')
+    search = within(menu).getByRole('textbox', { name: 'Search chats' })
+    await waitFor(() => expect(search).toHaveFocus())
+    await userEvent.type(search, 'review')
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+    expect(onRouteMessage).toHaveBeenCalledWith(expect.anything(), 'chat-two', 'reply')
     expect(api.createTeamMessage).not.toHaveBeenCalled()
     expect(api.teamMessages).toHaveBeenCalledTimes(1)
   })
 
-  it.each([
-    ['sender', (parent: TeamMessage) => ({ ...parent, sender: { ...parent.sender, id: 'server-different' } })],
-    ['team', (parent: TeamMessage) => ({ ...parent, team_id: 'different-team' })],
-    ['subject', (parent: TeamMessage) => ({ ...parent, title: 'Different subject' })],
-    ['delivery', (parent: TeamMessage) => ({ ...parent, delivery: null })]
-  ])('rejects a changed %s during exact-parent validation', async (_label, change) => {
-    const parent = incoming()
-    const api = installReplyAPI(parent)
-    render(board())
-    await openReply()
-    api.teamMessage.mockResolvedValueOnce(change(parent))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Keep this body.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('no longer available')
-    expect(api.createTeamMessage).not.toHaveBeenCalled()
-  })
-
-  it('does not send after navigating away while parent validation is pending', async () => {
-    const parent = incoming()
-    const api = installReplyAPI(parent)
-    const check = deferred<TeamMessage>()
-    const view = render(board())
-    await openReply()
-    api.teamMessage.mockReturnValueOnce(check.promise)
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Still a draft.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    await waitFor(() => expect(api.teamMessage).toHaveBeenCalledTimes(2))
-    view.unmount()
-    await act(async () => check.resolve(parent))
-    expect(api.createTeamMessage).not.toHaveBeenCalled()
-    render(board())
-    await openReply()
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('Still a draft.')
-  })
-
-  it('shares a pending send across remounts and clears only its confirmed draft', async () => {
+  it('keeps agent Reply available on an older host without probing threads or posting', async () => {
     const api = installReplyAPI()
-    const pending = deferred<TeamMessage>()
-    api.createTeamMessage.mockReturnValueOnce(pending.promise)
-    const view = render(board())
-    await openReply()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'One in-flight send.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    await waitFor(() => expect(api.createTeamMessage).toHaveBeenCalledTimes(1))
-    const input = api.createTeamMessage.mock.calls[0][1]
-    view.unmount()
-    render(board())
-    await openReply()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry reply' }))
-    await waitFor(() => expect(api.teamMessage).toHaveBeenCalledTimes(4))
-    expect(api.createTeamMessage).toHaveBeenCalledTimes(1)
-    await act(async () => pending.resolve(replyResult(input)))
-    expect(await screen.findByText('Reply sent to Studio.')).toBeVisible()
-    expect(api.createTeamMessage).toHaveBeenCalledTimes(1)
-  })
-
-  it('requires the negotiated subject capability but can reply to untitled mail on an older Hub', async () => {
-    const api = installReplyAPI()
-    const view = render(board({ capability }))
-    expect(await openDetail()).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('cannot preserve the original subject')
+    const teamMessageThread = vi.fn()
+    Object.assign(window.agentsDock.teamHub, { teamMessageThread })
+    render(board({ capability, routeTargets: [] }))
+    const menu = await openReply()
+    expect(within(menu).getByText('No active chats')).toBeVisible()
+    expect(teamMessageThread).not.toHaveBeenCalled()
     expect(api.createTeamMessage).not.toHaveBeenCalled()
-    view.unmount()
-    resetTeamNetworkSnapshotCacheForTests()
-    const untitledApi = installReplyAPI(incoming({ title: null }))
-    render(board({ capability }))
-    await openReply()
-    expect(screen.getByText('(No subject)', { exact: false })).toBeVisible()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Untitled reply.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    expect(await screen.findByText('Reply sent to Studio.')).toBeVisible()
-    expect(untitledApi.createTeamMessage.mock.calls[0][1]).not.toHaveProperty('title')
   })
 
   it.each([
     ['missing delivery', () => incoming({ delivery: null }), {}],
     ['human sender', () => incoming({ sender: { kind: 'human', id: 'person-1', display_name: 'Teammate' } }), {}],
     ['skill parent', () => incoming({ kind: 'skill', skill: { id: 'skill-1', slug: 'guide', version: 1 } }), {}],
-    ['mixed recipient mail', () => incoming({ recipients: [message().recipients[0], { ...message().recipients[0], kind: 'human', id: 'person-1' }] }), {}],
     ['another server’s delivery', () => incoming({ delivery: { ...message().recipients[0], id: 'server-other' } }), {}],
-    ['sent mail', () => incoming(), { initialMailboxBox: 'sent' as const }],
     ['self sender', () => incoming({ sender: { kind: 'server', id: 'server-local', display_name: 'Local' } }), {}],
     ['human identity', () => incoming(), { callerPostingKind: 'human' as const }],
     ['read-only identity', () => incoming(), { canWrite: false }]
   ])('does not offer Reply for %s', async (_label, parent, props) => {
-    const detail = parent()
-    const api = installReplyAPI(detail)
+    const api = installReplyAPI(parent())
     render(board(props))
     fireEvent.click(await screen.findByRole('button', { name: /^Open / }))
     expect(await screen.findByText('rollout')).toBeVisible()
@@ -643,36 +633,48 @@ describe('human replies to exact server mail', () => {
     expect(api.createTeamMessage).not.toHaveBeenCalled()
   })
 
-  it('keeps draft identities isolated across profiles and falls back to memory when storage is full', async () => {
-    const api = installReplyAPI()
-    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Storage quota exceeded') })
-    const view = render(board({ draftIdentity: 'quota-test' }))
-    await openReply()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Retained without storage.' } })
-    view.unmount()
-    const other = render(board({ draftIdentity: 'quota-test', scope: { ...scope, profileId: 'profile-other' } }))
-    await openReply()
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('')
-    other.unmount()
-    storage.mockRestore()
-    render(board({ draftIdentity: 'quota-test' }))
-    await openReply()
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('Retained without storage.')
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: '' } })
+  it('loads exact incoming and outgoing thread rows only on open and explicit more', async () => {
+    const parent = incoming({ body: 'Original incoming question.' })
+    const api = installReplyAPI(parent)
+    const reply = message({ id: 'reply-1', sequence: 8, body: 'Outgoing answer.',
+      sender: { kind: 'server', id: 'server-local', display_name: 'Local' }, in_reply_to_message_id: parent.id })
+    const followup = incoming({ id: 'followup-1', sequence: 9, body: 'Incoming follow-up.', in_reply_to_message_id: reply.id })
+    const page = { team_id: 'team-1', anchor_message_id: parent.id, root_message_id: parent.id,
+      messages: [parent, reply], next_after_sequence: 8, has_more: true, truncated: false }
+    const teamMessageThread = vi.fn().mockResolvedValueOnce(page).mockResolvedValueOnce({
+      ...page, messages: [followup], next_after_sequence: 9, has_more: false, truncated: true
+    })
+    Object.assign(window.agentsDock.teamHub, { teamMessageThread })
+    render(board({ capability: { ...subjectsCapability, mail_threads: { available: true, version: 1, max_page_items: 25, max_thread_items: 2048 } } }))
+    expect(teamMessageThread).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: /^Open / }))
+    expect(await screen.findByText('Outgoing answer.')).toBeVisible()
+    expect(teamMessageThread).toHaveBeenCalledTimes(1)
+    expect(teamMessageThread).toHaveBeenLastCalledWith(scope, { teamId: 'team-1', messageId: parent.id, afterSequence: 0, limit: 25 })
+    expect(screen.getByText('Original incoming question.').closest('article')).toHaveClass('incoming')
+    expect(screen.getByText('Outgoing answer.').closest('article')).toHaveClass('outgoing')
+    fireEvent.click(screen.getByRole('button', { name: 'Load more messages' }))
+    expect(await screen.findByText('Incoming follow-up.')).toBeVisible()
+    expect(teamMessageThread).toHaveBeenLastCalledWith(scope, { teamId: 'team-1', messageId: parent.id, afterSequence: 8, limit: 25 })
+    expect(screen.getAllByText('Original incoming question.')).toHaveLength(1)
+    expect(screen.getByText(/Showing available thread history/)).toBeVisible()
+    expect(api.teamMessages).toHaveBeenCalledTimes(1)
     expect(api.createTeamMessage).not.toHaveBeenCalled()
   })
 
-  it('does not revive a confirmed draft when persistent storage cannot remove it', async () => {
-    const api = installReplyAPI()
-    render(board({ draftIdentity: 'remove-failure-test' }))
-    await openReply()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reply message' }), { target: { value: 'Confirmed reply.' } })
-    vi.spyOn(localStorage, 'removeItem').mockImplementation(() => { throw new Error('Storage unavailable') })
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
-    expect(await screen.findByText('Reply sent to Studio.')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Reply' }))
-    expect(screen.getByRole('textbox', { name: 'Reply message' })).toHaveValue('')
-    expect(api.createTeamMessage).toHaveBeenCalledTimes(1)
+  it('fences a late thread result after closing the exact message', async () => {
+    installReplyAPI()
+    const pending = deferred<any>()
+    const teamMessageThread = vi.fn().mockReturnValue(pending.promise)
+    Object.assign(window.agentsDock.teamHub, { teamMessageThread })
+    render(board({ capability: { ...subjectsCapability, mail_threads: { available: true, version: 1, max_page_items: 25, max_thread_items: 2048 } } }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Open / }))
+    await waitFor(() => expect(teamMessageThread).toHaveBeenCalledOnce())
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await act(async () => pending.resolve({ team_id: 'team-1', anchor_message_id: 'message-1', root_message_id: 'message-1',
+      messages: [incoming({ body: 'Late thread body must not return.' })], next_after_sequence: 7, has_more: false, truncated: false }))
+    expect(screen.queryByText('Late thread body must not return.')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^Open / })).toBeVisible()
   })
 
   it.each(['inbox', 'sent'] as const)('links the exact reply parent from %s without loading its body', async box => {
@@ -699,6 +701,69 @@ describe('human replies to exact server mail', () => {
 })
 
 describe('Team Messages board', () => {
+  it('switches Mail and routing labels without refetching or translating authored content', async () => {
+    const detail = message({ title: 'Mail / 公告 / @@bulletin', body: 'Keep this user-authored **message** unchanged.' })
+    const summary = messageSummary(detail)
+    const original = structuredClone({ detail, summary })
+    const api = installAPI([summary], [detail])
+    const onRouteMessage = vi.fn()
+    render(<TeamMessagesBoard section="mail" scope={scope} teamId="team-1" capability={capability}
+      addresses={[{ kind: 'server', id: 'server-local', label: 'Local' }]} canWrite
+      routeTargets={[{ id: 'chat-1', label: 'User chat title / @@bulletin', current: true }]}
+      onRouteMessage={onRouteMessage} />)
+    await screen.findByRole('button', { name: `Open ${detail.title}` })
+    await userEvent.click(screen.getByRole('button', { name: `Route ${detail.title} to a chat` }))
+    const reads = api.teamMessages.mock.calls.length
+    const deletions = api.networkDeletions.mock.calls.length
+
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('heading', { name: '信箱', hidden: true })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '搜索会话' })).toBeVisible()
+    expect(screen.getByText('在会话中打开邮件')).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: /User chat title \/ @@bulletin/ })).toBeVisible()
+    expect(screen.getByLabelText('当前会话')).toBeVisible()
+
+    act(() => setLocale('en'))
+    expect(screen.getByRole('textbox', { name: 'Search chats' })).toBeVisible()
+    expect(screen.getByText('Open mail in chat')).toBeVisible()
+    expect(api.teamMessages).toHaveBeenCalledTimes(reads)
+    expect(api.networkDeletions).toHaveBeenCalledTimes(deletions)
+    expect(api.teamMessage).not.toHaveBeenCalled()
+    expect(onRouteMessage).not.toHaveBeenCalled()
+    expect({ detail, summary }).toEqual(original)
+  })
+
+  it('switches Bulletin draft and stored error labels without new transport or posting', async () => {
+    const api = installAPI([])
+    const createTeamMessage = vi.fn()
+    const file: NativeFileRef = { path: '/tmp/locale-draft.txt', name: 'User filename.txt', size: 0, type: 'text/plain' }
+    const choose = vi.fn().mockResolvedValue([file])
+    Object.assign(window.agentsDock, { files: { choose } })
+    Object.assign(window.agentsDock.teamHub, { createTeamMessage })
+    render(<TeamMessagesBoard section="feed" scope={scope} teamId="team-1" capability={capability}
+      addresses={[]} canWrite />)
+    const draft = 'Preserve my draft / 用户内容 / @@bulletin'
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Team bulletin' }), { target: { value: draft } })
+    fireEvent.click(screen.getByRole('button', { name: 'Attach files' }))
+    await screen.findByText('User filename.txt is not a valid attachment.')
+    const reads = api.teamMessages.mock.calls.length
+    const deletions = api.networkDeletions.mock.calls.length
+
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('heading', { name: '公告栏' })).toBeVisible()
+    expect(screen.getByRole('textbox', { name: '团队公告栏' })).toHaveValue(draft)
+    expect(screen.getByRole('button', { name: '发布' })).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent('User filename.txt 不是有效的附件。')
+
+    act(() => setLocale('en'))
+    expect(screen.getByRole('textbox', { name: 'Team bulletin' })).toHaveValue(draft)
+    expect(screen.getByRole('alert')).toHaveTextContent('User filename.txt is not a valid attachment.')
+    expect(api.teamMessages).toHaveBeenCalledTimes(reads)
+    expect(api.networkDeletions).toHaveBeenCalledTimes(deletions)
+    expect(choose).toHaveBeenCalledOnce()
+    expect(createTeamMessage).not.toHaveBeenCalled()
+  })
+
   it('keeps a readable untitled mail heading consistent through cards, loading, detail, and routing', async () => {
     const detail = message({ body: '# Review [the rollout](https://example.com/private)\n\nFull **context** remains here.' })
     const summary = messageSummary(detail, { preview: '# Review [the rollout](https://example.com/private)\nA shortened preview.' })
@@ -1312,6 +1377,42 @@ describe('Team Messages board', () => {
     await waitFor(() => expect(screen.queryByText('Delete owned skill')).not.toBeInTheDocument())
   })
 
+  it.each(['legacy', 'announcement', 'skill', 'mail'] as const)('lets a capability-verified host delete another author’s %s without edit rights', async kind => {
+    const user = userEvent.setup()
+    const item = (kind === 'mail' ? message : bulletinMessage)({ id: 'orphan-item', title: 'Orphaned item', body: 'Orphaned content',
+      kind: kind === 'skill' ? 'skill' : 'message', skill: kind === 'skill' ? { id: 'skill-orphan', slug: 'orphan', version: 1 } : null })
+    const legacy: TeamNetworkBulletinPost = { id: item.id, sequence: 1, author: item.sender, body_format: 'plain', body: 'Orphaned item',
+      thread_root_post_id: null, reply_to_post_id: null, created_at: item.created_at }
+    installAPI(kind === 'legacy' ? [] : [messageSummary(item, { preview: item.body })], [item])
+    const remove = vi.fn().mockResolvedValue({ deleted: true, post_id: item.id, message_id: item.id })
+    Object.assign(window.agentsDock.teamHub, { deleteNetworkBulletin: remove, deleteTeamMessage: remove })
+    render(<TeamMessagesBoard section={kind === 'mail' ? 'mail' : 'feed'} scope={scope} teamId="team-1"
+      capability={{ ...capability, host_content_deletion: true }} canHostDelete canWrite={false}
+      addresses={[{ kind: 'server', id: 'server-local', label: 'Host' }]} legacyBulletinPosts={kind === 'legacy' ? [legacy] : []} />)
+    const title = await screen.findByText('Orphaned item')
+    if (kind === 'legacy') await screen.findByRole('button', { name: 'Delete legacy announcement from Studio' })
+    const card = screen.getByText(title.textContent!).closest(kind === 'mail' ? '.network-v2-card' : '.network-v2-bulletin-card') as HTMLElement
+    fireEvent.contextMenu(card)
+    expect(screen.queryByRole('menuitem', { name: /Edit/ })).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('menuitem', { name: kind === 'mail' ? 'Delete for everyone…' : 'Delete Bulletin item…' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: kind === 'mail' ? 'Delete for everyone' : 'Delete item' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(scope, {
+      teamId: 'team-1', ...(kind === 'legacy' ? { postId: item.id } : { messageId: item.id }), idempotencyKey: expect.any(String)
+    }))
+    await waitFor(() => expect(screen.queryByText('Orphaned item')).not.toBeInTheDocument())
+  })
+
+  it.each([[false, true], [true, false]])('keeps host deletion gated by operator=%s capability=%s', async (host, supported) => {
+    const other = bulletinMessage({ title: 'Other author', body: 'Not owned here' })
+    installAPI([messageSummary(other)])
+    render(<TeamMessagesBoard section="feed" scope={scope} teamId="team-1" canWrite={false} canHostDelete={host}
+      capability={{ ...capability, ...(supported ? { host_content_deletion: true } : {}) }} addresses={[]} />)
+    fireEvent.contextMenu((await screen.findByText('Other author')).closest('.network-v2-bulletin-card')!)
+    expect(await screen.findByRole('menuitem', { name: 'Open Bulletin item' })).toBeVisible()
+    expect(screen.queryByRole('menuitem', { name: 'Delete Bulletin item…' })).not.toBeInTheDocument()
+  })
+
   it('does not let a moderator delete another skill poster on a supporting Hub', async () => {
     const other = bulletinMessage({
       id: 'message-other-skill-delete', sequence: 24, kind: 'skill', title: 'Other poster skill',
@@ -1839,15 +1940,21 @@ describe('Team Messages board', () => {
     expect(screen.queryByLabelText('walkthrough.mp4')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Recovery runbook' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show video walkthrough.mp4' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Show video walkthrough.mp4' }))
+    })
     const player = await screen.findByLabelText('walkthrough.mp4')
     expect(player).toHaveAttribute('src', 'agentsdock-media://team/profile-1/team-1/attachment-1')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show image result.png' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Show image result.png' }))
+    })
     const image = await screen.findByRole('img', { name: 'result.png' })
     expect(image).toHaveAttribute('src', 'agentsdock-media://team/profile-1/team-1/attachment-image')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load attachment runbook.md' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Load attachment runbook.md' }))
+    })
     expect(await screen.findByRole('heading', { name: 'Recovery runbook' })).toBeVisible()
     expect(api.cacheTeamAttachment).toHaveBeenCalledWith(scope, {
       teamId: 'team-1', attachmentId: 'attachment-1'
@@ -2047,7 +2154,13 @@ describe('Team Messages board', () => {
       onRouteMessage={onRouteMessage}
     />)
 
-    expect(await screen.findByRole('button', { name: 'Route Review request to a chat' })).toBeVisible()
+    const routeButton = await screen.findByRole('button', { name: 'Route Review request to a chat' })
+    const openButton = screen.getByRole('button', { name: 'Open Review request' })
+    expect(routeButton).toBeVisible()
+    expect(openButton.closest('article')?.querySelector('footer')).toContainElement(routeButton)
+    expect(openButton).not.toContainElement(routeButton)
+    expect(openButton.querySelector('.network-v2-card-title')).toHaveTextContent('Review request')
+    expect(openButton.querySelector('time')).toHaveAttribute('datetime', note.created_at)
     expect(screen.queryByRole('button', { name: /process unread/i })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Route Review request to a chat' }))
     const routeMenu = await screen.findByRole('menu')

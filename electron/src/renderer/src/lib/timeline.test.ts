@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import type { AgentFile, Event } from '@shared/types'
 import { extractStructuredToolDiff, extractUnifiedDiff, importedCrossChatDelivery, isAgentVisibleEvent, isTimelineError, jobDisplayEvents, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, parseReviewableDiff, parseUnifiedDiff, projectTimeline, reconcileRenderTimelineItems, reconcileTimelineItems, renderTimelineItems, reviewTargetBelongsToSession, sameCodeReviewTarget, settleInactiveTimelineItems, summarizeStructuredToolDiff, TimelineProjector, type RenderTimelineItem, type TimelineItem } from './timeline'
+import { cachedTimelineProjection, clearTimelineProjectionCache } from './timeline-projection-cache'
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
   id: `event-${seq}`, session_id: 'chat-1', seq, type, ts: `2026-07-09T10:00:${String(seq).padStart(2, '0')}Z`, ...patch
@@ -14,7 +16,201 @@ function importedDeliveryPrompt(kind = 'reply', body = 'The renderer audit is co
     + 'reply: use the respond command in the provider-authority block only if a reply or follow-up is needed.\n[End delivery]'
 }
 
+// Faithful relationships from the reported legacy exchange: the native input
+// is a short description, the receipt hashes the full reply, and an unrelated
+// import run later replays its complete wrapper at the original source time.
+function legacyReplyCorrelationFixture() {
+  const body = 'A complete reply with a distinct full tail. '.repeat(30) + 'Exact reply end.'
+  const exchange = { exchange_id: 'exchange-observed', requester_session_id: 'chat-1', responder_session_id: 'peer', exchange_max_legs: 2 }
+  const delivery = { ...exchange, exchange_leg_id: 'reply-leg', cross_chat_exchange_id: exchange.exchange_id,
+    cross_chat_exchange_leg_id: 'reply-leg', source_session_id: 'peer', target_session_id: 'chat-1' }
+  const native = { ...delivery, backend: 'claude' as const, run_id: 'native-delivery', purpose: 'cross_chat_handoff_delivery' }
+  const reply = { ...delivery, target_run_id: native.run_id, exchange_leg_kind: 'reply' as const, exchange_ordinal: 2,
+    handoff_preview: body.slice(0, 100), handoff_body_chars: body.length, handoff_body_truncated: true }
+  const source = event(7, 'turn_started', { backend: 'claude', imported: true, run_id: 'import_observed',
+    ts: '2026-09-10T21:13:30.068Z', prompt: importedDeliveryPrompt('reply', body, 'Peer'),
+    provider_origin: { provider: 'claude', session_id: 'provider-session', event_id: 'provider-input',
+      timestamp: '2026-09-10T21:13:30.068Z' } as Event['provider_origin'] })
+  return [
+    event(1, 'cross_chat_exchange_leg_registered', { ...exchange, exchange_leg_id: 'request-leg', exchange_leg_kind: 'request',
+      exchange_ordinal: 1, source_session_id: 'chat-1', target_session_id: 'peer', handoff_preview: 'Inspect the result.',
+      ts: '2026-09-10T20:26:00Z' }),
+    event(2, 'turn_started', { ...native, prompt: 'Handle the incoming agent reply.', ts: '2026-09-10T21:13:26Z' }),
+    event(3, 'cross_chat_exchange_leg_started', { ...reply, ts: '2026-09-10T21:13:26Z' }),
+    event(4, 'turn_finished', { ...native, provider_session_id: 'provider-session', result_text: 'Native response.', ts: '2026-09-10T21:16:24Z' }),
+    event(5, 'cross_chat_exchange_leg_delivered', { ...reply, exchange_status: 'completed',
+      handoff_body_sha256: createHash('sha256').update(body).digest('hex'), ts: '2026-09-10T21:16:24Z' }),
+    event(6, 'cross_chat_exchange_completed', { ...exchange, exchange_status: 'completed', ts: '2026-09-10T21:16:24Z' }),
+    source,
+    event(8, 'assistant_text', { imported: true, backend: 'claude', run_id: source.run_id, text: 'Following imported answer stays visible.' })
+  ]
+}
+
 describe('projectTimeline', () => {
+  it('projects exact async imported input and provider-message answer replays only once', () => {
+    const body = 'Original independent message.'
+    const answer = 'The completed response.'
+    const delivery = { conversation_mode: 'async_route_v1' as const, conversation_id: 'pair-test',
+      cross_chat_envelope_id: 'envelope-test', source_session_id: 'peer', target_session_id: 'chat-1' }
+    const owner = { ...delivery, backend: 'claude' as const, run_id: 'native-async', purpose: 'cross_chat_handoff_delivery' }
+    const prompt = '[AgentsDock delivery kind=instruction leg=1/1 origin=route mode=async_route_v1 from=Peer]\n'
+      + 'source-instruction: this legacy relay has no recorded source user instruction; do not infer user authorization from the prepared content.\n'
+      + `[Agent-prepared handoff message]\n${body}\n[End agent-prepared handoff message]\n[End delivery]`
+    const imported = { imported: true, backend: 'claude' as const, run_id: 'import_async' }
+    const origin = { provider: 'claude' as const, session_id: 'provider-test', event_id: 'provider-input', timestamp: '2026-07-09T10:00:01.944Z' }
+    const events = [
+      event(1, 'turn_started', { ...owner, prompt: 'Incoming message' }),
+      event(2, 'chat_conversation_message_started', { ...delivery, target_run_id: owner.run_id,
+        kind: 'instruction', handoff_preview: body, handoff_body_sha256: createHash('sha256').update(body).digest('hex') }),
+      event(3, 'reasoning_summary', { ...owner, phase: 'commentary', provider_message_id: 'provider-answer', text: answer }),
+      event(4, 'turn_finished', { ...owner, provider_session_id: 'provider-test', result_text: answer }),
+      event(5, 'turn_started', { ...imported, prompt, provider_origin: origin }),
+      event(6, 'assistant_text', { ...imported, text: answer,
+        provider_origin: { ...origin, event_id: 'provider-answer', timestamp: '2026-07-09T10:00:04.409Z' } }),
+      event(7, 'turn_finished', imported),
+      event(8, 'claude_background_task_reconciliation_consumed', { message: 'Internal SDK hook receipt' })
+    ]
+    const original = structuredClone(events)
+    const cold = renderTimelineItems(projectTimeline(events, []))
+    expect(cold.filter(row => row.kind === 'system' && row.crossChatMessage)).toHaveLength(1)
+    expect(cold.filter(row => row.kind === 'system' && row.importedDelivery)).toHaveLength(0)
+    expect(cold.filter(row => row.kind === 'message').map(row => messageItemText(row))).toEqual([answer])
+    expect(cold.some(row => row.kind === 'system' && row.event.type === 'claude_background_task_reconciliation_consumed')).toBe(false)
+    clearTimelineProjectionCache()
+    cachedTimelineProjection('async-source-replay', events.slice(0, 5), [])
+    expect(cachedTimelineProjection('async-source-replay', events, []).rendered).toEqual(cold)
+    for (const patch of [{ provider_user_authored: true }, { provider_origin: undefined }, { prompt: prompt.replace('[End delivery]', '') }]) {
+      const unproven = [...events]
+      unproven[4] = { ...unproven[4], ...patch }
+      const rows = renderTimelineItems(projectTimeline(unproven, []))
+      expect(rows.some(row => row.kind === 'system' && row.importedDelivery || row.kind === 'message' && row.role === 'user')).toBe(true)
+      expect(rows.filter(row => row.kind === 'message' && row.role === 'assistant')).toHaveLength(2)
+    }
+    const differentAnswer = [...events]
+    differentAnswer[5] = { ...differentAnswer[5], text: 'A genuinely different answer with the same provider metadata.' }
+    expect(renderTimelineItems(projectTimeline(differentAnswer, [])).filter(row => row.kind === 'message' && row.role === 'assistant')).toHaveLength(2)
+    const unrelated = [...events, event(9, 'turn_started', { ...imported, prompt: 'A genuine later question.' }),
+      event(10, 'assistant_text', { ...imported, text: answer, provider_origin: events[5].provider_origin })]
+    expect(renderTimelineItems(projectTimeline(unrelated, [])).filter(row => row.kind === 'message' && row.role === 'assistant')).toHaveLength(2)
+    expect(events).toEqual(original)
+  })
+
+  it('recognizes only complete supported async wrappers and retains recipient edit attribution', () => {
+    const prompt = importedDeliveryPrompt('instruction').replace('leg=2/2 origin=route', 'leg=1/1 origin=route mode=async_route_v1')
+    const start = event(1, 'turn_started', { imported: true, backend: 'claude', run_id: 'import_async', prompt })
+    expect(importedCrossChatDelivery(start)).toMatchObject({ mode: 'async_route_v1', kind: 'instruction', ordinal: 1, maxLegs: 1 })
+    const marker = '[Server provenance: the recipient user edited this queued message; sender identity and routing permissions are unchanged.]\n'
+    expect(importedCrossChatDelivery({ ...start, prompt: prompt.replace(']\n', `]\n${marker}`) })).toMatchObject({ editedByUser: true })
+    expect(importedCrossChatDelivery({ ...start, provider_user_authored: true })).toBeNull()
+    expect(importedCrossChatDelivery({ ...start, prompt: prompt.replace('async_route_v1', 'unknown_mode') })).toBeNull()
+    expect(importedCrossChatDelivery({ ...start, prompt: `Quoted text:\n${prompt}` })).toBeNull()
+  })
+
+  it('ignores only proven assistant copies on a cold job-summary page and preserves same-import-run follow-up', () => {
+    const imports = { imported: true, backend: 'claude' as const, run_id: 'import_shared' }
+    const replay = event(3, 'assistant_text', { ...imports, text: '', metadata_only: true,
+      provider_history_repair: 'source_proven_assistant_replay',
+      provider_origin: { provider: 'claude', event_id: 'source-one', session_id: 'provider-one', timestamp: '2026-07-09T10:00:03.321Z' } })
+    const rows = [event(1, 'job_summary', { purpose: 'scheduled_job', job_id: 'job-one', job_status: 'completed', job_run_count: 2 }),
+      replay,
+      event(4, 'turn_started', { ...imports, prompt: 'Genuine follow-up' }),
+      event(5, 'assistant_text', { ...imports, text: 'Unrelated answer' }),
+      event(6, 'assistant_text', { ...imports, text: 'Unproven report remains visible' }),
+      event(7, 'turn_finished', imports)]
+    const cold = renderTimelineItems(projectTimeline(rows, []))
+    expect(cold.filter(row => row.kind === 'job')).toHaveLength(1)
+    expect(cold.filter(row => row.kind === 'progress')).toHaveLength(0)
+    const messages = cold.filter(row => row.kind === 'message').map(row => messageItemText(row as Extract<RenderTimelineItem, { kind: 'message' }>))
+    expect(messages.join('\n')).toContain('Genuine follow-up')
+    expect(messages.join('\n')).toContain('Unrelated answer')
+    expect(messages.join('\n')).toContain('Unproven report remains visible')
+    clearTimelineProjectionCache()
+    cachedTimelineProjection('source-replay-cold', rows.slice(0, 2), [])
+    expect(cachedTimelineProjection('source-replay-cold', rows, []).rendered).toEqual(cold)
+  })
+
+  it('correlates the full receipt hash and owned provider interval, flattening each leg at its original time', () => {
+    const rows = renderTimelineItems(projectTimeline(legacyReplyCorrelationFixture(), []))
+    expect(rows.filter(row => row.kind === 'system' && row.crossChatLegId).map(row => [row.seq, (row as Extract<RenderTimelineItem, { kind: 'system' }>).anchorTs]))
+      .toEqual([[1, '2026-09-10T20:26:00Z'], [3, '2026-09-10T21:13:26Z']])
+    expect(rows.some(row => row.kind === 'system' && row.importedDelivery)).toBe(false)
+    expect(rows.filter(row => row.kind === 'message').map(row => messageItemText(row as Extract<RenderTimelineItem, { kind: 'message' }>)))
+      .toEqual(['Native response.', 'Following imported answer stays visible.'])
+  })
+
+  it('preserves unproven, changed-tail and explicitly user-authored imported delivery quotations', () => {
+    for (const change of ['no-origin', 'different-session', 'outside-interval', 'different-tail', 'user-authored'] as const) {
+      const events = legacyReplyCorrelationFixture()
+      const input = events[6]
+      events[6] = change === 'no-origin' ? { ...input, provider_origin: undefined }
+        : change === 'different-session' ? { ...input, provider_origin: { ...input.provider_origin!, session_id: 'another-provider-session' } }
+        : change === 'outside-interval' ? { ...input, provider_origin: { ...input.provider_origin!, timestamp: '2026-09-10T22:00:00Z' } }
+        : change === 'different-tail' ? { ...input, prompt: input.prompt!.replace('Exact reply end.', 'A genuinely different reply end.') }
+        : { ...input, provider_user_authored: true }
+      const rows = renderTimelineItems(projectTimeline(events, []))
+      const visible = rows.filter(row => row.kind === 'system' && row.importedDelivery || row.kind === 'message' && row.role === 'user')
+      expect(visible, change).toHaveLength(1)
+      if (change === 'user-authored') expect(visible[0]).toMatchObject({ kind: 'message', role: 'user', event: { id: input.id } })
+    }
+  })
+
+  it('restores a prior alias when a distinct provider input later makes the correlation ambiguous', () => {
+    clearTimelineProjectionCache()
+    const events = legacyReplyCorrelationFixture()
+    const first = cachedTimelineProjection('observed-reply-ambiguity', events, [])
+    expect(first.rendered.some(row => row.kind === 'system' && row.importedDelivery)).toBe(false)
+    const competing = { ...events[6], id: 'later-distinct-input', seq: 9,
+      provider_origin: { ...events[6].provider_origin!, event_id: 'another-provider-input' } }
+    const next = cachedTimelineProjection('observed-reply-ambiguity', [...events, competing], [])
+    expect(next.strategy).toBe('rebuild')
+    expect(next.rendered.filter(row => row.kind === 'system' && row.importedDelivery)).toHaveLength(2)
+    expect(next.rendered.some(row => row.kind === 'message' && messageItemText(row).includes('Following imported answer'))).toBe(true)
+    const cold = renderTimelineItems(projectTimeline([...events, competing], []))
+    expect(cold.filter(row => row.kind === 'system' && row.importedDelivery)).toHaveLength(2)
+  })
+
+  it('does not treat overlapping imports of one provider record as a different message or hide a genuine same-body user', () => {
+    const events = legacyReplyCorrelationFixture()
+    const duplicate = { ...events[6], id: 'same-source-reimport', seq: 9, run_id: 'import_second_batch' }
+    const quoted = { ...events[6], id: 'literal-user-quotation', seq: 10, imported: false, run_id: 'ordinary-user-run', provider_origin: undefined }
+    const rows = renderTimelineItems(projectTimeline([...events, duplicate, quoted], []))
+    expect(rows.some(row => row.kind === 'system' && row.importedDelivery)).toBe(false)
+    expect(rows.filter(row => row.kind === 'message' && row.role === 'user')).toMatchObject([{ event: { id: quoted.id, prompt: quoted.prompt } }])
+  })
+
+  it('omits an exact repaired input without suppressing the following imported answer', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'import_repaired', backend: 'claude', imported: true,
+        provider_history_repair: 'source_proven_import', prompt: '' }),
+      event(2, 'assistant_text', { run_id: 'import_repaired', backend: 'claude', imported: true,
+        text: 'The genuine imported answer remains visible.' })
+    ], []))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: 'message', role: 'assistant',
+      events: [{ text: 'The genuine imported answer remains visible.' }] })
+  })
+
+  it('preserves a silent repaired-input boundary between genuine imported answers in the same run', () => {
+    const source = [
+      event(1, 'turn_started', { run_id: 'import_mixed', backend: 'claude', imported: true, prompt: 'A genuine question' }),
+      event(2, 'assistant_text', { run_id: 'import_mixed', backend: 'claude', imported: true, text: 'The genuine question answer.' }),
+      event(3, 'turn_started', { run_id: 'import_mixed', backend: 'claude', imported: true,
+        provider_history_repair: 'source_proven_import', prompt: '' }),
+      event(4, 'assistant_text', { run_id: 'import_mixed', backend: 'claude', imported: true, text: 'A separate later answer.' })
+    ]
+    const projector = new TimelineProjector([])
+    projector.append(source.slice(0, 3))
+    const beforeLaterAnswer = renderTimelineItems(projector.items)
+    expect(beforeLaterAnswer.map(row => row.kind)).toEqual(['message', 'message'])
+    projector.append(source.slice(3))
+    const rows = renderTimelineItems(projector.items)
+    expect(rows).toEqual(renderTimelineItems(projectTimeline(source, [])))
+    expect(rows.map(row => row.kind)).toEqual(['message', 'message', 'message'])
+    expect(rows[0]).toMatchObject({ role: 'user', events: [{ seq: 1 }] })
+    expect(rows[1]).toMatchObject({ key: 'turn:import_mixed:assistant', events: [{ seq: 2 }] })
+    expect(rows[2]).toMatchObject({ key: 'turn:import_mixed:start-3:assistant', events: [{ seq: 4 }] })
+  })
+
   it('ignores proven control-only import companions without creating or finishing a turn', () => {
     const history = event(2, 'history_imported', { backend: 'claude', imported: true, metadata_only: true, run_id: 'import_control' })
     const finished = event(3, 'turn_finished', { backend: 'claude', imported: true, metadata_only: true,
@@ -56,7 +252,7 @@ describe('projectTimeline', () => {
       event(1, 'turn_started', { run_id: 'live-run', prompt: 'Continue the actual work' }),
       event(2, 'assistant_text', { run_id: 'live-run', text: 'Before control metadata' }), control,
       { ...control, seq: 4, id: 'duplicate-import-id', provider_origin: {
-        ...control.provider_origin!, event_id: control.provider_origin!.event_id.toUpperCase()
+        ...control.provider_origin!, event_id: control.provider_origin!.event_id!.toUpperCase()
       } },
       event(5, 'assistant_text', { run_id: 'live-run', text: 'After control metadata' })
     ], [])
@@ -1287,6 +1483,34 @@ describe('projectTimeline', () => {
     expect(rows.some(row => row.kind === 'trace')).toBe(false)
   })
 
+  it.each(['codex', 'claude'] as const)('keeps explicitly phased %s text in activity until the final arrives', backend => {
+    const source = [
+      event(1, 'turn_started', { run_id: 'phased-run', backend, prompt: 'Inspect the renderer' }),
+      event(2, 'reasoning_summary', { run_id: 'phased-run', backend, text: 'Checking the event sequence.' }),
+      event(3, 'assistant_text', { run_id: 'phased-run', backend, phase: 'commentary', text: 'I found the renderer.' }),
+      event(4, 'tool_started', { run_id: 'phased-run', backend, tool: { id: 'read-one', name: 'Read' } }),
+      event(5, 'reasoning_summary', { run_id: 'phased-run', backend, phase: 'commentary', text: 'The sequence is correct.' })
+    ]
+    const projector = new TimelineProjector([])
+    projector.append(source)
+    const live = renderTimelineItems(projector.items)
+    expect(live.map(row => row.kind)).toEqual(['message', 'progress'])
+    expect(live[1]).toMatchObject({ active: true, events: [
+      { seq: 2 },
+      { seq: 3, phase: 'commentary' },
+      { seq: 4 },
+      { seq: 5, phase: 'commentary' }
+    ] })
+    const final = event(6, 'turn_finished', { run_id: 'phased-run', backend, result_text: 'The renderer is ready.' })
+    projector.append([final])
+    const finished = renderTimelineItems(projector.items)
+    expect(finished).toEqual(renderTimelineItems(projectTimeline([...source, final], [])))
+    expect(finished[1]).toMatchObject({ key: live[1].key, active: false })
+    expect(finished[2]).toMatchObject({ kind: 'message', role: 'assistant', events: [final] })
+    expect(source[1]).not.toHaveProperty('phase')
+    expect(source[2].type).toBe('assistant_text')
+  })
+
   it('updates one cached activity stream as reasoning and commentary arrive', () => {
     const projector = new TimelineProjector([])
     projector.append([
@@ -1469,6 +1693,59 @@ describe('projectTimeline', () => {
     const stopped = renderTimelineItems(projector.items)
     expect(stopped.at(-1)).toMatchObject({ active: false, hasFinalResponse: false, stoppedAt: stop.ts })
     expect(stopped).toEqual(renderTimelineItems(projectTimeline([...source, stop], [])))
+  })
+
+  it.each(['codex', 'claude'] as const)('places delayed pre-final %s commentary in the completed activity above its answer', backend => {
+    const source = [
+      event(1, 'turn_started', { run_id: 'delayed-run', backend, prompt: 'Inspect it', ts: '2026-09-10T12:00:00Z' }),
+      event(2, 'reasoning_summary', { run_id: 'delayed-run', backend, phase: 'commentary', text: 'Initial progress.', ts: '2026-09-10T12:00:10Z' }),
+      event(3, 'assistant_text', { run_id: 'delayed-run', backend, text: 'Final response.', ts: '2026-09-10T12:03:20Z' }),
+      event(4, 'turn_finished', { run_id: 'delayed-run', backend, result_text: 'Final response.', ts: '2026-09-10T12:03:21Z' }),
+      event(5, 'reasoning_summary', { run_id: 'delayed-run', backend, phase: 'commentary', text: 'Earlier update delivered late.', ts: '2026-09-10T12:01:00Z' }),
+      event(6, 'reasoning_summary', { run_id: 'delayed-run', backend, phase: 'commentary', text: 'Second earlier update delivered late.', ts: '2026-09-10T12:02:00Z' })
+    ]
+    const projector = new TimelineProjector([])
+    projector.append(source.slice(0, 4))
+    projector.append(source.slice(4))
+    const rows = renderTimelineItems(projector.items)
+    expect(rows).toEqual(renderTimelineItems(projectTimeline(source, [])))
+    expect(rows.map(row => row.kind)).toEqual(['message', 'progress', 'message'])
+    expect(rows[1]).toMatchObject({
+      key: 'turn:delayed-run:activity', active: false, hasFinalResponse: true,
+      startedAt: source[0].ts, finishedAt: source[3].ts,
+      events: [{ seq: 2 }, { seq: 5 }, { seq: 6 }]
+    })
+    expect(rows[2]).toMatchObject({ role: 'assistant', events: [{ text: 'Final response.' }] })
+    expect(source.map(candidate => candidate.seq)).toEqual([1, 2, 3, 4, 5, 6])
+  })
+
+  it('keeps true goal continuation live while routing a later-delivered earlier update above the answer', () => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'goal-run', backend: 'codex', prompt: 'Continue', ts: '2026-09-10T12:00:00Z' }),
+      event(2, 'reasoning_summary', { run_id: 'goal-run', phase: 'commentary', text: 'Initial progress.', ts: '2026-09-10T12:00:10Z' }),
+      event(3, 'assistant_text', { run_id: 'goal-run', text: 'Earlier answer.', ts: '2026-09-10T12:00:30Z' }),
+      event(4, 'reasoning_summary', { run_id: 'goal-run', phase: 'commentary', text: 'Real continuation.', ts: '2026-09-10T12:00:40Z' }),
+      event(5, 'reasoning_summary', { run_id: 'goal-run', phase: 'commentary', text: 'Delayed earlier progress.', ts: '2026-09-10T12:00:20Z' })
+    ], []))
+    expect(rows.map(row => row.kind)).toEqual(['message', 'progress', 'message', 'progress'])
+    expect(rows[1]).toMatchObject({ active: false, hasFinalResponse: true, throughSeq: 3, events: [{ seq: 2 }, { seq: 5 }] })
+    expect(rows[3]).toMatchObject({ key: 'turn:goal-run:activity:after:event-3', active: true, afterSeq: 3,
+      hasFinalResponse: false, events: [{ seq: 4 }] })
+  })
+
+  it.each([
+    { phase: 'commentary', ts: 'invalid' },
+    { phase: 'commentary', ts: '2026-09-10T12:00:20' },
+    { phase: 'commentary', ts: '2026-09-10T12:00:30Z' },
+    { ts: '2026-09-10T12:00:20Z' }
+  ])('preserves sequence when commentary timing is not conclusive: %j', fields => {
+    const rows = renderTimelineItems(projectTimeline([
+      event(1, 'turn_started', { run_id: 'goal-run', prompt: 'Continue', ts: '2026-09-10T12:00:00Z' }),
+      event(2, 'assistant_text', { run_id: 'goal-run', text: 'Earlier answer.', ts: '2026-09-10T12:00:30Z' }),
+      event(3, 'reasoning_summary', { run_id: 'goal-run', text: 'Later arrival.', ...fields })
+    ], []))
+    expect(rows.map(row => row.kind)).toEqual(['message', 'message', 'progress'])
+    expect(rows[2]).toMatchObject({ active: true, afterSeq: 2, events: [{ seq: 3 }] })
   })
 
   it('keeps post-answer bookkeeping in the original activity without inventing a continuation', () => {

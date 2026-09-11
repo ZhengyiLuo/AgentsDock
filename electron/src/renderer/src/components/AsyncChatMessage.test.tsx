@@ -5,6 +5,7 @@ import type { CrossChatHandoff, Event, WorkspaceProfileScope } from '@shared/typ
 import { projectTimeline, renderTimelineItems } from '../lib/timeline'
 import { useAppStore } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
+import { setLocale } from '@shared/i18n'
 
 const profileScope: WorkspaceProfileScope = { profileId: 'profile-a', profileGeneration: 0, serverIdentity: null }
 const event = (patch: Partial<Event> = {}): Event => ({
@@ -22,8 +23,8 @@ const handoff = (patch: Partial<CrossChatHandoff> = {}): CrossChatHandoff => ({
   created_at: '2026-09-10T10:00:00Z', updated_at: '2026-09-10T10:00:00Z', ...patch
 })
 
-function messageRow(value: Event) {
-  const item = renderTimelineItems(projectTimeline([value], []))[0]
+function messageRow(value: Event, prior: Event[] = []) {
+  const item = renderTimelineItems(projectTimeline([...prior, value], []))[0]
   return <TimelineRowView item={item} sessionId={value.session_id} profileScope={profileScope} onFindFile={() => {}} pinnedItemIds={new Set()} />
 }
 
@@ -44,6 +45,7 @@ describe('async agent message cards', () => {
     } as unknown as AgentsDockAPI })
   })
   afterEach(cleanup)
+  afterEach(() => setLocale('en'))
 
   it('shows received text on the right with the saved sender and outgoing text on the left', () => {
     const incoming = render(messageRow(event()))
@@ -71,6 +73,90 @@ describe('async agent message cards', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View message' }))
     expect(screen.getByText('The complete authenticated agent message.')).toBeVisible()
     expect(getHandoff).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the recipient edited revision under the sender name without changing the original sender message', () => {
+    const original = event({ type: 'chat_conversation_message_queued', handoff_preview: 'Sender original body.', message_revision: 0 })
+    const edited = event({ id: 'edited-event', seq: 2, message_edited_by_user: true, message_revision: 1,
+      handoff_preview: 'Recipient edited body.', handoff_body_chars: 22, handoff_body_truncated: false })
+    const saved = structuredClone([original, edited])
+    const view = render(messageRow(edited, [original]))
+    expect(screen.getByText('Research agent')).toBeVisible()
+    expect(screen.getByText('Edited by you')).toBeVisible()
+    expect(screen.getByText('Recipient edited body.')).toBeVisible()
+    expect(screen.queryByText('Sender original body.')).not.toBeInTheDocument()
+    expect(view.container.querySelector('.message-row.user')).toBeNull()
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByText('由你编辑')).toBeVisible()
+    expect(screen.getByText('Research agent')).toBeVisible()
+    act(() => setLocale('en'))
+    view.rerender(messageRow(event({ session_id: 'sender', type: 'chat_conversation_message_registered',
+      handoff_preview: 'Sender original body.' })))
+    expect(screen.getByText('Sender original body.')).toBeVisible()
+    expect(screen.queryByText('Edited by you')).not.toBeInTheDocument()
+    expect([original, edited]).toEqual(saved)
+    expect(getHandoff).not.toHaveBeenCalled()
+  })
+
+  it('discards an in-flight original full body when an edited recipient revision arrives', async () => {
+    let resolve!: (value: CrossChatHandoff) => void
+    getHandoff.mockReturnValue(new Promise<CrossChatHandoff>(done => { resolve = done }))
+    const view = render(messageRow(event({ handoff_preview: 'Original preview…', handoff_body_truncated: true })))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    await waitFor(() => expect(getHandoff).toHaveBeenCalledTimes(1))
+    view.rerender(messageRow(event({ id: 'edited-event', seq: 2, message_edited_by_user: true, message_revision: 1,
+      handoff_preview: 'Recipient edited body.', handoff_body_chars: 22, handoff_body_truncated: false })))
+    await act(async () => resolve(handoff()))
+    expect(screen.getByText('Recipient edited body.')).toBeVisible()
+    expect(screen.queryByText('The complete authenticated agent message.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Original preview…')).not.toBeInTheDocument()
+    expect(getHandoff).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads only the matching edited full body for the recipient and invalidates its cached previous revision', async () => {
+    getHandoff.mockResolvedValue(handoff({ target_body: 'Full edited recipient body, revision one.',
+      message_edited_by_user: true, message_revision: 1 }))
+    const edited = event({ message_edited_by_user: true, message_revision: 1,
+      handoff_preview: 'Edited preview…', handoff_body_chars: 2000, handoff_body_truncated: true })
+    const view = render(messageRow(edited))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    await screen.findByText('Full edited recipient body, revision one.')
+    expect(screen.queryByText('The complete authenticated agent message.')).not.toBeInTheDocument()
+    view.rerender(messageRow(event({ ...edited, id: 'revision-two', seq: 2, message_revision: 2,
+      handoff_preview: 'New edited preview…' }), [edited]))
+    expect(screen.getByText('New edited preview…')).toBeVisible()
+    expect(screen.queryByText('Full edited recipient body, revision one.')).not.toBeInTheDocument()
+    getHandoff.mockResolvedValue(handoff({ target_body: 'Full edited recipient body, revision two.',
+      message_edited_by_user: true, message_revision: 2 }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    await screen.findByText('Full edited recipient body, revision two.')
+    expect(getHandoff).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {}, { target_body: 'Wrong revision body', message_edited_by_user: true, message_revision: 2 },
+    { target_body: 'Unverified body', message_edited_by_user: false, message_revision: 1 },
+    { message_edited_by_user: true, message_revision: 1 }
+  ])('never falls back to the original body when edited detail metadata is missing or mismatched: %j', async patch => {
+    getHandoff.mockResolvedValue(handoff(patch))
+    render(messageRow(event({ message_edited_by_user: true, message_revision: 1,
+      handoff_preview: 'Edited preview…', handoff_body_truncated: true })))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    await screen.findByRole('alert')
+    expect(screen.getByText('Edited preview…')).toBeVisible()
+    expect(screen.queryByText('The complete authenticated agent message.')).not.toBeInTheDocument()
+  })
+
+  it('keeps the sender full body original even when recipient edit metadata is present in detail', async () => {
+    useAppStore.setState({ selectedSessionId: 'sender', chatPanes: { primary: 'sender', secondary: null } })
+    getHandoff.mockResolvedValue(handoff({ target_body: 'Recipient-only edited body.',
+      message_edited_by_user: true, message_revision: 1 }))
+    render(messageRow(event({ session_id: 'sender', type: 'chat_conversation_message_registered',
+      handoff_preview: 'Original preview…', handoff_body_truncated: true })))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    await screen.findByText('The complete authenticated agent message.')
+    expect(screen.queryByText('Recipient-only edited body.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Edited by you')).not.toBeInTheDocument()
   })
 
   it.each([

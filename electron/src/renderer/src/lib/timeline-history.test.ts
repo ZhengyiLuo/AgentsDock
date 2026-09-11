@@ -25,6 +25,16 @@ const page = (sequences: number[], before: number, after: number): TimelinePage 
 })
 
 describe('historical timeline paging', () => {
+  it('keeps source-proven assistant repairs when old same-ID copies bridge live and history pages', () => {
+    const legacy: Event = { ...event(80), imported: true, backend: 'claude', run_id: 'import_mixed', text: 'Old report',
+      provider_origin: { provider: 'claude', event_id: 'source-one', session_id: 'provider-one', timestamp: '2026-07-11T00:00:00.321Z' } }
+    const corrected: Event = { ...legacy, text: '', metadata_only: true, provider_history_repair: 'source_proven_assistant_replay' }
+    const correctedPage = { ...page([80], 79, 20), events: [corrected] }
+    expect(bridgeHistoricalPageToLive(correctedPage, [legacy, event(90)]).events).toEqual([corrected, event(90)])
+    expect(mergeHistoricalPages(correctedPage, { ...correctedPage, events: [legacy] }).events).toEqual([corrected])
+    expect(mergeHistoricalPages({ ...correctedPage, events: [legacy] }, correctedPage).events).toEqual([corrected])
+  })
+
   it('keeps proven same-ID interruption repairs when a historical window bridges a stale live cache', () => {
     const legacy: Event = { ...event(80), type: 'turn_started', imported: true, backend: 'claude', prompt: '[Request interrupted by user]' }
     const corrected: Event = { ...legacy, type: 'provider_interruption', prompt: null,

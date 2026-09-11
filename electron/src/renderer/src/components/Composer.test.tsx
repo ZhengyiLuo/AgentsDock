@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
+import { setLocale } from '@shared/i18n'
 import type { TeamHubStatus, TeamHubTeamDetails, TeamHubWorkspace } from '@shared/team-hub'
 import type { AgentCrossChatRoute, AgentFile, ChatReference, ClaudeRuntimeSnapshot, CodexRuntimeSnapshot, CrossChatHandoffsCapability, Health, PublicServerProfile, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
 import { queueClaudePermissionUpdate } from '../lib/claude-permission-updates'
@@ -145,6 +146,7 @@ const realRequestNewChat = useAppStore.getState().requestNewChat
 describe('Composer', () => {
   afterEach(() => {
     cleanup()
+    setLocale('en')
     resetTransientCloseStackForTests()
     useAppStore.setState({ requestNewChat: realRequestNewChat })
     vi.useRealTimers()
@@ -255,6 +257,60 @@ describe('Composer', () => {
     }
   })
 
+  it.each([false, true])('shows source-scoped Mail grants and revokes without selecting a mention (revision conflict=%s)', async conflict => {
+    const status: TeamHubStatus = {
+      version: 1, profileId: 'profile-a', profileGeneration: 0, serverIdentity: 'server-a', serverName: 'A', generation: 1,
+      hubUrl: 'https://hub.test', hubIdentity: 'hub-a', savedHubIdentity: 'hub-a', transport: 'loopback', designatedHost: true,
+      availabilityMessage: null, availabilityAction: null, canForgetBinding: true, connectionState: 'authenticated', authenticated: true,
+      bootstrapRequired: false, principal: { id: 'service-a', display_name: 'A' },
+      session: { id: 'session-a', device_label: 'A', expires_at: '2027-01-01T00:00:00Z' }, error: null
+    }
+    window.agentsDock.teamHub = {
+      status: vi.fn().mockResolvedValue(status),
+      teamMessagesCapabilities: vi.fn().mockResolvedValue({ available: true, version: 1 }),
+      workspace: vi.fn().mockResolvedValue({ status, teams: [{ id: 'team-mail', kind: 'shared', slug: 'mail', display_name: 'Mail', role: 'owner', status: 'active' }] }),
+      network: vi.fn().mockResolvedValue({ network: { id: 'team-mail', display_name: 'Mail', hub_id: 'hub-a' },
+        servers: [{ id: 'node-mail', server_identity: 'server-mail', display_name: 'Recipient', status: 'active', is_host: false, owned_by_caller: false }],
+        agents: [], next_after_server_id: null, has_more: false })
+    } as unknown as AgentsDockAPI['teamHub']
+    const grant = { route_id: 'mailgrant-one', revision: 'rev-one', display_name: 'Recipient', recipient_kind: 'server' as const,
+      team_id: 'team-mail', target_id: 'node-mail', available: true, unavailable_reason: null, created_at: '', updated_at: '' }
+    const detached = { ...grant, route_id: 'mailgrant-two', target_id: 'node-gone', display_name: 'Departed server', available: false, unavailable_reason: 'target_unavailable' as const }
+    const list = vi.fn().mockResolvedValueOnce({ routes: [grant, detached], max_routes: 16 })
+      .mockResolvedValue({ routes: conflict ? [{ ...grant, revision: 'rev-new' }, detached] : [detached], max_routes: 16 })
+    const remove = vi.fn().mockResolvedValue(conflict ? { status: 'revision_conflict' } : { status: 'deleted', deleted: true, route_id: grant.route_id })
+    window.agentsDock.agentTeamMailRoutes = { list, remove }
+    useAppStore.setState({ health: { ...teamMessagesHealth(), capabilities: { ...teamMessagesHealth().capabilities,
+      agent_team_mail_routes_v1: { available: true, version: 1, max_routes: 16 } } },
+      profiles: [{ id: 'profile-a', name: 'A', serverUrl: 'http://localhost:7850', serverIdentity: 'server-a', hasAccessToken: true,
+        serverSetupComplete: true, connectionState: 'online', cachedUnreadCount: 0 }] })
+    const onSelect = vi.fn()
+    const props = { id: 'mail-grants', sourceSessionId: 'chat-1', mention: { kind: '@@' as const, start: 0, end: 2, query: '' },
+      selectedIndex: 0, supported: true, profileId: 'profile-a', profileGeneration: 0, serverIdentity: 'server-a',
+      onCandidates: vi.fn(), onHighlight: vi.fn(), onSelect }
+    const view = render(<StrictMode><TeamMentionPalette {...props} /></StrictMode>)
+    expect(await screen.findByRole('option', { name: /Recipient.*Mail granted/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Revoke Mail access to Departed server' })).toBeVisible()
+    expect(list).toHaveBeenCalledTimes(1)
+    const networkReads = vi.mocked(window.agentsDock.teamHub.network).mock.calls.length
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('listbox', { name: '团队网络目标' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '撤销对Recipient的信箱访问权限' })).toBeVisible()
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(remove).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(window.agentsDock.teamHub.network).toHaveBeenCalledTimes(networkReads)
+    act(() => setLocale('en'))
+    view.rerender(<StrictMode><TeamMentionPalette {...props} mention={{ ...props.mention, query: 'Recipient' }} /></StrictMode>)
+    expect(list).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke Mail access to Recipient' }))
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+    expect(remove).toHaveBeenCalledExactlyOnceWith({ profileId: 'profile-a', profileGeneration: 0, serverIdentity: 'server-a' }, 'chat-1', 'mailgrant-one', 'rev-one')
+    if (conflict) expect(await screen.findByText('This Mail grant changed. Review it and revoke again.')).toBeVisible()
+    else await waitFor(() => expect(screen.queryByRole('button', { name: 'Revoke Mail access to Recipient' })).not.toBeInTheDocument())
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
   it.each(['workspace', 'roster', 'alias-only'] as const)('revalidates a cached negative %s once on explicit @@ opening', async negativeCache => {
     const status: TeamHubStatus = {
       version: 1, profileId: 'profile-a', profileGeneration: 4, serverIdentity: 'server-local', serverName: 'Local', generation: 3,
@@ -299,6 +355,18 @@ describe('Composer', () => {
     expect(await screen.findByRole('option', { name: /New guest server/ })).toHaveTextContent('Offline · inbox available')
     expect(loadNetwork).toHaveBeenCalledTimes(negativeCache === 'alias-only' ? 2 : 1)
     expect(loadWorkspace).toHaveBeenCalledTimes(negativeCache === 'workspace' ? 2 : 1)
+    if (negativeCache === 'alias-only') {
+      const reads = loadNetwork.mock.calls.length
+      act(() => setLocale('zh-CN'))
+      view.rerender(<StrictMode><TeamMentionPalette {...props} mention={{ ...props.mention, query: '公告' }} /></StrictMode>)
+      fireEvent.click(screen.getByRole('option', { name: /公告.*@@bulletin/ }))
+      expect(props.onSelect).toHaveBeenCalledWith(expect.objectContaining({
+        label: 'Bulletin', code: '@@bulletin',
+        target: { kind: 'recipient', recipient_kind: 'all', team_id: 'team-1', target_id: 'all', display_name_snapshot: 'bulletin' }
+      }))
+      expect(loadNetwork).toHaveBeenCalledTimes(reads)
+      act(() => setLocale('en'))
+    }
     view.rerender(<StrictMode><TeamMentionPalette {...props} mention={{ ...props.mention, query: 'New' }} /></StrictMode>)
     expect(screen.getByRole('option', { name: /New guest server/ })).toBeVisible()
     expect(loadNetwork).toHaveBeenCalledTimes(negativeCache === 'alias-only' ? 2 : 1)
@@ -1227,6 +1295,7 @@ describe('Composer', () => {
     useAppStore.setState({
       health: {
         ok: true,
+        api_contract_version: 15,
         capabilities: {
           cursor_backend: {
             available: true,
@@ -2668,7 +2737,9 @@ describe('Composer', () => {
     expect(within(row).getByText('Research agent')).toHaveClass('queue-agent-sender')
     expect(within(row).queryByText('Renamed research agent')).not.toBeInTheDocument()
     expect(within(row).queryByText(/Cross-chat delivery/)).not.toBeInTheDocument()
-    expect(within(row).queryByRole('button', { name: 'Send now' })).not.toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Send now' })).toBeDisabled()
+    expect(within(row).getByRole('button', { name: 'Edit' })).toBeDisabled()
+    expect(within(row).getByRole('button', { name: 'Send now' })).toHaveAttribute('title', 'Update AgentsServer to edit or send this agent message now.')
     expect(within(row).queryByRole('button', { name: 'Skip incoming delivery' })).not.toBeInTheDocument()
     expect(within(row).getByTitle('Drag to reorder')).toBeEnabled()
     expect(screen.getByText('User follow-up').closest('.queued-row')).not.toHaveClass('agent-message')
@@ -2684,6 +2755,83 @@ describe('Composer', () => {
     expect(runNow).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByText('Authenticated agent message')).not.toBeInTheDocument())
     expect(screen.getByText('User follow-up')).toBeVisible()
+  })
+
+  it.each([false, true])('edits only the exact async body revision without grants or mandatory refresh (conflict=%s)', async conflict => {
+    const body = 'KD Dev result: ' + 'Measured rollout detail. '.repeat(35) + 'END-EXACT-BODY'
+    const agent = asyncAgentQueuedTurn({ source_title: 'KD Dev', prompt: 'Agent-authored same-server handoff',
+      message_body: body, message_revision: 0, message_edited_by_user: false })
+    setAsyncAgentQueue([agent])
+    useAppStore.setState({ health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({
+      features: { async_queued_message_controls: true, exact_queued_delivery_skip: true } }) } } })
+    const update = conflict ? vi.fn().mockRejectedValue(new Error('message revision changed')) : vi.fn().mockResolvedValue(true)
+    const list = vi.fn().mockRejectedValue(new Error('unavailable optional refresh'))
+    const handoffGet = vi.fn()
+    window.agentsDock.queue = { update, list, runNow: vi.fn() } as unknown as AgentsDockAPI['queue']
+    window.agentsDock.handoffs = { get: handoffGet } as unknown as AgentsDockAPI['handoffs']
+    render(<Composer />)
+    const row = screen.getByText('KD Dev').closest('.queued-row') as HTMLElement
+    expect(row).toHaveClass('agent-message')
+    expect(within(row).queryByText('Agent-authored same-server handoff')).not.toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Send now' })).toBeEnabled()
+    expect(within(row).queryByText(/END-EXACT-BODY/)).not.toBeInTheDocument()
+    fireEvent.click(within(row).getByRole('button', { name: 'View message' }))
+    expect(await within(row).findByText(body)).toBeVisible()
+    expect(handoffGet).not.toHaveBeenCalled()
+    fireEvent.click(within(row).getByRole('button', { name: 'Edit' }))
+    const editor = await screen.findByRole('textbox', { name: 'Edit agent message' })
+    expect(editor).toHaveValue(body)
+    const changed = 'My exact edit @Local @@Remote is plain message text.'
+    fireEvent.change(editor, { target: { value: changed } })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(update).toHaveBeenCalledExactlyOnceWith('chat-1', 'queued-agent', changed, undefined, undefined, undefined, 0))
+    if (conflict) {
+      await waitFor(() => expect(useAppStore.getState().error).toBe('message revision changed'))
+      expect(editor).toHaveValue(changed)
+      expect(useAppStore.getState().snapshots['chat-1'].queuedTurns[0].message_revision).toBe(0)
+    } else {
+      await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Edit agent message' })).not.toBeInTheDocument())
+      expect(within(row).getByText('Edited by you')).toBeVisible()
+      expect(useAppStore.getState().snapshots['chat-1'].queuedTurns[0]).toMatchObject({
+        message_body: changed, message_revision: 1, message_edited_by_user: true, source_title: 'KD Dev', purpose: 'cross_chat_handoff_delivery'
+      })
+    }
+    expect(list).not.toHaveBeenCalled()
+  })
+
+  it('prioritizes a user message without deleting the earlier agent message on a capable server', async () => {
+    const agent = asyncAgentQueuedTurn({ message_body: 'Earlier agent body', message_revision: 0 })
+    const ordinary = { queued_id: 'later-user', prompt: 'Prioritize this user message', file_ids: [], position: 2 }
+    setAsyncAgentQueue([agent, ordinary])
+    useAppStore.setState({ health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability({
+      features: { async_queued_message_controls: true, exact_queued_delivery_skip: true } }) } } })
+    const runNow = vi.fn().mockResolvedValue({ ok: true })
+    const skipCrossChatDelivery = vi.fn()
+    window.agentsDock.queue = { runNow, skipCrossChatDelivery, list: vi.fn().mockResolvedValue([agent]) } as unknown as AgentsDockAPI['queue']
+    render(<Composer />)
+    const userRow = screen.getByText(ordinary.prompt).closest('.queued-row') as HTMLElement
+    fireEvent.click(within(userRow).getByRole('button', { name: 'Send now' }))
+    await waitFor(() => expect(runNow).toHaveBeenCalledExactlyOnceWith('chat-1', 'later-user'))
+    await waitFor(() => expect(screen.queryByText(ordinary.prompt)).not.toBeInTheDocument())
+    expect(screen.getByText('Earlier agent body')).toBeVisible()
+    expect(skipCrossChatDelivery).not.toHaveBeenCalled()
+  })
+
+  it('loads an old-server async body only on View and keeps unsupported actions disabled', async () => {
+    const agent = asyncAgentQueuedTurn({ source_title: 'KD Dev', prompt: 'Agent-authored same-server handoff' })
+    setAsyncAgentQueue([agent])
+    const get = vi.fn().mockResolvedValue({ id: 'envelope-1', target_session_id: 'chat-1', source_session_id: 'chat-sender',
+      queued_id: 'queued-agent', conversation_mode: 'async_route_v1', body: 'Actual older-server message body.' })
+    window.agentsDock.handoffs = { get } as unknown as AgentsDockAPI['handoffs']
+    render(<Composer />)
+    expect(screen.getByText('Message from KD Dev')).toBeVisible()
+    expect(get).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
+    expect(await screen.findByText('Actual older-server message body.')).toBeVisible()
+    expect(get).toHaveBeenCalledExactlyOnceWith('envelope-1')
   })
 
   it.each([
@@ -4026,6 +4174,351 @@ describe('Composer', () => {
     await waitFor(() => expect(screen.queryByRole('option', { name: /^Import Chat/ })).not.toBeInTheDocument())
   })
 
+  it('lazily lists Codex skills, collapses exact duplicates, distinguishes variants, and sends the selected opaque binding', async () => {
+    const list = vi.fn().mockResolvedValue({
+      backend: 'codex',
+      revision: 'skills-rev-4',
+      support: { available: true, mode: 'native' },
+      commands: [
+        {
+          id: 'opaque-project', name: 'review-code', label: 'Review code',
+          description: 'Review this change', scope: 'project', source: '.agents',
+          kind: 'skill', invocation: '/review-code'
+        },
+        {
+          id: 'opaque-project-mirror', name: 'review-code', label: 'Review code',
+          description: 'Review this change', scope: 'project', source: '.agents',
+          kind: 'skill', invocation: '/review-code'
+        },
+        {
+          id: 'opaque-user', name: 'review-code', label: 'Review code',
+          description: 'Review using personal guidance', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/review-code'
+        },
+        {
+          id: 'opaque-collision', name: 'model', label: 'Provider model command',
+          description: 'Must not replace AgentsDock model', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/model'
+        },
+        {
+          id: 'opaque-path', name: 'unsafe', label: 'Unsafe', description: 'Invalid invocation',
+          scope: 'user', source: 'Codex', kind: 'skill', invocation: '/Users/me/unsafe'
+        },
+        {
+          id: 'opaque-safe', name: 'safe', label: 'No path leak', description: 'Valid command',
+          scope: 'project', source: '/Users/me/.codex/skills/safe', kind: 'skill', invocation: '/safe'
+        }
+      ]
+    })
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }, turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      health: {
+        ok: true,
+        api_contract_version: 15,
+        capabilities: {
+          local_session_import_v1: {
+            available: true, required: false, message: '', action: null,
+            version: 1, max_batch_items: 25, max_list_items: 500
+          }
+        }
+      }
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(list).not.toHaveBeenCalled()
+
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '  /')
+    const skills = await screen.findAllByRole('option', { name: /^Review code/ })
+
+    expect(list).toHaveBeenCalledOnce()
+    expect(screen.getByRole('group', { name: 'Skills' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^Import Chat/ }).closest('[role="group"]')).toHaveAttribute('aria-label', 'AgentsDock')
+    expect(skills).toHaveLength(2)
+    expect(skills[0]).toHaveTextContent('project · .agents')
+    expect(skills[1]).toHaveTextContent('user · Codex')
+    expect(screen.queryByRole('option', { name: /^Provider model command/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /^Unsafe/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^No path leak/ })).not.toHaveTextContent('/Users/me')
+
+    await user.click(skills[0])
+    expect(editor).toHaveFocus()
+    expect(editor).toHaveValue('/review-code ')
+    await user.type(editor, 'focus on concurrency')
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '/review-code focus on concurrency',
+      skillSelection: { id: 'opaque-project', revision: 'skills-rev-4' }
+    })))
+  })
+
+  it('clears a selected provider-command binding when its leading token is edited or displaced', async () => {
+    const list = vi.fn().mockResolvedValue({
+      backend: 'claude', revision: 'commands-rev-1',
+      support: { available: true, mode: 'sdk' },
+      commands: [{
+        id: 'opaque-claude', name: 'plugin:review_code.v2', label: 'Review code',
+        description: 'Claude command', scope: 'plugin', source: 'reviewer',
+        kind: 'command', invocation: '/plugin:review_code.v2'
+      }]
+    })
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'claude' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }, turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '/plugin:review')
+    expect(await screen.findByRole('group', { name: 'Claude commands' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /^Review code/ }))
+    fireEvent.change(editor, {
+      target: { value: '/plugin:review_code.v3 explain', selectionStart: 35, selectionEnd: 35 }
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send.mock.calls[0]?.[0]).not.toHaveProperty('skillSelection')
+
+    send.mockClear()
+    await user.type(editor, '/plugin:review')
+    await user.click(screen.getByRole('option', { name: /^Review code/ }))
+    fireEvent.change(editor, {
+      target: { value: '\ufeff/plugin:review_code.v2 explain', selectionStart: 31, selectionEnd: 31 }
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send.mock.calls[0]?.[0]).not.toHaveProperty('skillSelection')
+
+    for (const invalidBoundary of ['\v', '\f']) {
+      send.mockClear()
+      await user.clear(editor)
+      await user.type(editor, '/plugin:review')
+      await user.click(screen.getByRole('option', { name: /^Review code/ }))
+      const prompt = `/plugin:review_code.v2${invalidBoundary}explain`
+      fireEvent.change(editor, {
+        target: { value: prompt, selectionStart: prompt.length, selectionEnd: prompt.length }
+      })
+      fireEvent.keyDown(editor, { key: 'Enter' })
+
+      await waitFor(() => expect(send).toHaveBeenCalledOnce())
+      expect(send.mock.calls[0]?.[0]).not.toHaveProperty('skillSelection')
+    }
+  })
+
+  it('refreshes stale provider commands after a selected send fails without rebinding the restored draft', async () => {
+    const list = vi.fn()
+      .mockResolvedValueOnce({
+        backend: 'codex', revision: 'stale-rev',
+        support: { available: true, mode: 'native' },
+        commands: [{
+          id: 'opaque-stale', name: 'review-code', label: 'Review code',
+          description: 'Stale command', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/review-code'
+        }]
+      })
+      .mockResolvedValueOnce({
+        backend: 'codex', revision: 'fresh-rev',
+        support: { available: true, mode: 'native' },
+        commands: [{
+          id: 'opaque-fresh', name: 'review-code', label: 'Review code',
+          description: 'Fresh command', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/review-code'
+        }]
+      })
+    const send = vi.fn()
+      .mockRejectedValueOnce(new Error(
+        "Error invoking remote method 'turns:send': Error: the provider command list changed; choose the command again"
+      ))
+      .mockResolvedValueOnce({ session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }, turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', cwd: '/test/provider-stale' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, '/review')
+    await user.click(await screen.findByRole('option', { name: /^Review code/ }))
+    await user.type(editor, 'focus on races')
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(editor).toHaveValue('/review-code focus on races'))
+    await waitFor(() => expect(list).toHaveBeenNthCalledWith(2, 'chat-1', true))
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(send.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      skillSelection: { id: 'opaque-stale', revision: 'stale-rev' }
+    }))
+    expect(send.mock.calls[1]?.[0]).not.toHaveProperty('skillSelection')
+  })
+
+  it('keeps static commands usable when discovery fails and retries with an explicit refresh', async () => {
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error('endpoint temporarily unavailable'))
+      .mockResolvedValueOnce({
+        backend: 'codex', revision: 'retry-rev',
+        support: { available: true, mode: 'native' },
+        commands: [{
+          id: 'opaque-retry', name: 'after-retry', label: 'After retry',
+          description: 'Loaded after refreshing', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/after-retry'
+        }]
+      })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', cwd: '/test/provider-retry' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.type(screen.getByPlaceholderText('Message'), '/')
+    expect(screen.getByRole('option', { name: /Attach files/ })).toBeInTheDocument()
+    expect(await screen.findByText('Couldn’t load provider commands.')).toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('Message'), 'after')
+    expect(screen.getByText('Couldn’t load provider commands.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByRole('option', { name: /^After retry/ })).toBeInTheDocument()
+    expect(list).toHaveBeenNthCalledWith(1, 'chat-1', false)
+    expect(list).toHaveBeenNthCalledWith(2, 'chat-1', true)
+  })
+
+  it('refreshes an expired provider-command cache when the slash palette is reopened', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000)
+    const list = vi.fn().mockResolvedValue({
+      backend: 'codex', revision: 'ttl-rev',
+      support: { available: true, mode: 'native' },
+      commands: [{
+        id: 'opaque-ttl', name: 'ttl-skill', label: 'TTL skill',
+        description: 'Reloaded after expiry', scope: 'user', source: 'Codex',
+        kind: 'skill', invocation: '/ttl-skill'
+      }]
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', cwd: '/test/provider-ttl' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, '/')
+    expect(await screen.findByRole('option', { name: /^TTL skill/ })).toBeInTheDocument()
+    expect(list).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(editor, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+    await user.clear(editor)
+    now.mockReturnValue(40_001)
+    await user.type(editor, '/')
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+    expect(list).toHaveBeenLastCalledWith('chat-1', true)
+    now.mockRestore()
+  })
+
+  it('discards provider commands returned after the active chat changes', async () => {
+    const first = deferred<{
+      backend: 'codex'; revision: string
+      support: { available: true; mode: string }
+      commands: Array<{ id: string; name: string; label: string; description: string; kind: string; invocation: string }>
+    }>()
+    const list = vi.fn((sessionId: string) => sessionId === 'chat-1'
+      ? first.promise
+      : Promise.resolve({
+          backend: 'codex' as const, revision: 'second-rev',
+          support: { available: true as const, mode: 'native' },
+          commands: [{
+            id: 'opaque-second', name: 'second-chat', label: 'Second chat command',
+            description: 'Current inventory', kind: 'skill', invocation: '/second-chat'
+          }]
+        }))
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [
+        { id: 'chat-1', title: 'First', backend: 'codex', cwd: '/test/first' },
+        { id: 'chat-2', title: 'Second', backend: 'codex', cwd: '/test/second' }
+      ]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '/')
+    expect(list).toHaveBeenCalledWith('chat-1', false)
+
+    act(() => useAppStore.setState({
+      selectedSessionId: 'chat-2',
+      chatPanes: { primary: 'chat-2', secondary: null },
+      focusedChatPane: 'primary'
+    }))
+    await waitFor(() => expect(editor).toHaveValue(''))
+    await user.type(editor, '/')
+    expect(await screen.findByRole('option', { name: /^Second chat command/ })).toBeInTheDocument()
+
+    await act(async () => first.resolve({
+      backend: 'codex', revision: 'first-rev', support: { available: true, mode: 'native' },
+      commands: [{
+        id: 'opaque-first', name: 'first-chat', label: 'First chat command',
+        description: 'Stale inventory', kind: 'skill', invocation: '/first-chat'
+      }]
+    }))
+    expect(screen.queryByRole('option', { name: /^First chat command/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^Second chat command/ })).toBeInTheDocument()
+  })
+
   it('offers Claude plan controls only when the server and session make them actionable', async () => {
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -4866,6 +5359,34 @@ describe('Composer', () => {
     expect(within(picker).getByRole('option', { name: /Granted target/ })).toBeEnabled()
     expect(within(picker).getByRole('option', { name: /New target/ })).toBeDisabled()
     expect(within(picker).getByRole('option', { name: /New target/ })).toHaveAttribute('title', expect.stringMatching(/Revoke a granted route/))
+  })
+
+  it('selects and sends a new chat after twenty stored routes when max_routes is null', async () => {
+    const routes = Array.from({ length: 20 }, (_, index) => grantedComposerRoute(`granted-${index}`, `Granted ${index}`))
+    const routeSnapshot = { routes, max_routes: null }
+    const list = vi.fn().mockResolvedValue(routeSnapshot)
+    const send = vi.fn().mockResolvedValue({ session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+      agentRoutes: { list }, turns: { send }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ activeProfileId: 'profile-a', profileGeneration: 7, connected: true,
+      profiles: [{ id: 'profile-a', name: 'Server', serverIdentity: 'server-a' } as PublicServerProfile],
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex' }, { id: 'chat-new', title: 'New target', backend: 'claude' }],
+      health: { ok: true, capabilities: { cross_chat_handoffs_v1: durableComposerCapability() } },
+      agentRoutesBySession: { 'chat-1': routeSnapshot }, chatReferencesBySession: {} })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await waitFor(() => expect(list).toHaveBeenCalled())
+    await user.type(screen.getByPlaceholderText('Message'), 'Ask @New')
+    const target = await screen.findByRole('option', { name: /New target/ })
+    expect(target).toBeEnabled()
+    expect(screen.queryByText('Route access limit reached')).not.toBeInTheDocument()
+    await user.click(target)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'chat-1',
+      chatReferences: [expect.objectContaining({ session_id: 'chat-new', grant_intent: true, action: 'route' })] })))
+    expect(useAppStore.getState().error).toBeNull()
   })
 
   it('labels existing grants in the inline picker and revokes by revision without changing draft text', async () => {

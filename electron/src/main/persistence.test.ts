@@ -60,6 +60,24 @@ describe('prepared statement reuse', () => {
   })
 })
 
+describe('source-proven import repair persistence', () => {
+  it('keeps an exact repair through stale replay and cached snapshots without touching manual text', () => {
+    const value = cache()
+    value.putSession('server', session('chat'))
+    const prompt = 'scheduled monitor '.repeat(800)
+    const legacy: Event = { ...event('chat', 0, ''), type: 'turn_started', backend: 'claude',
+      run_id: 'import_history', imported: true, prompt }
+    const repaired: Event = { ...legacy, prompt: '', provider_history_repair: 'source_proven_import' }
+    const manual: Event = { ...event('chat', 1, ''), type: 'turn_started', backend: 'claude',
+      prompt: prompt + ' genuine manual tail' }
+    value.putEvents('server', 'chat', [legacy, manual])
+    value.putEvents('server', 'chat', [repaired])
+    value.putEvents('server', 'chat', [legacy])
+    expect(value.snapshot('server', 'chat')?.events).toEqual([repaired, manual])
+    expect(value.searchEvents('server', 'chat', 'scheduled')).toHaveLength(1)
+  })
+})
+
 describe('transaction error preservation', () => {
   it('keeps the primary write error when SQLite has already rolled back the transaction', () => {
     const value = cache()

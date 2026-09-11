@@ -100,6 +100,7 @@ if (!app.requestSingleInstanceLock()) {
       teamHub = new LazyTeamHubService(() => new TeamHubService({
         discovery: {
           currentScope: () => appService.teamHubServerScope(),
+          currentMailHintScope: expected => appService.currentMailHintScope(expected),
           currentDiscovery: expected => appService.currentTeamHubDiscovery(expected),
           discover: expected => appService.discoverTeamHub(expected),
           configureTeamHubServerRole: (expected, input) => appService.configureTeamHubServerRole(expected, input),

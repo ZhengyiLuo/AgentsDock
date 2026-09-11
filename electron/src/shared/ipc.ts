@@ -3,6 +3,7 @@ import type {
   AgentCrossChatRoute,
   AgentCrossChatRouteUpdateResult,
   AgentCrossChatRoutesSnapshot,
+  AgentTeamMailRoutesSnapshot,
   AgentTextFile,
   AppUpdateStatus,
   AppUpdateTrack,
@@ -56,6 +57,7 @@ import type {
   ProfileNotificationPayload,
   ProviderReloadResult,
   ProfileSessionSearchResult,
+  ProviderCommandsSnapshot,
   PublicServerProfile,
   PublicServerSettings,
   QueuedCrossChatDeliveryIdentity,
@@ -201,6 +203,9 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  mailHints?: {
+    acknowledgePage(input: import('./team-mail-hints').MailHintPageAcknowledgment): Promise<import('./team-mail-hints').MailHintProjection | null>
+  }
   bootstrap(): Promise<BootstrapPayload>
   language: {
     get(): Promise<LanguageSettingsSnapshot>
@@ -249,6 +254,7 @@ export interface AgentsDockAPI {
     teamMessagesCapabilities(scope: TeamHubScope): Promise<TeamMessagesCapability>
     teamMessages(scope: TeamHubScope, query: TeamMessageQuery): Promise<TeamMessagePage>
     teamMessage(scope: TeamHubScope, teamId: string, messageId: string): Promise<TeamMessage>
+    teamMessageThread(scope: TeamHubScope, query: import('./team-network').TeamMessageThreadQuery): Promise<import('./team-network').TeamMessageThreadPage>
     createTeamMessage(scope: TeamHubScope, input: TeamMessageCreateInput): Promise<TeamMessage>
     recordTeamMessageReceipt(scope: TeamHubScope, input: TeamMessageReceiptInput): Promise<TeamMessageReceiptResult>
     setTeamMessageMailboxState(scope: TeamHubScope, input: TeamMailboxStateInput): Promise<TeamMailboxStateResult>
@@ -343,6 +349,9 @@ export interface AgentsDockAPI {
     listLocal(): Promise<LocalSessionCandidate[]>
     bulkImport(items: BulkImportSessionItem[]): Promise<BulkImportSessionResult[]>
   }
+  providerCommands: {
+    list(sessionId: string, refresh?: boolean): Promise<ProviderCommandsSnapshot>
+  }
   timeline: {
     cached(sessionId: string): Promise<SessionSnapshot | null>
     open(sessionId: string, forceRemote?: boolean): Promise<SessionSnapshot>
@@ -411,7 +420,8 @@ export interface AgentsDockAPI {
       prompt: string,
       chatReferences?: ChatReference[],
       clientCapabilities?: string[],
-      teamReferences?: TeamReference[]
+      teamReferences?: TeamReference[],
+      expectedMessageRevision?: number
     ): Promise<boolean>
     remove(sessionId: string, queuedId: string): Promise<boolean>
     skipCrossChatDelivery(sessionId: string, queuedId: string, identity: QueuedCrossChatDeliveryIdentity): Promise<boolean>
@@ -423,6 +433,10 @@ export interface AgentsDockAPI {
     search(scope: WorkspaceProfileScope, query: string, excludeSessionId: string, limit?: number): Promise<ChatSearchSnapshot>
     create(scope: WorkspaceProfileScope, sessionId: string, input: CreateAgentCrossChatRouteInput): Promise<AgentCrossChatRoute>
     update(scope: WorkspaceProfileScope, sessionId: string, routeId: string, input: UpdateAgentCrossChatRouteInput): Promise<AgentCrossChatRouteUpdateResult>
+    remove(scope: WorkspaceProfileScope, sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResult>
+  }
+  agentTeamMailRoutes: {
+    list(scope: WorkspaceProfileScope, sessionId: string): Promise<AgentTeamMailRoutesSnapshot>
     remove(scope: WorkspaceProfileScope, sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResult>
   }
   handoffs: {

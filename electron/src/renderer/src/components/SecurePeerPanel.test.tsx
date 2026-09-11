@@ -5,6 +5,7 @@ import type { AgentsDockAPI } from '@shared/ipc'
 import type { SecurePeerControlStatus, SecurePeerPairing } from '@shared/secure-peer'
 import type { TeamHubStatus, TeamHubTeamDetails, TeamHubWorkspace } from '@shared/team-hub'
 import { SecurePeerPanel } from './SecurePeerPanel'
+import { setLocale } from '@shared/i18n'
 
 const fingerprint = `sha256:${'a'.repeat(64)}`
 const certificate = `sha256:${'b'.repeat(64)}`
@@ -179,12 +180,14 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  setLocale('en')
   window.localStorage.clear()
   vi.stubGlobal('crypto', { randomUUID: vi.fn(() => '42e7bb2e-3b47-4be7-89fc-2cecd90f4434') })
 })
 
 afterEach(() => {
   cleanup()
+  setLocale('en')
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -449,6 +452,35 @@ describe('automatic secure peer approval completion', () => {
 })
 
 describe('SecurePeerPanel', () => {
+  it('switches host approval copy without changing names, pairing codes or request counts', async () => {
+    const incoming = pairing({ direction: 'incoming', peerDisplayName: 'Exact QA server' })
+    const { teamHub } = installAPI({ securePeerStatus: vi.fn().mockResolvedValue(control({
+      profileId: hostStatus.profileId, serverIdentity: hostStatus.serverIdentity!, pairings: [incoming]
+    })) })
+    render(<SecurePeerPanel status={hostStatus} details={details} workspace={workspace} />)
+    await screen.findByRole('button', { name: 'Approve' })
+    const counts = Object.fromEntries(Object.entries(teamHub).map(([key, fn]) => [key, vi.mocked(fn).mock.calls.length]))
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('button', { name: '批准' })).toBeDisabled()
+    expect(screen.getByLabelText('六词配对码')).toHaveTextContent(incoming.sasWords.join(''))
+    expect(screen.getByText('Exact QA server')).toBeVisible()
+    expect(screen.getByRole('button', { name: '刷新连接状态' })).toBeEnabled()
+    act(() => setLocale('en'))
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
+    expect(Object.fromEntries(Object.entries(teamHub).map(([key, fn]) => [key, vi.mocked(fn).mock.calls.length]))).toEqual(counts)
+  })
+
+  it('switches a saved local error message without retrying the failed operation', async () => {
+    const { teamHub, native } = installAPI()
+    native.readClipboard.mockRejectedValue(null)
+    render(<SecurePeerPanel status={peerStatus} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Paste invite' }))
+    await screen.findByText('Server connection failed.')
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByText('服务器连接失败。')).toBeVisible()
+    expect(native.readClipboard).toHaveBeenCalledTimes(1)
+    expect(teamHub.securePeerStatus).toHaveBeenCalledTimes(1)
+  })
   it('gives a fresh designated host one reachable-address field and one Copy invite link path', async () => {
     const link = `agentsdock://secure-peer/join?host=100.64.0.1&port=7851&fingerprint=${encodeURIComponent(fingerprint)}`
     const enabled = control({

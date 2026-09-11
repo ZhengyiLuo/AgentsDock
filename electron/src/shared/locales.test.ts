@@ -52,8 +52,8 @@ describe('localization catalog integrity', () => {
       expect(Object.keys(catalog).sort(), locale).toEqual(Object.keys(english).sort())
       for (const [key, translated] of Object.entries(catalog)) {
         expect(translated.trim(), `${locale}: ${key}`).not.toBe('')
-        // Equal English/translated values are intentional for product names
-        // and the Team Network feature; completeness does not require changes.
+        // Equal English/translated values are intentional for product names;
+        // feature UI still uses the selected locale.
         const englishParams = placeholders(english[key]).filter(name => (
           locale !== 'zh-CN' || key !== 'ui.import.groupedCounts' || !['chats', 'folderLabel'].includes(name)
         ))

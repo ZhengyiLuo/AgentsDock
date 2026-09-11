@@ -1,3 +1,5 @@
+import { getLocale } from '@shared/i18n'
+import { t, useLocale } from '../lib/i18n'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as ContextMenu from '@radix-ui/react-context-menu'
@@ -33,6 +35,7 @@ import {
   X
 } from 'lucide-react'
 import type { TeamHubScope } from '@shared/team-hub'
+import { parseMailboxCoverage, type MailArrivalCursor, type MailboxCoverage, type MailHintScope } from '@shared/team-mail-hints'
 import type {
   TeamAttachment,
   TeamMessage,
@@ -61,13 +64,13 @@ import type { NativeFileRef } from '@shared/types'
 import { dispatchTeamNetworkMessageDeleted } from '../lib/team-network-events'
 import { teamMailDisplayTitle } from '../lib/team-message-title'
 import { openTeamMessageLink, teamMessageLinkURL } from '../lib/team-message-links'
-import { flushMailReplyDraft, queueMailReplyDraft, readMailReplyDraft, saveMailReplyDraft } from '../lib/team-mail-reply-draft'
 import {
   peekTeamMessagesSnapshot,
   writeTeamMessagesSnapshot,
   type TeamMessagesSnapshotQuery
 } from '../lib/team-network-snapshot-cache'
 import { MarkdownContent } from './MarkdownContent'
+import { acknowledgeMailHintPage, captureMailHintScope, sameMailHintScope } from '../store/app-store'
 import './TeamMessagesBoard.css'
 
 const MAX_CATCH_UP_PAGES_PER_REQUEST = 16
@@ -117,6 +120,7 @@ export function TeamMessagesBoard({
   callerPostingKind = null,
   canWrite,
   canManageMessages = false,
+  canHostDelete = false,
   draftIdentity = 'unknown',
   initialAddress = null,
   mailboxRequestId = 0,
@@ -141,6 +145,7 @@ export function TeamMessagesBoard({
   callerPostingKind?: 'human' | 'server' | null
   canWrite: boolean
   canManageMessages?: boolean
+  canHostDelete?: boolean
   draftIdentity?: string
   initialAddress?: TeamMessageAddress | null
   mailboxRequestId?: number
@@ -152,10 +157,11 @@ export function TeamMessagesBoard({
   onInitialFeedLoadConsumed?: (load: TeamFeedInitialLoad) => void
   legacyBulletinPosts?: TeamNetworkBulletinPost[]
   routeTargets?: TeamMailRouteTarget[]
-  onRouteMessage?: (message: TeamMessageSummary, sessionId: string) => void
+  onRouteMessage?: (message: TeamMessageSummary, sessionId: string, intent?: 'read' | 'reply') => void
   onUnreadSnapshot?: (count: number, hasMore: boolean) => void
   lifecycleCacheKey?: string
 }) {
+  useLocale()
   if (section === 'feed') {
     return <TeamFeed
       scope={scope}
@@ -163,6 +169,7 @@ export function TeamMessagesBoard({
       capability={capability}
       canWrite={canWrite}
       canManageMessages={canManageMessages}
+      canHostDelete={canHostDelete && capability.host_content_deletion === true}
       addresses={addresses}
       principalId={principalId}
       callerPostingKind={callerPostingKind}
@@ -179,17 +186,18 @@ export function TeamMessagesBoard({
     />
   }
   if (section === 'mail') {
-    return <TeamMail scope={scope} teamId={teamId} capability={capability} canWrite={canWrite} callerPostingKind={callerPostingKind} draftIdentity={draftIdentity} addresses={addresses} canManageMessages={canManageMessages} initialAddress={initialAddress} mailboxRequestId={mailboxRequestId} initialMessageId={initialMessageId} initialMailboxBox={initialMailboxBox} onInitialMessageConsumed={onInitialMessageConsumed} onAddressChange={onAddressChange} routeTargets={routeTargets} onRouteMessage={onRouteMessage} onUnreadSnapshot={onUnreadSnapshot} lifecycleCacheKey={lifecycleCacheKey} />
+    return <TeamMail scope={scope} teamId={teamId} capability={capability} canWrite={canWrite} callerPostingKind={callerPostingKind} draftIdentity={draftIdentity} addresses={addresses} canManageMessages={canManageMessages} canHostDelete={canHostDelete && capability.host_content_deletion === true} initialAddress={initialAddress} mailboxRequestId={mailboxRequestId} initialMessageId={initialMessageId} initialMailboxBox={initialMailboxBox} onInitialMessageConsumed={onInitialMessageConsumed} onAddressChange={onAddressChange} routeTargets={routeTargets} onRouteMessage={onRouteMessage} onUnreadSnapshot={onUnreadSnapshot} lifecycleCacheKey={lifecycleCacheKey} />
   }
   return <TeamSkills scope={scope} teamId={teamId} capability={capability} canWrite={canWrite} />
 }
 
-function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, addresses, principalId, callerPostingKind, draftIdentity, initialLoad, onInitialLoadConsumed, legacyBulletinPosts, routeTargets, onRouteMessage, lifecycleCacheKey, initialMessageId, mailboxRequestId, onInitialMessageConsumed }: {
+function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canHostDelete, addresses, principalId, callerPostingKind, draftIdentity, initialLoad, onInitialLoadConsumed, legacyBulletinPosts, routeTargets, onRouteMessage, lifecycleCacheKey, initialMessageId, mailboxRequestId, onInitialMessageConsumed }: {
   scope: TeamHubScope
   teamId: string
   capability: TeamMessagesCapability
   canWrite: boolean
   canManageMessages: boolean
+  canHostDelete: boolean
   addresses: TeamMessageAddress[]
   principalId: string | null
   callerPostingKind: 'human' | 'server' | null
@@ -198,12 +206,13 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, addr
   onInitialLoadConsumed?: (load: TeamFeedInitialLoad) => void
   legacyBulletinPosts: TeamNetworkBulletinPost[]
   routeTargets: TeamMailRouteTarget[]
-  onRouteMessage?: (message: TeamMessageSummary, sessionId: string) => void
+  onRouteMessage?: (message: TeamMessageSummary, sessionId: string, intent?: 'read' | 'reply') => void
   lifecycleCacheKey: string
   initialMessageId: string | null
   mailboxRequestId: number
   onInitialMessageConsumed?: () => void
 }) {
+  useLocale()
   const initialLoadRef = useRef(initialLoad)
   const feed = useTeamMessages(
     scope,
@@ -345,28 +354,28 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, addr
     return <MessageDetailLoader summary={selected} initialMessage={linked.message} scope={scope} teamId={teamId} onBack={() => setSelected(null)}
       routeTargets={routeTargets} onRoute={onRouteMessage ? sessionId => onRouteMessage(selected, sessionId) : undefined} />
   }
-  return <section ref={bulletinSurface} className="network-v2-surface" aria-label="Team Bulletin" tabIndex={-1}>
+  return <section ref={bulletinSurface} className="network-v2-surface" aria-label={t('teamNetwork.mail.teamBulletin')} tabIndex={-1}>
     <SurfaceHeader
       icon={<RadioTower size={20} />}
-      title="Bulletin"
-      description="Shared announcements and skills."
+      title={t('teamNetwork.mail.bulletin')}
+      description={t('teamNetwork.mail.bulletinDescription')}
       loading={feed.loading}
       onRefresh={() => { void feed.refresh(); void deletionJournal.refresh() }}
     />
     {feed.error && <InlineError message={feed.error} onRetry={() => { void feed.refresh(); void deletionJournal.refresh() }} />}
     <div className="network-v2-scroll network-v2-feed-stream">
-      {feed.loading && <div className="network-v2-feed-sync" role="status"><LoaderCircle className="spin" size={15} />Syncing current Bulletin posts…</div>}
-      {!feed.loading && entries.length === 0 && <EmptyState icon={<RadioTower size={23} />} title="Nothing broadcast yet" body="Messages, images, videos, and files shared with everyone will collect here." />}
+      {feed.loading && <div className="network-v2-feed-sync" role="status"><LoaderCircle className="spin" size={15} />{t('teamNetwork.mail.syncBulletin')}</div>}
+      {!feed.loading && entries.length === 0 && <EmptyState icon={<RadioTower size={23} />} title={t('teamNetwork.mail.emptyBulletinTitle')} body={t('teamNetwork.mail.emptyBulletinBody')} />}
       {entries.map(entry => entry.message
         ? <FeedMessageCard
           key={entry.id}
           message={entry.message}
           scope={scope}
-          canDelete={deletionJournal.supported && (entry.message.kind === 'skill'
+          canDelete={deletionJournal.supported && (canHostDelete || (entry.message.kind === 'skill'
             ? canWrite && capability.skill_announcement_deletion === true
               && callerPostingKind === entry.message.sender.kind
               && canEditMessageAuthor(entry.message.sender, addresses, principalId)
-            : canDeleteMessageAuthor(entry.message.sender, addresses, canManageMessages))}
+            : canDeleteMessageAuthor(entry.message.sender, addresses, canManageMessages)))}
           canEdit={entry.message.kind === 'message' && Boolean(entry.message.revision) && canEditMessageAuthor(entry.message.sender, addresses, principalId)}
           onOpen={() => setSelected(entry.message)}
           onDelete={() => askToDelete(deleteTargetForMessage(entry.message))}
@@ -377,10 +386,10 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, addr
         : <LegacyBulletinCard
           key={entry.id}
           bulletin={entry.bulletin!}
-          canDelete={deletionJournal.supported && canDeleteMessageAuthor(entry.bulletin!.author, addresses, canManageMessages)}
+          canDelete={deletionJournal.supported && (canHostDelete || canDeleteMessageAuthor(entry.bulletin!.author, addresses, canManageMessages))}
           onDelete={() => askToDelete(deleteTargetForLegacyBulletin(entry.bulletin!))}
         />)}
-      {feed.hasMore && <button type="button" className="quiet-button network-v2-load-more" disabled={feed.loadingMore} onClick={feed.loadMore}>{feed.loadingMore && <LoaderCircle className="spin" size={14} />}Load more</button>}
+      {feed.hasMore && <button type="button" className="quiet-button network-v2-load-more" disabled={feed.loadingMore} onClick={feed.loadMore}>{feed.loadingMore && <LoaderCircle className="spin" size={14} />}{t('teamNetwork.mail.loadMore')}</button>}
     </div>
     {canWrite && !feed.loading && <TeamFeedComposer
       key={draftKey}
@@ -441,6 +450,7 @@ function TeamFeedComposer({ scope, teamId, capability, draftKey, onPosted }: {
   draftKey: string
   onPosted: (message: TeamMessage) => void
 }) {
+  useLocale()
   const [initialDraft] = useState(() => readFeedDraft(draftKey))
   const [body, setBody] = useState(initialDraft.body)
   const [files, setFiles] = useState<FeedDraftFile[]>(initialDraft.files)
@@ -622,32 +632,32 @@ function TeamFeedComposer({ scope, teamId, capability, draftKey, onPosted }: {
     deleteFeedDraft(draftKey)
   }
 
-  return <form className="network-v2-feed-composer" aria-label="Post to Bulletin" onSubmit={submit}>
-    <label><span>Broadcast to everyone</span><textarea
-      aria-label="Team bulletin"
+  return <form className="network-v2-feed-composer" aria-label={t('teamNetwork.mail.postBulletin')} onSubmit={submit}>
+    <label><span>{t('teamNetwork.mail.broadcastEveryone')}</span><textarea
+      aria-label={t('teamNetwork.mail.teamBulletinComposer')}
       aria-describedby="team-bulletin-caption-help"
       rows={2}
       value={body}
       disabled={busy || retryLocked}
       onChange={event => updateBody(event.target.value)}
-      placeholder="Share an update, image, video, or file…"
+      placeholder={t('teamNetwork.mail.bulletinPlaceholder')}
     /></label>
-    {files.length > 0 && <div className="network-v2-compose-files" aria-label="Selected attachments">{files.map(file => <span key={file.path}>
+    {files.length > 0 && <div className="network-v2-compose-files" aria-label={t('teamNetwork.mail.selectedAttachments')}>{files.map(file => <span key={file.path}>
       {attachmentIcon(file.name, file.type)}
-      <span><strong>{file.name}</strong><small>{file.size === undefined ? attachmentKind(file.name, file.type) : `${attachmentKind(file.name, file.type)} · ${formatBytes(file.size)}`}</small></span>
-      <button type="button" aria-label={`Remove attachment ${file.name}`} disabled={busy || retryLocked} onClick={() => removeFile(file.path)}><X size={13} /></button>
+      <span><strong>{file.name}</strong><small>{file.size === undefined ? attachmentKindLabel(attachmentKind(file.name, file.type)) : `${attachmentKindLabel(attachmentKind(file.name, file.type))} · ${formatBytes(file.size)}`}</small></span>
+      <button type="button" aria-label={t('teamNetwork.mail.removeAttachment', { name: file.name })} disabled={busy || retryLocked} onClick={() => removeFile(file.path)}><X size={13} /></button>
     </span>)}</div>}
-    {error && <p className="network-v2-compose-error" role="alert">{error}</p>}
-    {retryLocked && !busy && <p className="network-v2-compose-retry" role="status">The post may already have reached the Teamspace. Retry it unchanged to resolve safely, or start a new post.</p>}
-    <div><span id="team-bulletin-caption-help">{files.length ? `${files.length} of ${capability.attachments.max_files_per_message} files attached.` : 'Add images, videos, or files.'}</span><span>
-      {retryLocked && <button type="button" className="quiet-button" disabled={busy} onClick={discardAttempt}>Start new post</button>}
-      <button type="button" className="quiet-button" disabled={busy || choosing || retryLocked} onClick={() => void chooseFiles()}>{choosing ? <LoaderCircle className="spin" size={14} /> : <Paperclip size={14} />}{files.length ? 'Add files' : 'Attach files'}</button>
-      <button className="primary-button" disabled={busy || choosing || !body.trim()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}{busy ? 'Posting…' : 'Post'}</button>
+    {error && <p className="network-v2-compose-error" role="alert">{localizeMailError(error)}</p>}
+    {retryLocked && !busy && <p className="network-v2-compose-retry" role="status">{t('teamNetwork.mail.uncertainPost')}</p>}
+    <div><span id="team-bulletin-caption-help">{files.length ? t('teamNetwork.mail.attachedCount', { count: files.length, max: capability.attachments.max_files_per_message }) : t('teamNetwork.mail.addMedia')}</span><span>
+      {retryLocked && <button type="button" className="quiet-button" disabled={busy} onClick={discardAttempt}>{t('teamNetwork.mail.newPost')}</button>}
+      <button type="button" className="quiet-button" disabled={busy || choosing || retryLocked} onClick={() => void chooseFiles()}>{choosing ? <LoaderCircle className="spin" size={14} /> : <Paperclip size={14} />}{files.length ? t('teamNetwork.mail.addFiles') : t('teamNetwork.mail.attachFiles')}</button>
+      <button className="primary-button" disabled={busy || choosing || !body.trim()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}{busy ? t('teamNetwork.mail.posting') : t('teamNetwork.mail.post')}</button>
     </span></div>
   </form>
 }
 
-function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draftIdentity, addresses, canManageMessages, initialAddress, mailboxRequestId, initialMessageId, initialMailboxBox, onInitialMessageConsumed, onAddressChange, routeTargets, onRouteMessage, onUnreadSnapshot, lifecycleCacheKey }: {
+function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draftIdentity, addresses, canManageMessages, canHostDelete, initialAddress, mailboxRequestId, initialMessageId, initialMailboxBox, onInitialMessageConsumed, onAddressChange, routeTargets, onRouteMessage, onUnreadSnapshot, lifecycleCacheKey }: {
   scope: TeamHubScope
   teamId: string
   capability: TeamMessagesCapability
@@ -656,6 +666,7 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
   draftIdentity: string
   addresses: TeamMessageAddress[]
   canManageMessages: boolean
+  canHostDelete: boolean
   initialAddress: TeamMessageAddress | null
   mailboxRequestId: number
   initialMessageId: string | null
@@ -663,10 +674,11 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
   onInitialMessageConsumed?: () => void
   onAddressChange?: (address: TeamMessageAddress) => void
   routeTargets: TeamMailRouteTarget[]
-  onRouteMessage?: (message: TeamMessageSummary, sessionId: string) => void
+  onRouteMessage?: (message: TeamMessageSummary, sessionId: string, intent?: 'read' | 'reply') => void
   onUnreadSnapshot?: (count: number, hasMore: boolean) => void
   lifecycleCacheKey: string
 }) {
+  useLocale()
   const [box, setBox] = useState<Extract<TeamMessageBox, 'inbox' | 'sent'>>(initialMailboxBox ?? 'inbox')
   const [selected, setSelected] = useState<TeamMessageSummary | null>(null)
   const linked = useLinkedTeamMessage(scope, teamId, initialMessageId, mailboxRequestId, setSelected, onInitialMessageConsumed)
@@ -869,38 +881,41 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
         : capability.mailbox_state?.available === true && address?.kind === 'server' ? undefined : () => void markRead(selected)}
       routeTargets={routeTargets}
       onRoute={onRouteMessage ? sessionId => onRouteMessage(selected, sessionId) : undefined}
+      onReply={onRouteMessage ? (message, sessionId) => onRouteMessage(summaryFromMessage(message), sessionId, 'reply') : undefined}
       onRemove={box === 'inbox' ? () => void removeFromInbox(selected) : undefined}
       removing={removing}
       showReceipts={box === 'sent'}
-      replyContext={box === 'inbox' && canWrite && callerPostingKind === 'server' && address?.kind === 'server'
-        ? { capability, address, ownedAddresses: addresses, draftKey: `agentsdock:team-mail-reply:${JSON.stringify([feedDraftKey(scope, teamId, draftIdentity), address.id, selected.id])}` }
+      threadEnabled={capability.mail_threads?.available === true}
+      ownedAddresses={addresses}
+      replyContext={canWrite && callerPostingKind === 'server' && address?.kind === 'server'
+        ? { address, ownedAddresses: addresses }
         : undefined}
-      canDelete={deletionJournal.supported && canDeleteMessageAuthor(selected.sender, addresses, canManageMessages)}
+      canDelete={deletionJournal.supported && (canHostDelete || canDeleteMessageAuthor(selected.sender, addresses, canManageMessages))}
       onDeleted={messageId => { mail.remove(messageId); setSelected(null) }}
     />
   }
 
-  return <section className="network-v2-surface" aria-label="Team mail">
+  return <section className="network-v2-surface" aria-label={t('teamNetwork.mail.teamMail')}>
     <SurfaceHeader
       icon={<Inbox size={20} />}
-      title="Mail"
-      description="Open a message to mark it read, or route it to a chat."
+      title={t('teamNetwork.mail.mail')}
+      description={t('teamNetwork.mail.mailDescription')}
       loading={mail.loading}
       onRefresh={() => { void mail.refresh(); void deletionJournal.refresh() }}
     >
-      <div className="network-v2-segmented" role="group" aria-label="Mailbox">
-        <button type="button" className={box === 'inbox' ? 'active' : ''} onClick={() => setBox('inbox')}><Inbox size={13} />Inbox</button>
-        <button type="button" className={box === 'sent' ? 'active' : ''} onClick={() => setBox('sent')}><Send size={13} />Sent</button>
+      <div className="network-v2-segmented" role="group" aria-label={t('teamNetwork.mail.mailbox')}>
+        <button type="button" className={box === 'inbox' ? 'active' : ''} onClick={() => setBox('inbox')}><Inbox size={13} />{t('teamNetwork.mail.inbox')}</button>
+        <button type="button" className={box === 'sent' ? 'active' : ''} onClick={() => setBox('sent')}><Send size={13} />{t('teamNetwork.mail.sent')}</button>
       </div>
-      {box === 'inbox' && addresses.length > 1 && <label className="network-v2-address">Address<select value={address ? addressKey(address) : ''} onChange={event => {
+      {box === 'inbox' && addresses.length > 1 && <label className="network-v2-address">{t('teamNetwork.mail.address')}<select value={address ? addressKey(address) : ''} onChange={event => {
         const next = addresses.find(candidate => addressKey(candidate) === event.target.value)
         if (next) onAddressChange?.(next)
-      }}><option value="" disabled>Choose address</option>{addresses.map(option => <option key={addressKey(option)} value={addressKey(option)}>{option.label}</option>)}</select></label>}
+      }}><option value="" disabled>{t('teamNetwork.mail.chooseAddress')}</option>{addresses.map(option => <option key={addressKey(option)} value={addressKey(option)}>{option.label}</option>)}</select></label>}
     </SurfaceHeader>
     {mail.error && <InlineError message={mail.error} onRetry={mail.refresh} />}
     <div className="network-v2-scroll network-v2-bundle-grid">
-      {box === 'inbox' && !address && <EmptyState icon={<Inbox size={23} />} title="No mailbox on this server" body="Connect this server to receive direct mail." />}
-      {(box === 'sent' || address) && !mail.loading && visibleMessages.length === 0 && <EmptyState icon={<Mail size={23} />} title={box === 'inbox' ? 'Inbox is empty' : 'Nothing sent yet'} body={box === 'inbox' ? 'Direct messages sent to this server will wait here.' : 'Direct messages sent from this server will appear here.'} />}
+      {box === 'inbox' && !address && <EmptyState icon={<Inbox size={23} />} title={t('teamNetwork.mail.noMailboxTitle')} body={t('teamNetwork.mail.noMailboxBody')} />}
+      {(box === 'sent' || address) && !mail.loading && visibleMessages.length === 0 && <EmptyState icon={<Mail size={23} />} title={box === 'inbox' ? t('teamNetwork.mail.emptyInbox') : t('teamNetwork.mail.emptySent')} body={box === 'inbox' ? t('teamNetwork.mail.emptyInboxBody') : t('teamNetwork.mail.emptySentBody')} />}
       {visibleMessages.map(message => <MessageCard
         key={message.id}
         message={message}
@@ -915,11 +930,11 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
         routeTargets={onRouteMessage ? routeTargets : []}
         onRoute={onRouteMessage ? sessionId => onRouteMessage(message, sessionId) : undefined}
         onRemove={box === 'inbox' ? () => void removeFromInbox(message) : undefined}
-        onDelete={deletionJournal.supported && canDeleteMessageAuthor(message.sender, addresses, canManageMessages)
+        onDelete={deletionJournal.supported && (canHostDelete || canDeleteMessageAuthor(message.sender, addresses, canManageMessages))
           ? () => { setDeleteError(null); setDeleteMessage(message) }
           : undefined}
       />)}
-      {mail.hasMore && <button type="button" className="quiet-button network-v2-load-more" disabled={mail.loadingMore} onClick={mail.loadMore}>{mail.loadingMore && <LoaderCircle className="spin" size={14} />}Load more</button>}
+      {mail.hasMore && <button type="button" className="quiet-button network-v2-load-more" disabled={mail.loadingMore} onClick={mail.loadMore}>{mail.loadingMore && <LoaderCircle className="spin" size={14} />}{t('teamNetwork.mail.loadMore')}</button>}
     </div>
     {deleteMessage && <MessageDeleteDialog
       target={deleteTargetForMessage(deleteMessage)}
@@ -953,6 +968,7 @@ function MessageBundleDetail({ bundle, scope, teamId, label, onBack, onOpen, own
   deletionKeys: ReadonlySet<string>
   onDeleted: (messageId: string) => void
 }) {
+  useLocale()
   const [selected, setSelected] = useState<TeamMessageSummary | null>(null)
   const [deleteMessage, setDeleteMessage] = useState<TeamMessageSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -993,7 +1009,7 @@ function MessageBundleDetail({ bundle, scope, teamId, label, onBack, onOpen, own
     }}
   />
   return <section className="network-v2-surface" aria-label={label}>
-    <header className="network-v2-detail-header"><button type="button" className="quiet-button" autoFocus onClick={onBack}><ArrowLeft size={14} />Mail</button><div><span className="network-v2-avatar">{bundle.icon}</span><span><h1>{bundle.label}</h1><p>{bundle.messages.length} {bundle.messages.length === 1 ? 'message' : 'messages'}</p></span></div></header>
+    <header className="network-v2-detail-header"><button type="button" className="quiet-button" autoFocus onClick={onBack}><ArrowLeft size={14} />{t('teamNetwork.mail.mail')}</button><div><span className="network-v2-avatar">{bundle.icon}</span><span><h1>{bundle.label}</h1><p>{t(bundle.messages.length === 1 ? 'teamNetwork.mail.messageCountOne' : 'teamNetwork.mail.messageCountMany', { count: bundle.messages.length })}</p></span></div></header>
     <div className="network-v2-scroll network-v2-message-list">{bundle.messages.map(message => <MessageCard
       key={message.id}
       message={message}
@@ -1052,13 +1068,14 @@ function useLinkedTeamMessage(scope: TeamHubScope, teamId: string, messageId: st
 }
 
 function LinkedMessageState({ state }: { state: ReturnType<typeof useLinkedTeamMessage> }) {
-  return <section className="network-v2-surface" aria-label="Linked team message">
-    <header className="network-v2-detail-header"><button type="button" className="quiet-button" onClick={state.dismiss}><ArrowLeft size={14} />Back</button></header>
-    {state.error ? <InlineError message={state.error} onRetry={state.retry} /> : <div className="network-v2-detail-state" role="status">Loading linked message…</div>}
+  useLocale()
+  return <section className="network-v2-surface" aria-label={t('teamNetwork.mail.linkedMessage')}>
+    <header className="network-v2-detail-header"><button type="button" className="quiet-button" onClick={state.dismiss}><ArrowLeft size={14} />{t('teamNetwork.mail.back')}</button></header>
+    {state.error ? <InlineError message={state.error} onRetry={state.retry} /> : <div className="network-v2-detail-state" role="status">{t('teamNetwork.mail.loadingLinked')}</div>}
   </section>
 }
 
-function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, canDelete = false, onDeleted, onLoaded, detailError, onRetryReceipt, routeTargets = [], onRoute, onRemove, removing, showReceipts, replyContext }: {
+function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, canDelete = false, onDeleted, onLoaded, detailError, onRetryReceipt, routeTargets = [], onRoute, onReply, onRemove, removing, showReceipts, replyContext, threadEnabled = false, ownedAddresses = [] }: {
   summary: TeamMessageSummary
   initialMessage?: TeamMessage | null
   scope: TeamHubScope
@@ -1071,11 +1088,15 @@ function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, c
   onRetryReceipt?: () => void
   routeTargets?: TeamMailRouteTarget[]
   onRoute?: (sessionId: string) => void
+  onReply?: (message: TeamMessage, sessionId: string) => void
   onRemove?: () => void
   removing?: boolean
   showReceipts?: boolean
   replyContext?: MailReplyContext
+  threadEnabled?: boolean
+  ownedAddresses?: TeamMessageAddress[]
 }) {
+  useLocale()
   const [message, setMessage] = useState<TeamMessage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [request, setRequest] = useState(0)
@@ -1102,19 +1123,19 @@ function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, c
     return () => { active = false }
   }, [request, scopeKey, summary.id, teamId, initialMessage])
 
-  if (message) return <MessageDetail message={message} mailTitle={mailDisplayTitle(summary)} scope={scope} teamId={teamId} onBack={onBack} canDelete={canDelete} onDeleted={onDeleted} actions={<>
-    {onRoute && <MessageRouteMenu message={summary} routeTargets={routeTargets} onRoute={onRoute} menuLabel="Open mail in chat" />}
-    {onRemove && <button type="button" className="quiet-button" disabled={removing} onClick={onRemove}><Archive size={14} />{removing ? 'Removing…' : 'Remove from inbox'}</button>}
+  if (message) return <MessageDetail key={`${scopeKey}:${message.id}`} message={message} mailTitle={mailDisplayTitle(summary)} scope={scope} teamId={teamId} onBack={onBack} canDelete={canDelete} onDeleted={onDeleted} routeTargets={routeTargets} onReply={onReply} threadEnabled={threadEnabled} ownedAddresses={ownedAddresses} actions={<>
+    {onRoute && <MessageRouteMenu message={summary} routeTargets={routeTargets} onRoute={onRoute} menuLabel={t('teamNetwork.mail.openInChat')} />}
+    {onRemove && <button type="button" className="quiet-button" disabled={removing} onClick={onRemove}><Archive size={14} />{removing ? t('teamNetwork.mail.removing') : t('teamNetwork.mail.removeInbox')}</button>}
   </>} notice={detailError && <InlineError message={detailError} onRetry={onRetryReceipt ?? (() => setRequest(value => value + 1))} />} showReceipts={showReceipts} replyContext={replyContext} />
-  return <section className="network-v2-surface" aria-label={mailDisplayTitle(summary) || summary.title || 'Team message'}>
+  return <section className="network-v2-surface" aria-label={mailDisplayTitle(summary) || summary.title || t('teamNetwork.mail.teamMessage')}>
     <MessageDetailHeader message={summary} onBack={onBack} />
     {error
-      ? <div className="network-v2-detail-state" role="alert"><span>{error}</span><button type="button" className="quiet-button" onClick={() => setRequest(value => value + 1)}>Retry</button></div>
-      : <div className="network-v2-detail-state" role="status"><LoaderCircle className="spin" size={17} />Loading complete message…</div>}
+      ? <div className="network-v2-detail-state" role="alert"><span>{localizeMailError(error)}</span><button type="button" className="quiet-button" onClick={() => setRequest(value => value + 1)}>{t('teamNetwork.mail.retry')}</button></div>
+      : <div className="network-v2-detail-state" role="status"><LoaderCircle className="spin" size={17} />{t('teamNetwork.mail.loadingMessage')}</div>}
   </section>
 }
 
-function MessageDetail({ message, mailTitle, scope, teamId, onBack, canDelete, onDeleted, actions, notice, showReceipts, replyContext }: {
+function MessageDetail({ message, mailTitle, scope, teamId, onBack, canDelete, onDeleted, actions, notice, showReceipts, replyContext, routeTargets, onReply, threadEnabled, ownedAddresses }: {
   message: TeamMessage
   mailTitle?: string
   scope: TeamHubScope
@@ -1126,42 +1147,40 @@ function MessageDetail({ message, mailTitle, scope, teamId, onBack, canDelete, o
   notice?: ReactNode
   showReceipts?: boolean
   replyContext?: MailReplyContext
+  routeTargets: TeamMailRouteTarget[]
+  onReply?: (message: TeamMessage, sessionId: string) => void
+  threadEnabled: boolean
+  ownedAddresses: TeamMessageAddress[]
 }) {
+  useLocale()
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [replyOpen, setReplyOpen] = useState(false)
-  const [replySent, setReplySent] = useState(false)
-  const canReply = replyContext && incomingServerMail(message, replyContext)
-  const subjectError = canReply ? mailReplySubjectError(message, replyContext.capability) : null
+  const canReply = onReply && replyContext && incomingServerMail(message, replyContext)
+  const showThread = threadEnabled && !isBulletinMessage(message)
   const parentLink = message.in_reply_to_message_id && !isBulletinMessage(message)
     ? teamMessageLinkURL({ section: 'mail', teamId, messageId: message.in_reply_to_message_id,
       serverIdentity: scope.serverIdentity,
       ...(showReceipts === undefined ? {} : { mailboxBox: showReceipts ? 'inbox' : 'sent' }) })
     : null
-  return <section className="network-v2-surface" aria-label={mailDisplayTitle(message, mailTitle) || message.title || 'Team message'}>
-    <MessageDetailHeader message={message} mailTitle={mailTitle} onBack={onBack} actions={<>{canReply && <button type="button" className="quiet-button" disabled={Boolean(subjectError)} title={subjectError ?? 'Reply to the sender'} onClick={() => { setReplySent(false); setReplyOpen(true) }}><Reply size={14} />Reply</button>}{actions}{message.revision && <button type="button" className="quiet-button" onClick={() => setHistoryOpen(value => !value)}>Version history</button>}{canDelete && onDeleted && <DeleteTeamMessageAction message={message} scope={scope} teamId={teamId} onDeleted={onDeleted} />}</>} />
+  return <section className="network-v2-surface" aria-label={mailDisplayTitle(message, mailTitle) || message.title || t('teamNetwork.mail.teamMessage')}>
+    <MessageDetailHeader message={message} mailTitle={mailTitle} onBack={onBack} actions={<>{canReply && !showThread && <MessageRouteMenu message={summaryFromMessage(message)} routeTargets={routeTargets} onRoute={sessionId => onReply(message, sessionId)} menuLabel={t('teamNetwork.mail.replyThroughAgent')} intent="reply" />}{actions}{isBulletinMessage(message) && message.revision && <button type="button" className="quiet-button" onClick={() => setHistoryOpen(value => !value)}>{t('teamNetwork.mail.versionHistory')}</button>}{canDelete && onDeleted && <DeleteTeamMessageAction message={message} scope={scope} teamId={teamId} onDeleted={onDeleted} />}</>} />
     {notice}
-    {subjectError && <p className="network-v2-provenance" role="status">{subjectError}</p>}
-    {replySent && <p className="network-v2-provenance" role="status">Reply sent to {message.sender.display_name}.</p>}
     <div className="network-v2-scroll network-v2-detail-body">
-      {parentLink && <p className="network-v2-provenance">In reply to <a href={parentLink} onClick={event => { event.preventDefault(); openTeamMessageLink(parentLink) }}>Original message</a></p>}
-      <div className="network-v2-recipient-row"><strong>{message.destination === 'all_servers' ? 'Team Mail · All servers' : 'To'}</strong>{message.recipients.map((recipient, index) => <span className="network-v2-tag" key={`${recipient.kind}:${recipient.id ?? 'all'}:${index}`}>{recipient.kind === 'all' ? 'Bulletin' : recipient.display_name}{showReceipts && recipient.kind !== 'all' ? ` · ${recipient.state === 'available' ? 'Available' : recipient.state === 'delivered' ? 'Delivered' : 'Read'}` : ''}</span>)}</div>
+      {showThread ? <MailThread message={message} scope={scope} teamId={teamId} ownedAddresses={ownedAddresses} replyContext={replyContext} routeTargets={routeTargets} onReply={onReply} /> : <>
+      {parentLink && <p className="network-v2-provenance">{t('teamNetwork.mail.inReplyTo')} <a href={parentLink} onClick={event => { event.preventDefault(); openTeamMessageLink(parentLink) }}>{t('teamNetwork.mail.originalMessage')}</a></p>}
+      <div className="network-v2-recipient-row"><strong>{message.destination === 'all_servers' ? t('teamNetwork.mail.allServerMail') : t('teamNetwork.mail.to')}</strong>{message.recipients.map((recipient, index) => <span className="network-v2-tag" key={`${recipient.kind}:${recipient.id ?? 'all'}:${index}`}>{recipient.kind === 'all' ? t('teamNetwork.mail.bulletin') : recipient.display_name}{showReceipts && recipient.kind !== 'all' ? ` · ${recipient.state === 'available' ? t('teamNetwork.mail.available') : recipient.state === 'delivered' ? t('teamNetwork.mail.delivered') : t('teamNetwork.mail.read')}` : ''}</span>)}</div>
       {historyOpen && <MessageVersionHistory scope={scope} teamId={teamId} messageId={message.id} />}
       <TeamMessageBody format={message.body_format} body={message.body} />
       {message.attachments.length > 0 && <AttachmentCollection attachments={message.attachments} scope={scope} />}
-      <footer className="network-v2-provenance">Team message #{message.sequence}{message.revision && message.revision.version > 1 ? ` · edited · v${message.revision.version}` : ''}{message.provenance.backend ? ` · composed by ${message.provenance.backend}` : ''}</footer>
+      <footer className="network-v2-provenance">{t('teamNetwork.mail.messageSequence', { sequence: message.sequence })}{message.revision && message.revision.version > 1 ? t('teamNetwork.mail.editedSuffix', { version: message.revision.version }) : ''}{message.provenance.backend ? t('teamNetwork.mail.composedBy', { backend: message.provenance.backend }) : ''}</footer>
+      </>}
     </div>
-    {replyOpen && canReply && <MailReplyDialog key={`${replyContext.draftKey}:${JSON.stringify(scope)}`} parent={message} scope={scope} context={replyContext} onClose={() => setReplyOpen(false)} onSent={() => { setReplyOpen(false); setReplySent(true) }} />}
   </section>
 }
 
 interface MailReplyContext {
-  capability: TeamMessagesCapability
   address: TeamMessageAddress
   ownedAddresses: TeamMessageAddress[]
-  draftKey: string
 }
-
-const mailReplyPostsInFlight = new Map<string, Promise<TeamMessage>>()
 
 function incomingServerMail(message: TeamMessage, context: MailReplyContext): boolean {
   return message.kind === 'message' && message.skill === null && !isBulletinMessage(message)
@@ -1173,149 +1192,71 @@ function incomingServerMail(message: TeamMessage, context: MailReplyContext): bo
     && message.recipients.some(recipient => recipient.id === context.address.id)
 }
 
-function mailReplySubjectError(message: TeamMessage, capability: TeamMessagesCapability): string | null {
-  if (message.title === null) return null
-  const subjects = capability.mail_subjects
-  if (subjects?.available !== true || subjects.version !== 1 || subjects.max_subject_chars !== 160) {
-    return 'This Team Network host cannot preserve the original subject in a reply. Update the host and reconnect.'
-  }
-  if (!message.title || message.title !== message.title.trim() || [...message.title].length > 160
-    || /[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/u.test(message.title)) {
-    return 'The original subject is not supported for replies.'
-  }
-  return null
-}
 
-function MailReplyDialog({ parent, scope, context, onClose, onSent }: {
-  parent: TeamMessage
+function MailThread({ message, scope, teamId, ownedAddresses, replyContext, routeTargets, onReply }: {
+  message: TeamMessage
   scope: TeamHubScope
-  context: MailReplyContext
-  onClose: () => void
-  onSent: () => void
+  teamId: string
+  ownedAddresses: TeamMessageAddress[]
+  replyContext?: MailReplyContext
+  routeTargets: TeamMailRouteTarget[]
+  onReply?: (message: TeamMessage, sessionId: string) => void
 }) {
-  const [draft, setDraft] = useState(() => readMailReplyDraft(context.draftKey))
-  const [sending, setSending] = useState(false)
+  useLocale()
+  const [messages, setMessages] = useState<TeamMessage[]>([message])
+  const [cursor, setCursor] = useState(0)
+  const [nextCursor, setNextCursor] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [truncated, setTruncated] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const submitting = useRef(false)
-  const mounted = useRef(true)
-  const contextKey = useMemo(() => JSON.stringify([scope, context, parent.id, parent.sender.id, parent.title]),
-    [scope, context, parent.id, parent.sender.id, parent.title])
-  const currentContext = useRef(contextKey)
-  currentContext.current = contextKey
+  const [retry, setRetry] = useState(0)
+  const rootId = useRef<string | null>(null)
+  const scopeKey = JSON.stringify(scope)
   useEffect(() => {
-    mounted.current = true
-    const flush = () => flushMailReplyDraft(context.draftKey)
-    window.addEventListener('pagehide', flush)
-    return () => { mounted.current = false; window.removeEventListener('pagehide', flush); flush() }
-  }, [context.draftKey])
-  const close = () => { flushMailReplyDraft(context.draftKey); onClose() }
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (submitting.current) return
-    const expectedContext = contextKey
-    const active = () => mounted.current && currentContext.current === expectedContext
-    const body = draft.attempt?.body ?? draft.body.trim()
-    const bytes = new TextEncoder().encode(body).byteLength
-    if (!body || bytes > context.capability.max_body_bytes) {
-      setError(body ? `This reply exceeds the ${formatBytes(context.capability.max_body_bytes)} message limit.` : 'Write a reply before sending.')
-      return
-    }
-    flushMailReplyDraft(context.draftKey)
-    submitting.current = true
-    setSending(true)
+    let active = true
+    setLoading(true)
     setError(null)
-    try {
-      const subjectError = mailReplySubjectError(parent, context.capability)
-      if (subjectError) throw new Error(subjectError)
-      // Only an explicit Send reads the exact parent again. No list, body
-      // prefetch, receipt, or refresh can authorize or trigger this mutation.
-      const current = await window.agentsDock.teamHub.teamMessage(scope, parent.team_id, parent.id)
-      if (!active()) return
-      if (current.id !== parent.id || current.team_id !== parent.team_id
-        || current.sender.id !== parent.sender.id || current.title !== parent.title
-        || !incomingServerMail(current, context)) {
-        throw new Error('The original message is no longer available for this reply. Your draft is saved.')
-      }
-      const pending = draft.attempt ?? {
-        body, subject: parent.title, recipientId: parent.sender.id, idempotencyKey: crypto.randomUUID()
-      }
-      if (pending.subject !== parent.title || pending.recipientId !== parent.sender.id) {
-        throw new Error('This saved reply no longer matches the original sender or subject. Your draft is saved.')
-      }
-      const locked = { body: draft.body, attempt: pending }
-      setDraft(locked)
-      saveMailReplyDraft(context.draftKey, locked)
-      const attemptKey = JSON.stringify([context.draftKey, pending.idempotencyKey])
-      let posting = mailReplyPostsInFlight.get(attemptKey)
-      if (!posting) {
-        posting = window.agentsDock.teamHub.createTeamMessage(scope, {
-          teamId: parent.team_id,
-          kind: 'message',
-          ...(pending.subject === null ? {} : { title: pending.subject }),
-          body: pending.body,
-          bodyFormat: 'markdown',
-          recipients: [{ kind: 'server', id: pending.recipientId }],
-          attachmentIds: [],
-          inReplyToMessageId: parent.id,
-          provenance: { via: 'desktop' },
-          idempotencyKey: pending.idempotencyKey
-        }).then(result => {
-          if (result.team_id !== parent.team_id || result.id === parent.id
-            || result.in_reply_to_message_id !== parent.id || result.title !== pending.subject
-            || result.body !== pending.body || result.kind !== 'message'
-            || result.recipients.length !== 1 || result.recipients[0].kind !== 'server'
-            || result.recipients[0].id !== pending.recipientId) {
-            throw new Error('The reply confirmation did not match this draft. Retry unchanged to confirm delivery.')
-          }
-          // Completion may arrive after navigation. Clear only this exact
-          // confirmed attempt; never navigate or clear another context's draft.
-          if (readMailReplyDraft(context.draftKey).attempt?.idempotencyKey === pending.idempotencyKey) {
-            saveMailReplyDraft(context.draftKey, null)
-          }
-          return result
-        }).finally(() => { mailReplyPostsInFlight.delete(attemptKey) })
-        mailReplyPostsInFlight.set(attemptKey, posting)
-      }
-      await posting
-      if (active()) onSent()
-    } catch (cause) {
-      if (active()) setError(`Could not confirm the reply: ${errorMessage(cause)} Your draft is saved.`)
-    } finally {
-      submitting.current = false
-      if (active()) setSending(false)
-    }
-  }
-
-  return <Dialog.Root open onOpenChange={open => { if (!open) close() }}>
-    <Dialog.Portal>
-      <Dialog.Overlay className="network-v2-delete-backdrop" />
-      <Dialog.Content className="network-v2-edit-dialog" aria-describedby="network-v2-reply-description">
-        <Dialog.Title>Reply to {parent.sender.display_name}</Dialog.Title>
-        <Dialog.Description id="network-v2-reply-description">Your draft is saved until you send.</Dialog.Description>
-        <p><strong>To</strong> {parent.sender.display_name}</p>
-        <p><strong>Subject</strong> {parent.title ?? '(No subject)'}</p>
-        <form aria-label="Reply to mail" onSubmit={submit}>
-          <textarea aria-label="Reply message" value={draft.body} readOnly={sending || Boolean(draft.attempt)} autoFocus onChange={event => {
-            if (sending || draft.attempt) return
-            const next = { body: event.target.value, attempt: null }
-            setDraft(next)
-            setError(null)
-            queueMailReplyDraft(context.draftKey, next.body ? next : null)
-          }} />
-          {error && <p role="alert">{error}</p>}
-          {draft.attempt && !sending && <div className="network-v2-compose-retry" role="status">Delivery is unconfirmed. Retry sends this same reply.</div>}
-          <footer>
-            <button type="button" className="quiet-button" onClick={close}>Keep draft</button>
-            <button type="submit" className="primary-button" disabled={sending || !draft.body.trim()}>{sending ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}{sending ? 'Sending…' : draft.attempt ? 'Retry reply' : 'Send reply'}</button>
-          </footer>
-        </form>
-      </Dialog.Content>
-    </Dialog.Portal>
-  </Dialog.Root>
+    void window.agentsDock.teamHub.teamMessageThread(scope, { teamId, messageId: message.id, afterSequence: cursor, limit: 25 })
+      .then(page => {
+        if (!active) return
+        if (page.team_id !== teamId || page.anchor_message_id !== message.id
+          || (rootId.current && rootId.current !== page.root_message_id)
+          || page.messages.some(row => row.team_id !== teamId)
+          || (page.has_more && page.next_after_sequence <= cursor)) throw new Error('Team Network returned a different mail thread.')
+        rootId.current = page.root_message_id
+        setMessages(current => [...new Map([...(cursor === 0 ? [] : current), ...page.messages].map(row => [row.id, row])).values()]
+          .sort((left, right) => left.sequence - right.sequence))
+        setNextCursor(page.next_after_sequence)
+        setHasMore(page.has_more)
+        setTruncated(current => cursor === 0 ? page.truncated : current || page.truncated)
+      }).catch(cause => { if (active) setError(errorMessage(cause)) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [scopeKey, teamId, message.id, cursor, retry])
+  return <div className="network-v2-mail-thread" aria-label={t('teamNetwork.mail.thread')}>
+    <div className="network-v2-thread-actions"><button type="button" className="quiet-button" aria-label={t('teamNetwork.mail.refreshThread')} title={t('teamNetwork.mail.refreshThread')} disabled={loading} onClick={() => { rootId.current = null; setCursor(0); setRetry(value => value + 1) }}><RefreshCw size={14} /></button></div>
+    {messages.map(row => {
+      const outgoing = ownedAddresses.some(address => address.kind === row.sender.kind && address.id === row.sender.id)
+      const canReply = onReply && replyContext && incomingServerMail(row, replyContext)
+      return <article key={row.id} className={`network-v2-thread-message${outgoing ? ' outgoing' : ' incoming'}`} data-message-id={row.id}>
+        <header><strong>{row.sender.display_name}</strong><time>{formatDate(row.created_at)}</time>
+          {canReply && <MessageRouteMenu message={summaryFromMessage(row)} routeTargets={routeTargets} onRoute={sessionId => onReply(row, sessionId)} menuLabel={t('teamNetwork.mail.replyThroughAgent')} intent="reply" />}
+        </header>
+        <div className="network-v2-thread-recipients">{t('teamNetwork.mail.to')} {row.recipients.map(recipient => `${recipient.display_name}${outgoing ? ` · ${recipient.state === 'available' ? t('teamNetwork.mail.available') : recipient.state === 'delivered' ? t('teamNetwork.mail.delivered') : t('teamNetwork.mail.read')}` : ''}`).join(', ')}</div>
+        <TeamMessageBody format={row.body_format} body={row.body} />
+        {row.attachments.length > 0 && <AttachmentCollection attachments={row.attachments} scope={scope} />}
+      </article>
+    })}
+    {loading && <div className="network-v2-detail-state" role="status">{t('teamNetwork.mail.loadingThread')}</div>}
+    {error && <InlineError message={error} onRetry={() => setRetry(value => value + 1)} />}
+    {truncated && <p className="network-v2-provenance" role="status">{t('teamNetwork.mail.partialThread')}</p>}
+    {hasMore && <button type="button" className="quiet-button" disabled={loading} onClick={() => setCursor(nextCursor)}>{t('teamNetwork.mail.loadMoreMessages')}</button>}
+  </div>
 }
 
 function MessageVersionHistory({ scope, teamId, messageId }: { scope: TeamHubScope; teamId: string; messageId: string }) {
+  useLocale()
   const [versions, setVersions] = useState<TeamMessageHistoryEntry[]>([])
   const [selected, setSelected] = useState<TeamMessageHistoryEntry | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1335,13 +1276,13 @@ function MessageVersionHistory({ scope, teamId, messageId }: { scope: TeamHubSco
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [scopeKey, teamId, messageId, version, request])
-  return <section aria-label="Version history">
-    <h2>Version history</h2>
+  return <section aria-label={t('teamNetwork.mail.versionHistory')}>
+    <h2>{t('teamNetwork.mail.versionHistory')}</h2>
     <div className="network-v2-recipient-row">{versions.map(item => <button type="button" className="quiet-button" key={item.version}
       disabled={loading} onClick={() => setVersion(item.version)}>v{item.version} · {formatDate(item.created_at)}</button>)}</div>
-    {loading && <p role="status">Loading history…</p>}
+    {loading && <p role="status">{t('teamNetwork.mail.loadingHistory')}</p>}
     {error && <InlineError message={error} onRetry={() => setRequest(value => value + 1)} />}
-    {selected && !loading && <><p>Version {selected.version} · {selected.editor.display_name}</p><TeamMessageBody format={selected.body_format} body={selected.body ?? selected.preview ?? ''} /></>}
+    {selected && !loading && <><p>{t('teamNetwork.mail.version', { version: selected.version })} · {selected.editor.display_name}</p><TeamMessageBody format={selected.body_format} body={selected.body ?? selected.preview ?? ''} /></>}
   </section>
 }
 
@@ -1351,6 +1292,7 @@ function DeleteTeamMessageAction({ message, scope, teamId, onDeleted }: {
   teamId: string
   onDeleted: (messageId: string) => void
 }) {
+  useLocale()
   const [target, setTarget] = useState<BulletinDeleteTarget | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1397,12 +1339,12 @@ function DeleteTeamMessageAction({ message, scope, teamId, onDeleted }: {
       ref={trigger}
       type="button"
       className="quiet-button danger"
-      aria-label="Delete for everyone"
+      aria-label={t('teamNetwork.mail.deleteEveryone')}
       onClick={() => {
         setError(null)
         setTarget(deleteTargetForMessage(message))
       }}
-    ><Trash2 size={14} />Delete for everyone</button>
+    ><Trash2 size={14} />{t('teamNetwork.mail.deleteEveryone')}</button>
     {target && <MessageDeleteDialog
       target={target}
       variant="mail"
@@ -1415,50 +1357,86 @@ function DeleteTeamMessageAction({ message, scope, teamId, onDeleted }: {
 }
 
 function MessageDetailHeader({ message, mailTitle, onBack, actions }: { message: TeamMessageBase; mailTitle?: string; onBack: () => void; actions?: ReactNode }) {
-  return <header className="network-v2-detail-header"><button type="button" className="quiet-button" autoFocus onClick={onBack}><ArrowLeft size={14} />Back</button><div><span className="network-v2-avatar">{message.kind === 'skill' ? <BookOpenCheck size={18} /> : <Mail size={18} />}</span><span><h1>{mailDisplayTitle(message, mailTitle) || message.title || `${isBulletinMessage(message) ? 'Announcement' : 'Message'} from ${message.sender.display_name}`}</h1><p>{isBulletinMessage(message) ? `${message.kind === 'skill' ? 'Skill' : 'Announcement'} · ` : ''}{message.sender.display_name} · {formatDate(message.created_at)}</p></span></div>{actions && <div className="network-v2-detail-actions">{actions}</div>}</header>
+  useLocale()
+  return <header className={`network-v2-detail-header${isBulletinMessage(message) ? '' : ' mail'}`}><button type="button" className="quiet-button" autoFocus onClick={onBack}><ArrowLeft size={14} />{t('teamNetwork.mail.back')}</button><div><span className="network-v2-avatar">{message.kind === 'skill' ? <BookOpenCheck size={18} /> : <Mail size={18} />}</span><span><h1>{mailDisplayTitle(message, mailTitle) || message.title || t(isBulletinMessage(message) ? 'teamNetwork.mail.announcementFrom' : 'teamNetwork.mail.messageFrom', { sender: message.sender.display_name })}</h1><p>{isBulletinMessage(message) ? `${message.kind === 'skill' ? t('teamNetwork.mail.skill') : t('teamNetwork.mail.announcement')} · ` : ''}{message.sender.display_name} · {formatDate(message.created_at)}</p></span></div>{actions && <div className="network-v2-detail-actions">{actions}</div>}</header>
 }
 
 function TeamMessageBody({ format, body }: { format: TeamMessage['body_format']; body: string }) {
   return format === 'markdown'
-    ? <MarkdownContent text={body} fold={false} preserveEnglishUI />
+    ? <MarkdownContent text={body} fold={false} />
     : <p className="network-v2-plain-body">{body}</p>
 }
 
 function MessageCard({ message, unread = false, onOpen, onMarkRead, onMarkUnread, onDelete, onRemove, routeTargets = [], onRoute }: { message: TeamMessageSummary; unread?: boolean; onOpen: () => void; onMarkRead?: () => void; onMarkUnread?: () => void; onDelete?: () => void; onRemove?: () => void; routeTargets?: TeamMailRouteTarget[]; onRoute?: (sessionId: string) => void }) {
+  useLocale()
   const title = mailDisplayTitle(message) || message.title
   const card = <article className={`network-v2-card message ${message.kind}${unread ? ' unread' : ''}`}>
-    <button type="button" className="network-v2-card-open" aria-label={`Open ${title || `message from ${message.sender.display_name}`}`} onClick={onOpen}>
-      <span className="network-v2-card-heading"><span className="network-v2-avatar">{message.kind === 'skill' ? <BookOpenCheck size={16} /> : <Server size={16} />}</span><span><strong title={title || message.sender.display_name}>{title || message.sender.display_name}</strong><small>{message.kind === 'skill' ? `Skill${message.skill ? ` · v${message.skill.version}` : ''}` : title ? `${message.sender.display_name} · ${formatDate(message.created_at)}` : formatDate(message.created_at)}</small></span></span>
+    <button type="button" className="network-v2-card-open" aria-label={t('teamNetwork.mail.openNamedMessage', { message: title || t('teamNetwork.mail.messageFromLower', { sender: message.sender.display_name }) })} onClick={onOpen}>
+      <span className="network-v2-card-heading">
+        <strong className="network-v2-card-title" title={title || message.sender.display_name}>{title || message.sender.display_name}</strong>
+        <small className="network-v2-card-metadata">
+          <span className="network-v2-card-sender" title={message.sender.display_name}>{message.kind === 'skill' ? <BookOpenCheck size={14} /> : <Server size={14} />}<span>{message.sender.display_name}</span></span>
+          <time dateTime={message.created_at} title={formatDate(message.created_at)}>{mailCardDateFormats[getLocale()].format(new Date(message.created_at))}</time>
+        </small>
+      </span>
       <span className="network-v2-card-preview">{messagePreview(message)}</span>
       {message.attachments.length > 0 && <span className="network-v2-card-media" aria-label={attachmentCountLabel(message.attachments)}>{message.attachments.slice(0, 3).map(attachment => <span key={attachment.id}>
         {attachmentIcon(attachment.file_name, attachment.media_type)}<span>{attachment.file_name}</span>
       </span>)}{message.attachments.length > 3 && <b>+{message.attachments.length - 3}</b>}</span>}
-      <span className="network-v2-card-footer"><span>{isBulletinMessage(message) ? 'Bulletin' : `To ${recipientSummary(message)}`}</span>{message.attachments.length > 0 && <span><Paperclip size={12} />{message.attachments.length}</span>}<ChevronRight size={15} /></span>
     </button>
-    {(onRoute || onDelete) && <span className="network-v2-message-actions">
-      {onRoute && <MessageRouteMenu message={message} routeTargets={routeTargets} onRoute={onRoute} menuLabel="Open mail in chat" />}
-    </span>}
+    <footer className="network-v2-card-footer">
+      <span className="network-v2-card-destination" title={isBulletinMessage(message) ? t('teamNetwork.mail.bulletin') : t('teamNetwork.mail.toRecipients', { recipients: recipientSummary(message) })}>{isBulletinMessage(message) ? t('teamNetwork.mail.bulletin') : t('teamNetwork.mail.toRecipients', { recipients: recipientSummary(message) })}</span>
+      {message.attachments.length > 0 && <span><Paperclip size={12} />{message.attachments.length}</span>}
+      {onRoute && <span className="network-v2-message-actions"><MessageRouteMenu message={message} routeTargets={routeTargets} onRoute={onRoute} menuLabel={t('teamNetwork.mail.openInChat')} /></span>}
+    </footer>
   </article>
   return <ContextMenu.Root><ContextMenu.Trigger asChild>{card}</ContextMenu.Trigger><ContextMenu.Portal>
     <ContextMenu.Content className="menu-content">
-      <ContextMenu.Item className="menu-item" onSelect={onOpen}><Mail size={14} />Open message</ContextMenu.Item>
-      {onMarkRead && <ContextMenu.Item className="menu-item" onSelect={onMarkRead}><Check size={14} />Mark as read</ContextMenu.Item>}
-      {onMarkUnread && <ContextMenu.Item className="menu-item" onSelect={onMarkUnread}><Mail size={14} />Mark as unread</ContextMenu.Item>}
-      {onRemove && <ContextMenu.Item className="menu-item" onSelect={onRemove}><Archive size={14} />Remove from inbox</ContextMenu.Item>}
-      {onDelete && <><ContextMenu.Separator className="menu-separator" /><ContextMenu.Item className="menu-item danger" onSelect={onDelete}><Trash2 size={14} />Delete for everyone…</ContextMenu.Item></>}
+      <ContextMenu.Item className="menu-item" onSelect={onOpen}><Mail size={14} />{t('teamNetwork.mail.openMessage')}</ContextMenu.Item>
+      {onMarkRead && <ContextMenu.Item className="menu-item" onSelect={onMarkRead}><Check size={14} />{t('teamNetwork.mail.markRead')}</ContextMenu.Item>}
+      {onMarkUnread && <ContextMenu.Item className="menu-item" onSelect={onMarkUnread}><Mail size={14} />{t('teamNetwork.mail.markUnread')}</ContextMenu.Item>}
+      {onRemove && <ContextMenu.Item className="menu-item" onSelect={onRemove}><Archive size={14} />{t('teamNetwork.mail.removeInbox')}</ContextMenu.Item>}
+      {onDelete && <><ContextMenu.Separator className="menu-separator" /><ContextMenu.Item className="menu-item danger" onSelect={onDelete}><Trash2 size={14} />{t('teamNetwork.mail.deleteEveryoneMenu')}</ContextMenu.Item></>}
     </ContextMenu.Content>
   </ContextMenu.Portal></ContextMenu.Root>
 }
 
-function MessageRouteMenu({ message, routeTargets, onRoute, menuLabel }: {
+function MessageRouteMenu({ message, routeTargets, onRoute, menuLabel, intent = 'read' }: {
   message: TeamMessageSummary
   routeTargets: TeamMailRouteTarget[]
   onRoute: (sessionId: string) => void
   menuLabel: string
+  intent?: 'read' | 'reply'
 }) {
-  return <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="route" aria-label={`Route ${mailDisplayTitle(message) || message.title || `message from ${message.sender.display_name}`} to a chat`} title="Route to chat"><Forward size={14} /><span>Route</span><ChevronDown size={12} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content network-v2-route-menu" align="end">
+  useLocale()
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const input = useRef<HTMLInputElement | null>(null)
+  const filtered = useMemo(() => open ? routeTargets.filter(target => target.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : [], [open, query, routeTargets])
+  const duplicateLabels = useMemo(() => {
+    const seen = new Set<string>(), duplicates = new Set<string>()
+    if (!open) return duplicates
+    for (const target of routeTargets) { if (seen.has(target.label)) duplicates.add(target.label); seen.add(target.label) }
+    return duplicates
+  }, [open, routeTargets])
+  useEffect(() => {
+    if (!open) return
+    const frame = requestAnimationFrame(() => input.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+  return <DropdownMenu.Root open={open} onOpenChange={next => { setOpen(next); if (next) setQuery('') }}><DropdownMenu.Trigger asChild><button type="button" className="quiet-button route" aria-label={intent === 'reply' ? t('teamNetwork.mail.reply') : t('teamNetwork.mail.routeNamedMessage', { message: mailDisplayTitle(message) || message.title || t('teamNetwork.mail.messageFromLower', { sender: message.sender.display_name }) })} title={intent === 'reply' ? t('teamNetwork.mail.draftAgentReply') : t('teamNetwork.mail.routeChat')}>{intent === 'reply' ? <Reply size={14} /> : <Forward size={14} />}<span>{intent === 'reply' ? t('teamNetwork.mail.reply') : t('teamNetwork.mail.route')}</span><ChevronDown size={12} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content network-v2-route-menu" align="end">
     <DropdownMenu.Label className="menu-label">{menuLabel}</DropdownMenu.Label>
-    {routeTargets.length ? routeTargets.map(target => <DropdownMenu.Item className="menu-item network-v2-route-item" key={target.id} onSelect={() => onRoute(target.id)}><span>{target.label}</span>{target.current && <Check size={13} aria-label="Current chat" />}</DropdownMenu.Item>) : <DropdownMenu.Label className="menu-label">No active chats</DropdownMenu.Label>}
+    <input ref={input} className="network-v2-route-search" aria-label={t('teamNetwork.mail.searchChats')} placeholder={t('teamNetwork.mail.searchChatsPlaceholder')} value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+      if (event.key === 'Escape') return
+      event.stopPropagation()
+      if (event.key === 'ArrowDown' || event.key === 'Enter') {
+        event.preventDefault()
+        const first = event.currentTarget.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitem"]')
+        if (event.key === 'Enter') first?.click()
+        else first?.focus()
+      }
+    }} />
+    {filtered.length ? filtered.map(target => <DropdownMenu.Item className="menu-item network-v2-route-item" key={target.id} onSelect={() => onRoute(target.id)}><span>{target.label}{duplicateLabels.has(target.label) && <small>{target.id}</small>}</span>{target.current && <Check size={13} aria-label={t('teamNetwork.mail.currentChat')} />}</DropdownMenu.Item>) : <DropdownMenu.Label className="menu-label">{routeTargets.length ? t('teamNetwork.mail.noMatchingChats') : t('teamNetwork.mail.noActiveChats')}</DropdownMenu.Label>}
   </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
 }
 
@@ -1473,6 +1451,7 @@ function FeedMessageCard({ message, scope, canDelete, canEdit, onOpen, onDelete,
   routeTargets: TeamMailRouteTarget[]
   onRoute?: (sessionId: string) => void
 }) {
+  useLocale()
   const card = <article className="network-v2-bulletin-card">
     <button
       type="button"
@@ -1485,15 +1464,15 @@ function FeedMessageCard({ message, scope, canDelete, canEdit, onOpen, onDelete,
     </button>
     <footer className="network-v2-bulletin-footer">
       <span className="network-v2-avatar"><Server size={15} /></span>
-      <span><strong>{message.sender.display_name}</strong><small>{message.revision && message.revision.version > 1 ? `Edited · v${message.revision.version}` : formatDate(message.created_at)}</small></span>
-      <span className="network-v2-tag">{message.kind === 'skill' ? 'Skill' : 'Announcement'}</span>
-      {onRoute && <span className="network-v2-message-actions"><MessageRouteMenu message={message} routeTargets={routeTargets} onRoute={onRoute} menuLabel="Open Bulletin item in chat" /></span>}
+      <span><strong>{message.sender.display_name}</strong><small>{message.revision && message.revision.version > 1 ? t('teamNetwork.mail.editedVersion', { version: message.revision.version }) : formatDate(message.created_at)}</small></span>
+      <span className="network-v2-tag">{message.kind === 'skill' ? t('teamNetwork.mail.skill') : t('teamNetwork.mail.announcement')}</span>
+      {onRoute && <span className="network-v2-message-actions"><MessageRouteMenu message={message} routeTargets={routeTargets} onRoute={onRoute} menuLabel={t('teamNetwork.mail.openBulletinChat')} /></span>}
     </footer>
   </article>
   return <ContextMenu.Root><ContextMenu.Trigger asChild>{card}</ContextMenu.Trigger><ContextMenu.Portal><ContextMenu.Content className="menu-content">
-    <ContextMenu.Item className="menu-item" onSelect={onOpen}><Mail size={14} />Open Bulletin item</ContextMenu.Item>
-    {canEdit && <ContextMenu.Item className="menu-item" onSelect={onEdit}><Pencil size={14} />Edit Bulletin item…</ContextMenu.Item>}
-    {canDelete && <><ContextMenu.Separator className="menu-separator" /><ContextMenu.Item className="menu-item danger" onSelect={onDelete}><Trash2 size={14} />Delete Bulletin item…</ContextMenu.Item></>}
+    <ContextMenu.Item className="menu-item" onSelect={onOpen}><Mail size={14} />{t('teamNetwork.mail.openBulletinItem')}</ContextMenu.Item>
+    {canEdit && <ContextMenu.Item className="menu-item" onSelect={onEdit}><Pencil size={14} />{t('teamNetwork.mail.editBulletinMenu')}</ContextMenu.Item>}
+    {canDelete && <><ContextMenu.Separator className="menu-separator" /><ContextMenu.Item className="menu-item danger" onSelect={onDelete}><Trash2 size={14} />{t('teamNetwork.mail.deleteBulletinMenu')}</ContextMenu.Item></>}
   </ContextMenu.Content></ContextMenu.Portal></ContextMenu.Root>
 }
 
@@ -1502,20 +1481,26 @@ function LegacyBulletinCard({ bulletin, canDelete, onDelete }: {
   canDelete: boolean
   onDelete: () => void
 }) {
-  return <article className="network-v2-bulletin-card legacy">
+  useLocale()
+  const card = <article className="network-v2-bulletin-card legacy">
     <div className="network-v2-bulletin-open">
       <span className="network-v2-bulletin-body">{bulletin.body}</span>
     </div>
     <footer className="network-v2-bulletin-footer">
       <span className="network-v2-avatar"><FileText size={15} /></span>
       <span><strong>{bulletin.author.display_name}</strong><small>{formatDate(bulletin.created_at)}</small></span>
-      <span className="network-v2-tag">Announcement</span>
-      {canDelete && <button type="button" className="network-v2-bulletin-delete" aria-label={`Delete legacy announcement from ${bulletin.author.display_name}`} title="Delete announcement" onClick={onDelete}><Trash2 size={14} /></button>}
+      <span className="network-v2-tag">{t('teamNetwork.mail.announcement')}</span>
+      {canDelete && <button type="button" className="network-v2-bulletin-delete" aria-label={t('teamNetwork.mail.deleteLegacyAnnouncement', { sender: bulletin.author.display_name })} title={t('teamNetwork.mail.deleteAnnouncement')} onClick={onDelete}><Trash2 size={14} /></button>}
     </footer>
   </article>
+  if (!canDelete) return card
+  return <ContextMenu.Root><ContextMenu.Trigger asChild>{card}</ContextMenu.Trigger><ContextMenu.Portal><ContextMenu.Content className="menu-content">
+    <ContextMenu.Item className="menu-item danger" onSelect={onDelete}><Trash2 size={14} />{t('teamNetwork.mail.deleteBulletinMenu')}</ContextMenu.Item>
+  </ContextMenu.Content></ContextMenu.Portal></ContextMenu.Root>
 }
 
 function AnnouncementMediaPreview({ attachments, scope }: { attachments: TeamAttachment[]; scope: TeamHubScope }) {
+  useLocale()
   const primary = attachments.find(attachment => attachmentKind(attachment.file_name, attachment.media_type) === 'Image')
     ?? attachments.find(attachment => attachmentKind(attachment.file_name, attachment.media_type) === 'Video')
     ?? attachments[0]
@@ -1565,7 +1550,7 @@ function AnnouncementMediaPreview({ attachments, scope }: { attachments: TeamAtt
     {url && visualKind === 'video' && <video src={url} muted playsInline preload="auto" aria-label={primary.file_name} />}
     {!url && loading && <LoaderCircle className="spin" size={25} />}
     {!url && !loading && attachmentIcon(primary.file_name, primary.media_type)}
-    <span className={url ? 'network-v2-bulletin-media-caption' : undefined}><strong>{primary.file_name}</strong><small>{kind}{attachments.length > 1 ? ` · +${attachments.length - 1} more` : ''}</small></span>
+    <span className={url ? 'network-v2-bulletin-media-caption' : undefined}><strong>{primary.file_name}</strong><small>{attachmentKindLabel(kind)}{attachments.length > 1 ? t('teamNetwork.mail.moreAttachments', { count: attachments.length - 1 }) : ''}</small></span>
   </span>
 }
 
@@ -1577,6 +1562,7 @@ function MessageDeleteDialog({ target, variant, busy, error, onCancel, onConfirm
   onCancel: () => void
   onConfirm: () => void
 }) {
+  useLocale()
   const cancel = useRef<HTMLButtonElement | null>(null)
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
     <Dialog.Portal>
@@ -1594,13 +1580,13 @@ function MessageDeleteDialog({ target, variant, busy, error, onCancel, onConfirm
       >
         <span className="network-v2-delete-icon"><Trash2 size={18} /></span>
         <div>
-          <Dialog.Title>{variant === 'bulletin' ? 'Delete this Bulletin item?' : 'Delete for everyone?'}</Dialog.Title>
-          <Dialog.Description id="network-v2-delete-description">Remove this {variant === 'bulletin' ? 'Bulletin item' : 'message'} for everyone{target.attachmentCount > 0 ? ` and disable its ${target.attachmentCount} attachment${target.attachmentCount === 1 ? '' : 's'}` : ''}?{target.skillAnnouncement ? ' The underlying skill and its version history are kept.' : ''}</Dialog.Description>
+          <Dialog.Title>{variant === 'bulletin' ? t('teamNetwork.mail.deleteBulletinQuestion') : t('teamNetwork.mail.deleteEveryoneQuestion')}</Dialog.Title>
+          <Dialog.Description id="network-v2-delete-description">{t(variant === 'bulletin' ? 'teamNetwork.mail.deleteBulletinDescription' : 'teamNetwork.mail.deleteMailDescription', { attachments: target.attachmentCount > 0 ? t(target.attachmentCount === 1 ? 'teamNetwork.mail.disableOneAttachment' : 'teamNetwork.mail.disableAttachments', { count: target.attachmentCount }) : '' })}{target.skillAnnouncement ? t('teamNetwork.mail.keepSkillHistory') : ''}</Dialog.Description>
         </div>
-        {error && <p className="network-v2-delete-error" role="alert">{error}</p>}
+        {error && <p className="network-v2-delete-error" role="alert">{localizeMailError(error)}</p>}
         <footer>
-          <button ref={cancel} type="button" className="quiet-button" disabled={busy} onClick={onCancel}>Cancel</button>
-          <button type="button" className="danger-button" disabled={busy} onClick={onConfirm}>{busy ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}{busy ? 'Deleting…' : variant === 'bulletin' ? 'Delete item' : 'Delete for everyone'}</button>
+          <button ref={cancel} type="button" className="quiet-button" disabled={busy} onClick={onCancel}>{t('teamNetwork.mail.cancel')}</button>
+          <button type="button" className="danger-button" disabled={busy} onClick={onConfirm}>{busy ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}{busy ? t('teamNetwork.mail.deleting') : variant === 'bulletin' ? t('teamNetwork.mail.deleteItem') : t('teamNetwork.mail.deleteEveryone')}</button>
         </footer>
       </Dialog.Content>
     </Dialog.Portal>
@@ -1614,6 +1600,7 @@ function BulletinEditDialog({ summary, scope, teamId, onCancel, onSaved }: {
   onCancel: () => void
   onSaved: (message: TeamMessage) => void
 }) {
+  useLocale()
   const [message, setMessage] = useState<TeamMessage | null>(null)
   const [body, setBody] = useState('')
   const [loading, setLoading] = useState(true)
@@ -1680,24 +1667,24 @@ function BulletinEditDialog({ summary, scope, teamId, onCancel, onSaved }: {
         onEscapeKeyDown={event => { if (saving) event.preventDefault() }}
         onPointerDownOutside={event => { if (saving) event.preventDefault() }}
       >
-        <Dialog.Title>Edit Bulletin item</Dialog.Title>
-        <Dialog.Description id="network-v2-edit-description">{message?.revision ? `Version ${message.revision.version}. Previous versions stay preserved.` : 'Loading the current version…'}</Dialog.Description>
-        {loading && <div className="network-v2-edit-loading" role="status"><LoaderCircle className="spin" size={14} />Loading…</div>}
-        {error && !message && <p role="alert">{error}</p>}
+        <Dialog.Title>{t('teamNetwork.mail.editBulletin')}</Dialog.Title>
+        <Dialog.Description id="network-v2-edit-description">{message?.revision ? t('teamNetwork.mail.versionPreserved', { version: message.revision.version }) : t('teamNetwork.mail.loadingCurrentVersion')}</Dialog.Description>
+        {loading && <div className="network-v2-edit-loading" role="status"><LoaderCircle className="spin" size={14} />{t('teamNetwork.mail.loading')}</div>}
+        {error && !message && <p role="alert">{localizeMailError(error)}</p>}
         {message && <form onSubmit={save}>
-          <textarea aria-label="Bulletin message" value={body} disabled={saving || retryLocked} autoFocus onChange={event => setBody(event.target.value)} />
-          {error && <p role="alert">{error}</p>}
-          {retryLocked && !conflict && <p role="status">The edit may have saved. Retry unchanged to confirm it.</p>}
-          {conflict && <p role="status">Reload the current version to continue. Your draft will be kept.</p>}
+          <textarea aria-label={t('teamNetwork.mail.bulletinMessage')} value={body} disabled={saving || retryLocked} autoFocus onChange={event => setBody(event.target.value)} />
+          {error && <p role="alert">{localizeMailError(error)}</p>}
+          {retryLocked && !conflict && <p role="status">{t('teamNetwork.mail.uncertainEdit')}</p>}
+          {conflict && <p role="status">{t('teamNetwork.mail.editConflict')}</p>}
           <footer>
-            <button ref={cancel} type="button" className="quiet-button" disabled={saving} onClick={onCancel}>Cancel</button>
+            <button ref={cancel} type="button" className="quiet-button" disabled={saving} onClick={onCancel}>{t('teamNetwork.mail.cancel')}</button>
             {conflict && <button type="button" className="quiet-button" disabled={saving || loading} onClick={() => {
               attempt.current = null; setRetryLocked(false); setConflict(false); setReload(value => value + 1)
-            }}>Reload current version</button>}
-            <button type="submit" className="primary-button" disabled={saving || loading || conflict || !body.trim() || (!retryLocked && body === message.body)}>{saving ? <LoaderCircle className="spin" size={14} /> : <Pencil size={14} />}{saving ? 'Saving…' : retryLocked ? 'Retry save' : `Save v${message.revision!.version + 1}`}</button>
+            }}>{t('teamNetwork.mail.reloadVersion')}</button>}
+            <button type="submit" className="primary-button" disabled={saving || loading || conflict || !body.trim() || (!retryLocked && body === message.body)}>{saving ? <LoaderCircle className="spin" size={14} /> : <Pencil size={14} />}{saving ? t('teamNetwork.mail.saving') : retryLocked ? t('teamNetwork.mail.retrySave') : t('teamNetwork.mail.saveVersion', { version: message.revision!.version + 1 })}</button>
           </footer>
         </form>}
-        {!loading && !message && <footer><button ref={cancel} type="button" className="quiet-button" onClick={onCancel}>Close</button></footer>}
+        {!loading && !message && <footer><button ref={cancel} type="button" className="quiet-button" onClick={onCancel}>{t('teamNetwork.mail.close')}</button></footer>}
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>
@@ -1709,6 +1696,7 @@ function TeamSkills({ scope, teamId, capability, canWrite }: {
   capability: TeamMessagesCapability
   canWrite: boolean
 }) {
+  useLocale()
   const [skills, setSkills] = useState<TeamSkill[]>([])
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1748,17 +1736,17 @@ function TeamSkills({ scope, teamId, capability, canWrite }: {
       onChanged={replaceSkill}
     />
   }
-  return <section className="network-v2-surface" aria-label="Team skills">
-    <SurfaceHeader icon={<BookOpenCheck size={20} />} title="Skills" description="Shared, versioned team knowledge." loading={loading} onRefresh={load}>
-      <label className="network-v2-search"><Search size={14} /><span className="sr-only">Filter skills</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Filter skills" /></label>
+  return <section className="network-v2-surface" aria-label={t('teamNetwork.mail.teamSkills')}>
+    <SurfaceHeader icon={<BookOpenCheck size={20} />} title={t('teamNetwork.mail.skills')} description={t('teamNetwork.mail.skillsDescription')} loading={loading} onRefresh={load}>
+      <label className="network-v2-search"><Search size={14} /><span className="sr-only">{t('teamNetwork.mail.filterSkills')}</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('teamNetwork.mail.filterSkills')} /></label>
     </SurfaceHeader>
     {error && <InlineError message={error} onRetry={load} />}
     <div className="network-v2-scroll network-v2-skill-grid">
-      {!loading && visible.length === 0 && <EmptyState icon={<BookOpenCheck size={23} />} title={query ? 'No matching skills' : 'No team skills yet'} body={query ? 'Try a different title, slug, or tag.' : 'An agent can publish a skill by composing a skill message to @@bulletin.'} />}
+      {!loading && visible.length === 0 && <EmptyState icon={<BookOpenCheck size={23} />} title={query ? t('teamNetwork.mail.noMatchingSkills') : t('teamNetwork.mail.emptySkills')} body={query ? t('teamNetwork.mail.filterSkillsHelp') : t('teamNetwork.mail.publishSkillHelp')} />}
       {visible.map(skill => <button type="button" className={`network-v2-skill-card ${skill.archived_at ? 'archived' : ''}`} key={skill.id} onClick={() => setSelectedId(skill.id)}>
-        <span className="network-v2-skill-top"><span className="network-v2-avatar"><BookOpenCheck size={16} /></span><span><strong>{skill.title}</strong><code>/{skill.slug}</code></span>{skill.pinned_at && <Pin size={14} fill="currentColor" aria-label="Pinned" />}</span>
-        <span>{skill.summary || 'No summary'}</span>
-        <span className="network-v2-skill-footer"><span>Version {skill.version}</span>{skill.archived && <b>Archived</b>}{skill.tags.slice(0, 2).map(tag => <i key={tag}>{tag}</i>)}</span>
+        <span className="network-v2-skill-top"><span className="network-v2-avatar"><BookOpenCheck size={16} /></span><span><strong>{skill.title}</strong><code>/{skill.slug}</code></span>{skill.pinned_at && <Pin size={14} fill="currentColor" aria-label={t('teamNetwork.mail.pinned')} />}</span>
+        <span>{skill.summary || t('teamNetwork.mail.noSummary')}</span>
+        <span className="network-v2-skill-footer"><span>{t('teamNetwork.mail.version', { version: skill.version })}</span>{skill.archived && <b>{t('teamNetwork.mail.archived')}</b>}{skill.tags.slice(0, 2).map(tag => <i key={tag}>{tag}</i>)}</span>
       </button>)}
     </div>
   </section>
@@ -1773,6 +1761,7 @@ function SkillDetail({ scope, teamId, skillId, capability, canWrite, onBack, onC
   onBack: () => void
   onChanged: (skill: TeamSkill) => void
 }) {
+  useLocale()
   const [details, setDetails] = useState<TeamSkillDetails | null>(null)
   const [versions, setVersions] = useState<TeamSkillVersionSummary[]>([])
   const [shownVersion, setShownVersion] = useState<TeamSkillVersion | TeamSkillDetails | null>(null)
@@ -1903,23 +1892,25 @@ function SkillDetail({ scope, teamId, skillId, capability, canWrite, onBack, onC
     finally { setBusy(null) }
   }
 
-  return <section className="network-v2-surface" aria-label={details?.title || 'Team skill'}>
-    <header className="network-v2-detail-header"><button type="button" className="quiet-button" autoFocus onClick={onBack}><ArrowLeft size={14} />Skills</button>{details && <><div><span className="network-v2-avatar"><BookOpenCheck size={18} /></span><span><h1>{shownVersion?.title ?? details.title}</h1><p>/{details.slug} · version {shownVersion?.version ?? details.version}</p></span></div>{canWrite && <div className="network-v2-detail-actions">{details.permissions.manage && <><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void mutate('pin', !details.pinned)}><Pin size={13} fill={details.pinned ? 'currentColor' : 'none'} />{details.pinned ? 'Unpin' : 'Pin'}</button><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void mutate('archive', !details.archived)}>{details.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}{details.archived ? 'Restore' : 'Archive'}</button></>}{details.permissions.edit && !details.archived && <button type="button" className="primary-button" disabled={Boolean(busy)} onClick={() => setEditing(value => !value)}>Edit</button>}</div>}</>}</header>
+  return <section className="network-v2-surface" aria-label={details?.title || t('teamNetwork.mail.teamSkill')}>
+    <header className="network-v2-detail-header"><button type="button" className="quiet-button" autoFocus onClick={onBack}><ArrowLeft size={14} />{t('teamNetwork.mail.skills')}</button>{details && <><div><span className="network-v2-avatar"><BookOpenCheck size={18} /></span><span><h1>{shownVersion?.title ?? details.title}</h1><p>{t('teamNetwork.mail.skillVersion', { slug: details.slug, version: shownVersion?.version ?? details.version })}</p></span></div>{canWrite && <div className="network-v2-detail-actions">{details.permissions.manage && <><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void mutate('pin', !details.pinned)}><Pin size={13} fill={details.pinned ? 'currentColor' : 'none'} />{details.pinned ? t('teamNetwork.mail.unpin') : t('teamNetwork.mail.pin')}</button><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void mutate('archive', !details.archived)}>{details.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}{details.archived ? t('teamNetwork.mail.restore') : t('teamNetwork.mail.archive')}</button></>}{details.permissions.edit && !details.archived && <button type="button" className="primary-button" disabled={Boolean(busy)} onClick={() => setEditing(value => !value)}>{t('teamNetwork.mail.edit')}</button>}</div>}</>}</header>
     {error && <InlineError message={error} onRetry={load} />}
-    {busy === 'loading' && <div className="network-v2-loading"><LoaderCircle className="spin" size={17} />Loading skill…</div>}
-    {details && canWrite && details.permissions.edit && editing && <form className="network-v2-skill-editor" onSubmit={saveVersion}><div><label>Title<input required name="title" maxLength={160} defaultValue={details.title} /></label><label>Summary<input name="summary" maxLength={280} defaultValue={details.summary} /></label></div><label>Tags<input name="tags" defaultValue={details.tags.join(', ')} placeholder="comma, separated" /></label><label>Change note<input name="changeNote" maxLength={280} placeholder="What changed?" /></label><label>Markdown<textarea required name="body" defaultValue={details.body} /></label><div className="network-v2-editor-files"><button type="button" className="quiet-button" onClick={() => void chooseFiles()}><Paperclip size={13} />Choose attachments</button>{files.map(file => <span key={file.path}>{file.name}</span>)}</div><div><button className="primary-button" disabled={Boolean(busy)}>{busy === 'save' && <LoaderCircle className="spin" size={13} />}Post version {details.version + 1}</button><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => { setEditing(false); setFiles([]) }}>Cancel</button></div></form>}
+    {busy === 'loading' && <div className="network-v2-loading"><LoaderCircle className="spin" size={17} />{t('teamNetwork.mail.loadingSkill')}</div>}
+    {details && canWrite && details.permissions.edit && editing && <form className="network-v2-skill-editor" onSubmit={saveVersion}><div><label>{t('teamNetwork.mail.title')}<input required name="title" maxLength={160} defaultValue={details.title} /></label><label>{t('teamNetwork.mail.summary')}<input name="summary" maxLength={280} defaultValue={details.summary} /></label></div><label>{t('teamNetwork.mail.tags')}<input name="tags" defaultValue={details.tags.join(', ')} placeholder={t('teamNetwork.mail.tagsPlaceholder')} /></label><label>{t('teamNetwork.mail.changeNote')}<input name="changeNote" maxLength={280} placeholder={t('teamNetwork.mail.whatChanged')} /></label><label>{t('teamNetwork.mail.markdown')}<textarea required name="body" defaultValue={details.body} /></label><div className="network-v2-editor-files"><button type="button" className="quiet-button" onClick={() => void chooseFiles()}><Paperclip size={13} />{t('teamNetwork.mail.chooseAttachments')}</button>{files.map(file => <span key={file.path}>{file.name}</span>)}</div><div><button className="primary-button" disabled={Boolean(busy)}>{busy === 'save' && <LoaderCircle className="spin" size={13} />}{t('teamNetwork.mail.postVersion', { version: details.version + 1 })}</button><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => { setEditing(false); setFiles([]) }}>{t('teamNetwork.mail.cancel')}</button></div></form>}
     {details && (!editing || !canWrite) && <div className="network-v2-skill-layout">
-      <aside><strong>Versions</strong>{versions.map(version => <button type="button" className={shownVersion?.version === version.version ? 'active' : ''} key={version.message_id} disabled={busy === 'version'} onClick={() => void selectVersion(version.version)}><span>v{version.version}</span><small>{version.change_note || formatDate(version.created_at)}</small></button>)}</aside>
-      <div className="network-v2-scroll network-v2-skill-document"><div className="network-v2-skill-summary">{shownVersion?.summary || 'No summary'}{shownVersion?.tags.map(tag => <span className="network-v2-tag" key={tag}>{tag}</span>)}</div>{shownVersion && <><TeamMessageBody format={shownVersion.body_format} body={shownVersion.body} />{shownVersion.attachments.length > 0 && <AttachmentCollection attachments={shownVersion.attachments} scope={scope} />}</>}</div>
+      <aside><strong>{t('teamNetwork.mail.versions')}</strong>{versions.map(version => <button type="button" className={shownVersion?.version === version.version ? 'active' : ''} key={version.message_id} disabled={busy === 'version'} onClick={() => void selectVersion(version.version)}><span>v{version.version}</span><small>{version.change_note || formatDate(version.created_at)}</small></button>)}</aside>
+      <div className="network-v2-scroll network-v2-skill-document"><div className="network-v2-skill-summary">{shownVersion?.summary || t('teamNetwork.mail.noSummary')}{shownVersion?.tags.map(tag => <span className="network-v2-tag" key={tag}>{tag}</span>)}</div>{shownVersion && <><TeamMessageBody format={shownVersion.body_format} body={shownVersion.body} />{shownVersion.attachments.length > 0 && <AttachmentCollection attachments={shownVersion.attachments} scope={scope} />}</>}</div>
     </div>}
   </section>
 }
 
 function AttachmentCollection({ attachments, scope }: { attachments: TeamAttachment[]; scope: TeamHubScope }) {
-  return <section className="network-v2-attachments" aria-label={attachmentCountLabel(attachments)}><header><Paperclip size={14} /><strong>Attachments</strong><span>{attachments.length}</span></header><div>{attachments.map(attachment => <AttachmentView key={attachment.id} attachment={attachment} scope={scope} />)}</div></section>
+  useLocale()
+  return <section className="network-v2-attachments" aria-label={attachmentCountLabel(attachments)}><header><Paperclip size={14} /><strong>{t('teamNetwork.mail.attachments')}</strong><span>{attachments.length}</span></header><div>{attachments.map(attachment => <AttachmentView key={attachment.id} attachment={attachment} scope={scope} />)}</div></section>
 }
 
 function AttachmentView({ attachment, scope }: { attachment: TeamAttachment; scope: TeamHubScope }) {
+  useLocale()
   const [url, setURL] = useState<string | null>(null)
   const [text, setText] = useState<string | null>(null)
   const [textTruncated, setTextTruncated] = useState(false)
@@ -1975,24 +1966,24 @@ function AttachmentView({ attachment, scope }: { attachment: TeamAttachment; sco
   const canLoad = attachment.state === 'ready'
   const normalizedMediaType = attachment.media_type.toLowerCase()
   const visualKind = normalizedMediaType.startsWith('image/') ? 'image' : normalizedMediaType.startsWith('video/') ? 'video' : null
-  const loadLabel = error ? `Retry loading attachment ${attachment.file_name}` : `Load attachment ${attachment.file_name}`
+  const loadLabel = error ? t('teamNetwork.mail.retryLoadAttachment', { name: attachment.file_name }) : t('teamNetwork.mail.loadNamedAttachment', { name: attachment.file_name })
   return <article className="network-v2-attachment">
     <header><span>{teamAttachmentSupportsTextPreview(attachment) ? <FileText size={15} /> : attachmentIcon(attachment.file_name, attachment.media_type)}</span><div><strong>{attachment.file_name}</strong><small>{attachment.media_type} · {formatBytes(attachment.byte_size)}</small></div>{url
-      ? <a href={url} download={attachment.file_name} aria-label={`Download attachment ${attachment.file_name}`} title="Download attachment"><Download size={14} /></a>
-      : !visualKind && <button type="button" className="network-v2-attachment-load" aria-label={loadLabel} title={canLoad ? 'Load attachment' : 'Attachment is not ready'} disabled={!canLoad || loading} onClick={() => void load()}>{loading ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}</button>}</header>
-    {loading && !visualKind && <div className="network-v2-attachment-loading"><LoaderCircle className="spin" size={14} />Caching securely…</div>}
-    {error && <p role="alert">{error}</p>}
+      ? <a href={url} download={attachment.file_name} aria-label={t('teamNetwork.mail.downloadNamedAttachment', { name: attachment.file_name })} title={t('teamNetwork.mail.downloadAttachment')}><Download size={14} /></a>
+      : !visualKind && <button type="button" className="network-v2-attachment-load" aria-label={loadLabel} title={canLoad ? t('teamNetwork.mail.loadAttachment') : t('teamNetwork.mail.attachmentNotReady')} disabled={!canLoad || loading} onClick={() => void load()}>{loading ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}</button>}</header>
+    {loading && !visualKind && <div className="network-v2-attachment-loading"><LoaderCircle className="spin" size={14} />{t('teamNetwork.mail.caching')}</div>}
+    {error && <p role="alert">{localizeMailError(error)}</p>}
     {!url && visualKind && <button
       type="button"
       className="network-v2-media-load"
-      aria-label={`${error ? 'Retry' : 'Show'} ${visualKind} ${attachment.file_name}`}
+      aria-label={t(error ? 'teamNetwork.mail.retryNamedMedia' : 'teamNetwork.mail.showNamedMedia', { kind: mediaKindLabel(visualKind), name: attachment.file_name })}
       disabled={!canLoad || loading}
       onClick={() => void load()}
-    >{loading ? <LoaderCircle className="spin" size={22} /> : visualKind === 'image' ? <ImageIcon size={24} /> : <Film size={24} />}<span>{loading ? `Loading ${visualKind}…` : error ? `Retry ${visualKind}` : `Show ${visualKind}`}</span></button>}
+    >{loading ? <LoaderCircle className="spin" size={22} /> : visualKind === 'image' ? <ImageIcon size={24} /> : <Film size={24} />}<span>{loading ? t('teamNetwork.mail.loadingMedia', { kind: mediaKindLabel(visualKind) }) : error ? t('teamNetwork.mail.retryMedia', { kind: mediaKindLabel(visualKind) }) : t('teamNetwork.mail.showMedia', { kind: mediaKindLabel(visualKind) })}</span></button>}
     {url && visualKind === 'image' && <img src={url} alt={attachment.file_name} loading="lazy" />}
     {url && visualKind === 'video' && <video src={url} controls preload="metadata" aria-label={attachment.file_name} />}
-    {textTruncated && <p className="network-v2-attachment-truncated">Showing the first {formatBytes(TEAM_ATTACHMENT_TEXT_PREVIEW_MAX_BYTES)}. Download the file to read the rest.</p>}
-    {text !== null && (normalizedMediaType === 'text/markdown' || /\.md$/i.test(attachment.file_name)) && <div className="network-v2-attachment-markdown"><MarkdownContent text={text} fold={false} preserveEnglishUI /></div>}
+    {textTruncated && <p className="network-v2-attachment-truncated">{t('teamNetwork.mail.truncatedPreview', { size: formatBytes(TEAM_ATTACHMENT_TEXT_PREVIEW_MAX_BYTES) })}</p>}
+    {text !== null && (normalizedMediaType === 'text/markdown' || /\.md$/i.test(attachment.file_name)) && <div className="network-v2-attachment-markdown"><MarkdownContent text={text} fold={false} /></div>}
     {text !== null && normalizedMediaType !== 'text/markdown' && !/\.md$/i.test(attachment.file_name) && <pre>{text}</pre>}
   </article>
 }
@@ -2101,6 +2092,9 @@ function useTeamMessages(
   const receiptReconcileGeneration = useRef<number | null>(null)
   const receiptReconcileOffset = useRef(0)
   const latestSequence = useRef(initialSnapshot?.latestSequence ?? 0)
+  // Cache rows/sequence maxima are not coverage. Only a fresh, validated page
+  // in this exact stream can supply the immutable next-page predecessor.
+  const mailCoverageContinuation = useRef<{ scope: Readonly<MailHintScope>; cursor: Readonly<MailArrivalCursor> } | null>(null)
   const queryKey = JSON.stringify(query)
   const scopeKey = JSON.stringify(scope)
   const persistSnapshot = useCallback(() => {
@@ -2134,16 +2128,30 @@ function useTeamMessages(
     if (!quiet) setError(null)
     try {
       let cursor = afterSequence
+      const hintScope = retainMessage === retainEveryMessage ? captureMailHintScope(scope, query) : null
+      const continuation = mailCoverageContinuation.current
+      let requestedAfter: Readonly<MailArrivalCursor> | null = hintScope
+        ? cursor == null
+          ? Object.freeze({ through_sequence: 0, arrival_id: null })
+          : continuation && continuation.cursor.through_sequence === cursor && sameMailHintScope(continuation.scope, hintScope)
+            ? continuation.cursor : null
+        : null
       let preserveCurrent = append || quiet
       const prefetched = prefetchedLoad ? await prefetchedLoad : null
       if (requestGeneration.current !== generation) return
       if (prefetched?.state === 'error') throw new Error(prefetched.message)
       for (let pageNumber = 0; pageNumber < MAX_CATCH_UP_PAGES_PER_REQUEST; pageNumber += 1) {
-        const page = pageNumber === 0 && prefetched?.state === 'ready'
+        const isPrefetched = pageNumber === 0 && prefetched?.state === 'ready'
+        const page = isPrefetched
           ? prefetched.page
           : await window.agentsDock.teamHub.teamMessages(scope, {
             ...query,
             ...(cursor == null ? {} : { afterSequence: cursor }),
+            ...(hintScope && requestedAfter ? {
+              includeMailboxCoverage: true,
+              afterSequence: requestedAfter.through_sequence,
+              ...(requestedAfter.arrival_id ? { afterArrivalId: requestedAfter.arrival_id } : {})
+            } : {}),
             limit: TEAM_MESSAGES_PAGE_SIZE
           })
         if (requestGeneration.current !== generation) return
@@ -2168,6 +2176,24 @@ function useTeamMessages(
           setHasMore(page.has_more)
         }
         persistSnapshot()
+        const currentHintScope = captureMailHintScope(scope, query)
+        let coverage: MailboxCoverage | null = null
+        if (!isPrefetched && hintScope && requestedAfter && currentHintScope && sameMailHintScope(hintScope, currentHintScope)) {
+          try {
+            const parsed = parseMailboxCoverage(page.mailbox_coverage)
+            if (parsed.team_id === hintScope.teamId && parsed.recipient_server_id === hintScope.recipientServerId
+              && parsed.through_sequence >= requestedAfter.through_sequence
+              && (parsed.through_sequence !== requestedAfter.through_sequence || parsed.arrival_id === requestedAfter.arrival_id)) coverage = parsed
+          } catch { /* Older/unnegotiated servers provide no acknowledgement proof. */ }
+        }
+        if (coverage && hintScope && requestedAfter) {
+          // Rows have passed the request-generation fence and been applied.
+          // This optional IPC only persists local seen metadata; no receipts.
+          void acknowledgeMailHintPage(hintScope, requestedAfter, coverage)
+        }
+        requestedAfter = coverage && coverage.through_sequence === page.next_after_sequence
+          ? Object.freeze({ through_sequence: coverage.through_sequence, arrival_id: coverage.arrival_id }) : null
+        mailCoverageContinuation.current = requestedAfter && hintScope ? { scope: hintScope, cursor: requestedAfter } : null
         if (!page.has_more || page.next_after_sequence == null) break
         cursor = page.next_after_sequence
       }
@@ -2223,6 +2249,7 @@ function useTeamMessages(
     inFlightGeneration.current = null
     receiptReconcileGeneration.current = null
     receiptReconcileOffset.current = 0
+    mailCoverageContinuation.current = null
     const cached = enabled ? peekTeamMessagesSnapshot(lifecycleCacheKey, query) : null
     const stagedMessages = cached?.messages ?? []
     messagesRef.current = stagedMessages
@@ -2299,14 +2326,17 @@ function SurfaceHeader({ icon, title, description, loading, onRefresh, children 
   onRefresh: () => void
   children?: ReactNode
 }) {
-  return <header className="network-v2-header"><span className="network-v2-header-icon">{icon}</span><div><h1>{title}</h1><p>{description}</p></div>{children}<button type="button" className="icon-button" title={`Refresh ${title.toLocaleLowerCase()}`} aria-label={`Refresh ${title.toLocaleLowerCase()}`} disabled={loading} onClick={onRefresh}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></header>
+  useLocale()
+  return <header className="network-v2-header"><span className="network-v2-header-icon">{icon}</span><div><h1>{title}</h1><p>{description}</p></div>{children}<button type="button" className="icon-button" title={t('teamNetwork.mail.refreshSurface', { title: title.toLocaleLowerCase() })} aria-label={t('teamNetwork.mail.refreshSurface', { title: title.toLocaleLowerCase() })} disabled={loading} onClick={onRefresh}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></header>
 }
 
 function InlineError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return <div className="network-v2-error" role="alert"><span>{message}</span><button type="button" className="quiet-button" onClick={onRetry}>Retry</button></div>
+  useLocale()
+  return <div className="network-v2-error" role="alert"><span>{localizeMailError(message)}</span><button type="button" className="quiet-button" onClick={onRetry}>{t('teamNetwork.mail.retry')}</button></div>
 }
 
 function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
+  useLocale()
   return <div className="network-v2-empty"><span>{icon}</span><h2>{title}</h2><p>{body}</p></div>
 }
 
@@ -2329,13 +2359,13 @@ function buildMessageBundles(
 }
 
 function sentCounterpart(message: TeamMessageSummary) {
-  if (message.destination === 'all_servers') return { key: 'all_servers', label: 'All servers', icon: <Mail size={16} /> }
-  if (isBulletinMessage(message)) return { key: 'all', label: 'Bulletin', icon: <Users size={16} /> }
+  if (message.destination === 'all_servers') return { key: 'all_servers', label: t('teamNetwork.mail.allServers'), icon: <Mail size={16} /> }
+  if (isBulletinMessage(message)) return { key: 'all', label: t('teamNetwork.mail.bulletin'), icon: <Users size={16} /> }
   const recipients = [...message.recipients].sort((left, right) => (
     `${left.kind}:${left.id ?? ''}`.localeCompare(`${right.kind}:${right.id ?? ''}`)
   ))
   const labels = recipients.map(recipient => recipient.display_name).join(', ')
-  return { key: recipients.map(recipient => `${recipient.kind}:${recipient.id}`).join('|'), label: labels || 'Recipients', icon: <Mail size={16} /> }
+  return { key: recipients.map(recipient => `${recipient.kind}:${recipient.id}`).join('|'), label: labels || t('teamNetwork.mail.recipients'), icon: <Mail size={16} /> }
 }
 
 function messageIsUnread(message: TeamMessageSummary, address: TeamMessageAddress | null): boolean {
@@ -2396,7 +2426,7 @@ function sortSkills(skills: TeamSkill[]): TeamSkill[] {
 }
 
 function recipientSummary(message: TeamMessageBase): string {
-  if (message.destination === 'all_servers') return `All servers (${message.recipients.length})`
+  if (message.destination === 'all_servers') return t('teamNetwork.mail.allServersCount', { count: message.recipients.length })
   const names = message.recipients.map(recipient => recipient.display_name)
   if (names.length <= 2) return names.join(', ')
   return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
@@ -2463,7 +2493,7 @@ function readBulletinEditDraft(key: string): { body: string; attempt: { body: st
   return { body: value.body, attempt: attempt as { body: string; expectedVersion: number; key: string } | null }
 }
 function messagePreview(message: TeamMessageSummary): string {
-  return plainPreview(message.preview) || `${formatBytes(message.body_bytes)} message`
+  return plainPreview(message.preview) || t('teamNetwork.mail.messageSize', { size: formatBytes(message.body_bytes) })
 }
 
 function canDeleteMessageAuthor(
@@ -2519,7 +2549,11 @@ function mergeRecipientRows(current: TeamRecipient[], incoming: TeamRecipient[])
 function plainPreview(value: string): string {
   return [...value.replace(/[#*_>`~\[\]()]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 240).join('')
 }
-function formatDate(value: string): string { return new Date(value).toLocaleString() }
+const mailCardDateFormats = {
+  en: new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+  'zh-CN': new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+function formatDate(value: string): string { return new Date(value).toLocaleString(getLocale() === 'en' ? undefined : getLocale()) }
 function formatBytes(value: number): string { return value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB` }
 function attachmentKind(fileName: string, mediaType?: string): 'Image' | 'Video' | 'File' {
   const normalizedType = mediaType?.toLowerCase() ?? ''
@@ -2537,9 +2571,9 @@ function attachmentCountLabel(attachments: TeamAttachment[]): string {
   const videos = attachments.filter(attachment => attachmentKind(attachment.file_name, attachment.media_type) === 'Video').length
   const files = attachments.length - images - videos
   return [
-    images ? `${images} ${images === 1 ? 'image' : 'images'}` : '',
-    videos ? `${videos} ${videos === 1 ? 'video' : 'videos'}` : '',
-    files ? `${files} ${files === 1 ? 'file' : 'files'}` : ''
+    images ? t(images === 1 ? 'teamNetwork.mail.imageCountOne' : 'teamNetwork.mail.imageCountMany', { count: images }) : '',
+    videos ? t(videos === 1 ? 'teamNetwork.mail.videoCountOne' : 'teamNetwork.mail.videoCountMany', { count: videos }) : '',
+    files ? t(files === 1 ? 'teamNetwork.mail.fileCountOne' : 'teamNetwork.mail.fileCountMany', { count: files }) : ''
   ].filter(Boolean).join(', ')
 }
 function validateFeedBody(value: string, capability: TeamMessagesCapability): void {
@@ -2571,3 +2605,51 @@ function validateAttachmentFiles(files: NativeFileRef[], capability: TeamMessage
 }
 function formValue(form: FormData, name: string): string { return String(form.get(name) ?? '').trim() }
 function errorMessage(cause: unknown): string { return cause instanceof Error ? cause.message : 'Team Network request failed.' }
+
+function attachmentKindLabel(kind: 'Image' | 'Video' | 'File'): string {
+  return t(kind === 'Image' ? 'teamNetwork.mail.image' : kind === 'Video' ? 'teamNetwork.mail.video' : 'teamNetwork.mail.file')
+}
+
+function mediaKindLabel(kind: 'image' | 'video'): string {
+  return t(kind === 'image' ? 'teamNetwork.mail.imageLower' : 'teamNetwork.mail.videoLower')
+}
+
+// Keep stored request errors language-neutral; only app-authored display text is localized.
+const mailErrorKeys: Record<string, string> = {
+  'Posting was interrupted before this app received confirmation.': 'teamNetwork.mail.error.postInterrupted',
+  "Team Hub returned the wrong Bulletin deletion receipt.": 'teamNetwork.mail.error.wrongBulletinDeletion',
+  "Team Hub returned the wrong legacy Bulletin deletion receipt.": 'teamNetwork.mail.error.wrongLegacyDeletion',
+  "Refresh the mailbox before changing this message’s read status.": 'teamNetwork.mail.error.refreshMailboxFirst',
+  "Team Hub returned a mismatched mailbox state.": 'teamNetwork.mail.error.wrongMailboxState',
+  "Team Hub returned the wrong message receipt.": 'teamNetwork.mail.error.wrongMessageReceipt',
+  "Team Hub did not mark this mailbox message as read.": 'teamNetwork.mail.error.notMarkedRead',
+  "Team Hub returned the wrong message deletion receipt.": 'teamNetwork.mail.error.wrongMessageDeletion',
+  "Team Network returned the wrong linked message.": 'teamNetwork.mail.error.wrongLinkedMessage',
+  "Team Network returned the wrong message detail.": 'teamNetwork.mail.error.wrongMessageDetail',
+  "Team Network returned a different mail thread.": 'teamNetwork.mail.error.wrongThread',
+  "This server does not support Bulletin revisions yet.": 'teamNetwork.mail.error.revisionsUnsupported',
+  "The selected attachments exceed the per-message attachment limit.": 'teamNetwork.mail.error.attachmentTotalLimit',
+  "Attachment preview was not returned by the desktop service.": 'teamNetwork.mail.error.missingPreview',
+  "Write a message before posting.": 'teamNetwork.mail.error.writeMessage',
+  "The same file cannot be attached twice.": 'teamNetwork.mail.error.duplicateAttachment',
+  "Team Network request failed.": 'teamNetwork.mail.error.requestFailed'
+}
+const mailErrorPatterns: Array<{ pattern: RegExp; key: string; params: string[] }> = [
+  { pattern: /^The upload for (.+) did not finish safely\.$/, key: 'teamNetwork.mail.error.uploadIncomplete', params: ["name"] },
+  { pattern: /^Choose no more than (\d+) attachments\.$/, key: 'teamNetwork.mail.error.chooseMaxAttachments', params: ["count"] },
+  { pattern: /^Skill Markdown must be between 1 and (\d+) bytes\.$/, key: 'teamNetwork.mail.error.skillBodyBytes', params: ["count"] },
+  { pattern: /^Use up to (\d+) unique lowercase skill tags\.$/, key: 'teamNetwork.mail.error.skillTags', params: ["count"] },
+  { pattern: /^(.+) exceeds the per-file attachment limit\.$/, key: 'teamNetwork.mail.error.fileLimit', params: ["name"] },
+  { pattern: /^This bulletin exceeds the (.+) message limit\.$/, key: 'teamNetwork.mail.error.bulletinSizeLimit', params: ["size"] },
+  { pattern: /^(.+) is not a valid attachment\.$/, key: 'teamNetwork.mail.error.invalidAttachment', params: ["name"] },
+  { pattern: /^(.+) exceeds the (.+) per-file limit\.$/, key: 'teamNetwork.mail.error.namedFileSizeLimit', params: ["name","size"] },
+  { pattern: /^The selected attachments exceed the (.+) post limit\.$/, key: 'teamNetwork.mail.error.postAttachmentLimit', params: ["size"] }
+]
+function localizeMailError(message: string): string {
+  if (Object.hasOwn(mailErrorKeys, message)) return t(mailErrorKeys[message])
+  for (const { pattern, key, params } of mailErrorPatterns) {
+    const match = pattern.exec(message)
+    if (match) return t(key, Object.fromEntries(params.map((name, index) => [name, match[index + 1]])))
+  }
+  return message
+}

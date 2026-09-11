@@ -1,7 +1,9 @@
 import type { AgentFile, CodeDiffFileSummary, Event } from '@shared/types'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { hasTimelineChangeSignal } from '@shared/timeline-change-signal'
 import { agentFileBelongsToSession, eventFileForSession } from '@shared/session-files'
-import { isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedProviderControlMetadata, isImportedProviderInterruption } from '@shared/provider-origin'
+import { hasProviderUserProvenance, isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey, crossChatSemanticKey, isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, providerInteractionAuditKey } from '@shared/semantic-timeline'
 
 export type TimelineItem = TurnItem | SystemItem | JobItem
@@ -43,6 +45,8 @@ export interface ProgressItem {
   hasFinalResponse?: boolean
   /** Canonical output used to keep remotely loaded activity separate from the final answer. */
   finalEvents?: Event[]
+  /** Final timestamps that prove delayed commentary belongs before its arrival sequence. */
+  orderingFinalEvents?: Event[]
   /** Sequence bounds keep on-demand details inside this continuation. */
   afterSeq?: number
   throughSeq?: number
@@ -103,6 +107,8 @@ export interface SystemItem {
   importedDelivery?: ImportedCrossChatDelivery
   /** One explicitly negotiated asynchronous agent message, never a whole exchange panel. */
   crossChatMessage?: boolean
+  /** One historical exchange leg, presented independently without changing its lifecycle. */
+  crossChatLegId?: string
 }
 
 export interface ImportedCrossChatDelivery {
@@ -110,6 +116,10 @@ export interface ImportedCrossChatDelivery {
   kind: 'instruction' | 'request' | 'reply' | 'final_result' | 'status' | 'message'
   body: string
   sourceRequest: string
+  ordinal?: number
+  maxLegs?: number
+  mode?: 'async_route_v1'
+  editedByUser?: boolean
 }
 
 export interface JobItem {
@@ -144,6 +154,7 @@ const hiddenTypes = new Set([
   'subagent_state', 'claude_subagents_stopped', 'job_updated', 'job_deleted',
   'codex_thread_status', 'codex_goal_updated', 'codex_goal_cleared', 'codex_token_usage',
   'emergency_alert_acknowledged',
+  'claude_background_task_reconciliation_consumed',
 ])
 const jobTypes = new Set(['job_created', 'job_ran', 'job_started', 'job_deferred', 'job_finished', 'job_error'])
 const jobStatusTypes = new Set([
@@ -186,6 +197,38 @@ interface AssistantProjectionState {
   seen: Set<string>
 }
 
+interface NativeCrossChatDelivery {
+  start: Event
+  finish?: Event
+  deliveryKey: string
+}
+
+function crossChatDeliveryKey(event: Event): string | null {
+  if (event.conversation_mode === 'async_route_v1') {
+    const envelope = event.cross_chat_envelope_id?.trim() || event.handoff_id?.trim() || event.message_id?.trim()
+    const conversation = event.conversation_id?.trim()
+    return envelope && conversation ? `async:${conversation}:${envelope}` : null
+  }
+  const exchange = event.exchange_id?.trim() || event.cross_chat_exchange_id?.trim()
+  const leg = event.exchange_leg_id?.trim() || event.cross_chat_exchange_leg_id?.trim()
+  return exchange && leg ? `legacy:${exchange}:${leg}` : null
+}
+
+interface NativeCommentaryRecord {
+  event: Event
+  backend: Event['backend']
+  second: number
+  text: string
+}
+
+const MAX_NATIVE_COMMENTARY_RECORDS = 512
+
+function commentaryTimestampSecond(event: Event): number | null {
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(event.ts)) return null
+  const timestamp = Date.parse(event.ts)
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : null
+}
+
 const MAX_STANDALONE_JOB_UPDATES = 64
 const MAX_BUNDLED_JOB_RUNS = 20
 // Keep only a tiny visible seed for the latest job run. Expanding the trace
@@ -224,10 +267,22 @@ export class TimelineProjector {
   private readonly crossChatByKey = new Map<string, SystemItem>()
   private readonly providerInteractionAuditByKey = new Map<string, SystemItem>()
   private readonly crossChatTerminalStatusByExchange = new Map<string, NonNullable<Event['exchange_status']>>()
+  private readonly nativeCrossChatDeliveries = new Map<string, NativeCrossChatDelivery>()
+  private readonly crossChatDeliveryReceipts = new Map<string, Event>()
+  private readonly conflictingCrossChatReceiptRuns = new Set<string>()
+  private readonly importedCrossChatInputs = new Map<string, Event>()
+  private readonly importedCrossChatAliases = new Set<string>()
+  private readonly importedCrossChatInputByRun = new Map<string, string>()
+  private readonly importedCrossChatOutputs = new Map<string, { event: Event; inputId: string }>()
+  private readonly importedCrossChatOutputProviderIds = new Set<string>()
+  private readonly nativeCrossChatOutputs = new Map<string, Event>()
+  private readonly importedCrossChatOutputAliases = new Set<string>()
   private readonly queuedInputFileIds = new Map<string, string[]>()
   private readonly assistantByTurn = new Map<string, AssistantProjectionState>()
   private readonly rootThreadByRun = new Map<string, string>()
   private readonly suppressedProviderEchoRuns = new Set<string>()
+  private nativeCommentaryRecords: NativeCommentaryRecord[] = []
+  private discardedCommentaryThroughSecond = Number.NEGATIVE_INFINITY
   private readonly scope: TimelineProjectionScope
   private activeTurn: TurnItem | null = null
   private writableKeys = new Set<string>()
@@ -287,6 +342,7 @@ export class TimelineProjector {
 
   append(events: Event[]): boolean {
     if (!events.length) return true
+    if (!this.rememberCrossChatDeliveryAliases(events)) return false
 
     // A late job link can retroactively turn an already-projected ordinary
     // turn into a scheduled-job run. That rare transition needs one rebuild;
@@ -325,9 +381,29 @@ export class TimelineProjector {
   }
 
   private appendEvent(event: Event): void {
+    // Providers can deliver public updates through either text event shape.
+    // Only an explicit phase makes an assistant text update activity.
+    if (event.type === 'assistant_text' && isPublicCommentary(event)) {
+      event = { ...event, type: 'reasoning_summary' }
+    }
     // Checkpoint/finish companions of a proven control-only import batch are
     // not logical turns. In particular, they must not retire current work.
-    if (isImportedClaudeControlCompanion(event)) return
+    if (isImportedClaudeControlCompanion(event) || isImportedSourceProvenAssistantReplay(event)) return
+    if (this.importedCrossChatOutputAliases.has(event.id)) {
+      if (event.type !== 'turn_finished') return
+      event = { ...event, result_text: null, text: null }
+    }
+    // Keep a silent input boundary in mixed imports so later output cannot
+    // become the answer to a preceding genuine question in the same run.
+    if (isImportedSourceProvenRepair(event) || this.importedCrossChatAliases.has(event.id)) {
+      const prior = event.run_id ? this.turnByRun.get(event.run_id) : undefined
+      if (prior) {
+        this.writableTurn(prior).finishedAt ||= event.ts
+        this.assistantByTurn.delete(prior.key)
+      }
+      this.activeTurn = this.writableTurn(this.ensureTurn(event, Boolean(prior)))
+      return
+    }
     if (isImportedCodexGoalContext(event)) {
       // One import batch may first replay a suppressed native prompt/answer,
       // then contain a genuinely new goal continuation. The metadata starts
@@ -366,6 +442,7 @@ export class TimelineProjector {
     // showing the user's message and assistant response twice.
     if (runId && this.suppressedProviderEchoRuns.has(runId)) return
     if (isInternalProviderDiagnostic(event)) return
+    if (this.isReplayedPublicCommentary(event)) return
     const providerBackgroundTask = importedClaudeBackgroundTask(event)
     if (providerBackgroundTask) {
       const key = `provider-background-task:${event.id}`
@@ -662,6 +739,198 @@ export class TimelineProjector {
     }
 
     this.addItem({ kind: 'system', id: `event:${event.id}`, key: `event:${event.id}`, seq: event.seq, event })
+  }
+
+  private isReplayedPublicCommentary(event: Event): boolean {
+    const run = event.run_id?.trim()
+    if (!run) return false
+    const knownBackend = event.backend === 'codex' || event.backend === 'claude' ? event.backend : undefined
+    if (event.imported !== true && !run.startsWith('import_')) {
+      // Older native commentary omitted backend. The owning native start or
+      // finish supplies that evidence; message text never selects a provider.
+      if (knownBackend && (event.type === 'turn_started' || event.type === 'turn_finished')) {
+        for (const record of this.nativeCommentaryRecords) {
+          if (record.event.run_id !== run || record.event.session_id !== event.session_id) continue
+          record.backend = record.backend === null || (record.backend && record.backend !== knownBackend)
+            ? null : knownBackend
+        }
+      }
+      if (!isPublicCommentary(event)) return false
+      if (event.backend && !knownBackend) return false
+      const second = commentaryTimestampSecond(event)
+      if (second == null || second <= this.discardedCommentaryThroughSecond) return false
+      if (this.nativeCommentaryRecords.length >= MAX_NATIVE_COMMENTARY_RECORDS) {
+        // A dropped candidate must never turn an ambiguous old match unique.
+        this.discardedCommentaryThroughSecond = Math.max(...this.nativeCommentaryRecords.map(record => record.second))
+        this.nativeCommentaryRecords = []
+        if (second <= this.discardedCommentaryThroughSecond) return false
+      }
+      const owner = this.turnByRun.get(run)?.user
+      const ownerBackend = owner?.session_id === event.session_id ? owner.backend : undefined
+      this.nativeCommentaryRecords.push({ event, second, text: normalizeAssistantOutput(event.text ?? ''), backend: knownBackend
+        ?? (ownerBackend === 'codex' || ownerBackend === 'claude' ? ownerBackend : undefined) })
+      return false
+    }
+    if (event.imported !== true || !run.startsWith('import_') || !knownBackend || !isPublicCommentary(event)) return false
+    const second = commentaryTimestampSecond(event)
+    if (second == null || second <= this.discardedCommentaryThroughSecond) return false
+    const text = normalizeAssistantOutput(event.text ?? '')
+    const itemId = event.provider_message_id?.trim() || event.item_id?.trim()
+    const matches = this.nativeCommentaryRecords.filter(record => {
+      const native = record.event
+      if (record.backend !== knownBackend || native.session_id !== event.session_id || native.seq >= event.seq
+        || record.text !== text) return false
+      const nativeItemId = native.provider_message_id?.trim() || native.item_id?.trim()
+      if (itemId && nativeItemId) return itemId === nativeItemId
+      // Native timestamps historically had second precision; imported source
+      // timestamps retain milliseconds. This narrow fallback requires both
+      // exact full text and the same second, and never hides native updates.
+      return record.second === second && (
+        /T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/i.test(native.ts)
+        || Date.parse(native.ts) === Date.parse(event.ts)
+      )
+    })
+    return matches.length === 1
+  }
+
+  private rememberCrossChatDeliveryAliases(events: Event[]): boolean {
+    let changed = false
+    for (const event of events) {
+      if ((event.type.startsWith('cross_chat_exchange_leg_') || isAsyncCrossChatMessage(event)) && event.target_run_id
+        && /^[0-9a-f]{64}$/i.test(event.handoff_body_sha256 || '')) {
+        const prior = this.crossChatDeliveryReceipts.get(event.target_run_id)
+        if (prior && (prior.handoff_body_sha256 !== event.handoff_body_sha256
+          || crossChatDeliveryKey(prior) !== crossChatDeliveryKey(event)
+          || prior.source_session_id !== event.source_session_id || prior.target_session_id !== event.target_session_id)) {
+          this.conflictingCrossChatReceiptRuns.add(event.target_run_id)
+        }
+        this.crossChatDeliveryReceipts.set(event.target_run_id, event)
+        changed = true
+      }
+      const runId = event.run_id?.trim()
+      if (!runId) continue
+      if (event.imported === true) {
+        if (event.type === 'turn_started') {
+          this.importedCrossChatInputByRun.delete(runId)
+          if (event.provider_origin && importedCrossChatDelivery(event)) {
+            this.importedCrossChatInputs.set(event.id, event)
+            this.importedCrossChatInputByRun.set(runId, event.id)
+            changed = true
+          } else if (this.importedCrossChatInputs.delete(event.id)) changed = true
+        } else if ((event.type === 'assistant_text' || event.type === 'turn_finished') && event.provider_origin) {
+          const inputId = this.importedCrossChatInputByRun.get(runId)
+          if (inputId) {
+            this.importedCrossChatOutputs.set(event.id, { event, inputId })
+            if (event.provider_origin.event_id) this.importedCrossChatOutputProviderIds.add(event.provider_origin.event_id)
+            changed = true
+          }
+        }
+        if (event.type === 'turn_finished') this.importedCrossChatInputByRun.delete(runId)
+        continue
+      }
+      if (this.nativeCrossChatDeliveries.has(runId) && event.provider_message_id
+        && (event.type === 'assistant_text' || event.type === 'reasoning_summary')) {
+        this.nativeCrossChatOutputs.set(`${runId}:${event.provider_message_id}`, event)
+        // Ordinary streaming output must not rescan earlier imported history.
+        if (this.importedCrossChatOutputProviderIds.has(event.provider_message_id)) changed = true
+      }
+      if (event.purpose !== 'cross_chat_handoff_delivery'
+        || event.target_session_id !== event.session_id
+        || !event.source_session_id || event.source_session_id === event.session_id) continue
+      const deliveryKey = crossChatDeliveryKey(event)
+      if (!deliveryKey) continue
+      if (event.type === 'turn_started') {
+        this.nativeCrossChatDeliveries.set(runId, { start: event, deliveryKey })
+        changed = true
+      } else if (event.type === 'turn_finished' && event.provider_session_id) {
+        const native = this.nativeCrossChatDeliveries.get(runId)
+        if (native && native.deliveryKey === deliveryKey
+          && native.start.backend === event.backend && native.start.session_id === event.session_id) {
+          native.finish = event
+          changed = true
+        }
+      }
+    }
+    if (!changed || !this.importedCrossChatInputs.size && !this.importedCrossChatAliases.size) return true
+    const byHash = new Map<string, NativeCrossChatDelivery[]>()
+    for (const [runId, native] of this.nativeCrossChatDeliveries) {
+      const receipt = this.crossChatDeliveryReceipts.get(runId)
+      if (!native.finish || !receipt || this.conflictingCrossChatReceiptRuns.has(runId)
+        || receipt.session_id !== native.start.session_id
+        || crossChatDeliveryKey(receipt) !== native.deliveryKey
+        || receipt.source_session_id !== native.start.source_session_id
+        || receipt.target_session_id !== native.start.target_session_id) continue
+      const hash = receipt.handoff_body_sha256!.toLowerCase()
+      byHash.set(hash, [...(byHash.get(hash) ?? []), native])
+    }
+    const candidates = new Map<string, string>()
+    const originsByRun = new Map<string, Set<string>>()
+    for (const event of this.importedCrossChatInputs.values()) {
+      const delivery = importedCrossChatDelivery(event)!
+      const origin = event.provider_origin!
+      if (typeof origin.timestamp !== 'string') continue
+      const sourceTime = Date.parse(origin.timestamp)
+      if (!origin.event_id || !origin.session_id || !Number.isFinite(sourceTime)
+        || String(origin.provider) !== event.backend) continue
+      const matches = (byHash.get(importedCrossChatBodyHash(event, delivery.body)) ?? []).filter(native => {
+        const receipt = this.crossChatDeliveryReceipts.get(native.start.run_id!)!
+        const startTime = Date.parse(native.start.ts)
+        const finishTime = Date.parse(native.finish!.ts)
+        const kind = delivery.kind === 'final_result' ? 'reply' : delivery.kind
+        return native.start.session_id === event.session_id
+          && native.start.backend === event.backend
+          && native.finish!.provider_session_id === origin.session_id
+          && (delivery.mode === 'async_route_v1'
+            ? isAsyncCrossChatMessage(receipt) && (receipt.kind || receipt.handoff_action) === kind
+              && delivery.ordinal === 1 && delivery.maxLegs === 1
+              && Boolean(receipt.message_edited_by_user) === Boolean(delivery.editedByUser)
+            : !isAsyncCrossChatMessage(receipt) && receipt.exchange_leg_kind === kind
+              && receipt.exchange_ordinal === delivery.ordinal && receipt.exchange_max_legs === delivery.maxLegs)
+          && Number.isFinite(startTime) && Number.isFinite(finishTime)
+          && startTime <= sourceTime && sourceTime <= finishTime
+      })
+      // Correlate one complete wrapper with one exact owned leg; never infer
+      // identity from preview/title similarity or hide a whole imported run.
+      if (matches.length !== 1) continue
+      const runId = matches[0].start.run_id!
+      candidates.set(event.id, runId)
+      const origins = originsByRun.get(runId) ?? new Set<string>()
+      origins.add(origin.event_id)
+      originsByRun.set(runId, origins)
+    }
+    const aliases = new Set([...candidates].filter(([, runId]) => originsByRun.get(runId)?.size === 1).map(([id]) => id))
+    const outputAliases = new Set<string>()
+    for (const { event, inputId } of this.importedCrossChatOutputs.values()) {
+      if (!aliases.has(inputId) || hasProviderUserProvenance(event)) continue
+      const runId = candidates.get(inputId)!
+      const native = this.nativeCrossChatDeliveries.get(runId)!
+      const origin = event.provider_origin!
+      const output = this.nativeCrossChatOutputs.get(`${runId}:${origin.event_id}`)
+      // A repeated answer needs its own provider-message identity proof. A
+      // matched input never authorizes hiding the rest of an imported run.
+      if (output && output.session_id === event.session_id && output.backend === event.backend
+        && String(origin.provider) === event.backend && origin.session_id === native.finish!.provider_session_id
+        && normalizeAssistantOutput(output.text || '')
+        && normalizeAssistantOutput(output.text || '') === normalizeAssistantOutput(event.text || event.result_text || '')) {
+        outputAliases.add(event.id)
+      }
+    }
+    // A later distinct provider record can make an earlier correlation
+    // ambiguous. Restore that input by rebuilding; hidden aliases are not a
+    // monotonic set and ordinary user quotations must never disappear.
+    const removed = [...this.importedCrossChatAliases].some(id => !aliases.has(id))
+      || [...this.importedCrossChatOutputAliases].some(id => !outputAliases.has(id))
+    const added = new Set([
+      ...[...aliases].filter(id => !this.importedCrossChatAliases.has(id)),
+      ...[...outputAliases].filter(id => !this.importedCrossChatOutputAliases.has(id))
+    ])
+    const addedVisible = added.size > 0 && this.itemsValue.some(item => item.kind === 'turn'
+      && (Boolean(item.user && added.has(item.user.id)) || item.assistant.some(event => added.has(event.id))))
+    this.importedCrossChatAliases.clear()
+    for (const id of aliases) this.importedCrossChatAliases.add(id)
+    this.importedCrossChatOutputAliases.clear()
+    for (const id of outputAliases) this.importedCrossChatOutputAliases.add(id)
+    return !this.itemsValue.length || !removed && !addedVisible
   }
 
   private applyCrossChatTerminalStatus(event: Event): Event {
@@ -1426,6 +1695,18 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
   if (item.kind === 'system' && (item.events ?? [item.event]).some(isAsyncCrossChatMessage)) {
     return renderCrossChatMessage(item)
   }
+  if (item.kind === 'system' && item.event.type.startsWith('cross_chat_exchange_')) {
+    const byLeg = new Map<string, Event[]>()
+    for (const event of item.events ?? [item.event]) {
+      const legId = event.exchange_leg_id?.trim() || event.cross_chat_exchange_leg_id?.trim()
+      if (!legId || event.exchange_leg_kind === 'status') continue
+      byLeg.set(legId, [...(byLeg.get(legId) ?? []), event])
+    }
+    if (byLeg.size) return [...byLeg].map(([legId, events]) => ({
+      ...item, id: `${item.id}:message:${legId}`, key: `${item.key}:message:${legId}`,
+      seq: events[0].seq, anchorTs: events[0].ts, crossChatLegId: legId
+    }))
+  }
   if (item.kind !== 'turn') return [item]
   const rows: RenderTimelineItem[] = []
   const inputFileIds = new Set(item.user?.file_ids ?? [])
@@ -1459,16 +1740,18 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
       files: inputFiles
     })
   }
-  const finalAssistantEvents = item.assistant.filter(event => !completedCommentary(event))
+  const finalAssistantEvents = item.assistant.filter(event => !isPublicCommentary(event))
   const sourceEvents = deduplicateEvents([
     ...item.trace,
-    ...item.assistant.filter(completedCommentary)
+    ...item.assistant.filter(isPublicCommentary)
   ])
   // An earlier answer is not evidence that later work is finished. Native
   // goals and reconstructed provider history can both continue in one run.
-  // Use actual event order for every backend, so subsequent public progress
-  // stays live (or remains visible after interruption), including Claude.
-  const continuations = runPresentationSegments(sourceEvents, finalAssistantEvents)
+  // Sequence is arrival order. Explicitly phased commentary can be delivered
+  // late; an earlier timestamp in this same run keeps it before its answer.
+  const orderingFinalEvents = sourceEvents.some(event => activityEventSequence(event, finalAssistantEvents) < event.seq)
+    ? finalAssistantEvents : undefined
+  const continuations = runPresentationSegments(sourceEvents, finalAssistantEvents, orderingFinalEvents)
   for (const [index, segment] of continuations.entries()) {
     const last = index === continuations.length - 1
     const suffix = segment.after ? `:after:${segment.after.id}` : ''
@@ -1479,12 +1762,13 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
         kind: 'progress',
         id: `${item.id}:activity${suffix}`,
         key: `${item.key}:activity${suffix}`,
-        seq: activityEvents[0]?.seq ?? item.user?.seq ?? item.seq,
+        seq: activityEvents[0] ? activityEventSequence(activityEvents[0], orderingFinalEvents) : item.user?.seq ?? item.seq,
         events: activityEvents,
         sourceEvents: segment.events,
         active,
         hasFinalResponse: segment.finals.length > 0,
         finalEvents: segment.finals,
+        ...(orderingFinalEvents ? { orderingFinalEvents } : {}),
         afterSeq: segment.after?.seq ?? item.afterSeq,
         throughSeq: continuations[index + 1]?.after?.seq ?? item.throughSeq,
         startedAt: segment.after ? activityEvents[0]?.ts ?? segment.after.ts : item.startedAt,
@@ -1522,25 +1806,46 @@ function renderCrossChatMessage(item: SystemItem): SystemItem[] {
   }] : []
 }
 
-function runPresentationSegments(events: Event[], finals: Event[]): { events: Event[]; finals: Event[]; after?: Event }[] {
+/** Keep arrival order unless public commentary has an earlier, zoned timestamp in the same run. */
+export function activityEventSequence(event: Event, finals: Event[] = []): number {
+  if (!isPublicCommentary(event) || !event.run_id || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(event.ts)) return event.seq
+  const timestamp = Date.parse(event.ts)
+  if (!Number.isFinite(timestamp)) return event.seq
+  for (const final of finals) {
+    if (final.seq >= event.seq) break
+    if (final.run_id !== event.run_id || (event.backend && final.backend && event.backend !== final.backend)
+      || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(final.ts)) continue
+    const finalTimestamp = Date.parse(final.ts)
+    if (Number.isFinite(finalTimestamp) && timestamp < finalTimestamp) return final.seq
+  }
+  return event.seq
+}
+
+function runPresentationSegments(events: Event[], finals: Event[], orderingFinalEvents?: Event[]): { events: Event[]; finals: Event[]; after?: Event }[] {
+  const orderedEvents = orderingFinalEvents
+    ? [...events].sort((left, right) => activityEventSequence(left, orderingFinalEvents) - activityEventSequence(right, orderingFinalEvents) || left.seq - right.seq)
+    : events
   const boundaries: Event[] = []
   let finalCursor = 0
-  for (const event of events) {
+  for (const event of orderedEvents) {
     // Post-answer diff/bookkeeping alone is not another working turn.
     if (event.type !== 'tool_started' && event.type !== 'tool_finished'
-      && !(event.type === 'reasoning_summary' && messageText(event).trim())) continue
-    while (finalCursor < finals.length && finals[finalCursor].seq < event.seq) finalCursor++
+      && !(event.type === 'reasoning_summary' && messageText(event).trim())
+      && !isPublicCommentary(event)) continue
+    const seq = activityEventSequence(event, orderingFinalEvents)
+    while (finalCursor < finals.length && finals[finalCursor].seq < seq) finalCursor++
     const previousFinal = finals[finalCursor - 1]
     if (previousFinal && boundaries.at(-1) !== previousFinal) boundaries.push(previousFinal)
   }
-  if (!boundaries.length) return [{ events, finals }]
+  if (!boundaries.length) return [{ events: orderedEvents, finals }]
   const segments: { events: Event[]; finals: Event[]; after?: Event }[] = [
     { events: [], finals: [] },
     ...boundaries.map(after => ({ events: [], finals: [], after }))
   ]
   let index = 0
-  for (const event of events) {
-    while (index < boundaries.length && event.seq > boundaries[index].seq) index++
+  for (const event of orderedEvents) {
+    const seq = activityEventSequence(event, orderingFinalEvents)
+    while (index < boundaries.length && seq > boundaries[index].seq) index++
     segments[index].events.push(event)
   }
   index = 0
@@ -1553,6 +1858,7 @@ function runPresentationSegments(events: Event[], finals: Event[]): { events: Ev
 
 export function traceHasVisibleContent(events: Event[]): boolean {
   return events.some(event => event.type === 'reasoning_summary' && Boolean(messageText(event).trim())) ||
+    events.some(isPublicCommentary) ||
     events.some(event => event.type === 'tool_started' || event.type === 'tool_finished') ||
     events.some(event => event.type === 'code_diff' && Boolean(event.run_id)) ||
     Boolean(extractUnifiedDiff(events).trim())
@@ -1576,6 +1882,7 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
       before.hasFinalResponse === item.hasFinalResponse &&
       before.afterSeq === item.afterSeq && before.throughSeq === item.throughSeq &&
       sameReferences(before.finalEvents ?? [], item.finalEvents ?? []) &&
+      sameReferences(before.orderingFinalEvents ?? [], item.orderingFinalEvents ?? []) &&
       before.finishedAt === item.finishedAt && before.stoppedAt === item.stoppedAt &&
       sameReferences(before.events, item.events) &&
       sameReferences(before.sourceEvents ?? [], item.sourceEvents ?? []) &&
@@ -1615,8 +1922,8 @@ function codexLifecycleEventPriority(event: Event): number {
   return 0
 }
 
-function completedCommentary(event: Event): boolean {
-  return event.type === 'reasoning_summary'
+export function isPublicCommentary(event: Event): boolean {
+  return (event.type === 'reasoning_summary' || event.type === 'assistant_text')
     && event.phase === 'commentary'
     && Boolean(event.text?.trim())
 }
@@ -1659,8 +1966,7 @@ export function omitTerminalClaudeFinalCommentary(events: Event[], finalEvents: 
     if (event.id === final?.id) continue
     if (claudeTerminalBookkeepingTypes.has(event.type)) continue
     if (
-      event.type !== 'reasoning_summary'
-      || event.phase !== 'commentary'
+      !isPublicCommentary(event)
       || event.backend !== 'claude'
     ) return events
     const text = normalizeAssistantOutput(event.text ?? '')
@@ -1702,6 +2008,15 @@ export function messageText(event: Event): string {
 }
 
 const importedDeliveryCache = new WeakMap<Event, ImportedCrossChatDelivery | null>()
+const importedDeliveryHashCache = new WeakMap<Event, string>()
+
+function importedCrossChatBodyHash(event: Event, body: string): string {
+  const cached = importedDeliveryHashCache.get(event)
+  if (cached) return cached
+  const hash = bytesToHex(sha256(utf8ToBytes(body)))
+  importedDeliveryHashCache.set(event, hash)
+  return hash
+}
 const deliveryReplyFooters = new Set([
   '',
   'reply: use the respond command in the provider-authority block only if a reply or follow-up is needed.',
@@ -1725,15 +2040,23 @@ function parseImportedCrossChatDelivery(event: Event): ImportedCrossChatDelivery
   if (event.type !== 'turn_started' || event.imported !== true
     || !event.run_id?.startsWith('import_')
     || (event.backend !== 'codex' && event.backend !== 'claude')
-    || typeof event.prompt !== 'string' || event.prompt.length > 262_144) return null
-  const text = stripInjectedProviderAuthority(event.prompt.replace(/\r\n/g, '\n')).trim()
-  const header = /^\[AgentsDock delivery kind=(instruction|request|reply|final_result|status|message) leg=(0|[1-9]\d{0,5})\/([1-9]\d{0,5}) origin=(?:user|route|auto)(?: from=([^\[\]\r\n]{1,240}))?\]\n/u.exec(text)
+    || hasProviderUserProvenance(event)) return null
+  return parseCrossChatDeliveryPrompt(event.prompt)
+}
+
+function parseCrossChatDeliveryPrompt(prompt: Event['prompt']): ImportedCrossChatDelivery | null {
+  if (typeof prompt !== 'string' || prompt.length > 262_144) return null
+  const text = stripInjectedProviderAuthority(prompt.replace(/\r\n/g, '\n')).trim()
+  const header = /^\[AgentsDock delivery kind=(instruction|request|reply|final_result|status|message) leg=(0|[1-9]\d{0,5})\/([1-9]\d{0,5}) origin=(?:user|route|auto)(?: mode=(async_route_v1))?(?: from=([^\[\]\r\n]{1,240}))?\]\n/u.exec(text)
   if (!header || Number(header[2]) > Number(header[3]) || !text.endsWith('\n[End delivery]')) return null
   const kind = header[1] as ImportedCrossChatDelivery['kind']
   // A skipped request has no delivered leg. Its terminal status legitimately
   // uses leg=0; treating it as an invalid envelope exposed the internal prompt.
   if (header[2] === '0' && kind !== 'status') return null
   let remainder = text.slice(header[0].length, -'\n[End delivery]'.length)
+  const editedMarker = '[Server provenance: the recipient user edited this queued message; sender identity and routing permissions are unchanged.]\n'
+  const editedByUser = header[4] === 'async_route_v1' && remainder.startsWith(editedMarker)
+  if (editedByUser) remainder = remainder.slice(editedMarker.length)
   let sourceRequest = ''
   const sourceOpen = '[Source user instruction — verbatim, user-authored]\n'
   const sourceClose = '\n[End source user instruction]\n'
@@ -1759,7 +2082,10 @@ function parseImportedCrossChatDelivery(event: Event): ImportedCrossChatDelivery
   if (!deliveryReplyFooters.has(remainder.slice(end + preparedClose.length).trim())) return null
   const body = remainder.slice(preparedOpen.length, end).trim()
   if (!body) return null
-  return { sender: header[4]?.trim() || 'Other agent', kind, body, sourceRequest: sourceRequest.trim() }
+  return { sender: header[5]?.trim() || 'Other agent', kind, body, sourceRequest: sourceRequest.trim(),
+    ordinal: Number(header[2]), maxLegs: Number(header[3]),
+    ...(header[4] === 'async_route_v1' ? { mode: 'async_route_v1' as const } : {}),
+    ...(editedByUser ? { editedByUser: true } : {}) }
 }
 
 function stripInjectedProviderAuthority(text: string): string {

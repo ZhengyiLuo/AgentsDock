@@ -29,6 +29,26 @@ export class SubagentEventProjector {
   }
 
   project(event: Event): Event | null {
+    if (event.type === 'subagent_state' && event.backend === 'claude' && event.subagent_id && event.run_id) {
+      const stateKey = key(event.session_id, event.run_id, event.subagent_id)
+      const previous = this.states.get(stateKey)
+      const status = normalizeStatus(event.subagent_status)
+      if (previous && !isActiveStatus(previous.status) && isActiveStatus(status)) return null
+      const state: LiveSubagentState = {
+        sessionId: event.session_id, runId: event.run_id, taskId: event.subagent_id,
+        toolId: event.subagent_tool_id || previous?.toolId || '',
+        name: event.subagent_name || previous?.name || 'Claude subagent',
+        kind: event.subagent_kind || previous?.kind || 'agent', status,
+        startedAt: event.subagent_started_at || previous?.startedAt || event.ts,
+        updatedAt: event.ts, activity: event.subagent_activity || previous?.activity || '',
+        summary: event.subagent_summary || previous?.summary || '',
+        log: event.subagent_log?.slice(-LOG_LIMIT) || previous?.log || []
+      }
+      this.states.set(stateKey, state)
+      if (state.toolId) this.taskByTool.set(key(event.session_id, event.run_id, state.toolId), stateKey)
+      this.prune()
+      return null // The server's structured event already reaches the renderer.
+    }
     if (event.type === 'turn_finished' || event.type === 'turn_stopped' || event.type === 'error') {
       this.releaseRun(event.session_id, String(event.run_id || ''))
       return null
@@ -44,6 +64,8 @@ export class SubagentEventProjector {
 
     if (raw.type === 'system' && subtype === 'task_started' && raw.task_type === 'local_agent' && taskId) {
       const stateKey = key(event.session_id, runId, taskId)
+      const previous = this.states.get(stateKey)
+      if (previous && !isActiveStatus(previous.status)) return null
       const state: LiveSubagentState = {
         sessionId: event.session_id,
         runId,
@@ -67,7 +89,7 @@ export class SubagentEventProjector {
 
     if (raw.type === 'system' && subtype === 'task_progress' && taskId) {
       const state = this.states.get(key(event.session_id, runId, taskId))
-      if (!state) return null
+      if (!state || !isActiveStatus(state.status)) return null
       state.status = 'running'
       this.note(state, event.ts, raw.description || 'Working')
       return projectedEvent(event, state)
@@ -76,7 +98,9 @@ export class SubagentEventProjector {
     if (raw.type === 'system' && subtype === 'task_notification' && taskId) {
       const state = this.states.get(key(event.session_id, runId, taskId))
       if (!state) return null
-      state.status = normalizeStatus(raw.status)
+      const status = normalizeStatus(raw.status)
+      if (!isActiveStatus(state.status) && isActiveStatus(status)) return null
+      state.status = status
       state.summary = compact(raw.summary)
       this.note(state, event.ts, raw.summary || `Subagent ${state.status}`)
       return projectedEvent(event, state)
@@ -86,7 +110,7 @@ export class SubagentEventProjector {
       const stateKey = this.taskByTool.get(key(event.session_id, runId, parentToolId))
       const state = stateKey ? this.states.get(stateKey) : undefined
       const activity = childActivity(raw)
-      if (!state || !activity) return null
+      if (!state || !activity || !isActiveStatus(state.status)) return null
       this.note(state, event.ts, activity)
       return projectedEvent(event, state)
     }
@@ -168,10 +192,15 @@ function childActivity(raw: Record<string, any>): string {
 
 function normalizeStatus(value: unknown): string {
   const status = String(value || '').toLowerCase()
+  if (status === 'tracking_lost' || status === 'killed') return status
   if (status === 'completed' || status === 'complete' || status === 'done') return 'completed'
   if (status === 'failed' || status === 'error') return 'failed'
   if (status === 'stopped' || status === 'cancelled' || status === 'canceled') return 'stopped'
   return 'running'
+}
+
+function isActiveStatus(status: string): boolean {
+  return status === 'running' || status === 'starting'
 }
 
 function compact(value: unknown): string {

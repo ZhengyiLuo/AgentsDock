@@ -2,7 +2,7 @@ import type { Event, JsonValue } from '@shared/types'
 import { getLocale, t } from '@shared/i18n'
 import { timelineStatusLabel } from './timeline-labels'
 
-export type SubagentStatus = 'starting' | 'running' | 'completed' | 'failed' | 'stopped'
+export type SubagentStatus = 'starting' | 'running' | 'completed' | 'failed' | 'stopped' | 'killed' | 'tracking_lost'
 
 export interface SubagentLogEntry {
   ts: string
@@ -119,9 +119,9 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       const childId = String(event.subagent_id)
       const projectedToolId = String(event.subagent_tool_id || '')
       const identity = subagentEventIdentity(event)
-      const key = `${backend}:subagent:${childId}`
+      const key = backend === 'claude' ? `${backend}:${runId}:subagent:${childId}` : `${backend}:subagent:${childId}`
       const existingKey = (
-        taskKeys.get(taskAlias(backend, childId))
+        taskKeys.get(taskAlias(backend, childId, runId))
         || (projectedToolId ? toolKeys.get(toolAlias(backend, runId, projectedToolId)) : undefined)
       )
       const fallback = [...agents.values()]
@@ -135,6 +135,10 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         ))
         .sort((a, b) => (agentStartSeqs.get(b.key) ?? 0) - (agentStartSeqs.get(a.key) ?? 0))[0]
       const existing = agents.get(key) || (existingKey ? agents.get(existingKey) : undefined) || fallback
+      // A retired Claude execution cannot become live again from a delayed
+      // snapshot. A new owner has its own key, even if a task ID is reused.
+      if (backend === 'claude' && existing && !ACTIVE_STATUSES.has(existing.status)
+        && ACTIVE_STATUSES.has(normalizedStatus(event.subagent_status))) continue
       const agent = existing ? rekey(existing, key) : ensure(key, {
         id: childId,
         runId,
@@ -159,7 +163,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       if (event.subagent_log?.length) agent.log = event.subagent_log.slice(-LOG_LIMIT)
       authoritativeKeys.add(key)
       agentStartSeqs.set(key, Math.min(agentStartSeqs.get(key) ?? event.seq, event.seq))
-      taskKeys.set(taskAlias(backend, childId), key)
+      taskKeys.set(taskAlias(backend, childId, runId), key)
       if (projectedToolId) toolKeys.set(toolAlias(backend, runId, projectedToolId), key)
       note(agent, event.ts, event.subagent_activity)
     }
@@ -222,7 +226,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           agent.providerRef = providerIdentity.providerRef || agent.providerRef
           applySubagentIdentity(agent, providerIdentity)
         }
-        note(agent, event.ts, event.is_error ? event.output || t('timeline.subagent.failed') : agent.backend === 'claude' ? event.output || t('timeline.subagent.completed') : t('timeline.subagent.attached'))
+        if (agent.status !== 'tracking_lost') note(agent, event.ts, event.is_error ? event.output || t('timeline.subagent.failed') : agent.backend === 'claude' ? event.output || t('timeline.subagent.completed') : t('timeline.subagent.attached'))
       }
     }
 
@@ -234,7 +238,8 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
       const rawToolId = String(raw.tool_use_id || '')
 
       if (raw.type === 'system' && subtype === 'task_started' && raw.task_type === 'local_agent' && taskId) {
-        const key = toolKeys.get(toolAlias('claude', runId, rawToolId)) || `claude:${runId}:${rawToolId || taskId}`
+        const key = taskKeys.get(taskAlias('claude', taskId, runId))
+          || toolKeys.get(toolAlias('claude', runId, rawToolId)) || `claude:${runId}:${rawToolId || taskId}`
         const task = cleanIdentityText(raw.description)
         const fallbackName = task || cleanIdentityText(raw.subagent_type) || 'Claude subagent'
         const agent = ensure(key, {
@@ -248,6 +253,7 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
           startedAt: event.ts,
           updatedAt: event.ts
         })
+        if (!ACTIVE_STATUSES.has(agent.status)) continue
         agent.id = taskId
         if (task) {
           agent.name = task
@@ -255,25 +261,27 @@ export function subagentsFromEvents(events: Event[], ownerBackend?: 'claude' | '
         }
         agent.kind = String(raw.subagent_type || agent.kind || 'agent')
         agent.status = 'running'
-        taskKeys.set(taskAlias('claude', taskId), key)
+        taskKeys.set(taskAlias('claude', taskId, runId), key)
         if (rawToolId) toolKeys.set(toolAlias('claude', runId, rawToolId), key)
         note(agent, event.ts, raw.description || t('timeline.subagent.started'))
       } else if (raw.type === 'system' && subtype === 'task_progress' && taskId) {
-        const agent = agents.get(taskKeys.get(taskAlias('claude', taskId)) || '')
-        if (agent) {
+        const agent = agents.get(taskKeys.get(taskAlias('claude', taskId, runId)) || '')
+        if (agent && ACTIVE_STATUSES.has(agent.status)) {
           agent.status = 'running'
           note(agent, event.ts, raw.description || t('timeline.ui.working'))
         }
       } else if (raw.type === 'system' && subtype === 'task_notification' && taskId) {
-        const agent = agents.get(taskKeys.get(taskAlias('claude', taskId)) || '')
+        const agent = agents.get(taskKeys.get(taskAlias('claude', taskId, runId)) || '')
         if (agent) {
-          agent.status = normalizedStatus(raw.status)
+          const nextStatus = normalizedStatus(raw.status)
+          if (!ACTIVE_STATUSES.has(agent.status) && ACTIVE_STATUSES.has(nextStatus)) continue
+          agent.status = nextStatus
           agent.summary = compactText(raw.summary)
-          note(agent, event.ts, raw.summary || t('timeline.subagent.status', { status: getLocale() === 'en' ? agent.status : timelineStatusLabel(agent.status) }))
+          note(agent, event.ts, raw.summary || t('timeline.subagent.status', { status: subagentStatusLabel(agent.status) }))
         }
       } else if (parentToolId) {
         const agent = agents.get(toolKeys.get(toolAlias('claude', runId, parentToolId)) || '')
-        if (agent) note(agent, event.ts, childActivity(raw))
+        if (agent && ACTIVE_STATUSES.has(agent.status)) note(agent, event.ts, childActivity(raw))
       }
     }
 
@@ -303,13 +311,18 @@ export function isSubagentActive(agent: SubagentActivity): boolean {
   return ACTIVE_STATUSES.has(agent.status)
 }
 
+export function subagentStatusLabel(status: SubagentStatus): string {
+  if (status === 'tracking_lost' || status === 'killed') return timelineStatusLabel(status)
+  return getLocale() === 'en' ? status : timelineStatusLabel(status)
+}
+
 export function subagentLogText(agent: SubagentActivity): string {
   const task = subagentTaskLabel(agent)
   const header = [
     subagentDisplayName(agent),
     agent.path && agent.path !== subagentDisplayName(agent) ? t('timeline.subagent.path', { path: agent.path }) : '',
     task && task !== agent.name && task !== agent.path ? t('timeline.subagent.task', { task }) : '',
-    `${agent.backend} · ${agent.kind || 'subagent'} · ${getLocale() === 'en' ? agent.status : timelineStatusLabel(agent.status)}`,
+    `${agent.backend} · ${agent.kind || 'subagent'} · ${subagentStatusLabel(agent.status)}`,
     agent.providerRef ? `Provider: ${agent.providerRef}` : ''
   ].filter(Boolean)
   return [...header, '', ...agent.log.map(entry => `${formatLogTime(entry.ts)}  ${entry.text}`)].join('\n')
@@ -367,6 +380,7 @@ function childActivity(raw: Record<string, unknown>): string {
 
 function normalizedStatus(value: unknown): SubagentStatus {
   const status = String(value || '').toLowerCase()
+  if (status === 'tracking_lost' || status === 'killed') return status
   if (status === 'completed' || status === 'complete' || status === 'done') return 'completed'
   if (status === 'failed' || status === 'error' || status === 'errored' || status === 'systemerror' || status === 'notfound') return 'failed'
   if (status === 'stopped' || status === 'cancelled' || status === 'canceled' || status === 'interrupted' || status === 'shutdown' || status === 'closed') return 'stopped'
@@ -435,8 +449,8 @@ function asRecord(value: JsonValue | unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 }
 
-function taskAlias(backend: 'claude' | 'codex', id: string): string {
-  return `${backend}:${id}`
+function taskAlias(backend: 'claude' | 'codex', id: string, runId: string): string {
+  return backend === 'claude' ? `${backend}:${runId}:${id}` : `${backend}:${id}`
 }
 
 function toolAlias(backend: 'claude' | 'codex', runId: string, id: string): string {

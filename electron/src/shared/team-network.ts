@@ -1,4 +1,5 @@
 import type { AgentTeamMessagesCapability, Health, TeamAllServersAliasCapability, TeamBulletinAliasCapability } from './types'
+import { parseMailArrivalCursor, parseMailboxCoverage, type MailboxCoverage } from './team-mail-hints'
 
 export const TEAM_NETWORK_MAX_PAGE_ITEMS = 100
 export const TEAM_NETWORK_DEFAULT_PAGE_ITEMS = 50
@@ -307,6 +308,13 @@ export interface TeamMailSubjectsCapability {
   max_subject_chars: 160
 }
 
+export interface TeamMailThreadsCapability {
+  available: true
+  version: 1
+  max_page_items: 25
+  max_thread_items: 2048
+}
+
 export interface TeamMailboxStateCapability {
   available: true
   version: 1
@@ -332,9 +340,12 @@ export interface TeamMessagesCapability {
   all_servers?: TeamAllServersAliasCapability
   /** Desktop overlay from the separately negotiated subject capability. */
   mail_subjects?: TeamMailSubjectsCapability
+  mail_threads?: TeamMailThreadsCapability
   mailbox_state?: TeamMailboxStateCapability
   /** Desktop overlay derived from the verified Hub's schema, never from message data. */
   skill_announcement_deletion?: true
+  /** Desktop overlay from the separately negotiated exact-host moderation capability. */
+  host_content_deletion?: true
   attachments: {
     max_bytes_per_file: number
     max_files_per_message: number
@@ -462,6 +473,25 @@ export interface TeamMessagePage {
   messages: TeamMessageSummary[]
   next_after_sequence: number
   has_more: boolean
+  mailbox_coverage?: MailboxCoverage
+}
+
+export interface TeamMessageThreadQuery {
+  teamId: string
+  messageId: string
+  afterSequence?: number
+  limit?: number
+}
+
+export interface TeamMessageThreadPage {
+  team_id: string
+  anchor_message_id: string
+  root_message_id: string
+  messages: TeamMessage[]
+  next_after_sequence: number
+  has_more: boolean
+  /** A visibility/deletion boundary or bounded traversal prevents a complete history. */
+  truncated: boolean
 }
 
 export interface TeamMessageReceiptResult {
@@ -506,6 +536,8 @@ export interface TeamMessageQuery {
   fromId?: string
   since?: string
   afterSequence?: number
+  includeMailboxCoverage?: boolean
+  afterArrivalId?: string
   limit?: number
 }
 
@@ -710,6 +742,14 @@ export function parseTeamMailSubjectsCapability(value: unknown): TeamMailSubject
     throw invalidContract('Team Mail subjects capability')
   }
   return { available: true, version: 1, max_subject_chars: 160 }
+}
+
+export function parseTeamMailThreadsCapability(value: unknown): TeamMailThreadsCapability {
+  const item = strictRecord(value, 'Team Mail threads capability', ['available', 'version', 'max_page_items', 'max_thread_items'])
+  if (item.available !== true || item.version !== 1 || item.max_page_items !== 25 || item.max_thread_items !== 2048) {
+    throw invalidContract('Team Mail threads capability')
+  }
+  return { available: true, version: 1, max_page_items: 25, max_thread_items: 2048 }
 }
 
 export function parseTeamMailboxStateCapability(value: unknown): TeamMailboxStateCapability {
@@ -943,8 +983,8 @@ export function teamAllServersAliasAvailable(health: Health | null | undefined):
 export function parseTeamMessagePage(value: unknown, teamIdValue: string): TeamMessagePage {
   const teamId = opaqueId(teamIdValue, 'team')
   const item = strictRecord(value, 'Team Messages response', [
-    'box', 'address', 'messages', 'next_after_sequence', 'has_more'
-  ])
+    'box', 'address', 'messages', 'next_after_sequence', 'has_more', 'mailbox_coverage'
+  ], ['mailbox_coverage'])
   if (item.box !== 'inbox' && item.box !== 'feed' && item.box !== 'sent') {
     throw invalidContract('Team Messages box')
   }
@@ -959,18 +999,57 @@ export function parseTeamMessagePage(value: unknown, teamIdValue: string): TeamM
     Number.MAX_SAFE_INTEGER
   )
   const hasMore = booleanValue(item.has_more, 'Team Messages continuation')
+  const coverage = item.mailbox_coverage === undefined ? undefined : parseMailboxCoverage(item.mailbox_coverage)
+  if (coverage && (item.box !== 'inbox' || address?.kind !== 'server'
+    || coverage.team_id !== teamId || coverage.recipient_server_id !== address.id
+    || coverage.through_sequence < nextAfterSequence
+    || (hasMore && coverage.through_sequence !== nextAfterSequence))) throw invalidContract('Team Mail coverage')
   return {
     box: item.box,
     address,
     messages,
     next_after_sequence: nextAfterSequence,
-    has_more: hasMore
+    has_more: hasMore,
+    ...(coverage ? { mailbox_coverage: coverage } : {})
   }
 }
 
 export function parseTeamMessageResponse(value: unknown, teamIdValue: string): { message: TeamMessage } {
   const item = strictRecord(value, 'Team Message response', ['message'])
   return { message: parseTeamMessage(item.message, opaqueId(teamIdValue, 'team')) }
+}
+
+export function parseTeamMessageThreadQuery(value: unknown): Required<TeamMessageThreadQuery> {
+  const item = strictInputRecord(value, 'Team Mail thread query', ['teamId', 'messageId', 'afterSequence', 'limit'], ['afterSequence', 'limit'])
+  return {
+    teamId: opaqueId(item.teamId, 'team'),
+    messageId: opaqueId(item.messageId, 'Team Message'),
+    afterSequence: optionalInteger(item.afterSequence, 'Team Mail thread cursor', 0, Number.MAX_SAFE_INTEGER, 0),
+    limit: optionalInteger(item.limit, 'Team Mail thread page size', 1, 25, 25)
+  }
+}
+
+export function parseTeamMessageThreadPage(value: unknown, queryValue: TeamMessageThreadQuery): TeamMessageThreadPage {
+  const query = parseTeamMessageThreadQuery(queryValue)
+  const item = strictRecord(value, 'Team Mail thread', ['team_id', 'anchor_message_id', 'root_message_id', 'messages', 'next_after_sequence', 'has_more', 'truncated'])
+  if (item.team_id !== query.teamId || item.anchor_message_id !== query.messageId) throw invalidContract('Team Mail thread identity')
+  const root = opaqueId(item.root_message_id, 'Team Mail thread root')
+  const messages = boundedArray(item.messages, 'Team Mail thread messages', query.limit).map(value => parseTeamMessage(value, query.teamId))
+  const ids = new Set<string>()
+  let sequence = query.afterSequence
+  for (const message of messages) {
+    if (ids.has(message.id) || message.sequence <= sequence || message.kind !== 'message' || message.skill
+      || message.recipients.some(recipient => recipient.kind === 'all')) throw invalidContract('Team Mail thread message')
+    ids.add(message.id)
+    sequence = message.sequence
+  }
+  const next = integer(item.next_after_sequence, 'Team Mail thread next cursor', query.afterSequence, Number.MAX_SAFE_INTEGER)
+  const more = booleanValue(item.has_more, 'Team Mail thread continuation')
+  if (next !== sequence || more && !messages.length) throw invalidContract('Team Mail thread cursor')
+  return {
+    team_id: query.teamId, anchor_message_id: query.messageId, root_message_id: root, messages,
+    next_after_sequence: next, has_more: more, truncated: booleanValue(item.truncated, 'Team Mail thread completeness')
+  }
 }
 
 export function parseTeamMessageReceiptResponse(value: unknown): TeamMessageReceiptResult {
@@ -1076,8 +1155,8 @@ export function parseTeamSkillResponse(value: unknown, teamIdValue: string): { s
 export function parseTeamMessageQuery(value: unknown): Required<Pick<TeamMessageQuery, 'teamId' | 'box' | 'unread' | 'afterSequence' | 'limit'>> & Omit<TeamMessageQuery, 'teamId' | 'box' | 'unread' | 'afterSequence' | 'limit'> {
   const item = strictInputRecord(value, 'Team Messages query', [
     'teamId', 'box', 'addressKind', 'addressId', 'unread', 'fromKind', 'fromId',
-    'since', 'afterSequence', 'limit'
-  ], ['addressKind', 'addressId', 'unread', 'fromKind', 'fromId', 'since', 'afterSequence', 'limit'])
+    'since', 'afterSequence', 'limit', 'includeMailboxCoverage', 'afterArrivalId'
+  ], ['addressKind', 'addressId', 'unread', 'fromKind', 'fromId', 'since', 'afterSequence', 'limit', 'includeMailboxCoverage', 'afterArrivalId'])
   if (item.box !== 'inbox' && item.box !== 'feed' && item.box !== 'sent') {
     throw new Error('Team Messages box is invalid.')
   }
@@ -1089,6 +1168,14 @@ export function parseTeamMessageQuery(value: unknown): Required<Pick<TeamMessage
   const fromKind = optionalSenderOrAddressKind(item.fromKind, 'sender')
   const fromId = item.fromId === undefined ? undefined : opaqueId(item.fromId, 'Team Messages sender')
   if ((fromKind === undefined) !== (fromId === undefined)) throw new Error('Team Messages sender filter is invalid.')
+  const afterSequence = optionalInteger(item.afterSequence, 'Team Messages sequence', 0, Number.MAX_SAFE_INTEGER, 0)
+  const includeMailboxCoverage = item.includeMailboxCoverage === undefined ? undefined : inputBoolean(item.includeMailboxCoverage, 'Team Mail coverage')
+  if (includeMailboxCoverage) {
+    if (item.box !== 'inbox' || addressKind !== 'server' || item.unread === true || fromKind || item.since !== undefined) {
+      throw new Error('Team Mail coverage requires an unfiltered server inbox.')
+    }
+    parseMailArrivalCursor({ through_sequence: afterSequence, arrival_id: item.afterArrivalId ?? null })
+  } else if (item.afterArrivalId !== undefined) throw new Error('Team Mail arrival anchor requires coverage.')
   return {
     teamId: opaqueId(item.teamId, 'team'),
     box: item.box,
@@ -1098,7 +1185,9 @@ export function parseTeamMessageQuery(value: unknown): Required<Pick<TeamMessage
     ...(fromKind ? { fromKind } : {}),
     ...(fromId ? { fromId } : {}),
     ...(item.since === undefined ? {} : { since: inputTimestamp(item.since, 'Team Messages since filter') }),
-    afterSequence: optionalInteger(item.afterSequence, 'Team Messages sequence', 0, Number.MAX_SAFE_INTEGER, 0),
+    afterSequence,
+    ...(includeMailboxCoverage === undefined ? {} : { includeMailboxCoverage }),
+    ...(item.afterArrivalId === undefined ? {} : { afterArrivalId: item.afterArrivalId as string }),
     limit: optionalInteger(item.limit, 'Team Messages page size', 1, TEAM_NETWORK_MAX_PAGE_ITEMS, TEAM_NETWORK_DEFAULT_PAGE_ITEMS)
   }
 }

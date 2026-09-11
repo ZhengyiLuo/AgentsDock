@@ -17,6 +17,7 @@ import type {
   AgentFile,
   AgentCrossChatRoute,
   AgentCrossChatRoutesSnapshot,
+  AgentTeamMailRoutesSnapshot,
   BulkImportSessionItem,
   BulkImportSessionResult,
   ChatReference,
@@ -58,6 +59,8 @@ import type {
   PinnedItem,
   PinnedItemsSnapshot,
   ProcessSnapshot,
+  ProviderCommandSelection,
+  ProviderCommandsSnapshot,
   ProviderReloadResult,
   ProviderRuntimeChanged,
   QueuedCrossChatDeliveryIdentity,
@@ -103,6 +106,10 @@ import { parseAgentTeamMessagesCapability, parseTeamBulletinAliasCapability, par
 import { PinRevisionConflictError } from './pin-sync'
 import { PORT_TUNNEL_SUBPROTOCOL } from './port-tunnel-manager'
 import { SecurePeerRequestAdmission } from './secure-peer-request-admission'
+import {
+  parseMailHintPacket, TEAM_MAIL_HINTS_MAX_PACKET_CHARS, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
+  type MailboxCoverage, type MailHintMailbox, type MailHintPacket
+} from '../shared/team-mail-hints'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 // The server gives its one-shot digest summarizer 180 seconds to finish.
@@ -126,6 +133,27 @@ const TEAM_HUB_BOOTSTRAP_PROOF_TIMEOUT_MS = 15_000
 const TEAM_HUB_BOOTSTRAP_PROOF_MAX_RESPONSE_BYTES = 64 * 1024
 const SECURE_PEER_MAX_REQUEST_BYTES = 64 * 1024
 const SECURE_PEER_BINARY_ERROR_MAX_BYTES = 64 * 1024
+const PROVIDER_COMMAND_ID_PATTERN = /^pcmd_[0-9a-f]{32}$/
+const PROVIDER_COMMAND_REVISION_PATTERN = /^pcmdrev_[0-9a-f]{32}$/
+
+function providerCommandSelectionPayload(value: ProviderCommandSelection | undefined): ProviderCommandSelection | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid provider command selection.')
+  }
+  const record = value as unknown as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  if (
+    keys.length !== 2
+    || keys[0] !== 'id'
+    || keys[1] !== 'revision'
+    || typeof record.id !== 'string'
+    || !PROVIDER_COMMAND_ID_PATTERN.test(record.id)
+    || typeof record.revision !== 'string'
+    || !PROVIDER_COMMAND_REVISION_PATTERN.test(record.revision)
+  ) throw new Error('Invalid provider command selection.')
+  return { id: record.id, revision: record.revision }
+}
 const SECURE_PEER_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const TEAM_ATTACHMENT_CHUNK_MAX_BYTES = 8 * 1024 * 1024
 const TEAM_ATTACHMENT_TRANSFER_TIMEOUT_MS = 120_000
@@ -179,6 +207,7 @@ export interface TeamHubHostRoleRequest {
   confirmed: true
   server_name: string
   network_name?: string
+  require_existing_host?: true
 }
 
 export type TeamHubHostEnableRequest = TeamHubHostRoleRequest
@@ -380,6 +409,7 @@ export class AgentServerClient {
           expected_server_instance_id: input.expected_server_instance_id,
           confirmed: true,
           server_name: input.server_name,
+          ...(input.require_existing_host === true ? { require_existing_host: true } : {}),
           ...(input.network_name === undefined ? {} : { network_name: input.network_name })
         })
       },
@@ -987,6 +1017,10 @@ export class AgentServerClient {
     return this.sessionPageWithConfiguration(configuration, sessionId, { pageMode: 'semantic' })
   }
 
+  providerCommands(sessionId: string, refresh = false): Promise<ProviderCommandsSnapshot> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/provider-commands?refresh=${refresh ? 'true' : 'false'}`)
+  }
+
   async sendTurn(
     sessionId: string,
     prompt: string,
@@ -995,8 +1029,10 @@ export class AgentServerClient {
     effort?: string | null,
     clientCapabilities: string[] = ['codex_interactive_v1'],
     chatReferences: ChatReference[] = [],
-    teamReferences: TeamReference[] = []
+    teamReferences: TeamReference[] = [],
+    skillSelection?: ProviderCommandSelection
   ): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }> {
+    const selection = providerCommandSelectionPayload(skillSelection)
     const response = await this.post<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }>(`/api/sessions/${encodeURIComponent(sessionId)}/turns`, {
       prompt,
       file_ids: fileIds,
@@ -1004,7 +1040,8 @@ export class AgentServerClient {
       effort: effort ?? '',
       client_capabilities: clientCapabilities,
       ...(chatReferences.length ? { chat_references: chatReferences } : {}),
-      ...(teamReferences.length ? { team_references: teamReferences } : {})
+      ...(teamReferences.length ? { team_references: teamReferences } : {}),
+      ...(selection ? { skill_selection: selection } : {})
     })
     return response.event ? { ...response, event: compactTimelineEvent(response.event) } : response
   }
@@ -1148,19 +1185,30 @@ export class AgentServerClient {
     prompt: string,
     chatReferences?: ChatReference[],
     clientCapabilities?: string[],
-    teamReferences?: TeamReference[]
+    teamReferences?: TeamReference[],
+    expectedMessageRevision?: number
   ): Promise<boolean> {
     await this.patch(`/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}`, {
       prompt,
       ...(chatReferences ? { chat_references: chatReferences } : {}),
       ...(clientCapabilities ? { client_capabilities: clientCapabilities } : {}),
-      ...(teamReferences ? { team_references: teamReferences } : {})
+      ...(teamReferences ? { team_references: teamReferences } : {}),
+      ...(expectedMessageRevision !== undefined ? { expected_message_revision: expectedMessageRevision } : {})
     })
     return true
   }
 
   async agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
-    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)
+  }
+
+  agentTeamMailRoutes(sessionId: string): Promise<AgentTeamMailRoutesSnapshot> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-team-mail-routes`)
+  }
+
+  deleteAgentTeamMailRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
+    const params = new URLSearchParams({ expected_revision: expectedRevision })
+    return this.delete(`/api/sessions/${encodeURIComponent(sessionId)}/agent-team-mail-routes/${encodeURIComponent(routeId)}?${params}`)
   }
 
   async searchAgentHandoffTargets(
@@ -2045,6 +2093,95 @@ export class AgentServerClient {
         current.close()
         disconnect('Emergency alert stream disconnected')
       })
+    }
+    configuration.transports.add(stop)
+    if (configuration.abortController.signal.aborted) stop()
+    else connect()
+    return stop
+  }
+
+  /** One metadata-only stream. Retries only follow transport failure, never idle polling. */
+  mailHintStream(
+    expectedServerIdentity: string,
+    mailbox: MailHintMailbox,
+    previousCursor: () => MailboxCoverage | null,
+    onPacket: (packet: MailHintPacket) => void,
+    onFatal: () => void,
+    onDisconnect: () => void = () => {}
+  ): () => void {
+    const configuration = this.configuration
+    const endpoint = new URL(configurationURL(configuration, TEAM_MAIL_HINTS_PATH))
+    endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:'
+    let stopped = false
+    let socket: WebSocket | null = null
+    let retry: NodeJS.Timeout | null = null
+    let watchdog: NodeJS.Timeout | null = null
+    let delay = 500
+    const clearWatchdog = (): void => { if (watchdog) clearTimeout(watchdog); watchdog = null }
+    const stop = (): void => {
+      if (stopped) return
+      stopped = true
+      if (retry) clearTimeout(retry)
+      retry = null
+      clearWatchdog()
+      configuration.transports.delete(stop)
+      socket?.close()
+    }
+    const fatal = (): void => { stop(); onFatal() }
+    const connect = (): void => {
+      if (stopped) return
+      retry = null
+      const current = new WebSocket(endpoint, [TEAM_MAIL_HINTS_PROTOCOL, ...agentTokenWebSocketProtocols(configuration.token)])
+      socket = current
+      let disconnected = false
+      let first: MailHintPacket | null = null
+      let offered: MailboxCoverage | null = null
+      const active = (): boolean => !stopped && !disconnected && socket === current
+      const disconnect = (): void => {
+        if (!active()) return
+        disconnected = true
+        clearWatchdog()
+        onDisconnect()
+        retry = setTimeout(connect, delay + Math.floor(Math.random() * Math.min(250, delay / 3)))
+        delay = Math.min(10_000, delay * 2)
+      }
+      // Includes the first authenticated snapshot, not merely TCP connection.
+      // Member bootstrap may wait 15s for its feed, 10s for exact retained-
+      // anchor proof and 5s for its first write; retain 5s scheduling margin.
+      // This bounds bootstrap only, never idle.
+      watchdog = setTimeout(() => { if (active()) { disconnect(); current.close() } }, 35_000)
+      current.addEventListener('open', () => {
+        if (!active()) return
+        try {
+          if (current.protocol !== TEAM_MAIL_HINTS_PROTOCOL) throw new Error('Mail protocol was not negotiated')
+          offered = previousCursor()
+          current.send(JSON.stringify({ version: 1, team_id: mailbox.team_id, previous_cursor: offered }))
+        } catch { fatal() }
+      })
+      current.addEventListener('message', message => {
+        if (!active()) return
+        try {
+          if (typeof message.data !== 'string' || message.data.length > TEAM_MAIL_HINTS_MAX_PACKET_CHARS) throw new Error('Invalid packet')
+          const packet = parseMailHintPacket(JSON.parse(message.data))
+          if (packet.server_identity !== expectedServerIdentity || packet.hub_id !== mailbox.hub_id
+            || packet.cursor.team_id !== mailbox.team_id
+            || (mailbox.recipient_server_id !== null && packet.cursor.recipient_server_id !== mailbox.recipient_server_id)) throw new Error('Scope changed')
+          if (!first) {
+            if (packet.type !== 'snapshot' || (offered && offered.recipient_server_id !== packet.cursor.recipient_server_id && !packet.cursor.reset)) throw new Error('Invalid snapshot')
+            first = packet
+            delay = 500
+            clearWatchdog()
+          } else if (packet.type !== 'hint' || packet.stream_id !== first.stream_id
+            || packet.cursor.recipient_server_id !== first.cursor.recipient_server_id) throw new Error('Stream changed')
+          onPacket(packet)
+        } catch { fatal() }
+      })
+      current.addEventListener('close', event => {
+        if (!active()) return
+        if ([1008, 4401, 4403, 4406].includes(event.code)) fatal()
+        else disconnect()
+      })
+      current.addEventListener('error', () => { if (active()) { disconnect(); current.close() } })
     }
     configuration.transports.add(stop)
     if (configuration.abortController.signal.aborted) stop()

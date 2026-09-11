@@ -115,6 +115,15 @@ export function isCrossChatDeliveryQueuedTurn(turn: QueuedTurn): boolean {
   return turn.purpose === 'cross_chat_handoff_delivery'
 }
 
+export function isAsyncAgentQueuedTurn(turn: QueuedTurn): boolean {
+  return isCrossChatDeliveryQueuedTurn(turn) && turn.conversation_mode === 'async_route_v1'
+}
+
+export function asyncQueuedMessageControlsAvailable(health: Health | null | undefined): boolean {
+  const capability = health?.capabilities?.cross_chat_handoffs_v1
+  return capability?.available === true && capability.features?.async_queued_message_controls === true
+}
+
 /** Encrypted peer deliveries need a visible queue owner and exact escape. */
 export function isSecurePeerDeliveryQueuedTurn(turn: QueuedTurn): boolean {
   return turn.purpose === 'secure_peer_handoff_delivery'
@@ -180,17 +189,19 @@ export function queuedMoveCrossesCrossChatDelivery(
     || crossed.some(turn => !isReorderableQueuedTurn(turn, mixedReorder))
 }
 
-/** Actions a user turn cannot perform without overtaking earlier system work. */
+/** Pending order is user-controlled on capable servers; starting work is not. */
 export function queuedTurnCrossChatFence(
   turns: readonly QueuedTurn[],
   queuedId: string,
-  mixedReorder = false
+  mixedReorder = false,
+  asyncControls = false
 ): QueuedTurnCrossChatFence {
   const ordered = queuedTurnsInPositionOrder(turns)
   const index = ordered.findIndex(turn => turn.queued_id === queuedId)
   if (index < 0) return { runNow: false, moveEarlier: false, moveLater: false }
   return {
-    runNow: ordered.slice(0, index).some(isImmutableQueuedTurn),
+    runNow: ordered.slice(0, index).some(turn => turn.promoted === true
+      || (!asyncControls && isImmutableQueuedTurn(turn))),
     moveEarlier: index > 0 && !isReorderableQueuedTurn(ordered[index - 1], mixedReorder),
     moveLater: index + 1 < ordered.length && !isReorderableQueuedTurn(ordered[index + 1], mixedReorder)
   }
@@ -305,17 +316,19 @@ export function steerQueuedTurn(
 export async function steerFirstQueuedTurn(
   scope: SteeringScope,
   admissionError?: (turn: QueuedTurn) => string | null,
-  confirmImmediatelyBeforeRun?: () => boolean
+  confirmImmediatelyBeforeRun?: () => boolean,
+  asyncControls = false
 ): Promise<SteerFirstQueuedResult> {
   const pending = pendingSteers.get(steeringKey(scope))
   if (pending) return { steered: false, turns: await pending.promise }
 
   const turns = await window.agentsDock.queue.list(scope.sessionId)
   if (turns.some(turn => turn.promoted === true)) return { steered: false, turns }
-  const first = queuedTurnsInPositionOrder(turns).find(isUserQueuedTurn)
+  const first = queuedTurnsInPositionOrder(turns).find(turn => isUserQueuedTurn(turn)
+    || (asyncControls && isAsyncAgentQueuedTurn(turn)))
 
   if (!first) return { steered: false, turns }
-  if (queuedTurnCrossChatFence(turns, first.queued_id).runNow) {
+  if (queuedTurnCrossChatFence(turns, first.queued_id, false, asyncControls).runNow) {
     return { steered: false, turns }
   }
   const error = admissionError?.(first)

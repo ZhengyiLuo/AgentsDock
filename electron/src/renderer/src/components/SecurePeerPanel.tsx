@@ -8,6 +8,7 @@ import type {
   SecurePeerScope
 } from '@shared/secure-peer'
 import { normalizeSecurePeerJoinTarget } from '@shared/secure-peer'
+import { t, useLocale } from '../lib/i18n'
 import { canForgetSecurePeerPairing, reconcileSecurePeerPairings } from '../lib/secure-peer-lifecycle'
 
 const V1_SCOPES: SecurePeerScope[] = ['teamspace.read', 'teamspace.write']
@@ -54,6 +55,7 @@ export function SecurePeerPanel({
   connectionAttemptInFlight = false,
   onPendingCountChange
 }: SecurePeerPanelProps) {
+  useLocale()
   const scope = useMemo(() => profileScope(status), [status.profileGeneration, status.profileId, status.serverIdentity])
   const scopeKey = scope ? `${scope.profileId}\0${scope.profileGeneration}\0${scope.serverIdentity}` : ''
   const scopeIdentityKey = scope ? `${scope.profileId}\0${scope.serverIdentity}` : ''
@@ -71,8 +73,8 @@ export function SecurePeerPanel({
   const [invite, setInvite] = useState('')
   const [hostAddress, setHostAddress] = useState('')
   const [busy, setBusy] = useState<string | null>('status')
-  const [error, setError] = useState<string | null>(null)
-  const [approvalRefreshError, setApprovalRefreshError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [approvalRefreshError, setApprovalRefreshError] = useState<unknown>(null)
   const [completionNotice, setCompletionNotice] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [confirmedSas, setConfirmedSas] = useState<Set<string>>(() => new Set())
@@ -131,7 +133,7 @@ export function SecurePeerPanel({
     try {
       return await task(requestEpoch)
     } catch (cause) {
-      if (epoch.current === requestEpoch) setError(errorMessage(cause))
+      if (epoch.current === requestEpoch) setError(cause ?? new LocalizedPeerError('teamNetwork.peer.connectionFailed'))
       return null
     } finally {
       if (epoch.current === requestEpoch && operation.current === key) {
@@ -168,7 +170,7 @@ export function SecurePeerPanel({
         const refreshes = await Promise.allSettled(pendingPairings.map(async pendingPairing => {
           const refreshed = await window.agentsDock.teamHub.refreshSecurePeerPairing(scope, pendingPairing.id)
           if (refreshed.id !== pendingPairing.id || refreshed.direction !== 'outgoing') {
-            throw new Error('The server returned a mismatched connection request.')
+            throw new LocalizedPeerError('teamNetwork.peer.mismatchedRequest')
           }
           return refreshed
         }))
@@ -185,7 +187,7 @@ export function SecurePeerPanel({
             pairings: next.pairings.map(pairing => refreshedById.get(pairing.id) ?? pairing)
           }
         }
-        if (refreshError) setError(errorMessage(refreshError))
+        if (refreshError) setError(refreshError)
       }
       setControl(current => sameSecurePeerControl(current, next) ? current : next)
       if (status.designatedHost && workspace && details && canManage) {
@@ -194,7 +196,7 @@ export function SecurePeerPanel({
         setManagedPeers(current => sameSecurePeerPairings(current, peers) ? current : peers)
       }
     } catch (cause) {
-      if (epoch.current === requestEpoch) setError(errorMessage(cause))
+      if (epoch.current === requestEpoch) setError(cause ?? new LocalizedPeerError('teamNetwork.peer.connectionFailed'))
     } finally {
       if (statusInFlightEpoch.current === requestEpoch) statusInFlightEpoch.current = null
       if (epoch.current === requestEpoch) setBusy(null)
@@ -302,7 +304,7 @@ export function SecurePeerPanel({
         || !terminal && !completionEnded && (completed.completeOnApproval !== true || completed.trustState !== 'approved'
           || !completed.connectionId || !completed.hubIdentity
           || next.activeConnectionId !== completed.connectionId)) {
-        throw new Error('The server returned a mismatched automatic connection completion.')
+        throw new LocalizedPeerError('teamNetwork.peer.mismatchedCompletion')
       }
       if (!hasConsent(scope, pairing)
         || hasAutomaticAdoptionSuppression(automaticAdoptionSuppressions.current, scope, pairing)) return
@@ -319,20 +321,20 @@ export function SecurePeerPanel({
         forgetConsent(scope, pairing)
         automaticCompletionAttempts.current.delete(pairingConsentKey(scope, pairing))
         setCompletionNotice(completed.trustState === 'rejected'
-          ? 'The host rejected this connection request. You can try another invite.'
+          ? 'teamNetwork.peer.hostRejected'
           : completed.trustState === 'expired'
-            ? 'This connection request expired. Ask the host for a new invite.'
+            ? 'teamNetwork.peer.requestExpired'
             : completed.trustState === 'cancelled'
-              ? 'This connection request was cancelled. You can try another invite.'
+              ? 'teamNetwork.peer.requestCancelled'
               : next.pairingCompletion?.state === 'expired'
-                ? 'Automatic connection expired. The saved request has not been changed; review its status before reconnecting.'
-                : 'Automatic connection stopped. The saved request has not been changed; review its status before reconnecting.')
+                ? 'teamNetwork.peer.automaticExpired'
+                : 'teamNetwork.peer.automaticStopped')
       }
       // Successful completion already activated this exact request; terminal
       // receipts instead retain their truthful trust state with consent off.
       setControl(next)
     }).catch(cause => {
-      if (active) setError(`Automatic connection completion could not be confirmed: ${errorMessage(cause)}`)
+      if (active) setError(new LocalizedPeerError('teamNetwork.peer.completionUnconfirmed', cause))
     })
     return stop
   }, [automaticPendingKey, completionObservation, control?.activeConnectionId, scopeKey, status.designatedHost])
@@ -435,18 +437,19 @@ export function SecurePeerPanel({
     void completeApprovedConnection(approved, activatePairing, key)
   }, [completeApprovedConnection, connectionAttemptInFlight, control, networkError, outgoing, scopeKey, status.authenticated, status.backgroundReconnectAllowed, status.designatedHost])
 
-  if (!scope) return <div className="teamspace-host-help"><strong>Server identity is unavailable.</strong></div>
+  if (!scope) return <div className="teamspace-host-help"><strong>{t('teamNetwork.peer.identityUnavailable')}</strong></div>
 
   const copyServerInvite = async () => {
     if (!control) return
     await run('copy-invite', async requestEpoch => {
       let next = control
       if (next.host.error || next.host.errorCode) {
-        throw new Error(next.host.action || next.host.error || 'Resolve the secure peer host error before creating an invite.')
+        const reason = next.host.action || next.host.error
+        throw reason ? new Error(reason) : new LocalizedPeerError('teamNetwork.peer.resolveHostError')
       }
       if (!next.host.pairingLink) {
         const advertisedHost = hostAddress.trim() || next.host.advertisedHost || next.host.advertisedHosts[0]
-        if (!advertisedHost) throw new Error('This server needs a reachable private address before it can create an invite.')
+        if (!advertisedHost) throw new LocalizedPeerError('teamNetwork.peer.addressRequired')
         next = await window.agentsDock.teamHub.configureSecurePeerHost(scope, {
           enabled: true,
           advertisedHost,
@@ -455,7 +458,7 @@ export function SecurePeerPanel({
         if (epoch.current !== requestEpoch) throw new StaleSecurePeerResponse()
         setControl(next)
       }
-      if (!next.host.pairingLink) throw new Error('The server invite is not ready yet.')
+      if (!next.host.pairingLink) throw new LocalizedPeerError('teamNetwork.peer.inviteNotReady')
       await window.agentsDock.native.writeClipboard(next.host.pairingLink)
       if (epoch.current !== requestEpoch) throw new StaleSecurePeerResponse()
       setCopied(true)
@@ -466,7 +469,7 @@ export function SecurePeerPanel({
   const pasteInvite = async () => {
     setError(null)
     try { setInvite((await window.agentsDock.native.readClipboard()).trim()) }
-    catch (cause) { setError(errorMessage(cause)) }
+    catch (cause) { setError(cause ?? new LocalizedPeerError('teamNetwork.peer.connectionFailed')) }
   }
 
   const connectThisServer = async (event: FormEvent<HTMLFormElement>) => {
@@ -475,7 +478,7 @@ export function SecurePeerPanel({
     if (!target) return
     setCompletionNotice(null)
     if (control?.activeConnectionId || status.designatedHost) {
-      setError('Disconnect the current secure connection or turn off secure peer hosting before joining another network.')
+      setError(new LocalizedPeerError('teamNetwork.peer.disconnectBeforeJoin'))
       return
     }
     const submittedInviteRequestId = target === initialInvite?.trim()
@@ -529,7 +532,7 @@ export function SecurePeerPanel({
       const next = await window.agentsDock.teamHub.refreshSecurePeerPairing(scope, pairing.id)
       if (epoch.current !== requestEpoch) throw new StaleSecurePeerResponse()
       if (next.id !== pairing.id || next.direction !== 'outgoing') {
-        throw new Error('The server returned a mismatched connection request.')
+        throw new LocalizedPeerError('teamNetwork.peer.mismatchedRequest')
       }
       return next
     })
@@ -567,7 +570,7 @@ export function SecurePeerPanel({
       setManagedPeers(current => sameSecurePeerPairings(current, peers.value) ? current : peers.value)
     }
     const failure = peers.status === 'rejected' ? peers.reason : directory.status === 'rejected' ? directory.reason : null
-    if (failure) setApprovalRefreshError(`Approval succeeded, but the server list could not be refreshed: ${errorMessage(failure)}`)
+    if (failure) setApprovalRefreshError(failure)
   }
 
   const approve = async (pairing: SecurePeerPairing) => {
@@ -694,7 +697,7 @@ export function SecurePeerPanel({
       }
       retryFinished = epoch.current === requestEpoch
     } catch (cause) {
-      if (epoch.current === requestEpoch) setError(errorMessage(cause))
+      if (epoch.current === requestEpoch) setError(cause ?? new LocalizedPeerError('teamNetwork.peer.connectionFailed'))
     } finally {
       if (epoch.current === requestEpoch && operation.current === key) {
         operation.current = null
@@ -711,25 +714,25 @@ export function SecurePeerPanel({
   // connection is active, the parent adoption error belongs to this flow and
   // remains visible in its recovery card.
   const secureConnectionIsActive = Boolean(control?.activeConnectionId)
-  const peerConnectionError = error
+  const peerConnectionError = (error != null ? errorMessage(error) : null)
     ?? control?.connectionError
     ?? (secureConnectionIsActive ? networkError : null)
     ?? null
   const panelError = peerConnectionNeedsAttention ? null : peerConnectionError
 
-  return <section className="secure-peer-panel network-connect-panel" aria-label="Connect servers">
+  return <section className="secure-peer-panel network-connect-panel" aria-label={t('teamNetwork.peer.connectServers')}>
     <header className="teamspace-section-heading network-connect-heading">
       <KeyRound size={18} />
       <div>
-        <h2>{status.designatedHost ? 'Share an invite link' : 'Connect this server'}</h2>
+        <h2>{status.designatedHost ? t('teamNetwork.peer.shareInvite') : t('teamNetwork.peer.connectServer')}</h2>
         <span>{status.designatedHost
-          ? 'Send this link to your teammate. They can open it in AgentsDock to connect their server, then you approve the request here.'
-          : `Connect ${status.serverName || 'this server'} with an invite from the network host.`}</span>
+          ? t('teamNetwork.peer.shareInviteHelp')
+          : t('teamNetwork.peer.connectNamed', { name: status.serverName || t('teamNetwork.peer.thisServer') })}</span>
       </div>
-      <button type="button" className="quiet-button network-refresh-button" aria-label="Refresh connection status" disabled={Boolean(busy)} onClick={() => void load()}><RefreshCw className={busy === 'status' ? 'spin' : ''} size={15} /><span>Refresh</span></button>
+      <button type="button" className="quiet-button network-refresh-button" aria-label={t('teamNetwork.peer.refreshStatus')} disabled={Boolean(busy)} onClick={() => void load()}><RefreshCw className={busy === 'status' ? 'spin' : ''} size={15} /><span>{t('teamNetwork.peer.refresh')}</span></button>
     </header>
 
-    {!control && busy === 'status' && <div className="teamspace-empty"><LoaderCircle className="spin" size={16} />Checking server…</div>}
+    {!control && busy === 'status' && <div className="teamspace-empty"><LoaderCircle className="spin" size={16} />{t('teamNetwork.peer.checkingServer')}</div>}
 
     {control && status.designatedHost && <HostConnectionView
       status={status}
@@ -785,9 +788,9 @@ export function SecurePeerPanel({
       onRetry={() => void retryConnection()}
     />}
 
-    {panelError && <div className="teamspace-error network-panel-error" role="alert"><span>{panelError}</span><button type="button" className="quiet-button" onClick={() => void load()}>Retry</button></div>}
-    {completionNotice && <div className="teamspace-host-help" role="status"><strong>{completionNotice}</strong></div>}
-    {approvalRefreshError && <div className="teamspace-error network-panel-error" role="status"><span>{approvalRefreshError}</span><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void run('refresh-approved', refreshApprovedHost)}>Refresh server list</button></div>}
+    {panelError && <div className="teamspace-error network-panel-error" role="alert"><span>{panelError}</span><button type="button" className="quiet-button" onClick={() => void load()}>{t('teamNetwork.peer.retry')}</button></div>}
+    {completionNotice && <div className="teamspace-host-help" role="status"><strong>{t(completionNotice)}</strong></div>}
+    {approvalRefreshError != null && <div className="teamspace-error network-panel-error" role="status"><span>{t('teamNetwork.peer.approvalRefreshFailed', { error: errorMessage(approvalRefreshError) })}</span><button type="button" className="quiet-button" disabled={Boolean(busy)} onClick={() => void run('refresh-approved', refreshApprovedHost)}>{t('teamNetwork.peer.refreshServerList')}</button></div>}
   </section>
 }
 
@@ -832,32 +835,33 @@ function HostConnectionView({ status, control, pending, managedPeers, canManage,
   onCancelDisableHost: () => void
   onDisableHost: () => void
 }) {
+  const locale = useLocale()
   const livePeers = managedPeers.filter(pairing => (
     pairing.direction === 'incoming' && ['approved', 'revoked'].includes(pairing.trustState)
   ))
-  const hostIdentity = status.serverIdentity || 'Unavailable'
+  const hostIdentity = status.serverIdentity || t('teamNetwork.peer.unavailable')
   const hostHasError = Boolean(control.host.error || control.host.errorCode)
   const hostIssueTitle = control.host.errorCode === 'peer_identity_conflict'
-    ? 'Conflicting server connection records'
-    : 'This server cannot create an invite yet.'
+    ? t('teamNetwork.peer.conflictingRecords')
+    : t('teamNetwork.peer.cannotInvite')
   return <>
     <article className="network-server-identity">
       <Server size={18} />
-      <div><strong>{status.serverName || 'Network host'}</strong><span title={status.serverIdentity || undefined}>Server identity · {compactIdentity(hostIdentity)}</span></div>
-      <b>Host</b>
+      <div><strong>{status.serverName || t('teamNetwork.peer.networkHost')}</strong><span title={status.serverIdentity || undefined}>{t('teamNetwork.peer.serverIdentity')} · {compactIdentity(hostIdentity)}</span></div>
+      <b>{t('teamNetwork.peer.host')}</b>
     </article>
-    {!control.host.pairingLink && !control.host.advertisedHost && control.host.advertisedHosts.length === 0 && <label className="network-host-address">Reachable server address<input required aria-label="Reachable server address" value={hostAddress} onChange={event => onHostAddressChange(event.target.value)} inputMode="decimal" autoCapitalize="none" spellCheck={false} placeholder="100.x.x.x" /></label>}
-    <button type="button" className="primary-button network-copy-invite" disabled={busy || hostHasError || !control.host.available || !control.host.pairingLink && !hostAddress.trim() && !control.host.advertisedHost && control.host.advertisedHosts.length === 0} onClick={onCopy}><Copy size={14} />{copied ? 'Invite link copied' : 'Copy invite link'}</button>
+    {!control.host.pairingLink && !control.host.advertisedHost && control.host.advertisedHosts.length === 0 && <label className="network-host-address">{t('teamNetwork.peer.reachableAddress')}<input required aria-label={t('teamNetwork.peer.reachableAddress')} value={hostAddress} onChange={event => onHostAddressChange(event.target.value)} inputMode="decimal" autoCapitalize="none" spellCheck={false} placeholder="100.x.x.x" /></label>}
+    <button type="button" className="primary-button network-copy-invite" disabled={busy || hostHasError || !control.host.available || !control.host.pairingLink && !hostAddress.trim() && !control.host.advertisedHost && control.host.advertisedHosts.length === 0} onClick={onCopy}><Copy size={14} />{copied ? t('teamNetwork.peer.inviteCopied') : t('teamNetwork.peer.copyInvite')}</button>
     {(!control.host.available || hostHasError) && <div className="teamspace-host-help network-host-error" role="alert">
       <strong>{hostIssueTitle}</strong>
       {control.host.error && <span>{control.host.error}</span>}
       {control.host.action && <span>{control.host.action}</span>}
-      {control.host.errorCode && <span className="network-error-code">Error code · <code>{control.host.errorCode}</code></span>}
+      {control.host.errorCode && <span className="network-error-code">{t('teamNetwork.peer.errorCode')} · <code>{control.host.errorCode}</code></span>}
     </div>}
 
-    <section className="network-approval-list" aria-label="Connection requests">
-      <header><h3>Waiting for approval</h3><b className="network-pending-count">{pending.length}</b></header>
-      {!pending.length && <p>No servers are waiting.</p>}
+    <section className="network-approval-list" aria-label={t('teamNetwork.peer.connectionRequests')}>
+      <header><h3>{t('teamNetwork.peer.waitingApproval')}</h3><b className="network-pending-count">{pending.length}</b></header>
+      {!pending.length && <p>{t('teamNetwork.peer.noWaiting')}</p>}
       {pending.map(pairing => {
         const confirmationKey = pairingConfirmationKey(pairing)
         const allowed = V1_SCOPES.filter(scope => pairing.requestedScopes.includes(scope))
@@ -865,47 +869,47 @@ function HostConnectionView({ status, control, pending, managedPeers, canManage,
           <Server size={18} />
           <div>
             <strong>{pairing.peerDisplayName}</strong>
-            <span>Compare all six words with the person connecting the other server.</span>
+            <span>{t('teamNetwork.peer.compareSix')}</span>
             <SAS pairing={pairing} />
-            <label className="secure-peer-sas-confirm"><input type="checkbox" checked={confirmedSas.has(confirmationKey)} onChange={event => onConfirmSas(pairing, event.target.checked)} />The six words match.</label>
-            <details className="network-more"><summary>Advanced</summary><ConnectionDetails pairing={pairing} /></details>
+            <label className="secure-peer-sas-confirm"><input type="checkbox" checked={confirmedSas.has(confirmationKey)} onChange={event => onConfirmSas(pairing, event.target.checked)} />{t('teamNetwork.peer.sixMatch')}</label>
+            <details className="network-more"><summary>{t('teamNetwork.peer.advanced')}</summary><ConnectionDetails pairing={pairing} /></details>
           </div>
           <div className="secure-peer-card-actions">
             {canManage
-              ? <><button type="button" className="primary-button" disabled={busy || !confirmedSas.has(confirmationKey) || !allowed.length} onClick={() => onApprove(pairing)}>Approve</button><button type="button" className="quiet-button danger" disabled={busy} onClick={() => onReject(pairing)}>Reject</button></>
-              : <span>An owner or admin must approve.</span>}
+              ? <><button type="button" className="primary-button" disabled={busy || !confirmedSas.has(confirmationKey) || !allowed.length} onClick={() => onApprove(pairing)}>{t('teamNetwork.peer.approve')}</button><button type="button" className="quiet-button danger" disabled={busy} onClick={() => onReject(pairing)}>{t('teamNetwork.peer.reject')}</button></>
+              : <span>{t('teamNetwork.peer.adminApproval')}</span>}
           </div>
         </article>
       })}
     </section>
 
-    {livePeers.length > 0 && <section className="network-approval-list" aria-label="Server connections">
-      <header><h3>Server connections</h3></header>
+    {livePeers.length > 0 && <section className="network-approval-list" aria-label={t('teamNetwork.peer.serverConnections')}>
+      <header><h3>{t('teamNetwork.peer.serverConnections')}</h3></header>
       {livePeers.map(pairing => <article className={`secure-peer-pairing-card ${pairing.trustState === 'revoked' ? 'danger' : ''}`} key={pairing.id}>
         <Server size={18} />
         <div>
           <strong>{pairing.peerDisplayName}</strong>
           <span>{hostPeerStateLabel(pairing)}</span>
           <details className="network-more">
-            <summary>Connection details</summary>
+            <summary>{t('teamNetwork.peer.connectionDetails')}</summary>
             <ConnectionDetails pairing={pairing} />
-            {canManage && pairing.trustState === 'approved' && <button type="button" className="quiet-button danger" disabled={busy || !pairing.connectionId || !pairing.certificateFingerprint} onClick={() => onRevoke(pairing)}>Revoke access</button>}
+            {canManage && pairing.trustState === 'approved' && <button type="button" className="quiet-button danger" disabled={busy || !pairing.connectionId || !pairing.certificateFingerprint} onClick={() => onRevoke(pairing)}>{t('teamNetwork.peer.revokeAccess')}</button>}
           </details>
         </div>
       </article>)}
     </section>}
 
     <details className="network-more network-connection-manage">
-      <summary>Advanced / Manage</summary>
+      <summary>{t('teamNetwork.peer.advancedManage')}</summary>
       <div className="secure-peer-request-details">
-        <span>Host identity · <code>{status.serverIdentity}</code></span>
-        {control.host.caFingerprint && <span>Host fingerprint · <code>{control.host.caFingerprint}</code></span>}
-        {control.host.certificateExpiresAt && <span>Invite certificate expires {new Date(control.host.certificateExpiresAt).toLocaleString()}</span>}
-        {control.host.enabled && !confirmingDisableHost && <button type="button" className="quiet-button danger" disabled={busy} onClick={onRequestDisableHost}>Turn off secure peer hosting…</button>}
-        {control.host.enabled && confirmingDisableHost && <div className="secure-peer-destructive-confirm" role="group" aria-label="Turn off secure peer hosting">
-          <span>Turn off secure peer hosting? This stops accepting invites and takes connected peer servers offline. Existing approvals remain saved.</span>
-          <button type="button" className="quiet-button danger" disabled={busy} onClick={onDisableHost}>Turn off &amp; take peers offline</button>
-          <button type="button" className="quiet-button" disabled={busy} onClick={onCancelDisableHost}>Keep hosting</button>
+        <span>{t('teamNetwork.peer.hostIdentity')} · <code>{status.serverIdentity}</code></span>
+        {control.host.caFingerprint && <span>{t('teamNetwork.peer.hostFingerprint')} · <code>{control.host.caFingerprint}</code></span>}
+        {control.host.certificateExpiresAt && <span>{t('teamNetwork.peer.inviteExpires', { date: new Date(control.host.certificateExpiresAt).toLocaleString(locale) })}</span>}
+        {control.host.enabled && !confirmingDisableHost && <button type="button" className="quiet-button danger" disabled={busy} onClick={onRequestDisableHost}>{t('teamNetwork.peer.disableHostingEllipsis')}</button>}
+        {control.host.enabled && confirmingDisableHost && <div className="secure-peer-destructive-confirm" role="group" aria-label={t('teamNetwork.peer.disableHosting')}>
+          <span>{t('teamNetwork.peer.disableHostingConfirm')}</span>
+          <button type="button" className="quiet-button danger" disabled={busy} onClick={onDisableHost}>{t('teamNetwork.peer.disableTakeOffline')}</button>
+          <button type="button" className="quiet-button" disabled={busy} onClick={onCancelDisableHost}>{t('teamNetwork.peer.keepHosting')}</button>
         </div>}
       </div>
     </details>
@@ -934,6 +938,7 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
   onForget: (pairing: SecurePeerPairing) => void
   onRetry: () => void
 }) {
+  useLocale()
   const connectionCards = outgoing.filter(pairing => (
     pairing.id !== activePairing?.id
     && ['pending', 'approved', 'revoked'].includes(pairing.trustState)
@@ -948,56 +953,56 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
   )
   const activeRevoked = activePairing?.trustState === 'revoked'
   const degradedLabel = teamspaceAdoptionIncomplete
-    ? 'Teamspace connection incomplete'
+    ? t('teamNetwork.peer.teamspaceIncomplete')
     : activeRevoked
-    ? 'Access revoked'
+    ? t('teamNetwork.peer.accessRevoked')
     : activePairing?.transportState === 'reconnecting'
-      ? 'Reconnecting'
+      ? t('teamNetwork.peer.reconnecting')
       : activePairing?.transportState === 'offline'
-        ? 'Offline'
-        : 'Connection needs attention'
+        ? t('teamNetwork.peer.offline')
+        : t('teamNetwork.peer.attention')
   const degradedDescription = connectionError || activePairing?.error || (
     teamspaceAdoptionIncomplete
-      ? 'The secure server link is online, but this app has not entered the Teamspace yet. Try again to finish connecting.'
+      ? t('teamNetwork.peer.adoptionIncomplete')
       : activeRevoked
-      ? 'The host revoked this server. Forget the local connection to remove its certificate and saved record.'
+      ? t('teamNetwork.peer.revokedDescription')
       : activePairing?.transportState === 'reconnecting'
-      ? `The secure link dropped briefly. AgentsServer is retrying every ${control.heartbeatIntervalSeconds} seconds.`
+      ? t('teamNetwork.peer.reconnectingDescription', { seconds: control.heartbeatIntervalSeconds })
       : activePairing?.transportState === 'offline'
-        ? `No valid heartbeat arrived within ${control.leaseSeconds} seconds. AgentsServer will keep trying automatically.`
-        : 'The saved connection could not be verified. Refresh it before connecting another server.'
+        ? t('teamNetwork.peer.offlineDescription', { seconds: control.leaseSeconds })
+        : t('teamNetwork.peer.unverifiedDescription')
   )
   return <>
     {canStartConnection && <form className="network-connect-form" onSubmit={onConnect}>
       <div className="network-connect-form-copy">
         <span className="network-step-icon"><Link2 size={20} /></span>
-        <div><strong>Paste the invite from your network host</strong><span>One invite securely links this server to the host.</span></div>
+        <div><strong>{t('teamNetwork.peer.pasteHostInvite')}</strong><span>{t('teamNetwork.peer.inviteLinksServer')}</span></div>
       </div>
-      <div className="network-invite-field"><label htmlFor="secure-peer-server-invite">Server invite</label><div className="network-invite-input"><input id="secure-peer-server-invite" required aria-label="Server invite" value={invite} onChange={event => onInviteChange(event.target.value)} autoCapitalize="none" spellCheck={false} placeholder="agentsdock://secure-peer/join…" /><button type="button" className="quiet-button" disabled={busy} onClick={onPaste}>Paste invite</button></div></div>
-      <div className="network-connect-form-footer"><p>{control.automaticPairingCompletionAvailable === true ? 'After the host approves, this server will switch to that Team Network automatically. Your current local network stays saved.' : preservationSentence()}</p><button className="primary-button" disabled={busy || !invite.trim()}>Connect this server</button></div>
+      <div className="network-invite-field"><label htmlFor="secure-peer-server-invite">{t('teamNetwork.peer.serverInvite')}</label><div className="network-invite-input"><input id="secure-peer-server-invite" required aria-label={t('teamNetwork.peer.serverInvite')} value={invite} onChange={event => onInviteChange(event.target.value)} autoCapitalize="none" spellCheck={false} placeholder="agentsdock://secure-peer/join…" /><button type="button" className="quiet-button" disabled={busy} onClick={onPaste}>{t('teamNetwork.peer.pasteInvite')}</button></div></div>
+      <div className="network-connect-form-footer"><p>{control.automaticPairingCompletionAvailable === true ? t('teamNetwork.peer.automaticSwitch') : preservationSentence()}</p><button className="primary-button" disabled={busy || !invite.trim()}>{t('teamNetwork.peer.connectServer')}</button></div>
     </form>}
 
     {degraded && <article className={`network-connection-state needs-attention is-${activePairing?.transportState ?? 'unknown'}`} role="alert">
       <span className="network-state-icon">{activePairing?.transportState === 'offline' ? <WifiOff size={24} /> : <CircleAlert size={24} />}</span>
       <div className="network-state-copy">
         <span className="network-state-label">{degradedLabel}</span>
-        <h3>{activePairing?.peerDisplayName || 'Saved server connection'}</h3>
+        <h3>{activePairing?.peerDisplayName || t('teamNetwork.peer.savedConnection')}</h3>
         <p>{degradedDescription}</p>
       </div>
       <div className="network-state-actions">
-        {!activeRevoked && <button type="button" className="primary-button" disabled={busy} onClick={onRetry}><RefreshCw className={busy ? 'spin' : ''} size={15} />Try again</button>}
-        {!activeRevoked && activePairing?.connectionId && activePairing.hubIdentity && <button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(activePairing)}>Disconnect</button>}
-        {activePairing && canForgetSecurePeerPairing(activePairing) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(activePairing.id)}>{activeRevoked ? 'Forget local connection…' : 'Leave network…'}</button>}
+        {!activeRevoked && <button type="button" className="primary-button" disabled={busy} onClick={onRetry}><RefreshCw className={busy ? 'spin' : ''} size={15} />{t('teamNetwork.peer.tryAgain')}</button>}
+        {!activeRevoked && activePairing?.connectionId && activePairing.hubIdentity && <button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(activePairing)}>{t('teamNetwork.peer.disconnect')}</button>}
+        {activePairing && canForgetSecurePeerPairing(activePairing) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(activePairing.id)}>{activeRevoked ? t('teamNetwork.peer.forgetLocal') : t('teamNetwork.peer.leaveNetwork')}</button>}
       </div>
-      {activePairing && <details className="network-more network-state-details"><summary>Connection details</summary><ConnectionDetails pairing={activePairing} /></details>}
+      {activePairing && <details className="network-more network-state-details"><summary>{t('teamNetwork.peer.connectionDetails')}</summary><ConnectionDetails pairing={activePairing} /></details>}
       {activePairing && confirmForget === activePairing.id && <ForgetConfirmation pairing={activePairing} busy={busy} onConfirm={onForget} onCancel={onCancelForget} />}
     </article>}
 
     {connected && <article className="network-connection-state is-connected" role="status">
       <span className="network-state-icon"><ShieldCheck size={24} /></span>
-      <div className="network-state-copy"><span className="network-state-label">Connected</span><h3>{connected.peerDisplayName}</h3><p>This server is securely linked to your Team Network.</p></div>
-      <div className="network-state-actions"><button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(connected)}>Disconnect</button>{canForgetSecurePeerPairing(connected) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(connected.id)}>Leave network…</button>}</div>
-      <details className="network-more network-state-details"><summary>Connection details</summary><ConnectionDetails pairing={connected} /></details>
+      <div className="network-state-copy"><span className="network-state-label">{t('teamNetwork.peer.connected')}</span><h3>{connected.peerDisplayName}</h3><p>{t('teamNetwork.peer.connectedDescription')}</p></div>
+      <div className="network-state-actions"><button type="button" className="quiet-button" disabled={busy} onClick={() => onDisconnect(connected)}>{t('teamNetwork.peer.disconnect')}</button>{canForgetSecurePeerPairing(connected) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(connected.id)}>{t('teamNetwork.peer.leaveNetwork')}</button>}</div>
+      <details className="network-more network-state-details"><summary>{t('teamNetwork.peer.connectionDetails')}</summary><ConnectionDetails pairing={connected} /></details>
       {confirmForget === connected.id && <ForgetConfirmation pairing={connected} busy={busy} onConfirm={onForget} onCancel={onCancelForget} />}
     </article>}
 
@@ -1006,17 +1011,17 @@ function PeerConnectionView({ control, outgoing, activePairing, connected, conne
       <div>
         <strong>{pairing.peerDisplayName}</strong>
         {pairing.trustState === 'pending' && <>{automaticallyFinishing.has(pairing.id)
-          ? <><span role="status">Waiting for host approval</span><span>Compare these six words with the host. This server will connect automatically after they approve.</span></>
-          : <span>Compare these six words with the host. After they approve, choose Check approval to finish connecting this server.</span>}<SAS pairing={pairing} /></>}
-        {pairing.trustState === 'approved' && <><span>{automaticallyFinishing.has(pairing.id) ? 'Host approved. Finishing connection automatically…' : 'Saved and approved. Reconnect when you want to use this Team Network.'}</span><p className="network-preservation-note">{preservationSentence()}</p></>}
-        {pairing.trustState === 'revoked' && <span>The host revoked this server. It cannot reconnect; Forget removes the local certificate and saved record.</span>}
-        <details className="network-more"><summary>Advanced / Manage</summary><ConnectionDetails pairing={pairing} /></details>
+          ? <><span role="status">{t('teamNetwork.peer.waitingHostApproval')}</span><span>{t('teamNetwork.peer.compareAutomatic')}</span></>
+          : <span>{t('teamNetwork.peer.compareManual')}</span>}<SAS pairing={pairing} /></>}
+        {pairing.trustState === 'approved' && <><span>{automaticallyFinishing.has(pairing.id) ? t('teamNetwork.peer.finishingAutomatically') : t('teamNetwork.peer.savedApproved')}</span><p className="network-preservation-note">{preservationSentence()}</p></>}
+        {pairing.trustState === 'revoked' && <span>{t('teamNetwork.peer.revokedCannotReconnect')}</span>}
+        <details className="network-more"><summary>{t('teamNetwork.peer.advancedManage')}</summary><ConnectionDetails pairing={pairing} /></details>
         {confirmForget === pairing.id && <ForgetConfirmation pairing={pairing} busy={busy} onConfirm={onForget} onCancel={onCancelForget} />}
       </div>
       <div className="secure-peer-card-actions">
-        {pairing.trustState === 'pending' && <>{!automaticallyFinishing.has(pairing.id) && <button type="button" className="primary-button" disabled={busy} onClick={() => onCheckApproval(pairing)}>Check approval</button>}<button type="button" className="quiet-button" disabled={busy} onClick={() => onCancel(pairing)}>Cancel</button></>}
-        {pairing.trustState === 'approved' && !automaticallyFinishing.has(pairing.id) && <button type="button" className="primary-button" disabled={busy || Boolean(control.activeConnectionId)} onClick={() => onReconnect(pairing)}>Reconnect</button>}
-        {['approved', 'revoked'].includes(pairing.trustState) && canForgetSecurePeerPairing(pairing) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(pairing.id)}>{pairing.trustState === 'revoked' ? 'Forget local connection…' : 'Leave network…'}</button>}
+        {pairing.trustState === 'pending' && <>{!automaticallyFinishing.has(pairing.id) && <button type="button" className="primary-button" disabled={busy} onClick={() => onCheckApproval(pairing)}>{t('teamNetwork.peer.checkApproval')}</button>}<button type="button" className="quiet-button" disabled={busy} onClick={() => onCancel(pairing)}>{t('teamNetwork.peer.cancel')}</button></>}
+        {pairing.trustState === 'approved' && !automaticallyFinishing.has(pairing.id) && <button type="button" className="primary-button" disabled={busy || Boolean(control.activeConnectionId)} onClick={() => onReconnect(pairing)}>{t('teamNetwork.peer.reconnect')}</button>}
+        {['approved', 'revoked'].includes(pairing.trustState) && canForgetSecurePeerPairing(pairing) && <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onRequestForget(pairing.id)}>{pairing.trustState === 'revoked' ? t('teamNetwork.peer.forgetLocal') : t('teamNetwork.peer.leaveNetwork')}</button>}
       </div>
     </article>)}
   </>
@@ -1028,44 +1033,47 @@ function ForgetConfirmation({ pairing, busy, onConfirm, onCancel }: {
   onConfirm: (pairing: SecurePeerPairing) => void
   onCancel: () => void
 }) {
+  useLocale()
   return <div className="secure-peer-destructive-confirm network-forget-confirm">
-    <span>{pairing.trustState === 'revoked' ? 'Forget this revoked connection?' : 'Leave this Team Network?'} The saved connection and local certificate will be removed. While the certificate is valid, the host must be reachable to revoke access first. Expired certificates can be removed locally.</span>
-    <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onConfirm(pairing)}>{pairing.trustState === 'revoked' ? 'Confirm forget' : 'Confirm leave'}</button>
-    <button type="button" className="quiet-button" disabled={busy} onClick={onCancel}>Keep it</button>
+    <span>{pairing.trustState === 'revoked' ? t('teamNetwork.peer.forgetRevokedQuestion') : t('teamNetwork.peer.leaveQuestion')}{' '}{t('teamNetwork.peer.forgetDescription')}</span>
+    <button type="button" className="quiet-button danger" disabled={busy} onClick={() => onConfirm(pairing)}>{pairing.trustState === 'revoked' ? t('teamNetwork.peer.confirmForget') : t('teamNetwork.peer.confirmLeave')}</button>
+    <button type="button" className="quiet-button" disabled={busy} onClick={onCancel}>{t('teamNetwork.peer.keepIt')}</button>
   </div>
 }
 
 function ConnectionDetails({ pairing }: { pairing: SecurePeerPairing }) {
+  const locale = useLocale()
   return <div className="secure-peer-request-details">
-    <span>Trust · <code>{pairing.trustState}</code></span>
-    <span>Transport · <code>{pairing.transportState}</code></span>
-    <span>Server identity · <code>{pairing.peerServerIdentity}</code></span>
-    <span>Transcript · <code>{pairing.transcriptHash}</code></span>
-    <span>Public key · <code>{pairing.peerPublicKeyFingerprint}</code></span>
-    {pairing.certificateFingerprint && <span>Certificate · <code>{pairing.certificateFingerprint}</code></span>}
-    {pairing.certificateExpiresAt && <span>Certificate expires {new Date(pairing.certificateExpiresAt).toLocaleString()}</span>}
+    <span>{t('teamNetwork.peer.trust')} · <code>{pairing.trustState}</code></span>
+    <span>{t('teamNetwork.peer.transport')} · <code>{pairing.transportState}</code></span>
+    <span>{t('teamNetwork.peer.serverIdentity')} · <code>{pairing.peerServerIdentity}</code></span>
+    <span>{t('teamNetwork.peer.transcript')} · <code>{pairing.transcriptHash}</code></span>
+    <span>{t('teamNetwork.peer.publicKey')} · <code>{pairing.peerPublicKeyFingerprint}</code></span>
+    {pairing.certificateFingerprint && <span>{t('teamNetwork.peer.certificate')} · <code>{pairing.certificateFingerprint}</code></span>}
+    {pairing.certificateExpiresAt && <span>{t('teamNetwork.peer.certificateExpires', { date: new Date(pairing.certificateExpiresAt).toLocaleString(locale) })}</span>}
   </div>
 }
 
 function hostPeerStateLabel(pairing: SecurePeerPairing): string {
-  if (pairing.trustState === 'revoked') return 'Access revoked. This certificate is no longer trusted.'
+  if (pairing.trustState === 'revoked') return t('teamNetwork.peer.hostRevokedState')
   if (!pairing.lastSeenAt && ['offline', 'disconnected'].includes(pairing.transportState)) {
-    return 'Approved · waiting for this server to connect.'
+    return t('teamNetwork.peer.hostWaitingState')
   }
   switch (pairing.transportState) {
-    case 'online': return 'Online · heartbeat is current.'
-    case 'reconnecting': return 'Reconnecting · the server is retrying automatically.'
-    case 'offline': return 'Offline · the heartbeat lease expired.'
-    default: return 'Approved · not currently connected.'
+    case 'online': return t('teamNetwork.peer.hostOnlineState')
+    case 'reconnecting': return t('teamNetwork.peer.hostReconnectingState')
+    case 'offline': return t('teamNetwork.peer.hostOfflineState')
+    default: return t('teamNetwork.peer.hostApprovedState')
   }
 }
 
 function SAS({ pairing }: { pairing: SecurePeerPairing }) {
-  return <div className="secure-peer-sas" aria-label="Six-word pairing code">{pairing.sasWords.map((word, index) => <b key={`${index}:${word}`}>{word}</b>)}</div>
+  useLocale()
+  return <div className="secure-peer-sas" aria-label={t('teamNetwork.peer.sixWordCode')}>{pairing.sasWords.map((word, index) => <b key={`${index}:${word}`}>{word}</b>)}</div>
 }
 
 function preservationSentence(): string {
-  return 'Your current local network stays saved. You can use it again after you disconnect.'
+  return t('teamNetwork.peer.preservation')
 }
 
 function compactIdentity(identity: string): string {
@@ -1081,7 +1089,7 @@ function profileScope(status: TeamHubStatus): SecurePeerProfileScope | null {
 }
 
 function teamScope(status: TeamHubStatus) {
-  if (!status.serverIdentity) throw new Error('The active AgentsServer identity is unavailable.')
+  if (!status.serverIdentity) throw new LocalizedPeerError('teamNetwork.peer.activeIdentityUnavailable')
   return {
     profileId: status.profileId,
     profileGeneration: status.profileGeneration,
@@ -1221,9 +1229,14 @@ function toggleConfirmation(current: Set<string>, key: string, checked: boolean)
 }
 
 function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : 'Server connection failed.'
+  if (cause instanceof LocalizedPeerError) return t(cause.key, { error: errorMessage(cause.details) })
+  return cause instanceof Error ? cause.message : t('teamNetwork.peer.connectionFailed')
 }
 
-class StaleSecurePeerResponse extends Error {
-  constructor() { super('Ignored a stale server response.') }
+class LocalizedPeerError extends Error {
+  constructor(readonly key: string, readonly details?: unknown) { super(t(key)) }
+}
+
+class StaleSecurePeerResponse extends LocalizedPeerError {
+  constructor() { super('teamNetwork.peer.staleResponse') }
 }

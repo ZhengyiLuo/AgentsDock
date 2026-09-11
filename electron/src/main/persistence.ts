@@ -5,6 +5,7 @@ import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSna
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
 import { incompleteLeadingRunId } from '../shared/semantic-timeline'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
+import { isImportedSourceProvenRepair, mergeProviderInterruptionEvent } from '../shared/provider-origin'
 import { isSearchableEvent, searchEventRole, searchableEventText, searchFtsQuery, searchSnippet, searchTokens } from './search'
 
 const SERVER_SCOPED_TABLES = [
@@ -790,7 +791,20 @@ export class LocalCache {
       for (const event of events) {
         const isolated = isolateSessionEvent(event, sessionId)
         if (!isolated) continue
-        const compacted = compactTimelineEvent(isolated)
+        let compacted = compactTimelineEvent(isolated)
+        // A stale page or buffered stream can arrive after a proven in-place
+        // repair. Keep that exact repair across cache reloads as well as UI merges.
+        if (compacted.type === 'turn_started' && compacted.imported === true && compacted.backend === 'claude') {
+          const row = this.statement(`
+            SELECT json FROM events
+            WHERE server_id = ? AND session_id = ? AND event_id = ?
+              AND json_extract(json, '$.provider_history_repair') = 'source_proven_import'
+          `).get(serverId, sessionId, compacted.id) as { json: string } | undefined
+          const previous = row ? parseJSON<Event | null>(row.json, null) : null
+          if (previous && isImportedSourceProvenRepair(previous)) {
+            compacted = mergeProviderInterruptionEvent(previous, compacted)
+          }
+        }
         const result = put.run(serverId, sessionId, compacted.seq, compacted.id, JSON.stringify(compacted))
         if (result.changes > 0) changed.push(compacted)
       }

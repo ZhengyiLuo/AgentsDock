@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@shared/i18n'
 import type { Event } from '@shared/types'
-import { subagentDetailText, subagentDisplayName, subagentLogText, subagentsFromEvents } from './subagents'
+import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
 afterEach(() => setLocale('en'))
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -15,6 +15,35 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it('keeps exact-owner tracking loss inactive despite late raw or structured progress', () => {
+    const raw = (seq: number, subtype: string, run = 'run-1') => event(seq, 'raw_event', {
+      backend: 'claude', run_id: run,
+      raw: JSON.stringify({ type: 'system', subtype, task_id: 'same-task', task_type: 'local_agent', tool_use_id: 'tool-one', description: 'Late progress' })
+    })
+    const state = (seq: number, status: string) => event(seq, 'subagent_state', {
+      backend: 'claude', run_id: 'run-1', subagent_id: 'same-task', subagent_tool_id: 'tool-one',
+      subagent_status: status, subagent_activity: 'Completion is not confirmed'
+    })
+    const agents = subagentsFromEvents([
+      raw(1, 'task_started'), state(2, 'tracking_lost'), raw(3, 'task_progress'),
+      raw(4, 'task_started'), state(5, 'running'), raw(6, 'task_started', 'new-owner'), raw(7, 'task_progress')
+    ])
+    expect(agents).toHaveLength(2)
+    const lost = agents.find(agent => agent.runId === 'run-1')!
+    expect(lost.status).toBe('tracking_lost')
+    expect(lost.latestActivity).toBe('Completion is not confirmed')
+    expect(isSubagentActive(lost)).toBe(false)
+    expect(isSubagentActive(agents.find(agent => agent.runId === 'new-owner')!)).toBe(true)
+    setLocale('en')
+    expect(subagentStatusLabel(lost.status)).toBe('Tracking lost')
+    expect(subagentLogText(lost)).toContain('Tracking lost')
+  })
+
+  it('recognizes an explicitly observed killed task as inactive', () => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', { backend: 'claude', subagent_id: 'task', subagent_status: 'killed' })])
+    expect(agent.status).toBe('killed')
+    expect(isSubagentActive(agent)).toBe(false)
+  })
   it('localizes generated progress and logs without translating names, statuses, or provider output', () => {
     const events = [
       event(1, 'tool_started', { backend: 'claude', tool: { id: 'tool-a', name: 'Agent', input: { description: 'Review Prompt' } } }),

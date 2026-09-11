@@ -3,6 +3,7 @@ import {
   applyMailArrivalHint, applyMailPageCoverage, beginMailHintStream,
   mailHintPending, mailHintRealmKey, parseMailArrivalCursor,
   parseMailArrivalHint, parseMailboxCoverage,
+  parseTeamMailHintsCapability, TEAM_MAIL_HINTS_ENABLED, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
   type MailArrivalCursor, type MailHintScope
 } from './team-mail-hints'
 
@@ -19,6 +20,21 @@ const hint = (sequence: number, reset = false, arrivalId?: string | null) => ({ 
 const initial = (sequence = 0) => applyMailArrivalHint(beginMailHintStream(scope), scope, 'snapshot', hint(sequence))
 
 describe('Mail hint metadata boundary', () => {
+  it('enables quiet hints only with an exact capability and fixed credential-free endpoint', () => {
+    expect(TEAM_MAIL_HINTS_ENABLED).toBe(true)
+    const capability = { enabled: true, version: 1, websocket_path: TEAM_MAIL_HINTS_PATH,
+      websocket_protocol: TEAM_MAIL_HINTS_PROTOCOL, mailbox_coverage: true,
+      mailbox: { hub_id: 'hub-a', team_id: 'team-a', recipient_server_id: null } }
+    expect(parseTeamMailHintsCapability(capability)).toEqual(capability)
+    expect(parseTeamMailHintsCapability({ ...capability, enabled: false, mailbox: null }).enabled).toBe(false)
+    for (const invalid of [null, {}, { ...capability, enabled: 1 }, { ...capability, version: 2 },
+      { ...capability, mailbox: null }, { ...capability, mailbox_coverage: false },
+      { ...capability, websocket_path: `${TEAM_MAIL_HINTS_PATH}?token=private` },
+      { ...capability, websocket_protocol: 'legacy' }, { ...capability, body: 'private' },
+      { ...capability, mailbox: { ...capability.mailbox, recipient_server_id: 'node\n' } }]) {
+      expect(() => parseTeamMailHintsCapability(invalid)).toThrow()
+    }
+  })
   it('accepts only bounded recipient identifiers and precise immutable arrival cursors', () => {
     expect(parseMailArrivalCursor(at(0))).toEqual(at(0))
     expect(parseMailArrivalHint(hint(Number.MAX_SAFE_INTEGER))).toEqual(hint(Number.MAX_SAFE_INTEGER))

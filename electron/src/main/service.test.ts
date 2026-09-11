@@ -80,8 +80,169 @@ import {
 import { AppService, mergePolledSessionSummaries, mergeSessionSummaries, sessionOwnedFilesPage } from './service'
 import { SettingsStore } from './settings'
 import { PortTunnelManager } from './port-tunnel-manager'
+import { mailHintPending, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailHintPacket, type MailboxCoverage } from '../shared/team-mail-hints'
 
 const cleanup: Array<() => void> = []
+
+describe('main-owned passive Team Mail hints', () => {
+  const arrival = (seq: number) => ({ through_sequence: seq, arrival_id: seq ? `tmsg_${seq.toString(16).padStart(32, '0')}` : null })
+  const capability = { enabled: true, version: 1, websocket_path: TEAM_MAIL_HINTS_PATH,
+    websocket_protocol: TEAM_MAIL_HINTS_PROTOCOL, mailbox_coverage: true,
+    mailbox: { hub_id: 'hub-a', team_id: 'team-a', recipient_server_id: null } } as const
+  function harness(enabled?: boolean) {
+    let health: Health = { ok: true, server_identity: 'server-a', server_instance_id: 'boot-a',
+      capabilities: { team_mail_hints_v1: capability } }
+    const streams: Array<{ previous(): MailboxCoverage | null; packet(packet: MailHintPacket): void;
+      fatal(): void; disconnected(): void; stop: ReturnType<typeof vi.fn> }> = []
+    const a = Object.assign(fakeClient({ health: async () => health }), {
+      mailHintStream: vi.fn((_identity, _mailbox, previous, packet, fatal, disconnected) => {
+        const stream = { previous, packet, fatal, disconnected, stop: vi.fn() }
+        streams.push(stream)
+        return stream.stop
+      })
+    })
+    const b = Object.assign(fakeClient({ health: async () => ({ ok: true, server_identity: 'server-b' }) }), { mailHintStream: vi.fn() })
+    const { settings } = profileSettings()
+    const cache = new LocalCache(':memory:')
+    const service = new AppService({ settings, cache, mailHintsEnabled: enabled,
+      clientFactory: url => (url.includes('a.test') ? a : b) as unknown as AgentServerClient })
+    cleanup.push(() => { service.stop(); cache.close() })
+    const snapshot = (seq = 3, reset = false, streamId = 'a'.repeat(32), recipient = 'node-a'): MailHintPacket => ({
+      type: 'snapshot', server_identity: 'server-a', hub_id: 'hub-a', stream_id: streamId,
+      cursor: { version: 1, team_id: 'team-a', recipient_server_id: recipient, reset, ...arrival(seq) }
+    })
+    return { service, cache, a, b, streams, snapshot, setHealth: (value: Health) => { health = value },
+      refresh: () => service.refreshServer('a', 1), health: () => health }
+  }
+
+  it('can be explicitly disabled even when the server advertises support', async () => {
+    const test = harness(false)
+    expect((await test.refresh()).mailHints).toBeNull()
+    expect(test.a.mailHintStream).not.toHaveBeenCalled()
+  })
+
+  it('negotiates the default lane without probing disabled or older servers', async () => {
+    const test = harness()
+    for (const capabilities of [undefined, { team_mail_hints_v1: { ...capability, enabled: false, mailbox: null } }]) {
+      test.setHealth({ ...test.health(), capabilities })
+      expect((await test.refresh()).mailHints).toBeNull()
+      expect(test.a.mailHintStream).not.toHaveBeenCalled()
+    }
+    test.setHealth({ ...test.health(), capabilities: { team_mail_hints_v1: capability } })
+    await test.refresh()
+    await test.refresh()
+    expect(test.a.mailHintStream).toHaveBeenCalledOnce()
+  })
+
+  it('singleflights the active stream and hints only change bounded bootstrap metadata', async () => {
+    const test = harness(true)
+    await test.refresh()
+    await test.refresh()
+    expect(test.a.mailHintStream).toHaveBeenCalledOnce()
+    const methods = [test.a.health, test.a.sessions, test.a.jobs, test.a.runtimeCatalog, test.a.createSession, test.a.markRead, test.a.markUnread]
+    const calls = methods.map(method => method.mock.calls.length)
+    const put = vi.spyOn(test.cache, 'putPreference')
+    test.streams[0].packet(test.snapshot())
+    expect(put).toHaveBeenCalledOnce() // stable recipient pointer only; not an acknowledgment
+    put.mockClear()
+    for (let seq = 4; seq <= 100; seq++) test.streams[0].packet({ ...test.snapshot(seq), type: 'hint' })
+    expect(put).not.toHaveBeenCalled()
+    expect(methods.map(method => method.mock.calls.length)).toEqual(calls)
+    const projection = (await test.service.bootstrap()).mailHints!
+    expect(projection.state?.seen).toEqual(arrival(0))
+    expect(projection.state?.latest).toEqual(arrival(100))
+    expect(mailHintPending(projection.state!)).toBe(true)
+    expect(test.service.currentMailHintScope(test.service.teamHubServerScope())).toEqual(projection.state?.scope)
+  })
+
+  it('persists only fresh covered prefixes, retains offline arrivals, and fences pages during reconnect', async () => {
+    const test = harness(true)
+    await test.refresh()
+    const stream = test.streams[0]
+    stream.packet(test.snapshot(900))
+    const initial = (await test.service.bootstrap()).mailHints!.state!
+    const ack = { scope: { ...initial.scope }, requestedAfter: arrival(0),
+      coverage: { version: 1 as const, team_id: 'team-a', recipient_server_id: 'node-a', ...arrival(400) } }
+    const covered = test.service.acknowledgeMailHintPage(ack)!
+    expect(covered.state?.seen).toEqual(arrival(400))
+    expect(mailHintPending(covered.state!)).toBe(true)
+    expect(stream.previous()).toMatchObject(arrival(400))
+    stream.disconnected()
+    expect(test.service.currentMailHintScope(test.service.teamHubServerScope())).toBeNull()
+    expect(test.service.acknowledgeMailHintPage({ ...ack, coverage: { ...ack.coverage, ...arrival(900) } })).toBeNull()
+    stream.packet(test.snapshot(900, false, 'b'.repeat(32)))
+    const reconnected = (await test.service.bootstrap()).mailHints!
+    expect(reconnected.state?.seen).toEqual(arrival(400))
+    const stale = test.service.acknowledgeMailHintPage({ ...ack, coverage: { ...ack.coverage, ...arrival(900) } })!
+    expect(stale.state?.seen).toEqual(arrival(400))
+    const final = test.service.acknowledgeMailHintPage({ ...ack, scope: reconnected.state!.scope,
+      coverage: { ...ack.coverage, ...arrival(900) } })!
+    expect(mailHintPending(final.state!)).toBe(false)
+  })
+
+  it('retires late callbacks on profile switch and shutdown and resets unproven restored anchors', async () => {
+    const test = harness(true)
+    await test.refresh()
+    test.streams[0].packet(test.snapshot(10))
+    const state = (await test.service.bootstrap()).mailHints!.state!
+    test.service.acknowledgeMailHintPage({ scope: state.scope, requestedAfter: arrival(0),
+      coverage: { version: 1, team_id: 'team-a', recipient_server_id: 'node-a', ...arrival(10) } })
+    test.streams[0].packet(test.snapshot(12, true, 'b'.repeat(32), 'node-replaced'))
+    const restored = (await test.service.bootstrap()).mailHints!.state!
+    expect(restored.seen).toEqual(arrival(0))
+    expect(restored.scope.recipientServerId).toBe('node-replaced')
+    const switched = await test.service.switchServer('b')
+    expect(test.streams[0].stop).toHaveBeenCalledOnce()
+    test.streams[0].packet(test.snapshot(100))
+    expect((await test.service.bootstrap()).mailHints).toBeNull()
+    expect(switched.mailHints).toBeNull()
+    test.service.stop()
+    expect(test.b.mailHintStream).not.toHaveBeenCalled()
+  })
+
+  it('suspends on unverified health and reconnects only after fresh health with exact authority', async () => {
+    const test = harness(true)
+    await test.refresh()
+    test.streams[0].packet(test.snapshot(8))
+    test.a.health.mockRejectedValueOnce(new Error('offline'))
+    await test.refresh()
+    expect(test.streams[0].stop).toHaveBeenCalledOnce()
+    expect(test.service.currentMailHintScope(test.service.teamHubServerScope())).toBeNull()
+    expect(mailHintPending((await test.service.bootstrap()).mailHints!.state!)).toBe(true)
+    await test.refresh()
+    expect(test.a.mailHintStream).toHaveBeenCalledTimes(2)
+    test.streams[1].packet(test.snapshot(8, false, 'b'.repeat(32)))
+    test.setHealth({ ...test.health(), server_instance_id: 'boot-b' })
+    await test.refresh()
+    expect(test.streams[1].stop).toHaveBeenCalledOnce()
+    expect(test.a.mailHintStream).toHaveBeenCalledTimes(3)
+    test.streams[2].fatal()
+    expect((await test.service.bootstrap()).mailHints).toBeNull()
+  })
+
+  it('reloads the exact durable seen anchor after leaving and reopening a profile, never the latest hint', async () => {
+    const test = harness(true)
+    await test.refresh()
+    test.streams[0].packet(test.snapshot(40))
+    const state = (await test.service.bootstrap()).mailHints!.state!
+    const ack = { scope: state.scope, requestedAfter: arrival(0),
+      coverage: { version: 1 as const, team_id: 'team-a', recipient_server_id: 'node-a', ...arrival(10) } }
+    test.service.acknowledgeMailHintPage(ack)
+    expect(test.service.acknowledgeMailHintPage({ ...ack, body: 'unexpected' } as never)).toBeNull()
+    await test.service.switchServer('b')
+    const reopened = await test.service.switchServer('a')
+    await test.service.refreshServer('a', reopened.profileGeneration)
+    expect(test.streams.at(-1)!.previous()).toEqual({ version: 1, team_id: 'team-a', recipient_server_id: 'node-a', ...arrival(10) })
+    test.streams.at(-1)!.packet(test.snapshot(40, false, 'c'.repeat(32)))
+    const latest = (await test.service.bootstrap()).mailHints!.state!
+    expect(latest.seen).toEqual(arrival(10))
+    expect(mailHintPending(latest)).toBe(true)
+    const poisoned = test.service.acknowledgeMailHintPage({ ...ack, scope: latest.scope,
+      coverage: { ...ack.coverage, through_sequence: 40, arrival_id: `tmsg_${'e'.repeat(32)}` } })!
+    expect(poisoned.state?.invalid).toBe(true)
+    expect(test.service.currentMailHintScope(test.service.teamHubServerScope())).toBeNull()
+  })
+})
 
 afterEach(() => {
   while (cleanup.length) cleanup.pop()?.()
@@ -617,6 +778,32 @@ describe('server-wide Codex goals compatibility', () => {
   })
 })
 
+describe('provider command compatibility', () => {
+  it.each([404, 405, 501])('treats an older server HTTP %s as unsupported', async status => {
+    const client = {
+      providerCommands: vi.fn().mockRejectedValue(new ServerError(status, 'Not supported'))
+    }
+    const scope = { profileId: 'profile', generation: 1, namespace: 'profile:profile', client }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, {
+      scope,
+      activeProfileId: scope.profileId,
+      profileGeneration: scope.generation,
+      sessions: [{ id: 'chat', title: 'Chat', backend: 'claude' }],
+      ensureValidatedScope: vi.fn().mockResolvedValue(undefined),
+      assertCurrentScope: vi.fn()
+    })
+
+    await expect(service.providerCommands('chat', true)).resolves.toEqual({
+      backend: 'claude',
+      revision: 'unsupported',
+      support: { available: false, mode: 'unsupported' },
+      commands: []
+    })
+    expect(client.providerCommands).toHaveBeenCalledWith('chat', true)
+  })
+})
+
 describe('secure peer control fencing', () => {
   function completionHarness() {
     const expected = { profileId: 'profile-a', profileGeneration: 7, serverIdentity: 'server-a' }
@@ -646,12 +833,14 @@ describe('secure peer control fencing', () => {
     }
     const service = Object.create(AppService.prototype) as AppService
     const capability = { available: true, version: 1, completion_path: '/api/admin/secure-peers/v1/pairings/{pairing_id}/completion', max_wait_seconds: 600 }
+    const retireMailHints = vi.fn()
     Object.assign(service, {
+      mailHints: { retire: retireMailHints },
       health: { capabilities: { automatic_pairing_completion_v1: capability } },
       securePeerControlContext: vi.fn().mockResolvedValue({ expected, serverInstanceId: 'instance-a', scope: { client } }),
       requireSecurePeerControlContext: vi.fn()
     })
-    return { service, expected, pairing, status, receipt, client, capability,
+    return { service, expected, pairing, status, receipt, client, capability, retireMailHints,
       input: { pairingId: pairing.id, expectedTranscriptHash: pairing.transcript_hash }, controller: new AbortController() }
   }
 
@@ -664,6 +853,7 @@ describe('secure peer control fencing', () => {
     }, test.controller.signal)
     expect(test.client.securePeerStatus).toHaveBeenCalledExactlyOnceWith(test.controller.signal)
     expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).toHaveBeenCalledOnce()
   })
 
   it.each(['wrong-transcript', 'wrong-connection', 'offline', 'no-consent'] as const)('rejects %s completion instead of adopting it', async fault => {
@@ -673,6 +863,7 @@ describe('secure peer control fencing', () => {
     if (fault === 'offline') test.pairing.transport_state = 'offline'
     if (fault === 'no-consent') test.pairing.complete_on_approval = false
     await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
   })
 
   it.each(['cancelled', 'expired'])('returns exact %s consent outcome without falsifying retained approved trust', async state => {
@@ -687,6 +878,7 @@ describe('secure peer control fencing', () => {
     expect(result.pairings[0].trustState).toBe('approved')
     expect(result.activeConnectionId).toBeNull()
     expect(test.client.securePeerStatus).toHaveBeenCalledTimes(1)
+    expect(test.retireMailHints).not.toHaveBeenCalled()
   })
 
   it('does not start a status request after observation was aborted', async () => {
@@ -1870,6 +2062,8 @@ describe('persistent agent handoff route scope fencing', () => {
     const route = { route_id: 'route-1', alias: 'mobile' }
     const client = {
       agentHandoffRoutes: vi.fn().mockResolvedValue({ routes: [route], max_routes: 16 }),
+      agentTeamMailRoutes: vi.fn().mockResolvedValue({ routes: [], max_routes: 16 }),
+      deleteAgentTeamMailRoute: vi.fn().mockResolvedValue({ ok: true, deleted: true, route_id: 'mail-1' }),
       searchAgentHandoffTargets: vi.fn().mockResolvedValue({ chats: [], server_identity: 'server-a' }),
       createAgentHandoffRoute: vi.fn().mockResolvedValue(route),
       updateAgentHandoffRoute: vi.fn().mockResolvedValue(route),
@@ -1896,11 +2090,15 @@ describe('persistent agent handoff route scope fencing', () => {
     const updateResult = await service.updateAgentHandoffRoute(expected, 'source', 'route-1', { expected_revision: `rev_${'a'.repeat(32)}`, actions: ['request_reply'] })
     const deleteRevision = `rev_${'b'.repeat(32)}`
     const deleteResult = await service.deleteAgentHandoffRoute(expected, 'source', 'route-1', deleteRevision)
+    await expect(service.agentTeamMailRoutes(expected, 'source')).resolves.toEqual({ routes: [], max_routes: 16 })
+    await expect(service.deleteAgentTeamMailRoute(expected, 'source', 'mail-1', deleteRevision)).resolves.toEqual({ status: 'deleted', deleted: true, route_id: 'mail-1' })
 
-    expect(requireWorkspaceScope).toHaveBeenCalledTimes(5)
+    expect(requireWorkspaceScope).toHaveBeenCalledTimes(7)
     for (const call of requireWorkspaceScope.mock.calls) expect(call[0]).toEqual(expected)
-    expect(ensureValidatedScope).toHaveBeenCalledTimes(5)
-    expect(assertCurrentScope).toHaveBeenCalledTimes(5)
+    expect(ensureValidatedScope).toHaveBeenCalledTimes(7)
+    expect(assertCurrentScope).toHaveBeenCalledTimes(7)
+    expect(client.agentTeamMailRoutes).toHaveBeenCalledWith('source')
+    expect(client.deleteAgentTeamMailRoute).toHaveBeenCalledWith('source', 'mail-1', deleteRevision)
     expect(client.searchAgentHandoffTargets).toHaveBeenCalledWith('mobile', 'source', 10)
     expect(client.createAgentHandoffRoute).toHaveBeenCalledWith('source', { alias: 'mobile', target_session_id: 'target' })
     expect(client.updateAgentHandoffRoute).toHaveBeenCalledWith('source', 'route-1', { expected_revision: `rev_${'a'.repeat(32)}`, actions: ['request_reply'] })
@@ -2100,6 +2298,31 @@ describe('queued cross-chat capability forwarding', () => {
     expect(ensureValidatedScope).not.toHaveBeenCalled()
     expect(sendTurn).not.toHaveBeenCalled()
     expect(updateQueued).not.toHaveBeenCalled()
+  })
+
+  it.each([0, 2])('projects an edited async body without replacing a newer cached revision %s', async revision => {
+    const queued = {
+      queued_id: 'queued-agent', prompt: 'Old body', file_ids: [],
+      purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1',
+      cross_chat_envelope_id: 'envelope-1', source_session_id: 'sender',
+      message_body: 'Old body', message_revision: revision
+    }
+    const updateQueued = vi.fn().mockResolvedValue(true)
+    const client = { updateQueued } as unknown as AgentServerClient
+    const scope = { profileId: 'profile', generation: 1, namespace: 'profile:profile', client }
+    const putQueuedTurns = vi.fn()
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, {
+      scope, activeProfileId: scope.profileId, profileGeneration: scope.generation,
+      ensureValidatedScope: vi.fn().mockResolvedValue(undefined), assertCurrentScope: vi.fn(),
+      cache: { putQueuedTurns, queuedTurns: vi.fn().mockReturnValue([queued]) }
+    })
+    await expect(service.updateQueued('chat-1', 'queued-agent', 'Edited @literal', undefined, undefined, undefined, 0)).resolves.toBe(true)
+    expect(updateQueued).toHaveBeenCalledWith('chat-1', 'queued-agent', 'Edited @literal', undefined, undefined, undefined, 0)
+    expect(putQueuedTurns).toHaveBeenCalledWith(scope.namespace, 'chat-1', [revision > 1 ? queued : {
+      ...queued, prompt: 'Edited @literal', display_prompt: 'Edited @literal',
+      message_body: 'Edited @literal', message_revision: 1, message_edited_by_user: true
+    }])
   })
 
   it('scope-fences an edit and forwards the exact refreshed client capabilities', async () => {

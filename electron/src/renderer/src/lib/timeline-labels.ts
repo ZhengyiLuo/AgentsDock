@@ -9,7 +9,7 @@ const statusKeys: Record<string, string> = {
   requested: 'requested', resolved: 'resolved', answered: 'resolved', approved: 'approved',
   rejected: 'rejected', denied: 'rejected', expired: 'expired', submitted: 'submitted',
   registered: 'registered', submitting: 'submitting', delivered: 'delivered',
-  paused: 'paused', blocked: 'blocked'
+  paused: 'paused', blocked: 'blocked', tracking_lost: 'trackingLost', killed: 'killed'
 }
 
 const eventKeys: Record<string, string> = {

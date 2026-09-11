@@ -34,6 +34,7 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('team:mail-hints:acknowledge-page', input => service.acknowledgeMailHintPage(input))
   if (options.language) {
     const language = options.language
     handle('language:get', () => language.get())
@@ -82,6 +83,7 @@ export function registerIpc(
     handle('team-hub:network:messages:capabilities', scope => teamHub.teamMessagesCapabilities(scope))
     handle('team-hub:network:messages:list', (scope, query) => teamHub.teamMessages(scope, query))
     handle('team-hub:network:message:get', (scope, teamId, messageId) => teamHub.teamMessage(scope, teamId, messageId))
+    handle('team-hub:network:message:thread', (scope, query) => teamHub.teamMessageThread(scope, query))
     handle('team-hub:network:message:create', (scope, input) => teamHub.createTeamMessage(scope, input))
     handle('team-hub:network:message:receipt', (scope, input) => teamHub.recordTeamMessageReceipt(scope, input))
     handle('team-hub:network:message:mailbox-state', (scope, input) => teamHub.setTeamMessageMailboxState(scope, input))
@@ -232,6 +234,7 @@ export function registerIpc(
   handle('sessions:bulk-import', items => service.bulkImportSessions(
     parseBulkImportSessionItems(items, LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT)
   ))
+  handle('provider-commands:list', (sessionId, refresh) => service.providerCommands(sessionId, Boolean(refresh)))
 
   handle('timeline:cached', sessionId => service.cachedTimeline(sessionId))
   handle('timeline:open', (sessionId, forceRemote) => service.openTimeline(sessionId, forceRemote))
@@ -282,8 +285,9 @@ export function registerIpc(
   ))
 
   handle('queue:list', sessionId => service.queue(sessionId))
-  handle('queue:update', (sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences) => (
-    service.updateQueued(sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences)
+  handle('queue:update', (sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences, expectedMessageRevision) => (
+    service.updateQueued(sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences,
+      ...(expectedMessageRevision !== undefined ? [expectedMessageRevision] : []))
   ))
   handle('queue:remove', (sessionId, queuedId) => service.removeQueued(sessionId, queuedId))
   handle('queue:skip-cross-chat-delivery', (sessionId, queuedId, identity) => (
@@ -293,6 +297,8 @@ export function registerIpc(
   handle('queue:run-now', (sessionId, queuedId) => service.runQueuedNow(sessionId, queuedId))
 
   handle('agent-routes:list', (scope, sessionId) => service.agentHandoffRoutes(scope, sessionId))
+  handle('agent-team-mail-routes:list', (scope, sessionId) => service.agentTeamMailRoutes(scope, sessionId))
+  handle('agent-team-mail-routes:remove', (scope, sessionId, routeId, expectedRevision) => service.deleteAgentTeamMailRoute(scope, sessionId, routeId, expectedRevision))
   handle('agent-routes:search', (scope, query, excludeSessionId, limit) => service.searchAgentHandoffTargets(scope, query, excludeSessionId, limit))
   handle('agent-routes:create', (scope, sessionId, input) => service.createAgentHandoffRoute(scope, sessionId, input))
   handle('agent-routes:update', (scope, sessionId, routeId, input) => service.updateAgentHandoffRoute(scope, sessionId, routeId, input))

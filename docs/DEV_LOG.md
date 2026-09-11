@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-11 — Current desktop development
+
+- Bring current desktop changes into this repository: source-proven history
+  deduplication, readable asynchronous agent-message queues, revision-safe
+  recipient edits, explicit Send now priority, and actual chat names.
+- Include on-demand Mail threads, agent-only replies, searchable chat routing,
+  guarded Host rename, negotiated unlimited chat routes, and Team Network
+  translations. Quiet arrival hints update a badge without polling Inbox
+  contents or navigating away from the current chat.
+- Include native provider skills and commands in the slash palette, retaining
+  capability negotiation and unsupported-server fallbacks.
+- Preserve synthetic test data, the source-only CI boundary, and the existing
+  public binary update feed. No release, native mobile build, or server
+  deployment is part of this source migration.
+- Validation: desktop type checks, the complete desktop test run, and the
+  production bundle build passed. Local validation used Node 26; source CI
+  remains pinned to the documented Node 24 environment.
+
 ## Source verification
 
 - Mobile CI now runs the cross-chat protocol, projection, route/queue race,

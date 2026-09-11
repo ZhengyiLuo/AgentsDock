@@ -652,6 +652,25 @@ describe('Inspector', () => {
     expect(screen.getByText('Past audit')).toBeInTheDocument()
   })
 
+  it('shows Tracking lost as inactive history without claiming the task stopped', async () => {
+    const session = { id: 'chat-1', title: 'Lost tracking', backend: 'claude' as const }
+    useAppStore.setState({ sessions: [session], snapshots: { 'chat-1': {
+      session, events: [{ id: 'lost', seq: 1, session_id: session.id, run_id: 'old-owner',
+        type: 'subagent_state', ts: '2026-09-10T12:00:00Z', backend: 'claude',
+        subagent_id: 'task-1', subagent_name: 'Interrupted audit', subagent_status: 'tracking_lost',
+        subagent_activity: 'Completion is not confirmed' }], queuedTurns: [], files: [],
+      hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    fireEvent.click(screen.getByRole('button', { name: /Subagents 0 active/i }))
+    expect(screen.getByText('No active subagents.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /History 1 records/i }))
+    expect(screen.getByText(/Claude · Tracking lost/)).toBeInTheDocument()
+    expect(container.querySelector('.subagent-state.tracking_lost')).toBeInTheDocument()
+    expect(container.querySelector('.subagent-state.running')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Claude · stopped/)).not.toBeInTheDocument()
+  })
+
   it('does not show Codex coordination waits as subagents', () => {
     const session = { id: 'chat-1', title: 'Performance check', backend: 'codex' as const }
     useAppStore.setState({

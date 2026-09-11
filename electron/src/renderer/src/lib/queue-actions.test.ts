@@ -7,6 +7,8 @@ import {
   cancelPendingSteering,
   firstBlockingCrossChatDelivery,
   exactQueuedDeliveryReorderAvailable,
+  asyncQueuedMessageControlsAvailable,
+  isAsyncAgentQueuedTurn,
   isReorderableQueuedTurn,
   isCrossChatDeliveryQueuedTurn,
   isQueuedDeliveryBarrier,
@@ -101,6 +103,28 @@ afterEach(() => {
 
 describe('queue row visibility', () => {
   const turn = (purpose?: string) => ({ queued_id: purpose ?? 'user', prompt: 'Queued', file_ids: [], purpose })
+
+  it('lets explicit Send now overtake pending work while retaining starting and old-server guards', () => {
+    const async = { ...turn('cross_chat_handoff_delivery'), conversation_mode: 'async_route_v1' as const, position: 1 }
+    const user = { ...turn(), position: 2 }
+    const health = { capabilities: { cross_chat_handoffs_v1: { available: true, features: { async_queued_message_controls: true } } } }
+    expect(asyncQueuedMessageControlsAvailable(health as never)).toBe(true)
+    expect(asyncQueuedMessageControlsAvailable(null)).toBe(false)
+    expect(isAsyncAgentQueuedTurn(async)).toBe(true)
+    expect(isAsyncAgentQueuedTurn({ ...async, purpose: 'secure_peer_handoff_delivery' })).toBe(false)
+    expect(queuedTurnCrossChatFence([async, user], 'user', true).runNow).toBe(true)
+    expect(queuedTurnCrossChatFence([async, user], 'user', true, true).runNow).toBe(false)
+    expect(queuedTurnCrossChatFence([{ ...async, promoted: true }, user], 'user', true, true).runNow).toBe(true)
+    for (const pending of [
+      { ...async, conversation_mode: null },
+      { ...async, purpose: 'secure_peer_handoff_delivery' },
+      { ...async, purpose: 'scheduled_job' }
+    ]) {
+      expect(queuedTurnCrossChatFence([pending, user], 'user', true).runNow).toBe(true)
+      expect(queuedTurnCrossChatFence([pending, user], 'user', true, true).runNow).toBe(false)
+      expect(isImmutableQueuedTurn(pending)).toBe(true)
+    }
+  })
 
   it('shows local cross-chat deliveries in the shelf without making them steerable', () => {
     const delivery = turn('cross_chat_handoff_delivery')
@@ -462,6 +486,18 @@ describe('steerFirstQueuedTurn', () => {
 
     await expect(steerFirstQueuedTurn(chatOneScope)).resolves.toEqual({ steered: false, turns: [] })
     expect(runNow).not.toHaveBeenCalled()
+  })
+
+  it('sends the first async agent message through the existing action only when negotiated', async () => {
+    const agent = { queued_id: 'agent', prompt: 'Reply', file_ids: [], position: 1,
+      purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1' as const }
+    list.mockResolvedValueOnce([agent])
+    await expect(steerFirstQueuedTurn(chatOneScope)).resolves.toEqual({ steered: false, turns: [agent] })
+    expect(runNow).not.toHaveBeenCalled()
+    list.mockResolvedValueOnce([agent]).mockResolvedValueOnce([])
+    runNow.mockResolvedValue(true)
+    await expect(steerFirstQueuedTurn(chatOneScope, undefined, undefined, true)).resolves.toEqual({ steered: true, turns: [] })
+    expect(runNow).toHaveBeenCalledExactlyOnceWith('chat-1', 'agent')
   })
 
   it('does not promote another row while a visible provider handoff is starting', async () => {

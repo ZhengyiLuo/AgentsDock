@@ -301,6 +301,7 @@ function harness(
   } as unknown as TeamHubSettingsStore
   const discovery = {
     currentScope: vi.fn(() => ({ ...serverScope })),
+    currentMailHintScope: vi.fn<() => import('../shared/team-mail-hints').MailHintScope | null>(() => null),
     currentDiscovery: vi.fn(() => {
       const value = currentDiscoveryOverride === undefined ? discoveryResult : currentDiscoveryOverride
       return value ? { ...value } : null
@@ -345,7 +346,7 @@ function harness(
     networkBulletin: vi.fn(), postNetworkBulletin: vi.fn(), deleteNetworkBulletin: vi.fn(), networkDeletions: vi.fn(), networkMailbox: vi.fn(),
     sendNetworkMailbox: vi.fn(), networkItem: vi.fn(), recordNetworkDeliveryReceipt: vi.fn(),
     createNetworkPassiveRequest: vi.fn(), networkPassiveRequest: vi.fn(), replyNetworkPassiveRequest: vi.fn(),
-    teamMessages: vi.fn(), teamMessage: vi.fn(), createTeamMessage: vi.fn(), recordTeamMessageReceipt: vi.fn(), setTeamMessageMailboxState: vi.fn(), deleteTeamMessage: vi.fn(),
+    teamMessages: vi.fn(), teamMessage: vi.fn(), teamMessageThread: vi.fn(), createTeamMessage: vi.fn(), recordTeamMessageReceipt: vi.fn(), setTeamMessageMailboxState: vi.fn(), deleteTeamMessage: vi.fn(),
     declareTeamAttachment: vi.fn(), teamAttachment: vi.fn(), uploadTeamAttachmentChunk: vi.fn(),
     downloadTeamAttachmentChunk: vi.fn(), teamSkills: vi.fn(), teamSkill: vi.fn(), teamSkillVersions: vi.fn(),
     teamSkillVersion: vi.fn(), pinTeamSkill: vi.fn(), archiveTeamSkill: vi.fn()
@@ -398,6 +399,86 @@ async function connectWithTeamMessages(test: ReturnType<typeof harness>): Promis
 }
 
 const TRANSIENT_CONNECTION_ID = '09d7bb2e-3b47-4be7-89fc-2cecd90f4434'
+
+describe('Team Mail thread service capability', () => {
+  it('rejects old hosts before any thread request and fences exact connected-team responses', async () => {
+    const test = harness()
+    const input = { teamId: 'team-1', messageId: 'mail-1' }
+    const oldScope = await connectWithTeamMessages(test)
+    await expect(test.service.teamMessageThread(oldScope, input)).rejects.toThrow('does not support mail threads')
+    expect(test.client.teamMessageThread).not.toHaveBeenCalled()
+    test.service.stop()
+    const capability = { available: true, version: 1, max_page_items: 25, max_thread_items: 2048 }
+    test.client.health.mockResolvedValue({ ok: true, service: 'agentsdock-team-hub', api_version: 1,
+      hub_id: 'hub-stable-1', instance_id: 'instance-1', bootstrapped: true, bootstrap_required: false,
+      capabilities: { team_network_v1: teamNetworkCapability(), team_messages_v1: teamMessagesCapability(),
+        team_mail_threads_v1: capability } })
+    const scope = scopeFrom(await test.service.connect())
+    expect(test.service.teamMessagesCapabilities(scope).mail_threads).toEqual(capability)
+    const page = { team_id: 'team-1', anchor_message_id: 'mail-1', root_message_id: 'mail-1', messages: [],
+      next_after_sequence: 0, has_more: false, truncated: false }
+    test.client.teamMessageThread.mockResolvedValue(page)
+    await expect(test.service.teamMessageThread(scope, input)).resolves.toEqual(page)
+    expect(test.client.teamMessageThread).toHaveBeenLastCalledWith(expect.any(String), { ...input, afterSequence: 0, limit: 25 })
+    for (const invalid of [{ team_id: 'foreign-team' }, { anchor_message_id: 'foreign-mail' },
+      { messages: [{ team_id: 'foreign-team' }] }]) {
+      test.client.teamMessageThread.mockResolvedValue({ ...page, ...invalid })
+      await expect(test.service.teamMessageThread(scope, input)).rejects.toThrow('mismatched mail thread')
+    }
+    test.client.teamMessageThread.mockClear()
+    await expect(test.service.teamMessageThread(scope, { ...input, teamId: 'foreign-team' })).rejects.toThrow()
+    expect(test.client.teamMessageThread).not.toHaveBeenCalled()
+    test.service.stop()
+  })
+})
+
+describe('Team Mail fresh coverage authority', () => {
+  const anchor = `tmsg_${'a'.repeat(32)}`
+  const coverage = { version: 1 as const, team_id: 'team-1', recipient_server_id: 'node-1', through_sequence: 8, arrival_id: anchor }
+  const hintScope = { profileId: 'server-profile-1', profileGeneration: 1, serverIdentity: 'server-stable-1',
+    hubId: 'hub-stable-1', teamId: 'team-1', recipientServerId: 'node-1', streamId: 'a'.repeat(32) }
+  const query = { teamId: 'team-1', box: 'inbox' as const, addressKind: 'server' as const,
+    addressId: 'node-1', includeMailboxCoverage: true, afterSequence: 3, afterArrivalId: `tmsg_${'b'.repeat(32)}` }
+  it('adds coverage only for current exact mailbox while keeping ordinary manual Inbox loads available', async () => {
+    const test = harness()
+    const scope = await connectWithTeamMessages(test)
+    test.client.teamMessages.mockResolvedValue({ box: 'inbox', address: { kind: 'server', id: 'node-1' },
+      messages: [], next_after_sequence: 3, has_more: false, mailbox_coverage: coverage })
+    expect((await test.service.teamMessages(scope, query)).mailbox_coverage).toBeUndefined()
+    expect(test.client.teamMessages.mock.calls.at(-1)?.[2]).not.toHaveProperty('includeMailboxCoverage')
+    expect(test.client.teamMessages.mock.calls.at(-1)?.[2]).not.toHaveProperty('afterArrivalId')
+    test.discovery.currentMailHintScope.mockReturnValue(hintScope)
+    expect((await test.service.teamMessages(scope, query)).mailbox_coverage).toEqual(coverage)
+    expect(test.client.teamMessages).toHaveBeenCalledWith('access-new', 'team-1', expect.objectContaining({
+      includeMailboxCoverage: true, afterSequence: 3, afterArrivalId: query.afterArrivalId
+    }))
+    for (const changed of [{ hubId: 'foreign' }, { recipientServerId: 'foreign' }, { teamId: 'foreign' },
+      { serverIdentity: 'foreign' }, { profileGeneration: 2 }]) {
+      test.discovery.currentMailHintScope.mockReturnValue({ ...hintScope, ...changed })
+      expect((await test.service.teamMessages(scope, query)).mailbox_coverage).toBeUndefined()
+      expect(test.client.teamMessages.mock.calls.at(-1)?.[2]).not.toHaveProperty('includeMailboxCoverage')
+    }
+    expect(test.client.teamMessages).toHaveBeenCalledTimes(7)
+  })
+  it('strips stale or unproven coverage without a fallback query or receipt write', async () => {
+    const test = harness()
+    const scope = await connectWithTeamMessages(test)
+    test.discovery.currentMailHintScope.mockReturnValue(hintScope)
+    const pending = deferred<unknown>()
+    test.client.teamMessages.mockReturnValue(pending.promise)
+    const request = test.service.teamMessages(scope, query)
+    await vi.waitFor(() => expect(test.client.teamMessages).toHaveBeenCalledOnce())
+    test.discovery.currentMailHintScope.mockReturnValue(null)
+    pending.resolve({ box: 'inbox', address: { kind: 'server', id: 'node-1' }, messages: [], next_after_sequence: 3, has_more: false, mailbox_coverage: coverage })
+    expect((await request).mailbox_coverage).toBeUndefined()
+    test.discovery.currentMailHintScope.mockReturnValue(hintScope)
+    test.client.teamMessages.mockResolvedValue({ box: 'inbox', address: { kind: 'server', id: 'node-1' }, messages: [], next_after_sequence: 3, has_more: false })
+    expect((await test.service.teamMessages(scope, query)).mailbox_coverage).toBeUndefined()
+    expect(test.client.teamMessages).toHaveBeenCalledTimes(2)
+    expect(test.client.recordTeamMessageReceipt).not.toHaveBeenCalled()
+    expect(test.client.setTeamMessageMailboxState).not.toHaveBeenCalled()
+  })
+})
 
 describe('pending-only secure pairing completion observer', () => {
   const scope = { profileId: 'server-profile-1', profileGeneration: 1, serverIdentity: 'server-stable-1' }
@@ -5229,6 +5310,27 @@ describe('TeamHubService embedded discovery', () => {
     test.client.health.mockResolvedValue({ ...health, schema_version: 16 })
     const replacement = await test.service.connect()
     expect(test.service.teamMessagesCapabilities(scopeFrom(replacement)).skill_announcement_deletion).toBeUndefined()
+    test.service.stop()
+  })
+
+  it('overlays host deletion only from the connected Hub capability and clears it on reconnect', async () => {
+    const test = harness()
+    test.setDiscovery({ serverSessionBasePath: '/api/team-hub-server' })
+    test.client.serverSession.mockResolvedValue(serverSessionSnapshot())
+    const health = { ok: true, service: 'agentsdock-team-hub', api_version: 1, hub_id: 'hub-stable-1', instance_id: 'instance-1',
+      bootstrapped: true, bootstrap_required: false, server_session_available: true,
+      capabilities: { team_network_v1: teamNetworkCapability(), team_messages_v1: teamMessagesCapability(),
+        team_host_content_deletion_v1: { available: true, version: 1 } } }
+    test.client.health.mockResolvedValue(health)
+    const connected = await test.service.connect()
+    expect(test.service.teamMessagesCapabilities(scopeFrom(connected)).host_content_deletion).toBe(true)
+    const healthCalls = test.client.health.mock.calls.length
+    test.service.teamMessagesCapabilities(scopeFrom(connected))
+    expect(test.client.health).toHaveBeenCalledTimes(healthCalls)
+    test.service.stop()
+    test.client.health.mockResolvedValue({ ...health, capabilities: { ...health.capabilities, team_host_content_deletion_v1: undefined } })
+    const replacement = await test.service.connect()
+    expect(test.service.teamMessagesCapabilities(scopeFrom(replacement)).host_content_deletion).toBeUndefined()
     test.service.stop()
   })
 

@@ -41,9 +41,12 @@ import type {
   TeamMessagePage,
   TeamMessageProvenance,
   TeamMessageQuery,
+  TeamMessageThreadQuery,
+  TeamMessageThreadPage,
   TeamMessageReceiptResult,
   TeamMessagesCapability,
   TeamMailSubjectsCapability,
+  TeamMailThreadsCapability,
   TeamMailboxStateCapability,
   TeamSkill,
   TeamSkillDetails,
@@ -67,6 +70,8 @@ import {
   parseTeamAttachmentDeclaration,
   parseTeamAttachmentResponse,
   parseTeamMessagePage,
+  parseTeamMessageThreadQuery,
+  parseTeamMessageThreadPage,
   parseTeamMessageDeleteResponse,
   parseTeamMessageDismissResponse,
   parseTeamMessageHistory,
@@ -74,6 +79,7 @@ import {
   parseTeamMessageResponse,
   parseTeamMessagesCapability,
   parseTeamMailSubjectsCapability,
+  parseTeamMailThreadsCapability,
   parseTeamMailboxStateCapability,
   parseTeamMailboxStateResponse,
   parseTeamAllServersAliasCapability,
@@ -112,7 +118,9 @@ export interface TeamHubHealthResponse {
   capabilities?: {
     team_network_v1?: TeamNetworkCapabilities
     team_messages_v1?: TeamMessagesCapability
+    team_host_content_deletion_v1?: { available: true; version: 1 }
     team_mail_subjects_v1?: TeamMailSubjectsCapability
+    team_mail_threads_v1?: TeamMailThreadsCapability
     team_mailbox_state_v1?: TeamMailboxStateCapability
     team_all_servers_alias_v1?: import('../shared/types').TeamAllServersAliasCapability
   }
@@ -644,6 +652,8 @@ export class TeamHubClient {
     if (queryInput.fromId) query.set('from_id', queryInput.fromId)
     if (queryInput.since) query.set('since', queryInput.since)
     if (queryInput.afterSequence) query.set('after_sequence', String(queryInput.afterSequence))
+    if (queryInput.includeMailboxCoverage) query.set('include_mailbox_coverage', '1')
+    if (queryInput.afterArrivalId) query.set('after_arrival_id', queryInput.afterArrivalId)
     const request = (includeRevision: boolean) => {
       if (includeRevision) query.set('include_revision', '1')
       else query.delete('include_revision')
@@ -685,6 +695,13 @@ export class TeamHubClient {
       this.teamMessageRevisionQueriesSupported = false
       return request(false)
     }
+  }
+
+  async teamMessageThread(accessToken: string, queryValue: TeamMessageThreadQuery): Promise<TeamMessageThreadPage> {
+    const input = parseTeamMessageThreadQuery(queryValue)
+    const query = new URLSearchParams({ after_sequence: String(input.afterSequence), limit: String(input.limit) })
+    return this.authenticated(`/v1/teams/${segment(input.teamId)}/network/messages/${segment(input.messageId)}/thread?${query}`, accessToken)
+      .then(value => parseTeamMessageThreadPage(value, input))
   }
 
   createTeamMessage(
@@ -1300,6 +1317,11 @@ function parseHealth(value: unknown): TeamHubHealthResponse {
     const messages = advertised.team_messages_v1 === undefined
       ? undefined
       : parseTeamMessagesCapability(advertised.team_messages_v1)
+    const hostDeletion = advertised.team_host_content_deletion_v1
+    const hostDeletionSupported = Boolean(hostDeletion && typeof hostDeletion === 'object' && !Array.isArray(hostDeletion)
+      && (hostDeletion as Record<string, unknown>).available === true
+      && (hostDeletion as Record<string, unknown>).version === 1
+      && Object.keys(hostDeletion).every(key => key === 'available' || key === 'version'))
     const allServers = advertised.team_all_servers_alias_v1 === undefined
       ? undefined
       : parseTeamAllServersAliasCapability(advertised.team_all_servers_alias_v1)
@@ -1316,10 +1338,16 @@ function parseHealth(value: unknown): TeamHubHealthResponse {
     try {
       if (advertised.team_mailbox_state_v1 !== undefined) mailboxState = parseTeamMailboxStateCapability(advertised.team_mailbox_state_v1)
     } catch { /* An optional unknown capability cannot authorize mailbox mutations. */ }
-    if (network || messages || allServers || mailSubjects || mailboxState) capabilities = {
+    let mailThreads: TeamMailThreadsCapability | undefined
+    try {
+      if (advertised.team_mail_threads_v1 !== undefined) mailThreads = parseTeamMailThreadsCapability(advertised.team_mail_threads_v1)
+    } catch { /* Unknown optional thread versions keep ordinary Mail usable. */ }
+    if (network || messages || allServers || mailSubjects || mailThreads || mailboxState || hostDeletionSupported) capabilities = {
       ...(network ? { team_network_v1: network } : {}),
       ...(messages ? { team_messages_v1: messages } : {}),
+      ...(hostDeletionSupported ? { team_host_content_deletion_v1: { available: true as const, version: 1 as const } } : {}),
       ...(mailSubjects ? { team_mail_subjects_v1: mailSubjects } : {}),
+      ...(mailThreads ? { team_mail_threads_v1: mailThreads } : {}),
       ...(mailboxState ? { team_mailbox_state_v1: mailboxState } : {}),
       ...(allServers ? { team_all_servers_alias_v1: allServers } : {})
     }

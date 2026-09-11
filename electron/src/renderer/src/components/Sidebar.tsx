@@ -19,7 +19,7 @@ import { backendLabel, runtimeLabel } from '../lib/format'
 import { openSessionHistoryResult } from '../lib/session-history-search'
 import { rankSessionsForSearch } from '../lib/sessions'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
-import { handleMenuCommand, sessionUnread, useAppStore } from '../store/app-store'
+import { handleMenuCommand, selectMailHintPending, sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ServerSelector } from './ServerSelector'
 import { ShortcutTooltip } from './ShortcutTooltip'
@@ -61,6 +61,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
   const creatingChat = useAppStore(state => state.creatingChat)
   const connected = useAppStore(state => state.connected)
+  const newMailArrivals = useAppStore(selectMailHintPending)
   const folderOrder = useAppStore(state => state.folderOrder)
   const collapsed = useAppStore(state => state.collapsedFolders)
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
@@ -235,7 +236,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
       </div>
       <ServerSelector />
       <div className="sidebar-actions">
-        <button className="sidebar-action sidebar-action-labeled" title="Open Team Network (Beta)" aria-label="Open Team Network" disabled={Boolean(switchingProfileId)} onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', { detail: { section: 'mail' } }))}><UsersRound size={15} /><span>Team Network <small className="team-network-beta">Beta</small></span></button>
+        <button className="sidebar-action sidebar-action-labeled sidebar-team-network-action" title={t('teamNetwork.openBeta')} aria-label={t('teamNetwork.open')} aria-describedby={newMailArrivals ? 'sidebar-new-mail-arrivals' : undefined} disabled={Boolean(switchingProfileId)} onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', { detail: { section: 'mail' } }))}><UsersRound size={15} /><span>{t('teamNetwork.name')} <small className="team-network-beta">{t('teamNetwork.beta')}</small></span>{newMailArrivals && <><span className="status-dot" aria-hidden="true" /><span id="sidebar-new-mail-arrivals" className="sr-only">{t('teamNetwork.newMailArrivals')}</span></>}</button>
         <button className="sidebar-action sidebar-action-labeled" title={t("ui.Sidebar.Sidebar.resume_chat_790e1b9")} aria-label={t("ui.Sidebar.Sidebar.resume_chat_790e1b9")} disabled={Boolean(switchingProfileId)} onClick={() => {
           const store = useAppStore.getState()
           store.setModal(localSessionImportSupported(store.health) ? 'importChats' : 'resume', true)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Event } from './types'
-import { isImportedClaudeControlCompanion, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from './provider-origin'
+import { isImportedClaudeControlCompanion, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay, mergeProviderInterruptionEvent } from './provider-origin'
 
 const interruption = (patch: Partial<Event> = {}): Event => ({
   id: 'imported-control',
@@ -22,6 +22,72 @@ const interruption = (patch: Partial<Event> = {}): Event => ({
 })
 const companion = (patch: Partial<Event> = {}): Event => interruption({
   type: 'turn_finished', metadata_only: true, run_id: 'import_control-only', provider_origin: undefined, ...patch
+})
+
+describe('source-proven assistant replays', () => {
+  const repaired = (): Event => interruption({ type: 'assistant_text', run_id: 'import_mixed',
+    text: '', metadata_only: true, provider_history_repair: 'source_proven_assistant_replay',
+    provider_origin: { provider: 'claude', event_id: 'source-assistant', session_id: 'provider-session',
+      timestamp: '2026-09-09T10:00:00.321Z' } })
+
+  it('retains a same-ID correction across stale cache merges without requiring an imported phase', () => {
+    const corrected = repaired()
+    const stale = { ...corrected, text: 'Full old report', metadata_only: undefined, provider_history_repair: undefined }
+    expect(isImportedSourceProvenAssistantReplay(corrected)).toBe(true)
+    expect(isImportedProviderControlMetadata(corrected)).toBe(true)
+    expect(mergeProviderInterruptionEvent(corrected, stale)).toBe(corrected)
+    expect(mergeProviderInterruptionEvent(stale, corrected)).toBe(corrected)
+    for (const change of [{ imported: false }, { type: 'turn_started' }, { metadata_only: undefined },
+      { text: 'Nonempty' }, { provider_history_repair: undefined }, { provider_user_authored: true },
+      { provider_origin: undefined }]) {
+      expect(isImportedSourceProvenAssistantReplay({ ...corrected, ...change })).toBe(false)
+    }
+  })
+
+  it('does not retain the repair over conflicting identity or explicit human provenance', () => {
+    const corrected = repaired()
+    for (const change of [{ seq: 99 }, { run_id: 'import_other' }, { session_id: 'another-chat' },
+      { provider_user_authored: true }, { metadata_only: false },
+      { provider_origin: { ...corrected.provider_origin!, event_id: 'different-source' } }]) {
+      const incoming = { ...corrected, text: 'Genuine or conflicting copy', metadata_only: undefined,
+        provider_history_repair: undefined, ...change }
+      expect(mergeProviderInterruptionEvent(corrected, incoming)).toBe(incoming)
+    }
+  })
+})
+
+describe('source-proven imported history repairs', () => {
+  const corrected = (): Event => interruption({
+    type: 'turn_started', run_id: 'import_history', provider_origin: undefined,
+    prompt: '', provider_history_repair: 'source_proven_import'
+  })
+
+  it('retains only an explicit same-record repair in either merge direction', () => {
+    const repaired = corrected()
+    const stale = { ...repaired, provider_history_repair: undefined, prompt: 'long original import' }
+    expect(isImportedSourceProvenRepair(repaired)).toBe(true)
+    expect(isImportedProviderControlMetadata(repaired)).toBe(true)
+    expect(mergeProviderInterruptionEvent(repaired, stale)).toBe(repaired)
+    expect(mergeProviderInterruptionEvent(stale, repaired)).toBe(repaired)
+    expect(mergeProviderInterruptionEvent({ ...repaired, provider_history_repair: undefined }, stale)).toBe(stale)
+  })
+
+  it.each([
+    { id: 'another-event' }, { session_id: 'another-chat' }, { seq: 99 },
+    { run_id: 'import_another' }, { imported: false }, { backend: 'codex' },
+    { provider_user_authored: true }, { type: 'assistant_text' }
+  ])('keeps normal precedence for a different or human record: %j', patch => {
+    const incoming = { ...corrected(), provider_history_repair: undefined,
+      prompt: 'real user text', ...patch } as Event
+    expect(mergeProviderInterruptionEvent(corrected(), incoming)).toBe(incoming)
+  })
+
+  it('does not classify native, nonempty, or unmarked blank messages as repaired', () => {
+    for (const patch of [{ imported: false }, { prompt: 'real user text' },
+      { provider_history_repair: undefined }, { provider_user_authored: true }]) {
+      expect(isImportedSourceProvenRepair({ ...corrected(), ...patch })).toBe(false)
+    }
+  })
 })
 
 describe('imported Claude control companions', () => {
@@ -58,6 +124,7 @@ describe('imported Claude control companions', () => {
 describe('imported provider interruption provenance', () => {
   it.each(['steer', 'stop', 'unknown'] as const)('accepts the exact %s lifecycle contract without reading its text', cause => {
     const record = interruption()
+    if (!isImportedProviderInterruption(record)) throw new Error('Invalid interruption fixture')
     record.provider_origin = { ...record.provider_origin!, cause }
     expect(isImportedProviderInterruption(record)).toBe(true)
     expect(isImportedProviderInterruption({ ...record, prompt: 'User-authored-looking text is not the authority.' })).toBe(true)

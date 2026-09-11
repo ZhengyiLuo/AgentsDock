@@ -8,6 +8,33 @@ export function isImportedHistoryRecord(event: Event): boolean {
   return event.imported === true && typeof event.run_id === 'string' && event.run_id.startsWith('import_')
 }
 
+/** Empty text alone is not proof: only the server's source-verified repair is. */
+export function isImportedSourceProvenRepair(event: Event): boolean {
+  return isImportedHistoryRecord(event)
+    && event.type === 'turn_started'
+    && event.backend === 'claude'
+    && event.provider_history_repair === 'source_proven_import'
+    && event.prompt === ''
+    && !hasProviderUserProvenance(event)
+}
+
+/** Only an exact server source proof can hide unphased assistant history. */
+export function isImportedSourceProvenAssistantReplay(event: Event): boolean {
+  const origin = event.provider_origin
+  return isImportedHistoryRecord(event)
+    && (event.type === 'assistant_text' || event.type === 'reasoning_summary')
+    && event.backend === 'claude'
+    && event.provider_history_repair === 'source_proven_assistant_replay'
+    && event.metadata_only === true
+    && event.text === ''
+    && origin?.provider === 'claude'
+    && typeof origin.event_id === 'string' && origin.event_id.length > 0
+    && typeof origin.session_id === 'string' && origin.session_id.length > 0
+    && typeof origin.timestamp === 'string' && Number.isFinite(Date.parse(origin.timestamp))
+    && (origin.kind == null || origin.kind === 'assistant')
+    && !hasProviderUserProvenance(event)
+}
+
 /**
  * Trust the server's explicit import provenance, never the text of a message.
  * This is historical control metadata, not a new user turn or a live stop.
@@ -83,7 +110,7 @@ function isExactGoalRuntimePrompt(prompt: string): boolean {
     && /<objective>[\s\S]*\S[\s\S]*<\/objective>/.test(body)
 }
 
-function hasProviderUserProvenance(event: Event): boolean {
+export function hasProviderUserProvenance(event: Event): boolean {
   // Preserve aliases retained by older importers without treating arbitrary
   // message text as origin authority.
   const fields = event as unknown as Record<string, unknown>
@@ -100,7 +127,9 @@ function hasProviderUserProvenance(event: Event): boolean {
 }
 
 export function isImportedProviderControlMetadata(event: Event): boolean {
-  return isImportedProviderInterruption(event) || isImportedClaudeControlCompanion(event) || isImportedCodexGoalContext(event)
+  return isImportedProviderInterruption(event) || isImportedClaudeControlCompanion(event)
+    || isImportedCodexGoalContext(event) || isImportedSourceProvenRepair(event)
+    || isImportedSourceProvenAssistantReplay(event)
 }
 
 /**
@@ -109,6 +138,27 @@ export function isImportedProviderControlMetadata(event: Event): boolean {
  */
 export function mergeProviderInterruptionEvent(current: Event, incoming: Event): Event {
   if (current.id !== incoming.id || current.session_id !== incoming.session_id) return incoming
+  if (
+    isImportedSourceProvenAssistantReplay(current)
+    && incoming.seq === current.seq && incoming.type === current.type && incoming.run_id === current.run_id
+    && incoming.imported === true && incoming.backend === 'claude'
+    && incoming.provider_history_repair == null && incoming.metadata_only == null
+    && typeof incoming.text === 'string' && !hasProviderUserProvenance(incoming)
+    && ['provider', 'kind', 'event_id', 'session_id', 'timestamp', 'parent_event_id', 'prompt_id']
+      .every(key => (current.provider_origin as unknown as Record<string, unknown>)?.[key]
+        === (incoming.provider_origin as unknown as Record<string, unknown>)?.[key])
+  ) return current
+  if (
+    isImportedSourceProvenRepair(current)
+    && incoming.seq === current.seq
+    && incoming.type === current.type
+    && incoming.run_id === current.run_id
+    && incoming.imported === true
+    && incoming.backend === 'claude'
+    && incoming.provider_history_repair == null
+    && typeof incoming.prompt === 'string'
+    && !hasProviderUserProvenance(incoming)
+  ) return current
   if (
     isImportedCodexGoalContext(current)
     && incoming.seq === current.seq

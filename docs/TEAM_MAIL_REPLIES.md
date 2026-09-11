@@ -1,42 +1,44 @@
-# Desktop replies to server mail
+# Agent-only replies to server Mail
 
-This local desktop change adds a human-authored Reply draft to incoming server
-mail. The existing server-owned posting identity sends it through the modern
-`createTeamMessage` contract. A signed-in human mailbox, Bulletin, skills, sent
-mail, self-sent mail, and messages without the selected server's authenticated
-delivery projection do not gain a Reply action.
+Reply chooses a local chat and stages a draft there. It does not open a manual
+mail form, send mail, or start an agent. The draft reads
+`Reply to [exact mail title](exact message link) from @@sender`; existing chat
+text is preserved. The link identifies the team, message, mailbox and server.
+Its structured sender reference uses the same reviewed grant path as Route.
+The user sends that chat draft when ready; the chat's agent reads the mail and
+uses the server's authorized exact-parent reply operation.
 
-Reply opens a draft addressed only to the original server sender. The authored
-subject is retained literally, including Unicode and Markdown punctuation;
-an untitled parent's display-only heading is never saved as a subject. Titled
-parents require the connected Hub's negotiated `mail_subjects` capability.
-Untitled replies use the existing message contract on older Hubs.
+Reply is offered on incoming server Mail with the selected server's
+authenticated delivery projection. Bulletin, skills, human-mailbox,
+self-sent and unverified delivery entries do not gain a Reply action. In a
+thread opened from Sent, an eligible incoming reply can still be answered.
+The server independently validates the parent and recipient at send time.
+Replies go only to that sender, not to the original all-server fanout.
 
-Only the user's Send action re-reads the exact parent and then posts. The
-parent's team, message identity, sender, subject, and server delivery must still
-match. Deleted or changed parents fail before creation and keep the draft.
-Replies retain `inReplyToMessageId`; incoming all-server mail produces one
-reply to its sender, not another fanout. Parent attachments are not forwarded.
+Route and Reply share a searchable local chat list, with keyboard selection
+and stable IDs distinguishing duplicate names. Filtering runs only while the
+picker is open. No network search, roster refresh or per-keystroke global state
+write is added. Route retains its existing `Read` draft behavior. Saved data
+from the removed manual Reply form is left untouched, not silently deleted.
 
-Drafts are scoped by profile, server identity, Hub identity, team, posting
-identity, mailbox, and exact parent. They persist across closing the dialog,
-leaving Mail, and application remounting. If local storage cannot be written,
-a bounded memory fallback preserves drafts for the current application
-session. Before creation, the body and retry key are saved as one immutable
-attempt. An uncertain send retries with the same payload and idempotency key;
-concurrent views of that in-flight attempt share the same pending post. A
-confirmed response clears only its matching draft, even after navigation.
+## On-demand thread
 
-Message details expose an Original message link for a reply's exact parent.
-The link uses the existing Team message navigation handler and performs no
-parent-body prefetch. No new mailbox polling, timers, notification subscription,
-automatic send, inbox refresh, or agent activation is introduced. The separate
-local Mark-unread implementation is documented in `TEAM_MAILBOX_STATE.md`;
-new-mail notification transport remains separate work.
+The optional negotiated `team_mail_threads_v1` capability enables
+`GET /v1/teams/{team}/network/messages/{message}/thread` with
+`after_sequence` and `limit` (maximum 25). It follows exact parent IDs, never
+subjects or timestamps. Each entry must independently remain readable.
+Unavailable/deleted ancestors and bounded traversal are reported as incomplete
+history; private branches and Bulletin/skill entries are not traversed.
 
-Validation uses isolated renderer tests with mocked bridge operations for
-exact-recipient sends, literal subjects, capability fallback, retained drafts,
-uncertain retries, navigation during send, changed/deleted parents, denied
-parent kinds, parent-link navigation, and unchanged inbox request counts.
-Existing Team message and background-policy tests are included. This change
-does not claim packaged GUI acceptance, publication, or server deployment.
+Mail detail fetches one page on open. Load more and Refresh thread are explicit
+actions. It retains readable original content on fetch failure and fences late
+responses by the selected profile/team/message. Incoming/outgoing rows show
+the sender, original time, recipients and outgoing receipts. Older hosts keep
+single-message detail and the exact Original message link; they are not probed
+for the unsupported thread endpoint. Agent-only Reply still works there using
+the existing explicit sender reference on the draft.
+
+No thread timer, automatic refresh, send or receiving-agent activation exists.
+Quiet recipient-scoped push hints are separate and update only the badge;
+see `TEAM_MAIL_NOTIFICATIONS_PLAN.md`. Read/unread remains documented in
+`TEAM_MAILBOX_STATE.md`. Neither source changes nor tests deploy a server.
