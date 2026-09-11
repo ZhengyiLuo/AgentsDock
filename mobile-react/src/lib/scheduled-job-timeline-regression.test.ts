@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { Event } from '../types'
-import { projectTimeline } from './timeline'
+import { jobResultPresentation, projectTimeline } from './timeline'
 
 function event(seq: number, type: string, extra: Partial<Event> = {}): Event {
   return {
@@ -52,4 +52,15 @@ for (const runField of [
   )
 }
 
+for (const field of ['job_id', 'job'] as const) {
+  const metadata = field === 'job_id' ? { job_id: 'job-explicit' } : { job: { id: 'job-explicit', title: 'Explicit job' } as Event['job'] }
+  const rows = projectTimeline([
+    event(20, 'assistant_text', { ...metadata, run_id: 'explicit-run', text: 'Paged job output' }),
+    event(21, 'reasoning_summary', { run_id: 'explicit-run', text: 'Job trace without repeated metadata' }),
+  ], [])
+  assert.equal(rows.length, 1, `${field} must own metadata-light output even without start/purpose`)
+  assert.equal(rows[0].kind, 'job')
+  assert.equal(rows[0].kind === 'job' && rows[0].events.length, 2)
+}
+assert(!jobResultPresentation(event(1, 'turn_started', { purpose: 'scheduled_job', prompt: 'Private scheduled input' })).detail.includes('Private scheduled input'), 'scheduled start input must never become a public result')
 console.log('scheduled job reasoning trace regressions passed')

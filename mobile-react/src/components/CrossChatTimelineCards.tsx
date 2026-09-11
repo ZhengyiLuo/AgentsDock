@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, MessageSquareShare } from 'lu
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import type { AgentServerClient } from '../api/AgentServerClient'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
+import { authenticatedChatMessageBody } from '../lib/chat-message-body'
 import { formatDateTime, messageText } from '../lib/format'
 import { timelineChatReferenceIsRemote, timelineChatReferenceKey } from '../lib/timeline-inline-references'
 import type {
@@ -122,7 +123,7 @@ interface TimelineWorkspaceScope {
   serverInstanceId: string | null
 }
 
-function captureTimelineWorkspaceScope(sessionId: string): TimelineWorkspaceScope {
+export function captureTimelineWorkspaceScope(sessionId: string): TimelineWorkspaceScope {
   const state = useAppStore.getState()
   return {
     profileId: state.activeProfileId,
@@ -136,7 +137,7 @@ function captureTimelineWorkspaceScope(sessionId: string): TimelineWorkspaceScop
   }
 }
 
-function timelineWorkspaceScopeCurrent(scope: TimelineWorkspaceScope): boolean {
+export function timelineWorkspaceScopeCurrent(scope: TimelineWorkspaceScope): boolean {
   const state = useAppStore.getState()
   return client === scope.connection
     && scope.connection.validationRevision === scope.validationRevision
@@ -163,7 +164,7 @@ function timelineWorkspaceProfileCurrent(scope: TimelineWorkspaceScope): boolean
     && !state.workspaceAdopting
 }
 
-function useTimelineWorkspaceRevision(sessionId: string): string {
+export function useTimelineWorkspaceRevision(sessionId: string): string {
   return useAppStore(state => JSON.stringify([
     state.activeProfileId,
     state.profileGeneration,
@@ -287,6 +288,136 @@ function timelineReferenceLabel(reference: ChatReference): string {
 
 interface CrossChatCardProps { event: Event; events?: Event[]; rowKey: string; sessionId: string; fontScale?: number }
 
+interface CrossChatMessageCardProps extends CrossChatCardProps { anchorTs?: string; layoutWidth?: number }
+
+/** One explicit async message, with no legacy exchange or automatic-reply controls. */
+export function CrossChatMessageCard(props: CrossChatMessageCardProps) {
+  const profileGeneration = useAppStore(state => state.profileGeneration)
+  return <CrossChatMessageCardScoped key={`${profileGeneration}:${props.sessionId}:${props.rowKey}`} {...props} profileGeneration={profileGeneration} />
+}
+
+function CrossChatMessageCardScoped({
+  event, events, rowKey, sessionId, anchorTs, layoutWidth = 640, fontScale = 1, profileGeneration,
+}: CrossChatMessageCardProps & { profileGeneration: number }) {
+  const colors = usePalette()
+  const light = useColorScheme() === 'light'
+  const workspaceRevision = useTimelineWorkspaceRevision(sessionId)
+  const lifecycle = events?.length ? events : [event]
+  const envelopeId = event.cross_chat_envelope_id?.trim() || event.handoff_id?.trim() || event.message_id?.trim() || ''
+  const conversationId = latestExchangeString(lifecycle, value => value.conversation_id)
+  const sourceId = latestExchangeString(lifecycle, value => value.source_session_id)
+  const targetId = latestExchangeString(lifecycle, value => value.target_session_id)
+  const incoming = targetId === sessionId && sourceId !== sessionId
+  const latestRevision = latestExchangeNumber(lifecycle, value => value.message_revision)
+  const editedByUser = incoming && (latestExchangeBoolean(lifecycle, value => value.message_edited_by_user) === true || (latestRevision ?? 0) > 0)
+  const messageRevision = editedByUser ? latestRevision : null
+  const bodyEvents = editedByUser ? lifecycle.filter(value => value.message_edited_by_user === true && value.message_revision === messageRevision) : lifecycle
+  const bodyRevisionKey = JSON.stringify([workspaceRevision, envelopeId, conversationId, sourceId, targetId, editedByUser, messageRevision])
+  const counterpartId = incoming ? sourceId : targetId
+  const currentTitle = useAppStore(state => state.sessions.find(value => value.id === counterpartId)?.title)
+  const savedTitle = latestExchangeString(lifecycle, value => incoming ? value.source_title : value.target_title)
+  const counterpartTitle = savedTitle || currentTitle || 'Unknown agent'
+  const preview = latestExchangeString(bodyEvents, value => value.message_body) || latestExchangeString(bodyEvents, value => value.handoff_preview)
+  const bodyChars = latestExchangeNumber(bodyEvents, value => value.handoff_body_chars)
+  const truncated = latestExchangeBoolean(bodyEvents, value => value.handoff_body_truncated) === true
+  const bodyHash = latestExchangeString(bodyEvents, value => value.handoff_body_sha256)
+  const moreBodyAvailable = !preview || truncated || (bodyChars ?? 0) > preview.length || /(?:…|\.\.\.)$/u.test(preview)
+  const longBody = (bodyChars ?? preview.length) > CROSS_CHAT_LONG_MESSAGE_CHARS || preview.split('\n').length > CROSS_CHAT_LONG_MESSAGE_LINES
+  const [loadedBody, setLoadedBody] = useState<{ key: string; preview: string; hash: string; text: string } | null>(null)
+  const body = loadedBody?.key === bodyRevisionKey && loadedBody.preview === preview && loadedBody.hash === bodyHash ? loadedBody.text : null
+  const [expanded, setExpanded] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const requestGeneration = useRef(0)
+  const loadingRef = useRef(false)
+  useEffect(() => {
+    requestGeneration.current += 1
+    loadingRef.current = false
+    setLoadedBody(null)
+    setExpanded(false)
+    setLoading(false)
+    setLoadError('')
+    return () => { requestGeneration.current += 1; loadingRef.current = false }
+  }, [rowKey, sessionId, profileGeneration, workspaceRevision, envelopeId, conversationId, sourceId, targetId, preview, bodyHash, bodyRevisionKey])
+
+  const showFullMessage = async () => {
+    if (loadingRef.current) return
+    const scope = captureTimelineWorkspaceScope(sessionId)
+    if (scope.profileGeneration !== profileGeneration || !timelineWorkspaceScopeCurrent(scope)) {
+      setLoadError('This chat changed before the detail request could run.')
+      return
+    }
+    if (body !== null || !moreBodyAvailable) { setExpanded(true); return }
+    // Identity comes from authenticated lifecycle data. Display labels are
+    // never used to infer a participant, route, or body lookup target.
+    if (!envelopeId || !conversationId || !sourceId || !targetId || (sourceId !== sessionId && targetId !== sessionId)) {
+      setLoadError('This message is missing its conversation or participant identity.')
+      return
+    }
+    const request = ++requestGeneration.current
+    loadingRef.current = true
+    setLoading(true)
+    setLoadError('')
+    try {
+      const loaded = await scope.connection.crossChatHandoff(envelopeId)
+      if (request !== requestGeneration.current || !timelineWorkspaceScopeCurrent(scope)) return
+      const text = authenticatedChatMessageBody(loaded, {
+        messageId: envelopeId, conversationId, sourceSessionId: sourceId, targetSessionId: targetId,
+        incoming, editedByUser, messageRevision: editedByUser ? messageRevision ?? -1 : undefined,
+        bodyHash: bodyHash || undefined,
+      })
+      if (!text.trim()) throw new Error('AgentsServer did not return a message body')
+      setLoadedBody({ key: bodyRevisionKey, preview, hash: bodyHash, text })
+      setExpanded(true)
+    } catch (error) {
+      if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setLoadError(timelineActionError(error))
+    } finally {
+      if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) {
+        loadingRef.current = false
+        setLoading(false)
+      }
+    }
+  }
+  const status = latestExchangeString(lifecycle, value => value.handoff_status)
+  const failed = status === 'failed' || event.type === 'chat_conversation_message_failed'
+  const cancelled = status === 'cancelled' || event.type === 'chat_conversation_message_cancelled'
+  const text = expanded ? body ?? preview : longBody ? crossChatCollapsedText(preview) : preview
+  const title = incoming ? counterpartTitle : `Sent to ${counterpartTitle}`
+  const toggleLabel = loading ? 'Loading full message…' : expanded ? 'Show less' : 'View message'
+  const identity = `cross-chat-async-message-${envelopeId || event.id}`
+  const time = formatCrossChatTime(anchorTs || event.ts)
+  return <View testID={identity} style={styles.asyncMessage}>
+    <View testID={`${identity}-surface`} style={[
+      styles.asyncMessageSurface,
+      {
+        width: layoutWidth > 720 ? '82%' : '94%', alignSelf: incoming ? 'flex-end' : 'flex-start',
+        backgroundColor: incoming ? light ? '#eee5fb' : '#332444' : colors.raised,
+        borderColor: incoming ? light ? '#bca5dc' : '#685080' : colors.border,
+      },
+    ]}>
+      <View style={styles.asyncMessageHeader}>
+        <MessageSquareShare size={13} color={colors.muted} />
+        <Text accessibilityRole="header" style={[styles.asyncMessageTitle, { color: colors.text }]} numberOfLines={2}>{title}</Text>
+        {time ? <Text style={[styles.conversationTime, { color: colors.muted }]}>{time}</Text> : null}
+      </View>
+      {text ? <MarkdownContent value={text} compact fontScale={fontScale} color={colors.text} />
+        : <Text style={[styles.note, { color: colors.muted }]}>Message body available on demand.</Text>}
+      {moreBodyAvailable || longBody ? <Pressable
+        testID={`${identity}-toggle`}
+        accessibilityRole="button"
+        accessibilityLabel={toggleLabel}
+        accessibilityState={{ expanded, disabled: loading, busy: loading }}
+        disabled={loading}
+        onPress={() => expanded ? setExpanded(false) : void showFullMessage()}
+        style={({ pressed }) => [styles.conversationBodyToggle, { opacity: loading ? 0.6 : pressed ? 0.72 : 1 }]}
+      ><Text style={[styles.conversationBodyToggleText, { color: light ? '#664185' : '#c9b1eb' }]}>{toggleLabel}</Text></Pressable> : null}
+      {failed ? <InlineError message={latestExchangeString(lifecycle, value => value.message) || "Couldn't complete"} /> : null}
+      {cancelled ? <Text style={[styles.note, { color: colors.muted }]}>Cancelled</Text> : null}
+      {loadError ? <InlineError prefix="Could not load full message" message={loadError} /> : null}
+    </View>
+  </View>
+}
+
 interface CrossChatConversationLeg extends CrossChatExchangeLeg {
   /** Timeline previews retain this until authenticated detail supplies the full body. */
   bodyTruncated: boolean
@@ -319,7 +450,7 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
   const [body, setBody] = useState(truncated ? '' : preview)
   const [bodyLoading, setBodyLoading] = useState(false)
   const [bodyError, setBodyError] = useState('')
-  const [cancelled, setCancelled] = useState(false)
+  const [handoffStatusSnapshot, setHandoffStatusSnapshot] = useState<{ status: string; eventSeq: number } | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
   const [openError, setOpenError] = useState('')
@@ -336,11 +467,11 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
     setBody(truncated ? '' : preview)
     setBodyLoading(false)
     setBodyError('')
-    setCancelled(false)
+    setHandoffStatusSnapshot(null)
     setCancelling(false)
     setCancelError('')
     setOpenError('')
-  }, [envelopeId, preview, profileGeneration, rowKey, sessionId, truncated, workspaceRevision])
+  }, [envelopeId, sourceId, targetId, event.handoff_body_sha256, preview, profileGeneration, rowKey, sessionId, truncated, workspaceRevision])
 
   const loadBody = async () => {
     if (!envelopeId || body || bodyLoadingRef.current || (!truncated && preview)) return
@@ -360,6 +491,10 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
       if (loaded.source_session_id !== sessionId && loaded.target_session_id !== sessionId) {
         throw new Error('This chat is not a participant in the handoff')
       }
+      if ((sourceId && loaded.source_session_id !== sourceId) || (targetId && loaded.target_session_id !== targetId)) {
+        throw new Error('AgentsServer returned different handoff participants')
+      }
+      if (typeof loaded.body !== 'string' || !loaded.body.trim()) throw new Error('AgentsServer did not return a message body')
       setBody(loaded.body)
     } catch (error) {
       if (request === bodyRequest.current && timelineWorkspaceScopeCurrent(scope)) setBodyError(timelineActionError(error))
@@ -389,7 +524,12 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
       if (result.source_session_id !== sessionId && result.target_session_id !== sessionId) {
         throw new Error('This chat is not a participant in the handoff')
       }
-      setCancelled(true)
+      if ((sourceId && result.source_session_id !== sourceId) || (targetId && result.target_session_id !== targetId)) {
+        throw new Error('AgentsServer returned different handoff participants')
+      }
+      if (typeof result.status !== 'string' || !result.status.trim()) throw new Error('AgentsServer did not confirm handoff cancellation')
+      setHandoffStatusSnapshot({ status: result.status, eventSeq: event.seq })
+      if (result.status !== 'cancelled') throw new Error(`The handoff is ${statusLabel(result.status).toLowerCase()}; cancellation was not confirmed.`)
     } catch (error) {
       if (request === cancelRequest.current && timelineWorkspaceScopeCurrent(scope)) setCancelError(timelineActionError(error))
     } finally {
@@ -400,7 +540,9 @@ function CrossChatHandoffCardScoped({ event, rowKey, sessionId, profileGeneratio
     }
   }
 
-  const displayEvent = cancelled ? { ...event, handoff_status: 'cancelled' } : event
+  const displayEvent = handoffStatusSnapshot?.eventSeq === event.seq
+    ? { ...event, handoff_status: handoffStatusSnapshot.status }
+    : event
   const status = handoffStatus(displayEvent)
   const failed = /failed|error/u.test(status)
   const title = crossChatTitle(displayEvent, counterpartTitle, sessionId)
@@ -1369,6 +1511,10 @@ function CardAction({ testID, label, onPress, destructive = false, disabled = fa
 }
 
 const styles = StyleSheet.create({
+  asyncMessage: { minWidth: 0, marginHorizontal: 14, marginVertical: 8 },
+  asyncMessageSurface: { minWidth: 0, maxWidth: 760, paddingVertical: 10, paddingHorizontal: 13, borderWidth: 1, borderRadius: 10 },
+  asyncMessageHeader: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
+  asyncMessageTitle: { flex: 1, minWidth: 0, fontSize: 11, lineHeight: 16, fontWeight: '700' },
   referenceList: { gap: 6, marginTop: 8 },
   referenceChip: { minHeight: 44, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 7 },
   referenceText: { flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 16 },

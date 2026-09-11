@@ -2,11 +2,21 @@ import type { AgentFile, Event } from '../types'
 import { messageText } from './format'
 import { foldMarkdownSource } from './math'
 import { importedCrossChatDelivery, type ImportedCrossChatDelivery } from './imported-cross-chat-delivery'
+import { isChatMailboxEvent } from './chat-mailbox'
 
 export type TimelineRow = MessageRow | TraceRow | ProgressRow | MediaRow | SystemRow | JobRow
 export interface MessageRow { kind: 'message'; key: string; seq: number; role: 'user' | 'assistant'; events: Event[]; files: AgentFile[] }
-export interface TraceRow { kind: 'trace'; key: string; seq: number; events: Event[]; promotedCommentaryIds: string[]; runId?: string | null; active: boolean }
-export interface ProgressRow { kind: 'progress'; key: string; seq: number; events: Event[]; hiddenCount: number }
+export interface TraceRow {
+  kind: 'trace'; key: string; seq: number; events: Event[]; promotedCommentaryIds: string[]; runId?: string | null; active: boolean
+  /** Preserve the unsplit live-commentary policy when only the last segment is active. */
+  runActive?: boolean
+  afterSeq?: number; throughSeq?: number; terminalSeq?: number; continues?: boolean
+  toolStartSequences?: Readonly<Record<string, number>>
+}
+export interface ProgressRow {
+  kind: 'progress'; key: string; seq: number; events: Event[]; hiddenCount: number
+  afterSeq?: number; throughSeq?: number; continues?: boolean
+}
 export interface MediaRow { kind: 'media'; key: string; seq: number; files: AgentFile[] }
 export interface SystemRow {
   kind: 'system'
@@ -20,6 +30,11 @@ export interface SystemRow {
   representedEventSeqs?: number[]
   /** Read-only imported content; contains no recovered route authority. */
   importedDelivery?: ImportedCrossChatDelivery
+  /** Independent async messages use delivery-time placement and ordinary replies. */
+  crossChatMessage?: boolean
+  anchorTs?: string
+  /** Adjacent passive messages from the exact same sender/recipient pair. */
+  mailboxMessages?: SystemRow[]
 }
 export interface JobRow { kind: 'job'; key: string; seq: number; title: string; events: Event[]; jobId?: string; timelineGroupId?: string | null }
 
@@ -48,6 +63,7 @@ const terminalNormalizedCrossChatEvents = new WeakMap<
   Map<NonNullable<Event['exchange_status']>, Event>
 >()
 const importedDeliveryPresentationEvents = new WeakMap<Event, Event>()
+const mailboxStateEvents = new WeakMap<Event, Map<NonNullable<Event['inbox_state']>, Event>>()
 
 const hidden = new Set([
   'turn_queued',
@@ -176,6 +192,7 @@ function jobProjectionAssignments(events: readonly Event[]): Map<Event, JobProje
       || Boolean(codexLifecycleSemanticKey(event))
       || isHandoffDigestEvent(event)
       || event.type.startsWith('cross_chat_')
+      || isAsyncCrossChatMessage(event)
     const jobId = topLevel ? '' : explicitJobId || jobByOccurrence.get(occurrence) || (event.purpose === 'scheduled_job' ? runId : '')
     if (!jobId) {
       const boundaryKey = providerInteractionAuditKey(event)
@@ -382,6 +399,12 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       continue
     }
     if (appendCrossChatEvent(event)) continue
+    if (event.type.startsWith('chat_conversation_message_')) {
+      // Unknown protocol versions remain ordinary audit content, never an
+      // authenticated message card or a source of message-detail controls.
+      items.push({ kind: 'system', key: `event:${event.id}`, seq: event.seq, event })
+      continue
+    }
     if (hidden.has(event.type)) continue
     const interactionKey = providerInteractionAuditKey(event)
     if (interactionKey) {
@@ -568,7 +591,38 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     mediaRow: MediaRow | null
     displaySeq: number
   }> = []
-  for (const item of items.sort((a, b) => a.seq - b.seq)) {
+  // Pending incoming messages belong exclusively to the ordinary queue. Once
+  // admitted, anchor them at execution start before ordering around user work.
+  const displayItems = items.flatMap(item => {
+    if (!('kind' in item) || item.kind !== 'system' || !(item.events ?? [item.event]).some(isAsyncCrossChatMessage)) return [item]
+    // A later legacy compatibility receipt must not replace the negotiated
+    // async lifecycle's status, identity, or body provenance (same as Mac).
+    const asyncLifecycle = (item.events ?? [item.event]).filter(isAsyncCrossChatMessage)
+    const mailboxLifecycle = asyncLifecycle.filter(isChatMailboxEvent)
+    const lifecycle = mailboxLifecycle.length ? mailboxLifecycle : asyncLifecycle
+    let latest = lifecycle.at(-1)!
+    const incoming = latest.target_session_id === latest.session_id && latest.source_session_id !== latest.session_id
+    const mailbox = mailboxLifecycle.length > 0
+    if (mailbox) {
+      const priority = { unread: 1, read: 2, cancelled: 3, deleted: 4 }
+      const terminal = lifecycle.reduce<Event | undefined>((current, event) => event.inbox_state
+        && priority[event.inbox_state] > (current?.inbox_state ? priority[current.inbox_state] : 0) ? event : current, undefined)
+      if (terminal?.inbox_state && latest.inbox_state !== terminal.inbox_state) {
+        let normalized = mailboxStateEvents.get(latest)
+        if (!normalized) { normalized = new Map(); mailboxStateEvents.set(latest, normalized) }
+        let effective = normalized.get(terminal.inbox_state)
+        if (!effective) { effective = { ...latest, inbox_state: terminal.inbox_state }; normalized.set(terminal.inbox_state, effective) }
+        latest = effective
+      }
+    }
+    if (mailbox && incoming && latest.inbox_state === 'deleted') return []
+    const arrived = incoming ? lifecycle.find(event => (
+      mailbox && (event.type === 'chat_conversation_message_received' || event.type === 'chat_conversation_message_mailbox_migrated')
+      || event.type === 'chat_conversation_message_started' || event.type === 'chat_conversation_message_delivered'
+    )) : lifecycle[0]
+    return arrived ? [{ ...item, seq: arrived.seq, anchorTs: mailbox ? latest.received_at || arrived.ts : arrived.ts, event: latest, events: lifecycle, crossChatMessage: true }] : []
+  })
+  for (const item of displayItems.sort((a, b) => a.seq - b.seq)) {
     if ('kind' in item) { rows.push(item); continue }
     const inputFileIds = new Set(item.user?.file_ids ?? [])
     const inputFiles = item.files.filter(file => inputFileIds.has(file.id))
@@ -643,6 +697,8 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
         promotedCommentaryIds: item.promotedCommentaryIds,
         runId: item.runId,
         active: traceActive,
+        runActive: traceActive,
+        terminalSeq: item.finishedSeq,
       })
     }
     if (traceActive && currentTurn?.key === item.key) {
@@ -672,7 +728,137 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   // Live commentary belongs at the physical edge of the active turn. Keeping
   // it after lifecycle markers and already-positioned completed answers mirrors
   // Mac without allowing a successor's progress to reshuffle older rows.
-  return liveProgress ? [...orderedRows, liveProgress] : orderedRows
+  return interleaveCrossChatMessages(liveProgress ? [...orderedRows, liveProgress] : orderedRows, completedAssistantRows)
+}
+
+function traceToolKey(event: Event): string {
+  const id = event.tool_id?.trim() || event.tool?.id?.trim()
+  return id ? `${event.run_id?.trim() || 'runless'}:${id}` : ''
+}
+
+/** Full trace pages may expose starts missing from the compact timeline sample. */
+function traceToolStartSequences(events: readonly Event[], known: Readonly<Record<string, number>> = {}): Record<string, number> {
+  const starts = { ...known }
+  for (const event of events) {
+    const key = traceToolKey(event)
+    if (event.type === 'tool_started' && key) starts[key] = Math.min(starts[key] ?? event.seq, event.seq)
+  }
+  return starts
+}
+
+function traceEventSequence(event: Event, starts: Readonly<Record<string, number>>): number {
+  return (event.type === 'tool_started' || event.type === 'tool_finished')
+    ? starts[traceToolKey(event)] ?? event.seq : event.seq
+}
+
+/** Apply this to merged sampled/loaded trace events before display, copy or export. */
+export function traceEventsWithinRow(row: TraceRow, events: readonly Event[]): Event[] {
+  if (row.afterSeq === undefined && row.throughSeq === undefined) return events as Event[]
+  const starts = traceToolStartSequences(events, row.toolStartSequences)
+  return events.filter(event => {
+    const seq = traceEventSequence(event, starts)
+    return (row.afterSeq === undefined || seq > row.afterSeq)
+      && (row.throughSeq === undefined || seq <= row.throughSeq)
+  })
+}
+
+function firstAnchorAtOrAfter(anchors: readonly SystemRow[], seq: number): number {
+  let low = 0, high = anchors.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (anchors[middle].seq < seq) low = middle + 1
+    else high = middle
+  }
+  return low
+}
+
+/** A message divides presentation only; it does not finish the owning run. */
+function splitActivityAtMessages(rows: TimelineRow[], messages: readonly SystemRow[], presentedAt: Map<string, number>): TimelineRow[] {
+  return rows.flatMap((row): TimelineRow[] => {
+    if (row.kind !== 'trace' && row.kind !== 'progress' && !(row.kind === 'message' && row.role === 'assistant')) return [row]
+    const startSeq = Math.min(row.seq, ...row.events.map(event => event.seq))
+    const endSeq = row.kind === 'trace'
+      ? row.terminalSeq ?? (row.active ? Infinity : Math.max(row.seq, ...row.events.map(event => event.seq)))
+      : row.kind === 'progress' ? Infinity : Math.max(row.seq, ...row.events.map(event => event.seq))
+    const cuts = messages.slice(firstAnchorAtOrAfter(messages, startSeq), firstAnchorAtOrAfter(messages, endSeq))
+    if (!cuts.length) return [row]
+    const starts = row.kind === 'trace' ? traceToolStartSequences(row.events, row.toolStartSequences) : {}
+    const originalPresentation = presentedAt.get(row.key)
+    const buckets = Array.from({ length: cuts.length + 1 }, (): Event[] => [])
+    for (const event of row.events) buckets[firstAnchorAtOrAfter(cuts, traceEventSequence(event, starts))].push(event)
+    return buckets.flatMap((events, index): TimelineRow[] => {
+      const last = index === cuts.length
+      if (!events.length && !(last && (row.kind === 'progress' || row.kind === 'trace' && row.active))) return []
+      const before = cuts[index - 1]
+      const key = before ? `${row.key}:after:message:${before.key}` : row.key
+      if (row.kind === 'message') {
+        const seq = events[0].seq
+        presentedAt.set(key, last ? originalPresentation ?? seq : seq)
+        return [{ ...row, key, seq, events }]
+      }
+      const bounds = {
+        key, seq: before ? before.seq : startSeq, events, continues: !last,
+        afterSeq: before?.seq ?? row.afterSeq, throughSeq: last ? row.throughSeq : cuts[index].seq,
+      }
+      return row.kind === 'trace'
+        ? [{ ...row, ...bounds, active: last && row.active, terminalSeq: last ? row.terminalSeq : undefined, toolStartSequences: starts }]
+        : [{ ...row, ...bounds, hiddenCount: index === 0 ? row.hiddenCount : 0 }]
+    })
+  })
+}
+
+function interleaveCrossChatMessages(rows: TimelineRow[], completed: readonly { row: MessageRow; displaySeq: number; mediaRow: MediaRow | null }[]): TimelineRow[] {
+  const messages = rows.filter((row): row is SystemRow => row.kind === 'system' && crossChatSemanticKey(row.event) !== null)
+    .sort((left, right) => left.seq - right.seq)
+  if (!messages.length) return rows
+  const presentedAt = new Map<string, number>()
+  for (const value of completed) {
+    presentedAt.set(value.row.key, value.displaySeq)
+    if (value.mediaRow) presentedAt.set(value.mediaRow.key, value.displaySeq)
+  }
+  const messageKeys = new Set(messages.map(row => row.key))
+  const content = splitActivityAtMessages(rows.filter(row => !messageKeys.has(row.key)), messages, presentedAt)
+    .sort((left, right) => (presentedAt.get(left.key) ?? left.seq) - (presentedAt.get(right.key) ?? right.seq))
+  const bySequence = content.map((row, index) => ({ row, index }))
+    .sort((left, right) => (presentedAt.get(left.row.key) ?? left.row.seq) - (presentedAt.get(right.row.key) ?? right.row.seq) || left.index - right.index)
+  const buckets = Array.from({ length: content.length + 1 }, (): TimelineRow[] => [])
+  let cursor = 0, lastIndex = -1
+  for (const message of messages) {
+    while (cursor < bySequence.length) {
+      const { row, index } = bySequence[cursor]
+      const seq = presentedAt.get(row.key) ?? row.seq
+      if (seq > message.seq || seq === message.seq
+        && (row.kind === 'trace' || row.kind === 'progress') && row.afterSeq === message.seq) break
+      lastIndex = Math.max(lastIndex, index)
+      cursor += 1
+    }
+    buckets[lastIndex + 1].push(message)
+  }
+  const ordered: TimelineRow[] = [...buckets[0]]
+  for (let index = 0; index < content.length; index += 1) ordered.push(content[index], ...buckets[index + 1])
+  return groupAdjacentMailboxRows(ordered)
+}
+
+function groupAdjacentMailboxRows(rows: TimelineRow[]): TimelineRow[] {
+  const grouped: TimelineRow[] = []
+  for (const row of rows) {
+    if (row.kind !== 'system' || !isChatMailboxEvent(row.event)
+      || !row.event.source_session_id || !row.event.target_session_id
+      || row.event.target_session_id !== row.event.session_id || row.event.source_session_id === row.event.session_id) {
+      grouped.push(row)
+      continue
+    }
+    const previous = grouped.at(-1)
+    const children = row.mailboxMessages ?? [row]
+    if (previous?.kind === 'system' && previous.mailboxMessages
+      && previous.event.source_session_id === row.event.source_session_id
+      && previous.event.target_session_id === row.event.target_session_id) {
+      previous.mailboxMessages.push(...children)
+      previous.representedEventIds = [...previous.representedEventIds ?? [], ...row.representedEventIds ?? [row.event.id]]
+      previous.representedEventSeqs = [...previous.representedEventSeqs ?? [], ...row.representedEventSeqs ?? [row.event.seq]]
+    } else grouped.push({ ...row, mailboxMessages: [...children] })
+  }
+  return grouped
 }
 
 function jobOccurrenceIdentity(event: Event): string {
@@ -821,7 +1007,9 @@ export function rowText(row: TimelineRow): string {
   if (row.kind === 'message') return row.events.map(messageText).map(value => value.trim()).filter(Boolean).join('\n\n')
   if (row.kind === 'trace') return row.events.map(messageText).filter(Boolean).join('\n')
   if (row.kind === 'progress') return row.events.map(messageText).map(value => value.trim()).filter(Boolean).join('\n\n')
-  if (row.kind === 'system') return messageText(row.event)
+  if (row.kind === 'system') return row.mailboxMessages
+    ? row.mailboxMessages.map(child => child.event.message_body ?? child.event.handoff_preview ?? messageText(child.event)).join('\n\n')
+    : messageText(row.event)
   if (row.kind === 'job') {
     const latest = latestJobDisplayEvent(row.events)
     return latest ? messageText(latest) || row.title : row.title
@@ -839,7 +1027,7 @@ const JOB_PREVIEW_CHARACTER_LIMIT = 240
 
 /** Keep machine output useful on a phone without discarding its full detail. */
 export function jobResultPresentation(event: Event): JobResultPresentation {
-  const detail = messageText(event).trim() || 'Scheduled job started. Waiting for agent output.'
+  const detail = messageText({ ...event, prompt: null }).trim() || 'Scheduled job started. Waiting for agent output.'
   const structured = parseStructuredResult(detail)
   if (structured != null) {
     return {
@@ -1332,6 +1520,10 @@ function isInternalDeliveryTurn(event: Event): boolean {
 
 /** Match the server/Mac semantic identity for cross-chat lifecycle packets. */
 export function crossChatSemanticKey(event: Event): string | null {
+  if (isAsyncCrossChatMessage(event)) {
+    const envelopeId = event.cross_chat_envelope_id?.trim() || event.handoff_id?.trim() || event.message_id?.trim()
+    return envelopeId ? `cross-chat:handoff:${envelopeId}` : null
+  }
   if (!event.type.startsWith('cross_chat_')) return null
   const exchangeId = crossChatExchangeId(event)
   if (exchangeId && event.type.startsWith('cross_chat_exchange_')) {
@@ -1343,6 +1535,13 @@ export function crossChatSemanticKey(event: Event): string | null {
   if (handoffId) return `cross-chat:handoff:${handoffId}`
   if (watchId) return `cross-chat:watch:${watchId}`
   return null
+}
+
+/** Only the exact negotiated one-way protocol uses independent message cards. */
+export function isAsyncCrossChatMessage(event: Event): boolean {
+  return event.conversation_mode === 'async_route_v1'
+    && (/^chat_conversation_message_(registered|received|queued|started|delivered|cancelled|failed)$/u.test(event.type)
+      || event.delivery_mode === 'mailbox' && /^chat_conversation_message_(mailbox_migrated|read|deleted)$/u.test(event.type))
 }
 
 function crossChatExchangeId(event: Event): string {

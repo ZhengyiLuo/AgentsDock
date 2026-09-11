@@ -3,6 +3,7 @@ import { AppState as NativeAppState } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import type {
   AgentFile,
+  AgentCrossChatRoutesSnapshot,
   AddServerProfileInput,
   Backend,
   ChatDefaults,
@@ -43,9 +44,11 @@ import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../li
 import { reconcileHealthActiveSessions } from '../lib/active-sessions'
 import { shouldAutoConnectServer } from '../lib/first-launch'
 import { SNAPSHOT_CACHE_VERSION, shouldReplaceCachedTimeline, snapshotLatestSeq } from '../lib/history'
-import { isUserQueuedTurn, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier, resolveNewQueuedTurn, updateQueuedTurns } from '../lib/queue'
+import { asyncQueuedMessageControlsAvailable, crossChatQueueRefreshSessionId, isAsyncQueuedChatMessage, isNativeGoalSteerEvent, isUserQueuedTurn, queueSnapshotRequiresRefresh, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier, resolveNewQueuedTurn, updateQueuedTurns } from '../lib/queue'
+import { QueueReconciliationState } from '../lib/queue-reconciliation'
 import { isAgentActivityEvent } from '../lib/codex-controls'
 import {
+  agentCrossChatRoutesAvailable,
   chatReferencesEqual,
   interactiveClientCapabilities,
   localChatReferenceContractSupported,
@@ -56,8 +59,9 @@ import {
   supportedCrossChatTargetBackends,
   validChatReferences,
 } from '../lib/chat-references'
+import { agentRouteCapacityError, isAgentRouteRevisionConflict } from '../lib/agent-route-policy'
 import { publishProviderRuntimeChanged } from '../lib/provider-runtime-events'
-import { reconcileTeamReferences, restoreFailedTeamReferences, teamMessagesAvailable, teamReferencesEqual, teamReferenceTokenPresent, validTeamReferences } from '../lib/team-references'
+import { reconcileTeamReferences, requireTeamReferenceSupport, restoreFailedTeamReferences, teamMessagesAvailable, teamReferenceContractSupported, teamReferencesEqual, teamReferenceTokenPresent, validTeamReferences } from '../lib/team-references'
 import { awaitAllCodexPermissionUpdates, awaitCodexPermissionUpdates } from '../lib/codex-permission-updates'
 import { awaitAllClaudePermissionUpdates, awaitClaudePermissionUpdates } from '../lib/claude-permission-updates'
 import { awaitAllCursorPermissionUpdates } from '../lib/cursor-permission-updates'
@@ -162,7 +166,8 @@ const scheduledJobRunInFlight = new Map<string, { scope: ConnectionScope; promis
 const stopTurnInFlight = new Set<string>()
 const providerReloadInFlight = new Set<string>()
 const forkSessionInFlight = new Set<string>()
-const queueSnapshotRefreshInFlight = new Set<string>()
+const queueSnapshotRefreshInFlight = new Map<string, { dirty: boolean }>()
+const queuedDeliverySkipTokens = new Map<string, symbol>()
 const olderPageInFlight = new Map<string, Promise<number>>()
 const filePageInFlight = new Map<string, Promise<void>>()
 const sessionMutations = new SessionMutationReconciler()
@@ -226,6 +231,68 @@ let activeConnection: ConnectionScope = {
 }
 
 export let client = activeConnection.client
+
+const agentRouteRefreshTokens = new Map<string, symbol>()
+const agentRouteMutationTokens = new Map<string, symbol>()
+const queuedAgentEditTokens = new Map<string, symbol>()
+
+function emptyAgentRouteState() {
+  agentRouteRefreshTokens.clear()
+  agentRouteMutationTokens.clear()
+  queuedDeliverySkipTokens.clear()
+  queuedAgentEditTokens.clear()
+  queuedRunInFlight.clear()
+  return {
+    agentRoutesBySession: {},
+    agentRouteErrorsBySession: {},
+    agentRouteLoadingSessionIds: new Set<string>(),
+    revokingAgentRouteIds: new Set<string>(),
+    skippingQueuedDeliveryIds: new Set<string>(),
+    // Revalidation invalidates the operation, not just its late response. A
+    // hung old request must not leave the replacement workspace disabled.
+    pendingQueuedRunIds: new Set<string>(),
+  }
+}
+
+function captureAgentRouteGuard(scope: ConnectionScope, get: () => AppState): () => boolean {
+  const validationRevision = scope.client.validationRevision
+  const identity = get().health?.server_identity
+  const instance = get().health?.server_instance_id
+  return () => validatedRevisionIsCurrent(scope, validationRevision)
+    && get().profileGeneration === scope.generation
+    && get().activeProfileId === scope.profileId
+    && get().connected && !get().connecting && !get().switchingProfileId && !get().workspaceAdopting
+    && get().health?.server_identity === identity
+    && get().health?.server_instance_id === instance
+}
+
+function queuedOperationKey(scope: ConnectionScope, sessionId: string, get: () => AppState, queuedId?: string): string {
+  return JSON.stringify([scope.generation, scope.client.validationRevision,
+    get().health?.server_identity ?? null, get().health?.server_instance_id ?? null,
+    sessionId, queuedId ?? null])
+}
+
+// Queue reads and stream packets share one observation clock per validated
+// server instance. Even a no-op delivery invalidates an older HTTP response.
+const queueReconciliationScopes = new WeakMap<ConnectionScope, {
+  validationRevision: number
+  identity: string | undefined
+  instance: string | undefined
+  sessions: Map<string, QueueReconciliationState>
+}>()
+function queueReconciliationState(scope: ConnectionScope, sessionId: string, get: () => AppState): QueueReconciliationState {
+  const validationRevision = scope.client.validationRevision
+  const identity = get().health?.server_identity
+  const instance = get().health?.server_instance_id
+  let owner = queueReconciliationScopes.get(scope)
+  if (!owner || owner.validationRevision !== validationRevision || owner.identity !== identity || owner.instance !== instance) {
+    owner = { validationRevision, identity, instance, sessions: new Map() }
+    queueReconciliationScopes.set(scope, owner)
+  }
+  let state = owner.sessions.get(sessionId)
+  if (!state) { state = new QueueReconciliationState(); owner.sessions.set(sessionId, state) }
+  return state
+}
 
 function captureConnection(): ConnectionScope { return activeConnection }
 function connectionIsCurrent(scope: ConnectionScope): boolean { return activeConnection === scope }
@@ -299,6 +366,7 @@ function installConnection(
   activeConnection = next
   client = next.client
   previous.client.dispose()
+  set(emptyAgentRouteState())
   return next
 }
 
@@ -415,6 +483,11 @@ interface AppState {
   jobs: Job[]
   drafts: Record<string, string>
   chatReferencesBySession: Record<string, ChatReference[]>
+  agentRoutesBySession: Record<string, AgentCrossChatRoutesSnapshot>
+  agentRouteErrorsBySession: Record<string, string | null>
+  agentRouteLoadingSessionIds: Set<string>
+  revokingAgentRouteIds: Set<string>
+  skippingQueuedDeliveryIds: Set<string>
   teamReferencesBySession: Record<string, TeamReference[]>
   uploads: Record<string, AgentFile[]>
   uploadPending: Record<string, UploadRef[]>
@@ -458,6 +531,8 @@ interface AppState {
   setSessionDraft(sessionId: string, text: string, expectedGeneration?: number): void
   setChatReferencesForSession(sessionId: string, references: ChatReference[], expectedGeneration?: number): void
   setTeamReferencesForSession(sessionId: string, references: TeamReference[], expectedGeneration?: number): void
+  refreshAgentRoutes(sessionId: string, expectedGeneration?: number): Promise<AgentCrossChatRoutesSnapshot | null>
+  revokeAgentRoute(sessionId: string, routeId: string, expectedRevision: string, expectedGeneration?: number): Promise<boolean>
   beginTurnAdmission(sessionId: string): string | null
   endTurnAdmission(sessionId: string, token: string): void
   sendPrompt(steer?: boolean, expectedGeneration?: number, expectedSessionId?: string, options?: SendPromptOptions): Promise<boolean>
@@ -480,7 +555,9 @@ interface AppState {
   setCollapsedFolders(folders: string[], expectedGeneration?: number): void
   setFontScale(value: number): void
   updateQueued(sessionId: string, queuedId: string, prompt: string, chatReferences?: ChatReference[], expectedGeneration?: number, teamReferencesInput?: TeamReference[]): Promise<boolean>
+  updateQueuedAgentMessage(sessionId: string, queuedId: string, prompt: string, expectedMessageRevision: number, expectedGeneration?: number): Promise<boolean>
   removeQueued(sessionId: string, queuedId: string, expectedGeneration?: number): Promise<boolean>
+  skipQueuedDelivery(sessionId: string, queuedId: string, expectedGeneration?: number): Promise<boolean>
   moveQueued(sessionId: string, queuedId: string, direction: 'up' | 'down', expectedGeneration?: number): Promise<boolean>
   runQueuedNow(sessionId: string, queuedId: string, expectedGeneration?: number): Promise<boolean>
   clearQueuedRunStatus(sessionId: string, expectedGeneration?: number): void
@@ -534,12 +611,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   turnAdmissionTokens: {},
   sendingSessionIds: new Set(),
   stoppingSessionIds: new Set(),
-  pendingQueuedRunIds: new Set(),
   pendingJobRunIds: new Set(),
   queuedRunStatus: {},
   jobs: [],
   drafts: {},
   chatReferencesBySession: {},
+  ...emptyAgentRouteState(),
   teamReferencesBySession: {},
   uploads: {},
   uploadPending: {},
@@ -776,6 +853,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (NativeAppState.currentState !== 'active' || get().connecting) return
       const scope = requestedScope
       scope.client.revokeValidation()
+      set(emptyAgentRouteState())
       if (!get().connected) stopSelectedStream()
       set(state => ({
       connecting: true,
@@ -1045,6 +1123,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (offline) {
           scope.client.revokeValidation()
           stopSelectedStream()
+          set(emptyAgentRouteState())
         }
         set(state => ({
           connected: offline ? false : state.connected,
@@ -1183,6 +1262,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const promise = (async () => {
       if (NativeAppState.currentState !== 'active') return
+      const currentScope = captureAgentRouteGuard(scope, get)
+      const queueState = queueReconciliationState(scope, sessionId, get)
+      const queueRevision = queueState.revision
       const sessionRead = sessionMutations.captureRead()
       const existingAtStart = get().snapshots[sessionId]
       const eventIdsAtStart = new Set(existingAtStart?.events.map(event => event.id) ?? [])
@@ -1232,9 +1314,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           page = await fetchFullTail()
           fetchedFullTail = true
         }
-        if (NativeAppState.currentState !== 'active' || !connectionIsCurrent(scope) || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
+        if (NativeAppState.currentState !== 'active' || !currentScope() || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
 
         const current = get().snapshots[sessionId]
+        const queueChanged = queueState.revision !== queueRevision
+          || current?.queuedTurns !== existingAtStart?.queuedTurns
+        const queuedTurns = queueChanged ? current?.queuedTurns ?? [] : page.queued_turns
+        if (!queueChanged) queueState.commitSnapshot(page.latest_seq)
         const incomingEvents = page.events
           .filter(event => event.session_id === sessionId && Number.isFinite(event.seq))
           .map(sanitizeTimelineEvent)
@@ -1264,7 +1350,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           cacheVersion: SNAPSHOT_CACHE_VERSION,
           session: reconciledSession,
           events: mergedEvents,
-          queuedTurns: page.queued_turns,
+          queuedTurns,
           files: mergeFiles(current?.files ?? [], filesFromEvents(incomingEvents)),
           filesTotal: current?.filesTotal ?? 0,
           hasMore: (fetchedFullTail ? page.has_more : current?.hasMore ?? page.has_more) || eventsWereTrimmed,
@@ -1282,7 +1368,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         set(state => ({
           snapshots: snapshotMapWith(state.snapshots, sessionId, next),
-          queuedRunStatus: reconcileQueuedRunStatus(state.queuedRunStatus, sessionId, page.queued_turns),
+          queuedRunStatus: reconcileQueuedRunStatus(state.queuedRunStatus, sessionId, queuedTurns),
           sessions: state.sessions.map(value => value.id === sessionId ? reconciledSession : value),
           loadingSessionId: null,
           syncSessionId: sessionId,
@@ -1292,6 +1378,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         cancelSyncRecovery(set)
         scheduleLiveSnapshotSave(scope, next, true)
+        if (queueChanged) void refreshQueueAfterSparseSnapshot(scope, sessionId, set, get)
         if (reason === 'selection' || reason === 'manual' || reason === 'foreground') {
           void get().refreshFiles(sessionId)
         }
@@ -1301,7 +1388,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         void get().markRead(sessionId)
       } catch (error) {
         if (NativeAppState.currentState !== 'active') return
-        if (isStaleConnectionError(error, scope) || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
+        if (!currentScope() || isStaleConnectionError(error, scope) || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
         const message = errorMessage(error)
         const transient = syncFailureIsTransient(error)
         if (!transient) cancelSyncRecovery(set)
@@ -1887,6 +1974,104 @@ export const useAppStore = create<AppState>((set, get) => ({
     scheduleCurrentWorkspaceSave(get)
   },
 
+  async refreshAgentRoutes(sessionId, expectedGeneration) {
+    if (get().workspaceAdopting) return null
+    if (expectedGeneration !== undefined && expectedGeneration !== get().profileGeneration) return null
+    const available = () => agentCrossChatRoutesAvailable(get().health)
+      && get().sessions.some(session => session.id === sessionId && !session.archived)
+    if (!available()) {
+      agentRouteRefreshTokens.delete(sessionId)
+      set(state => {
+        const agentRoutesBySession = { ...state.agentRoutesBySession }
+        const agentRouteErrorsBySession = { ...state.agentRouteErrorsBySession }
+        const agentRouteLoadingSessionIds = new Set(state.agentRouteLoadingSessionIds)
+        delete agentRoutesBySession[sessionId]
+        delete agentRouteErrorsBySession[sessionId]
+        agentRouteLoadingSessionIds.delete(sessionId)
+        return { agentRoutesBySession, agentRouteErrorsBySession, agentRouteLoadingSessionIds }
+      })
+      return null
+    }
+    let scope: ConnectionScope
+    try { scope = captureValidatedConnection(get, expectedGeneration) } catch { return null }
+    const guard = captureAgentRouteGuard(scope, get)
+    const token = Symbol()
+    agentRouteRefreshTokens.set(sessionId, token)
+    const current = () => guard() && available() && agentRouteRefreshTokens.get(sessionId) === token
+    set(state => ({
+      agentRouteLoadingSessionIds: new Set(state.agentRouteLoadingSessionIds).add(sessionId),
+      agentRouteErrorsBySession: { ...state.agentRouteErrorsBySession, [sessionId]: null },
+    }))
+    try {
+      const snapshot = await scope.client.agentHandoffRoutes(sessionId)
+      if (!current()) return null
+      set(state => ({ agentRoutesBySession: { ...state.agentRoutesBySession, [sessionId]: snapshot } }))
+      return snapshot
+    } catch (error) {
+      if (current()) set(state => ({ agentRouteErrorsBySession: { ...state.agentRouteErrorsBySession, [sessionId]: errorMessage(error) } }))
+      return null
+    } finally {
+      if (agentRouteRefreshTokens.get(sessionId) === token) {
+        agentRouteRefreshTokens.delete(sessionId)
+        if (connectionIsCurrent(scope)) set(state => {
+          const agentRouteLoadingSessionIds = new Set(state.agentRouteLoadingSessionIds)
+          agentRouteLoadingSessionIds.delete(sessionId)
+          return { agentRouteLoadingSessionIds }
+        })
+      }
+    }
+  },
+
+  async revokeAgentRoute(sessionId, routeId, expectedRevision, expectedGeneration) {
+    if (get().workspaceAdopting) return false
+    const scope = validatedConnectionOrReport(get, set, expectedGeneration)
+    if (!scope || !agentCrossChatRoutesAvailable(get().health)) return false
+    const key = `${sessionId}:${routeId}`
+    if (get().revokingAgentRouteIds.has(key)) return false
+    const route = get().agentRoutesBySession[sessionId]?.routes.find(value => value.route_id === routeId)
+    if (!route || !expectedRevision.trim() || route.revision !== expectedRevision) {
+      await get().refreshAgentRoutes(sessionId, expectedGeneration)
+      return false
+    }
+    const guard = captureAgentRouteGuard(scope, get)
+    const token = Symbol()
+    agentRouteMutationTokens.set(key, token)
+    const current = () => guard() && agentCrossChatRoutesAvailable(get().health) && agentRouteMutationTokens.get(key) === token
+    set(state => ({
+      revokingAgentRouteIds: new Set(state.revokingAgentRouteIds).add(key),
+      agentRouteErrorsBySession: { ...state.agentRouteErrorsBySession, [sessionId]: null },
+    }))
+    try {
+      const result = await scope.client.deleteAgentHandoffRoute(sessionId, routeId, expectedRevision)
+      if (!current()) return false
+      if (result.ok !== true || result.route_id !== routeId) throw new Error('The server did not confirm this grant removal. Refresh and try again.')
+      const snapshot = await get().refreshAgentRoutes(sessionId, expectedGeneration)
+      if (current() && snapshot?.routes.some(value => value.route_id === routeId)) {
+        throw new Error('The current server grant is still present. Review the refreshed grant before revoking again.')
+      }
+      return current() && snapshot !== null && !snapshot.routes.some(value => value.route_id === routeId)
+    } catch (error) {
+      if (!current()) return false
+      if (error instanceof ServerError && isAgentRouteRevisionConflict(error)) {
+        await get().refreshAgentRoutes(sessionId, expectedGeneration)
+        if (current()) set(state => ({ agentRouteErrorsBySession: {
+          ...state.agentRouteErrorsBySession,
+          [sessionId]: 'This grant changed on the server. The current grant was refreshed; review it before revoking again.',
+        } }))
+      } else set(state => ({ agentRouteErrorsBySession: { ...state.agentRouteErrorsBySession, [sessionId]: errorMessage(error) } }))
+      return false
+    } finally {
+      if (agentRouteMutationTokens.get(key) === token) {
+        agentRouteMutationTokens.delete(key)
+        if (connectionIsCurrent(scope)) set(state => {
+          const revokingAgentRouteIds = new Set(state.revokingAgentRouteIds)
+          revokingAgentRouteIds.delete(key)
+          return { revokingAgentRouteIds }
+        })
+      }
+    }
+  },
+
   beginTurnAdmission(sessionId) {
     const current = get()
     if (
@@ -1972,6 +2157,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'A chat reference was edited or is no longer valid. Remove it and select the chat again.' })
       return false
     }
+    const capacityError = agentRouteCapacityError(get().agentRoutesBySession[sessionId], chatReferences)
+    if (capacityError) { set({ error: capacityError }); return false }
+    if ([...get().revokingAgentRouteIds].some(key => key.startsWith(`${sessionId}:`))) {
+      set({ error: 'Wait for the current route removal before sending.' })
+      return false
+    }
     if (chatReferences.length && !routeHintMentionsAvailable(get().health)) {
       set({ error: 'Inline @Chat routes require the complete v7 default-deny contract. Update AgentsServer and select the chat again.' })
       return false
@@ -1995,6 +2186,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     const clientCapabilities = interactiveClientCapabilities(session, get().health)
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
     if (!scope) return false
+    if (teamReferences.some(reference => reference.recipient_kind !== 'server')) {
+      const guard = captureAgentRouteGuard(scope, get)
+      try {
+        await requireTeamReferenceSupport(scope.client, get().health!, teamReferences,
+          () => guard() && teamReferences.every(reference => teamReferenceContractSupported(get().health, reference)))
+        if (!guard()) return false
+      } catch (error) {
+        if (guard()) set({ error: errorMessage(error) })
+        return false
+      }
+    }
+    if ([...get().revokingAgentRouteIds].some(key => key.startsWith(`${sessionId}:`))) return false
     const inFlightKey = `${scope.generation}:${sessionId}`
     if (sendPromptInFlight.has(inFlightKey)) return false
     const admissionToken = options?.admissionToken ?? get().beginTurnAdmission(sessionId)
@@ -2032,6 +2235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (consumedDraft) void saveCurrentWorkspace(get)
     const queuedBeforeSend = new Set((get().snapshots[sessionId]?.queuedTurns ?? []).map(turn => turn.queued_id))
     const sessionRead = sessionMutations.captureRead()
+    const queueScopeCurrent = captureAgentRouteGuard(scope, get)
     try {
       const response = await scope.client.sendTurn(
         sessionId,
@@ -2043,8 +2247,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         chatReferences,
         teamReferences,
       )
-      if (!connectionIsCurrent(scope)) return false
+      if (!queueScopeCurrent()) return false
       const stateAfterSend = get()
+      if (chatReferences.some(reference => reference.action === 'route' && reference.grant_intent === true)) {
+        void get().refreshAgentRoutes(sessionId, expectedGeneration)
+      }
       const currentSessionAfterSend = stateAfterSend.sessions.find(value => value.id === sessionId)
       const locallyObservedSeq = Math.max(
         stateAfterSend.snapshots[sessionId]?.latestSeq ?? 0,
@@ -2079,9 +2286,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         try {
           let queuedId = response.queued_id || response.event?.queued_id || null
           if (!queuedId) {
-            const turns = await scope.client.queue(sessionId)
-            if (!connectionIsCurrent(scope)) return false
-            setSnapshotQueue(scope, sessionId, turns, set, get)
+            const turns = await refreshSnapshotQueue(scope, sessionId, set, get, queueScopeCurrent)
+            if (!turns) return false
             queuedId = resolveNewQueuedTurn(prompt, queuedBeforeSend, turns)
           }
           if (!queuedId) throw new Error('The message was queued, but its queue ID could not be resolved for steering.')
@@ -2455,7 +2661,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'Wait for the active turn to finish before forking this chat.' })
       return
     }
-    if (state.turnAdmissionTokens[sessionId] || state.sendingSessionIds.has(sessionId) || queuedRunInFlight.has(inFlightKey)) {
+    if (state.turnAdmissionTokens[sessionId] || state.sendingSessionIds.has(sessionId)
+      || queuedRunInFlight.has(queuedOperationKey(scope, sessionId, get))) {
       set({ error: 'Wait for the message to be accepted before forking this chat.' })
       return
     }
@@ -2675,6 +2882,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'This server cannot deliver one or more queued cross-chat actions or targets. Change the action or update the server.' })
       return false
     }
+    if (teamReferences.some(reference => reference.recipient_kind !== 'server')) {
+      const guard = captureAgentRouteGuard(scope, get)
+      try {
+        await requireTeamReferenceSupport(scope.client, state.health!, teamReferences,
+          () => guard() && teamReferences.every(reference => teamReferenceContractSupported(get().health, reference)))
+        if (!guard()) return false
+      } catch (error) {
+        if (guard()) set({ error: errorMessage(error) })
+        return false
+      }
+    }
     return queueAction(
       scope,
       sessionId,
@@ -2690,6 +2908,57 @@ export const useAppStore = create<AppState>((set, get) => ({
       get,
     )
   },
+  async updateQueuedAgentMessage(sessionId, queuedId, prompt, expectedMessageRevision, expectedGeneration) {
+    const scope = validatedConnectionOrReport(get, set, expectedGeneration)
+    if (!scope) return false
+    const guard = captureAgentRouteGuard(scope, get)
+    const capable = () => guard() && asyncQueuedMessageControlsAvailable(get().health)
+    const normalized = prompt.trim()
+    if (!capable() || !normalized || !Number.isSafeInteger(expectedMessageRevision) || expectedMessageRevision < 0) {
+      set({ error: 'This server cannot safely edit this queued agent message. Refresh the queue before retrying.' })
+      return false
+    }
+    const initial = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
+    const owner = editableQueuedAgentOwner(initial, sessionId)
+    if (!owner || initial?.message_revision !== expectedMessageRevision) {
+      set({ error: 'This message changed or has already started. Reopen its editor from the current queue.' })
+      return false
+    }
+    const key = queuedOperationKey(scope, sessionId, get, queuedId)
+    if (queuedAgentEditTokens.has(key)) return false
+    const token = Symbol()
+    queuedAgentEditTokens.set(key, token)
+    const current = () => capable() && queuedAgentEditTokens.get(key) === token
+    try {
+      const turns = await refreshSnapshotQueue(scope, sessionId, set, get, current)
+      if (!current() || !turns) return false
+      const fresh = turns.find(turn => turn.queued_id === queuedId)
+      const visible = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
+      if (editableQueuedAgentOwner(fresh, sessionId) !== owner || fresh?.message_revision !== expectedMessageRevision
+        || editableQueuedAgentOwner(visible, sessionId) !== owner || visible?.message_revision !== expectedMessageRevision) {
+        throw new Error('This message changed or has already started. Your draft was kept; reopen the current message before saving.')
+      }
+      // Recipient edits alter only this body at this revision. They cannot
+      // create route grants or smuggle user-composer reference metadata.
+      await scope.client.updateQueued(sessionId, queuedId, normalized, undefined, undefined, undefined, expectedMessageRevision)
+      if (!current()) return false
+      const refreshed = await refreshSnapshotQueue(scope, sessionId, set, get, current)
+      if (!current() || !refreshed) return false
+      const remaining = refreshed.find(turn => turn.queued_id === queuedId)
+      if (remaining && (editableQueuedAgentOwner(remaining, sessionId) !== owner
+        || (remaining.message_revision ?? -1) <= expectedMessageRevision)) {
+        throw new Error('The server has not confirmed this edit. Your draft was kept; refresh the queue before retrying.')
+      }
+      return true
+    } catch (error) {
+      if (!current()) return false
+      await refreshSnapshotQueue(scope, sessionId, set, get, current).catch(() => null)
+      if (current()) set({ error: errorMessage(error) })
+      return false
+    } finally {
+      if (queuedAgentEditTokens.get(key) === token) queuedAgentEditTokens.delete(key)
+    }
+  },
   async removeQueued(sessionId, queuedId, expectedGeneration) {
     const queued = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
     if (queued && !isUserQueuedTurn(queued)) {
@@ -2698,6 +2967,53 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
     return scope ? queueAction(scope, sessionId, () => scope.client.removeQueued(sessionId, queuedId), set, get) : false
+  },
+  async skipQueuedDelivery(sessionId, queuedId, expectedGeneration) {
+    if (get().workspaceAdopting) return false
+    const scope = validatedConnectionOrReport(get, set, expectedGeneration)
+    if (!scope) return false
+    const key = `${sessionId}:${queuedId}`
+    if (get().skippingQueuedDeliveryIds.has(key)) return false
+    const initial = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === queuedId)
+    const identity = initial && queuedDeliverySkipIdentity(initial, get().health)
+    if (!identity) return false
+    const guard = captureAgentRouteGuard(scope, get)
+    const token = Symbol()
+    queuedDeliverySkipTokens.set(key, token)
+    const current = () => guard() && queuedDeliverySkipTokens.get(key) === token
+    const refresh = () => refreshSnapshotQueue(scope, sessionId, set, get, current)
+    set(state => ({ skippingQueuedDeliveryIds: new Set(state.skippingQueuedDeliveryIds).add(key) }))
+    try {
+      const turns = await refresh()
+      if (!current() || !turns) return false
+      const exact = turns.find(turn => turn.queued_id === queuedId)
+      const latestIdentity = exact && queuedDeliverySkipIdentity(exact, get().health)
+      if (!latestIdentity || JSON.stringify(latestIdentity) !== JSON.stringify(identity)) {
+        throw new Error('This incoming delivery changed or has already started. The queue was refreshed.')
+      }
+      await scope.client.skipQueuedCrossChatDelivery(sessionId, queuedId, identity)
+      if (!current()) return false
+      const refreshed = await refresh()
+      if (!current() || !refreshed) return false
+      if (refreshed.some(turn => turn.queued_id === queuedId)) {
+        throw new Error('The server has not confirmed this delivery was skipped. Refresh the queue before retrying.')
+      }
+      return true
+    } catch (error) {
+      if (!current()) return false
+      await refresh().catch(() => null)
+      if (current()) set({ error: errorMessage(error) })
+      return false
+    } finally {
+      if (queuedDeliverySkipTokens.get(key) === token) {
+        queuedDeliverySkipTokens.delete(key)
+        if (connectionIsCurrent(scope)) set(state => {
+          const skippingQueuedDeliveryIds = new Set(state.skippingQueuedDeliveryIds)
+          skippingQueuedDeliveryIds.delete(key)
+          return { skippingQueuedDeliveryIds }
+        })
+      }
+    }
   },
   async moveQueued(sessionId, queuedId, direction, expectedGeneration) {
     const turns = get().snapshots[sessionId]?.queuedTurns ?? []
@@ -2716,7 +3032,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   async runQueuedNow(sessionId, queuedId, expectedGeneration) {
     const queuedTurns = get().snapshots[sessionId]?.queuedTurns ?? []
     const queued = queuedTurns.find(turn => turn.queued_id === queuedId)
-    if (queued && !isUserQueuedTurn(queued)) {
+    const agentOwner = editableQueuedAgentOwner(queued, sessionId)
+    const agentMessage = Boolean(agentOwner && asyncQueuedMessageControlsAvailable(get().health))
+    if (queued && !isUserQueuedTurn(queued) && !agentMessage) {
       set(state => ({
         queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
           queued_id: queuedId,
@@ -2726,7 +3044,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       return false
     }
-    if (queuedTurnHasEarlierDeliveryBarrier(queuedTurns, queuedId)) {
+    if (queuedTurnHasEarlierDeliveryBarrier(queuedTurns, queuedId, asyncQueuedMessageControlsAvailable(get().health))) {
       set(state => ({
         queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
           queued_id: queuedId,
@@ -2750,18 +3068,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       return false
     }
-    const inFlightKey = `${scope.generation}:${sessionId}`
+    const guard = captureAgentRouteGuard(scope, get)
+    if (!guard()) return false
+    const inFlightKey = queuedOperationKey(scope, sessionId, get)
     const pending = queuedRunInFlight.get(inFlightKey)
     if (pending) return pending.queuedId === queuedId ? pending.promise : false
-    set(state => {
-      const pendingQueuedRunIds = new Set(state.pendingQueuedRunIds)
-      pendingQueuedRunIds.add(queuedId)
-      return {
-        pendingQueuedRunIds,
-        queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId),
-      }
-    })
-    const operation = (async (): Promise<boolean> => {
+    const current = () => guard() && queuedRunInFlight.get(inFlightKey)?.promise === operation
+    // Install admission before beginning asynchronous work or notifying store
+    // subscribers, including subscribers that synchronously issue another tap.
+    const operation = Promise.resolve().then(async (): Promise<boolean> => {
+      if (!current()) return false
       const session = get().sessions.find(candidate => candidate.id === sessionId)
       if (session?.backend === 'codex') {
         try {
@@ -2771,7 +3087,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessionId,
           })
         } catch (error) {
-          if (connectionIsCurrent(scope)) set(state => ({
+          if (current()) set(state => ({
             queuedRunStatus: queuedRunStatusMap(
               state.queuedRunStatus,
               sessionId,
@@ -2780,7 +3096,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           }))
           return false
         }
-        if (!connectionIsCurrent(scope)) return false
+        if (!current()) return false
       }
       if (session?.backend === 'claude') {
         try {
@@ -2790,7 +3106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessionId,
           })
         } catch (error) {
-          if (connectionIsCurrent(scope)) set(state => ({
+          if (current()) set(state => ({
             queuedRunStatus: queuedRunStatusMap(
               state.queuedRunStatus,
               sessionId,
@@ -2799,19 +3115,49 @@ export const useAppStore = create<AppState>((set, get) => ({
           }))
           return false
         }
-        if (!connectionIsCurrent(scope)) return false
+        if (!current()) return false
       }
 
+      if (!current()) return false
+      if (agentMessage) {
+        // Permission changes may wait arbitrarily long. Read only after those
+        // waits, then recheck the current projection without another await
+        // before POST: the GET publication itself can notify live subscribers.
+        const turns = await refreshSnapshotQueue(scope, sessionId, set, get, current).catch(() => null)
+        const currentTurns = get().snapshots[sessionId]?.queuedTurns
+        const validOwner = (values: QueuedTurn[] | null | undefined) => {
+          const latest = values?.find(turn => turn.queued_id === queuedId)
+          return Boolean(values && editableQueuedAgentOwner(latest, sessionId) === agentOwner
+            && latest?.message_revision === queued?.message_revision
+            && !queuedTurnHasEarlierDeliveryBarrier(values, queuedId, asyncQueuedMessageControlsAvailable(get().health)))
+        }
+        if (!current() || !asyncQueuedMessageControlsAvailable(get().health)
+          || !validOwner(turns) || !validOwner(currentTurns)) {
+          if (current()) set(state => ({ queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
+            queued_id: queuedId, tone: 'error', message: 'This agent message changed or has an earlier delivery. Refresh the queue before sending it now.',
+          }) }))
+          return false
+        }
+      }
       let response: QueuedRunNowResponse
       try {
         response = await scope.client.runQueuedNow(sessionId, queuedId)
       } catch (error) {
         if (isStaleConnectionError(error, scope)) return false
         const deliveryUncertain = queuedRunDeliveryUncertain(error)
-        const reconciledTurns = await scope.client.queue(sessionId).catch(() => null)
-        if (!connectionIsCurrent(scope)) return false
-        if (reconciledTurns) setSnapshotQueue(scope, sessionId, reconciledTurns, set, get)
+        const reconciledTurns = await refreshSnapshotQueue(scope, sessionId, set, get, current).catch(() => null)
+        if (!current()) return false
         if (deliveryUncertain) {
+          const admitted = reconciledTurns && !reconciledTurns.some(turn => turn.queued_id === queuedId)
+            && get().snapshots[sessionId]?.events.some(event => event.queued_id === queuedId
+              && (event.type === 'turn_started' || isNativeGoalSteerEvent(event)))
+          if (admitted) {
+            // An exact admission may overtake the HTTP error. Do not recreate
+            // uncertainty, or mark a possibly completed run active again.
+            set(state => ({ queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId) }))
+            if (get().selectedSessionId === sessionId) void get().syncSelectedSession('recovery')
+            return true
+          }
           set(state => ({
             queuedRunStatus: queuedRunStatusMap(
               state.queuedRunStatus,
@@ -2838,15 +3184,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return false
       }
-      if (!connectionIsCurrent(scope)) return false
+      if (!current()) return false
 
-      let reconciledTurns: QueuedTurn[]
+      let reconciledTurns: QueuedTurn[] | null
       try {
-        reconciledTurns = await scope.client.queue(sessionId)
+        reconciledTurns = await refreshSnapshotQueue(scope, sessionId, set, get, current)
       } catch (error) {
-        if (isStaleConnectionError(error, scope)) return false
+        if (!current() || isStaleConnectionError(error, scope)) return false
         const message = response.deferred
-          ? response.message?.trim() || 'The current turn is not ready to be interrupted. This message is still queued; try again shortly.'
+          ? 'Run now was deferred, but the latest queue could not be confirmed. Refresh the chat before retrying.'
           : `Run now was accepted, but AgentsDock could not refresh the queue. Refresh the chat before retrying. ${errorMessage(error)}`
         set(state => ({
           queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId, {
@@ -2857,10 +3203,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return false
       }
-      if (!connectionIsCurrent(scope)) return false
-      setSnapshotQueue(scope, sessionId, reconciledTurns, set, get)
+      if (!current() || !reconciledTurns) return false
 
       const remainsQueued = reconciledTurns.some(value => value.queued_id === queuedId)
+      if (!remainsQueued && (response.deferred || response.ok === false)) {
+        // The message may have started or been removed while the response was
+        // in flight. Absence is not proof this action started it, but it cannot
+        // truthfully be labelled "still queued" either.
+        set(state => ({ queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId) }))
+        if (get().selectedSessionId === sessionId) void get().syncSelectedSession('recovery')
+        return false
+      }
       if (response.deferred || response.ok === false || remainsQueued) {
         const deferred = response.deferred === true
         set(state => ({
@@ -2877,13 +3230,22 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       markQueuedRunAccepted(scope, sessionId, set, get)
       return true
-    })()
+    })
     queuedRunInFlight.set(inFlightKey, { queuedId, promise: operation })
+    set(state => {
+      const pendingQueuedRunIds = new Set(state.pendingQueuedRunIds)
+      pendingQueuedRunIds.add(queuedId)
+      return {
+        pendingQueuedRunIds,
+        queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId),
+      }
+    })
     try {
       return await operation
     } finally {
+      const ownsPresentation = current()
       if (queuedRunInFlight.get(inFlightKey)?.promise === operation) queuedRunInFlight.delete(inFlightKey)
-      if (connectionIsCurrent(scope)) {
+      if (ownsPresentation) {
         set(state => {
           const pendingQueuedRunIds = new Set(state.pendingQueuedRunIds)
           pendingQueuedRunIds.delete(queuedId)
@@ -3404,6 +3766,12 @@ async function acceptHealthIdentity(
   const contract = health.api_contract_version ?? 0
   if (contract < MIN_API_CONTRACT) throw new Error(`Server upgrade required: app needs API v${MIN_API_CONTRACT}, server reports v${contract}.`)
   const identity = requiredServerIdentity(health)
+  const previousHealth = get().health
+  if (previousHealth && (
+    previousHealth.server_identity !== health.server_identity
+    || previousHealth.server_instance_id !== health.server_instance_id
+    || (agentCrossChatRoutesAvailable(previousHealth) && !agentCrossChatRoutesAvailable(health))
+  )) set(emptyAgentRouteState())
   await withProfileMutation(async () => {
     if (!connectionIsCurrent(scope)) return
     assertHealthValidationCurrent(scope, healthValidationRevision)
@@ -3529,6 +3897,7 @@ function pauseReconnectForInactiveApp(
   scope.client.revokeValidation()
   stopSelectedStream()
   set(state => ({
+    ...emptyAgentRouteState(),
     connected: false,
     connecting: false,
     liveConnected: false,
@@ -3552,6 +3921,7 @@ function forceValidationOffline(
   scope.client.revokeValidation()
   stopSelectedStream()
   set(state => ({
+    ...emptyAgentRouteState(),
     connected: false,
     connecting: false,
     liveConnected: false,
@@ -3968,6 +4338,7 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
   if (!connectionIsCurrent(scope)) return
   event = sanitizeTimelineEvent(event)
   const sessionId = event.session_id
+  const acceptQueueEvent = queueReconciliationState(scope, sessionId, get).observe(event)
   const timelineInternal = TIMELINE_INTERNAL_EVENT_TYPES.has(event.type)
   const nativeSteerSupersession = isNativeSteerSupersession(event)
   const terminalEvent = ['turn_finished', 'turn_stopped', 'error'].includes(event.type) && !nativeSteerSupersession
@@ -4010,8 +4381,10 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
       lastTimelineSyncAt: Date.now(),
     } : {}
     if (!snapshot) return { activeSessionIds: active, sessions, profiles, ...selectedSync }
-    const queuedTurns = updateQueuedTurns(snapshot.queuedTurns, event)
-    const queuedRunStatus = queuedRunStatusForEvent(state.queuedRunStatus, sessionId, queuedTurns, event)
+    const queuedTurns = acceptQueueEvent ? updateQueuedTurns(snapshot.queuedTurns, event) : snapshot.queuedTurns
+    const queuedRunStatus = acceptQueueEvent || event.type === 'turn_started' || isNativeGoalSteerEvent(event)
+      ? queuedRunStatusForEvent(state.queuedRunStatus, sessionId, queuedTurns, event)
+      : state.queuedRunStatus
     // Queue, job and subagent bookkeeping must still update their dedicated
     // projections, but storing those packets as transcript events invalidates
     // every long-chat row and makes live scrolling stutter. If an internal
@@ -4054,11 +4427,12 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
     'claude_interaction_resolved',
   ].includes(event.type)) void get().refreshSessions()
   if (event.type.startsWith('job_')) void get().refreshJobs()
-  if (
-    event.type === 'queue_snapshot'
-    && event.positions?.length
-    && !(get().snapshots[sessionId]?.queuedTurns.length)
-  ) void refreshQueueAfterSparseSnapshot(scope, sessionId, set, get)
+  // A timeline high-water is not an atomic queue version. For a covered
+  // packet, suppress replay into the shelf but confirm its signal by HTTP.
+  if (!acceptQueueEvent || (
+    queueSnapshotRequiresRefresh(event, get().snapshots[sessionId]?.queuedTurns ?? [])
+    || crossChatQueueRefreshSessionId(event) === sessionId
+  )) void refreshQueueAfterSparseSnapshot(scope, sessionId, set, get)
   if (
     NativeAppState.currentState === 'active'
     && get().selectedSessionId === sessionId
@@ -4127,7 +4501,10 @@ function startSelectedStream(
         })
       } else if (detail?.fatal) {
         const message = detail.error.message || `Live updates closed (${detail.code}).`
-        if (detail.code === 4401) scope.client.revokeValidation()
+        if (detail.code === 4401) {
+          scope.client.revokeValidation()
+          set(emptyAgentRouteState())
+        }
         cancelSyncRecovery(set)
         stopSelectedStream()
         set(state => ({
@@ -4229,29 +4606,64 @@ function markQueuedRunAccepted(
   if (get().selectedSessionId === sessionId) void get().syncSelectedSession('recovery')
 }
 
+function editableQueuedAgentOwner(turn: QueuedTurn | undefined, sessionId: string): string | null {
+  if (!turn || !isAsyncQueuedChatMessage(turn) || turn.promoted
+    || turn.session_id && turn.session_id !== sessionId
+    || turn.target_session_id && turn.target_session_id !== sessionId
+    || !turn.source_session_id || turn.source_session_id === sessionId
+    || !turn.cross_chat_envelope_id
+    || !Number.isSafeInteger(turn.message_revision) || (turn.message_revision ?? -1) < 0) return null
+  return JSON.stringify([turn.queued_id, turn.cross_chat_envelope_id, turn.source_session_id, turn.target_session_id ?? sessionId])
+}
+
 async function queueAction(scope: ConnectionScope, sessionId: string, action: () => Promise<void>, set: (value: Partial<AppState>) => void, get: () => AppState): Promise<boolean> {
+  const current = captureAgentRouteGuard(scope, get)
   try {
+    if (!current()) return false
     await action()
-    if (!connectionIsCurrent(scope)) return false
-    setSnapshotQueue(scope, sessionId, await scope.client.queue(sessionId), set, get)
+    if (!current()) return false
+    if (!await refreshSnapshotQueue(scope, sessionId, set, get, current)) return false
     if (get().selectedSessionId === sessionId) {
       void get().syncSelectedSession('recovery')
     }
     return true
   } catch (error) {
-    if (isStaleConnectionError(error, scope)) return false
-    const refreshed = await scope.client.queue(sessionId).catch(() => null)
-    if (!connectionIsCurrent(scope)) return false
-    if (refreshed) setSnapshotQueue(scope, sessionId, refreshed, set, get)
+    if (!current() || isStaleConnectionError(error, scope)) return false
+    await refreshSnapshotQueue(scope, sessionId, set, get, current).catch(() => null)
+    if (!current()) return false
     set({ error: errorMessage(error) })
     return false
   }
+}
+
+async function refreshSnapshotQueue(
+  scope: ConnectionScope,
+  sessionId: string,
+  set: (value: Partial<AppState>) => void,
+  get: () => AppState,
+  current = captureAgentRouteGuard(scope, get),
+): Promise<QueuedTurn[] | null> {
+  const queueState = queueReconciliationState(scope, sessionId, get)
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!current()) return null
+    const revision = queueState.revision
+    const before = get().snapshots[sessionId]?.queuedTurns
+    const turns = await scope.client.queue(sessionId)
+    if (!current()) return null
+    // Never resurrect a delivered row or erase a new message with a read
+    // overtaken by a stream packet or another successfully published read.
+    if (queueState.revision !== revision || get().snapshots[sessionId]?.queuedTurns !== before) continue
+    setSnapshotQueue(scope, sessionId, turns, set, get)
+    return turns
+  }
+  throw new Error('The message queue changed while refreshing. Refresh the chat before retrying.')
 }
 
 function setSnapshotQueue(scope: ConnectionScope, sessionId: string, queuedTurns: QueuedTurn[], set: (value: Partial<AppState>) => void, get: () => AppState): void {
   if (!connectionIsCurrent(scope)) return
   const snapshot = get().snapshots[sessionId]
   if (!snapshot) return
+  queueReconciliationState(scope, sessionId, get).commitSnapshot()
   const next = { ...snapshot, queuedTurns, cachedAt: Date.now() }
   set({
     snapshots: snapshotMapWith(get().snapshots, sessionId, next),
@@ -4280,6 +4692,11 @@ function queuedRunStatusForEvent(
   queuedTurns: QueuedTurn[],
   event: Event,
 ): Record<string, QueuedRunStatus | undefined> {
+  if (current[sessionId]?.delivery_uncertain
+    && event.queued_id === current[sessionId]?.queued_id
+    && (event.type === 'turn_started' || isNativeGoalSteerEvent(event))) {
+    return queuedRunStatusMap(current, sessionId)
+  }
   const reconciled = reconcileQueuedRunStatus(current, sessionId, queuedTurns)
   if (event.type !== 'turn_queue_paused' && event.type !== 'turn_queue_delivery_fenced') return reconciled
   const queuedId = event.queued_id
@@ -4301,19 +4718,34 @@ async function refreshQueueAfterSparseSnapshot(
   set: (value: Partial<AppState>) => void,
   get: () => AppState,
 ): Promise<void> {
-  const key = `${scope.generation}:${sessionId}`
-  if (queueSnapshotRefreshInFlight.has(key)) return
-  queueSnapshotRefreshInFlight.add(key)
+  const validationRevision = scope.client.validationRevision
+  const key = JSON.stringify([scope.generation, validationRevision, get().health?.server_instance_id, sessionId])
+  const previous = queueSnapshotRefreshInFlight.get(key)
+  if (previous) { previous.dirty = true; return }
+  const request = { dirty: false }
+  const current = captureAgentRouteGuard(scope, get)
+  queueSnapshotRefreshInFlight.set(key, request)
   try {
-    const turns = await scope.client.queue(sessionId)
-    if (!connectionIsCurrent(scope) || get().selectedSessionId !== sessionId) return
-    setSnapshotQueue(scope, sessionId, turns, set, get)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      request.dirty = false
+      const queueState = queueReconciliationState(scope, sessionId, get)
+      const revision = queueState.revision
+      const before = get().snapshots[sessionId]?.queuedTurns
+      const turns = await scope.client.queue(sessionId)
+      if (!current() || get().selectedSessionId !== sessionId) return
+      if (request.dirty || queueState.revision !== revision || get().snapshots[sessionId]?.queuedTurns !== before) request.dirty = true
+      else {
+        setSnapshotQueue(scope, sessionId, turns, set, get)
+        return
+      }
+    }
+    if (current()) throw new Error('The message queue is still changing. Refresh the chat to check its latest state.')
   } catch (error) {
-    if (!isStaleConnectionError(error, scope)) {
+    if (current() && !isStaleConnectionError(error, scope)) {
       set({ syncError: `Could not refresh the message queue: ${errorMessage(error)}` })
     }
   } finally {
-    queueSnapshotRefreshInFlight.delete(key)
+    if (queueSnapshotRefreshInFlight.get(key) === request) queueSnapshotRefreshInFlight.delete(key)
   }
 }
 

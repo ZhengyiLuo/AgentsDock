@@ -20,6 +20,7 @@ import {
   mergeJobHistoryEvents,
   providerInteractionAuditSummary,
   rowText,
+  traceEventsWithinRow,
 } from '../lib/timeline'
 import { formatDateTime, messageText } from '../lib/format'
 import { canQueryScheduledJobHistory } from '../lib/job-history'
@@ -42,8 +43,9 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import { Text } from './AppText'
-import { ChatReferenceChips, CrossChatExchangeCard, CrossChatHandoffCard } from './CrossChatTimelineCards'
+import { ChatReferenceChips, CrossChatExchangeCard, CrossChatHandoffCard, CrossChatMessageCard } from './CrossChatTimelineCards'
 import { ImportedCrossChatDeliveryCard } from './ImportedCrossChatDeliveryCard'
+import { ChatInboxGroup } from './ChatInboxGroup'
 import { IconButton } from './ui'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
@@ -63,6 +65,8 @@ export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, o
   if (row.kind === 'media') return <MediaRowView row={row} sessionId={sessionId} />
   if (row.kind === 'job') return <JobRowView row={row} sessionId={sessionId} onReview={onReview} fontScale={fontScale} />
   if (row.importedDelivery) return <ImportedCrossChatDeliveryCard row={row} fontScale={fontScale} />
+  if (row.mailboxMessages) return <ChatInboxGroup row={row} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} />
+  if (row.crossChatMessage) return <CrossChatMessageCard event={row.event} events={row.events} rowKey={row.key} anchorTs={row.anchorTs} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} />
   if (codexLifecycleSemanticKey(row.event)) return <CodexLifecycleRowView row={row} fontScale={fontScale} />
   if (row.key.startsWith('provider-interaction-audit:')) return <ProviderInteractionAuditView row={row} />
   const exchangeId = row.event.exchange_id?.trim() || row.event.cross_chat_exchange_id?.trim()
@@ -278,13 +282,13 @@ function TraceRowView({ row, sessionId, onReview, fontScale, anchorSeq, includeC
   const displayEvents = useMemo(() => {
     const promotedIds = new Set(row.promotedCommentaryIds)
     const merged = loadedEvents ? mergeTraceEvents(row.events, loadedEvents) : row.events
-    return merged.filter(event => (
+    return traceEventsWithinRow(row, merged).filter(event => (
       !promotedIds.has(event.id)
       // Commentary already owns the live assistant surface. Keep it out of
       // both sampled and remotely loaded active trace detail.
-      && (includeCommentary || !row.active || event.phase !== 'commentary')
+      && (includeCommentary || !(row.runActive ?? row.active) || event.phase !== 'commentary')
     ))
-  }, [includeCommentary, loadedEvents, row.active, row.events, row.promotedCommentaryIds])
+  }, [includeCommentary, loadedEvents, row])
   const traceSummary = useMemo(() => {
     let toolEventCount = 0
     let thoughtCount = 0
@@ -383,7 +387,7 @@ function TraceRowView({ row, sessionId, onReview, fontScale, anchorSeq, includeC
     <View style={styles.traceWrap}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Reasoning trace. ${metadata || 'Activity details'}. ${toggleLabel}.`}
+        accessibilityLabel={`${row.continues ? 'Activity continues' : 'Reasoning trace'}. ${metadata || 'Activity details'}. ${toggleLabel}.`}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(value => !value)}
         style={[styles.traceHeader, { backgroundColor: colors.raised, borderColor: colors.border }]}
@@ -392,7 +396,7 @@ function TraceRowView({ row, sessionId, onReview, fontScale, anchorSeq, includeC
         <Code2 size={14} color={colors.muted} />
         <View style={styles.traceHeading}>
           <View style={styles.traceHeadingMeta}>
-            <Text style={[styles.traceTitle, { color: colors.text }]}>Reasoning trace</Text>
+            <Text style={[styles.traceTitle, { color: colors.text }]}>{row.continues ? 'Activity continues' : 'Reasoning trace'}</Text>
             {metadata ? <Text style={[styles.traceMeta, { color: colors.muted }]} numberOfLines={1}>{metadata}</Text> : null}
           </View>
           {!open && preview ? <Text style={[styles.traceHeadline, { color: colors.muted }]} numberOfLines={4}>{preview}</Text> : null}
@@ -488,13 +492,14 @@ function ProgressRowView({ row, fontScale }: { row: Extract<TimelineRow, { kind:
     testID="trace-live-updates"
     accessible
     accessibilityRole="text"
-    accessibilityLabel={`Live agent progress. ${latestAnnouncement}`}
-    accessibilityLiveRegion="polite"
+    accessibilityLabel={`${row.continues ? 'Earlier agent progress. Activity continues below' : 'Live agent progress'}. ${latestAnnouncement}`}
+    accessibilityLiveRegion={row.continues ? 'none' : 'polite'}
     style={[styles.progressWrap, { borderColor: colors.border, backgroundColor: colors.raised }]}
   >
     {row.hiddenCount > 0 ? <Text style={[styles.progressMeta, { color: colors.muted }]}>
       {row.hiddenCount} earlier live {row.hiddenCount === 1 ? 'update' : 'updates'} hidden while this turn is active
     </Text> : null}
+    {!commentary.length ? <Text style={[styles.progressMeta, { color: colors.muted }]}>{row.continues ? 'Activity continues below' : 'Working…'}</Text> : null}
     {commentary.map((event, index) => <ProgressLineView
       key={event.id}
       event={event}

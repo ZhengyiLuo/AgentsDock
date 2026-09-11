@@ -30,8 +30,9 @@ test('touch-first composer offers a searchable adaptive target-chat picker', () 
   assert.match(composer, /touchSize=\{44\}/)
   assert.match(composer, /referencesRef\.current\.length >= MAX_CHAT_REFERENCES/)
   assert.match(composer, /testID="chat-target-reference-limit"/)
-  assert.match(composer, /accessibilityState=\{\{ disabled: referenceLimitReached \}\}/)
-  assert.match(composer, /disabled=\{referenceLimitReached\}/)
+  assert.match(composer, /const disabled = referenceLimitReached \|\| capacityReached \|\| !connected \|\| !client\.isValidated/)
+  assert.match(composer, /accessibilityState=\{\{ disabled \}\}/)
+  assert.match(composer, /disabled=\{disabled\}/)
 })
 
 test('closed composer avoids high-frequency whole-session subscriptions', () => {
@@ -42,7 +43,7 @@ test('closed composer avoids high-frequency whole-session subscriptions', () => 
   assert.match(composer, /state\.sessions\.filter\(candidate => \([\s\S]*?\) : EMPTY_SESSIONS\)\)/)
 })
 
-test('selected chats are explicit removable authority chips with all Mac actions', () => {
+test('selected chats are removable grant references; modern local actions stay on the Mac route contract', () => {
   assert.match(composer, /insertChatReference\(currentDraft, currentTrigger, target, action\)/)
   assert.match(composer, /reconcileChatReferences\(currentDraft, inserted\.text, currentReferences\)/)
   assert.match(composer, /testID="composer-chat-references"/)
@@ -50,6 +51,7 @@ test('selected chats are explicit removable authority chips with all Mac actions
   assert.match(composer, /if \(action === 'request_reply'\) return 'Ask & return reply'/)
   assert.match(composer, /if \(action === 'final_result'\) return 'Send my final result'/)
   assert.match(composer, /return 'Send only'/)
+  assert.match(composer, /if \(actions\.includes\('route'\)\) return \['route'\]/)
   assert.match(composer, /This server cannot deliver one or more selected actions or target chats\./)
   assert.match(composer, /\|\| !referencesSupported/)
   assert.match(composer, /hasAuxiliaryContent = mailCommandSuggested \|\| references\.length > 0/)

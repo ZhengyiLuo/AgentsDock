@@ -42,7 +42,9 @@ test('native sheets publish before keyboard dismissal and search transfers focus
 test('composer keeps auxiliary content scrollable above a pinned toolbar and preserves large-paste measurements', () => {
   assert.match(composer, /testID="composer-auxiliary-scroll"/)
   assert.match(composer, /maxHeight: viewportLimits\.auxiliaryMaxHeight/)
-  assert.match(composer, /<View style=\{styles\.queueList\}>/)
+  assert.match(composer, /<ScrollView testID="queued-section-body"[^>]*contentContainerStyle=\{styles\.queueList\}/)
+  assert.match(composer, /queueScroll: \{ flexGrow: 0, maxHeight: 180 \}/)
+  assert.match(composer, /queueMessageScroll: \{ flexGrow: 0, maxHeight: 144 \}/)
   assert.match(composer, /style=\{\[styles\.composer/)
   assert.ok(composer.indexOf('testID="composer-auxiliary-scroll"') < composer.indexOf('style={[styles.composer'))
   assert.match(composer, /height: displayedInputHeight, maxHeight: viewportLimits\.inputMaxHeight/)
