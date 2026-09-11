@@ -8,6 +8,15 @@
 - Preserve genuine user quotations and retain exact corrections across stale
   event responses and disk-cache reloads. Historical corrections require the
   matching standalone server update; this is a local desktop change only.
+- Verified both runtime notice types together in the actual isolated Electron
+  service, SQLite, IPC and renderer: source-proven corrections, stale replay,
+  switching chats and reload preserve genuine quotations and assistant output.
+  Provider transport was synthetic; no live provider turn was started.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `188`, source `9cbed1e3`.
+  Developer ID signature and all 86 compiled archive files verified. Automatic
+  updates are disabled; this candidate is not notarized or publicly released.
+  The running app was left untouched. Historical repair requires standalone
+  server `0.1.26-beta.61`.
 
 ## 2026-09-11 — Codex subagent notification provenance
 
