@@ -54,6 +54,30 @@ export function crossChatQueueRefreshSessionId(event: Event): string | null {
     ? event.session_id : null
 }
 
+/** A server-confirmed user message delivered within the current native goal run. */
+export function isNativeGoalSteerEvent(event: Event): boolean {
+  return event.type === 'turn_steered'
+    && event.native_goal_steer === true
+    && event.native_steer === true
+    && event.backend === 'codex'
+    && event.purpose === 'codex_goal_resume'
+    && event.provider_user_authored === true
+    && Boolean(event.run_id?.trim())
+}
+
+/** Positions cannot prove removal: a membership gap requests a full public queue read. */
+export function queueSnapshotRequiresRefresh(event: Event, current: readonly QueuedTurn[]): boolean {
+  if (event.type !== 'queue_snapshot' || !Array.isArray(event.positions)) return false
+  const ids = new Set<string>()
+  for (const item of event.positions) {
+    if (!item || typeof item.queued_id !== 'string' || !item.queued_id.trim()
+      || item.queued_id !== item.queued_id.trim() || ids.has(item.queued_id)
+      || !Number.isSafeInteger(item.position) || item.position < 0) return true
+    ids.add(item.queued_id)
+  }
+  return ids.size !== current.length || current.some(turn => !ids.has(turn.queued_id))
+}
+
 export function queuedTurnHasEarlierDeliveryBarrier(turns: readonly QueuedTurn[], queuedId: string): boolean {
   const ordered = orderedQueuedTurns(turns)
   const index = ordered.findIndex(turn => turn.queued_id === queuedId)
@@ -107,8 +131,11 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
     }
     return [...current.filter(value => value.queued_id !== turn.queued_id), turn].sort(queueSort)
   }
-  if ((event.type === 'turn_unqueued' || event.type === 'turn_started' || event.type === 'turn_queue_run_now') && event.queued_id) {
-    return current.filter(value => value.queued_id !== event.queued_id)
+  if ((event.type === 'turn_unqueued' || event.type === 'turn_started' || isNativeGoalSteerEvent(event)) && event.queued_id) {
+    return removeQueuedIds(current, new Set([event.queued_id]))
+  }
+  if (event.type === 'turn_queue_run_now' && event.queued_id) {
+    return removeQueuedIds(current, new Set([event.queued_id, ...(event.superseded_queued_ids ?? [])]))
   }
   if (event.type === 'turn_queue_updated' && event.queued_id) {
     return current.map(value => value.queued_id === event.queued_id ? {
@@ -130,8 +157,11 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       pause_reason: event.pause_reason ?? value.pause_reason,
     } : value)
   }
-  if (event.positions?.length) {
-    const positions = new Map(event.positions.map(value => [value.queued_id, value.position]))
+  if (Array.isArray(event.positions) && event.positions.length) {
+    const positions = new Map(event.positions
+      .filter(value => value && typeof value.queued_id === 'string'
+        && Number.isSafeInteger(value.position) && value.position >= 0)
+      .map(value => [value.queued_id, value.position]))
     return current.map(value => ({ ...value, position: positions.get(value.queued_id) ?? value.position })).sort(queueSort)
   }
   return current
@@ -146,6 +176,12 @@ export function resolveNewQueuedTurn(prompt: string, previousIds: ReadonlySet<st
 
 function queueSort(left: QueuedTurn, right: QueuedTurn): number {
   return (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER)
+}
+
+function removeQueuedIds(current: QueuedTurn[], ids: ReadonlySet<string>): QueuedTurn[] {
+  return current.some(turn => ids.has(turn.queued_id))
+    ? current.filter(turn => !ids.has(turn.queued_id))
+    : current
 }
 
 function orderedQueuedTurns(turns: readonly QueuedTurn[]): QueuedTurn[] {

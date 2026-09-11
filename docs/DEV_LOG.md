@@ -1,5 +1,24 @@
 # Public development log
 
+## Mobile queue reconciliation — 0.1.1 (172)
+
+- Remove delivered native-goal messages and explicitly superseded queue IDs
+  without matching by message text or hiding unrelated queued work.
+- Fence delayed timeline and queue reads against newer delivery observations,
+  concurrent reads, reconnects, and server-instance changes. Empty or partial
+  queue membership signals now request an authoritative queue refresh.
+- Keep older stream packets from restoring a stale queued row; confirm covered
+  queue signals by a fresh read without treating timeline sequence numbers as
+  an atomic queue version. Refresh retries are bounded.
+- Do not recreate a "still queued" warning from a late deferred response after
+  the message has left the queue. Exact admission clears an uncertainty warning;
+  cancellation or unrelated messages do not claim delivery confirmation.
+- Preserve the desktop async cross-chat lifecycle when legacy compatibility
+  receipts appear later, avoiding duplicate pending cards and status regressions.
+- Add pure observation-clock tests, real-store delivery/reconnect races, and
+  rendered queue/card regressions to source verification. Native-host mocks do
+  not substitute for physical-device interaction or pixel testing.
+
 ## Source verification
 
 - Mobile CI now runs the cross-chat protocol, projection, route/queue race,

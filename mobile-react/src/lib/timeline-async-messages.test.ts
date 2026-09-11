@@ -96,4 +96,48 @@ assert.equal(cancelledAfterStart[0].kind === 'system' && cancelledAfterStart[0].
 
 const replacement = active.map(value => value.seq === 1 ? { ...value, handoff_preview: 'Updated retained preview' } : value)
 assert.notEqual(reuseStableTimelineRows(rows, projectTimeline(replacement, []))[0], rows[0], 'an earlier lifecycle replacement must refresh the current card')
+
+// Mixed compatibility histories may append a legacy queue receipt after the
+// exact async lifecycle. That receipt must neither duplicate a pending message
+// nor downgrade an admitted message to the legacy queued card.
+const legacyQueued = (seq: number, patch: Partial<Event> = {}) => message(seq, 'queued', {
+  type: 'cross_chat_handoff_queued', conversation_mode: undefined,
+  handoff_preview: 'Stale compatibility preview', ...patch,
+})
+assert.deepEqual(projectTimeline([...pending, legacyQueued(3)], []), [], 'late legacy receipts cannot expose incoming messages that are still pending')
+for (const session_id of ['recipient', 'sender']) {
+  const lifecycle = [
+    message(1, 'received', { session_id }), message(2, 'queued', { session_id }),
+    message(3, 'started', { session_id, handoff_status: 'running' }), message(4, 'delivered', { session_id }),
+  ]
+  const mixedRows = projectTimeline([...lifecycle, legacyQueued(5, { session_id })], [])
+  assert.equal(mixedRows.length, 1)
+  assert.equal(mixedRows[0].kind, 'system')
+  if (mixedRows[0].kind !== 'system') throw new Error('Missing mixed async message')
+  assert.equal(mixedRows[0].crossChatMessage, true, 'any exact async lifecycle keeps the grouped message on the async renderer')
+  assert.equal(mixedRows[0].event, lifecycle[3], 'only the latest exact async event owns display status and body provenance')
+  assert.deepEqual(mixedRows[0].events, lifecycle, 'legacy compatibility packets cannot enter the async body lifecycle')
+  assert.equal(mixedRows[0].seq, session_id === 'recipient' ? 3 : 1)
+  assert.equal(timelineTargetIsRepresented(mixedRows, { eventId: 'message-event-5', seq: 5 }), true)
+  const previous = projectTimeline(lifecycle.slice(0, 3), [])
+  assert.notEqual(reuseStableTimelineRows(previous, mixedRows)[0], previous[0], 'recycled started cards must receive the delivered event')
+  const hydrated = historicalTimelineEvents([...lifecycle, legacyQueued(5, { session_id })].map(sanitizeTimelineEvent))
+  assert.deepEqual(projectTimeline(hydrated, []), projectTimeline([...lifecycle, legacyQueued(5, { session_id })].map(sanitizeTimelineEvent), []))
+}
+for (const invalid of [
+  message(1, 'delivered', { conversation_mode: undefined }),
+  message(1, 'delivered', { conversation_mode: 'async_route_v1 ' as Event['conversation_mode'] }),
+  message(1, 'delivered', { type: 'chat_conversation_message_delivered_extra' }),
+  message(1, 'delivered', { type: 'cross_chat_handoff_delivered' }),
+]) {
+  const invalidRows = projectTimeline([invalid, legacyQueued(2)], [])
+  assert.equal(invalidRows.some(value => value.kind === 'system' && value.crossChatMessage), false, 'inexact protocol markers cannot recover async identity from a legacy receipt')
+}
+const separateIdentityRows = projectTimeline([
+  message(1, 'started'), message(2, 'delivered'),
+  legacyQueued(3, { handoff_id: 'different-message', correlation_id: 'message-a', handoff_preview: message(2, 'delivered').handoff_preview }),
+], [])
+assert.equal(separateIdentityRows.length, 2, 'matching conversation, alternate IDs, and prompt text cannot merge different exact message identities')
+assert.equal(separateIdentityRows[0].kind === 'system' && separateIdentityRows[0].crossChatMessage, true)
+assert.equal(separateIdentityRows[1].kind === 'system' && separateIdentityRows[1].crossChatMessage, undefined)
 console.log('async cross-chat timeline regressions passed')

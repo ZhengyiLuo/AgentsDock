@@ -70,7 +70,10 @@ jobs:
         run: |
           node scripts/run-history-tests.mjs src/lib/cross-chat-protocol.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/lib/timeline-async-messages.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/queue.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/queue-reconciliation.test.ts --native-mocks
           node scripts/run-history-tests.mjs src/store/useAppStore.cross-chat-routes.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/store/useAppStore.queue-reconciliation.test.ts --native-mocks
         working-directory: mobile-react
       - name: Verify cross-chat rendering and control interactions
         run: >-
