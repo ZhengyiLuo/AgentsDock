@@ -58,19 +58,15 @@
 
 <br />
 
-<!--
-Add the approved, privacy-reviewed product screenshot here when it is ready:
-
 <p align="center">
   <a href="https://agentsdock.net">
     <img
       src="docs/assets/agentsdock-overview.png"
-      alt="AgentsDock workspace on desktop and mobile"
+      alt="AgentsDock desktop and mobile apps showing agent chats and file previews"
       width="100%"
     />
   </a>
 </p>
--->
 
 ## What you can do
 
