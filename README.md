@@ -1,27 +1,6 @@
 <h1 align="center">AgentsDock</h1>
 
-<div align="center">
-  <strong>A dock for all your agents.</strong>
-  <br />
-  <br />
-  AgentsDock is a desktop and mobile workspace for Claude Code and Codex. Use
-  your agents for coding, research, and long-running work without living in a
-  terminal.
-  <br />
-  <br />
-  Run agents on your own workstation or server, follow their progress, review
-  files and rich media, and continue the conversation from your computer,
-  iPhone, or iPad.
-  <br />
-  <br />
-  <strong>
-    AgentsDock is the client;
-    <a href="https://github.com/ZhengyiLuo/AgentsServer">AgentsServer</a>
-    is the self-hosted backend.
-  </strong>
-</div>
-
-<br />
+<p align="center"><strong>A dock for all your agents.</strong></p>
 
 <div align="center">
   <a href="https://agentsdock.net">
@@ -56,17 +35,33 @@
   </a>
 </div>
 
-<br />
-
 <p align="center">
   <a href="https://agentsdock.net">
     <img
       src="docs/assets/agentsdock-overview.png"
       alt="AgentsDock desktop and mobile apps showing agent chats and file previews"
-      width="100%"
+      width="760"
     />
   </a>
 </p>
+
+<div align="center">
+  AgentsDock is a desktop and mobile workspace for Claude Code and Codex. Use
+  your agents for coding, research, and long-running work without living in a
+  terminal.
+  <br />
+  <br />
+  Run agents on your own workstation or server, follow their progress, review
+  files and rich media, and continue the conversation from your computer,
+  iPhone, or iPad.
+  <br />
+  <br />
+  <strong>
+    AgentsDock is the client;
+    <a href="https://github.com/ZhengyiLuo/AgentsServer">AgentsServer</a>
+    is the self-hosted backend.
+  </strong>
+</div>
 
 ## What you can do
 
