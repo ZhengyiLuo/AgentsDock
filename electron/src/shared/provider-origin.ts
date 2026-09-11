@@ -124,7 +124,7 @@ export function isImportedCodexRuntimeNotification(event: Event): boolean {
   const kind = event.provider_runtime_context
   return isImportedHistoryRecord(event)
     && event.type === 'turn_started' && event.backend === 'codex'
-    && (kind === 'subagent_notification' || kind === 'turn_aborted')
+    && (kind === 'subagent_notification' || kind === 'turn_aborted' || kind === 'provider_notice')
     && event.metadata_only === true && event.prompt === ''
     && origin?.provider === 'codex' && origin.kind === kind
     && ['event_id', 'session_id', 'turn_id'].every(key => {

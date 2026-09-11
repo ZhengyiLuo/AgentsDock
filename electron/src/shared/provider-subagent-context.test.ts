@@ -8,7 +8,8 @@ import { updateQueuedTurns } from './queue'
 
 describe.each([
   ['subagent_notification', '<subagent_notification>{"agent_path":"synthetic-worker","status":{"completed":"Synthetic result"}}</subagent_notification>'],
-  ['turn_aborted', '<turn_aborted>The previous turn was interrupted. A synthetic task may still be running.</turn_aborted>']
+  ['turn_aborted', '<turn_aborted>The previous turn was interrupted. A synthetic task may still be running.</turn_aborted>'],
+  ['provider_notice', 'Synthetic provider compaction summary, not a human message.']
 ] as const)('source-proven Codex %s runtime context', (kind, prompt) => {
   const corrected = (): Event & { provider_origin: ProviderHistoryOrigin } => ({
     id: 'notification', session_id: 'chat', seq: 8, type: 'turn_started', ts: '2026-09-11T10:00:00Z',

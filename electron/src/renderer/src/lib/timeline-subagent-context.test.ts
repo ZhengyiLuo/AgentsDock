@@ -8,7 +8,8 @@ import { mergeEvents, snapshotNeedsAuthoritativeTail, updateActiveSessions } fro
 
 describe.each([
   ['subagent_notification', '<subagent_notification>{"agent_path":"synthetic-worker","status":{"completed":"Synthetic result"}}</subagent_notification>'],
-  ['turn_aborted', '<turn_aborted>The previous turn was interrupted. A synthetic task may still be running.</turn_aborted>']
+  ['turn_aborted', '<turn_aborted>The previous turn was interrupted. A synthetic task may still be running.</turn_aborted>'],
+  ['provider_notice', 'Synthetic provider compaction summary, not a human message.']
 ] as const)('%s runtime context projection', (kind, prompt) => {
   const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
     id: `event-${seq}`, session_id: 'chat', seq, type, ts: '2026-09-11T10:00:00Z', backend: 'codex', ...patch

@@ -62,7 +62,7 @@ describe('prepared statement reuse', () => {
 })
 
 describe('source-proven import repair persistence', () => {
-  it.each(['subagent_notification', 'turn_aborted'] as const)('keeps a complete Codex %s repair across stale long input and preserves a genuine quotation', kind => {
+  it.each(['subagent_notification', 'turn_aborted', 'provider_notice'] as const)('keeps a complete Codex %s repair across stale long input and preserves a genuine quotation', kind => {
     const value = cache()
     value.putSession('server', session('chat'))
     const prompt = `<${kind}>${JSON.stringify({ agent_path: 'synthetic-worker',

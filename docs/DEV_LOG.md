@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-09-11 — Typed provider notice coverage
+
+- Extend the same source-proven runtime metadata contract to known provider
+  compaction summaries and infrastructure notices. A provider user-role record
+  is not automatically a message authored by a person.
+- Keep real user text, quotations, assistant output and live activity intact;
+  preserve exact repairs through stale event replay and disk-cache reloads.
+  No background refresh or polling is added. Historical repair requires the
+  matching standalone server update.
+
 ## 2026-09-11 — Codex interruption notice provenance
 
 - Apply the source-proven runtime notification contract to typed interruption
