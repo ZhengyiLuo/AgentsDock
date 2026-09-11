@@ -27,5 +27,15 @@
   screenshots and recordings are not included.
 - This source snapshot does not itself publish or change any installed release.
 
+## Electron workflow controls
+
+- Added native provider skills and commands to the composer slash palette.
+- Refined scheduled-job status, direct actions, working-directory navigation,
+  and compact unavailable-agent guidance.
+- Added a grouped keyboard-shortcuts page to Settings with localized labels.
+- Documented privacy-preserving usage events for these workflows.
+- Validated the affected Electron behavior with focused tests, type checking,
+  a production build, and a local desktop UI pass.
+
 Future entries should describe public-facing changes and validation without
 including credentials, user data, private infrastructure, or internal history.

@@ -617,6 +617,32 @@ describe('server-wide Codex goals compatibility', () => {
   })
 })
 
+describe('provider command compatibility', () => {
+  it.each([404, 405, 501])('treats an older server HTTP %s as unsupported', async status => {
+    const client = {
+      providerCommands: vi.fn().mockRejectedValue(new ServerError(status, 'Not supported'))
+    }
+    const scope = { profileId: 'profile', generation: 1, namespace: 'profile:profile', client }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, {
+      scope,
+      activeProfileId: scope.profileId,
+      profileGeneration: scope.generation,
+      sessions: [{ id: 'chat', title: 'Chat', backend: 'claude' }],
+      ensureValidatedScope: vi.fn().mockResolvedValue(undefined),
+      assertCurrentScope: vi.fn()
+    })
+
+    await expect(service.providerCommands('chat', true)).resolves.toEqual({
+      backend: 'claude',
+      revision: 'unsupported',
+      support: { available: false, mode: 'unsupported' },
+      commands: []
+    })
+    expect(client.providerCommands).toHaveBeenCalledWith('chat', true)
+  })
+})
+
 describe('secure peer control fencing', () => {
   function completionHarness() {
     const expected = { profileId: 'profile-a', profileGeneration: 7, serverIdentity: 'server-a' }

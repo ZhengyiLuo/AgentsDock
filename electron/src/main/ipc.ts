@@ -232,6 +232,7 @@ export function registerIpc(
   handle('sessions:bulk-import', items => service.bulkImportSessions(
     parseBulkImportSessionItems(items, LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT)
   ))
+  handle('provider-commands:list', (sessionId, refresh) => service.providerCommands(sessionId, Boolean(refresh)))
 
   handle('timeline:cached', sessionId => service.cachedTimeline(sessionId))
   handle('timeline:open', (sessionId, forceRemote) => service.openTimeline(sessionId, forceRemote))

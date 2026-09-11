@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   AgentCrossChatRoutesSnapshot, AgentFile, Backend, BootstrapPayload, ChatReference, ChatSyncStatus, CreateSessionInput, Event, ForwardedPort, Health, Job, NativeFileRef, QueuedTurn, TeamReference,
-  ProfileBootstrapPayload, ProfileConnectionEvent, ProfileNotificationRoute, PublicServerProfile, RuntimeCatalog, Session, SessionSnapshot,
+  ProfileBootstrapPayload, ProfileConnectionEvent, ProfileNotificationRoute, ProviderCommandSelection, PublicServerProfile, RuntimeCatalog, Session, SessionSnapshot,
   ServerForceRestartConfirmation, TimelinePage, UpdateServerProfilePatch, WorkspaceProfileScope
 } from '@shared/types'
 import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
@@ -75,6 +75,7 @@ interface SendPromptOptions {
   admissionToken?: string
   chatReferences?: ChatReference[]
   teamReferences?: TeamReference[]
+  skillSelection?: ProviderCommandSelection
   confirmSteer?: () => boolean
 }
 
@@ -1617,7 +1618,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         effort: session?.effort,
         clientCapabilities: interactiveClientCapabilities(session, get().health),
         chatReferences,
-        teamReferences
+        teamReferences,
+        ...(options?.skillSelection ? { skillSelection: options.skillSelection } : {})
       })
       if (!profileScopeMatches(scope, get())) return false
       if (response.event && eventAffectsQueuedTurns(response.event)) {
@@ -1908,6 +1910,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => ({ sessions: state.sessions.map(session => session.id === sessionId
         ? pending && pending.version !== version ? { ...updated, ...pending.patch } : updated
         : session) }))
+      if (previousSession && patch.folder !== undefined) {
+        const previousFolder = previousSession.folder?.trim() || 'General'
+        const updatedFolder = updated.folder?.trim() || 'General'
+        if (previousFolder !== updatedFolder) trackEvent('chat_moved_to_folder')
+      }
+      if (previousSession && patch.cwd !== undefined) {
+        const previousCwd = previousSession.cwd?.trim() || ''
+        const updatedCwd = updated.cwd?.trim() || ''
+        if (previousCwd !== updatedCwd) trackEvent('working_directory_changed')
+      }
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return
       const pending = pendingSessionPatches.get(sessionId)
@@ -1952,6 +1964,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           collapsedFolders
         }
       })
+      trackEvent('folder_deleted')
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return
       await get().refreshSessions()

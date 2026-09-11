@@ -1227,6 +1227,7 @@ describe('Composer', () => {
     useAppStore.setState({
       health: {
         ok: true,
+        api_contract_version: 15,
         capabilities: {
           cursor_backend: {
             available: true,
@@ -1283,12 +1284,23 @@ describe('Composer', () => {
       runtimeCatalog: null
     })
     const user = userEvent.setup()
-    render(<Composer />)
+    const { unmount } = render(<Composer />)
 
     await user.click(screen.getByTitle('Change backend'))
 
-    expect(screen.getByRole('menuitemcheckbox', { name: /Cursor.*Unavailable/ })).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByText(/model choices are still loading/i)).toBeInTheDocument()
+    const unavailableItem = screen.getByRole('menuitem', { name: /Cursor.*Unavailable/ })
+    expect(unavailableItem).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByText(/model choices are still loading/i)).not.toBeInTheDocument()
+    await user.hover(unavailableItem)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/model choices are still loading/i)
+
+    unmount()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    const unavailableByKeyboard = screen.getByRole('menuitem', { name: /Cursor.*Unavailable/ })
+    await user.keyboard('{End}')
+    expect(unavailableByKeyboard).toHaveFocus()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/model choices are still loading/i)
   })
 
   it('never exposes a Cursor reasoning control from stale stored effort', async () => {
@@ -4024,6 +4036,351 @@ describe('Composer', () => {
       useAppStore.setState({ health: { ...useAppStore.getState().health!, api_contract_version: 14 } })
     })
     await waitFor(() => expect(screen.queryByRole('option', { name: /^Import Chat/ })).not.toBeInTheDocument())
+  })
+
+  it('lazily lists Codex skills, collapses exact duplicates, distinguishes variants, and sends the selected opaque binding', async () => {
+    const list = vi.fn().mockResolvedValue({
+      backend: 'codex',
+      revision: 'skills-rev-4',
+      support: { available: true, mode: 'native' },
+      commands: [
+        {
+          id: 'opaque-project', name: 'review-code', label: 'Review code',
+          description: 'Review this change', scope: 'project', source: '.agents',
+          kind: 'skill', invocation: '/review-code'
+        },
+        {
+          id: 'opaque-project-mirror', name: 'review-code', label: 'Review code',
+          description: 'Review this change', scope: 'project', source: '.agents',
+          kind: 'skill', invocation: '/review-code'
+        },
+        {
+          id: 'opaque-user', name: 'review-code', label: 'Review code',
+          description: 'Review using personal guidance', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/review-code'
+        },
+        {
+          id: 'opaque-collision', name: 'model', label: 'Provider model command',
+          description: 'Must not replace AgentsDock model', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/model'
+        },
+        {
+          id: 'opaque-path', name: 'unsafe', label: 'Unsafe', description: 'Invalid invocation',
+          scope: 'user', source: 'Codex', kind: 'skill', invocation: '/Users/me/unsafe'
+        },
+        {
+          id: 'opaque-safe', name: 'safe', label: 'No path leak', description: 'Valid command',
+          scope: 'project', source: '/Users/me/.codex/skills/safe', kind: 'skill', invocation: '/safe'
+        }
+      ]
+    })
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }, turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      health: {
+        ok: true,
+        api_contract_version: 15,
+        capabilities: {
+          local_session_import_v1: {
+            available: true, required: false, message: '', action: null,
+            version: 1, max_batch_items: 25, max_list_items: 500
+          }
+        }
+      }
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(list).not.toHaveBeenCalled()
+
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '  /')
+    const skills = await screen.findAllByRole('option', { name: /^Review code/ })
+
+    expect(list).toHaveBeenCalledOnce()
+    expect(screen.getByRole('group', { name: 'Skills' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^Import Chat/ }).closest('[role="group"]')).toHaveAttribute('aria-label', 'AgentsDock')
+    expect(skills).toHaveLength(2)
+    expect(skills[0]).toHaveTextContent('project · .agents')
+    expect(skills[1]).toHaveTextContent('user · Codex')
+    expect(screen.queryByRole('option', { name: /^Provider model command/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /^Unsafe/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^No path leak/ })).not.toHaveTextContent('/Users/me')
+
+    await user.click(skills[0])
+    expect(editor).toHaveFocus()
+    expect(editor).toHaveValue('/review-code ')
+    await user.type(editor, 'focus on concurrency')
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '/review-code focus on concurrency',
+      skillSelection: { id: 'opaque-project', revision: 'skills-rev-4' }
+    })))
+  })
+
+  it('clears a selected provider-command binding when its leading token is edited or displaced', async () => {
+    const list = vi.fn().mockResolvedValue({
+      backend: 'claude', revision: 'commands-rev-1',
+      support: { available: true, mode: 'sdk' },
+      commands: [{
+        id: 'opaque-claude', name: 'plugin:review_code.v2', label: 'Review code',
+        description: 'Claude command', scope: 'plugin', source: 'reviewer',
+        kind: 'command', invocation: '/plugin:review_code.v2'
+      }]
+    })
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'claude' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }, turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '/plugin:review')
+    expect(await screen.findByRole('group', { name: 'Claude commands' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /^Review code/ }))
+    fireEvent.change(editor, {
+      target: { value: '/plugin:review_code.v3 explain', selectionStart: 35, selectionEnd: 35 }
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send.mock.calls[0]?.[0]).not.toHaveProperty('skillSelection')
+
+    send.mockClear()
+    await user.type(editor, '/plugin:review')
+    await user.click(screen.getByRole('option', { name: /^Review code/ }))
+    fireEvent.change(editor, {
+      target: { value: '\ufeff/plugin:review_code.v2 explain', selectionStart: 31, selectionEnd: 31 }
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(send.mock.calls[0]?.[0]).not.toHaveProperty('skillSelection')
+
+    for (const invalidBoundary of ['\v', '\f']) {
+      send.mockClear()
+      await user.clear(editor)
+      await user.type(editor, '/plugin:review')
+      await user.click(screen.getByRole('option', { name: /^Review code/ }))
+      const prompt = `/plugin:review_code.v2${invalidBoundary}explain`
+      fireEvent.change(editor, {
+        target: { value: prompt, selectionStart: prompt.length, selectionEnd: prompt.length }
+      })
+      fireEvent.keyDown(editor, { key: 'Enter' })
+
+      await waitFor(() => expect(send).toHaveBeenCalledOnce())
+      expect(send.mock.calls[0]?.[0]).not.toHaveProperty('skillSelection')
+    }
+  })
+
+  it('refreshes stale provider commands after a selected send fails without rebinding the restored draft', async () => {
+    const list = vi.fn()
+      .mockResolvedValueOnce({
+        backend: 'codex', revision: 'stale-rev',
+        support: { available: true, mode: 'native' },
+        commands: [{
+          id: 'opaque-stale', name: 'review-code', label: 'Review code',
+          description: 'Stale command', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/review-code'
+        }]
+      })
+      .mockResolvedValueOnce({
+        backend: 'codex', revision: 'fresh-rev',
+        support: { available: true, mode: 'native' },
+        commands: [{
+          id: 'opaque-fresh', name: 'review-code', label: 'Review code',
+          description: 'Fresh command', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/review-code'
+        }]
+      })
+    const send = vi.fn()
+      .mockRejectedValueOnce(new Error(
+        "Error invoking remote method 'turns:send': Error: the provider command list changed; choose the command again"
+      ))
+      .mockResolvedValueOnce({ session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }, turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', cwd: '/test/provider-stale' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, '/review')
+    await user.click(await screen.findByRole('option', { name: /^Review code/ }))
+    await user.type(editor, 'focus on races')
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(editor).toHaveValue('/review-code focus on races'))
+    await waitFor(() => expect(list).toHaveBeenNthCalledWith(2, 'chat-1', true))
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(send.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      skillSelection: { id: 'opaque-stale', revision: 'stale-rev' }
+    }))
+    expect(send.mock.calls[1]?.[0]).not.toHaveProperty('skillSelection')
+  })
+
+  it('keeps static commands usable when discovery fails and retries with an explicit refresh', async () => {
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error('endpoint temporarily unavailable'))
+      .mockResolvedValueOnce({
+        backend: 'codex', revision: 'retry-rev',
+        support: { available: true, mode: 'native' },
+        commands: [{
+          id: 'opaque-retry', name: 'after-retry', label: 'After retry',
+          description: 'Loaded after refreshing', scope: 'user', source: 'Codex',
+          kind: 'skill', invocation: '/after-retry'
+        }]
+      })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', cwd: '/test/provider-retry' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.type(screen.getByPlaceholderText('Message'), '/')
+    expect(screen.getByRole('option', { name: /Attach files/ })).toBeInTheDocument()
+    expect(await screen.findByText('Couldn’t load provider commands.')).toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('Message'), 'after')
+    expect(screen.getByText('Couldn’t load provider commands.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByRole('option', { name: /^After retry/ })).toBeInTheDocument()
+    expect(list).toHaveBeenNthCalledWith(1, 'chat-1', false)
+    expect(list).toHaveBeenNthCalledWith(2, 'chat-1', true)
+  })
+
+  it('refreshes an expired provider-command cache when the slash palette is reopened', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000)
+    const list = vi.fn().mockResolvedValue({
+      backend: 'codex', revision: 'ttl-rev',
+      support: { available: true, mode: 'native' },
+      commands: [{
+        id: 'opaque-ttl', name: 'ttl-skill', label: 'TTL skill',
+        description: 'Reloaded after expiry', scope: 'user', source: 'Codex',
+        kind: 'skill', invocation: '/ttl-skill'
+      }]
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', cwd: '/test/provider-ttl' }]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, '/')
+    expect(await screen.findByRole('option', { name: /^TTL skill/ })).toBeInTheDocument()
+    expect(list).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(editor, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+    await user.clear(editor)
+    now.mockReturnValue(40_001)
+    await user.type(editor, '/')
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+    expect(list).toHaveBeenLastCalledWith('chat-1', true)
+    now.mockRestore()
+  })
+
+  it('discards provider commands returned after the active chat changes', async () => {
+    const first = deferred<{
+      backend: 'codex'; revision: string
+      support: { available: true; mode: string }
+      commands: Array<{ id: string; name: string; label: string; description: string; kind: string; invocation: string }>
+    }>()
+    const list = vi.fn((sessionId: string) => sessionId === 'chat-1'
+      ? first.promise
+      : Promise.resolve({
+          backend: 'codex' as const, revision: 'second-rev',
+          support: { available: true as const, mode: 'native' },
+          commands: [{
+            id: 'opaque-second', name: 'second-chat', label: 'Second chat command',
+            description: 'Current inventory', kind: 'skill', invocation: '/second-chat'
+          }]
+        }))
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: { get: vi.fn().mockResolvedValue(''), set: vi.fn().mockResolvedValue(undefined) },
+        providerCommands: { list }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      connected: true,
+      sessions: [
+        { id: 'chat-1', title: 'First', backend: 'codex', cwd: '/test/first' },
+        { id: 'chat-2', title: 'Second', backend: 'codex', cwd: '/test/second' }
+      ]
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    await user.type(editor, '/')
+    expect(list).toHaveBeenCalledWith('chat-1', false)
+
+    act(() => useAppStore.setState({
+      selectedSessionId: 'chat-2',
+      chatPanes: { primary: 'chat-2', secondary: null },
+      focusedChatPane: 'primary'
+    }))
+    await waitFor(() => expect(editor).toHaveValue(''))
+    await user.type(editor, '/')
+    expect(await screen.findByRole('option', { name: /^Second chat command/ })).toBeInTheDocument()
+
+    await act(async () => first.resolve({
+      backend: 'codex', revision: 'first-rev', support: { available: true, mode: 'native' },
+      commands: [{
+        id: 'opaque-first', name: 'first-chat', label: 'First chat command',
+        description: 'Stale inventory', kind: 'skill', invocation: '/first-chat'
+      }]
+    }))
+    expect(screen.queryByRole('option', { name: /^First chat command/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^Second chat command/ })).toBeInTheDocument()
   })
 
   it('offers Claude plan controls only when the server and session make them actionable', async () => {
