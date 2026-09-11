@@ -119,13 +119,14 @@ export function isImportedCodexGoalContext(event: Event): boolean {
 }
 
 /** Only a source-proven runtime notification, never a matching user quotation. */
-export function isImportedCodexSubagentNotification(event: Event): boolean {
+export function isImportedCodexRuntimeNotification(event: Event): boolean {
   const origin = event.provider_origin
+  const kind = event.provider_runtime_context
   return isImportedHistoryRecord(event)
     && event.type === 'turn_started' && event.backend === 'codex'
-    && event.provider_runtime_context === 'subagent_notification'
+    && (kind === 'subagent_notification' || kind === 'turn_aborted')
     && event.metadata_only === true && event.prompt === ''
-    && origin?.provider === 'codex' && origin.kind === 'subagent_notification'
+    && origin?.provider === 'codex' && origin.kind === kind
     && ['event_id', 'session_id', 'turn_id'].every(key => {
       const value = (origin as unknown as Record<string, unknown>)[key]
       return typeof value === 'string' && value.trim().length > 0 && value.length <= 256
@@ -138,7 +139,7 @@ export function isImportedCodexSubagentNotification(event: Event): boolean {
 }
 
 export function isImportedCodexRuntimeContext(event: Event): boolean {
-  return isImportedCodexGoalContext(event) || isImportedCodexSubagentNotification(event)
+  return isImportedCodexGoalContext(event) || isImportedCodexRuntimeNotification(event)
 }
 
 function isExactGoalRuntimePrompt(prompt: string): boolean {
@@ -180,7 +181,7 @@ export function isImportedProviderControlMetadata(event: Event): boolean {
  */
 export function mergeProviderInterruptionEvent(current: Event, incoming: Event): Event {
   if (current.id !== incoming.id || current.session_id !== incoming.session_id) return incoming
-  if (isImportedCodexSubagentNotification(current)
+  if (isImportedCodexRuntimeNotification(current)
     && incoming.seq === current.seq && incoming.type === current.type
     && incoming.run_id === current.run_id && incoming.ts === current.ts
     && incoming.imported === true && incoming.backend === 'codex'

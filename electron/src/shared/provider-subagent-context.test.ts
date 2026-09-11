@@ -2,25 +2,27 @@ import { describe, expect, it } from 'vitest'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import type { Event, ProviderHistoryOrigin, QueuedTurn } from './types'
-import { isImportedCodexSubagentNotification, isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from './provider-origin'
+import { isImportedCodexRuntimeNotification, isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from './provider-origin'
 import { incompleteLeadingRunId, timelineSemanticUnits } from './semantic-timeline'
 import { updateQueuedTurns } from './queue'
 
-const prompt = '<subagent_notification>{"agent_path":"synthetic-worker","status":{"completed":"Synthetic result"}}</subagent_notification>'
-const corrected = (): Event & { provider_origin: ProviderHistoryOrigin } => ({
-  id: 'notification', session_id: 'chat', seq: 8, type: 'turn_started', ts: '2026-09-11T10:00:00Z',
-  run_id: 'import_history', backend: 'codex', imported: true, prompt: '',
-  provider_runtime_context: 'subagent_notification', metadata_only: true,
-  provider_origin: { provider: 'codex', kind: 'subagent_notification', event_id: 'provider-item',
-    session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
-    source_text_sha256: bytesToHex(sha256(utf8ToBytes(prompt))) }
-})
-const stale = (): Event => ({ ...corrected(), prompt, provider_runtime_context: undefined,
-  metadata_only: undefined, provider_origin: undefined })
+describe.each([
+  ['subagent_notification', '<subagent_notification>{"agent_path":"synthetic-worker","status":{"completed":"Synthetic result"}}</subagent_notification>'],
+  ['turn_aborted', '<turn_aborted>The previous turn was interrupted. A synthetic task may still be running.</turn_aborted>']
+] as const)('source-proven Codex %s runtime context', (kind, prompt) => {
+  const corrected = (): Event & { provider_origin: ProviderHistoryOrigin } => ({
+    id: 'notification', session_id: 'chat', seq: 8, type: 'turn_started', ts: '2026-09-11T10:00:00Z',
+    run_id: 'import_history', backend: 'codex', imported: true, prompt: '',
+    provider_runtime_context: kind, metadata_only: true,
+    provider_origin: { provider: 'codex', kind, event_id: 'provider-item',
+      session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
+      source_text_sha256: bytesToHex(sha256(utf8ToBytes(prompt))) }
+  })
+  const stale = (): Event => ({ ...corrected(), prompt, provider_runtime_context: undefined,
+    metadata_only: undefined, provider_origin: undefined })
 
-describe('source-proven Codex subagent notifications', () => {
   it('requires complete runtime provenance and preserves raw wrappers and positive user evidence', () => {
-    expect(isImportedCodexSubagentNotification(corrected())).toBe(true)
+    expect(isImportedCodexRuntimeNotification(corrected())).toBe(true)
     expect(isImportedProviderControlMetadata(corrected())).toBe(true)
     const rejected: Partial<Event>[] = [
       { imported: false }, { backend: 'claude' }, { run_id: 'native-run' }, { type: 'assistant_text' },
@@ -30,13 +32,14 @@ describe('source-proven Codex subagent notifications', () => {
         provider_origin: { ...corrected().provider_origin!, [key]: '' }
       })),
       { provider_origin: { ...corrected().provider_origin!, kind: 'user' } },
+      { provider_origin: { ...corrected().provider_origin!, kind: kind === 'turn_aborted' ? 'subagent_notification' : 'turn_aborted' } },
       { provider_origin: { ...corrected().provider_origin!, timestamp: '2026-09-11' } }
     ]
-    for (const patch of rejected) expect(isImportedCodexSubagentNotification({ ...corrected(), ...patch })).toBe(false)
+    for (const patch of rejected) expect(isImportedCodexRuntimeNotification({ ...corrected(), ...patch })).toBe(false)
     for (const key of ['clientUserMessageId', 'clientId', 'client_user_message_id', 'client_id']) {
-      expect(isImportedCodexSubagentNotification({ ...corrected(), [key]: 'human-client' } as Event)).toBe(false)
+      expect(isImportedCodexRuntimeNotification({ ...corrected(), [key]: 'human-client' } as Event)).toBe(false)
     }
-    expect(isImportedCodexSubagentNotification(stale())).toBe(false)
+    expect(isImportedCodexRuntimeNotification(stale())).toBe(false)
   })
 
   it('retains only an exact same-record full-hash repair through a stale merge', () => {

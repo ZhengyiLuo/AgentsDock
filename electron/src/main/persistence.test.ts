@@ -62,15 +62,15 @@ describe('prepared statement reuse', () => {
 })
 
 describe('source-proven import repair persistence', () => {
-  it('keeps a complete Codex runtime repair across stale long input and preserves a genuine quotation', () => {
+  it.each(['subagent_notification', 'turn_aborted'] as const)('keeps a complete Codex %s repair across stale long input and preserves a genuine quotation', kind => {
     const value = cache()
     value.putSession('server', session('chat'))
-    const prompt = `<subagent_notification>${JSON.stringify({ agent_path: 'synthetic-worker',
-      status: { completed: 'Synthetic result '.repeat(1500) } })}</subagent_notification>`
+    const prompt = `<${kind}>${JSON.stringify({ agent_path: 'synthetic-worker',
+      status: { completed: 'Synthetic result '.repeat(1500) } })}</${kind}>`
     const legacy: Event = { ...event('chat', 0, ''), type: 'turn_started', backend: 'codex',
       run_id: 'import_history', imported: true, prompt }
-    const repaired: Event = { ...legacy, prompt: '', metadata_only: true, provider_runtime_context: 'subagent_notification',
-      provider_origin: { provider: 'codex', kind: 'subagent_notification', event_id: 'provider-item',
+    const repaired: Event = { ...legacy, prompt: '', metadata_only: true, provider_runtime_context: kind,
+      provider_origin: { provider: 'codex', kind, event_id: 'provider-item',
         session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
         source_text_sha256: createHash('sha256').update(prompt).digest('hex') } }
     const manual: Event = { ...legacy, id: 'human-quote', seq: 2, provider_user_authored: true }

@@ -6,19 +6,21 @@ import { isAgentVisibleEvent, isTimelineError, messageItemText, projectTimeline,
 import { cachedTimelineProjection, clearTimelineProjectionCache } from './timeline-projection-cache'
 import { mergeEvents, snapshotNeedsAuthoritativeTail, updateActiveSessions } from '../store/app-store'
 
-const prompt = '<subagent_notification>{"agent_path":"synthetic-worker","status":{"completed":"Synthetic result"}}</subagent_notification>'
-const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
-  id: `event-${seq}`, session_id: 'chat', seq, type, ts: '2026-09-11T10:00:00Z', backend: 'codex', ...patch
-})
-const notification = (): Event => event(3, 'turn_started', {
-  imported: true, run_id: 'import_history', prompt: '', metadata_only: true,
-  provider_runtime_context: 'subagent_notification',
-  provider_origin: { provider: 'codex', kind: 'subagent_notification', event_id: 'provider-item',
-    session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
-    source_text_sha256: bytesToHex(sha256(utf8ToBytes(prompt))) }
-})
+describe.each([
+  ['subagent_notification', '<subagent_notification>{"agent_path":"synthetic-worker","status":{"completed":"Synthetic result"}}</subagent_notification>'],
+  ['turn_aborted', '<turn_aborted>The previous turn was interrupted. A synthetic task may still be running.</turn_aborted>']
+] as const)('%s runtime context projection', (kind, prompt) => {
+  const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
+    id: `event-${seq}`, session_id: 'chat', seq, type, ts: '2026-09-11T10:00:00Z', backend: 'codex', ...patch
+  })
+  const notification = (): Event => event(3, 'turn_started', {
+    imported: true, run_id: 'import_history', prompt: '', metadata_only: true,
+    provider_runtime_context: kind,
+    provider_origin: { provider: 'codex', kind, event_id: 'provider-item',
+      session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
+      source_text_sha256: bytesToHex(sha256(utf8ToBytes(prompt))) }
+  })
 
-describe('subagent runtime context projection', () => {
   it('hides only the proven input without deleting its assistant continuation or changing native activity', () => {
     const record = notification()
     const records = [event(1, 'turn_started', { run_id: 'native', prompt: 'Actual task' }),
@@ -39,7 +41,7 @@ describe('subagent runtime context projection', () => {
     for (const patch of [
       { provider_runtime_context: undefined, metadata_only: undefined, provider_origin: undefined },
       { provider_user_authored: true }, { imported: false },
-      { prompt: `Explain this:\n${prompt}` }, { prompt: prompt.replace('</subagent_notification>', '') }
+      { prompt: `Explain this:\n${prompt}` }, { prompt: prompt.replace(`</${kind}>`, '') }
     ]) {
       const record = { ...notification(), prompt, ...patch } as Event
       expect(renderTimelineItems(projectTimeline([record], []))).toEqual([

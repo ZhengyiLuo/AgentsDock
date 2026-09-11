@@ -1,5 +1,14 @@
 # Public development log
 
+## 2026-09-11 — Codex interruption notice provenance
+
+- Apply the source-proven runtime notification contract to typed interruption
+  notices as well as subagent completions. Neither becomes a message from the
+  user, and an old imported notice does not stop current work.
+- Preserve genuine user quotations and retain exact corrections across stale
+  event responses and disk-cache reloads. Historical corrections require the
+  matching standalone server update; this is a local desktop change only.
+
 ## 2026-09-11 — Codex subagent notification provenance
 
 - Treat source-proven imported subagent completion notifications as runtime

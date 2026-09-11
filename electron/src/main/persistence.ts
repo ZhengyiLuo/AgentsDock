@@ -5,7 +5,7 @@ import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSna
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
 import { incompleteLeadingRunId } from '../shared/semantic-timeline'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
-import { isImportedCodexSubagentNotification, isImportedSourceProvenRepair, mergeProviderInterruptionEvent } from '../shared/provider-origin'
+import { isImportedCodexRuntimeNotification, isImportedSourceProvenRepair, mergeProviderInterruptionEvent } from '../shared/provider-origin'
 import { isSearchableEvent, searchEventRole, searchableEventText, searchFtsQuery, searchSnippet, searchTokens } from './search'
 import { reportStartupStorageError, reportStorageError } from './storage-health'
 
@@ -894,10 +894,10 @@ export class LocalCache {
             SELECT json FROM events
             WHERE server_id = ? AND session_id = ? AND event_id = ?
               AND (json_extract(json, '$.provider_history_repair') = 'source_proven_import'
-                OR json_extract(json, '$.provider_runtime_context') = 'subagent_notification')
+                OR json_extract(json, '$.provider_runtime_context') IN ('subagent_notification', 'turn_aborted'))
           `).get(serverId, sessionId, compacted.id) as { json: string } | undefined
           const previous = row ? parseJSON<Event | null>(row.json, null) : null
-          if (previous && (isImportedSourceProvenRepair(previous) || isImportedCodexSubagentNotification(previous))) {
+          if (previous && (isImportedSourceProvenRepair(previous) || isImportedCodexRuntimeNotification(previous))) {
             // Compare full incoming text before cache compaction; never infer
             // source equality from a shared truncated preview.
             if (mergeProviderInterruptionEvent(previous, isolated) === previous) compacted = previous
