@@ -17,6 +17,11 @@
   themes, narrow layout, and typing/scrolling in long cached conversations.
   This does not certify live provider execution, server history pagination,
   or minimap navigation. No server deployment or public release is included.
+- Accepted local desktop candidate: `0.2.13-beta.33` build `182`, arm64,
+  source `22a19ce1`. Developer ID signature and compiled archive contents
+  verified. Final desktop UI pass includes stop-after-send, late delivery
+  receipts, and reopening for both providers. This candidate is not notarized
+  or published, and its automatic updater is disabled.
 
 ## 2026-09-11 — Current desktop development
 
