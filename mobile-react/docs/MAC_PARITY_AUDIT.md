@@ -7,6 +7,13 @@ queued-agent-message controls, and chronological async-message activity. It also
 retains the delivered-queue reconciliation fixes in build 172 and the main
 repository's removal of custom analytics on iOS/iPadOS.
 
+Accepted release: **0.1.2 (173)**, active for internal TestFlight testing with
+automatic notifications enabled. Binary source `6687f01` passed both CI jobs;
+the signed archive and exported IPA passed metadata, signature, ABI, privacy,
+production-feature and matching-symbol verification. External beta review was
+not submitted. Apple required the version advance after closing the approved
+0.1.1 release train; application behavior was unchanged by that metadata update.
+
 | Surface | Change | Verification |
 | --- | --- | --- |
 | Goal panel | Collapsed by default; one-line objective and status; expanded actions and scrollable objective share a bounded body | Actual rendered goal and combined Composer tests; long objectives, errors, polling, profile changes, and Pause/Resume/Edit/Clear |

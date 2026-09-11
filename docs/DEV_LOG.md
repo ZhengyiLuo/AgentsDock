@@ -2,6 +2,16 @@
 
 ## Mobile compact panels and cross-chat catch-up — 0.1.2 (173)
 
+- Apple validation and processing completed successfully; build 173 is active
+  for internal TestFlight testing with automatic notifications enabled.
+  External beta review was not submitted. Binary source: `6687f01`.
+- Signed archive and exported IPA passed distribution-signature, framework ABI,
+  version, privacy, production-feature/fixture-exclusion and matching-symbol
+  checks. Both source CI jobs passed for the exact binary source commit.
+- Source verification passed 388 rendered/contract checks, all 81 library,
+  2 API and 12 store test modules, 20 goal-component and 9 server-goal-settings
+  checks, and rendered file-transfer interactions. Counts overlap between
+  focused and broad suites; these are not physical-device acceptance tests.
 - Advance the marketing version to 0.1.2 after Apple closed the approved 0.1.1
   release train. The initial 0.1.1 build-173 candidate was rejected during
   validation and was not uploaded; application behavior is unchanged.
