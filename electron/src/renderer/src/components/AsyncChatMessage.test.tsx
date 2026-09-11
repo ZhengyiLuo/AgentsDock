@@ -8,6 +8,7 @@ import { TimelineRowView } from './TimelineRows'
 import { setLocale } from '@shared/i18n'
 
 const profileScope: WorkspaceProfileScope = { profileId: 'profile-a', profileGeneration: 0, serverIdentity: null }
+const originalSelectSession = useAppStore.getState().selectSession
 const event = (patch: Partial<Event> = {}): Event => ({
   id: 'event-a', session_id: 'recipient', seq: 1, ts: '2026-09-10T10:00:00Z',
   type: 'chat_conversation_message_started', conversation_mode: 'async_route_v1',
@@ -45,7 +46,43 @@ describe('async agent message cards', () => {
     } as unknown as AgentsDockAPI })
   })
   afterEach(cleanup)
+  afterEach(() => useAppStore.setState({ selectSession: originalSelectSession }))
   afterEach(() => setLocale('en'))
+
+  it('opens the exact sender or recipient chat only when its heading is clicked', async () => {
+    const selectSession = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ selectSession })
+    useAppStore.setState({ sessions: [
+      { id: 'sender', title: 'Renamed agent', backend: 'codex' },
+      { id: 'recipient', title: 'Desktop agent', backend: 'codex' },
+      { id: 'same-title-different-chat', title: 'Research agent', backend: 'codex' }
+    ] })
+    const view = render(messageRow(event()))
+    fireEvent.click(screen.getByText('Review the keyboard behavior.'))
+    expect(selectSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Research agent' }))
+    expect(selectSession).toHaveBeenCalledExactlyOnceWith('sender')
+    view.rerender(messageRow(event({ session_id: 'sender', type: 'chat_conversation_message_registered' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Sent to Desktop agent' }))
+    expect(selectSession).toHaveBeenLastCalledWith('recipient')
+    expect(getHandoff).not.toHaveBeenCalled()
+    expect(getExchange).not.toHaveBeenCalled()
+  })
+
+  it('does not navigate stale server rows or guess a missing chat from its title', () => {
+    const selectSession = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ selectSession })
+    render(messageRow(event()))
+    useAppStore.setState({ sessions: [{ id: 'wrong-id', title: 'Research agent', backend: 'codex' }] })
+    fireEvent.click(screen.getByRole('button', { name: 'Research agent' }))
+    expect(selectSession).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe('That chat is no longer available.')
+    useAppStore.setState({ activeProfileId: 'another-profile', profileGeneration: 1,
+      sessions: [{ id: 'sender', title: 'Research agent', backend: 'codex' }], error: null })
+    fireEvent.click(screen.getByRole('button', { name: 'Research agent' }))
+    expect(selectSession).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBeNull()
+  })
 
   it('shows received text on the right with the saved sender and outgoing text on the left', () => {
     const incoming = render(messageRow(event()))

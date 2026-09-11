@@ -9,6 +9,8 @@ import { ChatInboxGroup } from './ChatInboxGroup'
 
 vi.mock('./MarkdownContent', () => ({ MarkdownContent: ({ text }: { text: string }) => <div>{text}</div> }))
 afterEach(cleanup)
+const originalSelectSession = useAppStore.getState().selectSession
+afterEach(() => useAppStore.setState({ selectSession: originalSelectSession }))
 const scope = { profileId: 'profile', profileGeneration: 1, serverIdentity: null }
 const events: Event[] = [1, 2].map(number => ({ id: `event-${number}`, seq: number, session_id: 'recipient',
   ts: '2026-09-11T12:00:00Z', type: 'chat_conversation_message_received', conversation_mode: 'async_route_v1',
@@ -27,6 +29,19 @@ beforeEach(() => {
 })
 
 describe('sender-grouped chat inbox', () => {
+  it('opens the sender chat without expanding, loading, or acknowledging its mail', () => {
+    const selectSession = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ selectSession })
+    useAppStore.setState({ sessions: [{ id: 'sender', title: 'Renamed Sender', backend: 'codex' }] })
+    render(<ChatInboxGroup item={group()} sessionId="recipient" profileScope={scope} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Actual Sender' }))
+    expect(selectSession).toHaveBeenCalledExactlyOnceWith('sender')
+    expect(screen.getByRole('button', { name: 'Actual Sender · 2 unread' })).toHaveAttribute('aria-expanded', 'false')
+    expect(list).not.toHaveBeenCalled()
+    expect(get).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+  })
+
   it('loads exact out-of-page message body on demand without acknowledging or starting a turn', async () => {
     get.mockResolvedValue({ id: 'message-1', message_id: 'message-1', source_session_id: 'sender', target_session_id: 'recipient',
       conversation_id: 'pair', conversation_mode: 'async_route_v1', delivery_mode: 'mailbox', inbox_state: 'unread',

@@ -10,6 +10,7 @@ import { useLocale } from '../lib/i18n'
 import { formatTime } from '../lib/format'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
+import { CrossChatPeerLink } from './CrossChatPeerLink'
 
 /** Human expansion is read-only. Only the provider's batch-read receipt changes unread state. */
 export function ChatInboxGroup({ item, sessionId, profileScope }: {
@@ -109,13 +110,16 @@ export function ChatInboxGroup({ item, sessionId, profileScope }: {
   const latest = visible.at(-1)!
   return <article className="cross-chat-message incoming chat-inbox-group" data-message-ids={visible.map(child => chatInboxMessageId(child.event)).join(' ')}>
     <div className="cross-chat-message-surface">
-      <button type="button" className="chat-inbox-heading" aria-expanded={open} aria-label={`${sender} · ${countLabel}`} onClick={() => {
+      <div className="chat-inbox-heading">
+        <Inbox size={14} aria-hidden="true" />
+        <CrossChatPeerLink peerId={item.event.source_session_id} sessionId={sessionId} profileScope={profileScope}>{sender}</CrossChatPeerLink>
+        <button type="button" className="chat-inbox-toggle" aria-expanded={open} aria-label={`${sender} · ${countLabel}`} onClick={() => {
         setOpen(!open)
         if (!open && !loadedOnce) void load()
       }}>
-        <Inbox size={14} aria-hidden="true" /><strong>{sender}</strong>
-        <span>· {countLabel}</span><ChevronRight size={14} aria-hidden="true" />
-      </button>
+          <span>· {countLabel}</span><ChevronRight size={14} aria-hidden="true" />
+        </button>
+      </div>
       {!open && <p className="chat-inbox-preview">{(latest.event.handoff_preview || latest.event.message_body || '').slice(0, 240)}</p>}
       {open && <div className="chat-inbox-messages">
         {visible.slice(0, visibleLimit).map(child => {

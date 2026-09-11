@@ -18,6 +18,7 @@ import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
 import { ChatInboxGroup } from './ChatInboxGroup'
+import { CrossChatPeerLink } from './CrossChatPeerLink'
 import { chatMailboxAvailable } from '@shared/chat-inbox'
 
 export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, profileScope, onFindFile, pinnedItemIds, codexLifecycleActive = false }: { item: RenderTimelineItem; sessionId: string; profileScope: WorkspaceProfileScope | null; onFindFile: (fileId: string) => void; pinnedItemIds: ReadonlySet<string>; codexLifecycleActive?: boolean }) {
@@ -819,7 +820,7 @@ function SystemView({ item, sessionId, profileScope, pinned, codexLifecycleActiv
       <p>{t(`timeline.providerInterruption.${event.provider_origin.cause}`)}</p>
     </div>
   </article>
-  if (item.importedDelivery) return <ImportedCrossChatDeliveryView item={item} sessionId={sessionId} />
+  if (item.importedDelivery) return <ImportedCrossChatDeliveryView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (item.mailboxMessages) return <ChatInboxGroup item={item} sessionId={sessionId} profileScope={profileScope} />
   if (item.crossChatMessage) return <CrossChatMessageView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (codexLifecycleSemanticKey(event)) return <CodexLifecycleView item={item} sessionId={sessionId} active={codexLifecycleActive} />
@@ -844,7 +845,7 @@ function SystemView({ item, sessionId, profileScope, pinned, codexLifecycleActiv
   return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{title}</strong><time>{formatTime(event.ts)}</time><button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinItem') : t('timeline.ui.pinItem')} onClick={() => runTimelineAction(toggleSystemPin(event, sessionId, profileScope, pinned, title, digestBody || text))}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header>{routeAudit ? <p>{text}</p> : <MarkdownContent text={text} sessionId={sessionId} compact />}{digestBody && <details className="digest-body"><summary>{t('timeline.ui.viewDigest')}</summary><MarkdownContent text={digestBody} sessionId={sessionId} /></details>}</div></article>
 }
 
-function ImportedCrossChatDeliveryView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function ImportedCrossChatDeliveryView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
   const delivery = item.importedDelivery!
   const [expanded, setExpanded] = useState(false)
@@ -862,7 +863,7 @@ function ImportedCrossChatDeliveryView({ item, sessionId }: { item: SystemItem; 
     <div className="cross-chat-message-surface">
       <header>
         <MessageSquareShare size={13} aria-hidden="true" />
-        <strong>{delivery.sender}</strong>
+        <CrossChatPeerLink peerId={item.event.source_session_id} sessionId={sessionId} profileScope={profileScope}>{delivery.sender}</CrossChatPeerLink>
         <time>{formatTime(item.event.ts)}</time>
       </header>
       {delivery.editedByUser && <small>{t('timeline.handoff.editedByYou')}</small>}
@@ -1345,7 +1346,9 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
     <div className="cross-chat-message-surface">
       <header>
         <MessageSquareShare size={13} aria-hidden="true" />
-        <strong>{incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}</strong>
+        <CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>
+          {incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}
+        </CrossChatPeerLink>
         <time>{formatTime(item.anchorTs || item.event.ts)}</time>
       </header>
       {editedByUser && <small>{t('timeline.handoff.editedByYou')}</small>}

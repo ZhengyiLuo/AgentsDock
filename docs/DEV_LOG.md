@@ -1,5 +1,14 @@
 # Public development log
 
+## 2026-09-11 — Cross-chat heading navigation
+
+- Make the sender or recipient name on purple cross-chat messages open the
+  exact referenced chat. Grouped inbox messages keep a separate unread-count
+  disclosure, so clicking the sender does not expand or consume mail.
+- Reuse normal chat navigation without additional requests, polling or route
+  grants. Guard the originating server scope; do not resolve duplicate display
+  names or turn imported label-only messages into guessed links.
+
 ## 2026-09-11 — Lazy history repair after server upgrades
 
 - On an observed server-version change, invalidate only that server's cached
