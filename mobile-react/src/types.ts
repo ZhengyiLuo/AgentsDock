@@ -932,6 +932,8 @@ export interface Event {
   turn_id?: string | null
   item_id?: string | null
   native_steer?: boolean | null
+  native_goal_steer?: boolean | null
+  provider_user_authored?: boolean | null
   superseded_by_run_id?: string | null
   steer_interrupted_run_id?: string | null
   stopped?: boolean | null

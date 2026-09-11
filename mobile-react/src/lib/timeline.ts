@@ -581,14 +581,16 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   // Pending incoming messages belong exclusively to the ordinary queue. Once
   // admitted, anchor them at execution start before ordering around user work.
   const displayItems = items.flatMap(item => {
-    if (!('kind' in item) || item.kind !== 'system' || !isAsyncCrossChatMessage(item.event)) return [item]
+    if (!('kind' in item) || item.kind !== 'system' || !(item.events ?? [item.event]).some(isAsyncCrossChatMessage)) return [item]
+    // A later legacy compatibility receipt must not replace the negotiated
+    // async lifecycle's status, identity, or body provenance (same as Mac).
     const lifecycle = (item.events ?? [item.event]).filter(isAsyncCrossChatMessage)
     const latest = lifecycle.at(-1)!
     const incoming = latest.target_session_id === latest.session_id && latest.source_session_id !== latest.session_id
     const arrived = incoming ? lifecycle.find(event => (
       event.type === 'chat_conversation_message_started' || event.type === 'chat_conversation_message_delivered'
     )) : lifecycle[0]
-    return arrived ? [{ ...item, seq: arrived.seq, anchorTs: arrived.ts, crossChatMessage: true }] : []
+    return arrived ? [{ ...item, seq: arrived.seq, anchorTs: arrived.ts, event: latest, events: lifecycle, crossChatMessage: true }] : []
   })
   for (const item of displayItems.sort((a, b) => a.seq - b.seq)) {
     if ('kind' in item) { rows.push(item); continue }

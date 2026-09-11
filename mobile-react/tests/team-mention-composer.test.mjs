@@ -46,7 +46,7 @@ const mocks = {
 const outfile = path.resolve('build/tmp', `team-composer-tests-${process.pid}.mjs`)
 await mkdir(path.dirname(outfile), { recursive: true })
 await build({
-  stdin: { contents: `export { Composer, ChatTargetPicker, QueueShelf } from './src/components/Composer'; export { TeamTargetPicker } from './src/components/TeamTargetPicker';`, resolveDir: process.cwd(), loader: 'ts' },
+  stdin: { contents: `export { Composer, ChatTargetPicker, QueueShelf } from './src/components/Composer'; export { TeamTargetPicker } from './src/components/TeamTargetPicker'; export { updateQueuedTurns } from './src/lib/queue'; export { projectTimeline } from './src/lib/timeline';`, resolveDir: process.cwd(), loader: 'ts' },
   outfile, bundle: true, format: 'esm', platform: 'node', packages: 'external', jsx: 'automatic', logLevel: 'silent', loader: { '.png': 'dataurl' },
   plugins: [{ name: 'team-composer-native-hosts', setup(context) {
     context.onResolve({ filter: /.*/ }, args => args.path === 'react' ? { path: args.path, external: true }
@@ -55,7 +55,7 @@ await build({
   } }],
 })
 after(async () => { await unlink(outfile); delete globalThis.__teamComposerFixture })
-const { Composer, ChatTargetPicker, QueueShelf, TeamTargetPicker } = await import(pathToFileURL(outfile).href)
+const { Composer, ChatTargetPicker, QueueShelf, TeamTargetPicker, updateQueuedTurns, projectTimeline } = await import(pathToFileURL(outfile).href)
 
 function health() { return { ok: true, server_identity: 'local-server', server_instance_id: 'instance', capabilities: {
   agent_team_messages_v1: { available: true, version: 1, mention_sigil: '@@', send_requires_mention: true },
@@ -480,6 +480,80 @@ test('incoming-only queue is visible in Composer, but unsupported exact skip sta
     assert.equal(byID(renderer,'queued-row-incoming').length,1)
     assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,true)
     assert.match(byID(renderer,'queued-skip-incoming')[0].props.accessibilityHint,/Update AgentsServer/)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+const queueEvent=(patch={})=>({id:'queue-event',session_id:'chat',seq:1,ts:'2026-09-11T10:00:00Z',type:'turn_started',...patch})
+async function applyQueueEvent(event){
+  await act(async()=>store.setState(state=>({snapshots:{...state.snapshots,chat:{...state.snapshots.chat,queuedTurns:updateQueuedTurns(state.snapshots.chat.queuedTurns,event)}}})))
+}
+const userQueueTurn=(queued_id,position=0)=>({queued_id,session_id:'chat',prompt:'Identical message text',file_ids:[],position,created_at:'2020-01-01T00:00:00Z'})
+
+test('native-goal steering removes only the exact accepted queued row from the rendered Composer',async()=>{
+  resetRoutes({snapshots:{chat:{queuedTurns:[userQueueTurn('steered'),userQueueTurn('same-text',1)]}}})
+  const renderer=await render()
+  const accepted=queueEvent({type:'turn_steered',queued_id:'steered',run_id:'goal-run',native_goal_steer:true,native_steer:true,backend:'codex',purpose:'codex_goal_resume',provider_user_authored:true})
+  try{
+    assert.equal(byID(renderer,'queued-row-steered').length,1)
+    assert.equal(byID(renderer,'queued-row-same-text').length,1,'old timestamps alone never hide pending messages')
+    for(const patch of [{queued_id:undefined},{queued_id:'unknown'},{native_goal_steer:undefined},{provider_user_authored:false}]){
+      await applyQueueEvent({...accepted,...patch})
+      assert.equal(byID(renderer,'queued-row-steered').length,1,'inexact acknowledgements cannot clear a queued row')
+    }
+    await applyQueueEvent(accepted)
+    assert.equal(byID(renderer,'queued-row-steered').length,0)
+    assert.equal(byID(renderer,'queued-row-same-text').length,1,'prompt equality is not an acknowledgement for a different queue ID')
+    await applyQueueEvent(queueEvent({queued_id:'same-text',run_id:'next-run'}))
+    assert.equal(renderer.root.findAllByType(QueueShelf).length,0,'clearing the last queue row unmounts the shelf without a local stale copy')
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('Run now removes selected and explicitly superseded rows, preserving same-text unsuperseded rows',async()=>{
+  resetRoutes({snapshots:{chat:{queuedTurns:[userQueueTurn('older'),userQueueTurn('selected',1),userQueueTurn('keep',2)]}}})
+  const renderer=await render()
+  try{
+    await applyQueueEvent(queueEvent({type:'turn_queue_run_now',queued_id:'selected',superseded_queued_ids:['older']}))
+    assert.equal(byID(renderer,'queued-row-selected').length,0)
+    assert.equal(byID(renderer,'queued-row-older').length,0)
+    assert.equal(byID(renderer,'queued-row-keep').length,1)
+    await applyQueueEvent(queueEvent({queued_id:'keep',run_id:'next-run'}))
+    assert.equal(renderer.root.findAllByType(QueueShelf).length,0)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('incoming async message leaves the rendered queue on admission and mixed history has one nonqueued timeline card',async()=>{
+  resetRoutes({health:queueHealth(),snapshots:{chat:{queuedTurns:[asyncTurn()]}}})
+  const lifecycle=status=>queueEvent({id:`async-${status}`,seq:{received:1,queued:2,started:4,delivered:5}[status],type:`chat_conversation_message_${status}`,conversation_mode:'async_route_v1',conversation_id:'pair',message_id:'envelope',handoff_id:'envelope',cross_chat_envelope_id:'envelope',source_session_id:'target',target_session_id:'chat',queued_id:'incoming',handoff_status:status,handoff_preview:asyncTurn().prompt})
+  const lateLegacy=queueEvent({id:'legacy-queued',seq:3,type:'cross_chat_handoff_queued',handoff_id:'envelope',handoff_status:'queued',source_session_id:'target',target_session_id:'chat'})
+  const events=[lifecycle('received'),lifecycle('queued'),lateLegacy]
+  const renderer=await render()
+  try{
+    assert.equal(byID(renderer,'queued-row-incoming').length,1)
+    assert.deepEqual(projectTimeline(events,[]),[],'pending incoming content belongs exclusively to the queue even with a compatibility receipt')
+    await applyQueueEvent(queueEvent({queued_id:'incoming',run_id:'delivery-run',purpose:'cross_chat_handoff_delivery'}))
+    events.push(lifecycle('started'))
+    assert.equal(byID(renderer,'queued-row-incoming').length,0)
+    let projected=projectTimeline(events,[])
+    assert.equal(projected.length,1)
+    assert.equal(projected[0].crossChatMessage,true)
+    assert.equal(projected[0].event.type,'chat_conversation_message_started')
+    events.push(lifecycle('delivered'),{...lateLegacy,id:'later-legacy-queued',seq:6})
+    projected=projectTimeline(events,[])
+    assert.equal(projected.length,1)
+    assert.equal(projected[0].event.handoff_status,'delivered')
+    assert.equal(byID(renderer,'queued-row-incoming').length,0)
+    assert.equal(renderer.root.findAllByType(QueueShelf).length,0)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('a positions-only queue snapshot cannot hide a queued message before authoritative membership arrives',async()=>{
+  resetRoutes({snapshots:{chat:{queuedTurns:[userQueueTurn('unconfirmed')]}}})
+  const renderer=await render()
+  try{
+    await applyQueueEvent(queueEvent({type:'queue_snapshot',positions:[]}))
+    assert.equal(byID(renderer,'queued-row-unconfirmed').length,1,'omission is not an exact delivery acknowledgement')
+    await act(async()=>store.setState({snapshots:{chat:{queuedTurns:[]}}}))
+    assert.equal(byID(renderer,'queued-row-unconfirmed').length,0,'an authoritative empty queue does remove the row immediately')
   }finally{await act(async()=>renderer.unmount())}
 })
 

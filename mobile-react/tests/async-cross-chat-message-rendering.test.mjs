@@ -113,6 +113,32 @@ const visible = renderer => renderer.root.findAll(node => node.type === 'Text' |
   .flatMap(node => node.children.filter(child => typeof child === 'string')).join('\n')
 const patchLabel = patch => Object.entries(patch).map(([field, value]) => `${field}=${String(value)}`).join(', ')
 
+for (const session_id of ['recipient', 'sender']) test(`mixed lifecycle keeps the ${session_id} card async after started and delivered, never stale queued`, async () => {
+  reset(); publish({ selectedSessionId: session_id })
+  const lifecycle = ['received', 'queued', 'started', 'delivered'].map((status, index) => event({
+    id: `async-${status}`, seq: index + 1, session_id,
+    type: `chat_conversation_message_${status}`, handoff_status: status,
+    handoff_preview: `Authenticated ${status} message.`,
+  }))
+  const legacy = event({ id: 'legacy-queued', seq: 5, session_id, type: 'cross_chat_handoff_queued', conversation_mode: undefined,
+    handoff_status: 'queued', handoff_preview: 'Stale legacy queued content', source_title: 'Untrusted compatibility label' })
+  const renderer = await render(lifecycle.slice(0, 3))
+  try {
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-surface').length, 1)
+    assert.equal(content(renderer), lifecycle[2].handoff_preview)
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([...lifecycle.slice(0, 3), legacy])))))
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-surface').length, 1)
+    assert.equal(content(renderer), lifecycle[2].handoff_preview)
+    assert.doesNotMatch(visible(renderer), /Queued|Stale legacy|Untrusted compatibility/)
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([...lifecycle, legacy])))))
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-surface').length, 1)
+    assert.equal(content(renderer), lifecycle[3].handoff_preview)
+    assert.doesNotMatch(visible(renderer), /Queued|Stale legacy|Untrusted compatibility/)
+    assert.equal(byID(renderer, 'cross-chat-handoff-message-a').length, 0, 'no legacy queued card survives row recycling')
+    assert.deepEqual(calls, [], 'compatibility metadata cannot trigger a new body lookup')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
 for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${theme} async message uses readable incoming/outgoing surfaces at ${width}px`, async () => {
   reset(); fixture.theme = theme
   const renderer = await render(event(), width)
