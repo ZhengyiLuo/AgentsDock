@@ -1,5 +1,14 @@
 # Public development log
 
+## Documentation
+
+- Reorganized the README into a product overview, installation steps, and
+  separate desktop, mobile, and website development workflows.
+- Clarified the client/server boundary, current versus legacy client sources,
+  and the distinction between local builds and release publishing.
+- Checked development commands against package scripts and source CI, and
+  checked installation guidance against the standalone server documentation.
+
 ## Source snapshot
 
 - Includes the Electron desktop and React Native mobile clients, legacy Swift

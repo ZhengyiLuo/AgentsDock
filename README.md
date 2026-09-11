@@ -1,81 +1,155 @@
 # AgentsDock
 
-Desktop and mobile clients for a self-hosted
-[AgentsServer](https://github.com/ZhengyiLuo/AgentsServer): persistent agent
-chats, streaming activity, files and media, scheduled jobs, and remote terminals.
+A desktop and mobile workspace for Claude Code and Codex.
 
-## Repository layout
+Use your agents for coding, research, and long-running work without living in
+a terminal. Run them on your own workstation or server, then follow their
+progress, review files, and continue the conversation from your computer,
+iPhone, or iPad.
 
-- `electron/`: Electron desktop client (TypeScript and React), with macOS,
-  Linux, and Windows packaging.
-- `mobile-react/`: React Native / Expo mobile client for iOS, iPadOS, and Android.
-- `Sources/`, `Apps/`, and `ZenithDock.xcodeproj`: legacy Swift client targets.
-- `server/`: frozen compatibility fixtures for cross-stack tests. This is not
-  the deployable server; use the standalone AgentsServer repository.
-- `website/`: static product site and setup guide. `web/` contains legacy site assets.
-- `docs/`: architecture, localization, and contributor notes.
+[Website](https://agentsdock.net) ·
+[Desktop downloads](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases) ·
+[Setup guide](https://agentsdock.net/setup.html) ·
+[AgentsServer](https://github.com/ZhengyiLuo/AgentsServer)
 
-The clients connect to a separately installed AgentsServer. Provider runtimes
-and their authentication live on that server, not in this source repository.
+## What you can do
 
-## Set up the server
+- **Work with your agents:** start and resume chats, follow live activity, and
+  queue the next task.
+- **Review the results:** view images and videos inline, browse files, inspect
+  code changes, and download artifacts.
+- **Keep long-running work organized:** group chats, search history, create
+  digests, and schedule recurring jobs.
+- **Open a real terminal:** use a persistent tmux terminal attached to each
+  chat's workspace.
+- **Move between devices and servers:** connect multiple clients to the same
+  server, or manage several servers from one app.
 
-Use **Set up AgentsServer** in a supported direct desktop build, or follow the
-standalone server's installation instructions:
+## How it works
 
-```bash
-git clone https://github.com/ZhengyiLuo/AgentsServer.git
-cd AgentsServer
-./install.sh
-```
+**AgentsDock is the client. [AgentsServer](https://github.com/ZhengyiLuo/AgentsServer)
+is the backend.** Install the server on the machine that has your projects and
+agent CLIs. That can be the same computer as the desktop app or a remote
+machine you control. The desktop and mobile apps connect to it to send tasks
+and display results.
 
-Add the resulting server address and access token in AgentsDock. Use a private
-network such as Tailscale for remote access and keep credentials out of Git.
-The server needs `tmux` for persistent terminal sessions. See the
-[setup guide](website/setup.html) for the connection workflow.
+The agent CLIs must be installed and authenticated **on the server**, not on
+your phone. Self-hosting gives you control of the server and stored history;
+it does not make the models local. Your selected provider still processes
+model requests, and clients may cache content on your devices.
 
-## Develop the desktop client
+## Get started
 
-Install Node.js and the pnpm version declared in `electron/package.json`, then:
+1. **Install the app.** Get a desktop build from
+   [GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases),
+   or find the current iPhone/iPad distribution link on
+   [the website](https://agentsdock.net/#downloads).
+2. **Set up AgentsServer.** Direct macOS and Linux builds provide
+   **Set up AgentsServer**. For other clients or manual installation, follow
+   [the server's installation instructions](https://github.com/ZhengyiLuo/AgentsServer#guided-setup).
+   Install and sign in to the agent CLI you want to use on that machine.
+3. **Connect and start a chat.** Add the server connection in AgentsDock,
+   choose an agent and a working directory on the server, and send a task.
+
+For remote access, use a private network such as Tailscale rather than exposing
+the server directly to the internet. The server needs `tmux` for persistent
+terminals; see its documentation for the full prerequisites. Connection help
+is in the [setup guide](https://agentsdock.net/setup.html).
+
+## Develop from source
+
+Use Git, **Node.js 24**, and **pnpm 11.9.0** (the version pinned by the project).
+Desktop and mobile are separate packages; install dependencies in the package
+you are working on. You also need a running AgentsServer to use the app.
 
 ```bash
 git clone https://github.com/ZhengyiLuo/AgentsDock.git
-cd AgentsDock/electron
+cd AgentsDock
+```
+
+### Desktop
+
+The current desktop app is built with Electron, React, and TypeScript. From
+the repository root:
+
+```bash
+cd electron
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 pnpm dev
 ```
 
-`pnpm build` compiles the desktop client locally. Packaging requires the
-platform-specific tooling and dependencies described in
-[electron/README.md](electron/README.md). Local builds do not publish a release.
+`pnpm build` compiles the app without packaging or publishing it. For desktop
+architecture and platform-specific packaging, see
+[electron/README.md](electron/README.md).
 
-## Develop the mobile client
+### Mobile: iPhone, iPad, and Android source
 
-See [mobile-react/README.md](mobile-react/README.md) for the mobile development
-workflow. Native iOS builds require macOS and Xcode; Android builds require the
-Android toolchain. The Swift targets are retained for legacy development and
-are not the current React Native mobile client.
+The current iPhone/iPad app lives in **`mobile-react/`**, using React Native
+and Expo. Android source and native modules live in that same package. From
+the repository root:
 
-## Preview the website
+```bash
+cd mobile-react
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test:history
+pnpm test:server-setup
+```
+
+For local iOS development on macOS with Xcode, continue in `mobile-react/`:
+
+```bash
+pnpm exec expo prebuild --platform ios
+pnpm exec expo run:ios
+```
+
+Use a simulator or your own signing configuration. Read the
+[mobile development guide](mobile-react/README.md) before installing on a
+device: using the existing bundle identifier can replace your installed app.
+Android development requires the Android toolchain.
+
+### Website
+
+The product site is plain HTML, CSS, and JavaScript. With Python 3 installed,
+run this from the repository root:
 
 ```bash
 cd website
 npm run dev
 ```
 
-Open `http://localhost:4175`. Screenshots and recordings are omitted from this
-source snapshot pending publication review; the site includes text placeholders.
+Open `http://localhost:4175`. No website dependency installation is needed.
 
-## Downloads and contribution safety
+## Where things live
 
-Published desktop binaries and update metadata remain in
-[AgentsDock-Releases](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases).
-This repository's verification workflows do not publish app builds or deploy
-servers. See [the release-channel notes](docs/DIRECT_RELEASES.md).
+| Directory | Purpose |
+| --- | --- |
+| [`electron/`](electron/) | Current desktop client for macOS, Linux, and Windows |
+| [`mobile-react/`](mobile-react/) | Current React Native mobile client, including native modules in `modules/` |
+| [`website/`](website/) | Product website and user guides |
+| [`team-hub/`](team-hub/) | Team Hub service code and tests |
+| [`docs/`](docs/) | Architecture, development notes, and release-channel documentation |
+| [`server/`](server/) | Frozen compatibility fixtures for cross-stack tests, **not the deployable server** |
+| `Sources/`, `Apps/`, `ZenithDock.xcodeproj` | Legacy Swift clients, not the current Electron or React Native apps |
 
-Please omit credentials, private hostnames, transcripts, user screenshots, and
-machine-specific paths from contributions. Preserve existing third-party
-license and attribution notices. This snapshot does not import private
-development history; see [the public development log](docs/DEV_LOG.md).
+The maintained backend is in the separate
+[AgentsServer repository](https://github.com/ZhengyiLuo/AgentsServer). Do not
+deploy the `server/` directory from this repository.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and contribution guidelines.
+Keep changes scoped and add regression tests where appropriate. Use synthetic
+test data; do not commit credentials, private infrastructure details, chat
+transcripts, or screenshots containing user data.
+
+The repository's CI verifies source. It does not publish desktop releases,
+upload mobile builds, or deploy servers. Official binaries and update feeds
+are managed separately; see [release channels](docs/DIRECT_RELEASES.md).
+
+## License
+
+This repository does not currently include a project-wide license. Third-party
+components retain their existing license and attribution notices.
