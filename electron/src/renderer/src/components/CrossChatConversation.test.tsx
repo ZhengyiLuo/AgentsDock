@@ -11,6 +11,8 @@ const profileScope: WorkspaceProfileScope = {
 }
 
 afterEach(cleanup)
+const originalSelectSession = useAppStore.getState().selectSession
+afterEach(() => useAppStore.setState({ selectSession: originalSelectSession }))
 
 describe('cross-chat message lifecycle', () => {
   const loadExchange = vi.fn()
@@ -35,6 +37,25 @@ describe('cross-chat message lifecycle', () => {
         { id: 'chat-2', title: 'Reviewer', backend: 'claude' }
       ]
     })
+  })
+
+  it.each(['cross_chat_exchange_leg_delivered', 'cross_chat_received'])('opens the exact peer from older %s headings without loading message details', type => {
+    const selectSession = vi.fn().mockResolvedValue(undefined)
+    useAppStore.setState({ selectSession })
+    const event: Event = { id: 'older-message', session_id: 'chat-1', seq: 10, ts: '2026-09-04T01:00:00Z', type,
+      source_session_id: 'chat-2', target_session_id: 'chat-1', source_title: 'Reviewer', target_title: 'Source',
+      exchange_id: 'exchange-1', exchange_leg_id: 'leg-1', exchange_status: 'completed',
+      exchange_leg_status: 'delivered', exchange_leg_kind: 'reply', exchange_ordinal: 1,
+      requester_session_id: 'chat-1', responder_session_id: 'chat-2', handoff_id: 'older-envelope', handoff_preview: 'Saved reply.' }
+    const item: SystemItem = { kind: 'system', id: 'older-message', key: 'older-message', seq: 10, event }
+    const props = { item, sessionId: 'chat-1', profileScope, onFindFile: () => {}, pinnedItemIds: new Set<string>() }
+    const view = render(<TimelineRowView {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Reviewer' }))
+    expect(selectSession).toHaveBeenCalledExactlyOnceWith('chat-2')
+    view.rerender(<TimelineRowView {...props} sessionId="chat-2" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Sent to Source' }))
+    expect(selectSession).toHaveBeenLastCalledWith('chat-1')
+    expect(loadExchange).not.toHaveBeenCalled()
   })
 
   it('loads exact leg bodies on demand, preserves them across pane focus, and settles controls at terminal state', async () => {

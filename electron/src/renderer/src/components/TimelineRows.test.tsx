@@ -1439,10 +1439,10 @@ describe('timeline pin state', () => {
     const legs = boundary?.querySelectorAll('.cross-chat-message') ?? []
     expect(legs).toHaveLength(2)
     expect(legs[0]).toHaveClass('outgoing')
-    expect(legs[0].querySelector('header strong')).toHaveTextContent('Training')
+    expect(within(legs[0] as HTMLElement).getByRole('button', { name: 'Sent to Training' })).toBeVisible()
     expect(legs[0]).toHaveTextContent('Can you verify the updater state?')
     expect(legs[1]).toHaveClass('incoming')
-    expect(legs[1].querySelector('header strong')).toHaveTextContent('Training')
+    expect(within(legs[1] as HTMLElement).getByRole('button', { name: 'Training' })).toBeVisible()
     expect(legs[1]).toHaveTextContent('Verified: the updater is idle.')
     expect(boundary?.querySelector('.cross-chat-leg-meta')).not.toBeInTheDocument()
     expect(boundary?.querySelector('.cross-chat-exchange-footer')).not.toBeInTheDocument()

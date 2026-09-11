@@ -825,8 +825,8 @@ function SystemView({ item, sessionId, profileScope, pinned, codexLifecycleActiv
   if (item.crossChatMessage) return <CrossChatMessageView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (codexLifecycleSemanticKey(event)) return <CodexLifecycleView item={item} sessionId={sessionId} active={codexLifecycleActive} />
   if (item.key.startsWith('provider-interaction-audit:')) return <ProviderInteractionAuditView item={item} />
-  if (event.type.startsWith('cross_chat_exchange_') && event.exchange_id?.trim()) return <CrossChatExchangeView item={item} sessionId={sessionId} />
-  if (event.type.startsWith('cross_chat_')) return <CrossChatView item={item} sessionId={sessionId} />
+  if (event.type.startsWith('cross_chat_exchange_') && event.exchange_id?.trim()) return <CrossChatExchangeView item={item} sessionId={sessionId} profileScope={profileScope} />
+  if (event.type.startsWith('cross_chat_')) return <CrossChatView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (event.type === 'team_message_sent') return <TeamMessageSentView event={event} profileScope={profileScope} />
   if (event.type === 'emergency_alert_raised') return <EmergencyAlertView event={event} sessionId={sessionId} />
   const error = isTimelineError(event)
@@ -1371,7 +1371,7 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
   </article>
 }
 
-function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function CrossChatExchangeView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
   const event = item.event
   const exchangeId = event.exchange_id?.trim() || event.cross_chat_exchange_id?.trim() || ''
@@ -1667,7 +1667,9 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
         <div className="cross-chat-message-surface">
           <header>
             <MessageSquareShare size={13} aria-hidden="true" />
-            <strong>{incoming ? sourceTitle : t('timeline.handoff.sent', { title: targetTitle })}</strong>
+            <CrossChatPeerLink peerId={leg.sourceId === sessionId || leg.targetId === sessionId ? incoming ? leg.sourceId : leg.targetId : undefined} sessionId={sessionId} profileScope={profileScope}>
+              {incoming ? sourceTitle : t('timeline.handoff.sent', { title: targetTitle })}
+            </CrossChatPeerLink>
             {leg.ts && <time>{formatTime(item.anchorTs || leg.ts)}</time>}
           </header>
           {text ? <MarkdownContent text={text} sessionId={sessionId} fold={false} />
@@ -1696,7 +1698,7 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
     })}
     {!displayedLegs.length && <div className="cross-chat-message outgoing">
       <div className="cross-chat-message-surface">
-        <header><MessageSquareShare size={13} aria-hidden="true" /><strong>{counterpartTitle}</strong><time>{formatTime(event.ts)}</time></header>
+        <header><MessageSquareShare size={13} aria-hidden="true" /><CrossChatPeerLink peerId={requesterId === sessionId || responderId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>{counterpartTitle}</CrossChatPeerLink><time>{formatTime(event.ts)}</time></header>
         <small>{stateLabel}</small>
         <button type="button" className="cross-chat-message-expand" disabled={loading} onClick={() => void loadExchange()}>{loading ? t('timeline.ui.loadingMessages') : t('timeline.ui.viewMessage')}</button>
         {canCancel && <button type="button" className="cross-chat-message-expand" disabled={cancelling} onClick={() => void cancelExchange()}>{t('timeline.ui.endConversation')}</button>}
@@ -1706,7 +1708,7 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
   </div>
 }
 
-function CrossChatView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function CrossChatView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
   const event = item.event
   const envelopeId = event.handoff_id?.trim() || event.correlation_id?.trim() || ''
@@ -1796,7 +1798,7 @@ function CrossChatView({ item, sessionId }: { item: SystemItem; sessionId: strin
   const incoming = targetId === sessionId && sourceId !== sessionId
   return <article className={`cross-chat-message ${incoming ? 'incoming' : 'outgoing'}${failed ? ' failed' : ''}`} data-event-id={event.id}>
     <div className="cross-chat-message-surface">
-      <header><MessageSquareShare size={13} aria-hidden="true" /><strong>{incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}</strong><time>{formatTime(item.anchorTs || event.ts)}</time></header>
+      <header><MessageSquareShare size={13} aria-hidden="true" /><CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>{incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}</CrossChatPeerLink><time>{formatTime(item.anchorTs || event.ts)}</time></header>
       {body || preview ? <MarkdownContent text={body || preview} sessionId={sessionId} fold={false} /> : <small>{detail || title}</small>}
       {truncated && !body && <button type="button" className="cross-chat-message-expand" disabled={bodyLoading} onClick={() => void loadBody()}>{bodyLoading ? t('timeline.ui.loadingFullMessage') : t('timeline.ui.viewMessage')}</button>}
       {failed && preview && <small className="cross-chat-message-error">{detail || title}</small>}
