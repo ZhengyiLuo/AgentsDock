@@ -2570,6 +2570,69 @@ describe('projectTimeline', () => {
     }
   })
 
+  it.each(['job_id', 'job'] as const)('honors explicit job ownership from %s on a metadata-light history page', field => {
+    const job = { id: 'job-1', session_id: 'chat-1', title: 'Status check', prompt: 'Check status', interval_seconds: 3600 }
+    const ownership = field === 'job_id' ? { job_id: job.id } : { job_id: ' ', job }
+    const items = projectTimeline([
+      event(1, 'assistant_text', { run_id: 'older-job-run', text: 'Older report.' }),
+      event(2, 'assistant_text', { ...ownership, run_id: 'latest-job-run', text: 'Latest report.' }),
+      event(3, 'job_summary', { ...ownership, job_status_run_id: 'older-job-run',
+        job_latest_run_id: 'latest-job-run', job_run_count: 51, job_status: 'completed' })
+    ], [])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'job', jobId: 'job-1', runCount: 51 })
+    expect(renderTimelineItems(items).map(row => row.kind)).toEqual(['job'])
+    if (items[0].kind !== 'job') throw new Error('Expected job item')
+    expect(jobDisplaySelection(items[0]).updates.map(update => update.text)).toEqual(['Older report.', 'Latest report.'])
+  })
+
+  it.each(['assistant_text', 'job_summary'] as const)('rebuilds a projected turn when bare %s supplies explicit job ownership', type => {
+    const previous = [
+      event(1, 'turn_started', { run_id: 'job-run', prompt: 'Scheduled input' }),
+      event(2, 'assistant_text', { run_id: 'job-run', text: 'Retained report.' })
+    ]
+    const link = event(3, type, { job_id: 'job-1', ...(type === 'job_summary'
+      ? { job_latest_status_run_id: 'job-run', job_run_count: 1 }
+      : { run_id: 'job-run', text: 'Latest report.' }) })
+    const projector = new TimelineProjector([])
+    expect(projector.append(previous)).toBe(true)
+    expect(projector.items[0].kind).toBe('turn')
+    expect(projector.append([link])).toBe(false)
+
+    clearTimelineProjectionCache()
+    cachedTimelineProjection(`bare-job-link-${type}`, previous, [])
+    const result = cachedTimelineProjection(`bare-job-link-${type}`, [...previous, link], [])
+    expect(result.strategy).toBe('rebuild')
+    expect(result.rendered).toEqual(renderTimelineItems(projectTimeline([...previous, link], [])))
+    expect(result.rendered.map(row => row.kind)).toEqual(['job'])
+  })
+
+  it('keeps explicit job ownership separate from action receipts and unrelated native or imported messages', () => {
+    const owner = { job_id: 'job-1', run_id: 'job-run' }
+    const items = projectTimeline([
+      event(1, 'assistant_text', { ...owner, text: 'Report text.' }),
+      event(2, 'emergency_alert_raised', { ...owner, message: 'Important alert.' }),
+      event(3, 'team_message_sent', { ...owner, message_id: 'mail-1', kind: 'message' }),
+      event(4, 'cross_chat_exchange_leg_registered', { ...owner, exchange_id: 'exchange-1', exchange_leg_id: 'leg-1',
+        exchange_leg_kind: 'request', exchange_ordinal: 1, source_session_id: 'chat-1', target_session_id: 'peer',
+        handoff_preview: 'Independent message.' }),
+      event(5, 'turn_started', { run_id: 'ordinary-run', prompt: 'Explain job_id=job-1.' }),
+      event(6, 'assistant_text', { run_id: 'ordinary-run', text: 'A genuine answer.' }),
+      event(7, 'turn_started', { run_id: 'import_mixed', imported: true, backend: 'claude',
+        provider_user_authored: true, prompt: 'A genuine imported question.' }),
+      event(8, 'assistant_text', { run_id: 'import_mixed', imported: true, backend: 'claude', text: 'Report text.' })
+    ], [])
+
+    expect(items.filter(item => item.kind === 'job')).toHaveLength(1)
+    expect(items.filter(item => item.kind === 'system').map(item => item.event.type)).toEqual([
+      'emergency_alert_raised', 'team_message_sent', 'cross_chat_exchange_leg_registered'
+    ])
+    expect(renderTimelineItems(items).filter(row => row.kind === 'message').map(messageItemText)).toEqual([
+      'Explain job_id=job-1.', 'A genuine answer.', 'A genuine imported question.', 'Report text.'
+    ])
+  })
+
   it('does not regress a cancelled scheduled run to running on a late job marker', () => {
     const items = projectTimeline([
       event(1, 'turn_started', {

@@ -357,9 +357,8 @@ export class TimelineProjector {
     // ordinary live tail traffic remains strictly incremental.
     for (const event of events) {
       if (isImportedProviderControlMetadata(event)) continue
-      const jobId = String(event.job_id || event.job?.id || '').trim()
+      const jobId = event.job_id?.trim() || event.job?.id?.trim() || ''
       if (!jobId) continue
-      if (!jobTypes.has(event.type) && event.purpose !== 'scheduled_job') continue
       for (const runId of jobLinkedRunIds(event)) {
         const priorFallback = this.latestJobById.has(runId)
         if (!this.jobByRun.has(runId) && (this.turnByRun.has(runId) || priorFallback)) return false
@@ -368,13 +367,13 @@ export class TimelineProjector {
 
     for (const event of events) {
       if (isImportedProviderControlMetadata(event)) continue
-      const jobId = String(event.job_id || event.job?.id || '').trim()
+      const jobId = event.job_id?.trim() || event.job?.id?.trim() || ''
       if (!jobId) continue
       const title = String(event.job_title || event.job?.title || '').trim()
       if (title) this.jobTitles.set(jobId, title)
-      if (jobTypes.has(event.type) || event.purpose === 'scheduled_job') {
-        for (const runId of jobLinkedRunIds(event)) this.jobByRun.set(runId, jobId)
-      }
+      // Explicit server job ownership also appears on metadata-light output
+      // and job_summary pages without purpose or a retained start event.
+      for (const runId of jobLinkedRunIds(event)) this.jobByRun.set(runId, jobId)
     }
 
     const initialProjection = this.itemsValue.length === 0
@@ -608,10 +607,12 @@ export class TimelineProjector {
       return
     }
 
-    const explicitJobId = String(event.job_id || event.job?.id || '').trim()
-    const jobId = jobTypes.has(event.type) || event.purpose === 'scheduled_job'
-      ? explicitJobId || this.jobByRun.get(event.run_id || '') || event.run_id || `job-${event.seq}`
-      : this.jobByRun.get(event.run_id || '')
+    const explicitJobId = event.job_id?.trim() || event.job?.id?.trim() || ''
+    const jobId = explicitJobId || this.jobByRun.get(event.run_id || '') || (
+      jobTypes.has(event.type) || event.purpose === 'scheduled_job'
+        ? event.run_id || `job-${event.seq}`
+        : ''
+    )
     if (jobId) {
       this.appendJobEvent(event, jobId)
       return

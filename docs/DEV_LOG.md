@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-09-11 — Scheduled history ownership
+
+- Keep explicitly job-owned output inside Scheduled Job cards even when a
+  paged response omits the start event or scheduled-purpose field. Match cold
+  history, incremental updates, and late ownership metadata.
+- Preserve ordinary imported/user messages and independently rendered
+  emergency, Mail, and cross-chat receipts.
+- Older Claude imports also require the standalone server's source-proven
+  historical-page correction; this desktop change does not replace that repair.
+
 ## 2026-09-11 — Expanded queued messages
 
 - Keep expanded message rows at their natural height so the queue scrolls
