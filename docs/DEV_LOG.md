@@ -2,6 +2,12 @@
 
 ## Mobile queue reconciliation — 0.1.1 (172)
 
+- Apple validation and processing completed successfully; build 172 is active
+  for internal TestFlight testing with automatic notifications enabled.
+  External beta review was not submitted. Binary source: `9748210`.
+- The signed arm64 iPhone/iPad archive and exported IPA passed version,
+  distribution-signature, framework-ABI, production-bundle, and matching-symbol
+  checks. Both source CI jobs passed for the binary source commit.
 - Remove delivered native-goal messages and explicitly superseded queue IDs
   without matching by message text or hiding unrelated queued work.
 - Fence delayed timeline and queue reads against newer delivery observations,
