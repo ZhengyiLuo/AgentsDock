@@ -66,7 +66,26 @@ jobs:
         working-directory: mobile-react
       - run: node scripts/run-history-tests.mjs src/lib/team-references.test.ts
         working-directory: mobile-react
+      - name: Verify cross-chat protocol, projection, and store races
+        run: |
+          node scripts/run-history-tests.mjs src/lib/cross-chat-protocol.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/lib/timeline-async-messages.test.ts --native-mocks
+          node scripts/run-history-tests.mjs src/store/useAppStore.cross-chat-routes.test.ts --native-mocks
+        working-directory: mobile-react
+      - name: Verify cross-chat rendering and control interactions
+        run: >-
+          node --test
+          tests/async-cross-chat-message-rendering.test.mjs
+          tests/team-mention-composer.test.mjs
+          tests/cross-chat-card-interactions.test.mjs
+          tests/imported-cross-chat-rendering.test.mjs
+          tests/cross-chat-composer-ui-contract.test.mjs
+          tests/cross-chat-store-contract.test.mjs
+          tests/cross-chat-timeline-ui-contract.test.mjs
+        working-directory: mobile-react
       - run: node --test tests/ios-release-metadata.test.mjs
+        working-directory: mobile-react
+      - run: node --test tests/ios-workspace-resolution.test.mjs
         working-directory: mobile-react
 
 # This workflow verifies source only. It has no signing credentials, deployment

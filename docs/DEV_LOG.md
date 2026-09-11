@@ -1,5 +1,12 @@
 # Public development log
 
+## Source verification
+
+- Mobile CI now runs the cross-chat protocol, projection, route/queue race,
+  rendering, recipient-picker, and native-workspace resolution regressions.
+- The additional checks use synthetic data and mocked native boundaries;
+  source CI still does not build signed applications or publish releases.
+
 ## Documentation
 
 - Reorganized the README into a product overview, installation steps, and
