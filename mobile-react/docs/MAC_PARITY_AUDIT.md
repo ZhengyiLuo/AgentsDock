@@ -1,4 +1,24 @@
-# Mobile / Mac parity — 2026-09-09
+# Mobile / Mac parity — 2026-09-10
+
+## Current cross-chat update
+
+Mobile now follows the current desktop source snapshot for async agent-message
+negotiation and display, durable route access management, and supported `@@`
+recipient discovery. Older exchange and imported-delivery rendering remains
+supported without relaxing internal-wrapper provenance checks.
+
+| Surface | Change | Verification |
+| --- | --- | --- |
+| Async message timeline | Exact protocol gate; stable row per message; queued incoming messages hidden until started; Markdown body with scoped detail loading | Projection, cache/reuse and rendered lifecycle tests, including cancellation, failure and participant mismatches |
+| Granted chat access | Granted/will-grant labels, capacity limits, unavailable targets, exact-revision Revoke, loading and Retry | Rendered controls plus real store/API tests for duplicate taps, revision conflicts and stale reads |
+| Incoming message queue | Desktop purple styling, sender identity, exact Remove with no user Edit/Run now; authoritative confirmation | Rendered actions and store races, including promoted/replaced owners, queue changes and uncertain acknowledgement |
+| `@@` discovery | Offline inboxes, separate Bulletin and all-server targets under native/Hub capability gates | Helper, composer and send/queued-edit tests for capability loss, wrong scope and stale candidates |
+| Reconnect behavior | Old callbacks cannot act on refreshed recipients or unlock newer queue/revoke requests | Synthetic-host tests for hung requests, revalidation and same-tick Save/Remove/Revoke |
+
+Native simulator touch/pixel QA is unavailable in the current build environment.
+Dark/light and narrow/tablet synthetic-host checks exercise render trees and
+handlers; they do not claim measured native layouts. The broad baseline suite
+also has an unrelated existing privacy-policy wording assertion failure.
 
 This source snapshot includes Mac's last-opened-chat location changes and mobile's instant creation,
 backend switching, lean Inspector, and photo-upload completion fixes.

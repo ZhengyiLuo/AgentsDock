@@ -11,6 +11,7 @@ import { codexInteractiveClientCapability } from './codex-controls'
 export const CROSS_CHAT_HANDOFFS_V1_CLIENT_CAPABILITY = 'cross_chat_handoffs_v1'
 export const CROSS_CHAT_HANDOFFS_V2_CLIENT_CAPABILITY = 'cross_chat_handoffs_v2'
 export const AGENT_CROSS_CHAT_ROUTES_CLIENT_CAPABILITY = 'agent_cross_chat_routes_v2'
+export const ASYNC_CHAT_ROUTE_CLIENT_CAPABILITY = 'chat_conversation_async_route_v1'
 export const ROUTE_HINT_MENTIONS_CAPABILITY_VERSION = 7
 export const EXACT_QUEUED_DELIVERY_SKIP_CAPABILITY_VERSION = 9
 export const MAX_CHAT_REFERENCES = 16
@@ -92,6 +93,21 @@ export function routeHintMentionsAvailable(health: Health | null | undefined): b
   return crossChatHandoffsAvailable(health)
     && agentCrossChatRoutesSupported(health)
     && supportedCrossChatActions(health).includes('route')
+}
+
+export function agentCrossChatRoutesAvailable(health: Health | null | undefined): boolean {
+  return crossChatHandoffsAvailable(health) && agentCrossChatRoutesSupported(health)
+}
+
+/** Async messages require both the durable permission contract and its exact opt-in. */
+export function asyncChatRouteAvailable(health: Health | null | undefined): boolean {
+  const capability = health?.capabilities?.cross_chat_handoffs_v1
+  const mode = capability?.agent_routes?.async_route_v1
+  return agentCrossChatRoutesAvailable(health)
+    && capability?.features?.async_route_v1 === true
+    && mode?.available === true
+    && mode.client_capability === ASYNC_CHAT_ROUTE_CLIENT_CAPABILITY
+    && mode.mode === 'async_route_v1'
 }
 
 export function crossChatHandoffsAvailable(health: Health | null | undefined): boolean {
@@ -188,6 +204,7 @@ export function interactiveClientCapabilities(
       capabilities.push(CROSS_CHAT_HANDOFFS_V2_CLIENT_CAPABILITY)
     }
     if (routeHintMentionsAvailable(health)) capabilities.push(AGENT_CROSS_CHAT_ROUTES_CLIENT_CAPABILITY)
+    if (asyncChatRouteAvailable(health)) capabilities.push(ASYNC_CHAT_ROUTE_CLIENT_CAPABILITY)
   }
   return capabilities
 }

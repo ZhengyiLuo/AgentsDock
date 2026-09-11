@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolveIosWorkspace } from './resolve-ios-workspace.mjs'
 
 const root = process.cwd()
 const appPackagePath = path.join(root, 'package.json')
@@ -10,7 +11,7 @@ const podLockPath = path.join(root, 'ios', 'Podfile.lock')
 const manifestPath = path.join(root, 'ios', 'Pods', 'Manifest.lock')
 const localPodspecPath = path.join(root, 'ios', 'Pods', 'Local Podspecs', 'ExpoVideo.podspec.json')
 const podsProjectPath = path.join(root, 'ios', 'Pods', 'Pods.xcodeproj', 'project.pbxproj')
-const workspacePath = path.join(root, 'ios', 'AgentsDockReact.xcworkspace', 'contents.xcworkspacedata')
+const workspacePath = resolveIosWorkspace(path.join(root, 'ios'))
 const nativeVideoViewPath = path.join(root, 'modules', 'agentsdock-native-video', 'ios', 'AgentsDockNativeVideoView.swift')
 const nativeVideoConfigPath = path.join(root, 'modules', 'agentsdock-native-video', 'expo-module.config.json')
 

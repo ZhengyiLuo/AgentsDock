@@ -1,5 +1,8 @@
 import type {
   AgentFile,
+  AgentCrossChatRoutesSnapshot,
+  DeleteAgentCrossChatRouteResponse,
+  QueuedCrossChatDeliveryIdentity,
   CodexBackgroundTerminalTerminateInput,
   CodexBackgroundTerminalsCleanInput,
   CodexBackgroundTerminalsSnapshot,
@@ -628,6 +631,14 @@ export class AgentServerClient {
       `/api/cross-chat/handoffs/${encodeURIComponent(envelopeId)}`,
     )).handoff
   }
+  agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+  }
+  deleteAgentHandoffRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
+    if (!expectedRevision.trim()) throw new Error('Refresh this grant before revoking it.')
+    const params = new URLSearchParams({ expected_revision: expectedRevision })
+    return this.delete(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes/${encodeURIComponent(routeId)}?${params}`)
+  }
   async cancelCrossChatHandoff(envelopeId: string): Promise<CrossChatHandoffSummary> {
     return (await this.post<{ handoff: CrossChatHandoffSummary }>(
       `/api/cross-chat/handoffs/${encodeURIComponent(envelopeId)}/cancel`,
@@ -648,7 +659,7 @@ export class AgentServerClient {
   async skipQueuedCrossChatDelivery(
     sessionId: string,
     queuedId: string,
-    identity: { cross_chat_exchange_id: string; cross_chat_exchange_leg_id: string },
+    identity: QueuedCrossChatDeliveryIdentity,
   ): Promise<void> {
     await this.post(
       `/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}/skip-cross-chat-delivery`,

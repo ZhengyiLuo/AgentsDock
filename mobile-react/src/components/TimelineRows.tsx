@@ -42,7 +42,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import { Text } from './AppText'
-import { ChatReferenceChips, CrossChatExchangeCard, CrossChatHandoffCard } from './CrossChatTimelineCards'
+import { ChatReferenceChips, CrossChatExchangeCard, CrossChatHandoffCard, CrossChatMessageCard } from './CrossChatTimelineCards'
 import { ImportedCrossChatDeliveryCard } from './ImportedCrossChatDeliveryCard'
 import { IconButton } from './ui'
 import { MarkdownContent } from './MarkdownContent'
@@ -63,6 +63,7 @@ export const TimelineRowView = memo(function TimelineRowView({ row, sessionId, o
   if (row.kind === 'media') return <MediaRowView row={row} sessionId={sessionId} />
   if (row.kind === 'job') return <JobRowView row={row} sessionId={sessionId} onReview={onReview} fontScale={fontScale} />
   if (row.importedDelivery) return <ImportedCrossChatDeliveryCard row={row} fontScale={fontScale} />
+  if (row.crossChatMessage) return <CrossChatMessageCard event={row.event} events={row.events} rowKey={row.key} anchorTs={row.anchorTs} sessionId={sessionId} fontScale={fontScale} layoutWidth={layoutWidth} />
   if (codexLifecycleSemanticKey(row.event)) return <CodexLifecycleRowView row={row} fontScale={fontScale} />
   if (row.key.startsWith('provider-interaction-audit:')) return <ProviderInteractionAuditView row={row} />
   const exchangeId = row.event.exchange_id?.trim() || row.event.cross_chat_exchange_id?.trim()

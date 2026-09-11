@@ -20,6 +20,9 @@ export interface SystemRow {
   representedEventSeqs?: number[]
   /** Read-only imported content; contains no recovered route authority. */
   importedDelivery?: ImportedCrossChatDelivery
+  /** Independent async messages use delivery-time placement and ordinary replies. */
+  crossChatMessage?: boolean
+  anchorTs?: string
 }
 export interface JobRow { kind: 'job'; key: string; seq: number; title: string; events: Event[]; jobId?: string; timelineGroupId?: string | null }
 
@@ -176,6 +179,7 @@ function jobProjectionAssignments(events: readonly Event[]): Map<Event, JobProje
       || Boolean(codexLifecycleSemanticKey(event))
       || isHandoffDigestEvent(event)
       || event.type.startsWith('cross_chat_')
+      || isAsyncCrossChatMessage(event)
     const jobId = topLevel ? '' : explicitJobId || jobByOccurrence.get(occurrence) || (event.purpose === 'scheduled_job' ? runId : '')
     if (!jobId) {
       const boundaryKey = providerInteractionAuditKey(event)
@@ -382,6 +386,12 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       continue
     }
     if (appendCrossChatEvent(event)) continue
+    if (event.type.startsWith('chat_conversation_message_')) {
+      // Unknown protocol versions remain ordinary audit content, never an
+      // authenticated message card or a source of message-detail controls.
+      items.push({ kind: 'system', key: `event:${event.id}`, seq: event.seq, event })
+      continue
+    }
     if (hidden.has(event.type)) continue
     const interactionKey = providerInteractionAuditKey(event)
     if (interactionKey) {
@@ -568,7 +578,19 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
     mediaRow: MediaRow | null
     displaySeq: number
   }> = []
-  for (const item of items.sort((a, b) => a.seq - b.seq)) {
+  // Pending incoming messages belong exclusively to the ordinary queue. Once
+  // admitted, anchor them at execution start before ordering around user work.
+  const displayItems = items.flatMap(item => {
+    if (!('kind' in item) || item.kind !== 'system' || !isAsyncCrossChatMessage(item.event)) return [item]
+    const lifecycle = (item.events ?? [item.event]).filter(isAsyncCrossChatMessage)
+    const latest = lifecycle.at(-1)!
+    const incoming = latest.target_session_id === latest.session_id && latest.source_session_id !== latest.session_id
+    const arrived = incoming ? lifecycle.find(event => (
+      event.type === 'chat_conversation_message_started' || event.type === 'chat_conversation_message_delivered'
+    )) : lifecycle[0]
+    return arrived ? [{ ...item, seq: arrived.seq, anchorTs: arrived.ts, crossChatMessage: true }] : []
+  })
+  for (const item of displayItems.sort((a, b) => a.seq - b.seq)) {
     if ('kind' in item) { rows.push(item); continue }
     const inputFileIds = new Set(item.user?.file_ids ?? [])
     const inputFiles = item.files.filter(file => inputFileIds.has(file.id))
@@ -1332,6 +1354,10 @@ function isInternalDeliveryTurn(event: Event): boolean {
 
 /** Match the server/Mac semantic identity for cross-chat lifecycle packets. */
 export function crossChatSemanticKey(event: Event): string | null {
+  if (isAsyncCrossChatMessage(event)) {
+    const envelopeId = event.cross_chat_envelope_id?.trim() || event.handoff_id?.trim() || event.message_id?.trim()
+    return envelopeId ? `cross-chat:handoff:${envelopeId}` : null
+  }
   if (!event.type.startsWith('cross_chat_')) return null
   const exchangeId = crossChatExchangeId(event)
   if (exchangeId && event.type.startsWith('cross_chat_exchange_')) {
@@ -1343,6 +1369,12 @@ export function crossChatSemanticKey(event: Event): string | null {
   if (handoffId) return `cross-chat:handoff:${handoffId}`
   if (watchId) return `cross-chat:watch:${watchId}`
   return null
+}
+
+/** Only the exact negotiated one-way protocol uses independent message cards. */
+export function isAsyncCrossChatMessage(event: Event): boolean {
+  return event.conversation_mode === 'async_route_v1'
+    && /^chat_conversation_message_(registered|received|queued|started|delivered|cancelled|failed)$/u.test(event.type)
 }
 
 function crossChatExchangeId(event: Event): string {

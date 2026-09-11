@@ -579,6 +579,35 @@ export interface QueuePosition { queued_id: string; position: number }
 export type ChatReferenceAction = 'direct_message' | 'route' | 'request_reply' | 'instruction' | 'final_result'
 export type AgentCrossChatRouteAction = 'instruction' | 'request_reply'
 
+export interface AgentCrossChatRoute {
+  route_id: string
+  /** Opaque server mutation revision; never displayed to the user. */
+  revision: string
+  alias: string
+  target_session_id: string
+  actions: AgentCrossChatRouteAction[]
+  created_at: string
+  updated_at: string
+  target: {
+    title: string | null
+    folder: string | null
+    backend: Backend | null
+    available: boolean
+    unavailable_reason: 'source_archived' | 'target_missing' | 'target_deleting' | 'target_archived' | 'unsupported_backend' | 'unsupported_transport' | null
+  }
+}
+
+export interface AgentCrossChatRoutesSnapshot {
+  routes: AgentCrossChatRoute[]
+  max_routes: number
+}
+
+export interface DeleteAgentCrossChatRouteResponse {
+  ok: true
+  deleted: boolean
+  route_id: string
+}
+
 /**
  * A user-selected, authority-bearing reference to another chat. Offsets are
  * JavaScript string offsets (UTF-16 code units), matching native text-input
@@ -601,10 +630,10 @@ export interface ChatReference {
   target_route_revision?: string
 }
 
-/** Exact, user-selected Team Network server inbox authority. Offsets are UTF-16. */
+/** Exact, user-selected Team Network recipient authority. Offsets are UTF-16. */
 export interface TeamReference {
   kind: 'recipient'
-  recipient_kind: 'server'
+  recipient_kind: 'server' | 'all' | 'all_servers'
   team_id: string
   target_id: string
   display_name_snapshot: string
@@ -620,6 +649,9 @@ export interface CrossChatHandoffSummary {
   source_run_id: string
   target_session_id: string
   action: ChatReferenceAction
+  conversation_mode?: 'async_route_v1' | null
+  conversation_id?: string | null
+  message_id?: string | null
   status: string
   queued_id?: string | null
   queue_position?: number | null
@@ -700,6 +732,14 @@ export interface QueuedTurn {
   digest_job_id?: string | null
   source_session_id?: string | null
   target_session_id?: string | null
+  source_title?: string | null
+  conversation_mode?: 'async_route_v1' | null
+  cross_chat_envelope_id?: string | null
+  cross_chat_exchange_id?: string | null
+  cross_chat_exchange_leg_id?: string | null
+  cross_chat_exchange_status?: boolean | null
+  secure_peer_envelope_id?: string | null
+  promoted?: boolean | null
   chat_references?: ChatReference[] | null
   team_references?: TeamReference[] | null
   position?: number | null
@@ -707,6 +747,13 @@ export interface QueuedTurn {
   /** The server is deliberately holding this turn until an explicit Send now. */
   paused?: boolean | null
   pause_reason?: 'stopped' | 'delivery_uncertain' | null
+}
+
+export interface QueuedCrossChatDeliveryIdentity {
+  cross_chat_envelope_id?: string | null
+  cross_chat_exchange_id?: string | null
+  cross_chat_exchange_leg_id?: string | null
+  secure_peer_envelope_id?: string | null
 }
 
 export interface QueuedRunNowResponse {
@@ -749,6 +796,9 @@ export interface Event {
   /** The provider-import source already removed generated-only prompt wrappers. */
   provider_history_sanitized?: boolean | null
   queued_id?: string | null
+  promoted?: boolean | null
+  secure_peer_envelope_id?: string | null
+  team_references?: TeamReference[] | null
   queued_ids?: string[] | null
   superseded_queued_ids?: string[] | null
   superseded_by_queued_id?: string | null
@@ -764,6 +814,9 @@ export interface Event {
   handoff_id?: string | null
   cross_chat_envelope_id?: string | null
   watch_id?: string | null
+  conversation_mode?: 'async_route_v1' | null
+  conversation_id?: string | null
+  message_id?: string | null
   correlation_id?: string | null
   handoff_status?: string | null
   handoff_action?: ChatReferenceAction | null
@@ -1058,11 +1111,22 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     agent_cross_chat_routes?: boolean
     agent_ambient_local_handoffs?: boolean
     exact_queued_delivery_skip?: boolean
+    exact_queued_delivery_reorder?: boolean
+    exact_queued_peer_delivery_skip?: boolean
+    secure_peer_fifo_barriers?: boolean
+    async_route_v1?: boolean
     [key: string]: JsonValue | undefined
   }
   agent_routes?: {
+    async_route_v1?: {
+      available?: boolean
+      client_capability?: string
+      mode?: 'async_route_v1'
+    }
     client_capability?: string
     policy?: 'default_deny'
+    max_routes_per_chat?: number
+    transcript_access?: boolean
     actions?: Array<'instruction' | 'request_reply'>
     [key: string]: JsonValue | Array<'instruction' | 'request_reply'> | undefined
   }

@@ -43,9 +43,12 @@ export function sameTimelineRow(left: TimelineRow, right: TimelineRow): boolean 
   }
   return left.kind === 'system' && right.kind === 'system'
     // Cross-chat terminal normalization is memoized by source event + status
-    // in the projector. Keep this comparison O(1): previews may be 48k and a
-    // long history can contain hundreds of lifecycle cards.
+    // in the projector. Compare immutable event references without scanning
+    // their bodies: previews may be 48k across hundreds of lifecycle cards.
     && left.event === right.event
+    && left.crossChatMessage === right.crossChatMessage
+    && left.anchorTs === right.anchorTs
+    && sameOptionalReferences(left.events, right.events)
     && sameOptionalReferences(left.representedEventIds, right.representedEventIds)
     && sameOptionalReferences(left.representedEventSeqs, right.representedEventSeqs)
 }

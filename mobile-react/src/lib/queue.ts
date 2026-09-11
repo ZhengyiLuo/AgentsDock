@@ -1,4 +1,6 @@
-import type { Event, QueuedTurn } from '../types'
+import type { Event, Health, QueuedCrossChatDeliveryIdentity, QueuedTurn } from '../types'
+import { crossChatCapabilityVersion, crossChatHandoffsAvailable, exactQueuedDeliverySkipAvailable } from './chat-references'
+import { isAsyncCrossChatMessage } from './timeline'
 
 export function isUserQueuedTurn(turn: QueuedTurn): boolean {
   return turn.purpose !== 'handoff_digest'
@@ -20,7 +22,36 @@ export function isVisibleQueuedTurn(turn: QueuedTurn): boolean {
   // Delivery lifecycle belongs to the chronological timeline. Keep delivery
   // turns in the raw queue for FIFO fencing, but never duplicate them in the
   // user-editable composer shelf.
-  return isUserQueuedTurn(turn)
+  return isUserQueuedTurn(turn) || isAsyncQueuedChatMessage(turn)
+}
+
+export function isAsyncQueuedChatMessage(turn: QueuedTurn): boolean {
+  return turn.purpose === 'cross_chat_handoff_delivery' && turn.conversation_mode === 'async_route_v1'
+}
+
+/** Bind Skip to one advertised durable owner, never to position or prompt text. */
+export function queuedDeliverySkipIdentity(turn: QueuedTurn, health: Health | null | undefined): QueuedCrossChatDeliveryIdentity | null {
+  if (!turn.queued_id.trim() || turn.promoted || !crossChatHandoffsAvailable(health)) return null
+  if (turn.purpose === 'secure_peer_handoff_delivery') {
+    const envelope = turn.secure_peer_envelope_id?.trim()
+    return crossChatCapabilityVersion(health) >= 10
+      && health?.capabilities?.cross_chat_handoffs_v1?.features?.exact_queued_peer_delivery_skip === true
+      && envelope ? { secure_peer_envelope_id: envelope } : null
+  }
+  if (turn.purpose !== 'cross_chat_handoff_delivery' || !exactQueuedDeliverySkipAvailable(health)) return null
+  const envelope = turn.cross_chat_envelope_id?.trim() || null
+  const exchange = turn.cross_chat_exchange_id?.trim() || null
+  const leg = turn.cross_chat_exchange_leg_id?.trim() || null
+  return envelope || (exchange && leg)
+    ? { cross_chat_envelope_id: envelope, cross_chat_exchange_id: exchange, cross_chat_exchange_leg_id: leg }
+    : null
+}
+
+/** Public lifecycle events trigger an authoritative queue read only in the target chat. */
+export function crossChatQueueRefreshSessionId(event: Event): string | null {
+  if (!event.queued_id || event.session_id !== event.target_session_id) return null
+  return event.type.startsWith('cross_chat_handoff_') || event.type.startsWith('cross_chat_exchange_leg_') || isAsyncCrossChatMessage(event)
+    ? event.session_id : null
 }
 
 export function queuedTurnHasEarlierDeliveryBarrier(turns: readonly QueuedTurn[], queuedId: string): boolean {
@@ -60,7 +91,16 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       digest_job_id: event.digest_job_id,
       source_session_id: event.source_session_id,
       target_session_id: event.target_session_id,
+      source_title: event.source_title,
+      conversation_mode: event.conversation_mode,
+      cross_chat_envelope_id: event.cross_chat_envelope_id,
+      cross_chat_exchange_id: event.cross_chat_exchange_id,
+      cross_chat_exchange_leg_id: event.cross_chat_exchange_leg_id,
+      cross_chat_exchange_status: event.cross_chat_exchange_status,
+      secure_peer_envelope_id: event.secure_peer_envelope_id,
+      promoted: event.promoted,
       chat_references: event.chat_references,
+      team_references: event.team_references,
       created_at: event.ts,
       paused: event.paused,
       pause_reason: event.pause_reason,
@@ -77,6 +117,7 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       display_prompt: event.prompt ?? value.display_prompt,
       file_ids: event.file_ids ?? value.file_ids,
       chat_references: event.chat_references ?? value.chat_references,
+      team_references: event.team_references ?? value.team_references,
       position: event.position ?? value.position,
       paused: event.paused ?? value.paused,
       pause_reason: event.pause_reason ?? value.pause_reason,

@@ -12,17 +12,17 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame ??= callback => setTimeout(() => callback(Date.now()), 0)
 globalThis.cancelAnimationFrame ??= clearTimeout
 const store = create(() => ({}))
-const fixture = { store, alerts: [], reads: [], sends: [], client: { isValidated: true, validationRevision: 1 } }
+const fixture = { store, alerts: [], reads: [], sends: [], routeReads: [], revokes: [], skips: [], width: 390, scheme: 'dark', client: { isValidated: true, validationRevision: 1 } }
 globalThis.__teamComposerFixture = fixture
 const mocks = {
   'react-native': `import { createElement } from 'react'; const fixture=globalThis.__teamComposerFixture;
     export const View='View', Text='Text', ScrollView='ScrollView', ActivityIndicator='ActivityIndicator';
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({pressed:false}) : props.children);
     export const Modal = ({visible=true,...props}) => visible ? createElement('Modal',props) : null;
-    export const FlatList = ({data=[],renderItem,ListEmptyComponent,...props}) => createElement('FlatList',props,data.length ? data.map((item,index) => createElement('ListItem',{key:item.id||index},renderItem({item,index}))) : typeof ListEmptyComponent === 'function' ? createElement(ListEmptyComponent) : ListEmptyComponent);
+    export const FlatList = ({data=[],renderItem,ListEmptyComponent,ListFooterComponent,...props}) => createElement('FlatList',props,data.length ? data.map((item,index) => createElement('ListItem',{key:item.id||index},renderItem({item,index}))) : typeof ListEmptyComponent === 'function' ? createElement(ListEmptyComponent) : ListEmptyComponent, ListFooterComponent);
     export const StyleSheet={create:value=>value,hairlineWidth:0.5,absoluteFill:{},flatten:value=>Object.assign({},...[value].flat(Infinity).filter(Boolean))};
     export const Platform={OS:'ios',select:choices=>choices.ios??choices.default};
-    export const useColorScheme=()=>'dark'; export const useWindowDimensions=()=>({width:390,height:844,scale:3,fontScale:1});
+    export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:844,scale:3,fontScale:1});
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
   'expo-image': `export const Image='Image';`,
@@ -46,7 +46,7 @@ const mocks = {
 const outfile = path.resolve('build/tmp', `team-composer-tests-${process.pid}.mjs`)
 await mkdir(path.dirname(outfile), { recursive: true })
 await build({
-  stdin: { contents: `export { Composer } from './src/components/Composer'; export { TeamTargetPicker } from './src/components/TeamTargetPicker';`, resolveDir: process.cwd(), loader: 'ts' },
+  stdin: { contents: `export { Composer, ChatTargetPicker, QueueShelf } from './src/components/Composer'; export { TeamTargetPicker } from './src/components/TeamTargetPicker';`, resolveDir: process.cwd(), loader: 'ts' },
   outfile, bundle: true, format: 'esm', platform: 'node', packages: 'external', jsx: 'automatic', logLevel: 'silent', loader: { '.png': 'dataurl' },
   plugins: [{ name: 'team-composer-native-hosts', setup(context) {
     context.onResolve({ filter: /.*/ }, args => args.path === 'react' ? { path: args.path, external: true }
@@ -55,7 +55,7 @@ await build({
   } }],
 })
 after(async () => { await unlink(outfile); delete globalThis.__teamComposerFixture })
-const { Composer, TeamTargetPicker } = await import(pathToFileURL(outfile).href)
+const { Composer, ChatTargetPicker, QueueShelf, TeamTargetPicker } = await import(pathToFileURL(outfile).href)
 
 function health() { return { ok: true, server_identity: 'local-server', server_instance_id: 'instance', capabilities: {
   agent_team_messages_v1: { available: true, version: 1, mention_sigil: '@@', send_requires_mention: true },
@@ -63,6 +63,7 @@ function health() { return { ok: true, server_identity: 'local-server', server_i
 } } }
 function reset(patch = {}) {
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
+  fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.scheme='dark'
   fixture.client.teamNetworkGet = async (base, endpoint) => {
     fixture.reads.push([base,endpoint])
     if (endpoint === '/v1/health') return {hub_id:'hub',capabilities:{team_messages_v1:{available:true,version:1}}}
@@ -75,6 +76,10 @@ function reset(patch = {}) {
     health:health(),sessions:[{id:'chat',title:'Mobile',backend:'codex'}],snapshots:{},runtime:null,profiles:[],
     drafts:{chat:''},uploads:{},uploadPending:{},uploadFailed:{},queuedRunStatus:{},chatReferencesBySession:{},teamReferencesBySession:{},
     activeSessionIds:new Set(),sendingSessionIds:new Set(),stoppingSessionIds:new Set(),turnAdmissionTokens:{},
+    agentRoutesBySession:{},agentRouteErrorsBySession:{},agentRouteLoadingSessionIds:new Set(),revokingAgentRouteIds:new Set(),skippingQueuedDeliveryIds:new Set(),pendingQueuedRunIds:new Set(),
+    refreshAgentRoutes:async(...args)=>{fixture.routeReads.push(args);return store.getState().agentRoutesBySession[args[0]]??null},
+    revokeAgentRoute:async(...args)=>{fixture.revokes.push(args);return true},
+    skipQueuedDelivery:async(...args)=>{fixture.skips.push(args);return true},
     setSessionDraft:(id,text)=>store.setState(state=>({drafts:{...state.drafts,[id]:text}})),
     setChatReferencesForSession:(id,references)=>store.setState(state=>({chatReferencesBySession:{...state.chatReferencesBySession,[id]:references}})),
     setTeamReferencesForSession:(id,references)=>store.setState(state=>({teamReferencesBySession:{...state.teamReferencesBySession,[id]:references}})),
@@ -331,4 +336,226 @@ test('Add menu exposes a direct server recipient picker without requiring typed 
     assert.equal(store.getState().drafts.chat,'@@Mac Studio ')
     assert.equal(store.getState().teamReferencesBySession.chat.length,1)
   }finally{await act(async()=>renderer.unmount())}
+})
+
+const targetSession=(id='target')=>({id,title:`Chat ${id}`,backend:'codex',folder:'Work',status:'idle'})
+const route=(id='route',target='target')=>({route_id:id,revision:`opaque-${id}-revision`,alias:`Chat ${target}`,target_session_id:target,actions:['instruction','request_reply'],created_at:'2026-09-01T00:00:00Z',updated_at:'2026-09-01T00:00:00Z',target:{title:`Chat ${target}`,folder:'Work',backend:'codex',available:true,unavailable_reason:null}})
+function resetRoutes(patch={}){reset({health:withLocalChats(),sessions:[{id:'chat',title:'Mobile',backend:'codex'},targetSession(),targetSession('new')],agentRoutesBySession:{chat:{routes:[route()],max_routes:2}},...patch})}
+async function renderChatPicker(overrides={}){
+  let renderer
+  const props={visible:true,width:fixture.width,query:'',sourceSessionId:'chat',supportedTargetBackends:['codex','claude'],references:[],requestReplySupported:true,referenceLimitReached:false,onQueryChange(){},onTeamNetwork(){},onSelect(value){fixture.selected=value;return true},onClose(){},onDidDismiss(){},...overrides}
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(ChatTargetPicker,props))})
+  return {renderer,props}
+}
+
+for(const [width,scheme] of [[320,'dark'],[834,'light']])test(`chat access picker renders granted/pending permissions and usable controls at ${width} ${scheme}`,async()=>{
+  resetRoutes();fixture.width=width;fixture.scheme=scheme
+  const {renderer}=await renderChatPicker()
+  try{
+    assert.match(texts(renderer),/Granted · Send \+ Ask/)
+    assert.match(texts(renderer),/Will grant when sent · Send \+ Ask/)
+    assert.doesNotMatch(texts(renderer),/opaque-route-revision/)
+    assert.deepEqual(fixture.routeReads,[['chat',1]])
+    const revoke=byID(renderer,'chat-route-revoke-route')[0]
+    assert.equal(revoke.props.disabled,false)
+    assert.ok(revoke.props.style({pressed:false}).flat().some(value=>value?.minHeight>=44))
+    await act(async()=>{const choose=byID(renderer,'chat-target-new')[0].props.onPress;choose();choose()})
+    assert.equal(fixture.selected.id,'new')
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('route capacity blocks only new grants; existing and already-pending targets remain available',async()=>{
+  resetRoutes({agentRoutesBySession:{chat:{routes:[route()],max_routes:1}}})
+  const {renderer,props}=await renderChatPicker()
+  try{
+    assert.equal(byID(renderer,'chat-target-new')[0].props.disabled,true)
+    assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,false)
+    assert.equal(byID(renderer,'chat-route-capacity').length,1)
+    await act(async()=>renderer.update(React.createElement(ChatTargetPicker,{...props,references:[{session_id:'new',action:'route',grant_intent:true}]})))
+    assert.equal(byID(renderer,'chat-target-new')[0].props.disabled,false)
+    await act(async()=>renderer.update(React.createElement(ChatTargetPicker,{...props,referenceLimitReached:true})))
+    assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,true)
+    assert.equal(byID(renderer,'chat-route-revoke-route')[0].props.disabled,false,'Access may still be revoked when the draft reference limit is full')
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('detached unavailable grants can be revoked with exact opaque revision and no duplicate taps',async()=>{
+  const detached=route('detached','archived');detached.target.available=false
+  resetRoutes({agentRoutesBySession:{chat:{routes:[detached],max_routes:4}}})
+  const pending=deferred();store.setState({revokeAgentRoute:async(...args)=>{fixture.revokes.push(args);return pending.promise}})
+  const {renderer}=await renderChatPicker()
+  try{
+    assert.equal(byID(renderer,'chat-detached-route-detached').length,1)
+    assert.match(texts(renderer),/Target unavailable/)
+    await act(async()=>{const revoke=byID(renderer,'chat-route-revoke-detached')[0].props.onPress;revoke();revoke()})
+    assert.deepEqual(fixture.revokes,[['chat','detached','opaque-detached-revision',1]])
+    await act(async()=>pending.resolve(true))
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('permission loading/errors are visible and Retry, close, and server switch all work',async()=>{
+  resetRoutes({agentRouteLoadingSessionIds:new Set(['chat'])})
+  let closes=0,switches=0
+  const {renderer}=await renderChatPicker({onClose(){closes++},onTeamNetwork(){switches++}})
+  try{
+    assert.equal(byID(renderer,'chat-routes-loading').length,1)
+    await act(async()=>store.setState({agentRouteLoadingSessionIds:new Set(),agentRouteErrorsBySession:{chat:'Access changed; retry.'}}))
+    assert.match(texts(renderer),/Access changed; retry/)
+    await click(renderer,'chat-routes-retry');assert.equal(fixture.routeReads.length,2)
+    await click(renderer,'chat-target-team-network');assert.equal(switches,1)
+    await click(renderer,'chat-target-picker-close');assert.equal(closes,1)
+    await act(async()=>store.setState({connected:false}))
+    assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,true)
+    assert.equal(byID(renderer,'chat-route-revoke-route')[0].props.disabled,true)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('revalidation releases hung revoke without allowing stale callbacks or old completion to unlock the fresh request',async()=>{
+  resetRoutes();const old=deferred(),fresh=deferred()
+  store.setState({revokeAgentRoute:async(...args)=>{fixture.revokes.push(args);return fixture.revokes.length===1?old.promise:fresh.promise}})
+  const {renderer}=await renderChatPicker()
+  try{
+    const stale=byID(renderer,'chat-route-revoke-route')[0].props.onPress
+    await act(async()=>stale())
+    await act(async()=>{fixture.client.validationRevision++;store.setState({health:withLocalChats()})})
+    await act(async()=>stale());assert.equal(fixture.revokes.length,1)
+    await click(renderer,'chat-route-revoke-route');assert.equal(fixture.revokes.length,2)
+    await act(async()=>old.resolve(true))
+    await click(renderer,'chat-route-revoke-route');assert.equal(fixture.revokes.length,2)
+    await act(async()=>fresh.resolve(true))
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('rejected target selections do not lock the picker, and captured handlers cannot act after scope change',async()=>{
+  resetRoutes();let selections=0
+  const {renderer}=await renderChatPicker({onSelect(){selections++;return false}})
+  try{
+    const select=byID(renderer,'chat-target-new')[0].props.onPress
+    await act(async()=>{select();select()});assert.equal(selections,2)
+    await act(async()=>store.setState({profileGeneration:2}))
+    await act(async()=>select());assert.equal(selections,2)
+    await click(renderer,'chat-target-new');assert.equal(selections,3)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('composer disables Send while granted access is being revoked',async()=>{
+  resetRoutes({drafts:{chat:'Hello'},revokingAgentRouteIds:new Set(['chat:route'])})
+  const renderer=await render()
+  try{
+    assert.equal(byID(renderer,'chat-send')[0].props.disabled,true)
+    await act(async()=>store.setState({revokingAgentRouteIds:new Set()}))
+    assert.equal(byID(renderer,'chat-send')[0].props.disabled,false)
+    await click(renderer,'chat-send');assert.equal(fixture.sends.length,1)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+function asyncTurn(){return {queued_id:'incoming',session_id:'chat',purpose:'cross_chat_handoff_delivery',conversation_mode:'async_route_v1',source_session_id:'target',source_title:'Mac agent',target_session_id:'chat',cross_chat_envelope_id:'envelope',prompt:'Please review the patch.',display_prompt:'Please review the patch.',file_ids:[],position:0}}
+function queueHealth(){const value=withLocalChats();value.capabilities.cross_chat_handoffs_v1.version=9;value.capabilities.cross_chat_handoffs_v1.features.exact_queued_delivery_skip=true;return value}
+async function renderQueue(overrides={}){
+  let renderer
+  const props={sessionId:'chat',profileId:'profile',profileGeneration:1,networkDisabled:false,onSent(){},...overrides}
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(QueueShelf,props))})
+  return {renderer,props}
+}
+for(const [scheme,background,border] of [['dark','#312d36','#9d7ac9'],['light','#f4effb','#8566bd']])test(`incoming async queue uses Mac ${scheme} purple and only exact removal, never Edit or Run now`,async()=>{
+  resetRoutes({health:queueHealth(),snapshots:{chat:{queuedTurns:[asyncTurn()]}}});fixture.scheme=scheme
+  const {renderer}=await renderQueue()
+  try{
+    assert.match(texts(renderer),/Mac agent/)
+    assert.match(texts(renderer),/Please review the patch/)
+    assert.doesNotMatch(texts(renderer),/starts automatically|Run now/)
+    const row=byID(renderer,'queued-row-incoming')[0]
+    assert.ok(row.props.style.flat().some(value=>value?.backgroundColor===background&&value?.borderColor===border))
+    assert.equal(byID(renderer,'queued-send-now-incoming').length,0)
+    assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,false)
+    await act(async()=>{const skip=byID(renderer,'queued-skip-incoming')[0].props.onPress;skip();skip()})
+    assert.deepEqual(fixture.skips,[['chat','incoming',1]])
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('incoming-only queue is visible in Composer, but unsupported exact skip stays disabled',async()=>{
+  resetRoutes({snapshots:{chat:{queuedTurns:[asyncTurn()]}}})
+  const renderer=await render()
+  try{
+    assert.equal(byID(renderer,'queued-row-incoming').length,1)
+    assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,true)
+    assert.match(byID(renderer,'queued-skip-incoming')[0].props.accessibilityHint,/Update AgentsServer/)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('queue revalidation clears hung action and rejects old closure/completion without unlocking a new skip',async()=>{
+  resetRoutes({health:queueHealth(),snapshots:{chat:{queuedTurns:[asyncTurn()]}}})
+  const old=deferred(),fresh=deferred()
+  store.setState({skipQueuedDelivery:async(...args)=>{fixture.skips.push(args);return fixture.skips.length===1?old.promise:fresh.promise}})
+  const {renderer}=await renderQueue()
+  try{
+    const stale=byID(renderer,'queued-skip-incoming')[0].props.onPress
+    await act(async()=>stale());assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,true)
+    await act(async()=>{fixture.client.validationRevision++;store.setState({health:queueHealth()})})
+    assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,false)
+    await act(async()=>stale());assert.equal(fixture.skips.length,1)
+    await click(renderer,'queued-skip-incoming');assert.equal(fixture.skips.length,2)
+    await act(async()=>old.resolve(true));assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,true)
+    await act(async()=>fresh.resolve(true));assert.equal(byID(renderer,'queued-skip-incoming')[0].props.disabled,false)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('same-tick queued Save submits once and reconnect preserves unsaved editor text',async()=>{
+  const turn={queued_id:'user',session_id:'chat',prompt:'Old text',file_ids:[]}
+  resetRoutes({snapshots:{chat:{queuedTurns:[turn]}}})
+  const pending=deferred(),updates=[]
+  store.setState({updateQueued:async(...args)=>{updates.push(args);return pending.promise}})
+  const {renderer}=await renderQueue()
+  try{
+    const edit=renderer.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel==='Edit queued message')
+    await act(async()=>edit.props.onPress())
+    await act(async()=>renderer.root.findByType('TextInput').props.onChangeText('Keep this unsaved text'))
+    await act(async()=>{fixture.client.validationRevision++;store.setState({health:queueHealth()})})
+    assert.equal(renderer.root.findByType('TextInput').props.value,'Keep this unsaved text')
+    await act(async()=>{const save=byID(renderer,'queued-save-user')[0].props.onPress;save();save()})
+    assert.equal(updates.length,1)
+    await act(async()=>pending.resolve(true))
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('offline remote server inbox remains selectable and its offline state is explained',async()=>{
+  reset();const original=fixture.client.teamNetworkGet
+  fixture.client.teamNetworkGet=async(...args)=>{const value=await original(...args);if(value.servers)value.servers[0].status='offline';return value}
+  const {renderer}=await renderPicker()
+  try{assert.match(texts(renderer),/Offline · inbox available/);assert.ok(recipient(renderer));await act(async()=>recipient(renderer).props.onPress());assert.equal(fixture.selected.target.recipient_kind,'server')}
+  finally{await act(async()=>renderer.unmount())}
+})
+
+function aliasesHealth(){const value=health();value.capabilities.team_bulletin_alias_v1={available:true,version:1,mention:'@@bulletin',legacy_mention:'@@all'};value.capabilities.team_all_servers_alias_v1={available:true,version:1,mention:'@@all',recipient_kind:'all_servers',max_recipients_per_message:64};return value}
+test('Team aliases stay distinct, searchable by exact sigil, and stale rows cannot select after capability loss',async()=>{
+  reset({health:aliasesHealth()});const original=fixture.client.teamNetworkGet
+  fixture.client.teamNetworkGet=async(...args)=>{const value=await original(...args);if(args[1]==='/v1/health')value.capabilities.team_all_servers_alias_v1=aliasesHealth().capabilities.team_all_servers_alias_v1;return value}
+  let selections=0
+  const {renderer,props}=await renderPicker({onSelect(value){fixture.selected=value;selections++;return true}})
+  try{
+    assert.match(texts(renderer),/All server inboxes/);assert.match(texts(renderer),/@@bulletin/)
+    const old=renderer.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel==='Reference All servers in My team').props.onPress
+    await act(async()=>renderer.update(React.createElement(TeamTargetPicker,{...props,query:'@@bulletin'})))
+    assert.equal(renderer.root.findAllByType('Pressable').filter(node=>node.props.accessibilityLabel==='Reference All servers in My team').length,0)
+    await act(async()=>renderer.update(React.createElement(TeamTargetPicker,props)))
+    await act(async()=>store.setState({health:health()}))
+    await act(async()=>old());assert.equal(selections,0)
+    await act(async()=>recipient(renderer).props.onPress());assert.equal(selections,1)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('captured server row cannot select after same-profile recipient reload and empty discovery has working Refresh',async()=>{
+  reset();let selections=0
+  const {renderer}=await renderPicker({onSelect(){selections++;return true}})
+  try{
+    const old=recipient(renderer).props.onPress
+    await act(async()=>{fixture.client.validationRevision++;store.setState({health:health()})})
+    await act(async()=>old());assert.equal(selections,0)
+    await act(async()=>recipient(renderer).props.onPress());assert.equal(selections,1)
+  }finally{await act(async()=>renderer.unmount())}
+  reset();const original=fixture.client.teamNetworkGet;let empty=true
+  fixture.client.teamNetworkGet=async(...args)=>{const value=await original(...args);if(empty&&value.servers)value.servers=[];return value}
+  const second=await renderPicker()
+  try{assert.equal(byID(second.renderer,'team-target-refresh').length,1);empty=false;await click(second.renderer,'team-target-refresh');assert.ok(recipient(second.renderer))}
+  finally{await act(async()=>second.renderer.unmount())}
 })

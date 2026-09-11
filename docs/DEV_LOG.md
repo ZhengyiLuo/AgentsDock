@@ -9,6 +9,23 @@
 - Checked development commands against package scripts and source CI, and
   checked installation guidance against the standalone server documentation.
 
+## Mobile cross-chat parity — 0.1.1 (171)
+
+- Align mobile with the current desktop async agent-message protocol: one
+  Markdown card per message, pending incoming messages in the queue, and
+  delivery-time chronology without duplicating internal provider prompts.
+- Show granted chat access, pending grants, route limits, loading/errors, and
+  revision-safe Revoke controls. Reconnects fence stale requests and callbacks.
+- Add exact queued-message removal with truthful confirmation, duplicate-tap
+  protection, and desktop purple pending-message styling.
+- Include offline server inboxes in `@@` discovery and distinguish capability-gated
+  `@@bulletin` posts from `@@all` inbox broadcasts.
+- Validate real component handlers against synthetic native hosts, projection
+  and store/API race regressions, broad library tests, and native build checks.
+  Synthetic rendering does not substitute for physical-device touch/pixel QA.
+- Release preparation uses generated, ignored native projects and resolves the
+  configured workspace name rather than assuming the legacy project name.
+
 ## Source snapshot
 
 - Includes the Electron desktop and React Native mobile clients, legacy Swift
