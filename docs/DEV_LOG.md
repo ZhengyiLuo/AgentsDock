@@ -8,6 +8,14 @@
 - Reuse normal chat navigation without additional requests, polling or route
   grants. Guard the originating server scope; do not resolve duplicate display
   names or turn imported label-only messages into guessed links.
+- Verified actual isolated Electron navigation for Codex and Claude, both
+  directions, keyboard activation, historical exchange legs and grouped inbox
+  messages. Unread mail remains unread and collapsed after returning. The
+  synthetic transport recorded no mail or execution actions.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `192`, source `9fae5cff`.
+  Developer ID signature and all 86 compiled archive files verified. The
+  running app was preserved; this local candidate is not notarized or publicly
+  released and has automatic updates disabled. No server change is required.
 
 ## 2026-09-11 — Lazy history repair after server upgrades
 
