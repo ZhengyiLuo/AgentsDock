@@ -26,9 +26,59 @@ export const APP_SHORTCUTS = {
 
 export type AppShortcutId = keyof typeof APP_SHORTCUTS
 export type ShortcutPlatform = 'mac' | 'other'
+export type AppShortcutGroupId = 'general' | 'navigation' | 'terminal' | 'messaging'
+
+const MAC_ONLY_SHORTCUTS = new Set<AppShortcutId>([
+  'terminalNewWindow',
+  'terminalSplitRight',
+  'terminalSplitDown'
+])
+
+export const APP_SHORTCUT_GROUPS = [
+  {
+    id: 'general',
+    shortcuts: ['newChat', 'openWorkspaceFile', 'attachFiles', 'settings', 'findChat', 'findInChat', 'closeSurface']
+  },
+  {
+    id: 'navigation',
+    shortcuts: ['nextWorkspaceTab', 'previousWorkspaceTab', 'focusLeftChatPane', 'focusRightChatPane', 'nextServer', 'previousServer', 'toggleSidebar', 'toggleInspector', 'jumpLatest']
+  },
+  {
+    id: 'terminal',
+    shortcuts: ['toggleTerminal', 'terminalNewWindow', 'terminalSplitRight', 'terminalSplitDown', 'terminalFind']
+  },
+  {
+    id: 'messaging',
+    shortcuts: ['sendMessage', 'steerMessage']
+  }
+] as const satisfies ReadonlyArray<{
+  id: AppShortcutGroupId
+  shortcuts: readonly AppShortcutId[]
+}>
+
+export function shortcutTranslationKey(id: AppShortcutId): string {
+  return `shortcuts.action.${id}`
+}
+
+export function shortcutIsAvailable(id: AppShortcutId, platform: ShortcutPlatform): boolean {
+  return platform === 'mac' || !MAC_ONLY_SHORTCUTS.has(id)
+}
 
 export function shortcutDisplay(id: AppShortcutId, platform: ShortcutPlatform): string {
   return APP_SHORTCUTS[id][platform]
+}
+
+export function shortcutKeycaps(id: AppShortcutId, platform: ShortcutPlatform): readonly string[] {
+  const display = shortcutDisplay(id, platform)
+  if (platform === 'other') return display.split('+')
+
+  const characters = Array.from(display)
+  const keycaps: string[] = []
+  while (characters.length && ['⌘', '⌥', '⌃', '⇧'].includes(characters[0])) {
+    keycaps.push(characters.shift()!)
+  }
+  if (characters.length) keycaps.push(characters.join(''))
+  return keycaps
 }
 
 export function shortcutAccelerator(id: AppShortcutId): string {

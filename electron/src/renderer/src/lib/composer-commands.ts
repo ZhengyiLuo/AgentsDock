@@ -36,7 +36,7 @@ export function composerCommandTrigger(text: string, caret: number): ComposerCom
   const slash = text.search(/\S/u)
   if (slash < 0 || text[slash] !== '/') return null
   const token = text.slice(slash, safeCaret)
-  const match = /^\/([\p{L}\p{N}-]*)$/u.exec(token)
+  const match = /^\/([\p{L}\p{N}_.:-]*)$/u.exec(token)
   if (!match) return null
 
   return {

@@ -150,6 +150,9 @@ const api: AgentsDockAPI = {
     listLocal: () => ipcRenderer.invoke('sessions:list-local'),
     bulkImport: items => ipcRenderer.invoke('sessions:bulk-import', items)
   },
+  providerCommands: {
+    list: (sessionId, refresh) => ipcRenderer.invoke('provider-commands:list', sessionId, refresh)
+  },
   timeline: {
     cached: sessionId => ipcRenderer.invoke('timeline:cached', sessionId),
     open: (sessionId, forceRemote) => ipcRenderer.invoke('timeline:open', sessionId, forceRemote),
