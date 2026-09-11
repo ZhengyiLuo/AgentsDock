@@ -53,8 +53,14 @@ export interface ProgressItem {
   startedAt?: string
   finishedAt?: string
   stoppedAt?: string
+  /** Explicit terminal arrival, including stops with no assistant output. */
+  terminalSeq?: number
   /** Lifecycle rows embedded chronologically in the one live progress surface. */
   lifecycle?: SystemItem[]
+  /** A message boundary is not completion of the owning provider run. */
+  continues?: boolean
+  /** Keep a tool's result with its original call across message boundaries. */
+  toolStartSequences?: Readonly<Record<string, number>>
 }
 
 export interface MediaItem {
@@ -81,6 +87,8 @@ export interface TurnItem {
   startedAt?: string
   finishedAt?: string
   stoppedAt?: string
+  /** Presentation boundary only; never changes provider/run ownership. */
+  terminalSeq?: number
   purpose?: string | null
   /** Presentation-only native-goal input slice, with unchanged runtime ownership. */
   afterSeq?: number
@@ -425,7 +433,7 @@ export class TimelineProjector {
     }
     const runId = event.run_id?.trim() || ''
     if (event.type === 'turn_started' && runId.startsWith('import_')) {
-      if (hasInjectedProviderAuthority(event.prompt || '')
+      if (!hasProviderUserProvenance(event) && hasInjectedProviderAuthority(event.prompt || '')
         // Unknown delivery formats remain visible rather than being mistaken
         // for an entire native prompt echo and losing their following answer.
         && !event.prompt?.trimStart().startsWith('[AgentsDock delivery ')) {
@@ -701,6 +709,7 @@ export class TimelineProjector {
           turn.stoppedAt ||= event.ts
         }
         turn.finishedAt = event.ts
+        turn.terminalSeq = event.seq
         this.assistantByTurn.delete(turn.key)
         if (this.activeTurn?.id === turn.id) this.activeTurn = null
       }
@@ -1285,6 +1294,7 @@ export class TimelineProjector {
     if (!turn) return
     const retired = this.writableTurn(turn)
     retired.finishedAt = event.ts
+    retired.terminalSeq = event.seq
     if (genuinelyStopped) retired.stoppedAt ||= event.ts
     this.assistantByTurn.delete(retired.key)
     if (this.activeTurn?.key === retired.key) this.activeTurn = null
@@ -1608,9 +1618,92 @@ function interleaveChronologicalSystemRows(rows: RenderTimelineItem[]): RenderTi
   const chronological = rows.filter(isChronologicalSystemRow)
   if (!chronological.length) return rows
   return interleaveAnchoredRows(
-    rows.filter(row => !isChronologicalSystemRow(row)),
+    splitProgressAtMessages(rows.filter(row => !isChronologicalSystemRow(row)), chronological),
     chronological
   )
+}
+
+function progressToolKey(event: Event): string {
+  const id = event.tool_id?.trim() || event.tool?.id?.trim()
+  return id ? `${event.run_id?.trim() || 'runless'}:${id}` : ''
+}
+
+/** The result updates its tool, not a second tool below a later message. */
+export function progressEventSequence(event: Event, progress?: ProgressItem): number {
+  if (progress?.toolStartSequences && (event.type === 'tool_started' || event.type === 'tool_finished')) {
+    const seq = progress.toolStartSequences[progressToolKey(event)]
+    if (seq != null) return seq
+  }
+  return activityEventSequence(event, progress?.orderingFinalEvents)
+}
+
+/** Full trace pages may contain tool starts absent from the compact sample. */
+export function progressToolStartSequences(events: Event[], known: Readonly<Record<string, number>> = {}): Record<string, number> {
+  const starts = { ...known }
+  for (const event of events) {
+    const key = progressToolKey(event)
+    if (event.type === 'tool_started' && key) starts[key] = Math.min(starts[key] ?? event.seq, event.seq)
+  }
+  return starts
+}
+
+function sameToolStartSequences(left?: Readonly<Record<string, number>>, right?: Readonly<Record<string, number>>): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every(key => left[key] === right[key])
+}
+
+function firstAnchorAtOrAfter(anchors: SystemItem[], seq: number): number {
+  let low = 0, high = anchors.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (anchors[middle].seq < seq) low = middle + 1
+    else high = middle
+  }
+  return low
+}
+
+/** Split only the affected activity; ordinary chats keep their exact rows. */
+function splitProgressAtMessages(rows: RenderTimelineItem[], chronological: SystemItem[]): RenderTimelineItem[] {
+  const messages = chronological.filter(row => crossChatSemanticKey(row.event) !== null)
+    .sort((left, right) => left.seq - right.seq)
+  if (!messages.length) return rows
+  return rows.flatMap((row): RenderTimelineItem[] => {
+    if (row.kind !== 'progress') return [row]
+    const start = firstAnchorAtOrAfter(messages, row.seq)
+    const endSeq = row.throughSeq ?? row.finalEvents?.[0]?.seq ?? row.terminalSeq
+      ?? (row.active ? Number.POSITIVE_INFINITY : Math.max(row.seq, ...row.events.map(event => event.seq)))
+    const end = firstAnchorAtOrAfter(messages, endSeq)
+    const cuts = messages.slice(start, end)
+    if (!cuts.length) return [row]
+
+    const toolStartSequences = progressToolStartSequences(row.sourceEvents ?? row.events)
+    const context = { ...row, toolStartSequences }
+    const buckets = Array.from({ length: cuts.length + 1 }, () => ({ events: [] as Event[], source: [] as Event[], lifecycle: [] as SystemItem[] }))
+    for (const event of row.events) buckets[firstAnchorAtOrAfter(cuts, progressEventSequence(event, context))].events.push(event)
+    for (const event of row.sourceEvents ?? row.events) buckets[firstAnchorAtOrAfter(cuts, progressEventSequence(event, context))].source.push(event)
+    for (const item of row.lifecycle ?? []) buckets[firstAnchorAtOrAfter(cuts, item.seq)].lifecycle.push(item)
+    return buckets.flatMap((bucket, index): ProgressItem[] => {
+      const last = index === cuts.length
+      // Retain a live tail even while the sender has not emitted its next
+      // update. Sending an async message must not look like stopping work.
+      if (!bucket.events.length && !bucket.lifecycle.length && !(last && (row.active || row.stoppedAt))) return []
+      const before = cuts[index - 1]
+      const suffix = before ? `:after:message:${before.key}` : ''
+      return [{
+        ...row, id: `${row.id}${suffix}`, key: `${row.key}${suffix}`,
+        seq: before ? before.seq : row.seq,
+        events: bucket.events, sourceEvents: bucket.source,
+        lifecycle: bucket.lifecycle, toolStartSequences,
+        active: last && row.active, continues: !last,
+        afterSeq: before?.seq ?? row.afterSeq,
+        throughSeq: last ? row.throughSeq : cuts[index].seq,
+        finishedAt: last ? row.finishedAt : cuts[index].anchorTs ?? cuts[index].event.ts,
+        stoppedAt: last ? row.stoppedAt : undefined
+      }]
+    })
+  })
 }
 
 function interleaveAnchoredRows(
@@ -1643,7 +1736,10 @@ function interleaveAnchoredRows(
   for (const candidate of anchored) {
     while (
       contentCursor < contentBySequence.length
-      && contentBySequence[contentCursor].row.seq <= candidate.row.seq
+      && (contentBySequence[contentCursor].row.seq < candidate.row.seq
+        || contentBySequence[contentCursor].row.seq === candidate.row.seq
+          && !(contentBySequence[contentCursor].row.kind === 'progress'
+            && (contentBySequence[contentCursor].row as ProgressItem).afterSeq === candidate.row.seq))
     ) {
       lastPresentedContentIndex = Math.max(lastPresentedContentIndex, contentBySequence[contentCursor].contentIndex)
       contentCursor += 1
@@ -1773,7 +1869,8 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
         throughSeq: continuations[index + 1]?.after?.seq ?? item.throughSeq,
         startedAt: segment.after ? activityEvents[0]?.ts ?? segment.after.ts : item.startedAt,
         finishedAt: last ? item.finishedAt : segment.finals.at(-1)?.ts,
-        stoppedAt: last ? item.stoppedAt : undefined
+        stoppedAt: last ? item.stoppedAt : undefined,
+        terminalSeq: last && item.finishedAt ? item.terminalSeq : undefined
       })
     }
     if (segment.finals.length) {
@@ -1878,12 +1975,15 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
       sameReferences(before.events, item.events) &&
       sameReferences(before.promotedCommentaryIds, item.promotedCommentaryIds)) return before
     if (before.kind === 'progress' && item.kind === 'progress' &&
+      before.seq === item.seq && before.continues === item.continues &&
+      sameToolStartSequences(before.toolStartSequences, item.toolStartSequences) &&
       before.active === item.active && before.startedAt === item.startedAt &&
       before.hasFinalResponse === item.hasFinalResponse &&
       before.afterSeq === item.afterSeq && before.throughSeq === item.throughSeq &&
       sameReferences(before.finalEvents ?? [], item.finalEvents ?? []) &&
       sameReferences(before.orderingFinalEvents ?? [], item.orderingFinalEvents ?? []) &&
       before.finishedAt === item.finishedAt && before.stoppedAt === item.stoppedAt &&
+      before.terminalSeq === item.terminalSeq &&
       sameReferences(before.events, item.events) &&
       sameReferences(before.sourceEvents ?? [], item.sourceEvents ?? []) &&
       sameReferences(before.lifecycle ?? [], item.lifecycle ?? [])) return before
@@ -1905,7 +2005,7 @@ function timelineItemEqual(a: TimelineItem, b: TimelineItem): boolean {
   }
   if (a.kind === 'turn' && b.kind === 'turn') {
     return a.user === b.user && a.startedAt === b.startedAt && a.finishedAt === b.finishedAt &&
-      a.stoppedAt === b.stoppedAt &&
+      a.stoppedAt === b.stoppedAt && a.terminalSeq === b.terminalSeq &&
       a.afterSeq === b.afterSeq && a.throughSeq === b.throughSeq &&
       a.providerThreadId === b.providerThreadId &&
       a.purpose === b.purpose && sameReferences(a.assistant, b.assistant) &&
@@ -2002,7 +2102,8 @@ function normalizeAssistantOutput(value: string): string {
 
 export function messageText(event: Event): string {
   const text = event.result_text || event.text || event.prompt || printableEventValue(event.message) || printableEventValue(event.error) || event.output || ''
-  return event.type === 'turn_started' || event.type === 'turn_queued' || event.type === 'turn_queue_run_now' || isNativeGoalSteerEvent(event)
+  return !hasProviderUserProvenance(event)
+    && (event.type === 'turn_started' || event.type === 'turn_queued' || event.type === 'turn_queue_run_now' || isNativeGoalSteerEvent(event))
     ? stripInjectedProviderAuthority(text)
     : text
 }
@@ -2131,7 +2232,9 @@ export function jobResultPresentation(event: Event): JobResultPresentation {
   const cancelled = event.type === 'turn_stopped'
     || event.stopped === true
     || ['stopped', 'cancelled', 'canceled'].includes(status)
-  const detail = messageText(event).trim() || (deferred
+  // A scheduled input is not a public result, including when only the start
+  // or a status-only terminal is available on a bounded timeline page.
+  const detail = messageText({ ...event, prompt: null }).trim() || (deferred
     ? 'Scheduled job deferred until this chat is available.'
     : cancelled
       ? 'Scheduled job was cancelled.'
@@ -2406,6 +2509,7 @@ function importedClaudeBackgroundTask(event: Event): string {
     event.type !== 'turn_started'
     || event.backend !== 'claude'
     || event.imported !== true
+    || hasProviderUserProvenance(event)
   ) return ''
   const prompt = event.prompt?.trim() || ''
   const outerStart = '<task-notification>'

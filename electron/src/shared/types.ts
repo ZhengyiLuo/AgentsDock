@@ -868,6 +868,7 @@ export interface Event {
   handoff_body_chars?: number | null
   handoff_body_sha256?: string | null
   /** Recipient-side queued edit; the sender's original envelope remains unchanged. */
+  message_body?: string | null
   message_edited_by_user?: boolean | null
   message_revision?: number | null
   /** Native delivery run recorded by a legacy exchange-leg receipt. */

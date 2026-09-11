@@ -299,6 +299,8 @@ describe('automatic secure peer approval completion', () => {
     })
     const first = render(<SecurePeerPanel status={peerStatus} onActivated={finish} />)
     await join()
+    // The pending label renders before the effect starts its observer.
+    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1))
     const input = teamHub.waitForSecurePeerPairingCompletion.mock.calls[0][1]
     first.unmount()
     expect(teamHub.stopSecurePeerPairingCompletionWait).toHaveBeenCalledWith(
@@ -309,7 +311,7 @@ describe('automatic secure peer approval completion', () => {
     expect(localStorage.getItem(consentKey())).toBe('approved')
     render(<SecurePeerPanel status={peerStatus} onActivated={finish} />)
     await screen.findByText('Waiting for host approval')
-    expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(2))
     expect(teamHub.requestSecurePeerPairing).toHaveBeenCalledTimes(1)
     await act(async () => secondCompletion.resolve(completedControl()))
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1))

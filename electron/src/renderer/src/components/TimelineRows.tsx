@@ -9,7 +9,7 @@ import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey } from '@shared/semantic-timeline'
 import type { ChatReference, CrossChatExchange, Event, PinnedItem, QueuedTurn, WorkspaceProfileScope } from '@shared/types'
 import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, ProgressItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { activityEventSequence, extractUnifiedDiff, isHandoffDigestEvent, isPublicCommentary, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
+import { progressEventSequence, progressToolStartSequences, extractUnifiedDiff, isHandoffDigestEvent, isPublicCommentary, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { formatDuration, formatTime, titleCase } from '../lib/format'
 import { requirePinnedItemsScope } from '../lib/pinned-items'
@@ -378,7 +378,8 @@ function TraceDisclosure({
     hasFinalResponse: activityHasFinalResponse
   })
   const [loadedEvents, setLoadedEvents] = useState<Event[] | null>(null)
-  const [nextAfter, setNextAfter] = useState(runActivity?.afterSeq ?? 0)
+  const detailStart = runActivity?.toolStartSequences ? 0 : runActivity?.afterSeq ?? 0
+  const [nextAfter, setNextAfter] = useState(detailStart)
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -400,14 +401,14 @@ function TraceDisclosure({
   useEffect(() => {
     loadGeneration.current++
     setLoadedEvents(null)
-    setNextAfter(runActivity?.afterSeq ?? 0)
+    setNextAfter(detailStart)
     setHasMore(true)
     setLoadingMore(false)
     setLoadError(null)
     return () => {
       loadGeneration.current++
     }
-  }, [resetKey, runActivity?.afterSeq, runId, sessionId])
+  }, [resetKey, runActivity?.afterSeq, detailStart, runId, sessionId])
   useEffect(() => {
     const previous = previousActivity.current
     previousActivity.current = {
@@ -432,13 +433,16 @@ function TraceDisclosure({
     const normalized = loadedEvents
       ? omitTerminalClaudeFinalCommentary(merged, runActivity?.finalEvents ?? merged)
       : merged
+    const ordering = runActivity?.toolStartSequences && loadedEvents
+      ? { ...runActivity, toolStartSequences: progressToolStartSequences(merged, runActivity.toolStartSequences) }
+      : runActivity
     return normalized.filter(event => (
       !promotedIds.has(event.id)
-      && (runActivity?.afterSeq == null || activityEventSequence(event, runActivity.orderingFinalEvents) > runActivity.afterSeq)
-      && (runActivity?.throughSeq == null || activityEventSequence(event, runActivity.orderingFinalEvents) <= runActivity.throughSeq)
+      && (runActivity?.afterSeq == null || progressEventSequence(event, ordering) > runActivity.afterSeq)
+      && (runActivity?.throughSeq == null || progressEventSequence(event, ordering) <= runActivity.throughSeq)
       && (includeCommentary || !isPublicCommentary(event))
     ))
-  }, [events, includeCommentary, loadedEvents, promotedCommentaryIds, runActivity?.afterSeq, runActivity?.throughSeq, runActivity?.finalEvents, runActivity?.orderingFinalEvents, runActivity?.sourceEvents])
+  }, [events, includeCommentary, loadedEvents, promotedCommentaryIds, runActivity?.afterSeq, runActivity?.throughSeq, runActivity?.finalEvents, runActivity?.orderingFinalEvents, runActivity?.sourceEvents, runActivity?.toolStartSequences])
   const activity = useMemo(() => buildTraceActivity(displayEvents), [displayEvents])
   const activityParts = useMemo<TracePart[]>(() => [
     ...activity.map(entry => ({ kind: 'activity' as const, seq: entry.seq, entry })),
@@ -496,14 +500,16 @@ function TraceDisclosure({
       const page = await window.agentsDock.timeline.trace(sessionId, runId, traceAnchor, cursor)
       if (generation !== loadGeneration.current) return
       const nextCursor = page.next_after ?? cursor
-      const boundedEvents = page.events.filter(event => (
-        (runActivity?.afterSeq == null || activityEventSequence(event, runActivity.orderingFinalEvents) > runActivity.afterSeq)
-        && (runActivity?.throughSeq == null || activityEventSequence(event, runActivity.orderingFinalEvents) <= runActivity.throughSeq)
+      // An explicit details request must retain starts from earlier pages to
+      // pair tool results across this message. Rendering still stays bounded.
+      const boundedEvents = runActivity?.toolStartSequences ? page.events : page.events.filter(event => (
+        (runActivity?.afterSeq == null || progressEventSequence(event, runActivity) > runActivity.afterSeq)
+        && (runActivity?.throughSeq == null || progressEventSequence(event, runActivity) <= runActivity.throughSeq)
       ))
       setLoadedEvents(current => mergeTraceEvents(current ?? [], boundedEvents))
       setNextAfter(nextCursor)
       setHasMore(page.has_more && nextCursor > cursor
-        && (runActivity?.orderingFinalEvents != null || runActivity?.throughSeq == null || nextCursor < runActivity.throughSeq))
+        && (runActivity?.toolStartSequences != null || runActivity?.orderingFinalEvents != null || runActivity?.throughSeq == null || nextCursor < runActivity.throughSeq))
     } catch (error) {
       if (generation !== loadGeneration.current) return
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -514,7 +520,7 @@ function TraceDisclosure({
   const showLess = () => {
     loadGeneration.current++
     setLoadedEvents(null)
-    setNextAfter(runActivity?.afterSeq ?? 0)
+    setNextAfter(detailStart)
     setHasMore(true)
     setLoadingMore(false)
     setLoadError(null)
@@ -583,7 +589,7 @@ function RunActivityHeader({ item, events, open, detailsId, onToggle }: { item: 
     return () => window.clearInterval(timer)
   }, [live])
   const duration = activityDuration(item, events, now)
-  const title = stopped
+  const title = item.continues ? t('timeline.activity.progress') : stopped
     ? t('timeline.activity.stoppedAfter', { duration })
     : live
       ? t('timeline.activity.workingFor', { duration })

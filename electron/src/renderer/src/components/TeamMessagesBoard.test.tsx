@@ -1010,7 +1010,9 @@ describe('Team Messages board', () => {
       teamId: 'team-1', attachmentId: 'attachment-image'
     })
     expect(screen.getByRole('textbox', { name: 'Team bulletin' })).toHaveValue('')
-    fireEvent.click(screen.getByRole('button', { name: /Launch demo is ready/i }))
+    // Settle the detail fetch and its attachment scope effect before the
+    // next user action starts a media request in that newly mounted view.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Launch demo is ready/i })) })
     expect(await screen.findByRole('button', { name: 'Show image launch.png' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Show video demo.mp4' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Show image launch.png' }))

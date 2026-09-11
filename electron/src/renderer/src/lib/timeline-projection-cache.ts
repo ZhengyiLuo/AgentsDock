@@ -1,4 +1,5 @@
 import type { AgentFile, Event } from '@shared/types'
+import { crossChatSemanticKey } from '@shared/semantic-timeline'
 import {
   TimelineProjector,
   reconcileRenderTimelineItems,
@@ -103,7 +104,23 @@ function renderAppendedTimeline(
   semantic: TimelineItem[],
   appended: Event[]
 ): { rendered: RenderTimelineItem[]; renderedSemanticCount: number } {
-  const renderStart = firstChangedSemanticIndex(cached.semantic, semantic)
+  let renderStart = firstChangedSemanticIndex(cached.semantic, semantic)
+  // A newly sent message changes a system owner, not the sender's TurnItem.
+  // Re-render the overlapping turn too: it now has an activity boundary.
+  // This also preserves its final answer when an old receipt is updated.
+  if (appended.some(event => crossChatSemanticKey(event) !== null)) {
+    const anchors = renderTimelineItems(semantic.slice(renderStart).filter(item =>
+      item.kind === 'system' && crossChatSemanticKey(item.event) !== null))
+      .filter(row => row.kind === 'system').map(row => row.seq)
+    for (let index = 0; index < renderStart && anchors.length; index++) {
+      const item = semantic[index]
+      if (item.kind !== 'turn') continue
+      const end = item.finishedAt
+        ? item.terminalSeq ?? Math.max(item.seq, ...item.assistant.map(event => event.seq), ...item.trace.map(event => event.seq))
+        : Number.POSITIVE_INFINITY
+      if (anchors.some(seq => seq >= item.seq && seq <= end)) { renderStart = index; break }
+    }
+  }
   if (renderStart === semantic.length && semantic.length === cached.semantic.length) {
     return { rendered: cached.rendered, renderedSemanticCount: 0 }
   }
@@ -129,7 +146,7 @@ function renderAppendedTimeline(
   // rendered suffix. Carry only those crossing system owners, not all the
   // intervening historical turns, into the incremental render.
   const crossingOwnerKeys = new Set(previousSuffix.flatMap(row =>
-    row.kind === 'system' && row.crossChatLegId ? [systemRowOwnerKey(row)] : []))
+    row.kind === 'system' && crossChatSemanticKey(row.event) !== null ? [systemRowOwnerKey(row)] : []))
   const crossingOwners = crossingOwnerKeys.size
     ? cached.semantic.slice(0, renderStart).filter(item =>
       item.kind === 'system' && crossingOwnerKeys.has(item.key))

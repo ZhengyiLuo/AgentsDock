@@ -24,6 +24,7 @@
   "serverUpdate.retryWhenIdle": "空闲时重试更新（{version}）",
   "sessionFork.runningDescription": "从上一个已完成的轮次创建会话分支；原会话继续运行。",
   "sessionFork.runningUnavailable": "更新 AgentsServer，以便从正在运行的会话中上一个已完成的轮次创建分支，或等待本轮结束。",
+  "timeline.activity.progress": "进度",
   "timeline.activity.stoppedAfter": "你在 {duration} 后停止了运行",
   "timeline.activity.supportingActivity": "辅助活动",
   "timeline.activity.workedFor": "运行了 {duration}",

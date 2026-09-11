@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-11 — Chronological agent messages
+
+- Place agent messages between the progress before and after their send or
+  delivery-start event. Keep the sender's live or stopped state below the
+  message, and retain that position when delivery receipts arrive later.
+- Preserve earlier answers during incremental receipt updates. Keep tool
+  calls and results together when activity is split around a message, including
+  explicitly loaded trace pages.
+- Preserve full queued message bodies, recipient edits, and compare-and-swap
+  revisions during stream updates and stale receipt replay.
+- Do not display scheduled-job input as a public result. Preserve genuine
+  user-authored quotations of provider control text.
+- Validated live, completed, queued-reply, and reopened views in the actual
+  desktop renderer with synthetic Codex and Claude transport. Checked both
+  themes, narrow layout, and typing/scrolling in long cached conversations.
+  This does not certify live provider execution, server history pagination,
+  or minimap navigation. No server deployment or public release is included.
+
 ## 2026-09-11 — Current desktop development
 
 - Bring current desktop changes into this repository: source-proven history

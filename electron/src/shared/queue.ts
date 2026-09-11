@@ -31,7 +31,8 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       created_at: event.ts,
       paused: false,
       pause_reason: null,
-      promoted: event.promoted === true
+      promoted: event.promoted === true,
+      ...asyncQueuedMessageProjection(event, current.find(turn => turn.queued_id === event.queued_id))
     }
     return [...current.filter(turn => turn.queued_id !== next.queued_id), next].sort(queueSort)
   }
@@ -59,7 +60,8 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       created_at: event.ts,
       paused: true,
       pause_reason: 'delivery_uncertain',
-      promoted: event.promoted === true
+      promoted: event.promoted === true,
+      ...asyncQueuedMessageProjection(event, current.find(turn => turn.queued_id === event.queued_id))
     }
     return [...current.filter(turn => turn.queued_id !== next.queued_id), next].sort(queueSort)
   }
@@ -101,7 +103,8 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       team_references: event.team_references ?? turn.team_references,
       conversation_mode: event.conversation_mode ?? turn.conversation_mode,
       source_title: event.source_title ?? turn.source_title,
-      position: event.position ?? turn.position
+      position: event.position ?? turn.position,
+      ...asyncQueuedMessageProjection(event, turn)
     } : turn).sort(queueSort)
   }
   if (event.positions?.length) {
@@ -109,6 +112,28 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
     return current.map(turn => ({ ...turn, position: positions.get(turn.queued_id) ?? turn.position })).sort(queueSort)
   }
   return current
+}
+
+/** The public body and its CAS revision are one atomic projection. */
+function asyncQueuedMessageProjection(event: Event, current?: QueuedTurn): Partial<QueuedTurn> {
+  const incoming = (event.purpose ?? current?.purpose) === 'cross_chat_handoff_delivery'
+    && (event.conversation_mode ?? current?.conversation_mode) === 'async_route_v1'
+    && typeof event.message_body === 'string'
+    && typeof event.message_revision === 'number' && Number.isInteger(event.message_revision) && event.message_revision >= 0
+    && typeof event.message_edited_by_user === 'boolean'
+      ? { message_body: event.message_body, message_revision: event.message_revision, message_edited_by_user: event.message_edited_by_user }
+      : null
+  const previous = current?.purpose === 'cross_chat_handoff_delivery' && current.conversation_mode === 'async_route_v1'
+    && typeof current.message_body === 'string'
+    && typeof current.message_revision === 'number' && Number.isInteger(current.message_revision) && current.message_revision >= 0
+    && typeof current.message_edited_by_user === 'boolean'
+      ? { message_body: current.message_body, message_revision: current.message_revision, message_edited_by_user: current.message_edited_by_user }
+      : null
+  // An old stream receipt may arrive after the PATCH has already committed
+  // into the local cache. Position/fence updates still apply, but its short
+  // preview must not restore an older message or erase the editing revision.
+  const accepted = previous && (!incoming || previous.message_revision > incoming.message_revision) ? previous : incoming
+  return accepted ? { ...accepted, prompt: accepted.message_body, display_prompt: accepted.message_body } : {}
 }
 
 function queueSort(a: QueuedTurn, b: QueuedTurn): number {

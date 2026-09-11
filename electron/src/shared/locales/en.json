@@ -24,6 +24,7 @@
   "serverUpdate.retryWhenIdle": "Retry update ({version}) when idle",
   "sessionFork.runningDescription": "Fork through the last completed turn; the source chat keeps running.",
   "sessionFork.runningUnavailable": "Update AgentsServer to fork a running chat through its last completed turn, or wait for this turn to finish.",
+  "timeline.activity.progress": "Progress",
   "timeline.activity.stoppedAfter": "You stopped after {duration}",
   "timeline.activity.supportingActivity": "Supporting activity",
   "timeline.activity.workedFor": "Worked for {duration}",

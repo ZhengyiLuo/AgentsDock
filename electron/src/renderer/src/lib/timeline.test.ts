@@ -513,7 +513,7 @@ describe('projectTimeline', () => {
     expect(rows[2]).toMatchObject({ kind: 'system', seq: 3, event: { type: 'cross_chat_handoff_received' } })
   })
 
-  it('embeds a cross-chat card between live commentary updates at its arrival sequence', () => {
+  it('places a cross-chat card between separate live commentary segments at its arrival sequence', () => {
     const rows = renderTimelineItems(projectTimeline([
       event(1, 'turn_started', { run_id: 'run-live', prompt: 'Keep monitoring' }),
       event(2, 'reasoning_summary', { run_id: 'run-live', phase: 'commentary', text: 'Before the handoff.' }),
@@ -522,16 +522,20 @@ describe('projectTimeline', () => {
       }),
       event(4, 'reasoning_summary', { run_id: 'run-live', phase: 'commentary', text: 'After the handoff.' })
     ], []))
-    const progress = rows.find((row): row is Extract<RenderTimelineItem, { kind: 'progress' }> => row.kind === 'progress')
+    const progress = rows.filter((row): row is Extract<RenderTimelineItem, { kind: 'progress' }> => row.kind === 'progress')
 
-    expect(progress?.lifecycle).toBeUndefined()
+    expect(progress.flatMap(row => row.lifecycle ?? [])).toEqual([])
+    expect(progress).toMatchObject([
+      { active: false, continues: true, events: [{ seq: 2, text: 'Before the handoff.' }] },
+      { active: true, events: [{ seq: 4, text: 'After the handoff.' }] }
+    ])
     expect(rows.find(row => row.kind === 'system')).toMatchObject({ seq: 3, event: { type: 'cross_chat_handoff_received' } })
 
     const settled = settleInactiveTimelineItems(rows)
-    expect(settled.map(row => row.kind)).toEqual(['message', 'progress', 'system'])
-    expect(settled[1]).toMatchObject({
-      kind: 'progress', active: false
-    })
+    expect(settled.map(row => row.kind)).toEqual(['message', 'progress', 'system', 'progress'])
+    expect(settled.filter(row => row.kind === 'progress')).toMatchObject([
+      { active: false, events: [{ seq: 2 }] }, { active: false, events: [{ seq: 4 }] }
+    ])
   })
 
   it('suppresses a beta3-purpose exchange prompt while retaining native reasoning, tools, artifacts, and final', () => {
