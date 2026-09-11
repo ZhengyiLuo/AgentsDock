@@ -1,16 +1,84 @@
-# AgentsDock
+<h1 align="center">AgentsDock</h1>
 
-A desktop and mobile workspace for Claude Code and Codex.
+<p align="center"><strong>A dock for all your agents.</strong></p>
 
-Use your agents for coding, research, and long-running work without living in
-a terminal. Run them on your own workstation or server, then follow their
-progress, review files, and continue the conversation from your computer,
-iPhone, or iPad.
+<div align="center">
+  <a href="https://agentsdock.net">
+    <img
+      src="https://img.shields.io/badge/website-agentsdock.net-0EA5E9"
+      alt="AgentsDock website"
+    />
+  </a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.13-beta.33">
+    <img
+      src="https://img.shields.io/badge/desktop-v0.2.13--beta.33-EA7233"
+      alt="Latest desktop beta"
+    />
+  </a>
+  <a href="https://discord.gg/ZGDrhEWqPt">
+    <img
+      src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&amp;logoColor=white"
+      alt="Join the AgentsDock Discord"
+    />
+  </a>
+  <a href="https://github.com/ZhengyiLuo/AgentsServer">
+    <img
+      src="https://img.shields.io/badge/backend-self--hosted-2563EB"
+      alt="Self-hosted backend"
+    />
+  </a>
+  <a href="CONTRIBUTING.md">
+    <img
+      src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg"
+      alt="Contributions welcome"
+    />
+  </a>
+</div>
 
-[Website](https://agentsdock.net) ·
-[Desktop downloads](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases) ·
-[Setup guide](https://agentsdock.net/setup.html) ·
-[AgentsServer](https://github.com/ZhengyiLuo/AgentsServer)
+<p align="center">
+  <a href="https://agentsdock.net">
+    <img
+      src="docs/assets/agentsdock-overview.png"
+      alt="AgentsDock desktop and mobile apps showing agent chats and file previews"
+      width="760"
+    />
+  </a>
+</p>
+
+<div align="center">
+  <strong>Built for AI researchers.</strong>
+  <br />
+  <br />
+  AgentsDock currently supports <strong>Claude Code</strong>,
+  <strong>Codex</strong>, and <strong>Cursor</strong> in one desktop and mobile
+  workspace. Use your agents for coding, research, and long-running work
+  without living in a terminal.
+  <br />
+  <br />
+  Run agents on your own workstation or server, follow their progress, review
+  files and rich media, and continue from desktop or mobile.
+  <br />
+  <br />
+  <strong>Download the latest version:</strong>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-mac-universal.dmg">macOS</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-x86_64.AppImage">Linux x86_64</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-arm64.AppImage">Linux ARM64</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-win-x64.exe">Windows</a>
+  ·
+  <a href="https://testflight.apple.com/join/2JjWy2Z2">iPhone &amp; iPad</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
+  <br />
+  <br />
+  <strong>
+    AgentsDock is the client;
+    <a href="https://github.com/ZhengyiLuo/AgentsServer">AgentsServer</a>
+    is the self-hosted backend.
+  </strong>
+</div>
 
 ## What you can do
 
