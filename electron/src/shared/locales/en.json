@@ -1,4 +1,8 @@
 {
+  "storage.fullWarning": "Local storage ran out of space. Saved data remains on disk; recent changes may be unsaved. Keep this window open, free space, then choose Retry saving.",
+  "storage.retrySaving": "Retry saving",
+  "storage.legacyRestart": "Your saved connection settings could not be migrated while storage was full. The original settings are preserved. After freeing space, copy any unsaved text and reopen AgentsDock to finish migration; the temporary default will not overwrite them.",
+  "storage.closeFailed": "This window stayed open because your changes could not be saved. Free some disk space and try again, or copy your unsaved text before closing.",
   "timeline.inbox.unreadCount": "{count} unread",
   "timeline.inbox.messageCount": "{count} messages",
   "timeline.inbox.oneMessage": "1 message",

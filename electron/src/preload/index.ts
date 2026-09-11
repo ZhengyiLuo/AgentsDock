@@ -360,7 +360,8 @@ const api: AgentsDockAPI = {
     readyForNotifications: () => ipcRenderer.invoke('native:notification:ready'),
     readyForSecurePeerInvite: () => ipcRenderer.invoke('native:secure-peer-invite:ready'),
     closeWindow: () => ipcRenderer.invoke('native:close-window'),
-    completeCloseFlush: requestId => ipcRenderer.invoke('native:close-flush-complete', requestId)
+    completeCloseFlush: (requestId, saved) => ipcRenderer.invoke('native:close-flush-complete', requestId, saved),
+    retryStorage: () => ipcRenderer.invoke('native:retry-storage')
   },
   events: {
     on: <K extends keyof AppEventMap>(name: K, listener: (payload: AppEventMap[K]) => void) => {

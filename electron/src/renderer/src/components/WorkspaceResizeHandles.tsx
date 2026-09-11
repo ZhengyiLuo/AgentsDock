@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { saveLocalStorage } from '../lib/local-storage'
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -55,7 +56,7 @@ export function savedWorkspaceSidebarVisible(workspaceKey: string): boolean {
 }
 
 export function persistWorkspaceSidebarVisible(workspaceKey: string, visible: boolean): void {
-  window.localStorage.setItem(workspaceSidebarVisibilityStorageKey(workspaceKey), String(visible))
+  saveLocalStorage(workspaceSidebarVisibilityStorageKey(workspaceKey), String(visible))
 }
 
 export function savedWorkspaceColumnStyle(workspaceKey: string, viewportWidth = window.innerWidth): CSSProperties {
@@ -208,7 +209,7 @@ function setPanelWidth(shell: HTMLElement, panel: Panel, width: number): void {
 }
 
 function persistWidth(workspaceKey: string, panel: Panel, width: number): void {
-  window.localStorage.setItem(workspacePanelStorageKey(workspaceKey, panel), String(width))
+  saveLocalStorage(workspacePanelStorageKey(workspaceKey, panel), String(width))
 }
 
 function finishResize(drag: MutableRefObject<ResizeDrag | null>, panel: Panel | null): void {

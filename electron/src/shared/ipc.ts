@@ -568,7 +568,8 @@ export interface AgentsDockAPI {
     readyForNotifications(): Promise<boolean>
     readyForSecurePeerInvite(): Promise<boolean>
     closeWindow(): Promise<void>
-    completeCloseFlush(requestId: string): Promise<boolean>
+    completeCloseFlush(requestId: string, saved?: boolean): Promise<boolean>
+    retryStorage(): Promise<void>
   }
   events: {
     on<K extends keyof import('./types').AppEventMap>(name: K, listener: (payload: import('./types').AppEventMap[K]) => void): () => void

@@ -848,13 +848,16 @@ export interface ProviderInterruptionOrigin {
 }
 
 export interface ProviderHistoryOrigin {
-  provider: 'claude'
+  provider: 'claude' | 'codex'
   kind?: 'assistant' | 'user'
   event_id?: string
   session_id?: string
   timestamp?: string
   parent_event_id?: string | null
   prompt_id?: string | null
+  turn_id?: string
+  native_event_id?: string
+  source_text_sha256?: string
   cause?: never
 }
 
@@ -882,7 +885,7 @@ export interface Event {
   /** Server-verified Codex runtime context recovered from imported history. */
   provider_runtime_context?: 'goal' | null
   /** Server-proven, in-place repair of an imported provider record. */
-  provider_history_repair?: 'source_proven_import' | 'source_proven_assistant_replay' | null
+  provider_history_repair?: 'source_proven_import' | 'source_proven_assistant_replay' | 'source_proven_native_replay' | null
   /** Positive provider evidence that an imported input was authored by the user. */
   provider_user_authored?: boolean | null
   /** Additive provenance; only the exact imported lifecycle contract is control metadata. */
@@ -2062,6 +2065,8 @@ export interface TimelinePinsChanged {
 }
 
 export interface BootstrapPayload {
+  /** A local write failed due to storage exhaustion during this app session. */
+  storageFull?: boolean
   settings: PublicServerSettings
   mailHints?: MailHintProjection | null
   health?: Health | null
@@ -2223,6 +2228,7 @@ export interface NativeFileRef {
 }
 
 export interface AppEventMap {
+  'app:storage': { full: boolean }
   'team:mail-hints': MailHintProjection
   'app:language': LanguageSettingsSnapshot
   'app:update': AppUpdateStatus

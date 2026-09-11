@@ -144,6 +144,7 @@ import { PORT_TUNNEL_MAX_BRIDGES_PER_TUNNEL, PortTunnelManager } from './port-tu
 import { FileUploadGrantRegistry } from './file-upload-grants'
 import { SettingsStore, type ServerProfileRuntimeState } from './settings'
 import { appLog } from './logger'
+import { clearStorageError, localStorageWasFull, observeStorageErrors, reportStorageError } from './storage-health'
 import { SubagentEventProjector } from './subagent-projection'
 import { mergeTimelineSearchResults } from './search'
 import type { TeamHubConfigureServerRoleInput, TeamHubDiscovery, TeamHubScope, TeamHubServerScope } from '../shared/team-hub'
@@ -492,6 +493,9 @@ export class AppService {
 
   addWindow(window: BrowserWindow): void {
     this.windows.add(window)
+    const stopStorageObserver = observeStorageErrors(() => {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('app:storage', { full: true })
+    })
     const rendererId = window.webContents.id
     if (Number.isSafeInteger(rendererId) && rendererId > 0) {
       this.rendererGrantEpochs.set(rendererId, (this.rendererGrantEpochs.get(rendererId) ?? 0) + 1)
@@ -514,10 +518,17 @@ export class AppService {
       window.webContents.on('destroyed', () => this.invalidateRendererFileGrants(rendererId, true))
     }
     window.on('closed', () => {
+      stopStorageObserver()
       this.windows.delete(window)
       this.rendererReadyWindows.delete(window)
       this.invalidateRendererFileGrants(rendererId, true)
     })
+  }
+
+  retryLocalStorage(): void {
+    this.settings.retryStorageWrites()
+    this.cache.retryStorageWrites()
+    clearStorageError()
   }
 
   rendererReadyForNotificationRoutes(window: BrowserWindow | null): boolean {
@@ -4896,7 +4907,7 @@ export class AppService {
       this.cache.putSession(scope.namespace, page.session)
       this.rememberSessionDetail(scope, page.session)
       if (mode === 'replace') this.cache.replaceEvents(scope.namespace, sessionId, page.events)
-      else this.cache.putEvents(scope.namespace, sessionId, page.events)
+      else this.cache.putEvents(scope.namespace, sessionId, page.events, cachedLast)
       this.cache.putQueuedTurns(scope.namespace, sessionId, page.queued_turns ?? [])
       const hasMoreEvents = mode === 'replace'
         ? Boolean(page.has_more)
@@ -4964,6 +4975,7 @@ export class AppService {
       this.scheduleSubagentSnapshotRefresh(scope, sessionId, lease)
       queueMicrotask(() => void this.refreshTimelineFiles(scope, sessionId))
     } catch (error) {
+      reportStorageError(error)
       appLog('timeline', 'tail refresh failed; keeping cached transcript', { sessionId, error: errorText(error) })
       if (this.isCurrentTimeline(scope, sessionId, lease)) this.activateTimelineStream(scope, sessionId, cachedLast, lease)
     } finally {
@@ -5183,6 +5195,7 @@ export class AppService {
         this.cache.putEvents(scope.namespace, sessionId, events)
         this.applyEventsToCaches(scope, sessionId, events)
       } catch (error) {
+        reportStorageError(error)
         appLog('cache', 'failed to persist streamed events', {
           profileId: scope.profileId, generation: scope.generation, sessionId, count: events.length, error: errorText(error)
         })
@@ -5717,6 +5730,7 @@ export class AppService {
     this.profileTransitionWarning = null
     return {
       settings: this.settings.publicSettings(),
+      storageFull: localStorageWasFull(),
       health: this.health,
       mailHints: this.mailHints.projection(scope.profileId, scope.generation),
       sessions: this.sessions,

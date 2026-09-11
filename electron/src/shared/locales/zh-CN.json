@@ -1,4 +1,8 @@
 {
+  "storage.fullWarning": "本地存储空间不足。已保存的数据仍保留在磁盘上，最近的更改可能尚未保存。请保持此窗口打开，释放空间后选择“重试保存”。",
+  "storage.retrySaving": "重试保存",
+  "storage.legacyRestart": "存储空间不足时无法迁移已保存的连接设置。原始设置仍保留。释放空间后，请复制未保存的文字并重新打开 AgentsDock，以完成迁移；临时默认设置不会覆盖原始设置。",
+  "storage.closeFailed": "由于更改未能保存，此窗口保持打开。请释放磁盘空间后重试，或在关闭前复制未保存的文字。",
   "timeline.inbox.unreadCount": "{count} 条未读",
   "timeline.inbox.messageCount": "{count} 条消息",
   "timeline.inbox.oneMessage": "1 条消息",

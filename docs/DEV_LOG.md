@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-11 — Storage recovery and native history replay
+
+- Keep the desktop open after local storage exhaustion. Preserve the original
+  database and saved drafts; use temporary storage only for rebuildable cache
+  data. Failed draft saves block window close, with an explicit Retry saving
+  action after space is freed. An incomplete legacy credential migration keeps
+  its original settings protected and requires reopening after recovery.
+- Prevent failed event-cache batches from advancing the durable history cursor.
+  Handle browser storage quota errors in layout controls without crashing React.
+  Recovery is user-triggered, with no new storage or inbox polling.
+- Recognize the server's exact source-proven native replay marker. Keep original
+  human messages and scheduled reports, suppress only verified imported copies,
+  and preserve the correction when an older cached response arrives later.
+- Verified disk-full startup, preserved drafts, failed-close handling and a
+  successful explicit retry using the actual desktop service, SQLite, IPC,
+  preload and renderer with isolated fault injection. The system disk was not
+  filled, and no provider turn was started by this check.
+
 ## 2026-09-11 — Passive agent mailbox
 
 - Show passive incoming agent messages as compact purple sender groups in

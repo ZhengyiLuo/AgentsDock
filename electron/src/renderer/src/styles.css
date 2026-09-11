@@ -2357,6 +2357,7 @@ button.tool-event-toggle:hover { background: #242424; }
 .provider-reload-toast span { min-width: 0; flex: 1; user-select: text; overflow-wrap: anywhere; }
 .provider-reload-toast button { flex: none; color: inherit; background: transparent; -webkit-app-region: no-drag; }
 .top-right-notice-stack { position: fixed; z-index: 2000; right: 18px; top: 50px; width: min(520px, calc(100vw - 36px)); max-height: calc(100vh - 68px); display: grid; gap: 10px; overflow-y: auto; pointer-events: none; }
+.top-right-notice-stack .storage-full-notice { position: static; max-width: none; pointer-events: auto; }
 .update-toast { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 12px; color: #e8f3ff; background: #202b37; border: 1px solid #38526d; border-radius: 8px; box-shadow: 0 12px 30px #0009; pointer-events: auto; -webkit-app-region: no-drag; }
 .update-toast > svg { flex: none; color: #58a6ff; }
 .update-toast > div { min-width: 0; flex: 1; display: grid; gap: 2px; }

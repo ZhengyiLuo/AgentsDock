@@ -7,6 +7,7 @@ import { acknowledgeWindowCloseFlush, closeWindowAfterRendererFlush } from './wi
 import type { LazyTeamHubService } from './team-hub-lazy-service'
 import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, parseBulkImportSessionItems } from '../shared/local-session-import'
 import type { LanguageSettings } from './language'
+import { reportStorageError } from './storage-health'
 
 export interface RegisterIpcOptions {
   language?: Pick<LanguageSettings, 'get' | 'set'>
@@ -26,7 +27,13 @@ export function registerIpc(
     ipcMain.removeHandler(channel)
     ipcMain.handle(channel, (event, ...args) => {
       requireTrustedSender(event, channel)
-      return listener(event, ...args)
+      try {
+        const result = listener(event, ...args)
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+          return Promise.resolve(result).catch(error => { reportStorageError(error); throw error })
+        }
+        return result
+      } catch (error) { reportStorageError(error); throw error }
     })
   }
   const handle = (channel: string, listener: (...args: any[]) => unknown): void => {
@@ -34,6 +41,7 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('native:retry-storage', () => service.retryLocalStorage())
   handle('team:mail-hints:acknowledge-page', input => service.acknowledgeMailHintPage(input))
   if (options.language) {
     const language = options.language
@@ -437,9 +445,9 @@ export function registerIpc(
     return closeWindowAfterRendererFlush(BrowserWindow.fromWebContents(event.sender))
   })
   ipcMain.removeHandler('native:close-flush-complete')
-  ipcMain.handle('native:close-flush-complete', (event, requestId) => {
+  ipcMain.handle('native:close-flush-complete', (event, requestId, saved) => {
     requireTrustedSender(event, 'native:close-flush-complete')
-    return acknowledgeWindowCloseFlush(BrowserWindow.fromWebContents(event.sender), requestId)
+    return acknowledgeWindowCloseFlush(BrowserWindow.fromWebContents(event.sender), requestId, saved !== false)
   })
   return serverSetup
 }

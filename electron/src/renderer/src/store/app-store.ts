@@ -187,6 +187,7 @@ interface AppState {
   activeSessionIds: Set<string>
   turnAdmissionTokens: Record<string, string>
   stoppingSessionIds: Set<string>
+  storageFull: boolean
   error: string | null
   creatingChat: boolean
   modals: ModalState
@@ -430,6 +431,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeProfileId: null,
   profileGeneration: 0,
   switchingProfileId: null,
+  storageFull: false,
   mailHints: null,
   connected: false,
   connectionGeneration: 0,
@@ -612,6 +614,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     unsubscribers = [
       installLatencySensitiveInteractionTracking(),
+      window.agentsDock.events.on('app:storage', payload => { if (payload.full) set({ storageFull: true }) }),
       window.agentsDock.events.on('team:mail-hints', payload => {
         const current = get()
         if (bufferingBootstrapConnections || current.switchingProfileId
@@ -2656,6 +2659,7 @@ function workspaceStateFromBootstrap(
   )
   return {
     initialized,
+    storageFull: Boolean(payload.storageFull || useAppStore.getState().storageFull),
     profiles: payload.profiles ?? [],
     activeProfileId: payload.activeProfileId ?? null,
     profileGeneration: payload.profileGeneration ?? 0,

@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { saveLocalStorage } from '../lib/local-storage'
 import {
   memo,
   type CSSProperties,
@@ -44,7 +45,7 @@ function savedTerminalDockHeight(workspaceKey: string): number {
 }
 
 function persistTerminalDockHeight(workspaceKey: string, height: number): void {
-  window.localStorage.setItem(terminalDockStorageKey(workspaceKey), String(height))
+  saveLocalStorage(terminalDockStorageKey(workspaceKey), String(height))
 }
 
 export const TerminalDock = memo(function TerminalDock({

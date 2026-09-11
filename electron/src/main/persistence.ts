@@ -1,12 +1,13 @@
 import { app } from 'electron'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { AgentFile, Event, Job, PinnedItem, QueuedTurn, Session, SessionSnapshot, TimelineSearchResult, ViewState } from '../shared/types'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
 import { incompleteLeadingRunId } from '../shared/semantic-timeline'
 import { agentFileBelongsToSession, isolateSessionEvent } from '../shared/session-files'
 import { isImportedSourceProvenRepair, mergeProviderInterruptionEvent } from '../shared/provider-origin'
 import { isSearchableEvent, searchEventRole, searchableEventText, searchFtsQuery, searchSnippet, searchTokens } from './search'
+import { reportStartupStorageError, reportStorageError } from './storage-health'
 
 const SERVER_SCOPED_TABLES = [
   'sessions', 'events', 'queued_turns', 'jobs', 'files', 'view_state', 'timeline_state', 'pins', 'preferences'
@@ -53,6 +54,7 @@ const CACHED_TIMELINE_MAX_RAW_EVENT_LIMIT = 2_000
 // an older server response omitted even after the server is upgraded.
 export const TIMELINE_PAGING_SCHEMA_VERSION = 3
 const FILE_OWNERSHIP_CACHE_SCHEMA_VERSION = '1'
+const REBUILDABLE_PREFERENCES = new Set(['runtimeCatalog:v1', 'serverVersion:v1', 'semanticTimelineCapability:v1'])
 
 export class CacheNamespaceCollisionError extends Error {
   constructor(
@@ -110,15 +112,29 @@ function sessionsConflict(source: Session, target: Session): boolean {
 }
 
 export class LocalCache {
-  private readonly db: DatabaseSync
+  private db!: DatabaseSync
   private readonly statements = new Map<string, StatementSync>()
+  private readonly eventWriteGaps = new Map<string, { after: number; error: unknown }>()
+  private readonlyStorage: DatabaseSync | null = null
+  private storageFailure: unknown = null
+  private cachePath = ':memory:'
+  private readonly temporaryEventSessions = new Set<string>()
 
   private rollbackTransaction(): void {
     if (this.db.isTransaction) this.db.exec('ROLLBACK')
   }
 
   constructor(path?: string) {
-    this.db = new DatabaseSync(path ?? join(app.getPath('userData'), 'agentsdock.sqlite'))
+    const cachePath = path ?? join(app.getPath('userData'), 'agentsdock.sqlite')
+    this.cachePath = cachePath
+    try {
+    this.db = new DatabaseSync(cachePath)
+    // Opening an already-current cache must not require a write. In particular,
+    // a full disk must not prevent the user from opening their saved drafts.
+    if (this.schemaIsCurrent()) {
+      this.db.exec('PRAGMA synchronous = NORMAL')
+      return
+    }
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
@@ -226,10 +242,79 @@ export class LocalCache {
     if (!timelineColumns.some(column => column.name === 'paging_schema_version')) this.db.exec('ALTER TABLE timeline_state ADD COLUMN paging_schema_version INTEGER')
     if (!timelineColumns.some(column => column.name === 'semantic_paging')) this.db.exec('ALTER TABLE timeline_state ADD COLUMN semantic_paging INTEGER')
     this.migrateFileOwnershipCache()
+    } catch (error) {
+      if (cachePath === ':memory:' || !reportStartupStorageError(error, dirname(cachePath))) throw error
+      try { this.db!.close() } catch { /* It may not have opened successfully. */ }
+      // The existing file is never removed, renamed, or replaced. Rebuildable
+      // server data can stay usable in memory; user-owned saves still reject.
+      const temporary = new LocalCache(':memory:')
+      temporary.cachePath = cachePath
+      temporary.storageFailure = error
+      try { temporary.readonlyStorage = new DatabaseSync(cachePath, { readOnly: true }) }
+      catch { /* Existing data remains on disk for recovery after space is freed. */ }
+      return temporary
+    }
+  }
+
+  private requireDurableStorage(): void {
+    if (this.storageFailure) throw this.storageFailure
+  }
+
+  /** Explicit user retry only; never called by the stream or on a keystroke. */
+  retryStorageWrites(): void {
+    const recovered = this.storageFailure ? new LocalCache(this.cachePath) : this
+    if (recovered.storageFailure) {
+      recovered.close()
+      throw this.storageFailure
+    }
+    try {
+      recovered.db.exec('BEGIN IMMEDIATE')
+      recovered.db.prepare('UPDATE cache_meta SET value = value WHERE key = ?').run('file-ownership-schema')
+      recovered.db.exec('COMMIT')
+    } catch (error) {
+      recovered.rollbackTransaction()
+      if (recovered !== this) recovered.close()
+      reportStorageError(error)
+      throw error
+    }
+    if (recovered === this) return
+    this.statements.clear()
+    this.readonlyStorage?.close()
+    this.readonlyStorage = null
+    this.db.close()
+    this.db = recovered.db
+    this.storageFailure = null
+    for (const key of this.temporaryEventSessions) {
+      const [serverId, sessionId] = JSON.parse(key) as [string, string]
+      this.eventWriteGaps.set(key, { after: this.latestEventSequence(serverId, sessionId),
+        error: new Error('Refresh this chat to reconcile events received while its local cache was unavailable.') })
+    }
+    this.temporaryEventSessions.clear()
+  }
+
+  private savedJSON<T>(table: 'preferences' | 'view_state', serverId: string, key: string, fallback: T): T {
+    if (!this.readonlyStorage) return fallback
+    try {
+      const column = table === 'preferences' ? 'key' : 'session_id'
+      const row = this.readonlyStorage.prepare(`SELECT json FROM ${table} WHERE server_id = ? AND ${column} = ?`)
+        .get(serverId, key) as { json: string } | undefined
+      return row ? parseJSON(row.json, fallback) : fallback
+    } catch { return fallback }
+  }
+
+  private schemaIsCurrent(): boolean {
+    try {
+      const version = this.db.prepare('SELECT value FROM cache_meta WHERE key = ?').get('file-ownership-schema') as { value?: string } | undefined
+      if (version?.value !== FILE_OWNERSHIP_CACHE_SCHEMA_VERSION) return false
+      const columns = this.db.prepare('PRAGMA table_info(timeline_state)').all() as Array<{ name: string }>
+      return ['verified_latest_seq', 'known_total', 'next_timeline_before', 'paging_schema_version', 'semantic_paging']
+        .every(name => columns.some(column => column.name === name))
+    } catch { return false }
   }
 
   close(): void {
     this.statements.clear()
+    this.readonlyStorage?.close()
     this.db.close()
   }
 
@@ -447,6 +532,7 @@ export class LocalCache {
   }
 
   mergeServerNamespace(sourceServerId: string, targetServerId: string): CacheNamespaceMergeResult {
+    this.requireDurableStorage()
     const source = sourceServerId.trim()
     const target = targetServerId.trim()
     if (!source || !target) throw new Error('Cache namespace IDs must not be empty')
@@ -494,6 +580,7 @@ export class LocalCache {
 
   /** Remove every cached row owned by one or more server/profile namespaces. */
   removeServerNamespaces(serverIds: readonly string[]): void {
+    this.requireDurableStorage()
     const ids = [...new Set(serverIds.map(value => value.trim()).filter(Boolean))]
     if (!ids.length) return
     this.db.exec('BEGIN IMMEDIATE')
@@ -564,6 +651,7 @@ export class LocalCache {
   }
 
   removeSession(serverId: string, sessionId: string): void {
+    this.requireDurableStorage()
     this.db.exec('BEGIN')
     try {
       this.removeSessionRows(serverId, sessionId)
@@ -778,15 +866,21 @@ export class LocalCache {
     return row ? parseJSON(row.json, null) : null
   }
 
-  putEvents(serverId: string, sessionId: string, events: Event[]): void {
+  putEvents(serverId: string, sessionId: string, events: Event[], reconciledAfter?: number): void {
     if (!events.length) return
+    const key = JSON.stringify([serverId, sessionId])
+    const gap = this.eventWriteGaps.get(key)
+    // Only a server reconciliation from the last durable cursor (or a full
+    // replacement below) can repair a dropped batch. Later live events alone
+    // must not make the missing interval disappear behind a higher cursor.
+    if (gap && (reconciledAfter === undefined || reconciledAfter > gap.after)) throw gap.error
     const put = this.statement(`
       INSERT INTO events(server_id, session_id, seq, event_id, json) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(server_id, session_id, event_id) DO UPDATE SET seq = excluded.seq, json = excluded.json
       WHERE events.seq <> excluded.seq OR events.json <> excluded.json
     `)
-    this.db.exec('BEGIN')
     try {
+      this.db.exec('BEGIN')
       const changed: Event[] = []
       for (const event of events) {
         const isolated = isolateSessionEvent(event, sessionId)
@@ -810,8 +904,13 @@ export class LocalCache {
       }
       if (this.sessionIsSearchable(serverId, sessionId)) this.indexSearchEvents(serverId, sessionId, changed)
       this.db.exec('COMMIT')
+      this.eventWriteGaps.delete(key)
+      if (this.storageFailure) this.temporaryEventSessions.add(key)
     } catch (error) {
       this.rollbackTransaction()
+      if (reportStorageError(error)) this.eventWriteGaps.set(key, {
+        after: gap?.after ?? this.latestEventSequence(serverId, sessionId), error
+      })
       throw error
     }
   }
@@ -834,6 +933,8 @@ export class LocalCache {
       for (const event of compactedEvents) put.run(serverId, sessionId, event.seq, event.id, JSON.stringify(event))
       if (this.sessionIsSearchable(serverId, sessionId)) this.indexSearchEvents(serverId, sessionId, compactedEvents)
       this.db.exec('COMMIT')
+      this.eventWriteGaps.delete(JSON.stringify([serverId, sessionId]))
+      if (this.storageFailure) this.temporaryEventSessions.add(JSON.stringify([serverId, sessionId]))
     } catch (error) {
       this.rollbackTransaction()
       throw error
@@ -1097,6 +1198,8 @@ export class LocalCache {
     nextTimelineBefore?: number | null,
     semanticPaging?: boolean
   ): void {
+    const gap = this.eventWriteGaps.get(JSON.stringify([serverId, sessionId]))
+    if (gap) throw gap.error
     const updateCursor = nextTimelineBefore !== undefined
     const updatePaging = semanticPaging !== undefined
     this.statement(`
@@ -1234,11 +1337,13 @@ export class LocalCache {
   }
 
   viewState(serverId: string, sessionId: string): ViewState | null {
+    if (this.storageFailure) return this.savedJSON('view_state', serverId, sessionId, null)
     const row = this.statement('SELECT json FROM view_state WHERE server_id = ? AND session_id = ?').get(serverId, sessionId) as { json: string } | undefined
     return row ? parseJSON(row.json, null) : null
   }
 
   putViewState(serverId: string, state: ViewState): void {
+    this.requireDurableStorage()
     this.statement(`
       INSERT INTO view_state(server_id, session_id, json) VALUES (?, ?, ?)
       ON CONFLICT(server_id, session_id) DO UPDATE SET json = excluded.json
@@ -1252,6 +1357,7 @@ export class LocalCache {
   }
 
   putPin(serverId: string, item: PinnedItem): PinnedItem[] {
+    this.requireDurableStorage()
     this.statement(`
       INSERT INTO pins(server_id, session_id, item_id, json) VALUES (?, ?, ?, ?)
       ON CONFLICT(server_id, session_id, item_id) DO UPDATE SET json = excluded.json
@@ -1260,11 +1366,13 @@ export class LocalCache {
   }
 
   removePin(serverId: string, sessionId: string, itemId: string): PinnedItem[] {
+    this.requireDurableStorage()
     this.statement('DELETE FROM pins WHERE server_id = ? AND session_id = ? AND item_id = ?').run(serverId, sessionId, itemId)
     return this.pins(serverId, sessionId)
   }
 
   replacePins(serverId: string, sessionId: string, items: PinnedItem[]): PinnedItem[] {
+    this.requireDurableStorage()
     this.db.exec('BEGIN')
     try {
       this.statement('DELETE FROM pins WHERE server_id = ? AND session_id = ?').run(serverId, sessionId)
@@ -1280,10 +1388,11 @@ export class LocalCache {
 
   preference<T>(serverId: string, key: string, fallback: T): T {
     const row = this.statement('SELECT json FROM preferences WHERE server_id = ? AND key = ?').get(serverId, key) as { json: string } | undefined
-    return row ? parseJSON(row.json, fallback) : fallback
+    return row ? parseJSON(row.json, fallback) : this.savedJSON('preferences', serverId, key, fallback)
   }
 
   putPreference<T>(serverId: string, key: string, value: T): void {
+    if (!REBUILDABLE_PREFERENCES.has(key)) this.requireDurableStorage()
     this.statement(`
       INSERT INTO preferences(server_id, key, json) VALUES (?, ?, ?)
       ON CONFLICT(server_id, key) DO UPDATE SET json = excluded.json

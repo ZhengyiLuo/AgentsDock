@@ -1,4 +1,6 @@
 import type { Event, ProviderInterruptionOrigin } from './types'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 
 const canonicalUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const sourceISOTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
@@ -33,6 +35,23 @@ export function isImportedSourceProvenAssistantReplay(event: Event): boolean {
     && typeof origin.timestamp === 'string' && Number.isFinite(Date.parse(origin.timestamp))
     && (origin.kind == null || origin.kind === 'assistant')
     && !hasProviderUserProvenance(event)
+}
+
+/** Exact native duplicates may retain genuine authorship; only their imported copy is hidden. */
+export function isImportedSourceProvenNativeReplay(event: Event): boolean {
+  const origin = event.provider_origin
+  return isImportedHistoryRecord(event) && event.backend === 'codex'
+    && event.provider_history_repair === 'source_proven_native_replay' && event.metadata_only === true
+    && (event.type === 'turn_started' ? event.prompt === '' && origin?.kind === 'user'
+      : ['assistant_text', 'reasoning_summary'].includes(event.type) && event.text === '' && origin?.kind === 'assistant')
+    && origin?.provider === 'codex'
+    && ['event_id', 'session_id', 'turn_id', 'native_event_id'].every(key => {
+      const value = (origin as unknown as Record<string, unknown>)[key]
+      return typeof value === 'string' && value.length > 0 && value.length <= 256
+    })
+    && typeof origin.timestamp === 'string' && sourceISOTimestamp.test(origin.timestamp)
+    && Number.isFinite(Date.parse(origin.timestamp))
+    && typeof origin.source_text_sha256 === 'string' && /^[a-f0-9]{64}$/.test(origin.source_text_sha256)
 }
 
 /**
@@ -129,7 +148,7 @@ export function hasProviderUserProvenance(event: Event): boolean {
 export function isImportedProviderControlMetadata(event: Event): boolean {
   return isImportedProviderInterruption(event) || isImportedClaudeControlCompanion(event)
     || isImportedCodexGoalContext(event) || isImportedSourceProvenRepair(event)
-    || isImportedSourceProvenAssistantReplay(event)
+    || isImportedSourceProvenAssistantReplay(event) || isImportedSourceProvenNativeReplay(event)
 }
 
 /**
@@ -138,6 +157,15 @@ export function isImportedProviderControlMetadata(event: Event): boolean {
  */
 export function mergeProviderInterruptionEvent(current: Event, incoming: Event): Event {
   if (current.id !== incoming.id || current.session_id !== incoming.session_id) return incoming
+  if (isImportedSourceProvenNativeReplay(current) && incoming.seq === current.seq
+    && incoming.type === current.type && incoming.run_id === current.run_id && incoming.ts === current.ts
+    && incoming.imported === true && incoming.backend === 'codex'
+    && incoming.provider_history_repair == null && incoming.metadata_only == null
+    && incoming.provider_user_authored === current.provider_user_authored) {
+    const body = incoming.type === 'turn_started' ? incoming.prompt : incoming.text
+    if (typeof body === 'string' && current.provider_origin?.provider === 'codex'
+      && bytesToHex(sha256(utf8ToBytes(body))) === current.provider_origin.source_text_sha256) return current
+  }
   if (
     isImportedSourceProvenAssistantReplay(current)
     && incoming.seq === current.seq && incoming.type === current.type && incoming.run_id === current.run_id

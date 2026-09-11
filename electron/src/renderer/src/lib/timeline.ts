@@ -3,7 +3,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { hasTimelineChangeSignal } from '@shared/timeline-change-signal'
 import { agentFileBelongsToSession, eventFileForSession } from '@shared/session-files'
-import { hasProviderUserProvenance, isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay } from '@shared/provider-origin'
+import { hasProviderUserProvenance, isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedProviderControlMetadata, isImportedProviderInterruption, isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay, isImportedSourceProvenNativeReplay } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey, crossChatSemanticKey, isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, providerInteractionAuditKey } from '@shared/semantic-timeline'
 import { isChatMailboxEvent } from '@shared/chat-inbox'
 
@@ -398,14 +398,15 @@ export class TimelineProjector {
     }
     // Checkpoint/finish companions of a proven control-only import batch are
     // not logical turns. In particular, they must not retire current work.
-    if (isImportedClaudeControlCompanion(event) || isImportedSourceProvenAssistantReplay(event)) return
+    if (isImportedClaudeControlCompanion(event) || isImportedSourceProvenAssistantReplay(event)
+      || isImportedSourceProvenNativeReplay(event) && event.type !== 'turn_started') return
     if (this.importedCrossChatOutputAliases.has(event.id)) {
       if (event.type !== 'turn_finished') return
       event = { ...event, result_text: null, text: null }
     }
     // Keep a silent input boundary in mixed imports so later output cannot
     // become the answer to a preceding genuine question in the same run.
-    if (isImportedSourceProvenRepair(event) || this.importedCrossChatAliases.has(event.id)) {
+    if (isImportedSourceProvenRepair(event) || isImportedSourceProvenNativeReplay(event) || this.importedCrossChatAliases.has(event.id)) {
       const prior = event.run_id ? this.turnByRun.get(event.run_id) : undefined
       if (prior) {
         this.writableTurn(prior).finishedAt ||= event.ts
