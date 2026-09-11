@@ -14,6 +14,10 @@
   read-state updates and reopening. This is not a live-provider execution test.
 - Requires the matching standalone server mailbox contract. No server
   deployment or public release is included in this local implementation.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `185`, source `bac1876e`.
+  Developer ID signature and all 86 compiled archive files verified. Automatic
+  updates are disabled; this candidate is not notarized or published, and the
+  installed/running app was not replaced.
 
 ## 2026-09-11 — Scheduled history ownership
 
