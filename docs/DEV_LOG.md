@@ -1,6 +1,10 @@
 # Public development log
 
-## Mobile compact panels and cross-chat catch-up — 0.1.1 (173)
+## Mobile compact panels and cross-chat catch-up — 0.1.2 (173)
+
+- Advance the marketing version to 0.1.2 after Apple closed the approved 0.1.1
+  release train. The initial 0.1.1 build-173 candidate was rejected during
+  validation and was not uploaded; application behavior is unchanged.
 
 - Collapse goals and queued messages by default into touch-sized summary
   headers. Expanded content stays scrollable within a shared composer height
