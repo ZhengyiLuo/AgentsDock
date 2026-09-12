@@ -225,7 +225,7 @@ describe('automatic secure peer approval completion', () => {
     )
     expect(screen.queryByRole('button', { name: 'Check approval' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
-    expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1))
     expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledWith(
       { profileId: 'profile-peer', profileGeneration: 4, serverIdentity: 'server-peer' },
       { pairingId, expectedTranscriptHash: 'c'.repeat(64), requestId: expect.any(String) }
