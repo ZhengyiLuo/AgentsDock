@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-12 — Receipt-based outgoing chat status
+
+- Replace the unconditional outgoing “Sent to” heading with “To” and an
+  explicit status. Distinguish unconfirmed delivery, stored unread mail,
+  agent-read receipts, cancellation and failure; preserve legacy queue status.
+- Correlate receipts to the exact message and participants. A default unread
+  state or registration event alone is not proof of mailbox storage. Reading
+  is not represented as processing or replying.
+- Preserve target navigation, on-demand message expansion and existing
+  controls. Add no polling, automatic resend, agent invocation or server change.
+- Verified synthetic receipt states in the actual desktop renderer, including
+  on-demand expansion and target navigation, plus focused component checks.
+  These checks do not establish the delivery of any particular live message.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `198`, source
+  `2734708`. Developer ID signature and all 86 compiled archive files verified.
+  The running app was preserved. This candidate is not notarized or publicly
+  released and has automatic updates disabled.
+
 ## 2026-09-12 — Full control within a shared chat
 
 - Expand the interactive invitation disclosure and required confirmation to
