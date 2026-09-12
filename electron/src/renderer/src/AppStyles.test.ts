@@ -26,7 +26,7 @@ describe('app overlay interaction styles', () => {
 
   it('stacks the transient emergency notice above the update notice without replacing timeline acknowledgement', () => {
     expect(app).toMatch(
-      /<div className="top-right-notice-stack">\s*<EmergencyNotice \/>\s*<UpdateNotice \/>\s*<\/div>/s
+      /<div className="top-right-notice-stack">\s*<EmergencyNotice \/>\s*\{storageFull && <div className="error-toast storage-full-notice" role="alert">.*?<\/div>\}\s*<UpdateNotice \/>\s*<\/div>/s
     )
     expect(styles).toMatch(
       /\.emergency-toast \{[^}]*pointer-events:\s*auto;[^}]*-webkit-app-region:\s*no-drag;/s

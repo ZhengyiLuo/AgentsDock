@@ -53,7 +53,7 @@ describe('cross-chat message lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reviewer' }))
     expect(selectSession).toHaveBeenCalledExactlyOnceWith('chat-2')
     view.rerender(<TimelineRowView {...props} sessionId="chat-2" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Sent to Source' }))
+    fireEvent.click(screen.getByRole('button', { name: 'To Source' }))
     expect(selectSession).toHaveBeenLastCalledWith('chat-1')
     expect(loadExchange).not.toHaveBeenCalled()
   })
