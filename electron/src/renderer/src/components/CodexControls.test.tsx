@@ -156,6 +156,22 @@ describe('Codex controls', () => {
     })))
   })
 
+  it('disables shared permission and goal dialogs when access is lost, while keeping Close available', async () => {
+    Object.assign(window.agentsDock, { sharedChat: true })
+    useAppStore.setState({ connected: true })
+    renderControls()
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
+    expect(await screen.findByRole('button', { name: 'Save permissions' })).toBeEnabled()
+    act(() => { useAppStore.setState({ connected: false }) })
+    expect(screen.getByRole('button', { name: 'Save permissions' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save goal' })).toBeDisabled()
+    expect(screen.getByLabelText('Approval prompts')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Refresh Codex status' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Close Codex controls' })).toBeEnabled()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Save permissions' }))
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
   it('opens goal controls only for the addressed Codex chat', async () => {
     renderControls()
     await screen.findByRole('button', { name: 'Codex controls: Approval needed' })

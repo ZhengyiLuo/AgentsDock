@@ -372,6 +372,7 @@ export function CodexGoalBar() {
 export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean }) {
   useLocale()
   const { runtime, session, loading, refreshing, mutating, error, refresh } = useCodexRuntime()
+  const sharedDisconnected = useAppStore(state => window.agentsDock.sharedChat === true && !state.connected)
   const [notice, setNotice] = useState<string | null>(null)
   if (!session) return null
   return <div className="codex-controls">
@@ -385,23 +386,24 @@ export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean 
           {runtime?.thread_loaded === false ? t("ui.CodexControls.CodexControlsPanel.thread_not_loaded_08b0501") : ''}
         </Dialog.Description>
       </div>
-      <button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.refresh_codex_status_da5990a")} disabled={refreshing || mutating} onClick={() => void refresh()}>
+      <button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.refresh_codex_status_da5990a")} disabled={refreshing || mutating || sharedDisconnected} onClick={() => void refresh()}>
         <RefreshCw className={refreshing ? 'spin' : ''} size={15} />
       </button>
       <Dialog.Close asChild><button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.close_codex_controls_9fa3e16")}><X size={16} /></button></Dialog.Close>
     </header>
+    {sharedDisconnected && <div className="codex-control-alert" role="status">{t('chatShare.web.disconnected')}</div>}
     {error && <div className="codex-control-alert" role="alert"><AlertTriangle size={14} /><span>{error}</span></div>}
     {notice && <div className="codex-control-notice" role="status"><Check size={14} /><span>{notice}</span><button type="button" aria-label={t("ui.CodexControls.CodexControlsPanel.dismiss_notice_a179917")} onClick={() => setNotice(null)}><X size={12} /></button></div>}
     {loading
       ? <div className="codex-controls-loading"><LoaderCircle className="spin" size={18} />{" "}{t("ui.CodexControls.CodexControlsPanel.loading_thread_controls_8d8c070")}</div>
-      : <div className="codex-controls-body">
+      : <fieldset className="codex-controls-body" disabled={sharedDisconnected}>
         <PendingControlsSection />
         <ThreadStatusSection />
         <PermissionSettings session={session} onNotice={setNotice} />
         <GoalSettings onNotice={setNotice} autoFocusObjective={focusGoal} />
         {!window.agentsDock.sharedChat && <ThreadActions onNotice={setNotice} />}
         {!window.agentsDock.sharedChat && <BackgroundTerminals onNotice={setNotice} />}
-      </div>}
+      </fieldset>}
   </div>
 }
 

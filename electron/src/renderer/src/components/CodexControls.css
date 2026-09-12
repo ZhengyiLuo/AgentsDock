@@ -546,7 +546,7 @@
 .codex-control-mark.active { color: var(--green); }
 .codex-control-mark.waiting { color: var(--amber); }
 .codex-control-mark.error { color: var(--danger); }
-.codex-controls-body { min-height: 0; overflow: auto; padding: 11px; }
+.codex-controls-body { min-width: 0; min-height: 0; margin: 0; border: 0; overflow: auto; padding: 11px; }
 .codex-control-section {
   margin-bottom: 9px;
   padding: 12px;
