@@ -58,6 +58,8 @@ import type {
   PinnedItem,
   PinnedItemsSnapshot,
   ProcessSnapshot,
+  ProviderCommandSelection,
+  ProviderCommandsSnapshot,
   ProviderReloadResult,
   ProviderRuntimeChanged,
   QueuedCrossChatDeliveryIdentity,
@@ -126,6 +128,27 @@ const TEAM_HUB_BOOTSTRAP_PROOF_TIMEOUT_MS = 15_000
 const TEAM_HUB_BOOTSTRAP_PROOF_MAX_RESPONSE_BYTES = 64 * 1024
 const SECURE_PEER_MAX_REQUEST_BYTES = 64 * 1024
 const SECURE_PEER_BINARY_ERROR_MAX_BYTES = 64 * 1024
+const PROVIDER_COMMAND_ID_PATTERN = /^pcmd_[0-9a-f]{32}$/
+const PROVIDER_COMMAND_REVISION_PATTERN = /^pcmdrev_[0-9a-f]{32}$/
+
+function providerCommandSelectionPayload(value: ProviderCommandSelection | undefined): ProviderCommandSelection | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid provider command selection.')
+  }
+  const record = value as unknown as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  if (
+    keys.length !== 2
+    || keys[0] !== 'id'
+    || keys[1] !== 'revision'
+    || typeof record.id !== 'string'
+    || !PROVIDER_COMMAND_ID_PATTERN.test(record.id)
+    || typeof record.revision !== 'string'
+    || !PROVIDER_COMMAND_REVISION_PATTERN.test(record.revision)
+  ) throw new Error('Invalid provider command selection.')
+  return { id: record.id, revision: record.revision }
+}
 const SECURE_PEER_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const TEAM_ATTACHMENT_CHUNK_MAX_BYTES = 8 * 1024 * 1024
 const TEAM_ATTACHMENT_TRANSFER_TIMEOUT_MS = 120_000
@@ -987,6 +1010,10 @@ export class AgentServerClient {
     return this.sessionPageWithConfiguration(configuration, sessionId, { pageMode: 'semantic' })
   }
 
+  providerCommands(sessionId: string, refresh = false): Promise<ProviderCommandsSnapshot> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/provider-commands?refresh=${refresh ? 'true' : 'false'}`)
+  }
+
   async sendTurn(
     sessionId: string,
     prompt: string,
@@ -995,8 +1022,10 @@ export class AgentServerClient {
     effort?: string | null,
     clientCapabilities: string[] = ['codex_interactive_v1'],
     chatReferences: ChatReference[] = [],
-    teamReferences: TeamReference[] = []
+    teamReferences: TeamReference[] = [],
+    skillSelection?: ProviderCommandSelection
   ): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }> {
+    const selection = providerCommandSelectionPayload(skillSelection)
     const response = await this.post<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }>(`/api/sessions/${encodeURIComponent(sessionId)}/turns`, {
       prompt,
       file_ids: fileIds,
@@ -1004,7 +1033,8 @@ export class AgentServerClient {
       effort: effort ?? '',
       client_capabilities: clientCapabilities,
       ...(chatReferences.length ? { chat_references: chatReferences } : {}),
-      ...(teamReferences.length ? { team_references: teamReferences } : {})
+      ...(teamReferences.length ? { team_references: teamReferences } : {}),
+      ...(selection ? { skill_selection: selection } : {})
     })
     return response.event ? { ...response, event: compactTimelineEvent(response.event) } : response
   }

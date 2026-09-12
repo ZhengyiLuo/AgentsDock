@@ -26,6 +26,7 @@ import { BackendMark } from './BackendMark'
 import { CodexServerSettings } from './CodexServerSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
 import { ServerManagement } from './ServerManagement'
+import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings'
 import { ShortcutKey } from './ShortcutTooltip'
 import { WorkingDirectoryInput } from './WorkingDirectoryInput'
 import { ADD_SERVER_EVENT, MANAGE_SERVERS_EVENT } from './ServerSelector'
@@ -446,7 +447,7 @@ export function Dialogs() {
   </>
 }
 
-type AppSettingsSection = 'general' | 'appearance' | 'server' | 'updates'
+type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
 
 export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSettings?: ReactNode; serverUpdates?: ReactNode } = {}) {
   useLocale()
@@ -472,8 +473,9 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
   useTransientClose(open, closeSettings)
   useEffect(() => {
     const selectSection = (event: Event) => {
-      const next = (event as CustomEvent<AppSettingsSection>).detail
-      if (next === 'general' || next === 'appearance' || next === 'server' || next === 'updates') setSection(next)
+      const next = (event as CustomEvent<AppSettingsSection | 'appearance'>).detail
+      if (next === 'appearance') setSection('general')
+      else if (next === 'general' || next === 'shortcuts' || next === 'server' || next === 'updates') setSection(next)
     }
     window.addEventListener('agentsdock:app-settings-section', selectSection)
     return () => window.removeEventListener('agentsdock:app-settings-section', selectSection)
@@ -543,7 +545,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
           <Dialog.Title>{t('settings.title')}</Dialog.Title>
           <nav aria-label={t('settings.sections')}>
             <button ref={section === 'general' ? activeSectionRef : undefined} type="button" className={section === 'general' ? 'active' : ''} aria-current={section === 'general' ? 'page' : undefined} onClick={() => setSection('general')}><span>{t('settings.general')}</span></button>
-            <button ref={section === 'appearance' ? activeSectionRef : undefined} type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => setSection('appearance')}><span>{t('settings.appearance')}</span></button>
+            <button ref={section === 'shortcuts' ? activeSectionRef : undefined} type="button" className={section === 'shortcuts' ? 'active' : ''} aria-current={section === 'shortcuts' ? 'page' : undefined} onClick={() => setSection('shortcuts')}><span>{t('settings.keyboardShortcuts')}</span></button>
             <button ref={section === 'server' ? activeSectionRef : undefined} type="button" className={section === 'server' ? 'active' : ''} aria-current={section === 'server' ? 'page' : undefined} onClick={() => setSection('server')}><span>{t('settings.server')}</span></button>
             <button ref={section === 'updates' ? activeSectionRef : undefined} type="button" className={section === 'updates' ? 'active' : ''} aria-current={section === 'updates' ? 'page' : undefined} onClick={() => setSection('updates')}><span>{t('settings.updates')}</span></button>
           </nav>
@@ -560,6 +562,14 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                 </select>
               </label>
               {language.saveFailed && <p role="status">{t('language.saveFailed')}</p>}
+              <label className="app-settings-row">
+                <strong className="app-settings-row-title">{t('settings.theme')}</strong>
+                <select className="app-settings-select" aria-label={t('settings.appTheme')} value={appearance} onChange={event => chooseAppearance(event.currentTarget.value as AppearanceMode)}>
+                  <option value="system">{t('settings.systemTheme')}</option>
+                  <option value="light">{t('settings.lightTheme')}</option>
+                  <option value="dark">{t('settings.darkTheme')}</option>
+                </select>
+              </label>
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
                 <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>
@@ -570,19 +580,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
               </div>
             </div>
           </section>}
-          {section === 'appearance' && <section className="app-settings-section" aria-labelledby="app-settings-appearance-title">
-            <header><h2 id="app-settings-appearance-title">{t('settings.appearance')}</h2></header>
-            <div className="app-settings-list">
-              <label className="app-settings-row">
-                <strong className="app-settings-row-title">{t('settings.theme')}</strong>
-                <select className="app-settings-select" aria-label={t('settings.appTheme')} value={appearance} onChange={event => chooseAppearance(event.currentTarget.value as AppearanceMode)}>
-                  <option value="system">{t('settings.systemTheme')}</option>
-                  <option value="light">{t('settings.lightTheme')}</option>
-                  <option value="dark">{t('settings.darkTheme')}</option>
-                </select>
-              </label>
-            </div>
-          </section>}
+          {section === 'shortcuts' && <KeyboardShortcutsSettings />}
           {section === 'server' && <section className="app-settings-section" aria-labelledby="app-settings-server-title">
             <header><h2 id="app-settings-server-title">{t('settings.server')}</h2></header>
             {serverSettings}
@@ -1035,6 +1033,7 @@ function FolderDialog() {
       return
     }
     useAppStore.getState().setFolderOrder([...folderOrder, clean])
+    trackEvent('folder_created')
     useAppStore.getState().setModal('folder', false)
   }
   return <Shell open={open} onOpenChange={value => useAppStore.getState().setModal('folder', value)} title={t("ui.Dialogs.FolderDialog.new_folder_cf28f49")} description={t("ui.Dialogs.FolderDialog.create_an_empty_chat_folder_then_drag_or_m_b438439")}>
@@ -2818,6 +2817,8 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       if (mode === 'newChat') {
         trackEvent('chat_created')
         await saveNewChatDefaults(preferenceScope, input).catch(() => undefined)
+      } else {
+        trackEvent('chat_resumed')
       }
       await useAppStore.getState().refreshSessions(); useAppStore.getState().setModal(mode, false); await useAppStore.getState().selectSession(session.id)
     } catch (error) { useAppStore.getState().setError(message(error)) } finally { setSaving(false) }
@@ -3142,7 +3143,7 @@ export function ImportChatsDialog() {
       if (!currentImportDialogScope(origin, epoch, requestEpoch.current)) return
       const result = outcome[0]
       if (!result?.ok || !result.session_id) throw new Error(result?.error || 'The selected provider session could not be resumed.')
-      trackEvent('chats_bulk_imported', { success: true })
+      trackEvent('chat_resumed')
       await finishResumeById(result.session_id, origin, epoch)
     } catch (error) {
       if (currentImportDialogScope(origin, epoch, requestEpoch.current)) setResumeError(message(error))
@@ -3196,6 +3197,7 @@ export function ImportChatsDialog() {
         providerId
       })
       if (!currentImportDialogScope(origin, epoch, requestEpoch.current)) return
+      trackEvent('chat_resumed')
       await finishResumeById(session.id, origin, epoch)
     } catch (error) {
       if (currentImportDialogScope(origin, epoch, requestEpoch.current)) setResumeError(message(error))
@@ -4276,6 +4278,7 @@ export function JobDialog() {
           patch.enabled = true
         }
         await window.agentsDock.jobs.update(editing.id, patch)
+        if (Object.keys(patch).length > 0) trackEvent('scheduled_job_updated')
       } else {
         const input: CreateJobInput = {
           session_id: session.id, title: title.trim(), prompt: cleanPrompt, schedule_kind: scheduleKind,
@@ -4287,6 +4290,7 @@ export function JobDialog() {
           backend: selectedBackend
         }
         await window.agentsDock.jobs.create(input)
+        trackEvent('scheduled_job_created')
       }
       close()
     }
