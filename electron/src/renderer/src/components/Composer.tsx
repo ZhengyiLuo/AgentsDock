@@ -1752,9 +1752,9 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   if (!session) return <div className="composer disabled"><span>{t("ui.Composer.Composer.select_or_create_a_chat_to_begin_3a0c22a")}</span></div>
   return (
     <div className="composer-dock">
-      <div className="composer-context-row">
+      {!window.agentsDock.sharedChat && <div className="composer-context-row">
         <WorkingDirectoryPopover session={session} />
-      </div>
+      </div>}
       <CodexGoalBar />
       <div className={`composer ${dropActive ? 'drop-active' : ''}`}>
       <div className="composer-scroll-region">
@@ -2150,11 +2150,11 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       <div className="drop-overlay" role="status" aria-label={dropActive ? t("ui.Composer.Composer.drop_to_attach_34a7a63") : undefined} aria-live="polite" aria-atomic="true" aria-hidden={!dropActive}>
         <Paperclip size={15} aria-hidden="true" /> <span>{t("ui.Composer.Composer.drop_to_attach_34a7a63")}</span>
       </div>
-      <WorkingDirectoryCommandDialog
+      {!window.agentsDock.sharedChat && <WorkingDirectoryCommandDialog
         open={workingDirectoryOpen}
         session={session}
         onOpenChange={setWorkingDirectoryOpen}
-      />
+      />}
       <ClaudeMcpDialog
         open={mcpDialogOpen}
         session={session}

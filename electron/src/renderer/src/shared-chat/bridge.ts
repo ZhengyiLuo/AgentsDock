@@ -77,7 +77,6 @@ export function createSharedChatBridge(
     }
     state = next
     receive(next)
-    connection(true)
     emit('server:sessions', { profileId: 'shared-chat', profileGeneration: 1, serverIdentity: prefix, sessions: [next.session] })
     if (next.session.backend === 'codex' || next.session.backend === 'claude') emit('server:provider-runtime', {
       profileId: 'shared-chat', profileGeneration: 1, serverIdentity: prefix,
@@ -182,7 +181,15 @@ export function createSharedChatBridge(
       await refresh()
       source?.close()
       source = new EventSource(prefix + '/events', { withCredentials: true })
-      source.addEventListener('state', event => { try { ++streamEpoch; apply(JSON.parse((event as MessageEvent).data)) } catch { source?.close(); connection(false, 'The shared chat stream could not be read. Reopen this page to reconnect.') } })
+      source.addEventListener('state', event => {
+        try {
+          ++streamEpoch
+          apply(JSON.parse((event as MessageEvent).data))
+          // A complete authenticated SSE snapshot, including an unchanged
+          // revision, confirms live sync. A standalone HTTP GET does not.
+          connection(true)
+        } catch { source?.close(); connection(false, 'The shared chat stream could not be read. Reopen this page to reconnect.') }
+      })
       source.addEventListener('unavailable', () => { closed = true; source?.close(); connection(false, 'This shared chat is no longer available.') })
       source.onerror = () => { source?.close(); connection(false, 'Connection interrupted. Reopen this page to reconnect.') }
     },

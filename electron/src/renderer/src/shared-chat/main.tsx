@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@radix-ui/react-tooltip'
 import { t } from '@shared/i18n'
 import { createSharedChatBridge } from './bridge'
-import { SharedChatApp, receiveSharedChatState } from './SharedChatApp'
+import { SharedChatApp, receiveSharedChatConnection, receiveSharedChatState } from './SharedChatApp'
 import { initializeAppearance } from '../lib/appearance'
 import { initializeLanguage, useLocale } from '../lib/i18n'
 import { useAppStore } from '../store/app-store'
@@ -15,7 +15,7 @@ import './shared-chat.css'
 const prefix = location.pathname.replace(/\/$/, '')
 const bridge = createSharedChatBridge(prefix,
   state => receiveSharedChatState(state, prefix),
-  (connected, error) => useAppStore.setState({ connected, ...(error ? { error } : {}) }))
+  receiveSharedChatConnection)
 window.agentsDock = bridge.api
 // The invitation is consumed only by the explicit button, never by a page GET.
 let invitation = new URLSearchParams(location.hash.slice(1)).get('invite')
