@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-09-12 — Quiet idle-mail wake presentation
+
+- Keep the server-generated mailbox availability input out of the user-message
+  timeline while retaining the receiving agent's progress and final answer.
+  Suppression requires exact native wake metadata, not matching message text.
+- Preserve genuine user inputs and unproved imported history. Verified cold and
+  incremental projection for Claude and Codex with focused checks and TypeScript.
+- Idle execution requires the corresponding standalone server change; this
+  desktop change alone does not wake an idle recipient or update its server.
+
 ## 2026-09-12 — Local desktop beta.34 candidate
 
 - Accepted local universal macOS installer: `0.2.13-beta.34`, build `157`, exact

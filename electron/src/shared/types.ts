@@ -876,6 +876,11 @@ export interface Event extends SharedChatAttribution {
   superseded_by_queued_id?: string | null
   position?: number | null
   purpose?: string | null
+  /** Exact server-authored quiet mailbox wake; its provider input is not user text. */
+  mailbox_wake_id?: string | null
+  mailbox_wake_through_seq?: number | null
+  provider_generated?: boolean | null
+  provider_input_sha256?: string | null
   phase?: string | null
   /** Provider message identity when supplied by native output or history. */
   provider_message_id?: string | null
