@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@radix-ui/react-tooltip'
@@ -28,13 +28,15 @@ function Entry() {
   const ready = useAppStore(state => state.initialized)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const enter = async () => {
-    if (busy) return
+  const entering = useRef(false)
+  const enter = async (allowRedemption = true) => {
+    if (entering.current) return
+    entering.current = true
     setBusy(true); setError(null)
     try {
       try { await bridge.start() }
       catch (cause) {
-        if (!invitation) throw cause
+        if (!allowRedemption || !invitation) throw cause
         await bridge.redeem(invitation)
         invitation = null
         await bridge.start()
@@ -42,8 +44,14 @@ function Entry() {
       useAppStore.getState().setError(null)
       void bridge.catalog().catch(() => { /* The current model/effort remains usable if discovery is unavailable. */ })
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
-    finally { setBusy(false) }
+    finally { entering.current = false; setBusy(false) }
   }
+  useEffect(() => {
+    // Reloading a redeemed URL resumes its existing HttpOnly browser session.
+    // This reads state only; a new invitation is still consumed exclusively
+    // by the explicit Open action, never by loading or refreshing the page.
+    if (!invitation) void enter(false)
+  }, [])
   if (ready) return <SharedChatApp />
   return <main className="shared-chat-welcome">
     <h1>AgentsDock</h1><h2>{t('chatShare.web.title')}</h2>
@@ -54,6 +62,10 @@ function Entry() {
 }
 
 window.addEventListener('pagehide', () => bridge.close(), { once: true })
+window.addEventListener('pageshow', event => {
+  // A bfcache restore must not reuse the bridge closed by pagehide.
+  if (event.persisted) location.reload()
+})
 window.addEventListener('beforeunload', event => {
   if (Object.values(useAppStore.getState().drafts).some(value => value.trim())) { event.preventDefault(); event.returnValue = '' }
 })

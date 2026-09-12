@@ -92,12 +92,12 @@ export function SharedChatApp() {
         {error && <div className="shared-chat-notice" role="alert"><span>{error}</span><button className="icon-button" aria-label={t('chatShare.web.dismiss')} onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
         <div className="chat-workspace">
           <div className="chat-workspace-history"><Timeline /></div>
-          <div className="chat-workspace-shelves"><CodexInteractionShelf /><ClaudeInteractionShelf /></div>
+          <div className="chat-workspace-shelves"><fieldset disabled={!connected} className="shared-chat-controls"><CodexInteractionShelf /><ClaudeInteractionShelf /></fieldset></div>
           <fieldset disabled={!connected} className="shared-chat-controls"><Composer /></fieldset>
         </div>
       </main>
-      <JobDialog />
-      <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="form-dialog shared-chat-settings">
+      {connected && <JobDialog />}
+      <Dialog.Root open={settingsOpen && connected} onOpenChange={setSettingsOpen}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="form-dialog shared-chat-settings">
         <Dialog.Title>{t('chatShare.web.settings')}</Dialog.Title>
         <Dialog.Description>{t('chatShare.web.settingsHelp')}</Dialog.Description>
         <SessionPromptField value={session.system_prompt ?? ''} onSave={system_prompt => useAppStore.getState().updateSession(session.id, { system_prompt: system_prompt || null })} />
