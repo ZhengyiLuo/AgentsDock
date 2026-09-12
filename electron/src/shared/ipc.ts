@@ -205,6 +205,12 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  chatShares: {
+    preview(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./chat-shares').ChatSharePreview>
+    list(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode): Promise<import('./chat-shares').ChatShareRecord[]>
+    create(scope: WorkspaceProfileScope, sessionId: string, input: import('./chat-shares').CreateChatShareInput): Promise<import('./chat-shares').CreatedChatShare>
+    revoke(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode, shareId: string): Promise<void>
+  }
   mailHints?: {
     acknowledgePage(input: import('./team-mail-hints').MailHintPageAcknowledgment): Promise<import('./team-mail-hints').MailHintProjection | null>
   }

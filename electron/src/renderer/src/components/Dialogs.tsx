@@ -23,6 +23,7 @@ import { useTransientClose } from '../lib/transient-close'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
+import { ChatShareDialog } from './ChatShareDialog'
 import { CodexServerSettings } from './CodexServerSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
 import { ServerManagement } from './ServerManagement'
@@ -442,6 +443,7 @@ export function Dialogs() {
     <DigestDialog />
     <JobDialog />
     <RenameChatDialog />
+    <ChatShareDialog />
     <ConfirmDeleteDialog />
   </>
 }

@@ -4,6 +4,12 @@ import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
 
 const api: AgentsDockAPI = {
+  chatShares: {
+    preview: (scope, sessionId) => ipcRenderer.invoke('chat-shares:preview', scope, sessionId),
+    list: (scope, sessionId, mode) => ipcRenderer.invoke('chat-shares:list', scope, sessionId, mode),
+    create: (scope, sessionId, input) => ipcRenderer.invoke('chat-shares:create', scope, sessionId, input),
+    revoke: (scope, sessionId, mode, shareId) => ipcRenderer.invoke('chat-shares:revoke', scope, sessionId, mode, shareId)
+  },
   mailHints: {
     acknowledgePage: input => ipcRenderer.invoke('team:mail-hints:acknowledge-page', input)
   },

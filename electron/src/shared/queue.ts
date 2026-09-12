@@ -1,6 +1,7 @@
 import type { Event, QueuedTurn } from './types'
 import { isImportedProviderControlMetadata } from './provider-origin'
 import { isNativeGoalSteerEvent } from './semantic-timeline'
+import { isSharedChatCollaborator } from './chat-shares'
 
 export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTurn[] {
   if (isImportedProviderControlMetadata(event)) return current
@@ -10,6 +11,8 @@ export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTu
       session_id: event.session_id,
       prompt: event.prompt || '',
       display_prompt: event.prompt,
+      ...(isSharedChatCollaborator(event) ? { shared_chat_id: event.shared_chat_id,
+        shared_chat_request_id: event.shared_chat_request_id, author_label: event.author_label } : {}),
       file_ids: event.file_ids || [],
       backend: event.backend,
       position: event.position,

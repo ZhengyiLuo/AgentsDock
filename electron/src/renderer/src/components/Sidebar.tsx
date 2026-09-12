@@ -9,7 +9,7 @@ import {
 } from '@dnd-kit/core'
 import {
   Archive, ArchiveRestore, ChevronDown, ChevronRight, Folder, FolderPlus, GripVertical, Inbox, MoreHorizontal,
-  Columns2, PanelLeftClose, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, Undo2, UsersRound
+  Columns2, PanelLeftClose, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, Share2, Trash2, Undo2, UsersRound
 } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
@@ -404,6 +404,9 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
 
 function SessionContextMenu({ session, unread, folders }: { session: Session; unread: boolean; folders: string[] }) {
   useLocale()
+  const shareProfileId = useAppStore(state => state.activeProfileId)
+  const shareGeneration = useAppStore(state => state.profileGeneration)
+  const shareIdentity = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null)
   const update = (patch: Partial<Session>) => useAppStore.getState().updateSession(session.id, patch)
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
   const admitting = useAppStore(state => Boolean(state.turnAdmissionTokens[session.id]))
@@ -415,6 +418,9 @@ function SessionContextMenu({ session, unread, folders }: { session: Session; un
         <MenuItem icon={unread ? Inbox : Inbox} label={unread ? t("ui.Sidebar.SessionContextMenu.mark_as_read_75c4ef2") : t("ui.Sidebar.SessionContextMenu.mark_as_unread_1a9220e")} onSelect={() => unread ? void useAppStore.getState().markRead(session.id, true) : void useAppStore.getState().markUnread(session.id)} />
         {!session.archived && <MenuItem icon={Columns2} label={t("ui.Sidebar.SessionContextMenu.open_in_split_view_fd78f06")} onSelect={() => void useAppStore.getState().openSessionInSplit(session.id)} />}
         <MenuItem icon={Pencil} label={t("ui.Sidebar.SessionContextMenu.rename_chat_a257dec")} onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:rename-chat', { detail: session }))} />
+        <MenuItem icon={Share2} label={t('chatShare.menu')} onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:share-chat', {
+          detail: { session, scope: { profileId: shareProfileId, profileGeneration: shareGeneration, serverIdentity: shareIdentity } }
+        }))} />
         <MenuItem icon={session.pinned ? PinOff : Pin} label={session.pinned ? t("ui.Sidebar.SessionContextMenu.unpin_chat_e260efa") : t("ui.Sidebar.SessionContextMenu.pin_chat_633b23e")} onSelect={() => void update({ pinned: !session.pinned })} />
         {!session.archived && <ContextMenu.Sub><ContextMenu.SubTrigger className="menu-item"><Folder size={14} />{t("ui.Sidebar.SessionContextMenu.move_to_folder_91d631e")}<ChevronRight size={13} className="submenu-arrow" /></ContextMenu.SubTrigger><ContextMenu.Portal><ContextMenu.SubContent className="menu-content" sideOffset={3}>{folders.map(folder => <ContextMenu.Item className="menu-item" key={folder} onSelect={() => void update(sidebarFolderAssignmentPatch(folder))}>{folder}</ContextMenu.Item>)}</ContextMenu.SubContent></ContextMenu.Portal></ContextMenu.Sub>}
         <MenuItem icon={session.archived ? ArchiveRestore : Archive} label={session.archived ? t("ui.Sidebar.SessionContextMenu.unarchive_chat_b4d36bb") : t("ui.Sidebar.SessionContextMenu.archive_chat_180f1c3")} onSelect={() => void update({ archived: !session.archived })} />

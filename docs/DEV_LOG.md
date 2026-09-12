@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-12 — Explicit chat sharing
+
+- Add right-click **Share chat** with two separate choices: a reviewed,
+  read-only text snapshot and a one-time invitation to a live chat.
+- Interactive sharing explicitly grants trusted use of the existing agent's
+  tools/context. The guest web surface has no native terminal, file browser,
+  downloads, other chats, or administration; it is not a provider sandbox.
+- Use exact native-authenticated, server-scoped management requests with no
+  redirects or automatic retries. Show missing HTTPS hosting honestly, retain
+  new link secrets only in the open dialog, and provide exact revocation.
+- Mark shared-chat prompts as Collaborator in the timeline and queue. Do not
+  add an inbox poller, background navigation, or automatic sharing.
+- Validated the actual isolated Electron right-click/preview/confirmation,
+  copy/revoke and collaborator-label journey against synthetic share responses,
+  plus actual loopback native-header transport and affected regression checks.
+  New interactive sharing requires the separately updated standalone server;
+  no server deployment or public app release is included in this source change.
+
 ## 2026-09-12 — Preserve proven assistant replay corrections
 
 - Keep exact server-proven Codex and Claude assistant replay corrections in the

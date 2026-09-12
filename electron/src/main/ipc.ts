@@ -41,6 +41,10 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('chat-shares:preview', (scope, sessionId) => service.previewChatShare(scope, sessionId))
+  handle('chat-shares:list', (scope, sessionId, mode) => service.listChatShares(scope, sessionId, mode))
+  handle('chat-shares:create', (scope, sessionId, input) => service.createChatShare(scope, sessionId, input))
+  handle('chat-shares:revoke', (scope, sessionId, mode, shareId) => service.revokeChatShare(scope, sessionId, mode, shareId))
   handle('native:retry-storage', () => service.retryLocalStorage())
   handle('team:mail-hints:acknowledge-page', input => service.acknowledgeMailHintPage(input))
   if (options.language) {

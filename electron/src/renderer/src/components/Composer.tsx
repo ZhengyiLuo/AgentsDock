@@ -1,5 +1,6 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
+import { isSharedChatCollaborator } from '@shared/chat-shares'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -4229,6 +4230,7 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
       ? <span className="queue-job-icon" title={t('timeline.minimap.scheduledJob')}><CalendarClock size={14} /></span>
       : null}
     <span className="queue-copy">
+      {isSharedChatCollaborator(turn) && <small className="queue-agent-sender">{t('chatShare.collaborator')}</small>}
       {senderTitle && <small className="queue-agent-sender" title={senderTitle}>{senderTitle}</small>}
       {scheduledJob && <small>{turn.job_title || t('timeline.minimap.scheduledJob')}</small>}
       <span className={`queue-prompt${bodyExpanded ? ' expanded' : ''}`} title={preview}>{preview}</span>

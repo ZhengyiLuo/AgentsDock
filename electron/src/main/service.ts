@@ -6,6 +6,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
 import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from '../shared/provider-origin'
+import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
 import {
@@ -1666,6 +1667,41 @@ export class AppService {
       return health
     }
     finally { client.dispose() }
+  }
+
+  async previewChatShare(expected: WorkspaceProfileScope, sessionId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.previewChatShare(sessionId)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async listChatShares(expected: WorkspaceProfileScope, sessionId: string, mode: ChatShareMode) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.listChatShares(sessionId, mode)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async createChatShare(expected: WorkspaceProfileScope, sessionId: string, input: CreateChatShareInput) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.createChatShare(sessionId, input)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async revokeChatShare(expected: WorkspaceProfileScope, sessionId: string, mode: ChatShareMode, shareId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    await scope.client.revokeChatShare(sessionId, mode, shareId)
+    this.assertCurrentScope(scope)
   }
 
   async serverRestartStatus(expected: WorkspaceProfileScope): Promise<ServerRestartStatus> {

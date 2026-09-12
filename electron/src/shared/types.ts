@@ -1,4 +1,5 @@
 import type { LanguagePreference } from './i18n'
+import type { SharedChatAttribution } from './chat-shares'
 import type { MailHintProjection, TeamMailHintsCapability } from './team-mail-hints'
 
 export interface LanguageSettingsSnapshot {
@@ -494,7 +495,7 @@ export interface ProviderCommandsSnapshot {
   commands: ProviderCommand[]
 }
 
-export interface QueuedTurn {
+export interface QueuedTurn extends SharedChatAttribution {
   queued_id: string
   session_id?: string | null
   prompt: string
@@ -861,7 +862,7 @@ export interface ProviderHistoryOrigin {
   cause?: never
 }
 
-export interface Event {
+export interface Event extends SharedChatAttribution {
   seq: number
   id: string
   session_id: string

@@ -20,6 +20,7 @@ import { MediaGrid } from './MediaGrid'
 import { ChatInboxGroup } from './ChatInboxGroup'
 import { CrossChatPeerLink } from './CrossChatPeerLink'
 import { chatMailboxAvailable } from '@shared/chat-inbox'
+import { isSharedChatCollaborator } from '@shared/chat-shares'
 
 export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, profileScope, onFindFile, pinnedItemIds, codexLifecycleActive = false }: { item: RenderTimelineItem; sessionId: string; profileScope: WorkspaceProfileScope | null; onFindFile: (fileId: string) => void; pinnedItemIds: ReadonlySet<string>; codexLifecycleActive?: boolean }) {
   useLocale()
@@ -57,6 +58,8 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
       ))
     : []
   const primary = events[0] ?? event
+  const collaborator = role === 'user' && isSharedChatCollaborator(primary)
+    && events.every(part => isSharedChatCollaborator(part) && part.shared_chat_id === primary.shared_chat_id)
   const text = messageItemText(item)
   const [copied, setCopied] = useState(false)
   const pinId = `message:${primary.id}`
@@ -68,7 +71,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
     }
     const pinItem: PinnedItem = {
       id: pinId, sessionId, kind: 'message', eventId: primary.id,
-      title: role === 'user' ? 'You' : 'Assistant', body: text, subtitle: formatTime(event.ts), createdAt: Date.now()
+      title: role === 'user' ? collaborator ? 'Collaborator' : 'You' : 'Assistant', body: text, subtitle: formatTime(event.ts), createdAt: Date.now()
     }
     await window.agentsDock.pins.put(requirePinnedItemsScope(profileScope), pinItem)
     window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
@@ -82,7 +85,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
     >
       <div className="message-surface">
         <header>
-          <span>{role === 'user' ? t('timeline.ui.you') : primary.purpose === 'handoff_digest' ? t('timeline.ui.digest') : t('timeline.ui.assistant')}</span>
+          <span>{role === 'user' ? t(collaborator ? 'chatShare.collaborator' : 'timeline.ui.you') : primary.purpose === 'handoff_digest' ? t('timeline.ui.digest') : t('timeline.ui.assistant')}</span>
           <time>{formatTime(event.ts)}</time>
           <button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinMessage') : t('timeline.ui.pinMessage')} onClick={() => runTimelineAction(togglePin())}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button>
           <button type="button" title={t('timeline.ui.copyFullMessage')} onClick={() => runTimelineAction(copy())}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>

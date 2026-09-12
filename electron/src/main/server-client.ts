@@ -6,6 +6,8 @@ import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
 import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
+import { chatShareCreateBody, chatShareId, chatShareMode, parseChatShareList, parseChatSharePreview, parseCreatedChatShare,
+  type ChatShareMode, type CreateChatShareInput } from '../shared/chat-shares'
 import { inferredFileContentType } from '../shared/file-content-type'
 import {
   LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT,
@@ -2266,13 +2268,14 @@ export class AgentServerClient {
     path: string,
     init: RequestInit = {},
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-    expectedStatus?: number
+    expectedStatus?: number,
+    maxResponseBytes?: number
   ): Promise<T> {
     const configuration = this.configuration
     const target = new URL(configurationURL(configuration, path))
     const server = new URL(configuration.baseURL)
     const serverPrefix = server.pathname === '/' ? '' : server.pathname
-    const method = securePeerMethod(init.method ?? 'GET', ['GET', 'POST', 'PUT'])
+    const method = securePeerMethod(init.method ?? 'GET', ['GET', 'POST', 'PUT', 'DELETE'])
     if (!isPrivilegedNativeControlTarget(target, server, serverPrefix, method)) {
       throw new Error('Privileged native control route is invalid.')
     }
@@ -2281,6 +2284,7 @@ export class AgentServerClient {
       method,
       headers: privilegedNativeTransportHeaders(configuration.token, body),
       body,
+      maxResponseBytes,
       signal: combineAbortSignals(
         configuration.abortController.signal,
         init.signal,
@@ -2321,6 +2325,30 @@ export class AgentServerClient {
       throw new ServerError(response.status, detail, rawDetail)
     }
     return response.text()
+  }
+
+  private chatSharePath(sessionId: string, mode: ChatShareMode): string {
+    return `/api/admin/${chatShareMode(mode) === 'snapshot' ? 'chat-shares' : 'interactive-chat-shares'}/${chatShareId(sessionId)}`
+  }
+
+  async previewChatShare(sessionId: string) {
+    return parseChatSharePreview(await this.privilegedNativeRequest(`${this.chatSharePath(sessionId, 'snapshot')}/preview`,
+      { method: 'POST', body: '{}' }, DEFAULT_REQUEST_TIMEOUT_MS, 200, 4 * 1024 * 1024))
+  }
+
+  async listChatShares(sessionId: string, mode: ChatShareMode) {
+    return parseChatShareList(await this.privilegedNativeRequest(this.chatSharePath(sessionId, mode), {}, DEFAULT_REQUEST_TIMEOUT_MS, 200, 256 * 1024), mode)
+  }
+
+  async createChatShare(sessionId: string, input: CreateChatShareInput) {
+    return parseCreatedChatShare(await this.privilegedNativeRequest(this.chatSharePath(sessionId, input.mode),
+      { method: 'POST', body: JSON.stringify(chatShareCreateBody(input)) }, DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
+  }
+
+  async revokeChatShare(sessionId: string, mode: ChatShareMode, shareId: string): Promise<void> {
+    const value = await this.privilegedNativeRequest<{ revoked?: boolean }>(`${this.chatSharePath(sessionId, mode)}/${chatShareId(shareId)}`,
+      { method: 'DELETE' }, DEFAULT_REQUEST_TIMEOUT_MS, 200, 8192)
+    if (value?.revoked !== true) throw new Error('Share revocation was not confirmed.')
   }
 
   private async request<T>(path: string, init: RequestInit = {}, configuration = this.configuration, maxResponseBytes?: number): Promise<T> {
@@ -2808,6 +2836,9 @@ function isPrivilegedNativeControlTarget(
     || !target.pathname.startsWith(`${serverPrefix}/api/admin/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
+  const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
+  if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'
+    : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')
   if (path === '/api/admin/codex/goals') {
     return !target.search && (method === 'GET' || method === 'PUT')
   }
