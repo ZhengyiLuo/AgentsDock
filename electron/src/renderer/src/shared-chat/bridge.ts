@@ -186,6 +186,19 @@ export function createSharedChatBridge(
     claude: group({ runtime: async (id: string) => { exact(id); return current().claude_runtime }, refreshContextUsage: async (id: string) => { exact(id); return current().claude_runtime }, resolveInteraction: async (id: string, interactionId: string, response: unknown) => { exact(id); return action('approval.respond', { backend: 'claude', id: interactionId, response }) } }),
     jobs: { list: async () => current().jobs, runs: async (id: string, jobId: string, beforeSeq?: number, limit = 25, timelineGroupId?: string) => { exact(id); return action('jobs.runs', { id: jobId, before_seq: beforeSeq, limit, timeline_group_id: timelineGroupId }, true) }, create: async (input: { session_id: string } & Record<string, unknown>) => { exact(input.session_id); const { session_id: _id, ...payload } = input; return (await action('job.create', payload))?.job }, update: async (id: string, patch: Record<string, unknown>) => (await action('job.update', { id, ...patch }))?.job, remove: async (id: string) => { await action('job.delete', { id }); return true }, run: async (id: string) => action('job.run', { id }) },
     pins: group({ list: async () => [] }),
+    handoffs: group({ get: async (id: string) => {
+      const sessionId = current().session.id
+      if (!/^[A-Za-z0-9_.-]{1,128}$/.test(id)) denied()
+      const handoff = (await action('handoffs.get', { id }, true))?.handoff
+      exact(sessionId)
+      if (!handoff || handoff.id !== id || typeof handoff.body !== 'string'
+        || typeof handoff.source_session_id !== 'string' || typeof handoff.target_session_id !== 'string'
+        || (handoff.source_session_id !== sessionId && handoff.target_session_id !== sessionId)
+        || (handoff.conversation_mode === 'async_route_v1' && (handoff.message_id !== id || !handoff.conversation_id))) {
+        throw new Error('Invalid shared chat message detail.')
+      }
+      return handoff
+    } }),
     files: group({
       choose: () => new Promise<NativeFileRef[]>((resolve, reject) => {
         const input = document.createElement('input')

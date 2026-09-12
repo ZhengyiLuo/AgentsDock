@@ -8,6 +8,31 @@ const state = { revision: '1111111111111111:1', csrf: 'synthetic-csrf', session:
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('the restricted shared browser bridge', () => {
+  it('reads exact participant message detail only on demand, preserving recipient edit metadata', async () => {
+    const handoff = { id: 'handoff-one', message_id: 'handoff-one', conversation_id: 'pair-one', conversation_mode: 'async_route_v1',
+      source_session_id: 'synthetic-peer', target_session_id: state.session.id, body: 'Original synthetic body',
+      target_body: 'Recipient-edited synthetic body', message_edited_by_user: true, message_revision: 2 }
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/state') ? state : { result: { handoff } })))
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    expect(request).toHaveBeenCalledTimes(1)
+    await expect(bridge.api.handoffs.get('handoff-one')).resolves.toEqual(handoff)
+    expect(request).toHaveBeenCalledTimes(2)
+    const input = request.mock.calls[1] as unknown as [string, RequestInit]
+    expect(input[0]).toBe(prefix + '/controls')
+    expect(JSON.parse(String(input[1].body))).toMatchObject({ action: 'handoffs.get', payload: { id: 'handoff-one' } })
+    await expect(bridge.api.handoffs.cancel('handoff-one')).rejects.toThrow('not available')
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+  it('rejects mismatched message details without navigating to another chat', async () => {
+    let handoff = { id: 'handoff-one', source_session_id: 'another-chat', target_session_id: 'different-chat', body: 'Synthetic body' }
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/state') ? state : { result: { handoff } })))
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    await expect(bridge.api.handoffs.get('handoff-one')).rejects.toThrow('Invalid shared chat message detail')
+    handoff = { ...handoff, id: 'wrong-envelope', target_session_id: state.session.id }
+    await expect(bridge.api.handoffs.get('handoff-one')).rejects.toThrow('Invalid shared chat message detail')
+  })
   it('loads a semantic older page through the native store without losing its exact session', async () => {
     const event = (seq: number) => ({ id: `synthetic-${seq}`, seq, session_id: state.session.id, type: 'turn_started', prompt: `Prompt ${seq}`, ts: '2026-09-12T00:00:00Z' })
     const initial = { ...state, events: [event(3)], hasMoreEvents: true, nextTimelineBefore: 3 }
