@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-12 — Preserve proven assistant replay corrections
+
+- Keep exact server-proven Codex and Claude assistant replay corrections in the
+  local SQLite cache when an older page or buffered stream repeats the same
+  event. Reuse the existing identity/provenance merge checks; do not infer
+  duplicates from similar text or remove original scheduled reports.
+- The standalone server also corrects Codex history comparisons when native
+  delivery removed leading decorations from the same provider message. That
+  server correction is separate and requires deployment before historical
+  duplicates can be repaired. No polling or background refresh was added.
+
 ## 2026-09-11 — Cross-chat heading navigation
 
 - Make the sender or recipient name on purple cross-chat messages open the

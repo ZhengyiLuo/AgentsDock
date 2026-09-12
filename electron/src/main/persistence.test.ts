@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Event, Job, PinnedItem, Session } from '../shared/types'
 import { TOOL_OUTPUT_PREVIEW_CHARS } from '../shared/event-compaction'
 
@@ -39,6 +42,20 @@ function cacheDatabase(value: LocalCache): DatabaseSync {
   return (value as unknown as { db: DatabaseSync }).db
 }
 
+function assistantReplay(backend: 'claude' | 'codex', type: 'assistant_text' | 'reasoning_summary'): { legacy: Event; repaired: Event } {
+  const legacy: Event = { ...event('chat', 0, '✅ Synthetic scheduled report'), type, backend,
+    run_id: 'import_history', imported: true,
+    provider_origin: { provider: backend, kind: 'assistant', event_id: 'provider-item',
+      session_id: 'provider-thread', timestamp: '2026-07-13T12:00:00Z' } }
+  const repaired: Event = { ...legacy, text: '', metadata_only: true,
+    provider_history_repair: backend === 'codex' ? 'source_proven_native_replay' : 'source_proven_assistant_replay',
+    provider_origin: { ...legacy.provider_origin!, ...(backend === 'codex' ? {
+      turn_id: 'provider-turn', native_event_id: 'native-answer',
+      source_text_sha256: createHash('sha256').update(legacy.text!).digest('hex')
+    } : {}) } }
+  return { legacy, repaired }
+}
+
 afterEach(() => {
   while (openCaches.length) openCaches.pop()?.close()
 })
@@ -62,6 +79,60 @@ describe('prepared statement reuse', () => {
 })
 
 describe('source-proven import repair persistence', () => {
+  it.each(['claude', 'codex'] as const)('retains %s assistant repairs after stale replay and reopening SQLite', backend => {
+    const folder = mkdtempSync(join(tmpdir(), 'agentsdock-repair-cache-'))
+    const path = join(folder, 'cache.sqlite3')
+    let value: LocalCache | null = new LocalCache(path)
+    try {
+      value.putSession('server', session('chat'))
+      const pairs = (['assistant_text', 'reasoning_summary'] as const).map((type, index) => {
+        const pair = assistantReplay(backend, type)
+        const position = { id: `imported-answer-${index}`, seq: index + 1 }
+        return { legacy: { ...pair.legacy, ...position }, repaired: { ...pair.repaired, ...position } }
+      })
+      value.putEvents('server', 'chat', pairs.map(pair => pair.legacy))
+      value.putEvents('server', 'chat', pairs.map(pair => pair.repaired))
+      value.putEvents('server', 'chat', pairs.map(pair => pair.legacy))
+      expect(value.snapshot('server', 'chat')?.events).toEqual(pairs.map(pair => pair.repaired))
+      value.close()
+      value = null
+      value = new LocalCache(path)
+      expect(value.snapshot('server', 'chat')?.events).toEqual(pairs.map(pair => pair.repaired))
+      expect(value.searchEvents('server', 'chat', 'scheduled')).toHaveLength(0)
+    } finally {
+      value?.close()
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps distinct assistant identities, server/chat scopes, changed bodies and authorship visible', () => {
+    const value = cache()
+    const { legacy, repaired } = assistantReplay('codex', 'assistant_text')
+    for (const serverId of ['server', 'other-server']) {
+      value.putSession(serverId, session('chat'))
+      value.putSession(serverId, session('other-chat'))
+    }
+    value.putEvents('server', 'chat', [repaired])
+    value.putEvents('other-server', 'chat', [legacy])
+    value.putEvents('server', 'other-chat', [{ ...legacy, session_id: 'other-chat' }])
+    value.putEvents('server', 'chat', [{ ...legacy, id: 'different-event', seq: 2 }])
+    expect(value.snapshot('other-server', 'chat')?.events).toEqual([legacy])
+    expect(value.snapshot('server', 'other-chat')?.events[0].text).toBe(legacy.text)
+    expect(value.snapshot('server', 'chat')?.events[1].text).toBe(legacy.text)
+    for (const change of [{ text: 'A different full report' }, { provider_user_authored: true },
+      { run_id: 'import_other' }, { ts: '2026-07-13T12:01:00Z' }]) {
+      value.putEvents('server', 'chat', [repaired])
+      value.putEvents('server', 'chat', [{ ...legacy, ...change }])
+      expect(value.snapshot('server', 'chat')?.events[0]).toEqual({ ...legacy, ...change })
+    }
+    const claude = assistantReplay('claude', 'assistant_text')
+    const changedOrigin: Event = { ...claude.legacy,
+      provider_origin: { ...claude.legacy.provider_origin!, event_id: 'different-source-item' } }
+    value.putEvents('server', 'chat', [claude.repaired])
+    value.putEvents('server', 'chat', [changedOrigin])
+    expect(value.snapshot('server', 'chat')?.events[0]).toEqual(changedOrigin)
+  })
+
   it.each(['subagent_notification', 'turn_aborted', 'provider_notice'] as const)('keeps a complete Codex %s repair across stale long input and preserves a genuine quotation', kind => {
     const value = cache()
     value.putSession('server', session('chat'))
