@@ -1,12 +1,95 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSharedChatBridge, type SharedChatState } from './bridge'
+import { useAppStore } from '../store/app-store'
 
 const prefix = '/interactive-chat/interactive_' + '1'.repeat(32)
 const state = { revision: '1111111111111111:1', csrf: 'synthetic-csrf', session: { id: 'shared-one', backend: 'codex', title: 'Synthetic shared chat' }, events: [], queue: [], active: false, jobs: [], goal: { goal: null }, codex_runtime: null, claude_runtime: null, health: null, runtime_catalog: null } as unknown as SharedChatState
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('the restricted shared browser bridge', () => {
+  it('loads a semantic older page through the native store without losing its exact session', async () => {
+    const event = (seq: number) => ({ id: `synthetic-${seq}`, seq, session_id: state.session.id, type: 'turn_started', prompt: `Prompt ${seq}`, ts: '2026-09-12T00:00:00Z' })
+    const initial = { ...state, events: [event(3)], hasMoreEvents: true, nextTimelineBefore: 3 }
+    const page = { events: [event(1)], has_more: false, next_before: null, semantic_paging: true, semantic_item_count: 1 }
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/state') ? initial : { result: page })))
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    const previous = useAppStore.getState()
+    const previousAPI = window.agentsDock
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: bridge.api })
+    try {
+      useAppStore.setState({ activeProfileId: 'shared-chat', profileGeneration: 1, switchingProfileId: null,
+        selectedSessionId: state.session.id, sessions: [state.session], snapshots: { [state.session.id]: bridge.snapshot() } })
+      expect(await useAppStore.getState().loadOlderForSession(state.session.id)).toBe(1)
+      const snapshot = useAppStore.getState().snapshots[state.session.id]
+      expect(snapshot.session).toEqual(state.session)
+      expect(snapshot.session.backend).toBe('codex') // Timeline's first dereference.
+      expect(snapshot.events.map(row => row.seq)).toEqual([1, 3])
+      expect(snapshot.hasMoreEvents).toBe(false)
+      expect(request).toHaveBeenCalledTimes(2)
+      expect(await bridge.api.timeline.around(state.session.id, 1)).toMatchObject({ ...page, session: state.session })
+      expect(await bridge.api.timeline.historicalOlder(state.session.id, 3)).toMatchObject({ ...page, session: state.session })
+    } finally {
+      bridge.close()
+      useAppStore.setState(previous, true)
+      Object.defineProperty(window, 'agentsDock', { configurable: true, value: previousAPI })
+    }
+  })
+  it('rejects another chat in a history page instead of injecting its events or session', async () => {
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/state') ? state : { result: { events: [], session: { id: 'another-chat' } } })))
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    await expect(bridge.api.timeline.older(state.session.id, 10)).rejects.toThrow('Invalid shared chat history page')
+    request.mockImplementation(async () => new Response(JSON.stringify({ result: { events: [{ session_id: 'another-chat' }] } })))
+    await expect(bridge.api.timeline.around(state.session.id, 1)).rejects.toThrow('Invalid shared chat history page')
+  })
+  it.each(['network', 'server', 'receipt'] as const)('blocks a new mutation after an ambiguous %s acknowledgment, including after live updates', async failure => {
+    class Stream extends EventTarget { static instance: Stream; close = vi.fn(); constructor() { super(); Stream.instance = this } }
+    vi.stubGlobal('EventSource', Stream)
+    const request = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/state')) return new Response(JSON.stringify(state))
+      if (failure === 'network') throw new Error('Connection lost')
+      return new Response(JSON.stringify(failure === 'server' ? { detail: 'Acceptance unknown' } : { accepted: true }), { status: failure === 'server' ? 503 : 200 })
+    })
+    const connection = vi.fn()
+    const bridge = createSharedChatBridge(prefix, vi.fn(), connection, request)
+    await bridge.start()
+    await expect(bridge.api.turns.send({ sessionId: state.session.id, prompt: 'One synthetic prompt', fileIds: [] })).rejects.toThrow('Acceptance is unconfirmed')
+    Stream.instance.dispatchEvent(new MessageEvent('state', { data: JSON.stringify({ ...state, revision: '1111111111111111:2' }) }))
+    expect(connection).toHaveBeenLastCalledWith(false, expect.stringContaining('Acceptance is unconfirmed'))
+    await expect(bridge.api.turns.send({ sessionId: state.session.id, prompt: 'One synthetic prompt', fileIds: [] })).rejects.toThrow('Acceptance is unconfirmed')
+    await expect(bridge.api.queue.remove(state.session.id, 'queued-one')).rejects.toThrow('Acceptance is unconfirmed')
+    expect(request).toHaveBeenCalledTimes(2)
+    bridge.close()
+  })
+  it('reports typed validation denial without latching or treating it as acceptance', async () => {
+    let writes = 0
+    const request = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith('/state')) return new Response(JSON.stringify(state))
+      const { action, request_id } = JSON.parse(String(init?.body))
+      writes++
+      return new Response(JSON.stringify(writes === 1
+        ? { accepted: false, action, request_id, error_code: 'invalid_request', detail: 'Invalid chat control request' }
+        : { accepted: true, action, request_id, result: { stopped: true } }))
+    })
+    const connection = vi.fn()
+    const bridge = createSharedChatBridge(prefix, vi.fn(), connection, request)
+    await bridge.refresh()
+    await expect(bridge.api.turns.stop(state.session.id)).rejects.toThrow('Invalid chat control request')
+    await expect(bridge.api.turns.stop(state.session.id)).resolves.toEqual({ stopped: true })
+    expect(connection).not.toHaveBeenCalled()
+    expect(writes).toBe(2)
+  })
+  it('releases a failed upload batch staging count without deleting server data', async () => {
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/state') ? state : { detail: 'Invalid upload name' }), { status: String(url).endsWith('/state') ? 200 : 400 }))
+    const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)
+    await bridge.refresh()
+    const files = await Promise.all(Array.from({ length: 4 }, (_, index) => bridge.api.files.stageNativeFile(new File(['synthetic'], `file-${index}.txt`))))
+    await expect(bridge.api.files.upload(state.session.id, files.map(file => file!.path))).rejects.toThrow('Invalid upload name')
+    for (let index = 0; index < 4; index++) await expect(bridge.api.files.stageNativeFile(new File(['synthetic'], `replacement-${index}.txt`))).resolves.toBeTruthy()
+    expect(request).toHaveBeenCalledTimes(2)
+  })
   it('retains the discovered model choices across live baseline snapshots for this chat', async () => {
     class Stream extends EventTarget { static instance: Stream; close = vi.fn(); constructor() { super(); Stream.instance = this } }
     vi.stubGlobal('EventSource', Stream)
