@@ -1,5 +1,42 @@
 # Public development log
 
+## 2026-09-12 — Shared-browser recovery and control parity
+
+- Resume an already joined browser session on reload without consuming another
+  invitation. Preserve session identity when loading older timeline pages.
+- Disable shared provider controls and close permission popovers when access is
+  lost; retain a usable Close action and explain the disconnected state.
+- Stop further writes after an uncertain acknowledgment instead of offering an
+  automatic duplicate send. Do not misreport an accepted action as failed when
+  only its subsequent refresh fails. Release failed local upload staging slots.
+- Expand exact cross-chat message bodies on demand within the shared chat,
+  preserving recipient edits without sending messages or marking mail read.
+- Wire the web file-drop surface into the existing one-way upload path. Reject
+  oversized selections before staging a partial selection. Native desktop file
+  selection behavior is unchanged.
+- Rechecked the actual compiled shared renderer in an isolated Chromium browser:
+  join/reload, older history, expanded message scrolling, queue controls, Stop,
+  goal controls, settings/models/permissions, approvals, schedules, uploads,
+  pushed owner results, one-use invitations and read-only/interactive revocation.
+  The idle stream made no additional chat-history requests across its heartbeat.
+  Provider callbacks and owner state were synthetic, not production research jobs.
+- The final web pass also verified Claude approval/Stop and revoked-popover
+  behavior, actual rejected/accepted file drops, a narrow light-mode layout and
+  lost-response duplicate prevention. Confirmed reload after a retained draft
+  created a fresh document and restored one accepted queue receipt without a
+  resend. Claude permissions saved and re-rendered through browser form events;
+  native OS popup interaction remains unverified because the isolated window
+  could not take keyboard focus.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `200`, committed desktop
+  source `d44e1ad`. Developer ID signature and all 86 compiled archive files
+  verified. The running app was preserved; this candidate is not notarized or
+  published and has automatic updates disabled. The subsequent web-only drop
+  change is included in the separately packaged shared renderer at `6839cf2`.
+- The matching standalone server changes and web bundle are committed locally,
+  not deployed. Public HTTPS ingress and real provider execution remain separate
+  deployment acceptance steps. No direct file, terminal or other-chat API was
+  added to guest access; sharing remains trusted agent collaboration, not a sandbox.
+
 ## 2026-09-12 — Receipt-based outgoing chat status
 
 - Replace the unconditional outgoing “Sent to” heading with “To” and an
