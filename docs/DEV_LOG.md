@@ -11,8 +11,24 @@
   existing agent to use its tools and context; this is not a tool sandbox.
 - Explicitly explain that revoking access does not undo accepted work or
   scheduled jobs. Snapshot sharing remains read-only and unchanged.
+- Reuse the native timeline, composer, queue, approvals, goal and schedule
+  components in the token-scoped browser view. Keep file browsing/downloads,
+  working-directory controls, terminals, other chats and administration out.
+- Receive shared-chat changes through one demand-open stream, not polling.
+  Keep model choices across updates and refresh cached Codex/Claude status
+  after a snapshot commits. Use the native positioned settings modal.
+- Validated the compiled browser UI against the isolated token router and
+  native adapters with synthetic provider/store mutations: prompt queueing,
+  edit/reorder/send-now/stop, goal pause/resume, settings and permissions,
+  model choices, schedule create/edit/delete and approval responses. No
+  production provider run or live user job was started by these checks.
 - The expanded guest controls require the matching standalone server update;
-  this desktop disclosure change does not deploy or publish that server.
+  this source change does not deploy or publish that server.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `197`, desktop source
+  `ed1b20e`. Developer ID signature and all 86 compiled archive files verified.
+  The running app was preserved. This candidate is not notarized or publicly
+  released and has automatic updates disabled. The subsequent settings-modal
+  correction affects only the separately packaged web renderer.
 
 ## 2026-09-12 — Explicit chat sharing
 
