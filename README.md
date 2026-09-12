@@ -44,17 +44,10 @@
 </p>
 
 <div align="center">
-  <strong>Built for AI researchers.</strong>
-  <br />
-  <br />
   AgentsDock currently supports <strong>Claude Code</strong>,
   <strong>Codex</strong>, and <strong>Cursor</strong> in one desktop and mobile
   workspace. Use your agents for coding, research, and long-running work
-  without living in a terminal.
-  <br />
-  <br />
-  Run agents on your own workstation or server, follow their progress, review
-  files and rich media, and continue from desktop or mobile.
+  without living in a terminal. Easily review files and rich media.
   <br />
   <br />
   <strong>Download the latest version:</strong>
