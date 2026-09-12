@@ -7,6 +7,25 @@ const state = { revision: '1111111111111111:1', csrf: 'synthetic-csrf', session:
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('the restricted shared browser bridge', () => {
+  it('retains the discovered model choices across live baseline snapshots for this chat', async () => {
+    class Stream extends EventTarget { static instance: Stream; close = vi.fn(); constructor() { super(); Stream.instance = this } }
+    vi.stubGlobal('EventSource', Stream)
+    const baseline = { backends: { codex: { models: [{ value: 'selected', label: 'Selected' }], efforts: [] } } }
+    const catalog = { backends: { codex: { models: [...baseline.backends.codex.models, { value: 'another', label: 'Another model' }], efforts: [] } } }
+    const request = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(
+      String(url).endsWith('/controls') ? { result: catalog } : { ...state, runtime_catalog: baseline }
+    )))
+    const receive = vi.fn()
+    const bridge = createSharedChatBridge(prefix, receive, vi.fn(), request)
+    await bridge.start()
+    await bridge.catalog()
+    for (const revision of ['1111111111111111:2', '2222222222222222:1']) {
+      Stream.instance.dispatchEvent(new MessageEvent('state', { data: JSON.stringify({ ...state, revision, runtime_catalog: baseline }) }))
+      expect(receive.mock.calls.at(-1)?.[0].runtime_catalog).toEqual(catalog)
+    }
+    expect(request).toHaveBeenCalledTimes(2) // No rediscovery or polling on updates.
+    bridge.close()
+  })
   it('rejects an oversized chooser batch without leaving a pending promise or partially staging it', async () => {
     const request = vi.fn(async () => new Response(JSON.stringify(state)))
     const bridge = createSharedChatBridge(prefix, vi.fn(), vi.fn(), request)

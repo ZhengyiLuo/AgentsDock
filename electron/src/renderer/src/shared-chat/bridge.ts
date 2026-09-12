@@ -33,6 +33,10 @@ export function createSharedChatBridge(
 ) {
   if (!/^\/interactive-chat\/interactive_[a-f0-9]{32}$/.test(prefix)) throw new Error('Invalid shared chat URL.')
   let state: SharedChatState | null = null
+  // Live snapshots intentionally contain only a cheap current-model baseline.
+  // A successful explicit discovery belongs to this exact chat bridge, not to
+  // a transcript revision, and must survive subsequent snapshot updates.
+  let discoveredCatalog: RuntimeCatalog | null = null
   let csrf = ''
   let source: EventSource | null = null
   let closed = false
@@ -75,8 +79,8 @@ export function createSharedChatBridge(
       const [identity, generation] = next.revision.split(':')
       if (oldIdentity === identity && BigInt(generation) <= BigInt(oldGeneration)) return
     }
-    state = next
-    receive(next)
+    state = discoveredCatalog ? { ...next, runtime_catalog: discoveredCatalog } : next
+    receive(state)
     emit('server:sessions', { profileId: 'shared-chat', profileGeneration: 1, serverIdentity: prefix, sessions: [next.session] })
     if (next.session.backend === 'codex' || next.session.backend === 'claude') emit('server:provider-runtime', {
       profileId: 'shared-chat', profileGeneration: 1, serverIdentity: prefix,
@@ -193,7 +197,13 @@ export function createSharedChatBridge(
       source.addEventListener('unavailable', () => { closed = true; source?.close(); connection(false, 'This shared chat is no longer available.') })
       source.onerror = () => { source?.close(); connection(false, 'Connection interrupted. Reopen this page to reconnect.') }
     },
-    async catalog() { const value = await action('runtime.catalog', {}, true); if (state && !closed) apply({ ...state, runtime_catalog: value }, true) },
-    close() { closed = true; source?.close(); listeners.clear(); staged.clear(); uploaded.clear() }
+    async catalog() {
+      const value = await action('runtime.catalog', {}, true)
+      if (state && !closed && value?.backends && typeof value.backends === 'object' && !Array.isArray(value.backends)) {
+        discoveredCatalog = value
+        apply(state, true)
+      }
+    },
+    close() { closed = true; source?.close(); listeners.clear(); staged.clear(); uploaded.clear(); discoveredCatalog = null }
   }
 }
