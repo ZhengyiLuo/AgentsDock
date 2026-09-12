@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, type DragEvent } from 'react'
 import { Settings, X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { t } from '@shared/i18n'
 import type { SharedChatState } from './bridge'
 import { useLocale } from '../lib/i18n'
+import { nativeFileRefsFromFiles } from '../lib/native-files'
 import { useAppStore } from '../store/app-store'
 import { Timeline } from '../components/Timeline'
 import { Composer } from '../components/Composer'
@@ -75,10 +76,37 @@ export function SharedChatApp() {
   const error = useAppStore(state => state.error)
   const connected = useAppStore(state => state.connected)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [fileDropActive, setFileDropActive] = useState(false)
+  const fileDrag = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes('Files')
+  const fileDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!fileDrag(event)) return
+    event.preventDefault()
+    const available = connected && Boolean(session && !session.archived)
+    event.dataTransfer.dropEffect = available ? 'copy' : 'none'
+    setFileDropActive(available)
+  }
+  const fileDrop = async (event: DragEvent<HTMLElement>) => {
+    if (!fileDrag(event)) return
+    event.preventDefault()
+    setFileDropActive(false)
+    if (!connected || !session || session.archived) return
+    try {
+      const refs = await nativeFileRefsFromFiles(event.dataTransfer.files)
+      const current = useAppStore.getState()
+      if (refs.length && current.connected && current.selectedSessionId === session.id) {
+        await current.attachPathsForSession(session.id, refs)
+      }
+    } catch (cause) {
+      useAppStore.getState().setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
   if (!session) return null
   return <ClaudeRuntimeProvider session={session} capability={health?.capabilities?.claude_controls}>
     <CodexRuntimeProvider session={session} capability={health?.capabilities?.codex_controls}>
-      <main className="shared-chat-shell">
+      <main className="shared-chat-shell" onDragEnter={fileDragOver} onDragOver={fileDragOver}
+        onDragLeave={event => {
+          if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFileDropActive(false)
+        }} onDrop={fileDrop}>
         <header className="chat-header">
           <strong className="shared-chat-title">{session.title}</strong>
           <span className="shared-chat-scope">{t('chatShare.web.scope')}</span>
@@ -93,7 +121,7 @@ export function SharedChatApp() {
         <div className="chat-workspace">
           <div className="chat-workspace-history"><Timeline /></div>
           <div className="chat-workspace-shelves"><fieldset disabled={!connected} className="shared-chat-controls"><CodexInteractionShelf /><ClaudeInteractionShelf /></fieldset></div>
-          <fieldset disabled={!connected} className="shared-chat-controls"><Composer /></fieldset>
+          <fieldset disabled={!connected} className="shared-chat-controls"><Composer dropActive={connected && fileDropActive} /></fieldset>
         </div>
       </main>
       {connected && <JobDialog />}
