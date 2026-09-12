@@ -188,6 +188,13 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
   }, [connected, refresh, supported])
 
   useEffect(() => {
+    // Shared snapshots replace Session during the same commit that emits a
+    // runtime signal. Refresh after commit: the event effect's cleanup can
+    // otherwise cancel its queued refresh. This bridge read is memory-only.
+    if (window.agentsDock.sharedChat && supported) void refresh()
+  }, [refresh, session, supported])
+
+  useEffect(() => {
     if (!supported) return
     const onGoalsConfigurationChanged = (event: Event) => {
       const detail = (event as CustomEvent<CodexGoalsConfigurationChangedDetail>).detail

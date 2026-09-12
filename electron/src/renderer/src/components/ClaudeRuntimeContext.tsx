@@ -233,6 +233,12 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
   }, [connected, refresh, supported])
 
   useEffect(() => {
+    // Apply the shared bridge's cached runtime after the new Session commits;
+    // replacing Session also cleans up any pre-commit event refresh timer.
+    if (window.agentsDock.sharedChat && supported) void refresh()
+  }, [refresh, session, supported])
+
+  useEffect(() => {
     if (!supported || !session?.id) return
     const queueRefresh = () => {
       if (
