@@ -97,7 +97,7 @@ export function SharedChatApp() {
         </div>
       </main>
       <JobDialog />
-      <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content shared-chat-settings">
+      <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="form-dialog shared-chat-settings">
         <Dialog.Title>{t('chatShare.web.settings')}</Dialog.Title>
         <Dialog.Description>{t('chatShare.web.settingsHelp')}</Dialog.Description>
         <SessionPromptField value={session.system_prompt ?? ''} onSave={system_prompt => useAppStore.getState().updateSession(session.id, { system_prompt: system_prompt || null })} />
