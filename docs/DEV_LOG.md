@@ -9,6 +9,15 @@
   incremental projection for Claude and Codex with focused checks and TypeScript.
 - Idle execution requires the corresponding standalone server change; this
   desktop change alone does not wake an idle recipient or update its server.
+- Validated the compiled Electron renderer with synthetic Claude and Codex
+  live-progress, completion and sidebar-reopen journeys. Each retained one
+  genuine user bubble and both original and wake answers, without duplicate
+  output or an internal wake notice. No live provider execution was exercised.
+- Accepted local arm64 candidate: `0.2.13-beta.35`, build `201`, source `ffe6168`.
+  Production compilation, desktop tests, strict Developer ID signature, bundle
+  audit and matching packaged main/preload/renderer bytes passed. The app has
+  automatic updates disabled; it is not notarized or published. The running
+  desktop was not replaced.
 
 ## 2026-09-12 — Local desktop beta.34 candidate
 
