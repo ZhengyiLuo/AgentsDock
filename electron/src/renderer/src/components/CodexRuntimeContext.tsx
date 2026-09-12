@@ -126,7 +126,7 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
       const observed = await bridge.runtime(sessionId)
       if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId) return null
       let next = observed
-      if (focusedRef.current && shouldLoadPersistedThread(session, observed)) {
+      if (!window.agentsDock.sharedChat && focusedRef.current && shouldLoadPersistedThread(session, observed)) {
         try {
           // A short selection settle window prevents fast chat-list browsing
           // from launching expensive, uncancellable app-server resumes for
@@ -267,7 +267,8 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
     const sessionId = session?.id
     const bridge = codexBridge()
     if (
-      !supported
+      window.agentsDock.sharedChat
+      || !supported
       || !connected
       || !sessionId
       || !bridge

@@ -761,6 +761,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   )
   const commandAvailable = useCallback((command: ComposerCommand): boolean => {
     if (!session) return false
+    if (window.agentsDock.sharedChat && !['goal', 'permissions', 'reasoning', 'model', 'plan', 'schedule', 'attach'].includes(command.id)) return false
     if (command.provider) return command.provider.command.kind.length > 0
     if (command.id === 'chat') return crossChatSupported
     if (command.id === 'mail') return !teamMessagesAdvertised
@@ -2112,7 +2113,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
               {[t("ui.Composer.Composer.status_report_b784026"), t("ui.Composer.Composer.keep_going_8fc6411"), t("ui.Composer.Composer.verify_the_result_carefully_b07a805")].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => void send(false, phrase, false)}>{phrase}</DropdownMenu.Item>)}
             </DropdownMenu.Content></DropdownMenu.Portal>
           </DropdownMenu.Root>
-          <BackendMenu session={session} running={running} admitting={admitting} />
+          {!window.agentsDock.sharedChat && <BackendMenu session={session} running={running} admitting={admitting} />}
           <RuntimeMenu
             session={session}
             running={running}
@@ -3204,7 +3205,7 @@ function RuntimeMenu({
             <DropdownMenu.Label className="menu-label">Reasoning</DropdownMenu.Label>
             {efforts.map(option => <DropdownMenu.CheckboxItem data-runtime-section="reasoning" key={option.value || 'default'} className="menu-item" checked={(session.effort ?? '') === option.value} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { effort: option.value || null })}>{option.label}</DropdownMenu.CheckboxItem>)}
           </>}
-          {session.backend !== 'cursor' && <>
+          {!window.agentsDock.sharedChat && session.backend !== 'cursor' && <>
             <DropdownMenu.Separator className="menu-separator" />
             <DropdownMenu.Label className="menu-label">{t("ui.Composer.RuntimeMenu.agent_process_4dc27ee")}</DropdownMenu.Label>
             <DropdownMenu.Item

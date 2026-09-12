@@ -11,7 +11,7 @@ export function BackendMark({ backend, size = 18 }: { backend: Backend; size?: n
   return (
     <span className={`backend-mark backend-${backend}`} style={{ width: size, height: size }} aria-hidden="true">
       <img
-        src={BACKEND_MARK_SRC[backend]}
+        src={window.agentsDock?.sharedChat ? `/interactive-chat/assets/backend-${backend}.png` : BACKEND_MARK_SRC[backend]}
         alt=""
         draggable={false}
         onError={event => { event.currentTarget.style.display = 'none' }}

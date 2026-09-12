@@ -1,0 +1,11 @@
+.shared-chat-shell { height: 100dvh; min-height: 0; display: flex; flex-direction: column; }
+.shared-chat-shell > .chat-workspace { flex: 1; min-height: 0; }
+.shared-chat-controls { display: contents; border: 0; padding: 0; margin: 0; min-width: 0; }
+.shared-chat-shell .chat-header { -webkit-app-region: no-drag; padding-left: var(--space-7); }
+.shared-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-chat-scope { color: var(--muted); font-size: var(--text-size-meta); margin-left: var(--space-4); }
+.shared-chat-shell .header-actions { margin-left: auto; }
+.shared-chat-notice { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-7); background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border); font-size: var(--text-size-meta); }
+.shared-chat-settings { padding: var(--space-8); display: grid; gap: var(--space-7); }
+.shared-chat-welcome { max-width: 620px; margin: 12vh auto; padding: var(--space-8); line-height: var(--line-height-relaxed); }
+@media (max-width: 600px) { .shared-chat-scope { display: none; } }

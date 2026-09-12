@@ -2,10 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { chatShareCreateBody, isSharedChatCollaborator, parseChatShareList, parseChatSharePreview, parseCreatedChatShare } from './chat-shares'
 import { updateQueuedTurns } from './queue'
 import type { Event } from './types'
+import { catalogs } from './locales'
 
 const metadata = { id: `interactive_${'a'.repeat(32)}`, title: 'Synthetic chat', created_at: 1, expires_at: null, revoked_at: null, redeemed_at: null }
 const path = `/interactive-chat/${metadata.id}#invite=${'b'.repeat(43)}`
 describe('explicit chat sharing boundary', () => {
+  it('discloses full chat control and non-rollback revocation in both confirmations', () => {
+    const english = catalogs.en['chatShare.confirmInteractive']
+    const chinese = catalogs['zh-CN']['chatShare.confirmInteractive']
+    expect(english).toContain('full control of this chat')
+    expect(english).toContain('permissions and scheduled jobs')
+    expect(english).toContain('does not undo accepted work or jobs')
+    expect(chinese).toContain('完整控制权')
+    expect(chinese).toContain('更改权限和管理定时任务')
+    expect(chinese).toContain('不会撤回已接受的工作或任务')
+  })
   it('accepts the exact fragment invite and rejects credentials, queries and other share paths', () => {
     expect(parseCreatedChatShare({ ...metadata, path, url: `https://share.example.test${path}` }, 'interactive').path).toBe(path)
     for (const url of [`https://secret@share.example.test${path}`, `https://share.example.test${path.replace('#', '?')}`, `http://share.example.test${path}`]) {

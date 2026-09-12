@@ -8,7 +8,7 @@ export function CrossChatPeerLink({ peerId, sessionId, profileScope, children }:
   peerId: string | null | undefined; sessionId: string; profileScope: WorkspaceProfileScope | null; children: ReactNode
 }) {
   const targetId = peerId?.trim()
-  if (!targetId || targetId === sessionId) return <strong>{children}</strong>
+  if (window.agentsDock.sharedChat || !targetId || targetId === sessionId) return <strong>{children}</strong>
   const scopeCurrent = () => {
     const state = useAppStore.getState()
     return profileScope && state.activeProfileId === profileScope.profileId

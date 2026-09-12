@@ -205,6 +205,8 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  /** Restricted browser renderer. It has no native, filesystem, or other-chat authority. */
+  readonly sharedChat?: true
   chatShares: {
     preview(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./chat-shares').ChatSharePreview>
     list(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode): Promise<import('./chat-shares').ChatShareRecord[]>

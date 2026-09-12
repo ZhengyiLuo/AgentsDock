@@ -284,7 +284,7 @@ function pinnedAgentFile(pin: PinnedItem, sessionId: string): AgentFile | null {
 }
 
 
-function SessionPromptField({ value, onSave }: { value: string; onSave: (value: string) => Promise<void> }) {
+export function SessionPromptField({ value, onSave }: { value: string; onSave: (value: string) => Promise<void> }) {
   useLocale()
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])

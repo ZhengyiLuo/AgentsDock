@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-12 — Full control within a shared chat
+
+- Expand the interactive invitation disclosure and required confirmation to
+  full control of the one shared chat: prompt/upload, stop/steer, send queued
+  messages now, manage the queue, change model/chat settings and permissions,
+  manage goals, and create/edit/delete scheduled jobs.
+- Retain the boundary against direct terminal access, file browsing/download,
+  other chats and server administration. The collaborator can still ask the
+  existing agent to use its tools and context; this is not a tool sandbox.
+- Explicitly explain that revoking access does not undo accepted work or
+  scheduled jobs. Snapshot sharing remains read-only and unchanged.
+- The expanded guest controls require the matching standalone server update;
+  this desktop disclosure change does not deploy or publish that server.
+
 ## 2026-09-12 — Explicit chat sharing
 
 - Add right-click **Share chat** with two separate choices: a reviewed,

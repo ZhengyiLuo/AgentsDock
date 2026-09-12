@@ -399,8 +399,8 @@ export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean 
         <ThreadStatusSection />
         <PermissionSettings session={session} onNotice={setNotice} />
         <GoalSettings onNotice={setNotice} autoFocusObjective={focusGoal} />
-        <ThreadActions onNotice={setNotice} />
-        <BackgroundTerminals onNotice={setNotice} />
+        {!window.agentsDock.sharedChat && <ThreadActions onNotice={setNotice} />}
+        {!window.agentsDock.sharedChat && <BackgroundTerminals onNotice={setNotice} />}
       </div>}
   </div>
 }
