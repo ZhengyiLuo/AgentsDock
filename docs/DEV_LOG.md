@@ -10,6 +10,17 @@
   delivery removed leading decorations from the same provider message. That
   server correction is separate and requires deployment before historical
   duplicates can be repaired. No polling or background refresh was added.
+- Verified the actual isolated Electron service, SQLite cache and renderer:
+  repair, stale replay, switching chats and reload preserve corrections while
+  all original scheduled reports, genuine messages and the running job remain
+  intact. Provider transport was synthetic. Claude's equivalent cache path was
+  verified with SQLite close/reopen and shared provenance checks, not a second
+  graphical journey.
+- Accepted local arm64 candidate: `0.2.13-beta.33` build `193`, source `c9c5210`.
+  Developer ID signature and all 86 compiled archive files verified. The
+  running app was preserved; this candidate is not notarized or publicly
+  released and has automatic updates disabled. The standalone server patch
+  is committed separately and has not been deployed.
 
 ## 2026-09-11 — Cross-chat heading navigation
 
