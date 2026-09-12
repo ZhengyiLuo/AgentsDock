@@ -1,5 +1,6 @@
 import { getLocale, t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { legacyOutgoingDeliveryStatus, outgoingDeliveryStatus } from '../lib/cross-chat-delivery-status'
 import { timelineCount, timelineEventLabel, timelineStatusLabel } from '../lib/timeline-labels'
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, History, LoaderCircle, MessageSquareShare, Pin, Siren, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
@@ -1350,7 +1351,7 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
       <header>
         <MessageSquareShare size={13} aria-hidden="true" />
         <CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>
-          {incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}
+          {incoming ? counterpartTitle : t('timeline.handoff.to', { title: counterpartTitle })}
         </CrossChatPeerLink>
         <time>{formatTime(item.anchorTs || item.event.ts)}</time>
       </header>
@@ -1364,9 +1365,8 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
         onClick={() => expanded ? setExpanded(false) : void showFullMessage()}
       >{loading ? t('timeline.ui.loadingFullMessage') : expanded ? t('timeline.ui.showLess') : t('timeline.ui.viewMessage')}</button>}
       {failed && <small className="cross-chat-message-error">{latestExchangeString(events, event => event.message) || t('timeline.ui.couldnTComplete')}</small>}
-      {cancelled && <small>{t('timeline.status.cancelled')}</small>}
-      {!incoming && item.event.delivery_mode === 'mailbox' && (item.event.inbox_state === 'read' || item.event.inbox_state === 'deleted')
-        && <small>{t(`timeline.inbox.${item.event.inbox_state}`)}</small>}
+      {incoming && cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {!incoming && <small className="cross-chat-exchange-state" role="status">{t(cancelledLocally ? 'timeline.inbox.cancelled' : outgoingDeliveryStatus(item.event, events))}</small>}
       {!incoming && item.event.delivery_mode === 'mailbox' && item.event.inbox_state === 'unread' && !cancelled && mailboxAvailable
         && <button className="quiet-button" disabled={cancelling} onClick={() => void cancelMailbox()}>{t('timeline.inbox.cancel')}</button>}
       {loadError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {loadError}</small>}
@@ -1671,7 +1671,7 @@ function CrossChatExchangeView({ item, sessionId, profileScope }: { item: System
           <header>
             <MessageSquareShare size={13} aria-hidden="true" />
             <CrossChatPeerLink peerId={leg.sourceId === sessionId || leg.targetId === sessionId ? incoming ? leg.sourceId : leg.targetId : undefined} sessionId={sessionId} profileScope={profileScope}>
-              {incoming ? sourceTitle : t('timeline.handoff.sent', { title: targetTitle })}
+              {incoming ? sourceTitle : t('timeline.handoff.to', { title: targetTitle })}
             </CrossChatPeerLink>
             {leg.ts && <time>{formatTime(item.anchorTs || leg.ts)}</time>}
           </header>
@@ -1801,11 +1801,12 @@ function CrossChatView({ item, sessionId, profileScope }: { item: SystemItem; se
   const incoming = targetId === sessionId && sourceId !== sessionId
   return <article className={`cross-chat-message ${incoming ? 'incoming' : 'outgoing'}${failed ? ' failed' : ''}`} data-event-id={event.id}>
     <div className="cross-chat-message-surface">
-      <header><MessageSquareShare size={13} aria-hidden="true" /><CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>{incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}</CrossChatPeerLink><time>{formatTime(item.anchorTs || event.ts)}</time></header>
+      <header><MessageSquareShare size={13} aria-hidden="true" /><CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>{incoming ? counterpartTitle : t('timeline.handoff.to', { title: counterpartTitle })}</CrossChatPeerLink><time>{formatTime(item.anchorTs || event.ts)}</time></header>
       {body || preview ? <MarkdownContent text={body || preview} sessionId={sessionId} fold={false} /> : <small>{detail || title}</small>}
       {truncated && !body && <button type="button" className="cross-chat-message-expand" disabled={bodyLoading} onClick={() => void loadBody()}>{bodyLoading ? t('timeline.ui.loadingFullMessage') : t('timeline.ui.viewMessage')}</button>}
       {failed && preview && <small className="cross-chat-message-error">{detail || title}</small>}
-      {cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {incoming && cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {!incoming && <small className="cross-chat-exchange-state" role="status">{t(legacyOutgoingDeliveryStatus(status, displayEvent.type))}</small>}
       {bodyError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {bodyError}</small>}
       {cancelError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotCancelHandoff')} {cancelError}</small>}
       {canCancel && <button type="button" className="cross-chat-message-expand" disabled={cancelling} onClick={() => void cancelHandoff()}>{cancelling ? t('timeline.ui.cancelling') : t('timeline.ui.cancelHandoff')}</button>}

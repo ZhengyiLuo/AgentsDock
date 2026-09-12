@@ -85,6 +85,29 @@ describe('timeline pin state', () => {
     })
   })
 
+  it.each([
+    ['registered', undefined, 'unread', 'Delivery unconfirmed'],
+    ['registered', 'stored', 'unread', 'In inbox · unread by agent'],
+    ['read', 'read', 'read', 'Read by agent'],
+    ['cancelled', 'cancelled', 'cancelled', 'Cancelled'],
+    ['failed', 'failed', 'unread', 'Delivery failed']
+  ] as const)('labels the outgoing %s receipt honestly (%s)', (phase, status, inboxState, expected) => {
+    const event: Event = {
+      id: 'mailbox-receipt', seq: 1, session_id: 'chat-1', ts: '2026-09-12T00:00:00Z',
+      type: `chat_conversation_message_${phase}`, conversation_mode: 'async_route_v1',
+      delivery_mode: 'mailbox', conversation_id: 'pair-one', message_id: 'message-one',
+      source_session_id: 'chat-1', target_session_id: 'chat-2', target_title: 'Training',
+      handoff_status: status, inbox_state: inboxState, received_at: '2026-09-12T00:00:00Z',
+      handoff_preview: 'The exact original message.'
+    }
+    render(<TimelineRowView item={{ kind: 'system', id: 'mailbox-one', key: 'mailbox-one', seq: 1,
+      event, events: [event], crossChatMessage: true }} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByRole('button', { name: 'To Training' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(expected)
+    expect(screen.queryByText('Sent to Training')).not.toBeInTheDocument()
+    expect(loadHandoff).not.toHaveBeenCalled()
+  })
+
   it('updates memoized message controls when language changes and preserves authored text', () => {
     const event: Event = {
       id: 'locale-message', session_id: 'chat-1', seq: 1, type: 'assistant_text',
@@ -1009,7 +1032,7 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText(/^(?:Sent to )?Training$/)).toBeInTheDocument()
+    expect(screen.getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Reply pending · Recipient processing')
     expect(screen.getByRole('status')).toHaveAttribute('title', 'Tracks message delivery and replies, not this chat’s run status.')
     expect(screen.queryByText('Agent-authored same-server access')).not.toBeInTheDocument()
@@ -1439,7 +1462,7 @@ describe('timeline pin state', () => {
     const legs = boundary?.querySelectorAll('.cross-chat-message') ?? []
     expect(legs).toHaveLength(2)
     expect(legs[0]).toHaveClass('outgoing')
-    expect(within(legs[0] as HTMLElement).getByRole('button', { name: 'Sent to Training' })).toBeVisible()
+    expect(within(legs[0] as HTMLElement).getByRole('button', { name: 'To Training' })).toBeVisible()
     expect(legs[0]).toHaveTextContent('Can you verify the updater state?')
     expect(legs[1]).toHaveClass('incoming')
     expect(within(legs[1] as HTMLElement).getByRole('button', { name: 'Training' })).toBeVisible()
@@ -1554,7 +1577,7 @@ describe('timeline pin state', () => {
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
     const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
     expect(boundary.querySelector('.cross-chat-message')).toHaveClass('failed')
-    expect(within(boundary).getByText(/^(?:Sent to )?Training$/)).toBeInTheDocument()
+    expect(within(boundary).getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(within(boundary).getByRole('status')).toHaveTextContent("Couldn't complete")
     expect(within(boundary).getByRole('alert')).toHaveTextContent('Training could not start the requested work.')
     expect(within(boundary).queryByText(/Expires/)).not.toBeInTheDocument()
@@ -1595,7 +1618,7 @@ describe('timeline pin state', () => {
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
     const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
     expect(boundary.querySelector('.cross-chat-message')).not.toHaveClass('failed')
-    expect(within(boundary).getByText(/^(?:Sent to )?Training$/)).toBeInTheDocument()
+    expect(within(boundary).getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(within(boundary).getByRole('status')).toHaveTextContent('Cancelled before completion')
     expect(within(boundary).queryByRole('alert')).not.toBeInTheDocument()
     expect(within(boundary).queryByText(recoveryMessage)).not.toBeInTheDocument()
@@ -1609,7 +1632,7 @@ describe('timeline pin state', () => {
     {
       direction: 'outgoing' as const,
       sessionId: 'chat-1',
-      title: 'Sent to Training'
+      title: 'To Training'
     },
     {
       direction: 'incoming' as const,
@@ -1673,7 +1696,7 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText(/^(?:Sent to )?Training$/)).toBeInTheDocument()
+    expect(screen.getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(document.querySelector('.cross-chat-exchange-detail-lines')).not.toBeInTheDocument()
     expect(screen.getByText('Delivery in progress')).toBeInTheDocument()
     expect(screen.queryByText('Reply expected from Training')).not.toBeInTheDocument()
@@ -1737,7 +1760,7 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText(/^(?:Sent to )?Training$/)).toBeInTheDocument()
+    expect(screen.getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(screen.getByText('Waiting to start')).toBeInTheDocument()
     expect(screen.queryByText('Reply expected')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View message' })).toBeInTheDocument()
