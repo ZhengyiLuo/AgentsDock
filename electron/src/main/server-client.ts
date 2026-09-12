@@ -115,6 +115,9 @@ import {
 } from '../shared/team-mail-hints'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+// Snapshot scans have a server-side 30s deadline. Leave response/transport
+// headroom without extending unrelated requests or retrying a creation.
+const CHAT_SHARE_SNAPSHOT_TIMEOUT_MS = 40_000
 // The server gives its one-shot digest summarizer 180 seconds to finish.
 // Keep the client alive through that window plus response/network overhead.
 const DIGEST_PREVIEW_REQUEST_TIMEOUT_MS = 210_000
@@ -2333,7 +2336,7 @@ export class AgentServerClient {
 
   async previewChatShare(sessionId: string) {
     return parseChatSharePreview(await this.privilegedNativeRequest(`${this.chatSharePath(sessionId, 'snapshot')}/preview`,
-      { method: 'POST', body: '{}' }, DEFAULT_REQUEST_TIMEOUT_MS, 200, 4 * 1024 * 1024))
+      { method: 'POST', body: '{}' }, CHAT_SHARE_SNAPSHOT_TIMEOUT_MS, 200, 4 * 1024 * 1024))
   }
 
   async listChatShares(sessionId: string, mode: ChatShareMode) {
@@ -2342,7 +2345,7 @@ export class AgentServerClient {
 
   async createChatShare(sessionId: string, input: CreateChatShareInput) {
     return parseCreatedChatShare(await this.privilegedNativeRequest(this.chatSharePath(sessionId, input.mode),
-      { method: 'POST', body: JSON.stringify(chatShareCreateBody(input)) }, DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
+      { method: 'POST', body: JSON.stringify(chatShareCreateBody(input)) }, input.mode === 'snapshot' ? CHAT_SHARE_SNAPSHOT_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
   }
 
   async revokeChatShare(sessionId: string, mode: ChatShareMode, shareId: string): Promise<void> {

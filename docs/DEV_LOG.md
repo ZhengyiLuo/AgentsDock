@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-12 — Large chat sharing
+
+- Preview and confirm text snapshots independently of raw tool-log size and
+  message count, retaining bounded UTF-8 snapshot and individual message sizes.
+  The matching server release preserves existing shared links and revocations
+  when upgrading snapshot storage.
+- Page the review dialog in groups of 20 messages, resetting scroll position on
+  each page. Confirmation still covers the complete reviewed snapshot, not just
+  the visible page. Strip native IPC boilerplate from share errors.
+- Give snapshot requests transport headroom beyond the server's bounded scan;
+  do not change unrelated request deadlines or add retries or background work.
+- Verified the actual desktop right-click, preview, paging, confirmation and
+  old-server error journey with a synthetic 2,384-message snapshot and a source
+  boundary larger than 64 MiB. Only 20 message elements were mounted at once;
+  confirmation from the second page retained the original full-snapshot digest.
+- Interactive sharing requires the matching standalone server implementation;
+  publishing the desktop alone does not add missing server endpoints.
+
 ## 2026-09-12 — Shared-browser recovery and control parity
 
 - Resume an already joined browser session on reload without consuming another

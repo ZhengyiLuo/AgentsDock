@@ -10,6 +10,7 @@ import { useAppStore } from '../store/app-store'
 import './ChatShareDialog.css'
 
 interface Target { session: Session; scope: WorkspaceProfileScope }
+const PREVIEW_PAGE_SIZE = 20
 
 export function ChatShareDialog() {
   const [target, setTarget] = useState<Target | null>(null)
@@ -39,6 +40,8 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
   const [mode, setMode] = useState<ChatShareMode>('snapshot')
   const [shares, setShares] = useState<ChatShareRecord[]>([])
   const [preview, setPreview] = useState<ChatSharePreview | null>(null)
+  const [previewPage, setPreviewPage] = useState(0)
+  const previewElement = useRef<HTMLElement | null>(null)
   const [created, setCreated] = useState<CreatedChatShare | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -49,6 +52,7 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
   const operation = useRef(false)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => { if (previewElement.current) previewElement.current.scrollTop = 0 }, [preview, previewPage])
   useEffect(() => {
     let active = true
     setLoading(true); setError(null); setShares([])
@@ -67,7 +71,7 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
   }
   const previewChat = () => run(async () => {
     const value = await window.agentsDock.chatShares.preview(scope, session.id)
-    if (mounted.current) { setPreview(value); setConfirmed(false) }
+    if (mounted.current) { setPreview(value); setPreviewPage(0); setConfirmed(false) }
   })
   const create = () => run(async () => {
     if (!confirmed || (mode === 'snapshot' && !preview)) return
@@ -88,7 +92,7 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
   })
   const changeMode = (next: ChatShareMode) => {
     if (operation.current) return
-    setMode(next); setPreview(null); setCreated(null); setConfirmed(false); setCopied(false)
+    setMode(next); setPreview(null); setPreviewPage(0); setCreated(null); setConfirmed(false); setCopied(false)
   }
   return <Dialog.Root open onOpenChange={open => { if (!open) close() }}><Dialog.Portal>
     <Dialog.Overlay className="dialog-overlay" />
@@ -102,10 +106,14 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
         </select></label>
         <p className="chat-share-warning">{t(mode === 'snapshot' ? 'chatShare.snapshotWarning' : 'chatShare.interactiveWarning')}</p>
         {mode === 'snapshot' && <button type="button" className="quiet-button" disabled={busy || loading} onClick={() => void previewChat()}>{t('chatShare.preview')}</button>}
-        {preview && <section className="chat-share-preview" aria-label={t('chatShare.preview')}>
-          {preview.messages.map((message, index) => <article key={index}><strong>{t(message.role === 'user' ? 'chatShare.user' : 'chatShare.assistant')}</strong><p>{message.text}</p></article>)}
+        {preview && <><section ref={previewElement} className="chat-share-preview" aria-label={t('chatShare.preview')}>
+          {preview.messages.slice(previewPage * PREVIEW_PAGE_SIZE, (previewPage + 1) * PREVIEW_PAGE_SIZE).map((message, index) => <article key={previewPage * PREVIEW_PAGE_SIZE + index}><strong>{t(message.role === 'user' ? 'chatShare.user' : 'chatShare.assistant')}</strong><p>{message.text}</p></article>)}
           {preview.messages.length === 0 && <p>{t('chatShare.emptyPreview')}</p>}
-        </section>}
+        </section>{preview.messages.length > PREVIEW_PAGE_SIZE && <nav className="chat-share-preview-pages" aria-label={t('chatShare.preview')}>
+          <button type="button" className="quiet-button" disabled={busy || previewPage === 0} onClick={() => setPreviewPage(page => page - 1)}>{t('timeline.ui.previous')}</button>
+          <span aria-live="polite">{t('chatShare.previewRange', { start: previewPage * PREVIEW_PAGE_SIZE + 1, end: Math.min((previewPage + 1) * PREVIEW_PAGE_SIZE, preview.messages.length), total: preview.messages.length })}</span>
+          <button type="button" className="quiet-button" disabled={busy || (previewPage + 1) * PREVIEW_PAGE_SIZE >= preview.messages.length} onClick={() => setPreviewPage(page => page + 1)}>{t('timeline.ui.next')}</button>
+        </nav>}</>}
         {!created && <>
           <label className="chat-share-confirm"><input type="checkbox" checked={confirmed} disabled={busy || loading || (mode === 'snapshot' && !preview)} onChange={event => setConfirmed(event.target.checked)} />
             <span>{t(mode === 'snapshot' ? 'chatShare.confirmSnapshot' : 'chatShare.confirmInteractive')}</span></label>
@@ -136,7 +144,8 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
 }
 
 function shareError(cause: unknown): string {
-  const message = cause instanceof Error ? cause.message : String(cause)
+  const message = (cause instanceof Error ? cause.message : String(cause))
+    .replace(/^Error invoking remote method ['"][^'"]+['"]:\s*/i, '').replace(/^Error:\s*/i, '')
   if (/\b404\b|not found|not implemented/i.test(message)) return t('chatShare.unavailable')
   return message
 }

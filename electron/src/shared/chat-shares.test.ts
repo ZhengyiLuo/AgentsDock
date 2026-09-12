@@ -36,6 +36,23 @@ describe('explicit chat sharing boundary', () => {
     expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, digest: preview.digest, through_bytes: preview.through_bytes })).toEqual({ confirmed_public: true, digest: 'd'.repeat(64), through_bytes: 42 })
     expect(() => chatShareCreateBody({ mode: 'interactive', confirmed_interactive: false } as never)).toThrow()
   })
+  it('shares a long noisy log without rejecting its small complete text snapshot', () => {
+    const messages = Array.from({ length: 2384 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', text: `Message ${index}: ${'small readable text '.repeat(15)}` }))
+    const preview = parseChatSharePreview({ messages, through_bytes: 145_336_998, digest: 'e'.repeat(64), warning: 'Review all text.' })
+    expect(preview.messages).toHaveLength(messages.length)
+    expect(preview.messages.at(-1)?.text).toBe(messages.at(-1)?.text)
+    expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, digest: preview.digest, through_bytes: preview.through_bytes }))
+      .toEqual({ confirmed_public: true, digest: 'e'.repeat(64), through_bytes: 145_336_998 })
+    for (const through_bytes of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity]) {
+      expect(() => parseChatSharePreview({ messages, through_bytes, digest: 'e'.repeat(64), warning: '' })).toThrow()
+    }
+  })
+  it('bounds actual exported UTF-8 text and serialized bytes, not the source log', () => {
+    const value = { through_bytes: 200_000_000, digest: 'f'.repeat(64), warning: '' }
+    expect(() => parseChatSharePreview({ ...value, messages: [{ role: 'user', text: 'é'.repeat(128 * 1024 + 1) }] })).toThrow('Invalid chat preview message')
+    expect(() => parseChatSharePreview({ ...value, messages: Array.from({ length: 12 }, () => ({ role: 'assistant', text: 'a'.repeat(190 * 1024) })) })).toThrow('2 MiB')
+    expect(() => parseChatSharePreview({ ...value, messages: Array.from({ length: 2 }, () => ({ role: 'user', text: '\u0000'.repeat(240_000) })) })).toThrow('2 MiB')
+  })
   it('labels only exact nonsecret collaborator provenance and preserves it in the queue', () => {
     const source = { shared_chat_id: metadata.id, shared_chat_request_id: 'qa_request_123', author_label: 'Collaborator' as const }
     expect(isSharedChatCollaborator(source)).toBe(true)

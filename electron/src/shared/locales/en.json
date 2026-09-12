@@ -2650,6 +2650,7 @@
   "chatShare.user": "User",
   "chatShare.assistant": "Assistant",
   "chatShare.emptyPreview": "No readable messages in this snapshot.",
+  "chatShare.previewRange": "{start}–{end} of {total} messages",
   "chatShare.confirmSnapshot": "I reviewed the preview and agree that anyone with the link can read it.",
   "chatShare.confirmInteractive": "I grant this trusted person full control of this chat, including permissions and scheduled jobs. I understand that revoking access does not undo accepted work or jobs.",
   "chatShare.createSnapshot": "Create snapshot link",

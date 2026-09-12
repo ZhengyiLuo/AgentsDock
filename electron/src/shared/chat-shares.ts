@@ -1,5 +1,8 @@
 export type ChatShareMode = 'snapshot' | 'interactive'
 
+export const MAX_CHAT_SHARE_SNAPSHOT_BYTES = 2 * 1024 * 1024
+const MAX_CHAT_SHARE_MESSAGE_BYTES = 256 * 1024
+
 export interface SharedChatAttribution {
   shared_chat_id?: string | null
   shared_chat_request_id?: string | null
@@ -101,15 +104,19 @@ export function parseCreatedChatShare(value: unknown, mode: ChatShareMode): Crea
 
 export function parseChatSharePreview(value: unknown): ChatSharePreview {
   const item = record(value)
-  if (!Array.isArray(item.messages) || item.messages.length > 1000 || !Number.isSafeInteger(item.through_bytes)
-    || Number(item.through_bytes) < 0 || Number(item.through_bytes) > 64 * 1024 * 1024
+  if (!Array.isArray(item.messages) || !Number.isSafeInteger(item.through_bytes)
+    || Number(item.through_bytes) < 0
     || typeof item.digest !== 'string' || !/^[a-f0-9]{64}$/.test(item.digest)
     || typeof item.warning !== 'string' || item.warning.length > 8192) throw new Error('Invalid chat preview.')
+  const utf8 = new TextEncoder()
   const messages: ChatSharePreview['messages'] = item.messages.map(value => {
     const message = record(value)
-    if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.text !== 'string' || message.text.length > 256 * 1024) throw new Error('Invalid chat preview message.')
+    if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.text !== 'string'
+      || utf8.encode(message.text).byteLength > MAX_CHAT_SHARE_MESSAGE_BYTES) throw new Error('Invalid chat preview message.')
     return { role: message.role, text: message.text, ...(message.timestamp === undefined ? {} : { timestamp: timestamp(message.timestamp)! }) }
   })
+  // Limit exported text, not the size or message count of the source event log.
+  if (utf8.encode(JSON.stringify(messages)).byteLength > MAX_CHAT_SHARE_SNAPSHOT_BYTES) throw new Error('Chat preview exceeds the 2 MiB text snapshot limit.')
   return { messages, through_bytes: Number(item.through_bytes), digest: item.digest, warning: item.warning }
 }
 
@@ -119,7 +126,7 @@ export function chatShareCreateBody(input: CreateChatShareInput): Record<string,
   if (input.expires_at !== undefined && timestamp(input.expires_at)! <= Date.now() / 1000) throw new Error('Share expiry must be in the future.')
   const optional = { ...(input.title === undefined ? {} : { title: input.title }), ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at }) }
   if (mode === 'snapshot' && input.mode === 'snapshot' && input.confirmed_public === true
-    && Number.isSafeInteger(input.through_bytes) && input.through_bytes > 0 && input.through_bytes <= 64 * 1024 * 1024 && /^[a-f0-9]{64}$/.test(input.digest)) {
+    && Number.isSafeInteger(input.through_bytes) && input.through_bytes > 0 && /^[a-f0-9]{64}$/.test(input.digest)) {
     return { ...optional, confirmed_public: true, through_bytes: input.through_bytes, digest: input.digest }
   }
   if (mode === 'interactive' && input.mode === 'interactive' && input.confirmed_interactive === true) return { ...optional, confirmed_interactive: true }

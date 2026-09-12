@@ -5,6 +5,7 @@
 .chat-share-preview { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-5); }
 .chat-share-preview article + article { margin-top: var(--space-6); }
 .chat-share-preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-share-preview-pages { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); font-size: var(--text-size-meta); }
 .chat-share-created { display: grid; gap: var(--space-4); }
 .chat-share-existing { border-top: 1px solid var(--border); padding-top: var(--space-5); }
 .chat-share-existing header, .chat-share-record { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); }
