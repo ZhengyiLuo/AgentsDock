@@ -1,6 +1,4 @@
-<h1 align="center">AgentsDock</h1>
-
-<p align="center"><strong>A dock for all your agents.</strong></p>
+<h1 align="center">AgentsDock: an IDE designed for agentic AI research</h1>
 
 <div align="center">
   <a href="https://agentsdock.net">
