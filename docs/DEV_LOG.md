@@ -20,7 +20,9 @@
 - Validated the compiled browser UI against the isolated token router and
   native adapters with synthetic provider/store mutations: prompt queueing,
   edit/reorder/send-now/stop, goal pause/resume, settings and permissions,
-  model choices, schedule create/edit/delete and approval responses. No
+  model choices, schedule create/edit/delete and approval responses. Verified
+  that a second browser cannot reuse an invitation and revocation disables
+  further guest actions and ends the live stream. No
   production provider run or live user job was started by these checks.
 - The expanded guest controls require the matching standalone server update;
   this source change does not deploy or publish that server.
