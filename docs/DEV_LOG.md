@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-12 — Local desktop beta.34 candidate
+
+- Accepted local universal macOS installer: `0.2.13-beta.34`, build `157`, exact
+  committed source `85654170df60df954d0efea1f68d0fd34e37a2a2`.
+- Verified Developer ID signing, notarization ticket, Gatekeeper acceptance,
+  embedded version/build and updater ZIP checksum. This candidate includes the
+  large-share preview and browser-sharing changes described below.
+- Desktop publication was canceled at the user's request. No public beta.34
+  release was created; the installer was retained locally and the running app
+  was not replaced. The signed candidate has normal direct-update support.
+- Full cross-platform release acceptance is not claimed: macOS and Linux x64
+  build jobs passed, an ARM renderer fixture exposed a passive-effect assertion
+  race, and the remaining workflow was canceled. The fixture correction is
+  retained separately and is not part of this installer.
+
 ## 2026-09-12 — Large chat sharing
 
 - Preview and confirm text snapshots independently of raw tool-log size and
