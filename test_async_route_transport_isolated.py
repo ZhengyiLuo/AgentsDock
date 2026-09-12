@@ -238,6 +238,8 @@ class AsyncRouteAcceptanceTests(unittest.IsolatedAsyncioTestCase):
             "append_cross_chat_event_once": AsyncMock(),
             "submit_cross_chat_delivery": AsyncMock(side_effect=AssertionError("mailbox must not execute recipient")),
             "publish_chat_mailbox_message": AsyncMock(return_value="unread"),
+            # Acceptance schedules an idle check but never awaits provider work.
+            "schedule_chat_mailbox_wake": Mock(),
             "generic_provider_route_delivery_error": lambda: HTTPException(409, "delivery failed"),
             "join_task_despite_caller_cancellation": lambda task: task,
             "reserve_provider_route_handoff": AsyncMock(side_effect=AssertionError("legacy reservation called")),
@@ -321,6 +323,17 @@ class AsyncRouteAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as conflict:
             await self.send()
         self.assertEqual(conflict.exception.status_code, 409)
+
+    async def test_retry_after_publication_failure_still_schedules_idle_mailbox(self):
+        self.ns["publish_chat_mailbox_message"].side_effect = [OSError("receipt storage unavailable"), "unread"]
+        with self.assertRaises(HTTPException):
+            await self.send()
+        self.ns["schedule_chat_mailbox_wake"].assert_not_called()
+        duplicate = await self.send()
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM chat_mailbox_messages").fetchone()[0], 1)
+        self.ns["schedule_chat_mailbox_wake"].assert_called_once_with("b")
+        self.ns["submit_cross_chat_delivery"].assert_not_awaited()
 
     async def test_unnegotiated_or_revoked_or_expired_run_fails_before_new_effect(self):
         self.capability["async_route_v1"] = False

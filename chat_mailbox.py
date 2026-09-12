@@ -76,6 +76,13 @@ def initialize(connection: sqlite3.Connection) -> None:
             after_seq INTEGER NOT NULL, end_seq INTEGER NOT NULL,
             has_more INTEGER NOT NULL CHECK(has_more IN (0,1)), message_ids_json TEXT NOT NULL,
             PRIMARY KEY(read_id, after_seq))""",
+        """CREATE TABLE IF NOT EXISTS chat_mailbox_wakes (
+            target_session_id TEXT PRIMARY KEY,
+            last_attempt_seq INTEGER NOT NULL DEFAULT 0 CHECK(last_attempt_seq>=0),
+            suppressed_seq INTEGER NOT NULL DEFAULT 0 CHECK(suppressed_seq>=0),
+            claim_id TEXT UNIQUE, through_seq INTEGER NOT NULL DEFAULT 0 CHECK(through_seq>=0),
+            state TEXT CHECK(state IN ('reserved','admitted')), run_id TEXT,
+            updated_at TEXT NOT NULL)""",
         """CREATE INDEX IF NOT EXISTS chat_mailbox_sender_order
             ON chat_mailbox_messages(target_session_id, source_session_id, mailbox_seq)""",
         """CREATE INDEX IF NOT EXISTS chat_mailbox_unread_order
@@ -338,3 +345,94 @@ def mark_read_event_published(connection: sqlite3.Connection, message_id: str) -
     return connection.execute("""UPDATE chat_mailbox_messages SET read_event_published=1
         WHERE message_id=? AND read_at IS NOT NULL AND read_event_published=0""",
         (_identifier(message_id),)).rowcount == 1
+
+
+def claim_wake(connection: sqlite3.Connection, target_session_id: str,
+               allowed_pair_ids: Iterable[str], *, now: str) -> dict | None:
+    """Reserve one authorized unread cutoff; the caller must separately prove idle.
+
+    A wake is an execution attempt, not a read receipt. New arrivals can replace
+    an admitted attempt only when the runtime has again proved the chat idle.
+    """
+    _transaction(connection)
+    clause, args = _scope(target_session_id, None, allowed_pair_ids)
+    prior = connection.execute("SELECT * FROM chat_mailbox_wakes WHERE target_session_id=?",
+                               (target_session_id,)).fetchone()
+    if prior is not None and prior["state"] == "reserved":
+        return None
+    cutoff = max(prior["last_attempt_seq"], prior["suppressed_seq"]) if prior else 0
+    through_seq = connection.execute(f"""SELECT COALESCE(MAX(m.mailbox_seq),0) FROM {_JOIN}
+        WHERE {clause} AND m.read_at IS NULL AND m.mailbox_seq>?""", (*args, cutoff)).fetchone()[0]
+    if not through_seq:
+        return None
+    claim_id = "mailwake_" + uuid.uuid4().hex
+    connection.execute("""INSERT INTO chat_mailbox_wakes
+        (target_session_id,claim_id,through_seq,state,updated_at) VALUES(?,?,?,'reserved',?)
+        ON CONFLICT(target_session_id) DO UPDATE SET claim_id=excluded.claim_id,
+        through_seq=excluded.through_seq,state='reserved',run_id=NULL,updated_at=excluded.updated_at""",
+        (target_session_id, claim_id, through_seq, now))
+    return dict(connection.execute("SELECT * FROM chat_mailbox_wakes WHERE target_session_id=?",
+                                   (target_session_id,)).fetchone())
+
+
+def admit_wake(connection: sqlite3.Connection, target_session_id: str, claim_id: str,
+               run_id: str, allowed_pair_ids: Iterable[str], *, now: str) -> bool:
+    """Consume one reservation before provider launch, retaining ambiguous attempts.
+
+    Current route permission and unread state are rechecked within the claimed
+    cutoff. Even an identical repeated admission returns False: it is not a
+    second authorization to launch the provider.
+    """
+    _transaction(connection)
+    clause, args = _scope(target_session_id, None, allowed_pair_ids)
+    _identifier(claim_id)
+    _identifier(run_id)
+    claim = connection.execute("""SELECT * FROM chat_mailbox_wakes
+        WHERE target_session_id=? AND claim_id=? AND state='reserved'""",
+        (target_session_id, claim_id)).fetchone()
+    if claim is None:
+        return False
+    eligible = connection.execute(f"""SELECT 1 FROM {_JOIN} WHERE {clause}
+        AND m.read_at IS NULL AND m.mailbox_seq>? AND m.mailbox_seq<=? LIMIT 1""",
+        (*args, max(claim["last_attempt_seq"], claim["suppressed_seq"]), claim["through_seq"])).fetchone()
+    if eligible is None:
+        return False
+    return connection.execute("""UPDATE chat_mailbox_wakes SET state='admitted',run_id=?,
+        last_attempt_seq=MAX(last_attempt_seq,through_seq),updated_at=?
+        WHERE target_session_id=? AND claim_id=? AND state='reserved'""",
+        (run_id, now, target_session_id, claim_id)).rowcount == 1
+
+
+def release_wake(connection: sqlite3.Connection, target_session_id: str, claim_id: str) -> bool:
+    """Release only a known unlaunched reservation, never an admitted attempt."""
+    _transaction(connection)
+    return connection.execute("""UPDATE chat_mailbox_wakes
+        SET claim_id=NULL,through_seq=0,state=NULL,run_id=NULL
+        WHERE target_session_id=? AND claim_id=? AND state='reserved'""",
+        (_identifier(target_session_id), _identifier(claim_id))).rowcount == 1
+
+
+def suppress_wake(connection: sqlite3.Connection, target_session_id: str, *, now: str) -> int:
+    """Stop suppresses current unread mail, without reading it or future arrivals."""
+    _transaction(connection)
+    target_session_id = _identifier(target_session_id)
+    through_seq = connection.execute(f"""SELECT COALESCE(MAX(m.mailbox_seq),0) FROM {_JOIN}
+        WHERE {_VALID} AND m.target_session_id=? AND m.read_at IS NULL""",
+        (target_session_id,)).fetchone()[0]
+    connection.execute("""INSERT INTO chat_mailbox_wakes
+        (target_session_id,suppressed_seq,updated_at) VALUES(?,?,?)
+        ON CONFLICT(target_session_id) DO UPDATE
+        SET suppressed_seq=MAX(suppressed_seq,excluded.suppressed_seq),updated_at=excluded.updated_at""",
+        (target_session_id, through_seq, now))
+    connection.execute("""UPDATE chat_mailbox_wakes
+        SET claim_id=NULL,through_seq=0,state=NULL,run_id=NULL
+        WHERE target_session_id=? AND state='reserved'""", (target_session_id,))
+    return connection.execute("SELECT suppressed_seq FROM chat_mailbox_wakes WHERE target_session_id=?",
+                              (target_session_id,)).fetchone()[0]
+
+
+def recover_wakes(connection: sqlite3.Connection) -> int:
+    """Startup only: no provider may launch before its reservation is admitted."""
+    _transaction(connection)
+    return connection.execute("""UPDATE chat_mailbox_wakes
+        SET claim_id=NULL,through_seq=0,state=NULL,run_id=NULL WHERE state='reserved'""").rowcount

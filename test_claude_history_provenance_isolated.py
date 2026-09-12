@@ -19,6 +19,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 import uuid
 from claude_history_provenance import ClaudeInterruptionTracker, normalize_claude_interruption_context
+from claude_history_repair import filter_native_claude_mailbox_wake_items
 from codex_history_repair import CodexNativeHistoryRepairCache, filter_native_codex_history_items
 
 
@@ -79,6 +80,8 @@ def load_projection() -> dict:
     namespace = {
         "re": re, "datetime": datetime, "json": json, "uuid": uuid, "asyncio": asyncio,
         "filter_native_codex_history_items": filter_native_codex_history_items,
+        "filter_native_claude_mailbox_wake_items": filter_native_claude_mailbox_wake_items,
+        "CLAUDE_PROJECTS_ROOT": Path("unused-project-root"),
         "CODEX_NATIVE_HISTORY_REPAIR_CACHE": CodexNativeHistoryRepairCache(),
         "hashlib": hashlib, "hmac": hmac, "deque": deque, "defaultdict": defaultdict,
         "ClaudeInterruptionTracker": ClaudeInterruptionTracker,
@@ -378,6 +381,22 @@ class ImportedHistoryProvenanceTests(unittest.IsolatedAsyncioTestCase):
         result = await self.projection[name](session, Path("unused.jsonl"), items, **kwargs)
         sink = self.projection["append_durable_event_batch" if name == "append_imported_history" else "append_imported_events"]
         return result, sink.await_args.args[1]
+
+    async def test_verified_wake_is_silent_before_first_durable_import(self) -> None:
+        item = {"kind": "user", "text": "internal wake", "provider_origin": origin()}
+        self.projection["filter_native_claude_mailbox_wake_items"] = Mock(return_value=[{
+            **item, "text": "", "provider_history_repair": "source_proven_import",
+        }])
+        _result, specs = await self.append("append_imported_history", [item])
+        self.assertTrue(specs[0][1]["metadata_only"])
+        self.assertTrue(specs[-1][1]["metadata_only"])
+        self.assertEqual(specs[1][1]["prompt"], "")
+        self.assertEqual(specs[1][1]["provider_history_repair"], "source_proven_import")
+        self.assertEqual(specs[1][1]["provider_origin"], origin())
+        self.assertNotIn("internal wake", json.dumps(specs))
+        proof = self.projection["filter_native_claude_mailbox_wake_items"].call_args
+        self.assertEqual(proof.kwargs["sync_checkpoint"], {"test": "checkpoint"})
+        self.assertTrue(callable(proof.kwargs["normalize_full_user"]))
 
     async def test_both_append_paths_preserve_source_timestamps_without_overriding_internal_ids(self) -> None:
         items = [self.projection["claude_history_event_item"](source_event(kind, kind)) for kind in ("user", "assistant")]

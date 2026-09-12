@@ -153,6 +153,57 @@ class CodexNativeHistoryRepairTests(unittest.TestCase):
         item = self.parse(self.raw[2])
         self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, [item]), [item])
 
+    def wake_fixture(self, **patch):
+        self.wake_text = "Check the unread mailbox using the chat inbox tool."
+        self.raw[0]["payload"]["content"][0]["text"] = self.wake_text
+        self.native[0].update(prompt="", purpose="chat_mailbox_wake", provider_generated=True,
+            mailbox_wake_id="mailwake_" + "a" * 32, mailbox_wake_through_seq=7,
+            provider_input_sha256=hashlib.sha256(self.wake_text.encode()).hexdigest())
+        self.native[0].update(patch)
+        self.fixture()
+
+    def test_mailbox_wake_exact_native_input_is_silent_without_losing_native_output(self):
+        self.wake_fixture()
+        before = self.events.read_bytes(), self.source.read_bytes()
+        self.prepare()
+        projected = self.cache.project_event("chat", self.imports[0])
+        self.assertEqual(projected["prompt"], "")
+        self.assertEqual(projected["provider_history_repair"], "source_proven_native_replay")
+        self.assertEqual(projected["provider_origin"]["native_event_id"], self.native[0]["id"])
+        self.assertTrue(all(self.cache.project_event("chat", row) is None for row in self.native))
+        item = self.parse(self.raw[0])
+        filtered = filter_native_codex_history_items("chat", PROVIDER, self.events, [item])
+        self.assertEqual(filtered[0]["text"], "")
+        self.assertTrue(filtered[0]["metadata_only"])
+        self.assertEqual(before, (self.events.read_bytes(), self.source.read_bytes()))
+
+    def test_mailbox_wake_incomplete_or_positive_human_native_metadata_is_not_proof(self):
+        for patch in ({"provider_generated": False}, {"mailbox_wake_id": "missing-claim"},
+                      {"mailbox_wake_through_seq": True}, {"provider_input_sha256": "0" * 64},
+                      {"provider_user_authored": True}, {"client_user_message_id": "real-user"},
+                      {"purpose": None}, {"prompt": "Visible human input"}):
+            with self.subTest(patch=patch):
+                self.native[0].pop("provider_user_authored", None)
+                self.native[0].pop("client_user_message_id", None)
+                self.wake_fixture(**patch); self.cache.forget("chat"); self.prepare()
+                self.assertIsNone(self.cache.project_event("chat", self.imports[0]))
+                item = self.parse(self.raw[0])
+                self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, [item]), [item])
+
+    def test_mailbox_wake_same_words_unowned_or_ambiguous_source_are_preserved(self):
+        self.wake_fixture()
+        self.raw.append({**self.raw[0], "timestamp": "2026-09-11T12:09:00Z", "payload": {**self.raw[0]["payload"],
+            "id": "genuine-user-item", "internal_chat_message_metadata_passthrough": {
+                "turn_id": "unowned-human-turn", "content_item_kinds": ["user.text"]}}})
+        self.fixture(); self.prepare()
+        self.assertIsNotNone(self.cache.project_event("chat", self.imports[0]))
+        self.assertIsNone(self.cache.project_event("chat", self.imports[-1]))
+        self.raw[-1]["payload"]["internal_chat_message_metadata_passthrough"]["turn_id"] = "turn-1"
+        self.fixture(); self.cache.forget("chat"); self.prepare()
+        self.assertIsNone(self.cache.project_event("chat", self.imports[0]))
+        items = [self.parse(self.raw[0]), self.parse(self.raw[-1])]
+        self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, items), items)
+
 
 if __name__ == "__main__":
     unittest.main()

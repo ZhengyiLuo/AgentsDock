@@ -404,6 +404,20 @@ class _NativeProof:
     targets: dict = field(default_factory=dict)
 
 
+def _native_mailbox_wake_hash(event: dict) -> str | None:
+    """A server-authored hidden input, not a text-based provider classification."""
+    digest = event.get("provider_input_sha256")
+    wake_id = event.get("mailbox_wake_id")
+    if (event.get("type") == "turn_started" and event.get("imported") is not True
+        and event.get("purpose") == "chat_mailbox_wake" and event.get("prompt") == ""
+        and event.get("provider_generated") is True and not _runtime_human_provenance(event)
+        and isinstance(wake_id, str) and re.fullmatch(r"mailwake_[a-f0-9]{32}", wake_id)
+        and type(event.get("mailbox_wake_through_seq")) is int and 0 < event["mailbox_wake_through_seq"] < 2**63
+        and isinstance(digest, str) and _DIGEST.fullmatch(digest)):
+        return digest
+    return None
+
+
 def _prove_native_replays(session_id: str, provider_id: str, events: Path, source: Path | None,
                           root: Path, parse_item: Callable[[dict], dict | None]) -> _NativeProof:
     if not _PROVIDER_ID.fullmatch(provider_id):
@@ -438,6 +452,8 @@ def _prove_native_replays(session_id: str, provider_id: str, events: Path, sourc
             body = event.get("prompt") if kind == "user" else event.get("result_text") if event.get("type") == "turn_finished" else event.get("text")
             if kind and isinstance(body, str) and body and len(body) <= 4 * 1024 * 1024:
                 native.setdefault((run, kind, _text_key(body)), []).append(event)
+            elif kind == "user" and (wake_hash := _native_mailbox_wake_hash(event)):
+                native.setdefault((run, kind, wake_hash), []).append(event)
         if len(candidates) + len(batches) + len(native) + len(owners) > MAX_KEYS:
             raise _Unproven()
     if not candidates:
@@ -671,7 +687,7 @@ def filter_native_codex_history_items(session_id: str, provider_id: str, events:
         stamp = _stamp(events)
         if stamp[2] > MAX_EVENTS_BYTES:
             return items
-        owners, native, assistant_items, native_count = {}, {}, {}, 0
+        owners, native, assistant_items, wake_keys, native_count = {}, {}, {}, set(), 0
         for event, _offset, _line in _records(events, stamp):
             run = event.get("run_id")
             if (event.get("session_id") not in (None, "", session_id) or event.get("imported") is True
@@ -683,17 +699,29 @@ def filter_native_codex_history_items(session_id: str, provider_id: str, events:
                 owners.setdefault(event["provider_turn_id"], set()).add(run)
             kind = "user" if event.get("type") == "turn_started" else "assistant" if event.get("type") in ("assistant_text", "reasoning_summary", "turn_finished") else None
             body = event.get("prompt") if kind == "user" else event.get("result_text") if event.get("type") == "turn_finished" else event.get("text")
-            if kind and isinstance(body, str) and body:
+            wake_hash = _native_mailbox_wake_hash(event) if kind == "user" else None
+            if kind and (isinstance(body, str) and body or wake_hash):
                 keys = native.setdefault(run, {})
-                key = (kind, _text_key(body))
+                key = (kind, wake_hash or _text_key(body))
                 native_count += key not in keys
                 if isinstance(event.get("id"), str):
                     keys.setdefault(key, event["id"])
+                    if wake_hash:
+                        wake_keys.add((run, wake_hash))
                     item_id = _public_assistant_item_id(event)
                     if item_id is not None:
                         assistant_items[(run, item_id, key[1])] = event["id"]
             if native_count + len(owners) + len(assistant_items) > MAX_KEYS:
                 return items
+        # A hidden wake has no public prompt body. Require a single exact source
+        # item in this verified import range, in addition to native turn ownership.
+        wake_source_ids = {}
+        for item in items if wake_keys else ():
+            origin = item.get("provider_origin")
+            if (item.get("kind") == "user" and isinstance(item.get("text"), str)
+                and isinstance(origin, dict)):
+                key = (origin.get("turn_id"), _text_key(item["text"]))
+                wake_source_ids.setdefault(key, set()).add(origin.get("event_id"))
         result = []
         for item in items:
             origin = item.get("provider_origin")
@@ -703,6 +731,9 @@ def filter_native_codex_history_items(session_id: str, provider_id: str, events:
                      and origin.get("session_id", provider_id) == provider_id and len(runs) == 1
                      and item.get("source_text_sha256") is None and isinstance(item.get("text"), str))
             known = owned and (item["kind"], _text_key(item["text"])) in native.get(next(iter(runs)), {})
+            if known and (next(iter(runs)), _text_key(item["text"])) in wake_keys:
+                known = (bool(origin.get("event_id")) and bool(origin.get("timestamp"))
+                         and len(wake_source_ids.get((origin.get("turn_id"), _text_key(item["text"])), set())) == 1)
             if owned and not known and item["kind"] == "assistant":
                 cleaned = _native_assistant_text(item["text"])
                 known = bool(cleaned and (next(iter(runs)), origin["event_id"], _text_key(cleaned)) in assistant_items)
