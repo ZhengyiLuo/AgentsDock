@@ -8,6 +8,14 @@ const root = resolve(process.cwd(), '..')
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
 const packageJSON = JSON.parse(read('electron/package.json'))
 
+function packagedUpdateValidator(script: string): string {
+  // Windows checkouts may convert shell sources to CRLF. Normalize the fixture,
+  // not the checked-in script, before locating and executing its real guard.
+  const validator = script.replace(/\r\n/g, '\n').match(/node - "\$JS_YAML" "\$(?:UPDATE_CONFIG|APPIMAGE_UPDATE_CONFIG)" "\$EXPECTED_CHANNEL" <<'NODE'\n([\s\S]*?)\nNODE/)?.[1]
+  if (!validator) throw new Error('Packaged updater validation must run in the platform verifier')
+  return validator
+}
+
 describe('desktop release destination migration', () => {
   let fixtureDirectory: string
   let yamlPath: string
@@ -36,10 +44,9 @@ describe('desktop release destination migration', () => {
   for (const platform of ['release', 'linux']) {
     describe(`${platform} packaged update configuration`, () => {
       const script = read(`scripts/verify_electron_${platform}.sh`)
-      const validator = script.match(/node - "\$JS_YAML" "\$(?:UPDATE_CONFIG|APPIMAGE_UPDATE_CONFIG)" "\$EXPECTED_CHANNEL" <<'NODE'\n([\s\S]*?)\nNODE/)?.[1]
 
-      function validate(overrides: Record<string, unknown>, expectedChannel: string) {
-        if (!validator) throw new Error('Packaged updater validation must run in the platform verifier')
+      function validate(source: string, overrides: Record<string, unknown>, expectedChannel: string) {
+        const validator = packagedUpdateValidator(source)
         const configPath = join(fixtureDirectory, `${platform}-app-update.yml`)
         // JSON is valid YAML; execute the actual verifier's parser and guard.
         writeFileSync(configPath, JSON.stringify({
@@ -48,14 +55,18 @@ describe('desktop release destination migration', () => {
         return spawnSync(process.execPath, ['-', yamlPath, configPath, expectedChannel], { input: validator, encoding: 'utf8' })
       }
 
-      for (const channel of ['latest', 'beta']) {
-        it(`accepts the ${channel} channel only at the public source repository`, () => {
-          expect(validate({}, channel).status).toBe(0)
-          expect(validate({ repo: 'AgentsDock-Releases' }, channel).status).toBe(2)
-          expect(validate({ repo: 'AgentsDock-Internal' }, channel).status).toBe(2)
-          expect(validate({ owner: 'someone-else' }, channel).status).toBe(2)
-          expect(validate({ channel: channel === 'beta' ? 'latest' : 'beta' }, channel).status).toBe(2)
-        })
+      for (const [lineEndingName, lineEnding] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+        const fixture = script.replace(/\r?\n/g, lineEnding)
+        for (const channel of ['latest', 'beta']) {
+          it(`accepts the ${channel} channel only at the public source repository (${lineEndingName} checkout)`, () => {
+            expect(packagedUpdateValidator(fixture)).not.toContain('\r')
+            expect(validate(fixture, {}, channel).status).toBe(0)
+            expect(validate(fixture, { repo: 'AgentsDock-Releases' }, channel).status).toBe(2)
+            expect(validate(fixture, { repo: 'AgentsDock-Internal' }, channel).status).toBe(2)
+            expect(validate(fixture, { owner: 'someone-else' }, channel).status).toBe(2)
+            expect(validate(fixture, { channel: channel === 'beta' ? 'latest' : 'beta' }, channel).status).toBe(2)
+          })
+        }
       }
 
       it('checks an explicitly stamped release build without disabling local verification', () => {
