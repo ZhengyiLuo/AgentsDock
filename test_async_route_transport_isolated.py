@@ -397,10 +397,16 @@ class AsyncRouteAcceptanceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancelled_message_retry_does_not_restart_delivery(self):
         receipt = await self.send()
-        self.connection.execute("UPDATE cross_chat_envelopes SET status='cancelled' WHERE id=?", (receipt["message_id"],))
-        self.connection.commit()
-        with self.assertRaises(HTTPException):
-            await self.send()
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            chat_mailbox.cancel_message(self.connection, receipt['message_id'], now='2026-09-10T00:01:00Z')
+        self.ns['publish_chat_mailbox_message'].return_value = 'cancelled'
+        self.ns['schedule_chat_mailbox_wake'].reset_mock()
+        replay = await self.send()
+        self.assertEqual((replay['message_id'], replay['state'], replay['duplicate'], replay['execution_started']),
+                         (receipt['message_id'], 'cancelled', True, False))
+        self.assertEqual(self.connection.execute('SELECT COUNT(*) FROM chat_mailbox_messages').fetchone()[0], 1)
+        self.ns['schedule_chat_mailbox_wake'].assert_not_called()
         self.ns["submit_cross_chat_delivery"].assert_not_awaited()
 
     async def test_successful_empty_final_only_completes_message_and_never_sends_reply(self):

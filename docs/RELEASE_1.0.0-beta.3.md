@@ -1,7 +1,4 @@
-# AgentsServer 1.0.0-beta.2
-
-This candidate did not pass the complete release gate and was not published.
-Its tag is retained unchanged. Use the corrected `1.0.0-beta.3` release.
+# AgentsServer 1.0.0-beta.3
 
 ## Cross-chat delivery
 
@@ -39,6 +36,11 @@ the existing Hub before upgrade; for downgrade, restore its pre-update backup
 rather than opening the migrated database with an older runtime. Provider
 transcripts and user messages are not rewritten.
 
-This beta is published through the existing signed server release channel.
-Publication does not install it or restart a live server. Stable-track users
-are not automatically opted into the beta.
+The beta.2 candidate was stopped before publication by the full release gate.
+This candidate corrects legacy-schema test fixtures and the obsolete canceled
+receipt assertion while retaining the same reviewed runtime changes. The
+beta.2 tag is not rewritten or reused.
+
+Publication uses the existing signed server release channel and does not
+install it or restart a live server. Stable-track users are not automatically
+opted into the beta.

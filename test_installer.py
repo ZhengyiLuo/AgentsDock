@@ -4189,6 +4189,43 @@ exit 0
             self.assertIn(operation_id, restore_event)
             self.assertTrue(any(value.startswith("verify-snapshot:") for value in events))
 
+    def test_schema4_installer_fixture_restores_then_upgrades_without_future_objects(self):
+        # Exercise the installer's own historical snapshot helper without
+        # starting a process or relying on the service-manager test doubles.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            identity = "server_schema4_fixture_12345678"
+            operation = "update_schema4_fixture_12345678"
+            hub_data = root / "hub"
+            (root / "install" / "current").mkdir(parents=True)
+            store, snapshot = self.prepare_real_managed_hub_fixture(
+                root / "install", hub_data, operation_id=operation,
+                server_identity=identity, schema_version=4,
+            )
+            expected_database = (snapshot / "team-hub.sqlite3").read_bytes()
+            expected_key = store.signing_key_path.read_bytes()
+            expected_proof = store.bootstrap_proof_path.read_bytes()
+            for database in (store.database_path, snapshot / "team-hub.sqlite3"):
+                with sqlite3.connect(database) as connection:
+                    self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+                    self.assertIsNone(connection.execute(
+                        "SELECT 1 FROM sqlite_master WHERE name LIKE 'team_bulletin_%'"
+                    ).fetchone())
+            arguments = dict(expected_host_identity=identity,
+                expected_hub_id=store.hub_id, expected_operation_id=operation)
+            HubStore.verify_maintenance_snapshot(hub_data, snapshot, **arguments)
+            HubStore.restore_maintenance_snapshot(hub_data, snapshot, **arguments)
+            self.assertEqual(store.database_path.read_bytes(), expected_database)
+            HubStore.confirm_restored_maintenance_snapshot(hub_data, snapshot, **arguments)
+            HubStore.acknowledge_restored_maintenance_snapshot(hub_data, snapshot, **arguments)
+            migrated = HubStore(hub_data, managed_host_identity=identity)
+            self.assertEqual(migrated.hub_id, store.hub_id)
+            self.assertEqual(migrated.signing_key_path.read_bytes(), expected_key)
+            self.assertEqual(migrated.bootstrap_proof_path.read_bytes(), expected_proof)
+            with migrated.connect() as connection:
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], LATEST_SCHEMA_VERSION)
+                self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+
     def test_beta2_schema4_managed_host_upgrades_with_exact_identity_and_secrets(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -7124,6 +7161,11 @@ exit 0
             connection.execute("DROP TRIGGER network_bulletin_body_limit_on_insert")
             connection.execute("DROP TRIGGER network_bulletin_body_limit_on_update")
             for trigger in (
+                "team_bulletin_created",
+                "team_bulletin_revised",
+                "team_bulletin_deleted",
+                "team_bulletin_changes_immutable",
+                "team_bulletin_changes_retained",
                 "team_mail_arrival_on_server_recipient",
                 "team_message_revisions_are_immutable",
                 "team_message_revisions_cannot_be_deleted",
@@ -7135,6 +7177,7 @@ exit 0
             ):
                 connection.execute(f"DROP TRIGGER {trigger}")
             for index in (
+                "team_bulletin_changes_by_team",
                 "team_mail_server_arrival_lookup",
                 "team_messages_parent_order",
                 "team_message_revisions_by_message",
@@ -7146,6 +7189,8 @@ exit 0
             ):
                 connection.execute(f"DROP INDEX {index}")
             for table in (
+                # Migration 0022 (metadata-only Bulletin change journal).
+                "team_bulletin_changes",
                 # Migration 0020 (durable Mail arrival watermark).
                 "team_mail_arrivals",
                 # Migration 0013 (immutable Team Message revision journal).
@@ -7179,6 +7224,9 @@ exit 0
             connection.execute("DROP TABLE bootstrap_delegations")
             connection.execute("DELETE FROM schema_migrations WHERE version > 4")
             connection.execute("PRAGMA user_version = 4")
+            assert connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name LIKE 'team_bulletin_%'"
+            ).fetchone() is None, "legacy fixture must not retain migration-22 objects"
             connection.execute("COMMIT")
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
