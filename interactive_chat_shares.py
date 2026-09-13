@@ -69,6 +69,10 @@ class InteractiveChatShareStore(PublicChatShareStore):
                 created_at REAL NOT NULL,expires_at REAL,revoked_at REAL,redeemed_at REAL,
                 invite_hash BLOB NOT NULL UNIQUE,browser_hash BLOB UNIQUE)""")
             db.execute("CREATE INDEX IF NOT EXISTS interactive_share_session ON interactive_shares(session_id,created_at DESC)")
+            # Additive migration: old grants keep their configured-origin behavior.
+            # Never run migrations from anonymous read/open_existing requests.
+            if "public_origin" not in {row[1] for row in db.execute("PRAGMA table_info(interactive_shares)")}:
+                db.execute("ALTER TABLE interactive_shares ADD COLUMN public_origin TEXT NOT NULL DEFAULT ''")
             db.execute("""CREATE TABLE IF NOT EXISTS interactive_uploads(
                 id TEXT PRIMARY KEY,share_id TEXT NOT NULL REFERENCES interactive_shares(id),
                 name TEXT NOT NULL,media_type TEXT NOT NULL,byte_size INTEGER NOT NULL,
@@ -95,7 +99,7 @@ class InteractiveChatShareStore(PublicChatShareStore):
     def metadata(row):
         return {key: row[key] for key in ("id", "title", "created_at", "expires_at", "revoked_at", "redeemed_at")}
 
-    def create_share(self, session_id, *, title=None, expires_at=None):
+    def create_share(self, session_id, *, title=None, expires_at=None, public_origin=""):
         if not isinstance(session_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id) is None:
             raise ValidationError("Invalid chat")
         title = "Shared conversation" if title is None else title
@@ -108,10 +112,17 @@ class InteractiveChatShareStore(PublicChatShareStore):
         invite = secrets.token_urlsafe(32)
         share_id = "interactive_" + secrets.token_hex(16)
         with self._connection(write=True) as db:
-            db.execute("INSERT INTO interactive_shares(id,session_id,title,created_at,expires_at,invite_hash) VALUES(?,?,?,?,?,?)",
-                (share_id, session_id, title, now, expires_at, token_hash(invite)))
+            db.execute("INSERT INTO interactive_shares(id,session_id,title,created_at,expires_at,invite_hash,public_origin) VALUES(?,?,?,?,?,?,?)",
+                (share_id, session_id, title, now, expires_at, token_hash(invite), public_origin))
             row = db.execute("SELECT * FROM interactive_shares WHERE id=?", (share_id,)).fetchone()
         return {**self.metadata(row), "invitation_token": invite}
+
+    def share_origin(self, share_id):
+        with self._connection() as db:
+            row = db.execute("SELECT * FROM interactive_shares WHERE id=?", (share_id,)).fetchone()
+            if row is None:
+                raise Unavailable()
+            return row["public_origin"] if "public_origin" in row.keys() else ""
 
     def list_shares(self, session_id):
         with self._connection() as db:

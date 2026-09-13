@@ -76,12 +76,14 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.assertFalse(self.storage.exists())
         self.store_factory.assert_not_called()
 
-    def test_publish_requires_explicit_boolean_confirmation_and_valid_preview(self):
+    def test_publish_requires_explicit_boolean_confirmation_and_paired_review_fields(self):
         preview = self.preview()
         valid = {"through_bytes": preview["through_bytes"], "digest": preview["digest"]}
         for value in ({}, {**valid}, {**valid, "confirmed_public": False},
                       {**valid, "confirmed_public": 1}, {**valid, "confirmed_public": "true"},
-                      {"confirmed_public": True}, {**valid, "confirmed_public": True, "through_bytes": True},
+                      {"confirmed_public": True, "through_bytes": preview["through_bytes"]},
+                      {"confirmed_public": True, "digest": preview["digest"]},
+                      {**valid, "confirmed_public": True, "through_bytes": True},
                       {**valid, "confirmed_public": True, "digest": "invalid"},
                       {**valid, "confirmed_public": True, "unexpected": "option"}):
             with self.subTest(value=value):
@@ -89,6 +91,38 @@ class PublicChatShareRouteTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400, response.text)
         self.store_factory.assert_not_called()
         self.assertEqual(self.load.call_count, 1)
+
+    def test_confirmed_only_snapshot_loads_once_and_returns_direct_http_link(self):
+        self.base = ""
+        self.client.base_url = "http://192.0.2.42:8080"
+        response = self.client.post(self.admin, headers=self.auth, json={"confirmed_public": True})
+        self.assertEqual(response.status_code, 201, response.text)
+        share = response.json()
+        self.assertEqual(share["url"], "http://192.0.2.42:8080" + share["path"])
+        self.load.assert_called_once_with("chat-one", None)
+        self.store_factory.assert_called_once_with(self.storage)
+        self.events.write_text(json.dumps({"type": "turn_started", "prompt": "Later private message"}) + "\n")
+        page = self.client.get(share["url"])
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertIn("Reviewed question", page.text)
+        self.assertNotIn("Later private message", page.text)
+        self.load.assert_called_once_with("chat-one", None)
+
+    def test_explicit_link_origin_overrides_configuration_and_preserves_https_fallback(self):
+        share = self.create(base_url="http://192.0.2.42:8080/")
+        self.assertEqual(share["url"], "http://192.0.2.42:8080" + share["path"])
+        configured = self.create()
+        self.assertEqual(configured["url"], self.base + configured["path"])
+
+    def test_invalid_explicit_origins_fail_before_loading_or_persisting(self):
+        for base in (None, "", False, "ftp://example.test", "http://example.test/private", "http://@example.test",
+                     "http://user:password@example.test", "http://example.test?token=value"):
+            with self.subTest(base=base):
+                response = self.client.post(self.admin, headers=self.auth,
+                    json={"confirmed_public": True, "base_url": base})
+                self.assertEqual(response.status_code, 400, response.text)
+        self.load.assert_not_called()
+        self.store_factory.assert_not_called()
 
     def test_authentication_denial_precedes_every_management_callback(self):
         for method, suffix in (("POST", "/preview"), ("POST", ""), ("GET", ""), ("DELETE", "/share_fake")):
@@ -168,7 +202,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
 
     def test_invalid_public_origin_fails_before_persisting_share(self):
         preview = self.preview()
-        self.base = "http://insecure.example.test"
+        self.base = "ftp://unsupported.example.test"
         response = self.client.post(self.admin, headers=self.auth, json={
             "confirmed_public": True, "through_bytes": preview["through_bytes"], "digest": preview["digest"],
         })
@@ -283,14 +317,25 @@ class PublicChatShareRouteTests(unittest.TestCase):
 
 
 class PublicShareURLTests(unittest.TestCase):
-    def test_only_explicit_https_origins_generate_public_urls(self):
+    def test_http_and_https_origins_generate_public_urls(self):
         self.assertIsNone(routes.public_share_url("", "token"))
-        self.assertEqual(routes.public_share_url("https://share.example.test/", "token"), "https://share.example.test/share/token")
-        for base in ("http://share.example.test", "https://user:password@share.example.test",
+        for base in ("https://share.example.test", "http://192.0.2.42:8080", "http://[2001:db8::42]:8080"):
+            self.assertEqual(routes.public_share_url(base + "/", "token"), base + "/share/token")
+        for base in ("ftp://share.example.test", "https://user:password@share.example.test",
                      "https://share.example.test/path", "https://share.example.test?query=yes",
-                     "https://share.example.test#fragment", "https://share.example.test /", "//share.example.test"):
+                     "https://share.example.test#fragment", "https://share.example.test /", "//share.example.test",
+                     "http://example.test:99999", "http://example.test\\path", "http://",
+                     "http://@example.test", "http://:@example.test", "http://[fe80::1%25en0]"):
             with self.subTest(base=base), self.assertRaises(PublicChatShareValidationError):
                 routes.public_share_url(base, "token")
+
+    def test_origins_follow_browser_case_and_default_port_normalization(self):
+        for base, expected in (("http://192.0.2.42:80/", "http://192.0.2.42"),
+                               ("HTTPS://SHARE.EXAMPLE.TEST:443/", "https://share.example.test"),
+                               ("http://SHARE.EXAMPLE.TEST:8080", "http://share.example.test:8080"),
+                               ("http://[2001:0db8:0:0:0:0:0:42]:80", "http://[2001:db8::42]")):
+            with self.subTest(base=base):
+                self.assertEqual(routes.public_share_url(base, "token"), expected + "/share/token")
 
     def test_log_redaction_removes_capability_without_redacting_unrelated_text(self):
         token = "Abc123_-" * 5 + "xyz"

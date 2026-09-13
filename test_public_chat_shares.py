@@ -268,6 +268,90 @@ class PublicChatShareTests(unittest.TestCase):
         with self.assertRaises(PublicChatShareValidationError):
             render_public_chat_html(snapshot)
 
+    def test_assistant_markdown_has_readable_structure_and_literal_code(self):
+        message = """## A practical plan
+
+Start with **a small change** and inspect `result < expected`.
+
+- First task
+- Second task with *emphasis*
+
+3. Third step
+4. Fourth step
+
+> Keep this observation visible.
+
+```python
+if result < expected:
+    print("<script>not markup</script>")
+```
+
+| Check | Outcome |
+| :--- | ---: |
+| **Desktop** | Ready |
+| Mobile | Reviewing |
+
+---
+
+Final paragraph.
+"""
+        page = render_public_chat_html({"title": "Planning", "created_at": self.clock,
+            "messages": [{"role": "assistant", "text": message}]}).decode()
+        parsed = _ParsedHTML()
+        parsed.feed(page)
+        for tag in ("h3", "strong", "em", "code", "ul", "ol", "li", "blockquote", "pre", "table", "thead", "th", "tbody", "td", "hr"):
+            self.assertIn(tag, parsed.tags)
+        self.assertIn('<ol start="3">', page)
+        self.assertIn('if result < expected:\n    print("<script>not markup</script>")', parsed.text)
+        self.assertIn("Final paragraph.", parsed.text)
+        self.assertNotIn("script", parsed.tags)
+
+    def test_assistant_markdown_cannot_emit_active_html_urls_or_attributes(self):
+        message = """# <img src=x onerror=alert(1)>
+**<script>alert(2)</script>** and `<iframe src=x>`.
+[link](javascript:alert(3)) ![pixel](https://example.invalid/pixel)
+<style>body{display:none}</style><svg onload=alert(4)>
+```</div><script>alert(5)</script>
+<object data=x>literal code</object>
+```
+| <img src=x> | Header |
+| --- | --- |
+| <a href=https://example.invalid/> | Safe |
+"""
+        page = render_public_chat_html({"title": "</title><script>alert(6)</script>",
+            "created_at": self.clock, "messages": [{"role": "assistant", "text": message}]}).decode()
+        parsed = _ParsedHTML()
+        parsed.feed(page)
+        self.assertTrue(set(parsed.tags).isdisjoint({"script", "iframe", "img", "a", "form", "input", "button", "object", "embed", "link", "svg"}))
+        self.assertEqual(parsed.tags.count("style"), 1)
+        self.assertFalse(any(name.lower().startswith("on") or name in ("href", "src", "data", "style") for name, _ in parsed.attributes))
+        self.assertIn("[link](javascript:alert(3)) ![pixel](https://example.invalid/pixel)", "".join(parsed.text))
+        self.assertIn("</div><script>alert(5)</script>", parsed.text)
+
+    def test_view_only_page_preserves_roles_order_and_optional_timestamps(self):
+        page = render_public_chat_html({"title": "A saved conversation", "created_at": self.clock,
+            "messages": self.messages}).decode()
+        parsed = _ParsedHTML()
+        parsed.feed(page)
+        self.assertIn("View only", parsed.text)
+        self.assertIn("2 messages", parsed.text)
+        self.assertLess(page.index('class="message user"'), page.index('class="message assistant"'))
+        self.assertEqual(parsed.tags.count("time"), 2)  # Shared time plus the one supplied message time.
+        self.assertEqual(parsed.tags.count("h1"), 1)
+        self.assertIn(("datetime", "2027-01-15T07:58:20+00:00"), parsed.attributes)
+        self.assertIn("prefers-color-scheme:dark", page)
+        self.assertIn("@media(max-width:600px)", page)
+
+    def test_incomplete_markdown_and_long_heading_preserve_visible_text(self):
+        message = "# " + " " * 20000 + "Heading\n\n```\n<unfinished>\nnext line"
+        page = render_public_chat_html({"title": "Incomplete reply", "created_at": self.clock,
+            "messages": [{"role": "assistant", "text": message}]}).decode()
+        parsed = _ParsedHTML()
+        parsed.feed(page)
+        self.assertIn("<unfinished>\nnext line", parsed.text)
+        self.assertIn("Heading", "".join(parsed.text))
+        self.assertEqual(parsed.tags.count("pre"), 1)
+
     def test_rejects_nonprivate_or_symlink_storage_without_changing_permissions(self):
         with self.assertRaises(PublicChatShareValidationError):
             PublicChatShareStore("relative")

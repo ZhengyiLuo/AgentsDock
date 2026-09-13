@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 from pathlib import Path
 import re
@@ -34,19 +35,40 @@ def redact_public_share_path(value: str) -> str:
     return PUBLIC_SHARE_PATH_RE.sub(r"\1<redacted>", value)
 
 
-def public_share_url(base: str, token: str) -> str | None:
-    if not base:
-        return None
+def chat_share_origin(base: str) -> str:
+    """Use the browser's canonical origin spelling when binding capabilities."""
+    if not isinstance(base, str) or not base:
+        raise PublicChatShareValidationError("Chat link must use an HTTP or HTTPS origin")
     try:
         parsed = urlsplit(base)
         parsed.port  # Reject malformed/out-of-range ports before persistence.
     except (TypeError, ValueError):
-        raise PublicChatShareValidationError("Public chat base URL must be an HTTPS origin") from None
-    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
-            or parsed.password or parsed.query or parsed.fragment
+        raise PublicChatShareValidationError("Chat link must use an HTTP or HTTPS origin") from None
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.query or parsed.fragment
             or parsed.path not in {"", "/"} or "\\" in base or any(c.isspace() for c in base)):
-        raise PublicChatShareValidationError("Public chat base URL must be an HTTPS origin")
-    return base.rstrip("/") + "/share/" + token
+        raise PublicChatShareValidationError("Chat link must use an HTTP or HTTPS origin")
+    try:
+        hostname = parsed.hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        raise PublicChatShareValidationError("Invalid chat link hostname") from None
+    if ":" in hostname:
+        try:
+            if "%" in hostname:
+                raise ValueError("Scoped IPv6 is not a browser origin")
+            hostname = ipaddress.IPv6Address(hostname).compressed
+        except ValueError:
+            raise PublicChatShareValidationError("Invalid chat link hostname") from None
+        host = f"[{hostname}]"
+    else:
+        host = hostname
+    port = parsed.port
+    suffix = f":{port}" if port is not None and port != (443 if parsed.scheme == "https" else 80) else ""
+    return f"{parsed.scheme}://{host}{suffix}"
+
+
+def public_share_url(base: str, token: str) -> str | None:
+    return chat_share_origin(base) + "/share/" + token if base else None
 
 
 def create_public_chat_share_router(
@@ -143,18 +165,21 @@ def create_public_chat_share_router(
     async def create(session_id: str, request: Request):
         guard(request, session_id)
         value = await body(request)
-        if set(value) - {"confirmed_public", "through_bytes", "digest", "title", "expires_at"}:
+        if set(value) - {"confirmed_public", "through_bytes", "digest", "title", "expires_at", "base_url"}:
             raise HTTPException(400, "Unknown share option")
         if value.get("confirmed_public") is not True:
             raise HTTPException(400, "Public sharing must be explicitly confirmed")
-        if type(value.get("through_bytes")) is not int or not re.fullmatch(r"[a-f0-9]{64}", str(value.get("digest", ""))):
-            raise HTTPException(400, "Preview the chat before sharing")
+        reviewed = "through_bytes" in value or "digest" in value
+        if reviewed and (type(value.get("through_bytes")) is not int or not re.fullmatch(r"[a-f0-9]{64}", str(value.get("digest", "")))):
+            raise HTTPException(400, "Snapshot boundary and digest must be supplied together")
+        if "base_url" in value and (not isinstance(value["base_url"], str) or not value["base_url"]):
+            raise HTTPException(400, "Invalid chat link origin")
         def publish():
             # Validate configuration before persisting any public capability.
-            base = public_base_url()
+            base = value.get("base_url") or public_base_url() or str(request.base_url).rstrip("/")
             public_share_url(base, "validation")
-            snapshot = load_transcript(session_id, value["through_bytes"])
-            if not hmac.compare_digest(snapshot["digest"], value["digest"]):
+            snapshot = load_transcript(session_id, value.get("through_bytes"))
+            if reviewed and not hmac.compare_digest(snapshot["digest"], value["digest"]):
                 raise PublicTranscriptError("Chat changed; preview it again")
             share = store(create=True).create_share(session_id, snapshot["messages"],
                 title=value.get("title"), expires_at=value.get("expires_at"))

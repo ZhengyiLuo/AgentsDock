@@ -1,8 +1,10 @@
 """Synthetic invitation, cookie, upload and submission ledger tests."""
 import concurrent.futures
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 from interactive_chat_shares import InteractiveChatShareStore, Unavailable, Conflict, MAX_SHARE_UPLOAD_BYTES
 
@@ -39,6 +41,46 @@ class InteractiveShareStoreTests(unittest.TestCase):
         listed = self.store.list_shares("chat-one")
         self.assertNotIn("invitation_token", listed[0])
         self.assertNotIn("session_id", listed[0])
+
+    def test_public_origin_is_durable_and_does_not_expose_capabilities(self):
+        origin = "http://192.0.2.42:8080"
+        share = self.store.create_share("chat-one", public_origin=origin)
+        reopened = InteractiveChatShareStore.open_existing(self.root, now=lambda: self.now)
+        self.assertEqual(reopened.share_origin(share["id"]), origin)
+        self.assertEqual(reopened.share_origin(self.share["id"]), "")
+        listed = reopened.list_shares("chat-one")
+        for row in listed:
+            self.assertNotIn("invitation_token", row)
+            self.assertNotIn("browser_hash", row)
+        with self.assertRaises(Unavailable):
+            reopened.share_origin("interactive_" + "0" * 32)
+
+    def test_legacy_origin_migration_is_admin_only_and_preserves_active_and_revoked_grants(self):
+        active_token = self.redeem()
+        revoked = self.store.create_share("chat-one")
+        revoked_token = self.redeem(revoked)
+        self.store.revoke_share(revoked["id"], session_id="chat-one")
+        with self.store._connection(write=True) as db:
+            db.execute("ALTER TABLE interactive_shares DROP COLUMN public_origin")
+        before = self.store.database_path.read_bytes()
+        with mock.patch("public_chat_shares.sqlite3.connect", wraps=sqlite3.connect) as connect:
+            legacy = InteractiveChatShareStore.open_existing(self.root, now=lambda: self.now)
+            self.assertEqual(legacy.share_origin(self.share["id"]), "")
+            self.assertEqual(legacy.authenticate(self.share["id"], active_token)["session_id"], "chat-one")
+            with self.assertRaises(Unavailable):
+                legacy.authenticate(revoked["id"], revoked_token)
+        self.assertTrue(all(call.args[0].endswith("?mode=ro") for call in connect.call_args_list))
+        self.assertEqual(self.store.database_path.read_bytes(), before)
+        upgraded = InteractiveChatShareStore(self.root, now=lambda: self.now)
+        self.assertEqual(upgraded.share_origin(self.share["id"]), "")
+        self.assertEqual(upgraded.authenticate(self.share["id"], active_token)["session_id"], "chat-one")
+        with self.assertRaises(Unavailable):
+            upgraded.authenticate(revoked["id"], revoked_token)
+        fresh = upgraded.create_share("chat-one", public_origin="https://share.example.test")
+        self.assertEqual(upgraded.share_origin(fresh["id"]), "https://share.example.test")
+        with upgraded._connection() as db:
+            self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.assertEqual(db.execute("SELECT count(*) FROM interactive_shares").fetchone()[0], 3)
 
     def test_expiry_revocation_and_exact_chat_management(self):
         token = self.redeem()

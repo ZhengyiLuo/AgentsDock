@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import ClientDisconnect
 
-from interactive_chat_share_routes import create_interactive_chat_share_router, COOKIE
+from interactive_chat_share_routes import create_interactive_chat_share_router, COOKIE, HTTP_COOKIE
 from interactive_chat_shares import InteractiveChatShareStore, csrf_token
 from public_chat_transcript import PublicTranscriptError
 from interactive_chat_controls import ChatControlError
@@ -25,6 +25,7 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name) / "shares"
         self.origin = "https://share.example.test"
+        self.public_origin = self.origin
         self.sessions = {"chat-one"}
         self.load = mock.AsyncMock(return_value={"revision": "1", "messages": [], "busy": False})
         self.submit = mock.AsyncMock(return_value={"accepted": True, "queued": True})
@@ -35,7 +36,7 @@ class InteractiveShareRouteTests(unittest.TestCase):
             if request.headers.get("x-agentsdock-token") != "synthetic-native-admin" or request.headers.get("origin") or request.headers.get("cookie"):
                 raise HTTPException(403, "Native administration required")
         self.router = create_interactive_chat_share_router(storage_root=self.root, authorize=authorize,
-            session_exists=lambda session: session in self.sessions, public_base_url=lambda: self.origin,
+            session_exists=lambda session: session in self.sessions, public_base_url=lambda: self.public_origin,
             load_transcript=self.load, submit_prompt=self.submit, save_upload=self.save, wait_for_change=self.wait,
             chat_control=self.control)
         app = FastAPI()
@@ -46,8 +47,8 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.admin = "/api/admin/interactive-chat-shares/chat-one"
         self.admin_headers = {"X-AgentsDock-Token": "synthetic-native-admin"}
 
-    def create(self):
-        response = self.client.post(self.admin, headers=self.admin_headers, json={"confirmed_interactive": True})
+    def create(self, **options):
+        response = self.client.post(self.admin, headers=self.admin_headers, json={"confirmed_interactive": True, **options})
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()
 
@@ -70,6 +71,111 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.assertEqual(self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["path"].split("#invite=")[1]}).status_code, 404)
         self.assertEqual(self.client.get(path + "/state").json()["messages"], [])
         self.assertNotIn("session_id", self.client.get(path + "/state").text)
+
+    def test_http_direct_create_cookie_and_csrf_work_without_public_origin(self):
+        self.public_origin = ""
+        self.origin = "http://192.0.2.42:8080"
+        self.client.base_url = self.origin
+        share = self.create()
+        self.assertEqual(share["url"], self.origin + share["path"])
+        self.assertEqual(InteractiveChatShareStore.open_existing(self.root).share_origin(share["id"]), self.origin)
+        self.load.assert_not_awaited()
+        path, invite = share["path"].split("#invite=")
+        response = self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": invite})
+        self.assertEqual(response.status_code, 200, response.text)
+        cookie = response.headers["set-cookie"]
+        self.assertTrue(cookie.startswith(HTTP_COOKIE + "="), cookie)
+        self.assertNotIn("Secure", cookie)
+        for flag in ("HttpOnly", "SameSite=strict", "Path=" + path):
+            self.assertIn(flag, cookie)
+        self.assertNotIn("Domain=", cookie)
+        self.assertEqual(self.client.get(path + "/state").status_code, 200)
+        csrf = response.json()["csrf"]
+        headers = {"Origin": self.origin, "X-Chat-CSRF": csrf}
+        payload = {"prompt": "A direct HTTP reply", "request_id": "request_http_0001"}
+        for denied in ({}, {"Origin": self.origin}, {**headers, "X-Chat-CSRF": "0" * 64},
+                       {**headers, "Origin": "http://192.0.2.43:8080"},
+                       {**headers, "Sec-Fetch-Site": "cross-site"}):
+            with self.subTest(headers=denied):
+                self.assertEqual(self.client.post(path + "/prompts", headers=denied, json=payload).status_code, 403)
+        self.submit.assert_not_awaited()
+        accepted = self.client.post(path + "/prompts", headers=headers, json=payload)
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        self.submit.assert_awaited_once()
+        token = next(item.value for item in self.client.cookies.jar if item.name == HTTP_COOKIE)
+        for raw_cookie in (f"{HTTP_COOKIE}={token}; {HTTP_COOKIE}={token}", f"{COOKIE}={token}"):
+            self.assertEqual(self.client.get(path + "/state", headers={"Cookie": raw_cookie}).status_code, 404)
+
+    def test_share_origin_stays_bound_after_configuration_changes(self):
+        original = self.origin
+        share = self.create()
+        path, headers = self.redeem(share)
+        self.public_origin = "http://192.0.2.44:9090"
+        self.assertEqual(self.client.get(path).status_code, 200)
+        self.assertEqual(self.client.get(path + "/state").status_code, 200)
+        self.assertEqual(self.client.get(self.public_origin + path).status_code, 403)
+        self.assertEqual(self.client.get(path + "/state", headers={"Origin": self.public_origin}).status_code, 403)
+        self.assertEqual(self.client.post(path + "/prompts", headers=headers,
+            json={"prompt": "Still on the original origin", "request_id": "request_bound_001"}).status_code, 202)
+        self.assertEqual(InteractiveChatShareStore.open_existing(self.root).share_origin(share["id"]), original)
+
+    def test_explicit_http_origin_overrides_configured_https_and_is_bound(self):
+        direct = "http://192.0.2.42:8080"
+        share = self.create(base_url=direct + "/")
+        self.assertEqual(share["url"], direct + share["path"])
+        path = share["path"].split("#")[0]
+        self.assertEqual(self.client.get(path).status_code, 403)
+        self.client.base_url = direct
+        self.origin = direct
+        self.redeem(share)
+        self.assertEqual(self.client.get(path + "/state").status_code, 200)
+        self.assertTrue(any(item.name == HTTP_COOKIE and not item.secure for item in self.client.cookies.jar))
+
+    def test_invalid_explicit_origin_does_not_create_a_grant(self):
+        for base in (None, "", False, "ftp://example.test", "http://example.test/private", "http://@example.test",
+                     "http://user:password@example.test", "http://example.test?token=value"):
+            with self.subTest(base=base):
+                response = self.client.post(self.admin, headers=self.admin_headers,
+                    json={"confirmed_interactive": True, "base_url": base})
+                self.assertEqual(response.status_code, 400, response.text)
+        self.assertFalse(self.root.exists())
+        self.load.assert_not_awaited()
+
+    def test_origin_normalization_matches_browser_navigation_and_cookie_scheme(self):
+        for base, expected in (("http://192.0.2.42:80/", "http://192.0.2.42"),
+                               ("HTTPS://SHARE.EXAMPLE.TEST:443/", "https://share.example.test")):
+            with self.subTest(base=base):
+                share = self.create(base_url=base)
+                self.assertEqual(share["url"], expected + share["path"])
+                self.assertEqual(InteractiveChatShareStore.open_existing(self.root).share_origin(share["id"]), expected)
+                self.origin = expected
+                self.client.base_url = expected
+                path, _ = self.redeem(share)
+                self.assertEqual(self.client.get(path).status_code, 200)
+                self.assertEqual(self.client.get(path + "/state").status_code, 200)
+                cookie_name = COOKIE if expected.startswith("https:") else HTTP_COOKIE
+                cookie = next(item for item in self.client.cookies.jar if item.name == cookie_name)
+                self.assertEqual(cookie.secure, expected.startswith("https:"))
+
+    def test_cold_legacy_https_share_is_read_without_migration_then_admin_create_upgrades(self):
+        legacy = InteractiveChatShareStore(self.root)
+        share = legacy.create_share("chat-one")
+        with legacy._connection(write=True) as db:
+            db.execute("ALTER TABLE interactive_shares DROP COLUMN public_origin")
+        before = legacy.database_path.read_bytes()
+        path = "/interactive-chat/" + share["id"]
+        self.assertEqual(self.client.get(path).status_code, 200)
+        self.assertEqual(legacy.database_path.read_bytes(), before)
+        with legacy._connection() as db:
+            self.assertNotIn("public_origin", {row[1] for row in db.execute("PRAGMA table_info(interactive_shares)")})
+        created = self.create()  # An anonymous cached store must not block the authenticated upgrade.
+        self.assertEqual(InteractiveChatShareStore.open_existing(self.root).share_origin(created["id"]), self.origin)
+        response = self.client.post(path + "/redeem", headers={"Origin": self.origin},
+            json={"invitation_token": share["invitation_token"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.headers["set-cookie"].startswith(COOKIE + "="))
+        self.assertIn("Secure", response.headers["set-cookie"])
+        self.assertEqual(self.client.get(path + "/state").status_code, 200)
 
     def test_prompt_origin_csrf_allowlist_and_exact_durable_retry(self):
         path, headers = self.redeem(self.create())

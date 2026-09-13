@@ -4,8 +4,12 @@ Available starting with AgentsServer `0.1.26-beta.64` and a compatible desktop
 sharing interface. The server release includes the scoped browser renderer.
 
 This opt-in feature shares control of one live chat with one browser. It does not configure
-ingress, open a public listener, or share anything automatically. Configure the
-HTTPS origin `AGENTSDOCK_PUBLIC_CHAT_BASE_URL` deliberately before creation.
+ingress, open a public listener, or share anything automatically. The desktop
+offers **View only** and **Interactive** and uses the connected server's HTTP or
+HTTPS address. No separate domain or origin setup is required for direct access.
+Recipients must be able to reach that address (for example, on the same LAN or VPN).
+HTTP is supported for trusted networks, but does not encrypt chat contents or
+capabilities in transit; use HTTPS for untrusted networks.
 
 This is trusted collaboration, **not a provider sandbox**. A guest cannot directly
 use native terminal, filesystem, downloads, administration, or other-chat APIs.
@@ -24,7 +28,11 @@ Management requires the same native-only admin header guard as read-only public
 snapshots; browser credentials never authorize management.
 
 - `POST /api/admin/interactive-chat-shares/{session_id}` accepts
-  `{confirmed_interactive:true,title?,expires_at?}`. Expiry is future Unix seconds.
+  `{confirmed_interactive:true,title?,expires_at?,base_url?}`. Expiry is future Unix seconds.
+  The native client derives `base_url` from its selected authenticated connection.
+  The exact validated HTTP/HTTPS origin is bound to the share in the ledger;
+  changing global configuration does not rebind an existing share. Legacy clients
+  can omit it to use `AGENTSDOCK_PUBLIC_CHAT_BASE_URL` or the management request's origin.
   The response contains `id`, `title`, `created_at`, `expires_at`, `redeemed_at`,
   `revoked_at`, `warning`, and the one-time `path`/`url`.
 - `GET` on that management path returns `{shares:[metadata]}` (newest 100), with
@@ -36,8 +44,10 @@ Invitations use `/interactive-chat/{id}#invite={token}`. The secret is in the UR
 fragment, not the server request or access-log path. `GET`/`HEAD` serve only the
 static shell and never consume the invitation. An explicit Join action POSTs the
 token to `/redeem`. The ledger atomically permits one redemption and issues a
-separate browser capability in a Secure, HttpOnly, SameSite=Strict, share-path
-cookie. Only token hashes are persisted. Lost cookies require a new invitation;
+separate browser capability in an HttpOnly, SameSite=Strict, share-path cookie.
+HTTPS uses the Secure-prefixed cookie with Secure enabled; HTTP uses a distinct
+non-prefixed cookie so browsers can actually retain it. Only token hashes are
+persisted. Lost cookies require a new invitation;
 redeemed invitation tokens cannot recreate access.
 Reloading an already redeemed URL resumes through the existing browser cookie:
 the viewer reads authenticated state and opens a new scoped stream without
@@ -57,7 +67,7 @@ coalesce for one second. Twenty-second heartbeats recheck access but do not read
 the transcript; there is no event-log polling. Deletion, expiry, and revocation
 deny subsequent access; an idle stream closes on its next access check.
 
-POST requests require the exact configured origin and browser CSRF header. Prompt
+POST requests require the exact share-bound origin and browser CSRF header. Prompt
 fields are only `prompt`, `upload_ids`, and stable `request_id`. Native model,
 backend, references, purpose, force-send, filesystem, and other-chat options are
 not accepted by the prompt endpoint; the approved same-chat controls use the

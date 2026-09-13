@@ -1,12 +1,12 @@
 # Public read-only chat snapshots (AgentsServer 0.1.26-beta.64+)
 
-This optional API creates a fixed, explicitly reviewed text snapshot. Nothing is
+This optional API creates a fixed, explicitly requested chat snapshot. Nothing is
 shared automatically. It does not open a listener, configure ingress, publish an
 existing chat, or add background polling. The public viewer cannot continue a
 conversation or access session APIs, files, tools, or the live transcript.
 
 Anyone holding a share URL can read and copy that snapshot without signing in.
-Review the preview for secrets and personal information before confirming.
+Check the chat for secrets and personal information before sharing its link.
 Revocation and expiry stop subsequent reads, but cannot erase saved copies or
 bytes already returned by an in-flight request.
 
@@ -18,12 +18,17 @@ All management routes require one exact `X-AgentsDock-Token` (or legacy
 rejected. An unconfigured server token fails closed. Use `application/json` for
 POSTs; bodies are limited to 8 KiB and a five-second receive deadline.
 
-1. `POST /api/admin/chat-shares/{session_id}/preview` with `{}` returns
+1. The desktop's **View only** button calls `POST /api/admin/chat-shares/{session_id}`
+   with `{confirmed_public:true,title?,expires_at?,base_url?}`. It captures the current
+   durable transcript in one scan, then copies and opens the actual browser page.
+   A preview round-trip and confirmation checkbox are not required.
+   The optional legacy `POST /api/admin/chat-shares/{session_id}/preview` with `{}` returns
    `messages`, `through_bytes`, opaque `digest`, and a privacy `warning`.
    It creates no public capability or share storage.
 2. Review the exact messages, then `POST /api/admin/chat-shares/{session_id}`
    with `confirmed_public: true`, the returned `through_bytes` and `digest`,
-   optional `title`, and optional `expires_at` (future Unix seconds).
+   optional `title`, `base_url`, and optional `expires_at` (future Unix seconds).
+   When supplied, `through_bytes` and `digest` must be supplied together.
    The digest binds both the durable prefix and the projected message text.
    Changed bytes or changed projection require another preview (409); later
    appends are excluded. A successful response (201) contains management
@@ -34,7 +39,9 @@ POSTs; bodies are limited to 8 KiB and a five-second receive deadline.
    session's share. Revoking an existing share is idempotent. Listing/revocation
    remain available after the original chat is deleted.
 
-Only `GET`/`HEAD /share/{token}` exposes a snapshot, as escaped static HTML.
+Only `GET`/`HEAD /share/{token}` exposes a snapshot, as escaped static HTML with
+green user bubbles, readable assistant cards, timestamps, responsive light/dark
+layouts and a safe basic assistant Markdown subset (headings, lists, code and tables).
 No query options, JSON mode, actions, script execution, links, images, or remote
 resources are provided. Missing, malformed, revoked, and expired links return
 the same unavailable response. Responses use strict CSP, no-store, no-referrer,
@@ -43,11 +50,13 @@ operator-managed reverse proxy must redact or disable logging of `/share/*` too.
 
 ## Origin and storage
 
-`AGENTSDOCK_PUBLIC_CHAT_BASE_URL` may contain a trusted HTTPS origin, such as
-`https://share.example.org`, with no credentials, path, query, or fragment.
-If unset, creation returns a relative `path` and `url: null`; it never infers an
-origin from request headers. This setting does not make the server internet
-reachable. Configure any desired HTTPS ingress separately and deliberately;
+The authenticated management request can supply `base_url`, a valid HTTP or
+HTTPS origin with no credentials, path, query, or fragment. The native client
+derives this from the connected server. Otherwise `AGENTSDOCK_PUBLIC_CHAT_BASE_URL`
+is used, falling back to the authenticated management request's origin.
+This does not make a private IP internet reachable. Recipients must be on a network
+that reaches the server. HTTP does not encrypt the snapshot or its bearer link;
+use HTTPS on untrusted networks. Configure any desired ingress deliberately;
 publishing a link does not grant authority to other routes.
 
 Snapshot storage is a dedicated owner-only `public-chat-shares` directory under

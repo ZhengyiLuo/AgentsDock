@@ -17,7 +17,7 @@ from interactive_chat_shares import (
     InteractiveChatShareStore, Unavailable, ValidationError, Conflict, SHARE_ID,
     MAX_PROMPT_BYTES, MAX_UPLOAD_BYTES, csrf_token, _utf8_size,
 )
-from public_chat_share_routes import public_share_url
+from public_chat_share_routes import chat_share_origin
 import interactive_chat_share_web as web
 from interactive_chat_controls import ChatControlError
 
@@ -39,6 +39,7 @@ CONTROL_READ_ACTIONS = frozenset({"timeline.older", "timeline.around", "timeline
 NATIVE_STATE_FIELDS = frozenset({"revision", "session", "events", "queue", "active", "goal", "jobs",
     "codex_runtime", "claude_runtime", "health", "runtime_catalog", "hasMoreEvents", "nextTimelineBefore", "eventsTotal"})
 COOKIE = "__Secure-AgentsDock-Chat"
+HTTP_COOKIE = "AgentsDock-Chat"
 HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "X-Robots-Tag": "noindex, nofollow, noarchive", "Cross-Origin-Resource-Policy": "same-origin",
@@ -56,6 +57,7 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
     """
     router = APIRouter()
     cached_store = None
+    writable_store = False
     store_lock = threading.Lock()
     locks = weakref.WeakValueDictionary()
     streams = 0
@@ -98,26 +100,31 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
         return await asyncio.shield(task)
 
     def store(create=False):
-        nonlocal cached_store
+        nonlocal cached_store, writable_store
         with store_lock:
-            if cached_store is None:
+            if cached_store is None or (create and not writable_store):
                 if not create and not (Path(storage_root) / "interactive.sqlite3").is_file():
                     raise Unavailable()
                 cached_store = InteractiveChatShareStore(storage_root) if create else InteractiveChatShareStore.open_existing(storage_root)
+                writable_store = create
             return cached_store
 
-    def origin():
-        base = public_base_url()
-        if not base:
-            raise HTTPException(409, "Configure an HTTPS public chat origin before enabling interactive sharing")
+    def origin(base):
+        if not isinstance(base, str) or not base:
+            raise HTTPException(409, "This link has no server address; create a new share")
         try:
-            public_share_url(base, "validation")
+            return chat_share_origin(base)
         except ValidationError:
-            raise HTTPException(409, "Interactive sharing requires a configured HTTPS origin") from None
-        return base.rstrip("/")
+            raise HTTPException(400, "Chat link must use an HTTP or HTTPS origin") from None
 
-    def public_guard(request, *, write=False, shell=False):
-        expected = origin()
+    async def public_guard(request, share_id, *, write=False, shell=False):
+        if SHARE_ID.fullmatch(share_id) is None:
+            raise HTTPException(404, "Shared conversation unavailable")
+        try:
+            bound_origin = await worker(lambda: store().share_origin(share_id))
+        except Unavailable:
+            raise HTTPException(404, "Shared conversation unavailable") from None
+        expected = origin(bound_origin or public_base_url())
         # Never use forwarded/Host headers to choose the allowed origin. The
         # configured origin is the authority; ingress must preserve its host.
         if str(request.base_url).rstrip("/") != expected or request.url.query:
@@ -132,6 +139,7 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
         )
         if request.headers.get("sec-fetch-site") in {"cross-site", "same-site"} and not public_navigation:
             raise HTTPException(403, "Cross-origin access is not permitted")
+        return expected
 
     def management(request, session_id, *, exists=False):
         authorize(request)
@@ -166,12 +174,12 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
         return value
 
     async def auth(request, share_id, *, write=False):
-        public_guard(request, write=write)
+        expected = await public_guard(request, share_id, write=write)
         if SHARE_ID.fullmatch(share_id) is None:
             raise HTTPException(404, "Shared conversation unavailable")
         # Reject ambiguous same-name cookies rather than choosing browser order.
         cookies = [part.strip().partition("=")[2] for part in request.headers.get("cookie", "").split(";")
-            if part.strip().partition("=")[0] == COOKIE]
+            if part.strip().partition("=")[0] == (COOKIE if expected.startswith("https:") else HTTP_COOKIE)]
         if len(cookies) != 1:
             raise HTTPException(404, "Shared conversation unavailable")
         token = cookies[0]
@@ -227,11 +235,13 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
     async def create(session_id: str, request: Request):
         management(request, session_id, exists=True)
         value = await json_body(request)
-        if value.get("confirmed_interactive") is not True or set(value) - {"confirmed_interactive", "title", "expires_at"}:
+        if value.get("confirmed_interactive") is not True or set(value) - {"confirmed_interactive", "title", "expires_at", "base_url"}:
             raise HTTPException(400, "Trusted interactive collaboration must be explicitly confirmed")
-        base = origin()
+        if "base_url" in value and (not isinstance(value["base_url"], str) or not value["base_url"]):
+            raise HTTPException(400, "Invalid chat link origin")
+        base = origin(value.get("base_url") or public_base_url() or str(request.base_url).rstrip("/"))
         try:
-            created = await worker(lambda: store(True).create_share(session_id, title=value.get("title"), expires_at=value.get("expires_at")))
+            created = await worker(lambda: store(True).create_share(session_id, title=value.get("title"), expires_at=value.get("expires_at"), public_origin=base))
         except ValidationError as exc:
             raise HTTPException(400, str(exc)) from None
         invite = created.pop("invitation_token")
@@ -272,14 +282,14 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
 
     @router.api_route("/interactive-chat/{share_id}", methods=["GET", "HEAD"], include_in_schema=False)
     async def shell(share_id: str, request: Request):
-        public_guard(request, shell=True)
+        await public_guard(request, share_id, shell=True)
         if SHARE_ID.fullmatch(share_id) is None:
             raise HTTPException(404)
         return Response(web.HTML if request.method == "GET" else b"", media_type="text/html", headers=HEADERS)
 
     @router.post("/interactive-chat/{share_id}/redeem", include_in_schema=False)
     async def redeem(share_id: str, request: Request):
-        public_guard(request, write=True)
+        expected = await public_guard(request, share_id, write=True)
         value = await json_body(request)
         if set(value) != {"invitation_token"} or SHARE_ID.fullmatch(share_id) is None:
             raise HTTPException(404, "Invitation unavailable")
@@ -289,7 +299,8 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
             except Unavailable:
                 raise HTTPException(404, "Invitation unavailable") from None
         response = result({"redeemed": True, "csrf": csrf_token(token)})
-        response.set_cookie(COOKIE, token, secure=True, httponly=True, samesite="strict", path=f"/interactive-chat/{share_id}")
+        secure = expected.startswith("https:")
+        response.set_cookie(COOKIE if secure else HTTP_COOKIE, token, secure=secure, httponly=True, samesite="strict", path=f"/interactive-chat/{share_id}")
         return response
 
     @router.get("/interactive-chat/{share_id}/state", include_in_schema=False)
