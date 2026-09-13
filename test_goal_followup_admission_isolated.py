@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from collections import deque
+from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +23,8 @@ FUNCTIONS = {
     "codex_goal_steer_selection_is_plain",
     "_run_queued_turn_now_once",
     "async_route_queue_fields",
+    "active_snapshot_input",
+    "stop_turn",
 }
 
 
@@ -29,6 +33,21 @@ class AdmissionHTTPException(Exception):
         super().__init__(str(detail))
         self.status_code = status_code
         self.detail = detail
+
+
+class ObservedLock:
+    """Expose a real blocked acquisition without sleep-based race timing."""
+
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.attempted = asyncio.Event()
+
+    async def __aenter__(self):
+        self.attempted.set()
+        await self.lock.acquire()
+
+    async def __aexit__(self, *_args):
+        self.lock.release()
 
 
 def load_admission():
@@ -45,7 +64,7 @@ def load_admission():
         module="__future__", names=[ast.alias(name="annotations")], level=0,
     ), *selected], type_ignores=[]))
     namespace = {
-        "asyncio": asyncio, "deque": deque,
+        "asyncio": asyncio, "deque": deque, "suppress": suppress,
         "HTTPException": AdmissionHTTPException,
         "BACKEND_CODEX": "codex", "BACKEND_CLAUDE": "claude",
         "DEFAULT_BACKEND": "claude",
@@ -176,9 +195,17 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.active.pop("native_steer_queue")
         await self.assert_rejected()
 
-    async def test_starting_provider_keeps_goal_and_exact_queue_position(self):
+    async def test_starting_ordinary_provider_keeps_goal_and_exact_queue_position(self):
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.active["codex_goal_steer_queue"] = asyncio.Queue()
         self.active["provider_turn_ready"] = False
         await self.assert_rejected()
+
+    async def test_between_goal_turns_queues_native_followup_without_stale_turn_id(self):
+        self.active["provider_turn_ready"] = False
+        self.active["provider_turn_id"] = "previous-completed-turn"
+        await self.assert_admitted_to_goal_lane(self.active["native_steer_queue"], expected_turn_id="")
 
     async def test_idle_cached_active_goal_rejects_before_stop_or_queue_mutation(self):
         self.ns["ACTIVE"].clear()
@@ -222,7 +249,7 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
         for field in (
             "chat_references", "team_references", "cross_chat_obligation_ids",
             "cross_chat_exchange_ids", "provider_cross_chat_route_snapshot",
-            "secure_peer_route_snapshots", "file_ids", "cross_chat_envelope_id",
+            "secure_peer_route_snapshots", "cross_chat_envelope_id",
             "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
         ):
             with self.subTest(field=field):
@@ -302,10 +329,224 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
                     )
                 self.assert_untouched(before)
 
-    async def test_ordinary_authority_owner_with_active_goal_cannot_fallback_to_stop(self):
+    async def test_ordinary_owner_without_goal_lane_cannot_fallback_to_stop(self):
         self.active.pop("codex_native_operation_kind")
         self.current.pop("purpose")
         await self.assert_rejected()
+
+    async def assert_admitted_to_goal_lane(self, lane, *, expected_turn_id="turn-1"):
+        goal_before = deepcopy(self.session["codex_goal"])
+        active_before = dict(self.active)
+        current_before = deepcopy(self.current)
+
+        async def accept(chat, selected, **kwargs):
+            self.assertIs(kwargs["native_steer_queue"], lane)
+            command = lane.get_nowait()
+            self.assertIs(command["selected"], self.selected)
+            self.assertEqual(command["expected_provider_turn_id"], expected_turn_id)
+            self.assertEqual(command["goal_identity"], ("", "Finish the existing work"))
+            return {"ok": True, "queued_id": selected["queued_id"], "interrupted": False}
+
+        self.ns["await_native_steer_result"] = AsyncMock(side_effect=accept)
+        self.ns["suppress"] = __import__("contextlib").suppress
+        result = await self.ns["_run_queued_turn_now_once"]("chat", "q-followup")
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["interrupted"])
+        self.assertEqual(result["remaining"], 2)
+        self.assertEqual(self.session["codex_goal"], goal_before)
+        self.assertEqual(self.active, active_before)
+        self.assertEqual(self.current, current_before)
+        self.assertEqual([row["queued_id"] for row in self.ns["QUEUED_TURNS"]["chat"]], ["q-before", "q-after"])
+        self.assertFalse(self.ns["STEERING_SESSIONS"])
+        self.forbidden["stop_turn"].assert_not_called()
+        self.forbidden["pause_active_codex_goal_for_stop"].assert_not_called()
+        self.forbidden["prepare_steered_turn"].assert_not_called()
+
+    async def test_original_turn_that_creates_goal_uses_goal_only_lane(self):
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.active["native_steer_queue"] = None
+        self.active["codex_goal_steer_queue"] = asyncio.Queue()
+        await self.assert_admitted_to_goal_lane(self.active["codex_goal_steer_queue"])
+
+    async def test_goal_created_while_waiting_for_queue_lock_uses_goal_lane(self):
+        goal = self.session.pop("codex_goal")
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.active["native_steer_queue"] = None
+        lane = self.active["codex_goal_steer_queue"] = asyncio.Queue()
+        lock = self.ns["QUEUE_LOCK"] = ObservedLock()
+        await lock.lock.acquire()
+
+        async def accept(_chat, _selected, **kwargs):
+            self.assertIs(kwargs["native_steer_queue"], lane)
+            request = lane.get_nowait()
+            self.assertEqual(request["goal_identity"], ("", goal["objective"]))
+            self.assertEqual(request["expected_provider_turn_id"], "turn-1")
+            return {"ok": True, "interrupted": False}
+
+        self.ns["await_native_steer_result"] = AsyncMock(side_effect=accept)
+        task = asyncio.create_task(self.ns["_run_queued_turn_now_once"](
+            "chat", "q-followup", require_native=False,
+        ))
+        try:
+            await asyncio.wait_for(lock.attempted.wait(), 5)
+            self.session["codex_goal"] = goal
+            lock.lock.release()
+            result = await asyncio.wait_for(task, 5)
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["interrupted"])
+            self.assertIs(self.session["codex_goal"], goal)
+            self.assertEqual(goal["status"], "active")
+            self.assertEqual([row["queued_id"] for row in self.ns["QUEUED_TURNS"]["chat"]], ["q-before", "q-after"])
+            self.forbidden["stop_turn"].assert_not_called()
+            self.forbidden["pause_active_codex_goal_for_stop"].assert_not_called()
+            self.forbidden["prepare_steered_turn"].assert_not_called()
+        finally:
+            if not task.done():
+                task.cancel()
+                if lock.lock.locked():
+                    lock.lock.release()
+            with suppress(BaseException):
+                await task
+
+    async def test_original_goal_guard_survives_goal_clearing_during_queue_wait(self):
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.active["native_steer_queue"] = None
+        self.active["codex_goal_steer_queue"] = asyncio.Queue()
+        lock = self.ns["QUEUE_LOCK"] = ObservedLock()
+        await lock.lock.acquire()
+        task = asyncio.create_task(self.ns["_run_queued_turn_now_once"](
+            "chat", "q-followup", require_native=False,
+        ))
+        try:
+            await asyncio.wait_for(lock.attempted.wait(), 5)
+            self.session["codex_goal"] = None
+            before = self.snapshot()
+            lock.lock.release()
+            with self.assertRaises(AdmissionHTTPException) as caught:
+                await asyncio.wait_for(task, 5)
+            self.assertEqual(caught.exception.detail["guard"], "active_goal_requires_native_steer")
+            self.assert_untouched(before)
+        finally:
+            if not task.done():
+                task.cancel()
+                if lock.lock.locked():
+                    lock.lock.release()
+            with suppress(BaseException):
+                await task
+
+    def test_active_snapshot_excludes_both_private_steer_queues(self):
+        self.active["codex_goal_steer_queue"] = asyncio.Queue()
+        snapshot = self.ns["active_snapshot_input"](self.active)
+        self.assertNotIn("native_steer_queue", snapshot)
+        self.assertNotIn("codex_goal_steer_queue", snapshot)
+        self.assertEqual(json.loads(json.dumps(snapshot))["run_id"], "run-1")
+
+    def actual_stop_turn(self):
+        source = self.source_namespace["stop_turn"]
+        actual = type(source)(source.__code__, self.ns, source.__name__)
+        actual.__kwdefaults__ = source.__kwdefaults__
+        return actual
+
+    async def test_goal_created_during_final_stop_lock_wait_restores_exact_queue(self):
+        goal = self.session.pop("codex_goal")
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.active["native_steer_queue"] = None
+        active_before, current_before = dict(self.active), deepcopy(self.current)
+        selected_before = deepcopy(self.selected)
+        original_rows = list(self.queue)
+        actual_stop = self.actual_stop_turn()
+
+        async def enter_stop(*args, **kwargs):
+            self.assertIs(kwargs["preserve_active_goal"], True)
+            lock = self.ns["ACTIVE_LOCK"] = ObservedLock()
+            await lock.lock.acquire()
+            task = asyncio.create_task(actual_stop(*args, **kwargs))
+            try:
+                await asyncio.wait_for(lock.attempted.wait(), 5)
+                self.session["codex_goal"] = goal
+                lock.lock.release()
+                return await asyncio.wait_for(task, 5)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    if lock.lock.locked():
+                        lock.lock.release()
+                with suppress(BaseException):
+                    await task
+
+        self.ns["stop_turn"] = AsyncMock(side_effect=enter_stop)
+        # Rollback may offer queue scheduling; it must not prepare a new turn,
+        # interrupt the current provider, or actually execute any queued work.
+        self.ns["schedule_next_queued_turn"] = Mock()
+        with self.assertRaises(AdmissionHTTPException) as caught:
+            await self.ns["_run_queued_turn_now_once"]("chat", "q-followup")
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.detail["guard"], "active_goal_requires_native_steer")
+        self.assertEqual(self.active, active_before)
+        self.assertEqual(self.current, current_before)
+        self.assertEqual(self.selected, selected_before)
+        self.assertEqual(list(self.ns["QUEUED_TURNS"]["chat"]), original_rows)
+        for actual, original in zip(self.ns["QUEUED_TURNS"]["chat"], original_rows, strict=True):
+            self.assertIs(actual, original)
+        self.assertFalse(self.ns["STEERING_SESSIONS"])
+        self.assertFalse(self.ns["RUN_NOW_TURNS"])
+        self.assertEqual(goal["status"], "active")
+        self.forbidden["pause_active_codex_goal_for_stop"].assert_not_called()
+        self.forbidden["prepare_steered_turn"].assert_not_called()
+
+    async def test_protected_stop_checks_cached_goal_and_both_owner_markers(self):
+        actual_stop = self.actual_stop_turn()
+        for mode in ("active-goal", "active-owner", "current-owner", "idle-goal"):
+            with self.subTest(mode=mode):
+                self.session["codex_goal"] = {"status": "active"} if mode.endswith("goal") else None
+                self.active.pop("codex_native_operation_kind", None)
+                self.current.pop("purpose", None)
+                if mode == "active-owner":
+                    self.active["codex_native_operation_kind"] = "goal_resume"
+                elif mode == "current-owner":
+                    self.current["purpose"] = "codex_goal_resume"
+                elif mode == "idle-goal":
+                    self.ns["ACTIVE"].clear()
+                    self.ns["CURRENT_TURNS"].clear()
+                    self.ns["BUSY_SESSIONS"].clear()
+                before = self.snapshot()
+                ready = asyncio.Event()
+                with self.assertRaises(AdmissionHTTPException) as caught:
+                    await actual_stop("chat", preserve_active_goal=True, _admission_ready=ready)
+                self.assertEqual(caught.exception.detail["guard"], "active_goal_requires_native_steer")
+                self.assertTrue(ready.is_set())
+                self.assert_untouched(before)
+
+    async def test_explicit_stop_default_still_fences_active_goal(self):
+        # Execute the real synchronous Stop admission, then stop at its first
+        # cleanup dependency so no provider task or service is touched.
+        self.ns.update({
+            "STOPPED_RUNS": set(), "RUN_METADATA": {},
+            "SESSION_TURN_TASKS": {}, "CODEX_NATIVE_ACTION_TASKS": {},
+            "empty_subagent_stop_result": Mock(side_effect=RuntimeError("cleanup boundary")),
+        })
+        with self.assertRaisesRegex(RuntimeError, "cleanup boundary"):
+            await self.actual_stop_turn()("chat")
+        self.assertTrue(self.active["stop_requested"])
+        self.assertEqual(self.ns["STOPPED_RUNS"], {"run-1"})
+
+    async def test_goal_continuation_accepts_attached_followup_without_pausing(self):
+        self.selected["file_ids"] = ["uploaded-image"]
+        await self.assert_admitted_to_goal_lane(self.active["native_steer_queue"])
+
+    async def test_non_goal_cannot_use_goal_only_lane_to_replace_authority(self):
+        self.session["codex_goal"] = None
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.active["native_steer_queue"] = None
+        self.active["codex_goal_steer_queue"] = asyncio.Queue()
+        with self.assertRaises(self.ns["NonNativeForceSendRequiresLifecycleLock"]):
+            await self.ns["_run_queued_turn_now_once"]("chat", "q-followup", require_native=True)
+        self.assertTrue(self.active["codex_goal_steer_queue"].empty())
 
     async def test_exhausted_goal_budget_does_not_deliver_or_resume(self):
         self.session["codex_goal_time_budget_exhausted"] = True

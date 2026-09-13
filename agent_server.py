@@ -23357,12 +23357,12 @@ def codex_goal_followup_requires_native(
 
 
 def codex_goal_steer_selection_is_plain(selected: dict[str, Any]) -> bool:
-    """In-place goal steering retains its original authority ceiling."""
+    """User text/attachments may steer without changing runtime authority."""
     return (
         CODEX_GOAL_STEER_CLIENT_CAPABILITY in (selected.get("client_capabilities") or [])
         and str(selected.get("prompt") or "").strip().split(maxsplit=1)[:1] != ["/mail"]
         and not any(selected.get(field) for field in (
-        "purpose", "file_ids", "chat_references", "team_references",
+        "purpose", "chat_references", "team_references",
         "secure_peer_route_snapshots", "cross_chat_obligation_ids",
         "cross_chat_exchange_ids", "cross_chat_envelope_id",
         "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
@@ -23394,10 +23394,18 @@ async def _run_queued_turn_now_once(
     selected_successor_id: str | None = None
     selected_was_paused = False
     native_steer = False
-    native_steer_queue = active_turn.get("native_steer_queue")
     goal_followup = codex_goal_followup_requires_native(
         STORE.sessions[session_id], active_turn, interrupted_turn,
     )
+    # A goal may be created during an ordinary turn, including a turn with
+    # run-bound provider authority. Its goal-only lane preserves that owner;
+    # it must never reopen the generic logical-run/authority replacement lane.
+    native_steer_queue_key = (
+        "codex_goal_steer_queue"
+        if goal_followup and active_turn.get("codex_native_operation_kind") != "goal_resume"
+        else "native_steer_queue"
+    )
+    native_steer_queue = active_turn.get(native_steer_queue_key)
     selected_backend = str(
         STORE.sessions[session_id].get("backend") or DEFAULT_BACKEND
     )
@@ -23509,14 +23517,36 @@ async def _run_queued_turn_now_once(
                     or STORE.sessions[session_id].get("backend")
                     or DEFAULT_BACKEND
                 )
+                # QUEUE_LOCK admission and async message lookup can yield while
+                # the live provider creates a goal or replaces its turn. Read
+                # the latest owner here without an inverse ACTIVE/QUEUE lock
+                # acquisition. There is no await before the decision below.
+                # Once observed, goal protection must not turn into Stop
+                # fallback merely because the goal cache changes meanwhile.
+                active_turn = dict(ACTIVE.get(session_id) or {})
+                interrupted_turn = dict(CURRENT_TURNS.get(session_id) or {})
+                goal_followup = goal_followup or codex_goal_followup_requires_native(
+                    STORE.sessions[session_id], active_turn, interrupted_turn,
+                )
+                native_steer_queue_key = (
+                    "codex_goal_steer_queue"
+                    if goal_followup and active_turn.get("codex_native_operation_kind") != "goal_resume"
+                    else "native_steer_queue"
+                )
+                native_steer_queue = active_turn.get(native_steer_queue_key)
                 native_steer = bool(
-                    active_turn.get("provider_turn_ready")
+                    (
+                        active_turn.get("provider_turn_ready")
+                        or (
+                            goal_followup
+                            and active_turn.get("codex_native_operation_kind") == "goal_resume"
+                        )
+                    )
                     and not selected_async
                     and native_steer_queue is not None
                     and (
                         not goal_followup or (
-                            active_turn.get("codex_native_operation_kind") == "goal_resume"
-                            and isinstance(STORE.sessions[session_id].get("codex_goal"), dict)
+                            isinstance(STORE.sessions[session_id].get("codex_goal"), dict)
                             and STORE.sessions[session_id]["codex_goal"].get("status") == "active"
                             and not STORE.sessions[session_id].get("codex_goal_time_budget_exhausted")
                             and codex_goal_steer_selection_is_plain(selected)
@@ -23580,7 +23610,7 @@ async def _run_queued_turn_now_once(
                             session_id, queued_id,
                             guard="active_goal_requires_native_steer",
                             message="This follow-up cannot safely steer the active Codex goal. It remains queued; the goal was not paused.",
-                            action="Use a plain-text follow-up with the current model settings once the goal turn is ready, or explicitly pause the goal before starting separate work.",
+                            action="Use a text or attachment follow-up with the current model settings once the goal turn is ready. New route grants or provider commands require separate work; the goal has not been paused.",
                             retryable=True,
                             owner_queued_id=queued_id,
                         ),
@@ -23646,7 +23676,10 @@ async def _run_queued_turn_now_once(
                 "phase": "queued",
                 "accepted_event": asyncio.Event(),
                 "owner_task": owner_task,
-                "expected_provider_turn_id": str(active_turn.get("provider_turn_id") or ""),
+                "expected_provider_turn_id": (
+                    str(active_turn.get("provider_turn_id") or "")
+                    if active_turn.get("provider_turn_ready") else ""
+                ),
                 "goal_identity": (
                     str((STORE.sessions[session_id].get("codex_goal") or {}).get("id") or ""),
                     str((STORE.sessions[session_id].get("codex_goal") or {}).get("objective") or ""),
@@ -23659,8 +23692,14 @@ async def _run_queued_turn_now_once(
                 current = ACTIVE.get(session_id)
                 if (
                     not current
-                    or not current.get("provider_turn_ready")
-                    or current.get("native_steer_queue") is not native_steer_queue
+                    or not (
+                        current.get("provider_turn_ready")
+                        or (
+                            goal_followup
+                            and current.get("codex_native_operation_kind") == "goal_resume"
+                        )
+                    )
+                    or current.get(native_steer_queue_key) is not native_steer_queue
                     or str(current.get("run_id") or "")
                     != str(active_turn.get("run_id") or "")
                 ):
@@ -23668,6 +23707,10 @@ async def _run_queued_turn_now_once(
                         "The active provider turn finished before steering delivery",
                         safe_to_requeue=True,
                     )
+                if not current.get("provider_turn_ready"):
+                    # The native goal owner will bind the pending message to
+                    # its next turn/started event, never a stale completed ID.
+                    request["expected_provider_turn_id"] = ""
                 try:
                     native_steer_queue.put_nowait(request)
                 except asyncio.QueueFull as exc:
@@ -23757,6 +23800,7 @@ async def _run_queued_turn_now_once(
             cascade_claude_subagents=False,
             hard_terminalize_on_timeout=False,
             pause_queued_turns_on_stop=False,
+            preserve_active_goal=True,
         )
         interrupted = bool(stop_result.get("stopped") or stop_result.get("pending"))
         deferred = bool(stop_result.get("deferred"))
@@ -29227,6 +29271,7 @@ def active_snapshot_input(active: dict[str, Any]) -> dict[str, Any]:
             "stdout_tail",
             "codex_app_server_turn",
             "native_steer_queue",
+            "codex_goal_steer_queue",
             "owner_task",
         }
     }
@@ -53939,6 +53984,25 @@ async def send_codex_goal_steer(
         goal_identity = (
             str(goal.get("id") or ""), str(goal.get("objective") or ""),
         ) if isinstance(goal, dict) else None
+        turn = active.get("codex_app_server_turn")
+        same_owner_lane = (
+            (
+                bool(reservation_id)
+                and active.get("codex_native_operation_kind") == "goal_resume"
+                and active.get("native_steer_queue") is steer_queue
+            ) or (
+                not reservation_id
+                and not active.get("codex_native_operation_kind")
+                and not active.get("standalone_provider_context")
+                and active.get("codex_goal_steer_queue") is steer_queue
+                and turn is not None
+                and not getattr(turn, "_closed", False)
+                and not getattr(turn, "_completed", False)
+                and getattr(turn, "_subscription", None) is subscription
+                and str(getattr(turn, "turn_id", "")) == expected_turn_id
+                and str(getattr(turn, "thread_id", "")) == thread_id
+            )
+        )
         return bool(
             CODEX_GOALS_ENABLED and manager.generation == generation
             and not getattr(subscription, "_closed", False)
@@ -53951,8 +54015,7 @@ async def send_codex_goal_steer(
             and isinstance(goal, dict) and goal.get("status") == "active"
             and goal_identity == request.get("goal_identity")
             and not codex_goal_time_budget_is_exhausted(session)
-            and active.get("codex_native_operation_kind") == "goal_resume"
-            and active.get("native_steer_queue") is steer_queue
+            and same_owner_lane
             and not active.get("stop_requested")
             and active.get("provider_turn_ready")
             and expected_turn_id
@@ -53984,7 +54047,9 @@ async def send_codex_goal_steer(
 
     try:
         await validate_delivery_owner()
-        prompt = build_user_provider_prompt(session_id, str(selected.get("prompt") or ""), [])
+        prompt = build_user_provider_prompt(
+            session_id, str(selected.get("prompt") or ""), list(selected.get("file_ids") or []),
+        )
         await fence_native_steer_delivery(session_id, selected, backend=BACKEND_CODEX)
         # Stop/Pause, budget/goal changes, and native turn rollover can win
         # during the durable fence. Check again at the RPC boundary.
@@ -54043,10 +54108,16 @@ async def commit_codex_goal_steer(
             safe_to_requeue=False, delivery_uncertain=True,
         )
     display_prompt = str(selected.get("display_prompt") if selected.get("display_prompt") is not None else selected.get("prompt") or "")
+    display_file_ids = list(
+        selected.get("display_file_ids")
+        if selected.get("display_file_ids") is not None
+        else selected.get("file_ids") or []
+    )
     await append_durable_event_batch(session_id, [
         ("turn_queue_run_now", {
             "queued_id": selected.get("queued_id"), "run_id": operation_id,
             "backend": BACKEND_CODEX, "prompt": display_prompt,
+            "file_ids": display_file_ids,
             "native_steer": True, "native_goal_steer": True,
             "interrupted": False, "replays_interrupted_message": False,
             "remaining": request.get("remaining", 0), "superseded_queued_ids": [],
@@ -54056,7 +54127,7 @@ async def commit_codex_goal_steer(
             "run_id": operation_id, "backend": BACKEND_CODEX,
             "purpose": "codex_goal_resume", "provider_turn_id": pending["provider_turn_id"],
             "queued_id": selected.get("queued_id"), "prompt": display_prompt,
-            "file_ids": [], "native_steer": True, "native_goal_steer": True,
+            "file_ids": display_file_ids, "native_steer": True, "native_goal_steer": True,
             "provider_user_authored": True,
         }),
     ])
@@ -54080,6 +54151,7 @@ async def consume_codex_native_turn(
     interrupted_before_start: bool = False,
     finalize_operation: bool = True,
     initial_sequence: int = 0,
+    initial_pending_steer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Consume native work; an inline ordinary runner retains its own cleanup."""
     assistant_deltas: dict[str, list[str]] = {}
@@ -54102,8 +54174,10 @@ async def consume_codex_native_turn(
     goal_steer_queue = (ACTIVE.get(session_id) or {}).get("native_steer_queue") if goal_resume else None
     steer_task: asyncio.Task[Any] | None = None
     notification_task: asyncio.Task[Any] | None = None
-    steer_request: dict[str, Any] | None = None
-    pending_steer: dict[str, Any] | None = None
+    steer_request: dict[str, Any] | None = (
+        initial_pending_steer["request"] if initial_pending_steer is not None else None
+    )
+    pending_steer: dict[str, Any] | None = initial_pending_steer
     handled_sequence = initial_sequence
     synthetic_sequence = initial_sequence
 
@@ -54131,6 +54205,35 @@ async def consume_codex_native_turn(
             raise asyncio.CancelledError
         while True:
             if goal_resume:
+                if pending_steer is None and steer_request is not None:
+                    if not steer_request.get("expected_provider_turn_id"):
+                        # Send now may arrive in the gap between native goal
+                        # turns. Hold this one command on the existing stream,
+                        # then bind it once to the next ready turn. The helper
+                        # still rechecks goal/owner/Stop and the exact turn at
+                        # the wire boundary; no poller or goal restart is added.
+                        async with ACTIVE_LOCK:
+                            active = ACTIVE.get(session_id) or {}
+                            if (
+                                active.get("run_id") == operation_id
+                                and active.get("native_steer_queue") is goal_steer_queue
+                                and active.get("provider_turn_ready")
+                            ):
+                                steer_request["expected_provider_turn_id"] = str(
+                                    active.get("provider_turn_id") or ""
+                                )
+                    if steer_request.get("expected_provider_turn_id"):
+                        try:
+                            pending_steer = await send_codex_goal_steer(
+                                session_id, operation_id, manager, thread_id,
+                                reservation_id, subscription, goal_steer_queue, steer_request,
+                            )
+                        except BaseException as exc:
+                            reject_goal_steer(steer_request, exc)
+                            steer_request = None
+                            if isinstance(exc, asyncio.CancelledError):
+                                raise
+                        continue
                 if pending_steer is not None and handled_sequence >= pending_steer["watermark"]:
                     try:
                         result = await commit_codex_goal_steer(
@@ -54188,7 +54291,7 @@ async def consume_codex_native_turn(
                     else:
                         if notification_task is None:
                             notification_task = asyncio.create_task(next_goal_notification())
-                        if pending_steer is None and steer_task is None:
+                        if pending_steer is None and steer_request is None and steer_task is None:
                             steer_task = asyncio.create_task(goal_steer_queue.get())
                         waiters = {notification_task}
                         if pending_steer is None and steer_task is not None:
@@ -54210,16 +54313,6 @@ async def consume_codex_native_turn(
                             steer_request = steer_task.result()
                             steer_task = None
                             mark_native_steer_accepted(steer_request)
-                            try:
-                                pending_steer = await send_codex_goal_steer(
-                                    session_id, operation_id, manager, thread_id,
-                                    reservation_id, subscription, goal_steer_queue, steer_request,
-                                )
-                            except BaseException as exc:
-                                reject_goal_steer(steer_request, exc)
-                                steer_request = None
-                                if isinstance(exc, asyncio.CancelledError):
-                                    raise
                             continue
                 except asyncio.TimeoutError:
                     # Drain already queued output before using control state:
@@ -64100,6 +64193,8 @@ async def run_codex_app_server(
     manifest_watch_task: asyncio.Task[None] | None = None
     goal_time_budget_task: asyncio.Task[None] | None = None
     goal_continuation_result: dict[str, Any] | None = None
+    pending_goal_steer_handoff: dict[str, Any] | None = None
+    goal_steer_recovery_fenced = False
     logical_state_lock = asyncio.Lock()
     steer_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     notification_task: asyncio.Task[tuple[int, dict[str, Any]]] | None = None
@@ -64116,10 +64211,14 @@ async def run_codex_app_server(
             if (
                 active
                 and str(active.get("run_id") or "") == current_run_id
-                and active.get("native_steer_queue") is steer_queue
+                and (
+                    active.get("native_steer_queue") is steer_queue
+                    or active.get("codex_goal_steer_queue") is steer_queue
+                )
             ):
                 active["provider_turn_ready"] = False
                 active["native_steer_queue"] = None
+                active["codex_goal_steer_queue"] = None
 
     async def reconcile_cancelled_runner_exit() -> None:
         """Release this run and its exact provider-thread pin after cancellation."""
@@ -64471,7 +64570,9 @@ async def run_codex_app_server(
         synthetic_notification_sequence += 1
         return synthetic_notification_sequence, dict(notification)
 
-    async def drain_notifications_through(watermark: int) -> None:
+    async def drain_notifications_through(
+        watermark: int, *, handoff_at_completion: bool = False,
+    ) -> None:
         """Persist exactly the provider notifications preceding steer ack."""
         nonlocal notification_task, handled_notification_sequence
         nonlocal last_activity
@@ -64493,6 +64594,12 @@ async def run_codex_app_server(
             handled_notification_sequence = sequence
             last_activity = time.monotonic()
             await handle_notification(notification)
+            if handoff_at_completion and turn_completed:
+                # The subscription is thread-wide. A native continuation may
+                # already follow this completion before the steer ACK. Leave
+                # those packets to the goal consumer, which owns their turn
+                # identity/readiness and commits the pending ACK after them.
+                break
 
     async def switch_logical_run(
         selected: dict[str, Any],
@@ -65431,6 +65538,14 @@ async def run_codex_app_server(
                     if runtime_env or provider_command is not None
                     else steer_queue
                 ),
+                # Goal steering retains this exact run, Responses metadata,
+                # authority and tool processes. Advertise separately even when
+                # ordinary logical-run replacement is unavailable.
+                "codex_goal_steer_queue": (
+                    steer_queue
+                    if provider_command is None and not standalone_provider_context
+                    else None
+                ),
                 "stdout_tail": deque(maxlen=LIVE_STDOUT_MAX_LINES),
                 "stdout_total_lines": 0,
                 "stdout_updated_at": None,
@@ -65774,10 +65889,54 @@ async def run_codex_app_server(
                             selected_for_steer = command.get("selected") or {}
                             try:
                                 async with logical_state_lock:
-                                    result = await switch_logical_run(
-                                        selected_for_steer,
-                                        int(command.get("remaining") or 0),
-                                    )
+                                    live_goal = (STORE.sessions.get(session_id) or {}).get("codex_goal")
+                                    # Goal creation can race with queue admission. Do not
+                                    # rotate ownership after a goal became active merely
+                                    # because this request was admitted a moment earlier.
+                                    if (
+                                        command.get("goal_identity") is None
+                                        and isinstance(live_goal, dict)
+                                        and live_goal.get("status") == "active"
+                                    ):
+                                        command["goal_identity"] = (
+                                            str(live_goal.get("id") or ""),
+                                            str(live_goal.get("objective") or ""),
+                                        )
+                                    if command.get("goal_identity") is not None:
+                                        pending = await send_codex_goal_steer(
+                                            session_id, current_run_id, manager, provider_id,
+                                            "", turn._subscription, steer_queue, command,
+                                        )
+                                        # The original prompt no longer represents all
+                                        # accepted user input. Never replay only that old
+                                        # prompt through context-recovery after this point.
+                                        goal_steer_recovery_fenced = True
+                                        try:
+                                            await drain_notifications_through(
+                                                pending["watermark"], handoff_at_completion=True,
+                                            )
+                                            if handled_notification_sequence < pending["watermark"]:
+                                                pending_goal_steer_handoff = pending
+                                                break
+                                            result = await commit_codex_goal_steer(
+                                                session_id, current_run_id, provider_id, "", pending,
+                                            )
+                                        except BaseException as exc:
+                                            # Provider acceptance is already proven. A failed
+                                            # projection must never replay that input or stop
+                                            # the goal merely to change logical ownership.
+                                            if isinstance(exc, asyncio.CancelledError):
+                                                raise
+                                            raise NativeSteerHandoffError(
+                                                concise_error_message(exc),
+                                                safe_to_requeue=False, delivery_uncertain=True,
+                                            ) from exc
+                                        last_activity = time.monotonic()
+                                    else:
+                                        result = await switch_logical_run(
+                                            selected_for_steer,
+                                            int(command.get("remaining") or 0),
+                                        )
                                 if future is not None and not future.done():
                                     future.set_result(result)
                             except asyncio.CancelledError:
@@ -65796,6 +65955,11 @@ async def run_codex_app_server(
                                     )
                                 raise
                             except Exception as exc:
+                                if (
+                                    command.get("goal_identity") is not None
+                                    and getattr(exc, "delivery_uncertain", False)
+                                ):
+                                    goal_steer_recovery_fenced = True
                                 if future is not None and not future.done():
                                     # Do not transfer a traceback that still
                                     # owns this live runner frame into another
@@ -65818,7 +65982,13 @@ async def run_codex_app_server(
                         with suppress(Exception):
                             command = steer_task.result()
                             future = command.get("future")
-                            if future is not None and not future.done():
+                            if (
+                                future is not None and not future.done()
+                                and (
+                                    pending_goal_steer_handoff is None
+                                    or command is not pending_goal_steer_handoff["request"]
+                                )
+                            ):
                                 future.set_exception(
                                     NativeSteerHandoffError(
                                         "the Codex turn completed before steering was applied",
@@ -65870,6 +66040,7 @@ async def run_codex_app_server(
                         provider_id, current_run_id, turn._subscription,
                         finalize_operation=False,
                         initial_sequence=handled_notification_sequence,
+                        initial_pending_steer=pending_goal_steer_handoff,
                     )
                     terminal_status = goal_continuation_result["status"]
                     terminal_error = goal_continuation_result["error"]
@@ -65979,6 +66150,16 @@ async def run_codex_app_server(
             """Retire every owner before cancellation can escape the runner."""
 
             try:
+                if pending_goal_steer_handoff is not None:
+                    future = pending_goal_steer_handoff["request"].get("future")
+                    if future is not None and not future.done():
+                        # Stop, failed completion or cancellation can prevent
+                        # the native consumer handoff after provider acceptance.
+                        # Settle its caller without replaying or pausing a goal.
+                        future.set_exception(NativeSteerHandoffError(
+                            "The goal continuation ended before the accepted follow-up could be projected; it was not replayed",
+                            safe_to_requeue=False, delivery_uncertain=True,
+                        ))
                 # Cancellation can bypass the Exception handler. Keep this
                 # idempotent identity-fenced detach as the final transport guard.
                 await detach_native_steer_admission()
@@ -66049,6 +66230,8 @@ async def run_codex_app_server(
     )
     recover_resume = (
         not delivery_unknown
+        and not goal_steer_recovery_fenced
+        and goal_continuation_result is None
         and should_recover_codex_resume(
             allow_rollover=allow_resume_rollover,
             resumed_provider_id=resumed_provider_id,
@@ -86826,6 +87009,7 @@ async def stop_turn(
     cascade_claude_subagents: bool = True,
     hard_terminalize_on_timeout: bool = True,
     pause_queued_turns_on_stop: bool = True,
+    preserve_active_goal: bool = False,
     _admission_ready: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     deferred = False
@@ -86864,6 +87048,25 @@ async def stop_turn(
                     "superseded": True,
                     "message": "The requested run no longer owns this chat.",
                 }
+        if preserve_active_goal and codex_goal_followup_requires_native(
+            STORE.sessions.get(session_id) or {}, active or {}, current_turn,
+        ):
+            # Force Send may have passed its non-goal probe before the
+            # provider created a goal. Reject at the final, synchronous Stop
+            # admission boundary, before closing authority or marking a run
+            # stopped. Its caller restores the selected row in place.
+            if _admission_ready is not None:
+                _admission_ready.set()
+            raise HTTPException(
+                status_code=409,
+                detail=force_send_conflict_detail(
+                    session_id, "",
+                    guard="active_goal_requires_native_steer",
+                    message="A Codex goal became active before Force Send could stop the turn. The message remains queued; the goal was not paused.",
+                    action="Retry the follow-up through the active goal's native steering lane.",
+                    retryable=True,
+                ),
+            )
         if active:
             if require_provider_turn_ready and (
                 not active.get("provider_turn_ready")
