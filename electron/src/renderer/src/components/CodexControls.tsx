@@ -391,19 +391,21 @@ export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean 
       </button>
       <Dialog.Close asChild><button type="button" className="icon-button" aria-label={t("ui.CodexControls.CodexControlsPanel.close_codex_controls_9fa3e16")}><X size={16} /></button></Dialog.Close>
     </header>
-    {sharedDisconnected && <div className="codex-control-alert" role="status">{t('chatShare.web.disconnected')}</div>}
-    {error && <div className="codex-control-alert" role="alert"><AlertTriangle size={14} /><span>{error}</span></div>}
-    {notice && <div className="codex-control-notice" role="status"><Check size={14} /><span>{notice}</span><button type="button" aria-label={t("ui.CodexControls.CodexControlsPanel.dismiss_notice_a179917")} onClick={() => setNotice(null)}><X size={12} /></button></div>}
-    {loading
-      ? <div className="codex-controls-loading"><LoaderCircle className="spin" size={18} />{" "}{t("ui.CodexControls.CodexControlsPanel.loading_thread_controls_8d8c070")}</div>
-      : <fieldset className="codex-controls-body" disabled={sharedDisconnected}>
-        <PendingControlsSection />
-        <ThreadStatusSection />
-        <PermissionSettings session={session} onNotice={setNotice} />
-        <GoalSettings onNotice={setNotice} autoFocusObjective={focusGoal} />
-        {!window.agentsDock.sharedChat && <ThreadActions onNotice={setNotice} />}
-        {!window.agentsDock.sharedChat && <BackgroundTerminals onNotice={setNotice} />}
-      </fieldset>}
+    <div className="codex-controls-scroll-region">
+      {sharedDisconnected && <div className="codex-control-alert" role="status">{t('chatShare.web.disconnected')}</div>}
+      {error && <div className="codex-control-alert" role="alert"><AlertTriangle size={14} /><span>{error}</span></div>}
+      {notice && <div className="codex-control-notice" role="status"><Check size={14} /><span>{notice}</span><button type="button" aria-label={t("ui.CodexControls.CodexControlsPanel.dismiss_notice_a179917")} onClick={() => setNotice(null)}><X size={12} /></button></div>}
+      {loading
+        ? <div className="codex-controls-loading"><LoaderCircle className="spin" size={18} />{" "}{t("ui.CodexControls.CodexControlsPanel.loading_thread_controls_8d8c070")}</div>
+        : <fieldset className="codex-controls-body" disabled={sharedDisconnected}>
+          <PendingControlsSection />
+          <ThreadStatusSection />
+          <PermissionSettings session={session} onNotice={setNotice} />
+          <GoalSettings onNotice={setNotice} autoFocusObjective={focusGoal} />
+          {!window.agentsDock.sharedChat && <ThreadActions onNotice={setNotice} />}
+          {!window.agentsDock.sharedChat && <BackgroundTerminals onNotice={setNotice} />}
+        </fieldset>}
+    </div>
   </div>
 }
 
