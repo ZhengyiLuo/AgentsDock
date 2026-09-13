@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-13 — Published server goal-steering correction
+
+- Published [AgentsServer `1.0.0-beta.4`](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.0-beta.4)
+  from immutable source `b5fa0728ede6e99f228685f625198b5bdcde20a0`.
+  The full release gate, downloaded signature, public asset digests and all
+  76 packaged source files passed verification.
+- Preserve active native Codex goals when steering during the initial turn or
+  a continuation, including uploaded attachments and between-turn delivery.
+  Keep one chronological follow-up across acknowledgement rollover and prevent
+  stale-prompt recovery after accepted or uncertain steering. No polling added.
+- Existing desktop `1.0.0-beta.2`, build `1160`, supports this server correction;
+  there is no new desktop binary for the regression-only app changes below.
+- An accepted idle deployment schedule is not a completed installation.
+  Live-provider acceptance remains separate from the isolated protocol tests.
+  Stable readiness also requires resolving the idle-goal mailbox-authority
+  limitation and completing the stable-upgrade and platform acceptance gates.
+
 ## 2026-09-13 — Active-goal steering regression coverage
 
 - Verify Send now and Cmd/Ctrl+Enter while a goal is active across a pending
