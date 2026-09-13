@@ -141,11 +141,11 @@ a { color: inherit; }
 .appstore-btn { text-decoration: none; }
 
 /* ── Trusted by ── */
-.trusted-by { padding: 72px max(5vw, 24px); display: flex; flex-direction: column; align-items: center; }
-.trusted-label { margin: 0 0 84px; font-size: 13px; font-weight: 400; letter-spacing: .18em; text-transform: uppercase; color: rgba(255, 255, 255, .38); text-align: center; }
+.trusted-by { padding: 44px max(5vw, 24px) 36px; display: flex; flex-direction: column; align-items: center; }
+.trusted-label { margin: 0 0 28px; font-size: 12px; font-weight: 400; letter-spacing: .18em; text-transform: uppercase; color: rgba(255, 255, 255, .38); text-align: center; }
 /* Logo wall sized from the Claude Code page: 40px max logo height in a 64px
    slot, flex-wrapped and centred with a 24px column gap. */
-.trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: clamp(64px, 11vw, 168px); row-gap: 40px; flex-wrap: wrap; }
+.trusted-logos { display: flex; align-items: center; justify-content: center; column-gap: clamp(40px, 6vw, 88px); row-gap: 24px; flex-wrap: wrap; }
 .trusted-logos > * { animation: logoRise .6s ease both; }
 .trusted-logos span { font-family: var(--display); font-size: clamp(17px, 2vw, 23px); font-weight: 600; color: #58657a; letter-spacing: .005em; transition: color .25s ease; }
 .trusted-logos span:hover { color: #b4c0d2; }
@@ -154,7 +154,7 @@ a { color: inherit; }
 /* Equal height, natural width — the logos are wordmarks of different aspect
    ratios, so a fixed box would make them look uneven. */
 .trusted-logos img {
-  height: 64px;
+  height: 26px;
   width: auto;
   display: block;
   filter: grayscale(1) invert(1);
@@ -169,6 +169,47 @@ a { color: inherit; }
 .trusted-logos span:nth-child(5) { animation-delay: .36s; }
 @keyframes logoRise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 
+/* Scrolling quote wall under the trusted-by band: two rows drifting in
+   opposite directions (one long row on wide monitors). Each track holds the
+   same group four times so a translate(-50%) loop shifts by two full groups —
+   wider than any screen — and stays seamless; hover/focus pauses it; reduced-motion
+   disables it. Edge fades blend the rows into the page background. */
+.quote-marquee { position: relative; display: flex; flex-direction: column; gap: 12px; align-self: stretch; width: auto; margin: 52px calc(-1 * max(5vw, 24px)) 0; }
+.quote-marquee::before, .quote-marquee::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 2; pointer-events: none; width: max(48px, 50vw - 564px); }
+.quote-marquee::before { left: 0; background: linear-gradient(90deg, var(--bg), transparent); }
+.quote-marquee::after { right: 0; background: linear-gradient(270deg, var(--bg), transparent); }
+.quote-row { overflow: hidden; }
+.quote-track { display: flex; width: max-content; will-change: transform; animation: quoteDrift 155s linear infinite; }
+.quote-row.is-reverse .quote-track { animation-duration: 170s; animation-direction: reverse; }
+/* Two rows on laptops/desktops; a single long row only on wide monitors. */
+.quote-marquee--one { display: none; }
+.quote-marquee--one .quote-track { animation-duration: 300s; }
+.quote-marquee:hover .quote-track, .quote-marquee:focus-within .quote-track { animation-play-state: paused; }
+.quote-group { display: flex; gap: 12px; padding-right: 12px; }
+.quote-card { position: relative; display: flex; flex-direction: column; gap: 10px; width: clamp(264px, 22vw, 308px); height: 150px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.012); transition: border-color .18s ease, background-color .18s ease; }
+.quote-card:hover { border-color: rgba(91,157,255,.55); background: rgba(91,157,255,.06); }
+.quote-author { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.quote-avatar { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; overflow: hidden; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
+.quote-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.quote-handle { color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quote-card p { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.4; letter-spacing: -.003em; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+@keyframes quoteDrift { from { transform: translate(0); } to { transform: translate(-50%); } }
+@media (max-width: 900px) {
+  .quote-marquee { margin-top: 40px; }
+  .quote-marquee::before, .quote-marquee::after { width: 28px; }
+  .quote-track { animation-duration: 140s; }
+  .quote-row.is-reverse .quote-track { animation-duration: 155s; }
+  .quote-card { width: 268px; padding: 14px; }
+  .quote-card p { font-size: 13px; }
+}
+@media (min-width: 1900px) {
+  .quote-marquee--two { display: none; }
+  .quote-marquee--one { display: flex; }
+}
+@media (prefers-reduced-motion: reduce) { .quote-track { animation: none; } }
+
+
+
 /* ── Quick start ── */
 .quickstart { padding: 112px max(4vw, 24px); border-bottom: 1px solid var(--line); background: #0c0f13; }
 .quickstart-inner { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: .82fr 1.18fr; gap: 72px; align-items: center; }
@@ -180,7 +221,7 @@ a { color: inherit; }
 /* Numbered points, reusing the setup-guide step badge */
 .quickstart-points { list-style: none; margin: 24px 0 26px; padding: 0; display: flex; flex-direction: column; gap: 16px; }
 .quickstart-points li { display: flex; align-items: center; font-size: var(--body-1); line-height: 1.35; color: var(--muted-2); }
-/* Check list, styled after the t3.codes harness footer items */
+/* Check list (optional-prerequisite items) */
 .check-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; }
 .check-list li { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); }
 .check-list li svg { color: #54d18c; flex-shrink: 0; }
@@ -252,7 +293,7 @@ a { color: inherit; }
 .seg .seg-on { background: var(--accent-soft); color: var(--blue-2); box-shadow: inset 0 0 0 1px rgba(91,157,255,.3); }
 .sched-select { display: flex; align-items: center; justify-content: space-between; width: 220px; max-width: 100%; padding: 10px 13px; border: 1px solid var(--line); border-radius: 9px; background: #0b0e13; font-size: 14px; color: var(--text); }
 .sched-select svg { color: var(--muted); }
-/* Fork chat (t3-style list + button) */
+/* Fork chat (list + button mock) */
 .fork-media { line-height: normal; padding: 30px 30px 34px; background: #0f1319; display: flex; flex-direction: column; align-items: stretch; }
 .fork-card { border: 1px solid var(--line); border-radius: 12px; background: #0b0e13; padding: 8px; }
 .fork-list { list-style: none; margin: 0; padding: 0; }
