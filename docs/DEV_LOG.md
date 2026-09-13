@@ -1,30 +1,35 @@
 # Public development log
 
-## 2026-09-12 — 1.0 desktop migration bridge candidate
+## 2026-09-12 — Published 1.0 desktop migration bridge
 
-- Prepared `1.0.0-beta.1`, build `1159`, from the exact reviewed source
+- Published `1.0.0-beta.1`, build `1159`, from the exact reviewed source
   `885bfa9a382c734f7b66e9a2b6bb025333ba9d0a`. This is a beta migration bridge;
   stable `1.0.0` is not published.
 - Native release builds and platform verification passed for universal macOS,
   Linux x64, Linux ARM64, and Windows x64. The macOS artifacts are Developer ID
   signed and notarized. Windows remains an explicitly unsigned beta preview,
   not a signed stable distribution.
-- The candidate embeds the public AgentsDock desktop feed and preserves
+- The release embeds the public AgentsDock desktop feed and preserves
   application identity, saved update-track preference, and explicit installation.
   Its Beta track can select a newer stable release without adding background
   polling or changing Team Network behavior.
-- The exact 14-asset set is staged and verified in both canonical and legacy
-  release drafts. The source tag resolves to the reviewed commit above;
+- The exact 14-asset set is published in the
+  [canonical public release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0-beta.1)
+  and [legacy mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.0-beta.1).
+  Release API checks verified both releases' matching asset digests and sealed
+  checksum-manifest identity. The source tag resolves to the reviewed commit above;
   checksum-manifest SHA-256 is
   `237bfd4ef1ed42fbe8e16b5549510eaea88a935296fa6b96903b5335486d169f`.
-- Publication is blocked: the automation release credential cannot see the
-  canonical repository's draft, although the operator's authenticated account
-  verifies both drafts. Fix its repository access before resuming the protected
-  publisher. No artifact rebuild or replacement is required.
-- Installed legacy-feed → public-feed upgrade acceptance is pending publication.
-  Build verification alone does not establish that an installed older client
-  has upgraded successfully. Existing public download links remain unchanged
-  until the bridge is actually public.
+- The protected publisher replayed all four native platform verifiers and
+  published the original sealed artifacts without rebuilding or replacing them.
+  Canonical beta download links now point to the public source repository.
+- Installed legacy-feed → public-feed upgrade acceptance passed on an isolated
+  macOS runner using the signed production packages and actual updater UI.
+  `0.2.13-beta.33` downloaded the bridge, completed native replacement and
+  relaunch, and then checked the public feed successfully. The profile, Beta
+  preference, and language were preserved. Installed application payload matched
+  the published bridge; screenshots and a machine-readable receipt were retained.
+  No operator app or live server was used for this acceptance journey.
 - Current stable `0.2.12` downloads and the Android release feed remain on the
   legacy repository. No standalone server deployment or mobile release is part
   of this desktop migration.

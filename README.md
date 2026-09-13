@@ -7,10 +7,10 @@
       alt="AgentsDock website"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0-beta.1">
     <img
-      src="https://img.shields.io/badge/desktop-beta-EA7233"
-      alt="Public desktop beta releases"
+      src="https://img.shields.io/badge/desktop-v1.0.0--beta.1-EA7233"
+      alt="Desktop 1.0.0-beta.1 migration bridge"
     />
   </a>
   <a href="https://discord.gg/ZGDrhEWqPt">
@@ -50,14 +50,14 @@
   without living in a terminal. Easily review files and rich media.
   <br />
   <br />
-  <strong>Desktop beta 0.2.13-beta.33:</strong>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-mac-universal.dmg">macOS</a>
+  <strong>Desktop beta 1.0.0-beta.1:</strong>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.1/AgentsDock-1.0.0-beta.1-mac-universal.dmg">macOS</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-x86_64.AppImage">Linux x86_64</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.1/AgentsDock-1.0.0-beta.1-linux-x86_64.AppImage">Linux x86_64</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-arm64.AppImage">Linux ARM64</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.1/AgentsDock-1.0.0-beta.1-linux-arm64.AppImage">Linux ARM64</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-win-x64.exe">Windows</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.1/AgentsDock-1.0.0-beta.1-win-x64.exe">Windows (unsigned preview)</a>
   ·
   <a href="https://testflight.apple.com/join/2JjWy2Z2">iPhone &amp; iPad</a>
   ·
