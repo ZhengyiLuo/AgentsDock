@@ -12,10 +12,18 @@
   background refreshes. The matching server supplies paginated full-log
   snapshots and starts their viewer at the latest page.
 - Focused component, bridge, URL-validation and timeline-position checks,
-  TypeScript, the desktop suite and production compilation passed. Real-browser
-  acceptance and local packaging are tracked separately before acceptance.
-- These changes require the matching standalone server contract. No app or
-  server publication is performed by the source change itself.
+  TypeScript, the desktop suite and production compilation passed. Actual
+  compiled desktop clicks verified both share actions, separate URL/token,
+  copy/open dispatch, snapshot-only token links, and revoked-history folding
+  against isolated fixtures without creating real shares.
+- Accepted local arm64 candidate: `0.2.13-beta.37`, build `203`, source `699911b`.
+  Developer ID signing, strict signature verification, bundle audit, and all
+  151 packaged compiled-file byte comparisons passed. This local build is not
+  notarized or publicly released; automatic updates are disabled. The running
+  desktop was not replaced.
+- These changes require AgentsServer `0.1.26-beta.66` or later. Server release
+  and installation are tracked separately; the local app does not update a
+  server automatically.
 
 ## 2026-09-12 — Two-action HTTP chat sharing
 
