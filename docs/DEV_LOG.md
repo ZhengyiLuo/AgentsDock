@@ -12,6 +12,18 @@
 - Serve a styled static snapshot with user bubbles, assistant Markdown, dates
   and responsive light/dark layouts. Interactive sharing reuses the chat UI and
   keeps explicit one-time Join, chat-scoped access, same-origin and CSRF checks.
+- Verified actual compiled desktop right-click, both creation buttons, exact
+  copy/open dispatch and lazy existing-link management with isolated fixtures.
+  Verified served pages on a genuinely non-secure HTTP browser origin: Join,
+  reload, prompt, queue Send now, Stop, wrong-origin/CSRF denial and used-invite
+  denial. Static pages were checked at desktop and mobile widths in light/dark
+  themes. These synthetic journeys did not execute providers or expose real chats.
+- Accepted local arm64 candidate: `0.2.13-beta.36`, build `202`, source `ce1e0d9`.
+  Production compilation, desktop checks, strict Developer ID signature, bundle
+  audit and exact packaged main/preload/renderer byte comparisons passed.
+  Automatic updates are disabled; this local candidate is not notarized or
+  published. The running desktop was not replaced. Server changes are committed
+  separately and were not deployed by this validation.
 
 ## 2026-09-12 — Quiet idle-mail wake presentation
 
