@@ -40,8 +40,8 @@ export interface CreatedChatShare extends ChatShareRecord {
 export type CreateChatShareInput = {
   mode: 'snapshot'
   confirmed_public: true
-  through_bytes: number
-  digest: string
+  through_bytes?: number
+  digest?: string
   title?: string
   expires_at?: number
 } | {
@@ -97,7 +97,7 @@ export function parseCreatedChatShare(value: unknown, mode: ChatShareMode): Crea
   if (item.url !== null) {
     if (typeof item.url !== 'string') throw new Error('Invalid public chat URL.')
     const url = new URL(item.url)
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || `${url.pathname}${url.hash}` !== item.path) throw new Error('Invalid public chat URL.')
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || `${url.pathname}${url.hash}` !== item.path) throw new Error('Invalid public chat URL.')
   }
   return { ...metadata, path: item.path, url: item.url as string | null }
 }
@@ -125,8 +125,10 @@ export function chatShareCreateBody(input: CreateChatShareInput): Record<string,
   if (input.title !== undefined && (typeof input.title !== 'string' || [...input.title].length > 256)) throw new Error('Share title is too long.')
   if (input.expires_at !== undefined && timestamp(input.expires_at)! <= Date.now() / 1000) throw new Error('Share expiry must be in the future.')
   const optional = { ...(input.title === undefined ? {} : { title: input.title }), ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at }) }
-  if (mode === 'snapshot' && input.mode === 'snapshot' && input.confirmed_public === true
-    && Number.isSafeInteger(input.through_bytes) && input.through_bytes > 0 && /^[a-f0-9]{64}$/.test(input.digest)) {
+  if (mode === 'snapshot' && input.mode === 'snapshot' && input.confirmed_public === true) {
+    if (input.through_bytes === undefined && input.digest === undefined) return { ...optional, confirmed_public: true }
+    if (!Number.isSafeInteger(input.through_bytes) || (input.through_bytes ?? -1) < 0
+      || typeof input.digest !== 'string' || !/^[a-f0-9]{64}$/.test(input.digest)) throw new Error('Invalid reviewed chat snapshot boundary.')
     return { ...optional, confirmed_public: true, through_bytes: input.through_bytes, digest: input.digest }
   }
   if (mode === 'interactive' && input.mode === 'interactive' && input.confirmed_interactive === true) return { ...optional, confirmed_interactive: true }

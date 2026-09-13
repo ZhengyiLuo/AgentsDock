@@ -11,6 +11,34 @@ async function localTransport(handler: (request: IncomingMessage, response: Serv
 }
 
 describe('native chat-share management client', () => {
+  it('creates either mode directly with the selected native HTTP origin, not renderer-supplied URL fields', async () => {
+    const bodies: Record<string, unknown>[] = []
+    await localTransport((request, response) => {
+      let body = ''
+      request.on('data', chunk => { body += chunk })
+      request.on('end', () => {
+        const value = JSON.parse(body)
+        bodies.push(value)
+        expect(value.base_url).toBe(`http://${request.headers.host}`)
+        const interactive = request.url?.includes('interactive-chat-shares')
+        const id = `interactive_${'a'.repeat(32)}`
+        const path = interactive ? `/interactive-chat/${id}#invite=${'b'.repeat(43)}` : `/share/${'c'.repeat(43)}`
+        response.writeHead(201, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ id, share_id: 'share_qa', title: 'Example', created_at: 1,
+          expires_at: null, revoked_at: null, path, url: `${value.base_url}${path}` }))
+      })
+    }, async client => {
+      client.configure(`${client.url('')}/api/health`, 'synthetic-admin-credential')
+      const view = await client.createChatShare('qa-chat', { mode: 'snapshot', confirmed_public: true,
+        title: 'Example', base_url: 'http://untrusted.example.test', token: 'ignored' } as never)
+      expect(view.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/share\//)
+      await client.createChatShare('qa-chat', { mode: 'interactive', confirmed_interactive: true,
+        base_url: 'https://untrusted.example.test' } as never)
+    })
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toEqual({ confirmed_public: true, title: 'Example', base_url: expect.any(String) })
+    expect(bodies[1]).toEqual({ confirmed_interactive: true, base_url: expect.any(String) })
+  })
   it('uses exact admin routes with no browser headers or URL credentials on actual native HTTP', async () => {
     const responses = [
       { messages: [{ role: 'user', text: 'Synthetic preview' }], digest: 'a'.repeat(64), through_bytes: 12, warning: 'Synthetic privacy warning' },

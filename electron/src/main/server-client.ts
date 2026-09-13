@@ -2344,8 +2344,11 @@ export class AgentServerClient {
   }
 
   async createChatShare(sessionId: string, input: CreateChatShareInput) {
+    // The selected native connection supplies the link origin, never renderer
+    // fields or credentials. Keep management on the existing authenticated path.
+    const body = { ...chatShareCreateBody(input), base_url: new URL(this.configuration.baseURL).origin }
     return parseCreatedChatShare(await this.privilegedNativeRequest(this.chatSharePath(sessionId, input.mode),
-      { method: 'POST', body: JSON.stringify(chatShareCreateBody(input)) }, input.mode === 'snapshot' ? CHAT_SHARE_SNAPSHOT_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
+      { method: 'POST', body: JSON.stringify(body) }, input.mode === 'snapshot' ? CHAT_SHARE_SNAPSHOT_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
   }
 
   async revokeChatShare(sessionId: string, mode: ChatShareMode, shareId: string): Promise<void> {

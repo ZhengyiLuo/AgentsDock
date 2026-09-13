@@ -19,7 +19,8 @@ describe('explicit chat sharing boundary', () => {
   })
   it('accepts the exact fragment invite and rejects credentials, queries and other share paths', () => {
     expect(parseCreatedChatShare({ ...metadata, path, url: `https://share.example.test${path}` }, 'interactive').path).toBe(path)
-    for (const url of [`https://secret@share.example.test${path}`, `https://share.example.test${path.replace('#', '?')}`, `http://share.example.test${path}`]) {
+    expect(parseCreatedChatShare({ ...metadata, path, url: `http://192.0.2.4:7850${path}` }, 'interactive').path).toBe(path)
+    for (const url of [`https://secret@share.example.test${path}`, `http://secret:password@192.0.2.4${path}`, `https://share.example.test${path.replace('#', '?')}`, `ftp://share.example.test${path}`, `http://share.example.test${path.replace(metadata.id, 'other')}`]) {
       expect(() => parseCreatedChatShare({ ...metadata, path, url }, 'interactive')).toThrow()
     }
     expect(() => parseCreatedChatShare({ ...metadata, path: path.replace(metadata.id, 'other'), url: null }, 'interactive')).toThrow()
@@ -35,6 +36,25 @@ describe('explicit chat sharing boundary', () => {
     expect(preview.messages[0].text).toBe('<private quotation>')
     expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, digest: preview.digest, through_bytes: preview.through_bytes })).toEqual({ confirmed_public: true, digest: 'd'.repeat(64), through_bytes: 42 })
     expect(() => chatShareCreateBody({ mode: 'interactive', confirmed_interactive: false } as never)).toThrow()
+  })
+  it('allows direct confirmed creation and validates any legacy boundary as an exact pair', () => {
+    expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, title: 'Example' }))
+      .toEqual({ confirmed_public: true, title: 'Example' })
+    expect(chatShareCreateBody({ mode: 'interactive', confirmed_interactive: true }))
+      .toEqual({ confirmed_interactive: true })
+    for (const fields of [{ through_bytes: 42 }, { digest: 'd'.repeat(64) }, { through_bytes: -1, digest: 'd'.repeat(64) },
+      { through_bytes: 1.5, digest: 'd'.repeat(64) }, { through_bytes: 42, digest: 'bad' }]) {
+      expect(() => chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, ...fields })).toThrow()
+    }
+    expect(() => chatShareCreateBody({ mode: 'snapshot', confirmed_public: false } as never)).toThrow()
+    expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, base_url: 'http://untrusted.example.test' } as never))
+      .toEqual({ confirmed_public: true })
+    const snapshotPath = `/share/${'c'.repeat(43)}`
+    expect(parseCreatedChatShare({ ...metadata, share_id: 'share_qa', path: snapshotPath, url: `http://192.0.2.4:7850${snapshotPath}` }, 'snapshot').path)
+      .toBe(snapshotPath)
+    for (const url of [`http://192.0.2.4${snapshotPath}?token=other`, `http://192.0.2.4${snapshotPath}#other`]) {
+      expect(() => parseCreatedChatShare({ ...metadata, share_id: 'share_qa', path: snapshotPath, url }, 'snapshot')).toThrow()
+    }
   })
   it('shares a long noisy log without rejecting its small complete text snapshot', () => {
     const messages = Array.from({ length: 2384 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', text: `Message ${index}: ${'small readable text '.repeat(15)}` }))

@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-12 — Two-action HTTP chat sharing
+
+- Replace the preview/checkbox workflow with View only and Interactive actions.
+  Each explicitly creates, copies and opens a link; existing-link revocation is
+  available on demand without background refreshes.
+- Derive share addresses from the selected native server connection. Support
+  direct HTTP as well as HTTPS without requiring a separately configured domain.
+  This requires the matching standalone server change; an app update alone is
+  insufficient. HTTP is intended for trusted networks and is not encrypted.
+- Serve a styled static snapshot with user bubbles, assistant Markdown, dates
+  and responsive light/dark layouts. Interactive sharing reuses the chat UI and
+  keeps explicit one-time Join, chat-scoped access, same-origin and CSRF checks.
+
 ## 2026-09-12 — Quiet idle-mail wake presentation
 
 - Keep the server-generated mailbox availability input out of the user-message

@@ -1,4 +1,5 @@
 import { isStorageFullError } from '@shared/storage-errors'
+import { secureRandomUUID } from './browser-crypto'
 
 let warningPending = false
 
@@ -17,7 +18,7 @@ export function saveLocalStorage(key: string, value: string): void {
 }
 
 export function verifyLocalStorageWritable(): void {
-  const key = `agentsdock:storage-probe:${crypto.randomUUID()}`
+  const key = `agentsdock:storage-probe:${secureRandomUUID()}`
   window.localStorage.setItem(key, '1')
   window.localStorage.removeItem(key)
 }

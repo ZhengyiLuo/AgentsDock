@@ -1,4 +1,6 @@
 import type { AgentsDockAPI } from '@shared/ipc'
+import { secureRandomUUID } from '../lib/browser-crypto'
+import { copySharedChatText } from './clipboard'
 import type { AgentFile, AppEventMap, ClaudeRuntimeSnapshot, CodexGoalSnapshot, CodexRuntimeSnapshot, Event, Health, Job, LanguageSettingsSnapshot, NativeFileRef, QueuedTurn, RuntimeCatalog, Session, SessionSnapshot, TimelinePage, ViewState } from '@shared/types'
 
 /** The server emits native DTOs, scoped and sanitized for the one redeemed chat. */
@@ -124,7 +126,7 @@ export function createSharedChatBridge(
   }
   async function action(name: string, payload: Record<string, unknown> = {}, read = false) {
     current()
-    const requestId = crypto.randomUUID()
+    const requestId = secureRandomUUID()
     const init = { method: 'POST', body: JSON.stringify({ action: name, payload, request_id: requestId }) }
     const result = read ? await json('/controls', init) : await write('/controls', init, value => {
       if (value?.action !== name || value?.request_id !== requestId) return false
@@ -158,7 +160,7 @@ export function createSharedChatBridge(
   }
   const stage = (file: File): NativeFileRef => {
     if (staged.size >= 4 || file.size > 8 * 1024 * 1024) throw new Error('Choose at most 4 files, up to 8 MiB each.')
-    const path = `guest-upload:${crypto.randomUUID()}`
+    const path = `guest-upload:${secureRandomUUID()}`
     staged.set(path, file)
     return { path, name: file.name, size: file.size, type: file.type }
   }
@@ -167,14 +169,14 @@ export function createSharedChatBridge(
     sharedChat: true,
     events: { on(name: string, listener: (value: never) => void) { const bucket = listeners.get(name) ?? new Set(); bucket.add(listener); listeners.set(name, bucket); return () => { bucket.delete(listener) } } },
     language: { get: async () => language, set: async (preference: LanguageSettingsSnapshot['preference']) => { language = { ...language, preference }; emit('app:language', language); return language } },
-    native: group({ analyticsDisabled: true, log: async () => undefined, writeClipboard: async (text: string) => navigator.clipboard.writeText(text), readyForNotifications: async () => false, readyForSecurePeerInvite: async () => false }),
+    native: group({ analyticsDisabled: true, log: async () => undefined, writeClipboard: copySharedChatText, readyForNotifications: async () => false, readyForSecurePeerInvite: async () => false }),
     preferences: { get: async <T>(key: string, fallback: T) => preferences.has(key) ? preferences.get(key) as T : fallback, set: async (key: string, value: unknown) => { preferences.set(key, value) }, getScoped: async <T>(_scope: unknown, key: string, fallback: T) => preferences.has(key) ? preferences.get(key) as T : fallback, setScoped: async (_scope: unknown, key: string, value: unknown) => { preferences.set(key, value) } },
     sessions: group({ list: async () => [current().session], update: async (id: string, patch: Record<string, unknown>) => { exact(id); const allowed = new Set(['title', 'model', 'effort', 'system_prompt', 'codex_approval_policy', 'codex_sandbox_mode', 'codex_permission_profile', 'codex_approvals_reviewer', 'claude_permission_mode', 'cursor_permission_mode', 'provider_jobs_access']); const payload = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)); if (Object.keys(payload).some(key => !allowed.has(key))) denied(); await action('settings.update', payload); return current().session }, markRead: async (id: string) => { exact(id); return current().session } }),
     timeline: group({ cached: async (id: string) => { exact(id); return snapshot() }, open: async (id: string) => { exact(id); await refresh(); return snapshot() }, older: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, historicalOlder: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, around: async (id: string, anchorSeq: number, limit = 100) => { exact(id); return timelinePage('timeline.around', { anchor_seq: anchorSeq, limit }) }, trace: async (id: string, runId: string, anchorSeq: number, after = 0, limit = 100) => { exact(id); return action('timeline.trace', { run_id: runId, anchor_seq: anchorSeq, after, limit }, true) }, index: async (id: string) => { exact(id); return action('timeline.index', {}, true) }, subscribe: async (id: string) => { exact(id) }, unsubscribe: async (id: string) => { exact(id) }, saveViewState: async (_scope: unknown, value: ViewState) => { exact(value.sessionId); viewState = value }, getViewState: async (_scope: unknown, id: string) => { exact(id); return viewState }, search: async (id: string) => { exact(id); return [] } }),
     turns: { send: async (input: { sessionId: string; prompt: string; fileIds: string[]; chatReferences?: unknown[]; teamReferences?: unknown[]; skillSelection?: unknown }) => {
       exact(input.sessionId)
       if (input.chatReferences?.length || input.teamReferences?.length || input.skillSelection || input.fileIds.length > 4 || input.fileIds.some(id => !uploaded.has(id))) denied()
-      const requestId = crypto.randomUUID()
+      const requestId = secureRandomUUID()
       const result = await write('/prompts', { method: 'POST', body: JSON.stringify({ prompt: input.prompt, upload_ids: input.fileIds, request_id: requestId }) }, value =>
         value?.accepted === true && value.request_id === requestId && typeof value.queued === 'boolean'
         && (value.queued ? typeof value.queued_id === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value.queued_id) : value.queued_id === undefined))
