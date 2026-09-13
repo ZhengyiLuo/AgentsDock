@@ -32,3 +32,17 @@ restoring the older database together with its runtime. Never interrupt active
 work solely to install this release without explicit operator approval.
 
 This is a beta release, not 1.0 stable acceptance.
+
+## Accepted release
+
+Published from `b5fa0728ede6e99f228685f625198b5bdcde20a0` after the full
+release gate completed successfully (3,883 tests run, two skipped). Downloaded
+assets passed Ed25519 signature validation, public asset digest checks and
+exact source comparison for all 76 packaged files. Archive SHA-256:
+`5d4d70ed26e03a4f5bcbc13de57172db483123926a4e3cda2cc7a8239ef8f0f4`.
+
+Publication and accepting an idle update schedule do not establish live
+installation or provider acceptance. Confirm the new running version and Hub
+health after activation, then use a disposable chat for the real steering
+journey. Stable qualification also needs the separately documented idle-goal
+mailbox-authority limitation resolved.
