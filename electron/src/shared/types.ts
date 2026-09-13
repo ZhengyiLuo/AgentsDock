@@ -1108,6 +1108,8 @@ export interface Job {
   last_run_started_at?: string | null
   loop?: boolean | null
   enabled?: boolean | null
+  /** True while a user-requested Run once is waiting for admission. */
+  manual_run_pending?: boolean | null
   /** Missing on older servers/jobs; clients must treat an absent value as `chat`. */
   context_mode?: JobContextMode | null
   backend?: Backend | null

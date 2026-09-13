@@ -1932,6 +1932,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => ({ sessions: state.sessions.map(session => session.id === sessionId
         ? pending && pending.version !== version ? { ...updated, ...pending.patch } : updated
         : session) }))
+      if (previousSession && patch.folder !== undefined) {
+        const previousFolder = previousSession.folder?.trim() || 'General'
+        const updatedFolder = updated.folder?.trim() || 'General'
+        if (previousFolder !== updatedFolder) trackEvent('chat_moved_to_folder')
+      }
+      if (previousSession && patch.cwd !== undefined) {
+        const previousCwd = previousSession.cwd?.trim() || ''
+        const updatedCwd = updated.cwd?.trim() || ''
+        if (previousCwd !== updatedCwd) trackEvent('working_directory_changed')
+      }
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return
       const pending = pendingSessionPatches.get(sessionId)
@@ -1976,6 +1986,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           collapsedFolders
         }
       })
+      trackEvent('folder_deleted')
     } catch (error) {
       if (!profileScopeMatches(scope, get())) return
       await get().refreshSessions()

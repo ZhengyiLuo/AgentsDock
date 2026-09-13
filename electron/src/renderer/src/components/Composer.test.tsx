@@ -1352,12 +1352,23 @@ describe('Composer', () => {
       runtimeCatalog: null
     })
     const user = userEvent.setup()
-    render(<Composer />)
+    const { unmount } = render(<Composer />)
 
     await user.click(screen.getByTitle('Change backend'))
 
-    expect(screen.getByRole('menuitemcheckbox', { name: /Cursor.*Unavailable/ })).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByText(/model choices are still loading/i)).toBeInTheDocument()
+    const unavailableItem = screen.getByRole('menuitem', { name: /Cursor.*Unavailable/ })
+    expect(unavailableItem).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByText(/model choices are still loading/i)).not.toBeInTheDocument()
+    await user.hover(unavailableItem)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/model choices are still loading/i)
+
+    unmount()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    const unavailableByKeyboard = screen.getByRole('menuitem', { name: /Cursor.*Unavailable/ })
+    await user.keyboard('{End}')
+    expect(unavailableByKeyboard).toHaveFocus()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/model choices are still loading/i)
   })
 
   it('never exposes a Cursor reasoning control from stale stored effort', async () => {

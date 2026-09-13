@@ -14,6 +14,7 @@ import {
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { localSessionImportSupported } from '@shared/local-session-import'
+import { trackEvent } from '../lib/analytics'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { backendLabel, runtimeLabel } from '../lib/format'
 import { openSessionHistoryResult } from '../lib/session-history-search'
@@ -208,6 +209,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
     if (!operation) return
     if (operation.kind === 'reorder-folder') {
       useAppStore.getState().setFolderOrder(operation.order)
+      trackEvent('folder_reordered')
     } else if (operation.kind === 'move-session') {
       await useAppStore.getState().updateSession(operation.sessionId, sidebarFolderAssignmentPatch(operation.folder))
     } else {

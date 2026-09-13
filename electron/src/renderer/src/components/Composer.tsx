@@ -5,8 +5,9 @@ import { useLocale } from '../lib/i18n'
 import { forwardRef, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core'
-import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronDown, Columns2, CornerDownRight, File, FolderOpen, Gauge, GitFork, Goal, GripVertical, Import, ListOrdered, LoaderCircle, Mail, MessageSquarePlus, MessageSquareShare, MoreHorizontal, Network, Paperclip, Pencil, Plus, RadioTower, RotateCw, Send, Settings, Shield, Sparkles, Square, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronDown, Columns2, CornerDownRight, File, FolderOpen, Gauge, GitFork, Goal, GripVertical, Import, Info, ListOrdered, LoaderCircle, Mail, MessageSquarePlus, MessageSquareShare, MoreHorizontal, Network, Paperclip, Pencil, Plus, RadioTower, RotateCw, Send, Settings, Shield, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { effectiveFileContentType } from '@shared/file-content-type'
 import { localSessionImportSupported } from '@shared/local-session-import'
 import type { AgentCrossChatRoute, AgentTeamMailRoute, AgentTeamMailRoutesSnapshot, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
@@ -1377,6 +1378,11 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       })
       if (sent) {
         trackEvent('message_sent')
+        if (boundProviderCommand) {
+          trackEvent(boundProviderCommand.kind.toLowerCase() === 'skill' ? 'slash_skill_used' : 'slash_command_used')
+        }
+        if (outgoingReferences.length > 0) trackEvent('chat_reference_sent')
+        if (outgoingTeamReferences.length > 0) trackEvent('team_reference_sent')
       }
       const current = useAppStore.getState()
       if (!sent && consumeComposer && mountedRef.current && current.activeProfileId === activeProfileId && current.profileGeneration === profileGeneration && activeIdentity(current) === serverIdentity && draftContextRef.current.sessionId === selectedId) {
@@ -3245,12 +3251,22 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
         : t('ui.composer.changeAgent')
   const chip = <button className="backend-chip" title={title} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{backendLabel(session.backend)}</span>{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
-  return <DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(backend => {
+  return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(backend => {
     const unavailable = backend === 'cursor' && !cursorAvailable
-    return <DropdownMenu.CheckboxItem key={backend} className="menu-item" disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} checked={session.backend === backend} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend)}{unavailable ? <span className="menu-item-locked-hint">{" "}{t("ui.Composer.unavailable_ca18449")}</span> : null}</DropdownMenu.CheckboxItem>
-  })}{backends.includes('cursor') && !cursorAvailable && cursorUnavailableReason
-    ? <DropdownMenu.Label className="runtime-option-help">{cursorUnavailableReason}</DropdownMenu.Label>
-    : null}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
+    const unavailableReason = cursorUnavailableReason || t('ui.Composer.agentUnavailableFallback')
+    if (unavailable) return <Tooltip.Root key={backend}>
+      <Tooltip.Trigger asChild>
+        <DropdownMenu.Item className="menu-item backend-unavailable-item" aria-disabled="true" onSelect={event => event.preventDefault()}>
+          <BackendMark backend={backend} size={15} />
+          {backendLabel(backend)}
+          <span className="menu-item-locked-hint">{t("ui.Composer.unavailable_ca18449")}</span>
+          <span className="backend-unavailable-info" aria-hidden="true"><Info size={13} /></span>
+        </DropdownMenu.Item>
+      </Tooltip.Trigger>
+      <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
+    </Tooltip.Root>
+    return <DropdownMenu.CheckboxItem key={backend} className="menu-item" checked={session.backend === backend} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend)}</DropdownMenu.CheckboxItem>
+  })}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 
 function AttachmentShelf({ sessionId, profileId, profileGeneration, files, pending }: { sessionId: string; profileId: string | null; profileGeneration: number; files: AgentFile[]; pending: NativeFileRef[] }) {
@@ -4253,7 +4269,10 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
           className="queue-action"
           aria-label={t('composer.cancelQueuedJob')}
           title={t('composer.cancelQueuedJobHint')}
-          onClick={() => void runAndRefresh(() => window.agentsDock.queue.remove(sessionId, turn.queued_id))}
+          onClick={() => void runAndRefresh(async () => {
+            const removed = await window.agentsDock.queue.remove(sessionId, turn.queued_id)
+            if (removed) trackEvent('scheduled_job_run_cancelled')
+          })}
         ><Trash2 size={13} /></button>{reorderable && movementMenu}</div>
       : agentMessage
       ? <div className="queue-actions"><button

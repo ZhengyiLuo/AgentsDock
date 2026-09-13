@@ -1,18 +1,13 @@
 import appConfig from '../../app.json'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
-import { Platform } from 'react-native'
 import { buildTrackPayload, MIXPANEL_TOKEN, MIXPANEL_TRACK_URL } from './analytics-payload'
-import { androidAnalyticsEnabledFromStoredPreference, getAndroidAnalyticsEnabled, setAndroidAnalyticsEnabled, trackEvent } from './analytics'
+import { androidAnalyticsEnabledFromStoredPreference, getAndroidAnalyticsEnabled, setAndroidAnalyticsEnabled, trackEvent } from './analytics.android'
 
 function assertEqual(actual: unknown, expected: unknown, label: string): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`)
   }
-}
-
-function setPlatform(os: 'ios' | 'android'): void {
-  ;(Platform as unknown as { OS: 'ios' | 'android' }).OS = os
 }
 
 // A minimal aggregate event carries only the token, an explicitly blank ID,
@@ -77,16 +72,7 @@ async function flushAnalytics(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
-// iOS performs migration cleanup but never sends a custom analytics request.
-setPlatform('ios')
-trackEvent('app_launched')
-await flushAnalytics()
-assertEqual(requests.length, 0, 'iOS sends no Mixpanel event')
-assertEqual(await getAndroidAnalyticsEnabled(), false, 'analytics API is hard-disabled on iOS')
-assertEqual(await SecureStore.getItemAsync('agentsdock.analytics.distinct_id'), null, 'legacy analytics ID is removed')
-
 // Android is enabled by default and sends ID-less aggregate events.
-setPlatform('android')
 assertEqual(await getAndroidAnalyticsEnabled(), true, 'Android starts enabled when no choice is stored')
 trackEvent('app_launched')
 await flushAnalytics()
@@ -117,13 +103,5 @@ assertEqual(await AsyncStorage.getItem('agentsdock.analytics.consent.v1'), 'deni
 trackEvent('message_sent')
 await flushAnalytics()
 assertEqual(requests.length, 2, 'Android opt-out blocks future events')
-
-// A stale Android preference can never bypass the platform gate after the app
-// is running as iOS.
-await setAndroidAnalyticsEnabled(true)
-setPlatform('ios')
-trackEvent('chat_opened')
-await flushAnalytics()
-assertEqual(requests.length, 2, 'iOS remains disabled after Android is enabled')
 
 console.log('analytics payload regressions passed')

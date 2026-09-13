@@ -37,6 +37,21 @@ describe('ShortcutTooltip', () => {
     expect(tooltip).toHaveTextContent('⇧⌘]')
   })
 
+  it('does not advertise unavailable terminal chords on Windows or Linux', async () => {
+    const user = userEvent.setup()
+    render(<TooltipProvider delayDuration={0} skipDelayDuration={0}>
+      <ShortcutTooltip shortcut="terminalSplitRight" platform="other">
+        <button>Split pane</button>
+      </ShortcutTooltip>
+    </TooltipProvider>)
+
+    await user.hover(screen.getByRole('button', { name: 'Split pane' }))
+
+    const tooltip = await screen.findByRole('tooltip')
+    expect(tooltip).toHaveTextContent('macOS only')
+    expect(tooltip).not.toHaveTextContent('Ctrl+D')
+  })
+
   it('renders the platform-specific key outside a tooltip', () => {
     const { rerender } = render(<ShortcutKey shortcut="findChat" platform="other" />)
     expect(screen.getByText('Ctrl+P')).toBeInTheDocument()

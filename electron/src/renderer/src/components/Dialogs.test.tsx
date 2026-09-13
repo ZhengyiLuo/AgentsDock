@@ -97,10 +97,19 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByText('Desktop settings')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('Desktop information and access to advanced controls.')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('Chat font')).not.toBeInTheDocument()
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Appearance' }))
+    expect(within(dialog).queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
     expect(within(dialog).queryByText('Set the color theme used throughout AgentsDock.')).not.toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
+    expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')
+    expect(within(dialog).getByRole('heading', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    expect(within(dialog).getAllByRole('listitem')).toHaveLength(23)
+    expect(within(dialog).getByText('Toggle chat list')).toBeInTheDocument()
+
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'appearance' })))
+    expect(within(dialog).getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')
+    expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Updates' }))
     expect(within(dialog).getByText('This is the latest one.')).toBeInTheDocument()

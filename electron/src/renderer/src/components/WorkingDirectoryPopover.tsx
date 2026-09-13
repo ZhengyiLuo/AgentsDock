@@ -8,6 +8,8 @@ import type { Session, WorkingDirectoryCompletion } from '@shared/types'
 import { parentDirectory } from '../lib/working-directory-path'
 import { useAppStore } from '../store/app-store'
 
+const TYPED_PATH_LOOKUP_DELAY_MS = 120
+
 export function cwdChipLabel(cwd?: string | null): string {
   const trimmed = cwd?.trim()
   if (!trimmed) return t("ui.WorkingDirectoryPopover.cwdChipLabel.default_folder_aff5db4")
@@ -31,40 +33,52 @@ export function WorkingDirectoryPopover({ session }: { session: Session }) {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const requestRef = useRef(0)
+  const typedPathLookupRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const load = (target: string) => {
+  const cancelTypedPathLookup = () => {
+    if (typedPathLookupRef.current == null) return
+    clearTimeout(typedPathLookupRef.current)
+    typedPathLookupRef.current = null
+  }
+
+  const load = async (target: string, canonicalizeDraft = true): Promise<WorkingDirectoryCompletion | null> => {
     const path = target.trim()
-    if (!completionAvailable) return
+    if (!completionAvailable) return null
+    cancelTypedPathLookup()
     const request = ++requestRef.current
-    setPathDraft(path)
+    if (canonicalizeDraft) setPathDraft(path)
     setLoading(true)
     setError(null)
-    void window.agentsDock.workingDirectories.complete(path, 50).then(result => {
-      if (request !== requestRef.current) return
+    try {
+      const result = await window.agentsDock.workingDirectories.complete(path, 50)
+      if (request !== requestRef.current) return null
       setCompletion(result)
-      setPathDraft(result.exists ? result.resolved_path || path : path)
-    }).catch(reason => {
-      if (request !== requestRef.current) return
+      if (canonicalizeDraft) setPathDraft(result.exists ? result.resolved_path || path : path)
+      return result
+    } catch (reason) {
+      if (request !== requestRef.current) return null
       setError(reason instanceof Error ? reason.message : String(reason))
-    }).finally(() => {
+      return null
+    } finally {
       if (request === requestRef.current) setLoading(false)
-    })
+    }
   }
 
   useEffect(() => {
     if (!open) return
-    load(session.cwd?.trim() || defaultCwd || '')
+    void load(session.cwd?.trim() || defaultCwd || '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  useEffect(() => () => cancelTypedPathLookup(), [])
 
   const currentPath = completion?.resolved_path || completion?.base_path || ''
   const parentPath = parentDirectory(currentPath)
   const canGoToParent = Boolean(currentPath && parentPath && parentPath !== currentPath)
   const folders = completion?.suggestions ?? []
-  const openTypedPath = () => load(pathDraft)
 
-  const choose = async () => {
-    const target = currentPath.trim()
+  const choose = async (targetPath = currentPath) => {
+    const target = targetPath.trim()
     if (!target || saving) return
     setSaving(true)
     try {
@@ -77,9 +91,26 @@ export function WorkingDirectoryPopover({ session }: { session: Session }) {
     }
   }
 
+  const chooseTypedPath = async () => {
+    const draft = pathDraft.trim()
+    if (!draft || saving) return
+    cancelTypedPathLookup()
+    const detected = !loading && completion?.exists && completion.input.trim() === draft
+      ? completion
+      : await load(draft)
+    if (!detected?.exists) return
+    await choose(detected.resolved_path || detected.base_path || draft)
+  }
+
   const chipTitle = session.cwd?.trim() ? `Working directory: ${session.cwd.trim()}` : 'Set the working directory for this chat'
 
-  return <Popover.Root open={open} onOpenChange={setOpen}>
+  return <Popover.Root open={open} onOpenChange={nextOpen => {
+    if (!nextOpen) {
+      cancelTypedPathLookup()
+      requestRef.current += 1
+    }
+    setOpen(nextOpen)
+  }}>
     <Popover.Trigger asChild>
       <button type="button" className="composer-context-control cwd-pill" title={chipTitle} aria-label={chipTitle}>
         <FolderOpen size={13} /><span>{cwdChipLabel(session.cwd)}</span>
@@ -90,7 +121,7 @@ export function WorkingDirectoryPopover({ session }: { session: Session }) {
         {!completionAvailable
           ? <div className="cwd-popover-empty">{t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.folder_browsing_needs_a_newer_agentsserver_5e4747d")}</div>
           : <>
-            <form className="cwd-popover-path" onSubmit={event => { event.preventDefault(); openTypedPath() }}>
+            <div className="cwd-popover-path">
               <button
                 type="button"
                 className="cwd-popover-parent"
@@ -103,19 +134,28 @@ export function WorkingDirectoryPopover({ session }: { session: Session }) {
                 aria-label={t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.folder_path_98bca2f")}
                 value={pathDraft}
                 onChange={event => {
+                  const nextPath = event.currentTarget.value
+                  cancelTypedPathLookup()
                   requestRef.current += 1
-                  setPathDraft(event.currentTarget.value)
+                  setPathDraft(nextPath)
                   setCompletion(null)
                   setError(null)
                   setLoading(false)
+                  if (nextPath.trim()) {
+                    typedPathLookupRef.current = setTimeout(() => load(nextPath, false), TYPED_PATH_LOOKUP_DELAY_MS)
+                  }
+                }}
+                onKeyDown={event => {
+                  if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+                  event.preventDefault()
+                  void chooseTypedPath()
                 }}
                 placeholder={defaultCwd || t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.enter_a_folder_path_2dbdc38")}
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
               />
-              <button type="submit" disabled={loading || !pathDraft.trim()} aria-label={t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.open_path_01ecb69")}>Go</button>
-            </form>
+            </div>
             <div className="cwd-popover-list" role="group" aria-label={t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.folders_c4d6bb2")} aria-busy={loading}>
               {loading && <p className="cwd-popover-status"><LoaderCircle className="spin" size={14} />{" "}{t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.loading_folders_d0aa0da")}</p>}
               {!loading && error && <div className="cwd-popover-error" role="alert"><span>{error}</span><button type="button" onClick={() => load(pathDraft)}><RotateCcw size={12} />{" "}{t("ui.WorkingDirectoryPopover.WorkingDirectoryPopover.retry_942087c")}</button></div>}
