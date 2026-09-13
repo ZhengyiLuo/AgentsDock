@@ -24,6 +24,17 @@ legacy exchanges retain their negotiated delivery behavior.
 Peer content remains untrusted message content, never new user authorization.
 Opening a message in the desktop does not mark it read by the agent.
 
+Archiving a sender does not retract mail it already delivered. An active
+recipient can still discover and read that stored mail using its exact issued
+permanent pair. Reciprocal identities, route revisions, revocation and deletion
+are rechecked; no unrelated route is added to a delivery run's authority.
+The archived chat remains unavailable for new sends, replies or agent wakes.
+An idle, non-archived recipient can still wake once to read that mail; wake
+admission and its exact authority snapshot use the same receive-only check.
+Regression coverage exercises send → archive sender → fresh-turn inbox/read,
+pre-archive grants, stable read retries, idle wake, revocation and narrow delivery
+authority using the extracted handlers and a temporary real mailbox ledger.
+
 ## Quiet availability
 
 Unread availability is event-driven, with no polling loop. An active Codex run

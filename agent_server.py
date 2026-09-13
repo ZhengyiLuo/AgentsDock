@@ -18603,6 +18603,51 @@ def live_provider_cross_chat_route(
     return {**current, "actions": allowed_actions}
 
 
+def live_provider_chat_mailbox_route(
+    source_session_id: str,
+    issued_route: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read a stored peer message even after its sender is archived.
+
+    This resolver grants no send/reply permission. It intersects the same
+    issued permanent-pair snapshot with current identities and revocations;
+    only the remote peer's archived state is relaxed for mailbox reads.
+    """
+    if issued_route.get("route_kind") is not None or not issued_route.get("pair_id"):
+        return None
+    target_session_id = str(issued_route.get("target_session_id") or "")
+    if source_session_id in DELETED_SESSION_TOMBSTONES or target_session_id == source_session_id:
+        return None
+    live = live_provider_cross_chat_route(source_session_id, issued_route)
+    if live is not None:
+        return live
+    source = STORE.sessions.get(source_session_id)
+    if not source or source.get("archived") or source_session_id in DELETING_SESSIONS:
+        return None
+    available, reason = provider_cross_chat_route_availability(source_session_id, target_session_id)
+    if available or reason != "target_archived":
+        return None
+    current = next((route for route in provider_cross_chat_routes(source)
+                    if route.get("route_id") == issued_route.get("route_id")), None)
+    if (current is None or provider_cross_chat_route_id_is_revoked(source, str(current.get("route_id") or ""))
+            or any(current.get(key) != issued_route.get(key)
+                   for key in ("revision", "alias", "target_session_id", "pair_id", "paired_route_id"))):
+        return None
+    target = STORE.sessions.get(target_session_id)
+    if not any(
+        reverse.get("pair_id") == current.get("pair_id")
+        and reverse.get("route_id") == current.get("paired_route_id")
+        and reverse.get("paired_route_id") == current.get("route_id")
+        and reverse.get("target_session_id") == source_session_id
+        and not provider_cross_chat_route_id_is_revoked(target or {}, str(reverse.get("route_id") or ""))
+        for reverse in provider_cross_chat_routes(target)
+    ):
+        return None
+    actions = [action for action in PROVIDER_CROSS_CHAT_ROUTE_ACTIONS
+               if action in set(current.get("actions") or []) and action in set(issued_route.get("actions") or [])]
+    return {**current, "actions": actions} if actions else None
+
+
 def pending_admission_provider_cross_chat_route(
     source_session_id: str,
     admission_id: str,
@@ -18824,6 +18869,10 @@ def provider_cross_chat_route_snapshot_for_authority(
                     pending_grant_admission_id,
                     issued_route,
                 )
+            if live_route is None:
+                # Retain a read-only archived peer in this exact ceiling.
+                # Send/list/reply still require the stricter live resolver.
+                live_route = live_provider_chat_mailbox_route(source_session_id, issued_route)
             if live_route is not None:
                 configured_routes.append(live_route)
         return normalized_provider_cross_chat_route_snapshot(configured_routes)
@@ -66388,7 +66437,7 @@ async def _start_turn_locked(
     )
     if mailbox_wake_claim is not None:
         provider_route_snapshot = [live for route in provider_cross_chat_routes(sess)
-            if (live := live_provider_cross_chat_route(session_id, route)) is not None
+            if (live := live_provider_chat_mailbox_route(session_id, route)) is not None
             and live.get("pair_id")]
     secure_route_snapshots: list[dict[str, Any]] = []
     team_mail_route_snapshot = (
@@ -83697,7 +83746,7 @@ async def maybe_start_chat_mailbox_locked(session_id: str) -> bool:
         return False
     async with STORE._lock:
         routes = [live for route in provider_cross_chat_routes(session)
-                  if (live := live_provider_cross_chat_route(session_id, route)) is not None
+                  if (live := live_provider_chat_mailbox_route(session_id, route)) is not None
                   and live.get("pair_id")]
         claim = await CROSS_CHAT.mailbox_call(
             "claim_wake", session_id, {str(route["pair_id"]) for route in routes}, now=now_iso(),
@@ -83737,7 +83786,7 @@ def chat_mailbox_pairs(session_id: str, capability: dict[str, Any] | None = None
     )
     return {
         str(live["pair_id"]) for route in candidates
-        if (live := live_provider_cross_chat_route(session_id, route)) is not None and live.get("pair_id")
+        if (live := live_provider_chat_mailbox_route(session_id, route)) is not None and live.get("pair_id")
     }
 
 

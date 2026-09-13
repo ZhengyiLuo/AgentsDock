@@ -110,6 +110,26 @@ class ChatMailboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({node.func.id for node in launches}, {"run_codex", "run_claude", "run_cursor"})
         self.assertTrue(all(admissions[0].lineno < node.lineno for node in launches))
 
+    def test_mailbox_wake_authority_snapshot_uses_read_eligible_pairs(self):
+        start = next(node for node in TREE.body if isinstance(node, ast.AsyncFunctionDef)
+                     and node.name == "_start_turn_locked")
+        selections = [node for node in start.body if isinstance(node, ast.If)
+                      and ast.unparse(node.test) == "mailbox_wake_claim is not None"
+                      and any(isinstance(child, ast.Assign)
+                              and any(isinstance(target, ast.Name)
+                                      and target.id == "provider_route_snapshot"
+                                      for target in child.targets)
+                              for child in node.body)]
+        self.assertEqual(len(selections), 1)
+        namespace = dict(self.ns, session_id="recipient", mailbox_wake_claim={},
+                         sess=self.ns["STORE"].sessions["recipient"], provider_route_snapshot=[])
+        strict_live = Mock(side_effect=AssertionError("Wake reads must not require send eligibility"))
+        namespace["live_provider_cross_chat_route"] = strict_live
+        exec(compile(ast.fix_missing_locations(ast.Module(body=deepcopy(selections), type_ignores=[])),
+                     "<isolated-mailbox-wake-routes>", "exec"), namespace)
+        self.assertEqual(namespace["provider_route_snapshot"], [self.reverse])
+        strict_live.assert_not_called()
+
     def test_mailbox_routes_have_exact_bounded_provider_header_entry_points(self):
         names = {"agent_helper_route_body_limit", "is_agent_helper_route"}
         nodes = [ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)]
@@ -157,6 +177,7 @@ class ChatMailboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "authorize_provider_action": AsyncMock(side_effect=lambda request, **kw: deepcopy(self.capabilities[request.owner])),
             "provider_cross_chat_routes": lambda row: self.routes["recipient" if row["title"] == "Synthetic recipient" else "sender"],
             "live_provider_cross_chat_route": lambda owner, issued: next((dict(route) for route in self.routes[owner] if route == issued), None),
+            "live_provider_chat_mailbox_route": lambda owner, issued: next((dict(route) for route in self.routes[owner] if route == issued), None),
             "provider_cross_chat_route_projection": lambda owner, route: dict(route),
             "provider_cross_chat_route_availability": lambda *_args: (True, None),
             "cross_chat_delivery_client_capabilities": lambda *_args: [],
@@ -308,6 +329,19 @@ class ChatMailboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.drain_idle_check()
         self.assertEqual(len(self.launches), 1, "Unread attempted mail must not create a wake loop")
         self.assertEqual(self.ns["STORE"].sessions["recipient"]["codex_goal"], goal)
+        self.assert_no_execution()
+
+    async def test_idle_wake_uses_read_eligible_pairs_when_send_is_unavailable(self):
+        self.set_recipient("idle")
+        receipt = await self.send()
+        self.ns["live_provider_cross_chat_route"] = Mock(return_value=None)
+        self.enable_wake_admission()
+        await self.drain_idle_check()
+        self.assertEqual(len(self.launches), 1)
+        row = (await self.ledger.mailbox_envelopes(message_id=receipt["message_id"]))[0]
+        self.assertIsNone(row["read_at"])
+        self.assertEqual(self.wake_state()["state"], "admitted")
+        self.ns["live_provider_cross_chat_route"].assert_not_called()
         self.assert_no_execution()
 
     async def test_arrivals_during_existing_idle_check_schedule_one_done_recheck(self):
