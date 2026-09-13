@@ -246,7 +246,8 @@ describe('automatic secure peer approval completion', () => {
     render(<SecurePeerPanel status={peerStatus} />)
     await join()
     expect(teamHub.requestSecurePeerPairing).toHaveBeenCalledTimes(1)
-    expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1)
+    // The pending label commits before the effect starts its observer.
+    await waitFor(() => expect(teamHub.waitForSecurePeerPairingCompletion).toHaveBeenCalledTimes(1))
   })
 
   it('keeps unsupported or unaccepted requests on the manual legacy path', async () => {
