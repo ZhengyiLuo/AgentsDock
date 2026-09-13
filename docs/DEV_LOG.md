@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-13 — Active-goal steering regression coverage
+
+- Verify Send now and Cmd/Ctrl+Enter while a goal is active across a pending
+  server response, acceptance and rejection. The goal and other queued work
+  remain unchanged; retries cannot duplicate prompt submission or promotion.
+- Confirm native goal follow-ups retain attachment rendering when reopened.
+  These are renderer regression checks accompanying a standalone server fix;
+  no desktop runtime change or new app build is required.
+- Full Composer tests, focused goal timeline tests and desktop type checks pass.
+  No app or server installation, deployment or publication is part of this change.
+
 ## 2026-09-13 — Published Team Network and cross-chat beta
 
 - Accepted direct desktop `1.0.0-beta.2`, build `1160`, from the immutable

@@ -3201,6 +3201,91 @@ describe('Composer', () => {
     expect(useAppStore.getState().sessions[0].codex_goal?.status).toBe('active')
   })
 
+  it.each([
+    { path: 'Send now', outcome: 'accepted' },
+    { path: 'Send now', outcome: 'rejected' },
+    { path: 'Command-Enter', outcome: 'accepted' },
+    { path: 'Command-Enter', outcome: 'rejected' }
+  ] as const)('preserves an active goal and its queued instruction while $path is pending then $outcome', async ({ path, outcome }) => {
+    const goalSession: Session = {
+      id: 'chat-1', title: 'Chat', backend: 'codex',
+      codex_goal: { threadId: 'thread-1', objective: 'Finish the integration', status: 'active',
+        tokensUsed: 120, timeUsedSeconds: 30, createdAt: 0, updatedAt: 0 }
+    }
+    const unrelated: QueuedTurn = {
+      queued_id: 'queued-other', session_id: 'chat-1', prompt: 'Other queued work', file_ids: [], position: 1
+    }
+    const instruction: QueuedTurn = {
+      queued_id: 'queued-followup', session_id: 'chat-1', prompt: 'Check the retry behavior first', file_ids: [], position: 2
+    }
+    const pendingRunNow = deferred<{ ok: boolean; queued_id: string }>()
+    const runNow = vi.fn(() => pendingRunNow.promise)
+    const list = vi.fn().mockResolvedValue([unrelated])
+    const send = vi.fn().mockResolvedValue({
+      session: goalSession, queued: true, queued_id: instruction.queued_id,
+      event: { id: 'queued-event', seq: 1, ts: '2026-09-13T10:00:00Z',
+        type: 'turn_queued', ...instruction }
+    })
+    const setGoal = vi.fn()
+    const stop = vi.fn()
+    Object.assign(window.agentsDock, { turns: { send, stop }, queue: { runNow, list }, codex: { setGoal } })
+    useAppStore.setState({
+      sessions: [goalSession], activeSessionIds: new Set(['chat-1']),
+      drafts: path === 'Command-Enter' ? { 'chat-1': instruction.prompt } : {},
+      snapshots: { 'chat-1': {
+        session: goalSession, events: [],
+        queuedTurns: path === 'Command-Enter' ? [unrelated] : [unrelated, instruction],
+        files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+      } }
+    })
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+    const instructionRow = () => within(screen.getByText(instruction.prompt).closest('.queued-row') as HTMLElement)
+    if (path === 'Command-Enter') fireEvent.keyDown(editor, { key: 'Enter', metaKey: true })
+    else fireEvent.click(instructionRow().getByRole('button', { name: 'Send now' }))
+
+    try {
+      await waitFor(() => expect(runNow).toHaveBeenCalledExactlyOnceWith('chat-1', instruction.queued_id))
+      expect(instructionRow().getByRole('button', { name: 'Send now' })).toBeDisabled()
+      expect(screen.getByText('Sending now…')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+      expect(useAppStore.getState().snapshots['chat-1'].queuedTurns).toMatchObject([unrelated, instruction])
+      expect(useAppStore.getState().sessions[0].codex_goal).toEqual(goalSession.codex_goal)
+
+      fireEvent.click(instructionRow().getByRole('button', { name: 'Send now' }))
+      fireEvent.keyDown(editor, { key: 'Enter', metaKey: true })
+      expect(runNow).toHaveBeenCalledTimes(1)
+      expect(list).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => {
+        if (outcome === 'accepted') pendingRunNow.resolve({ ok: true, queued_id: instruction.queued_id })
+        else pendingRunNow.reject(new Error('Codex rejected this goal steering request. The message remains queued.'))
+      })
+    }
+
+    await waitFor(() => expect(screen.queryByText('Sending now…')).not.toBeInTheDocument())
+    expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined()
+    expect(useAppStore.getState().sessions[0].codex_goal).toEqual(goalSession.codex_goal)
+    expect(useAppStore.getState().activeSessionIds.has('chat-1')).toBe(true)
+    expect(setGoal).not.toHaveBeenCalled()
+    expect(stop).not.toHaveBeenCalled()
+    expect(runNow).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(path === 'Command-Enter' ? 1 : 0)
+    expect(editor).toHaveValue('')
+    if (outcome === 'accepted') {
+      expect(list).toHaveBeenCalledExactlyOnceWith('chat-1')
+      expect(useAppStore.getState().snapshots['chat-1'].queuedTurns).toEqual([unrelated])
+      expect(screen.queryByText(instruction.prompt)).not.toBeInTheDocument()
+      expect(useAppStore.getState().error).toBeNull()
+    } else {
+      expect(list).not.toHaveBeenCalled()
+      expect(useAppStore.getState().snapshots['chat-1'].queuedTurns).toMatchObject([unrelated, instruction])
+      expect(screen.getAllByText(instruction.prompt)).toHaveLength(1)
+      expect(instructionRow().getByRole('button', { name: 'Send now' })).toBeEnabled()
+      expect(useAppStore.getState().error).toBe('Codex rejected this goal steering request. The message remains queued.')
+    }
+  })
+
   it('explains why an idle queued turn is paused and offers Send now', () => {
     useAppStore.setState({
       snapshots: {
