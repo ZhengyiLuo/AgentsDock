@@ -13,6 +13,17 @@
 - Editing stays local to the dialog, with no polling, address discovery or
   background refresh. The existing standalone server contract supports this
   client change without an update or restart.
+- Accepted local-only Apple Silicon `1.0.0-beta.2`, build `1162`, from
+  `b8a100ce75782d22edb9529d90811b5360d67a6d`. Desktop type checks, the full
+  desktop suite, focused address/response regressions, and production
+  compilation passed. All 151 packaged compile-output files match; bundle/fuse
+  audit and strict Developer ID signature verification passed.
+- Isolated offscreen renderer checks passed for both modes, light/dark themes,
+  narrow layouts, localized labels, keyboard activation, invalid addresses,
+  busy state, draft reset, and unchanged existing links. These used synthetic
+  services; no real chat share or recipient connection was created for testing.
+- This build is not notarized or published and has automatic updates disabled.
+  The running app and servers were left untouched.
 
 ## 2026-09-13 — Local main integration build
 
