@@ -1,5 +1,41 @@
 # Public development log
 
+## 2026-09-13 — Published Team Network and cross-chat beta
+
+- Accepted direct desktop `1.0.0-beta.2`, build `1160`, from the immutable
+  source `516213ddb27b4fc641c418609a7667d14e391918`. Native build and package
+  verification passed for universal macOS, Linux x64/ARM64 and Windows x64.
+  macOS is signed and notarized; Windows remains an unsigned beta preview.
+- Published the identical 14-asset set to the
+  [public release](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0-beta.2)
+  and [legacy mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.0-beta.2).
+  Both match checksum-manifest SHA-256
+  `6fa6cb2877d411ef423ef0c808a10286cd919f0acc5727c364e1de0620b5c445`.
+  The protected publisher independently replayed all platform verifiers;
+  publication recovery retained the original artifacts and source identity.
+- Include quiet, separately tracked Mail and Bulletin indications through one
+  metadata-only connection. Refresh stays explicit; arrivals do not fetch
+  content, move the current view, interrupt an agent or change a draft.
+  Bulletin edits retain version history, and incomplete refreshes cannot clear
+  attention to unseen changes.
+- The matching
+  [AgentsServer `1.0.0-beta.3`](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.0-beta.3)
+  fixes Chats provider-tool stdin replies and returns an original canceled
+  receipt on exact retries without resending or waking the recipient. The
+  complete server release gate, downloaded signature, exact source contents
+  and older-updater compatibility passed. An app-only update does not apply
+  the server corrections.
+- The isolated full-desktop lifecycle journey passed 15 checkpoints using
+  actual renderer, IPC and SQLite cache with synthetic transport: sent/read/
+  replied messages, disconnect/backfill, reopening, single canceled-message
+  identity, explicit Bulletin refresh, author edit/history/delete and scope
+  retirement. A 1,000-hint burst preserved drafts, focus and scroll position
+  without content requests. Real helper/TLS server journeys additionally
+  covered access revocation, concurrent reads, late arrivals and idle wakes.
+- No user's active provider run or live server was used for these checks.
+  Publication did not install or restart either component. Stable and mobile
+  channels are unchanged.
+
 ## 2026-09-13 — Quiet Team activity and cross-chat delivery regression
 
 - Local, unreleased candidate: extend the existing single Mail notification
@@ -24,9 +60,8 @@
   layouts. A 200-hint burst caused no content/receipt requests or acknowledgments
   and preserved the draft node, text, focus and scroll container. Explicit
   refresh performed only the expected content requests and local acknowledgments.
-- No packaged app, release publication, installation or live-server deployment
-  is included in this change. Production network behavior remains a separate
-  release acceptance step.
+- This source-change entry preceded release acceptance; see the published
+  beta entry above. No live-server deployment is included.
 
 ## 2026-09-12 — Published 1.0 desktop migration bridge
 

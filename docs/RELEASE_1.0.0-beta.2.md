@@ -13,7 +13,7 @@
 - Include translated indicators and refresh affordances in light and dark
   layouts. Existing author-only announcement edits retain version history.
 
-Use AgentsServer `1.0.0-beta.2` for Bulletin notifications and the provider-tool
+Use AgentsServer `1.0.0-beta.3` for Bulletin notifications and the provider-tool
 stdin reply fix. An app-only installation does not apply that server fix.
 Neither release forces a server restart or interrupts research jobs.
 
