@@ -8,4 +8,8 @@
 .shared-chat-notice { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-7); background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border); font-size: var(--text-size-meta); }
 .shared-chat-settings { padding: var(--space-8); display: grid; gap: var(--space-7); }
 .shared-chat-welcome { max-width: 620px; margin: 12vh auto; padding: var(--space-8); line-height: var(--line-height-relaxed); }
+.shared-chat-entry-form { display: grid; gap: var(--space-6); }
+.shared-chat-token-field { display: grid; gap: var(--space-3); font-size: var(--text-size-ui); }
+.shared-chat-token-field > input { min-width: 0; width: 100%; }
+.shared-chat-entry-form > button { justify-self: start; }
 @media (max-width: 600px) { .shared-chat-scope { display: none; } }

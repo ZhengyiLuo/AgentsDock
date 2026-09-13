@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-12 — Reusable-token chat sharing
+
+- Keep share addresses separate from access tokens. Copy invitation includes
+  both on separate lines; opening the interactive address requires manual token
+  entry. Existing browser sessions can resume without storing raw tokens in
+  browser storage. View-only sharing also offers an explicit token-in-link copy.
+- Use one reusable token per share for multiple collaborators. Remove the
+  one-person claim wording, and move revoked entries into collapsed history.
+- Preserve initial-latest timeline positioning without new scroll timers or
+  background refreshes. The matching server supplies paginated full-log
+  snapshots and starts their viewer at the latest page.
+- Focused component, bridge, URL-validation and timeline-position checks,
+  TypeScript, the desktop suite and production compilation passed. Real-browser
+  acceptance and local packaging are tracked separately before acceptance.
+- These changes require the matching standalone server contract. No app or
+  server publication is performed by the source change itself.
+
 ## 2026-09-12 — Two-action HTTP chat sharing
 
 - Replace the preview/checkbox workflow with View only and Interactive actions.

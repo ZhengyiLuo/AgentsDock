@@ -35,6 +35,8 @@ export interface ChatShareRecord {
 export interface CreatedChatShare extends ChatShareRecord {
   path: string
   url: string | null
+  access_token: string
+  token_url?: string
 }
 
 export type CreateChatShareInput = {
@@ -92,14 +94,36 @@ export function parseChatShareList(value: unknown, mode: ChatShareMode): ChatSha
 export function parseCreatedChatShare(value: unknown, mode: ChatShareMode): CreatedChatShare {
   const item = record(value)
   const metadata = parseChatShareRecord(item, mode)
-  const expected = mode === 'snapshot' ? /^\/share\/[A-Za-z0-9_-]{43}$/ : new RegExp(`^/interactive-chat/${metadata.id}#invite=[A-Za-z0-9_-]{43}$`)
-  if (typeof item.path !== 'string' || !expected.test(item.path)) throw new Error('Invalid chat share link.')
-  if (item.url !== null) {
-    if (typeof item.url !== 'string') throw new Error('Invalid public chat URL.')
-    const url = new URL(item.url)
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || `${url.pathname}${url.hash}` !== item.path) throw new Error('Invalid public chat URL.')
+  const expectedId = mode === 'snapshot' ? /^share_[a-f0-9]{32}$/ : /^interactive_[a-f0-9]{32}$/
+  if (!expectedId.test(metadata.id)) throw new Error('Invalid chat share identity.')
+  if (typeof item.access_token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(item.access_token)) {
+    throw new Error('Update the server to create token-protected sharing links.')
   }
-  return { ...metadata, path: item.path, url: item.url as string | null }
+  const expectedPath = `${mode === 'snapshot' ? '/shared-chat/' : '/interactive-chat/'}${metadata.id}`
+  if (item.path !== expectedPath) throw new Error('Update the server to create token-protected sharing links.')
+  // Never let URL parser errors retain the server-supplied string (which may
+  // contain a legacy bearer token). Require exact canonical, token-free URLs.
+  function safeURL(value: unknown, path: string): URL {
+    try {
+      if (typeof value !== 'string' || value.length > 8192) throw new Error()
+      const url = new URL(value)
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+        || url.search || url.hash || value !== `${url.origin}${path}`) throw new Error()
+      return url
+    } catch {
+      throw new Error('Invalid public chat URL.')
+    }
+  }
+  const url = item.url === null ? null : safeURL(item.url, expectedPath)
+  let tokenURL: string | undefined
+  if (item.token_url !== undefined) {
+    if (mode !== 'snapshot' || !url) throw new Error('Invalid token-bearing chat URL.')
+    const parsed = safeURL(item.token_url, `/share/${item.access_token}`)
+    if (parsed.origin !== url.origin) throw new Error('Invalid token-bearing chat URL.')
+    tokenURL = parsed.href
+  }
+  return { ...metadata, path: expectedPath, url: url?.href ?? null, access_token: item.access_token,
+    ...(tokenURL === undefined ? {} : { token_url: tokenURL }) }
 }
 
 export function parseChatSharePreview(value: unknown): ChatSharePreview {

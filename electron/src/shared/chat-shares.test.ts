@@ -5,7 +5,10 @@ import type { Event } from './types'
 import { catalogs } from './locales'
 
 const metadata = { id: `interactive_${'a'.repeat(32)}`, title: 'Synthetic chat', created_at: 1, expires_at: null, revoked_at: null, redeemed_at: null }
-const path = `/interactive-chat/${metadata.id}#invite=${'b'.repeat(43)}`
+const access_token = 'b'.repeat(43)
+const path = `/interactive-chat/${metadata.id}`
+const snapshot = { ...metadata, share_id: `share_${'c'.repeat(32)}`, access_token }
+const snapshotPath = `/shared-chat/${snapshot.share_id}`
 describe('explicit chat sharing boundary', () => {
   it('discloses full chat control and non-rollback revocation in both confirmations', () => {
     const english = catalogs.en['chatShare.confirmInteractive']
@@ -17,19 +20,67 @@ describe('explicit chat sharing boundary', () => {
     expect(chinese).toContain('更改权限和管理定时任务')
     expect(chinese).toContain('不会撤回已接受的工作或任务')
   })
-  it('accepts the exact fragment invite and rejects credentials, queries and other share paths', () => {
-    expect(parseCreatedChatShare({ ...metadata, path, url: `https://share.example.test${path}` }, 'interactive').path).toBe(path)
-    expect(parseCreatedChatShare({ ...metadata, path, url: `http://192.0.2.4:7850${path}` }, 'interactive').path).toBe(path)
-    for (const url of [`https://secret@share.example.test${path}`, `http://secret:password@192.0.2.4${path}`, `https://share.example.test${path.replace('#', '?')}`, `ftp://share.example.test${path}`, `http://share.example.test${path.replace(metadata.id, 'other')}`]) {
-      expect(() => parseCreatedChatShare({ ...metadata, path, url }, 'interactive')).toThrow()
+  it('accepts token-free interactive URLs with a separate token, rejecting credentials, queries and fragments', () => {
+    for (const origin of ['https://share.example.test', 'http://192.0.2.4:7850']) {
+      expect(parseCreatedChatShare({ ...metadata, access_token, path, url: `${origin}${path}` }, 'interactive'))
+        .toMatchObject({ path, url: `${origin}${path}`, access_token })
     }
-    expect(() => parseCreatedChatShare({ ...metadata, path: path.replace(metadata.id, 'other'), url: null }, 'interactive')).toThrow()
+    for (const url of [`https://secret@share.example.test${path}`, `http://secret:password@192.0.2.4${path}`,
+      `https://share.example.test${path}?token=${access_token}`, `https://share.example.test${path}#invite=${access_token}`,
+      `https://share.example.test${path}?`, `https://share.example.test${path}#`, `https://@share.example.test${path}`,
+      `ftp://share.example.test${path}`, `http://share.example.test${path.replace(metadata.id, 'other')}`]) {
+      expect(() => parseCreatedChatShare({ ...metadata, access_token, path, url }, 'interactive')).toThrow()
+    }
+    expect(() => parseCreatedChatShare({ ...metadata, access_token, path: path.replace(metadata.id, 'other'), url: null }, 'interactive')).toThrow()
   })
   it('keeps an unhosted snapshot as a relative path and strips unknown fields from lists', () => {
-    const source = { ...metadata, share_id: 'share_qa', path: `/share/${'c'.repeat(43)}`, url: null, token: 'never-return-this' }
-    expect(parseCreatedChatShare(source, 'snapshot').url).toBeNull()
-    expect(parseChatShareList({ shares: [source] }, 'snapshot')[0]).not.toHaveProperty('token')
-    expect(parseChatShareList({ shares: [source] }, 'snapshot')[0]).not.toHaveProperty('path')
+    const source = { ...snapshot, path: snapshotPath, url: null, token: 'never-return-this' }
+    expect(parseCreatedChatShare(source, 'snapshot')).toMatchObject({ path: snapshotPath, url: null, access_token })
+    for (const mode of ['snapshot', 'interactive'] as const) {
+      const listed = parseChatShareList({ shares: [{ ...source, token_url: `https://share.example.test/share/${access_token}` }] }, mode)[0]
+      for (const secret of ['token', 'path', 'url', 'access_token', 'token_url']) expect(listed).not.toHaveProperty(secret)
+    }
+  })
+  it('requires separate exact tokens and rejects old bearer-link responses with clean errors', () => {
+    for (const mode of ['snapshot', 'interactive'] as const) {
+      const source = { ...snapshot, path: mode === 'snapshot' ? snapshotPath : path, url: null }
+      for (const token of [undefined, null, '', 'a'.repeat(42), 'a'.repeat(44), '!'.repeat(43), 123]) {
+        expect(() => parseCreatedChatShare({ ...source, access_token: token }, mode)).toThrow('Update the server')
+      }
+      const legacyPath = mode === 'snapshot' ? `/share/${access_token}` : `${path}#invite=${access_token}`
+      expect(() => parseCreatedChatShare({ ...source, path: legacyPath, url: `http://share.example.test${legacyPath}` }, mode))
+        .toThrow('Update the server')
+      for (const id of ['other', `share_${'d'.repeat(32)}`, `interactive_${'d'.repeat(32)}`, '.*']) {
+        const changed = mode === 'snapshot' ? { share_id: id } : { id }
+        expect(() => parseCreatedChatShare({ ...source, ...changed }, mode)).toThrow()
+      }
+    }
+    const malicious = `http://invalid port/share/${access_token}`
+    try {
+      parseCreatedChatShare({ ...snapshot, path: snapshotPath, url: malicious }, 'snapshot')
+      throw new Error('Expected rejection')
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect(String(error)).toBe('Error: Invalid public chat URL.')
+      expect(String(error)).not.toContain(access_token)
+      expect(error).not.toHaveProperty('input')
+      expect(error).not.toHaveProperty('cause')
+    }
+  })
+  it('allows only matching same-origin snapshot token URLs and never interactive token URLs', () => {
+    const origin = 'http://192.0.2.4:7850'
+    const source = { ...snapshot, path: snapshotPath, url: `${origin}${snapshotPath}` }
+    const token_url = `${origin}/share/${access_token}`
+    expect(parseCreatedChatShare({ ...source, token_url }, 'snapshot').token_url).toBe(token_url)
+    for (const other of [`https://share.example.test/share/${access_token}`, `https://192.0.2.4:7850/share/${access_token}`,
+      `${origin}/share/${'d'.repeat(43)}`, `${token_url}?x=1`, `${token_url}#fragment`, `${origin}${snapshotPath}`,
+      `http://secret@192.0.2.4:7850/share/${access_token}`, null, '']) {
+      expect(() => parseCreatedChatShare({ ...source, token_url: other }, 'snapshot')).toThrow()
+    }
+    expect(() => parseCreatedChatShare({ ...source, url: null, token_url }, 'snapshot')).toThrow()
+    for (const other of [token_url, null, '']) {
+      expect(() => parseCreatedChatShare({ ...metadata, access_token, path, url: `${origin}${path}`, token_url: other }, 'interactive')).toThrow()
+    }
   })
   it('requires explicit confirmation and keeps the exact reviewed digest and message text', () => {
     const preview = parseChatSharePreview({ messages: [{ role: 'user', text: '<private quotation>' }], digest: 'd'.repeat(64), through_bytes: 42, warning: 'Synthetic warning' })
@@ -49,11 +100,10 @@ describe('explicit chat sharing boundary', () => {
     expect(() => chatShareCreateBody({ mode: 'snapshot', confirmed_public: false } as never)).toThrow()
     expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, base_url: 'http://untrusted.example.test' } as never))
       .toEqual({ confirmed_public: true })
-    const snapshotPath = `/share/${'c'.repeat(43)}`
-    expect(parseCreatedChatShare({ ...metadata, share_id: 'share_qa', path: snapshotPath, url: `http://192.0.2.4:7850${snapshotPath}` }, 'snapshot').path)
+    expect(parseCreatedChatShare({ ...snapshot, path: snapshotPath, url: `http://192.0.2.4:7850${snapshotPath}` }, 'snapshot').path)
       .toBe(snapshotPath)
     for (const url of [`http://192.0.2.4${snapshotPath}?token=other`, `http://192.0.2.4${snapshotPath}#other`]) {
-      expect(() => parseCreatedChatShare({ ...metadata, share_id: 'share_qa', path: snapshotPath, url }, 'snapshot')).toThrow()
+      expect(() => parseCreatedChatShare({ ...snapshot, path: snapshotPath, url }, 'snapshot')).toThrow()
     }
   })
   it('shares a long noisy log without rejecting its small complete text snapshot', () => {
