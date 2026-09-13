@@ -113,4 +113,18 @@ describe('local session import contract', () => {
       { provider_session_id: 'provider-1', backend: 'claude', label: 'Two', updated_at: '2026-08-02T00:00:00Z', cwd: null }
     ] })).toThrow(/duplicate local sessions/i)
   })
+
+  it('sanitizes malformed display labels without hiding the remaining local sessions', () => {
+    const sessions = parseLocalSessionCandidatesResponse({ sessions: [
+      { provider_session_id: 'claude-session-1', backend: 'claude', label: 'Linear-123 \u001b[31mfix', updated_at: '2026-08-01T00:00:00Z', cwd: '/work' },
+      { provider_session_id: 'codex-session-2', backend: 'codex', label: null, updated_at: '2026-08-02T00:00:00Z', cwd: null },
+      { provider_session_id: 'codex-session-3', backend: 'codex', label: '普通标题 — 🚀', updated_at: '2026-08-03T00:00:00Z', cwd: null }
+    ] })
+
+    expect(sessions.map(session => session.label)).toEqual([
+      'Claude chat claude-s',
+      'Codex chat codex-se',
+      '普通标题 — 🚀'
+    ])
+  })
 })

@@ -97,7 +97,7 @@ export function parseLocalSessionCandidatesResponse(value: unknown, maxItems = L
     return {
       provider_session_id: providerSessionId,
       backend,
-      label: responseString(entry.label, MAX_LABEL_CHARS, `local session ${index + 1} label`, true),
+      label: responseLabel(entry.label, backend, providerSessionId),
       updated_at: responseString(entry.updated_at, MAX_TIMESTAMP_CHARS, `local session ${index + 1} timestamp`),
       cwd: nullableResponseString(entry.cwd, MAX_PATH_CHARS, `local session ${index + 1} working directory`)
     }
@@ -182,6 +182,17 @@ function optionalNullableString(value: unknown, max: number, field: string): str
 
 function responseString(value: unknown, max: number, field: string, allowWhitespace = false): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > max || containsControl(value, allowWhitespace)) throw invalidResponse(field)
+  return value
+}
+
+function responseLabel(value: unknown, backend: Backend, providerSessionId: string): string {
+  const fallback = `${backend === 'claude' ? 'Claude' : 'Codex'} chat ${providerSessionId.slice(0, 8)}`
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > MAX_LABEL_CHARS
+    || containsControl(value, true)
+  ) return fallback
   return value
 }
 
