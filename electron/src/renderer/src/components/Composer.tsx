@@ -1625,7 +1625,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     } else if (command.id === 'digest') {
       useAppStore.getState().setModal('digest', true)
     } else if (command.id === 'feedback') {
-      void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new').catch(reportActionError)
+      void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock/issues/new').catch(reportActionError)
     } else if (command.id === 'goal') {
       window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
         detail: { sessionId: session.id, focus: 'goal' }

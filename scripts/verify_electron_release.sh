@@ -119,9 +119,14 @@ APP_PATH="$(/usr/bin/find "$TEMP_DIR/zip" -maxdepth 2 -type d -name 'AgentsDock.
 [[ -n "$APP_PATH" ]] || { echo "Zip does not contain AgentsDock.app" >&2; exit 2; }
 
 BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
+BUNDLE_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
 EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")"
 [[ "$BUNDLE_VERSION" == "$EXPECTED_VERSION" ]] || { echo "Bundle version $BUNDLE_VERSION does not match $EXPECTED_VERSION" >&2; exit 2; }
+if [[ -n "${AGENTSDOCK_EXPECTED_BUILD_NUMBER:-}" && "$BUNDLE_BUILD" != "$AGENTSDOCK_EXPECTED_BUILD_NUMBER" ]]; then
+  echo "Bundle build $BUNDLE_BUILD does not match $AGENTSDOCK_EXPECTED_BUILD_NUMBER" >&2
+  exit 2
+fi
 [[ "$BUNDLE_ID" == com.zhengyiluo.AgentsDock ]] || { echo "Unexpected bundle identifier $BUNDLE_ID" >&2; exit 2; }
 MAIN_EXECUTABLE="$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 ARCHS="$(/usr/bin/lipo -archs "$MAIN_EXECUTABLE")"
@@ -145,7 +150,7 @@ const [yamlPath, configPath, expectedChannel] = process.argv.slice(2)
 const fs = require('fs')
 const yaml = require(yamlPath)
 const config = yaml.load(fs.readFileSync(configPath, 'utf8'))
-if (!config || config.provider !== 'github' || config.owner !== 'ZhengyiLuo' || config.repo !== 'AgentsDock-Releases' || config.channel !== expectedChannel) {
+if (!config || config.provider !== 'github' || config.owner !== 'ZhengyiLuo' || config.repo !== 'AgentsDock' || config.channel !== expectedChannel) {
   console.error('Packaged updater configuration does not match the public AgentsDock release feed')
   process.exit(2)
 }

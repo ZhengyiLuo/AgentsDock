@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-12 — Public desktop release migration
+
+- Prepare the `1.0.0-beta.1` migration bridge with the public AgentsDock
+  repository as its canonical desktop download and update destination.
+  Keep the legacy release feed available for older installations and Android;
+  publish the same verified desktop artifacts to both repositories.
+- Beta subscribers can receive a newer stable release without losing their
+  Beta preference. Selecting stable metadata during a normal Beta check does
+  not enable downgrades. Existing startup and four-hour checks are unchanged;
+  downloads still require an explicit install action to restart the app.
+- Preserve application identity, signing requirements, saved settings and
+  connections. Merge the current public UI and pinned-message navigation
+  changes while retaining shared-chat restrictions and attribution.
+- Validate release ordering against both feeds. Publication must pin the public
+  source tag to the reviewed commit and resume mirrors only when the sealed
+  source identity and artifact checksums match; published conflicts fail closed.
+- Stable `1.0.0` remains a separate release gate. Existing stable downloads
+  continue to use the verified `0.2.12` artifacts until that promotion.
+
 ## 2026-09-12 — Reusable-token chat sharing
 
 - Keep share addresses separate from access tokens. Copy invitation includes

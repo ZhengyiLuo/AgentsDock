@@ -156,7 +156,7 @@ const [yamlPath, configPath, expectedChannel] = process.argv.slice(2)
 const fs = require('fs')
 const yaml = require(yamlPath)
 const config = yaml.load(fs.readFileSync(configPath, 'utf8'))
-if (!config || config.provider !== 'github' || config.owner !== 'ZhengyiLuo' || config.repo !== 'AgentsDock-Releases' || config.channel !== expectedChannel) {
+if (!config || config.provider !== 'github' || config.owner !== 'ZhengyiLuo' || config.repo !== 'AgentsDock' || config.channel !== expectedChannel) {
   console.error('Packaged updater configuration does not match the public AgentsDock release feed')
   process.exit(2)
 }
@@ -212,6 +212,10 @@ fi
 node "$ASAR_CLI" extract "$APPIMAGE_ASAR" "$TEMP_DIR/app"
 PACKAGE_VERSION="$(node -p "require(process.argv[1]).version" "$TEMP_DIR/app/package.json")"
 [[ "$PACKAGE_VERSION" == "$EXPECTED_VERSION" ]] || { echo "Packaged version $PACKAGE_VERSION does not match $EXPECTED_VERSION" >&2; exit 2; }
+if [[ -n "${AGENTSDOCK_EXPECTED_BUILD_NUMBER:-}" ]]; then
+  PACKAGE_BUILD="$(node -p "require(process.argv[1]).releaseBuildNumber" "$TEMP_DIR/app/package.json")"
+  [[ "$PACKAGE_BUILD" == "$AGENTSDOCK_EXPECTED_BUILD_NUMBER" ]] || { echo "Packaged build $PACKAGE_BUILD does not match $AGENTSDOCK_EXPECTED_BUILD_NUMBER" >&2; exit 2; }
+fi
 
 LEGACY_PRODUCT="$(printf '%s%s' 'Zeni' 'th')"
 FORBIDDEN_PATTERN="${LEGACY_PRODUCT}"

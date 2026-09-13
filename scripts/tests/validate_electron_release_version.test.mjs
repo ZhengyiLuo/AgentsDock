@@ -5,6 +5,32 @@ import { validateElectronReleaseVersion } from '../validate_electron_release_ver
 const published = (...tags) => tags.map(tag_name => ({ tag_name, draft: false }))
 
 describe('validateElectronReleaseVersion', () => {
+  it('accepts the migration bridge against the union of legacy and public feeds', () => {
+    const result = validateElectronReleaseVersion('1.0.0-beta.1', 'beta', [
+      published('v0.2.12', 'v0.2.13-beta.33', 'android-v0.1.1-beta.7'),
+      [{ tag_name: 'v1.0.0', draft: true }]
+    ])
+    assert.deepEqual(result, {
+      candidate: '1.0.0-beta.1', latestStable: '0.2.12', latestPublic: '0.2.13-beta.33'
+    })
+  })
+
+  it('does not permit rebuilding a published bridge or publishing behind either feed', () => {
+    for (const feeds of [
+      [published('v0.2.13-beta.33'), published('v1.0.0-beta.1')],
+      [published('v1.0.0-beta.2'), []],
+      [[], published('v1.0.0')]
+    ]) {
+      assert.throws(() => validateElectronReleaseVersion('1.0.0-beta.1', 'beta', feeds), /must be greater/)
+    }
+  })
+
+  it('permits stable 1.0 only as a later separately published promotion', () => {
+    assert.equal(validateElectronReleaseVersion('1.0.0', 'stable', [
+      published('v0.2.12', 'v1.0.0-beta.1'), published('v1.0.0-beta.1')
+    ]).candidate, '1.0.0')
+  })
+
   it('rejects a beta from a release line that is already stable', () => {
     assert.throws(
       () => validateElectronReleaseVersion('0.2.10-beta.13', 'beta', published('v0.2.10', 'v0.2.10-beta.12')),

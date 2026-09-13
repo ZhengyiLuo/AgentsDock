@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { GenericProvider } from 'electron-updater/out/providers/GenericProvider'
+import { AppUpdater } from 'electron-updater/out/AppUpdater'
 
 interface MockUpdateCheckResult {
   downloadPromise?: Promise<unknown> | null
@@ -6,12 +8,19 @@ interface MockUpdateCheckResult {
 
 const mocks = vi.hoisted(() => {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>()
+  let channel: string | null = null
   const autoUpdater = {
     autoDownload: false,
     autoInstallOnAppQuit: true,
     allowDowngrade: true,
     allowPrerelease: true,
-    channel: null as string | null,
+    get channel() { return channel },
+    set channel(value: string | null) {
+      channel = value
+      // Match the real electron-updater setter: it enables downgrade whenever
+      // the effective metadata channel changes, even without a user action.
+      this.allowDowngrade = true
+    },
     setFeedURL: vi.fn(),
     checkForUpdates: vi.fn<() => Promise<MockUpdateCheckResult | null>>().mockResolvedValue(null),
     quitAndInstall: vi.fn(),
@@ -55,7 +64,7 @@ describe('AppUpdateManager', () => {
     mocks.autoUpdater.setFeedURL.mockReset()
     mocks.autoUpdater.checkForUpdates.mockReset().mockResolvedValue(null)
     mocks.netFetch.mockReset().mockResolvedValue(new Response(
-      '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.2.6-beta.1" /></entry></feed>',
+      '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.6-beta.1" /></entry></feed>',
       { status: 200 }
     ))
     mocks.autoUpdater.quitAndInstall.mockReset()
@@ -149,7 +158,7 @@ describe('AppUpdateManager', () => {
     await manager.check(true)
 
     expect(mocks.netFetch).toHaveBeenCalledWith(
-      'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/latest/download/latest-mac.yml',
+      'https://github.com/ZhengyiLuo/AgentsDock/releases/latest/download/latest-mac.yml',
       {
         cache: 'no-store',
         headers: { Accept: 'text/yaml, text/plain' },
@@ -162,7 +171,7 @@ describe('AppUpdateManager', () => {
       track: 'stable',
       currentVersion: '1.2.3',
       availableVersion: '1.2.4',
-      message: 'Latest published Stable release: 1.2.4. This local development build does not self-update; source freshness is determined by Git.'
+      message: 'Latest published release on the Stable channel: 1.2.4. This local development build does not self-update; source freshness is determined by Git.'
     })
     expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
     expect(mocks.autoUpdater.setFeedURL).not.toHaveBeenCalled()
@@ -173,7 +182,7 @@ describe('AppUpdateManager', () => {
     mocks.netFetch.mockImplementation(async input => {
       const url = String(input)
       return new Response(url.endsWith('/releases.atom')
-        ? '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.2.6-beta.1" /></entry></feed>'
+        ? '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.6-beta.1" /></entry></feed>'
         : 'version: 1.2.6-beta.1\npath: AgentsDock-1.2.6-beta.1-mac-universal.zip\n', { status: 200 })
     })
     const write = vi.fn()
@@ -186,7 +195,7 @@ describe('AppUpdateManager', () => {
     expect(write).toHaveBeenCalledWith('beta')
     expect(mocks.netFetch).toHaveBeenCalledTimes(2)
     expect(mocks.netFetch).toHaveBeenLastCalledWith(
-      'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v1.2.6-beta.1/beta-mac.yml',
+      'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.2.6-beta.1/beta-mac.yml',
       {
         cache: 'no-store',
         headers: { Accept: 'text/yaml, text/plain' },
@@ -198,7 +207,7 @@ describe('AppUpdateManager', () => {
       state: 'idle',
       track: 'beta',
       availableVersion: '1.2.6-beta.1',
-      message: 'Latest published Beta release: 1.2.6-beta.1. This local development build does not self-update; source freshness is determined by Git.'
+      message: 'Latest published release on the Beta channel: 1.2.6-beta.1. This local development build does not self-update; source freshness is determined by Git.'
     })
     expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
     expect(mocks.autoUpdater.setFeedURL).not.toHaveBeenCalled()
@@ -225,7 +234,7 @@ describe('AppUpdateManager', () => {
     expect(manager.status()).toMatchObject({
       state: 'idle',
       availableVersion: '1.2.3',
-      message: 'Latest published Stable release: 1.2.3. This local development build does not self-update; source freshness is determined by Git.'
+      message: 'Latest published release on the Stable channel: 1.2.3. This local development build does not self-update; source freshness is determined by Git.'
     })
   })
 
@@ -242,7 +251,7 @@ describe('AppUpdateManager', () => {
     expect(mocks.autoUpdater.channel).toBe('beta')
     expect(mocks.autoUpdater.allowDowngrade).toBe(false)
     expect(mocks.netFetch).toHaveBeenCalledWith(
-      'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases.atom',
+      'https://github.com/ZhengyiLuo/AgentsDock/releases.atom',
       {
         cache: 'no-store',
         headers: { Accept: 'application/atom+xml, application/xml, text/xml' },
@@ -251,7 +260,7 @@ describe('AppUpdateManager', () => {
     )
     expect(mocks.autoUpdater.setFeedURL).toHaveBeenCalledWith({
       provider: 'generic',
-      url: 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v1.2.6-beta.1',
+      url: 'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.2.6-beta.1',
       channel: 'beta'
     })
     expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
@@ -260,9 +269,9 @@ describe('AppUpdateManager', () => {
   it('selects the greatest compatible beta instead of the first Atom entry', async () => {
     mocks.netFetch.mockResolvedValue(new Response(
       '<feed>' +
-      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.2.6" /></entry>' +
-      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.3.0-beta.2" /></entry>' +
-      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.3.0-beta.11" /></entry>' +
+      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.6" /></entry>' +
+      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.3.0-beta.2" /></entry>' +
+      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.3.0-beta.11" /></entry>' +
       '</feed>',
       { status: 200 }
     ))
@@ -272,15 +281,176 @@ describe('AppUpdateManager', () => {
 
     expect(mocks.autoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'generic',
-      url: 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v1.3.0-beta.11'
+      url: 'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.3.0-beta.11'
     }))
     expect(mocks.autoUpdater.setFeedURL.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.autoUpdater.checkForUpdates.mock.invocationCallOrder[0])
   })
 
+  it('discovers the public migration bridge from an old beta install', async () => {
+    mocks.appVersion = '0.2.13-beta.33'
+    mocks.netFetch.mockResolvedValue(new Response(
+      '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0-beta.1" /></entry></feed>'
+    ))
+    const manager = createManager({}, 'beta')
+
+    await manager.check(true)
+
+    expect(mocks.netFetch).toHaveBeenCalledOnce()
+    expect(mocks.netFetch.mock.calls[0][0]).toBe('https://github.com/ZhengyiLuo/AgentsDock/releases.atom')
+    expect(mocks.autoUpdater.setFeedURL).toHaveBeenCalledWith({
+      provider: 'generic',
+      url: 'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.1',
+      channel: 'beta'
+    })
+    expect(mocks.autoUpdater.allowDowngrade).toBe(false)
+  })
+
+  it('uses real provider stable metadata after bridge promotion and preserves the Beta preference', async () => {
+    mocks.appVersion = '1.0.0-beta.1'
+    mocks.netFetch.mockResolvedValue(new Response(
+      '<feed>' +
+      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0-beta.1" /></entry>' +
+      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0" /></entry></feed>'
+    ))
+    const write = vi.fn()
+    const manager = new AppUpdateManager(vi.fn(), {}, { read: () => 'beta', write })
+    managers.push(manager)
+    manager.start()
+    const metadataRequest = vi.fn(async (_url: URL) => 'version: 1.0.0\nfiles: []\n')
+    class ObservedProvider extends GenericProvider {
+      protected override httpRequest(url: URL): Promise<string> { return metadataRequest(url) }
+    }
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      const options = mocks.autoUpdater.setFeedURL.mock.lastCall?.[0]
+      const provider = new ObservedProvider(options, mocks.autoUpdater as unknown as AppUpdater, {
+        platform: 'darwin', executor: {} as never, isUseMultipleRangeRequest: false
+      })
+      const info = await provider.getLatestVersion()
+      mocks.emit('update-not-available', info)
+      return null
+    })
+
+    await manager.check(true)
+
+    expect(metadataRequest.mock.calls[0][0].pathname)
+      .toBe('/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/latest-mac.yml')
+    expect(mocks.autoUpdater.channel).toBe('latest')
+    expect(mocks.autoUpdater.allowDowngrade).toBe(false)
+    expect(manager.status().track).toBe('beta')
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('returns Beta subscribers to beta metadata for a newer prerelease after stable promotion', async () => {
+    const manager = createManager({}, 'beta')
+    mocks.netFetch
+      .mockResolvedValueOnce(new Response('<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0" /></entry></feed>'))
+      .mockResolvedValueOnce(new Response('<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.1.0-beta.1" /></entry></feed>'))
+    await manager.check(true)
+    mocks.emit('update-not-available', { version: '1.0.0' })
+    await manager.check(true)
+
+    expect(mocks.autoUpdater.setFeedURL).toHaveBeenLastCalledWith({
+      provider: 'generic',
+      url: 'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.1.0-beta.1',
+      channel: 'beta'
+    })
+    expect(mocks.autoUpdater.channel).toBe('beta')
+    expect(mocks.autoUpdater.allowDowngrade).toBe(false)
+    expect(manager.status().track).toBe('beta')
+  })
+
+  it('does not permit a stale feed to downgrade an ordinary Beta check', async () => {
+    mocks.appVersion = '1.0.0'
+    mocks.netFetch.mockResolvedValue(new Response(
+      '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v0.2.12" /></entry></feed>'
+    ))
+    const manager = createManager({}, 'beta')
+
+    await manager.check(true)
+
+    expect(mocks.autoUpdater.channel).toBe('latest')
+    expect(mocks.autoUpdater.allowDowngrade).toBe(false)
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled()
+    // Exercise the installed updater's actual SemVer gate, not only our mock
+    // configuration, without constructing an updater or touching user data.
+    const availability = AppUpdater.prototype as unknown as {
+      isUpdateAvailable(this: unknown, info: { version: string }): Promise<boolean>
+    }
+    const context = {
+      currentVersion: mocks.appVersion,
+      allowDowngrade: mocks.autoUpdater.allowDowngrade,
+      isUpdateSupported: () => true,
+      isUserWithinRollout: () => true
+    }
+    await expect(availability.isUpdateAvailable.call(context, { version: '0.2.12' })).resolves.toBe(false)
+    await expect(availability.isUpdateAvailable.call(context, { version: '1.0.0-beta.1' })).resolves.toBe(false)
+    await expect(availability.isUpdateAvailable.call({ ...context, currentVersion: '1.0.0-beta.1' }, { version: '1.0.0' }))
+      .resolves.toBe(true)
+    await expect(availability.isUpdateAvailable.call({ ...context, currentVersion: '0.2.12' }, { version: '1.0.0-beta.1' }))
+      .resolves.toBe(true)
+  })
+
+  it('reports stable metadata on the Beta channel in development without self-updating', async () => {
+    mocks.appIsPackaged = false
+    mocks.netFetch
+      .mockResolvedValueOnce(new Response('<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0" /></entry></feed>'))
+      .mockResolvedValueOnce(new Response('version: 1.0.0\nfiles: []\n'))
+    const manager = createManager({}, 'beta')
+
+    await manager.check(true)
+
+    expect(mocks.netFetch.mock.calls[1][0]).toBe('https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/latest-mac.yml')
+    expect(manager.status()).toMatchObject({ state: 'idle', track: 'beta', availableVersion: '1.0.0' })
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+  })
+
+  it('rejects metadata mismatching the selected release', async () => {
+    mocks.appIsPackaged = false
+    mocks.netFetch
+      .mockResolvedValueOnce(new Response('<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0" /></entry></feed>'))
+      .mockResolvedValueOnce(new Response('version: 0.2.12\nfiles: []\n'))
+    const manager = createManager({}, 'beta')
+
+    await expect(manager.check(true)).resolves.toMatchObject({ state: 'error' })
+
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on an empty compatible feed without falling back to the legacy repository', async () => {
+    mocks.netFetch.mockResolvedValue(new Response('<feed><entry><title>android-v1.0.0</title></entry></feed>'))
+    const manager = createManager({}, 'beta')
+
+    await expect(manager.check(true)).resolves.toMatchObject({ state: 'error' })
+
+    expect(mocks.netFetch).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.setFeedURL).not.toHaveBeenCalled()
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+  })
+
+  it('retains the startup check and four-hour cadence without introducing fast polling', async () => {
+    const manager = createManager()
+    mocks.autoUpdater.checkForUpdates.mockImplementation(async () => {
+      mocks.emit('update-not-available', { version: '1.2.3' })
+      return null
+    })
+
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000 - 15_001)
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2)
+    manager.stop()
+    await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000)
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2)
+  })
+
   it('reads a bounded UTF-8 Atom feed before checking the resolved beta channel', async () => {
     const feed = '<feed><title>Béta releases 🚀</title>' +
-      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.2.7-beta.4" /></entry></feed>'
+      '<entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.7-beta.4" /></entry></feed>'
     mocks.netFetch.mockResolvedValue(new Response(feed, {
       status: 200,
       headers: { 'Content-Length': String(Buffer.byteLength(feed, 'utf8')) }
@@ -290,7 +460,7 @@ describe('AppUpdateManager', () => {
     await manager.check(true)
 
     expect(mocks.autoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({
-      url: 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v1.2.7-beta.4'
+      url: 'https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.2.7-beta.4'
     }))
     expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
   })
@@ -355,7 +525,7 @@ describe('AppUpdateManager', () => {
     expect(mocks.autoUpdater.setFeedURL).toHaveBeenCalledWith({
       provider: 'github',
       owner: 'ZhengyiLuo',
-      repo: 'AgentsDock-Releases'
+      repo: 'AgentsDock'
     })
     expect(mocks.netFetch).toHaveBeenCalledOnce()
     expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
@@ -425,7 +595,7 @@ describe('AppUpdateManager', () => {
     expect(manager.status().message).toContain('timed out')
 
     mocks.netFetch.mockResolvedValue(new Response(
-      '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.2.6-beta.1" /></entry></feed>',
+      '<feed><entry><link href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.2.6-beta.1" /></entry></feed>',
       { status: 200 }
     ))
     mocks.autoUpdater.checkForUpdates.mockResolvedValue(null)

@@ -7,10 +7,10 @@
       alt="AgentsDock website"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.13-beta.33">
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">
     <img
-      src="https://img.shields.io/badge/desktop-v0.2.13--beta.33-EA7233"
-      alt="Latest desktop beta"
+      src="https://img.shields.io/badge/desktop-beta-EA7233"
+      alt="Public desktop beta releases"
     />
   </a>
   <a href="https://discord.gg/ZGDrhEWqPt">
@@ -50,7 +50,7 @@
   without living in a terminal. Easily review files and rich media.
   <br />
   <br />
-  <strong>Download the latest version:</strong>
+  <strong>Desktop beta 0.2.13-beta.33:</strong>
   <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-mac-universal.dmg">macOS</a>
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-x86_64.AppImage">Linux x86_64</a>
@@ -62,6 +62,10 @@
   <a href="https://testflight.apple.com/join/2JjWy2Z2">iPhone &amp; iPad</a>
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
+  <br />
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">New desktop beta releases</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.12">Current stable desktop release</a>
   <br />
   <br />
   <strong>
@@ -100,7 +104,8 @@ model requests, and clients may cache content on your devices.
 ## Get started
 
 1. **Install the app.** Get a desktop build from
-   [GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases),
+   [public GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock/releases)
+   ([current stable](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.12)),
    or find the current iPhone/iPad distribution link on
    [the website](https://agentsdock.net/#downloads).
 2. **Set up AgentsServer.** Direct macOS and Linux builds provide
