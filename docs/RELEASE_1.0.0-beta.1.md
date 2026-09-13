@@ -34,3 +34,14 @@ the original desktop requirement was 0.2.13-beta.37 or later.
 Publishing this beta does not install it, restart a live server, change
 permissions, add polling, or interrupt active chats. Installation remains an
 explicit managed-update action.
+
+## Release verification
+
+Published from source `3151c409364b7b22c244b4cc07a579559177c1aa` after the full
+release CI gate. The actual CI-signed manifest and archive were accepted by
+both the v0.1.25 and beta.66 updater verifiers, including Beta discovery,
+immutable URL, signature, version, and forward-update checks.
+
+All 73 packaged files other than `VERSION` match the beta.66 source byte for
+byte. API contract remains 28. Archive SHA-256:
+`862d7ecb8c1754e4d79b4c093e49c11a7016b0071d1229c35315868f9b8eef36`.
