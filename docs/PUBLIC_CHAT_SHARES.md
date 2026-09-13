@@ -1,5 +1,8 @@
 # Public read-only chat snapshots (AgentsServer 0.1.26-beta.64+)
 
+Direct HTTP links and confirmed-only creation described below require the newer
+server change; the original beta.64 release requires the preview/digest workflow.
+
 This optional API creates a fixed, explicitly requested chat snapshot. Nothing is
 shared automatically. It does not open a listener, configure ingress, publish an
 existing chat, or add background polling. The public viewer cannot continue a
