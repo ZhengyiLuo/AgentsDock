@@ -15,6 +15,40 @@ const message = (seq: number, id: string, state: 'unread' | 'read' | 'cancelled'
   })
 
 describe('passive chat inbox projection', () => {
+  it('renders an accepted mailbox reply in both chats before any wake or read, but never invents a receipt from assistant prose', () => {
+    const claimed = event(1, 'assistant_text', { session_id: 'sender', text: 'I sent the reply.' })
+    const reply = {
+      message_id: 'synthetic-reply', cross_chat_envelope_id: 'synthetic-reply',
+      conversation_id: 'pair', conversation_mode: 'async_route_v1' as const,
+      delivery_mode: 'mailbox' as const, inbox_state: 'unread' as const,
+      source_session_id: 'sender', target_session_id: 'recipient',
+      source_title: 'Sender', target_title: 'Recipient', reply_to_message_id: 'synthetic-original',
+      handoff_preview: 'Synthetic acceptance reply.', message_revision: 0
+    }
+    const registered = event(2, 'chat_conversation_message_registered', { ...reply, session_id: 'sender' })
+    const received = event(3, 'chat_conversation_message_received', reply)
+    clearTimelineProjectionCache()
+    const before = cachedTimelineProjection('accepted-reply-source', [claimed], []).rendered
+    expect(before.filter(row => row.kind === 'system' && row.crossChatMessage)).toEqual([])
+    const source = cachedTimelineProjection('accepted-reply-source', [claimed, registered], []).rendered
+    expect(source).toEqual(renderTimelineItems(projectTimeline([claimed, registered], [])))
+    expect(source.filter(row => row.kind === 'system')).toMatchObject([{
+      crossChatMessage: true, event: { type: 'chat_conversation_message_registered', message_id: 'synthetic-reply' }
+    }])
+    expect(source.find(row => row.kind === 'system')).not.toHaveProperty('mailboxMessages')
+    const target = cachedTimelineProjection('accepted-reply-target', [received], []).rendered
+    expect(target).toEqual(renderTimelineItems(projectTimeline([received], [])))
+    expect(target).toMatchObject([{
+      kind: 'system', mailboxMessages: [{ event: { message_id: 'synthetic-reply', inbox_state: 'unread' } }]
+    }])
+    const read = event(4, 'chat_conversation_message_read', { ...reply, inbox_state: 'read' })
+    const afterRead = cachedTimelineProjection('accepted-reply-target', [received, read], []).rendered
+    expect(afterRead).toEqual(renderTimelineItems(projectTimeline([received, read], [])))
+    expect(afterRead).toMatchObject([{
+      kind: 'system', seq: received.seq, mailboxMessages: [{ event: { message_id: 'synthetic-reply', inbox_state: 'read' } }]
+    }])
+  })
+
   it('groups only adjacent sender messages while preserving active work and exact read/delete ownership on cached append', () => {
     const events = [
       event(1, 'turn_started', { run_id: 'work', prompt: 'My task' }),

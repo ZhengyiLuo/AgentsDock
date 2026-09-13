@@ -9,6 +9,7 @@ import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } fro
 import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
+import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   localSessionImportBatchLimit,
   localSessionImportListLimit,
@@ -734,6 +735,11 @@ export class AppService {
     let checked: MailHintPageAcknowledgment
     try { checked = parseMailHintPageAcknowledgment(input) } catch { return null }
     return this.mailHints.acknowledgePage(checked)
+  }
+
+  acknowledgeBulletinHintRefresh(input: unknown) {
+    try { return this.mailHints.acknowledgeBulletinRefresh(parseBulletinHintRefresh(input)) }
+    catch { return null }
   }
 
   /**
@@ -4868,7 +4874,7 @@ export class AppService {
             health.capabilities?.team_hub_v1?.routes?.map(route => [route.transport, route.base_path, route.hub_url,
               route.connection_id, route.hub_id, route.host_server_identity])]),
           isCurrent: () => this.isCurrentScope(verifiedScope) && this.isValidatedScope(verifiedScope)
-        }, health.capabilities?.team_mail_hints_v1)
+        }, health.capabilities?.team_mail_hints_v1, health.capabilities?.team_mail_hints_v2)
       } catch { this.mailHints.retire() }
     } else this.mailHints.retire()
     if (!portForwardingCapabilityAvailable(health)) this.portTunnels.disposeAll()

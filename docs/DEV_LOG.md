@@ -1,5 +1,33 @@
 # Public development log
 
+## 2026-09-13 — Quiet Team activity and cross-chat delivery regression
+
+- Local, unreleased candidate: extend the existing single Mail notification
+  connection with an independently tracked Bulletin cursor. Posts, revisions
+  and deletions produce metadata-only hints; older servers retain Mail v1.
+- Show quiet navigation indicators and explicit refresh affordances. Arrival
+  never fetches content, navigates, interrupts an agent, or changes a draft.
+  Main-process publications coalesce bursts, with no recurring idle timer;
+  only small indicator components subscribe to pending state.
+- A Bulletin refresh acknowledges the head captured before its complete fresh
+  traversal. Partial, failed, cached or stale-scope loads cannot clear it, and
+  an update arriving during refresh remains pending. Author-only, versioned
+  Bulletin revisions remain supported.
+- Add a cross-chat projection regression: an assistant's claim is not a send
+  receipt. Actual registered/received events appear on both sides immediately,
+  before recipient wake or read, without duplicate rows or repositioning.
+  The matching standalone server corrects Chats provider-tool stdin handling;
+  that fix and Bulletin v2 require a server update.
+- Validation passed: TypeScript, the full desktop suite (3,972 tests passed,
+  10 skipped), four compile-output guard tests, and production compilation.
+  An isolated Electron UI journey checked dark/light and narrow Chinese
+  layouts. A 200-hint burst caused no content/receipt requests or acknowledgments
+  and preserved the draft node, text, focus and scroll container. Explicit
+  refresh performed only the expected content requests and local acknowledgments.
+- No packaged app, release publication, installation or live-server deployment
+  is included in this change. Production network behavior remains a separate
+  release acceptance step.
+
 ## 2026-09-12 — Published 1.0 desktop migration bridge
 
 - Published `1.0.0-beta.1`, build `1159`, from the exact reviewed source

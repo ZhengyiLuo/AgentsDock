@@ -8,6 +8,7 @@ import type { TeamHubScope } from '@shared/team-hub'
 import type { NativeFileRef } from '@shared/types'
 import { setLocale } from '@shared/i18n'
 import { applyMailArrivalHint, applyMailPageCoverage, beginMailHintStream, type MailHintPageAcknowledgment, type MailHintProjection, type MailHintScope } from '@shared/team-mail-hints'
+import { acknowledgeBulletinHint, applyBulletinHint, emptyBulletinCursor, type BulletinChangeCursor, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { TEAM_MESSAGES_SKILL_SLUG_PATTERN, type TeamAttachment, type TeamMessage, type TeamMessageCreateInput, type TeamMailboxStateInput, type TeamMessagePage, type TeamMessageSummary, type TeamMessagesCapability, type TeamNetworkBulletinPost, type TeamSkill, type TeamSkillDetails } from '@shared/team-network'
 import { resetTeamNetworkSnapshotCacheForTests } from '../lib/team-network-snapshot-cache'
 import { parseTeamMessageLink } from '../lib/team-message-links'
@@ -253,20 +254,243 @@ describe('fresh exact-mailbox page acknowledgement', () => {
   function installHints(latest: number | null = 900) {
     const initial = beginMailHintStream(hintScope)
     const state = latest === null ? initial : applyMailArrivalHint(initial, hintScope, 'snapshot', { ...coverage(latest), reset: false })
-    let revision = 1
     useAppStore.setState({
       activeProfileId: scope.profileId, profileGeneration: scope.profileGeneration, switchingProfileId: null,
       profiles: [{ id: scope.profileId, name: 'Local', serverUrl: 'https://example.test', serverIdentity: scope.serverIdentity,
         hasAccessToken: false, serverSetupComplete: true, connectionState: 'online', cachedUnreadCount: 0 }],
-      mailHints: { profileId: scope.profileId, profileGeneration: scope.profileGeneration, revision, state }
+      mailHints: { profileId: scope.profileId, profileGeneration: scope.profileGeneration, revision: 1, state }
     })
     const acknowledgePage = vi.fn(async (input: MailHintPageAcknowledgment): Promise<MailHintProjection | null> => {
       const current = useAppStore.getState().mailHints!
-      return { ...current, revision: ++revision, state: applyMailPageCoverage(current.state!, input.scope, input.requestedAfter, input.coverage) }
+      return { ...current, revision: current.revision + 1, state: applyMailPageCoverage(current.state!, input.scope, input.requestedAfter, input.coverage) }
     })
     Object.assign(window.agentsDock, { mailHints: { acknowledgePage } })
     return acknowledgePage
   }
+
+  function floodHints() {
+    act(() => {
+      for (let sequence = 8; sequence <= 250; sequence += 1) {
+        const current = useAppStore.getState().mailHints!
+        useAppStore.setState({ mailHints: { ...current, revision: current.revision + 1,
+          state: applyMailArrivalHint(current.state!, hintScope, 'hint', { ...coverage(sequence), reset: false }) } })
+      }
+    })
+  }
+
+  const bulletinCursor = (sequence: number): BulletinChangeCursor => sequence === 0 ? emptyBulletinCursor('team-1') : {
+    version: 1, team_id: 'team-1', through_sequence: sequence,
+    change_id: `bchg_${sequence.toString(16).padStart(32, '0')}`,
+    message_id: cursor(sequence).arrival_id!, change_kind: 'revised', message_version: sequence
+  }
+  const feedPage = (sequence = 0, hasMore = false): TeamMessagePage => ({
+    box: 'feed', address: null, messages: [], next_after_sequence: sequence, has_more: hasMore
+  })
+  function installBulletinHints(latest = 7) {
+    const acknowledgePage = installHints(0)
+    const current = useAppStore.getState().mailHints!
+    useAppStore.setState({ mailHints: { ...current,
+      bulletin: applyBulletinHint(null, hintScope, 'snapshot', { ...bulletinCursor(latest), reset: false }, emptyBulletinCursor('team-1')) } })
+    const acknowledgeBulletinRefresh = vi.fn(async (input: BulletinHintRefresh): Promise<MailHintProjection> => {
+      const projection = useAppStore.getState().mailHints!
+      return { ...projection, revision: projection.revision + 1,
+        bulletin: acknowledgeBulletinHint(projection.bulletin!, input) }
+    })
+    Object.assign(window.agentsDock.mailHints!, { acknowledgeBulletinRefresh })
+    return { acknowledgePage, acknowledgeBulletinRefresh }
+  }
+  function pushBulletinHint(sequence: number) {
+    const current = useAppStore.getState().mailHints!
+    useAppStore.setState({ mailHints: { ...current, revision: current.revision + 1,
+      bulletin: applyBulletinHint(current.bulletin!, hintScope, 'hint', { ...bulletinCursor(sequence), reset: false }, null) } })
+  }
+
+  it('keeps a Bulletin draft, focus and scroll on hint floods, then acknowledges only the head captured before Refresh', async () => {
+    const api = installAPI([])
+    const { acknowledgePage, acknowledgeBulletinRefresh } = installBulletinHints()
+    const view = render(board({ section: 'feed', initialFeedLoad: Promise.resolve({ state: 'ready', page: feedPage() }) }))
+    const draft = await screen.findByRole('textbox', { name: 'Team bulletin' })
+    fireEvent.change(draft, { target: { value: 'An unsent synthetic draft.' } })
+    draft.focus()
+    const scroll = view.container.querySelector('.network-v2-scroll') as HTMLElement
+    scroll.scrollTop = 147
+    vi.useFakeTimers()
+    act(() => { for (let sequence = 8; sequence <= 250; sequence += 1) pushBulletinHint(sequence) })
+    act(() => vi.advanceTimersByTime(180_000))
+    expect(screen.getByRole('button', { name: 'Bulletin updated · Refresh' })).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'Team bulletin' })).toBe(draft)
+    expect(draft).toHaveValue('An unsent synthetic draft.')
+    expect(draft).toHaveFocus()
+    expect(view.container.querySelector('.network-v2-scroll')).toBe(scroll)
+    expect(scroll.scrollTop).toBe(147)
+    expect(api.teamMessages).not.toHaveBeenCalled()
+    expect(api.teamMessage).not.toHaveBeenCalled()
+    expect(api.recordTeamMessageReceipt).not.toHaveBeenCalled()
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('button', { name: '公告栏有更新 · 刷新' })).toBeVisible()
+    act(() => setLocale('en'))
+    vi.useRealTimers()
+    const fresh = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValue(fresh.promise)
+    fireEvent.click(screen.getByRole('button', { name: 'Bulletin updated · Refresh' }))
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    act(() => pushBulletinHint(251))
+    await act(async () => fresh.resolve(feedPage()))
+    await waitFor(() => expect(acknowledgeBulletinRefresh).toHaveBeenCalledOnce())
+    expect(acknowledgeBulletinRefresh).toHaveBeenCalledWith({ scope: hintScope, cursor: bulletinCursor(250) })
+    expect(useAppStore.getState().mailHints?.bulletin?.seen.through_sequence).toBe(250)
+    expect(screen.getByRole('button', { name: 'Bulletin updated · Refresh' })).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'Team bulletin' })).toHaveValue('An unsent synthetic draft.')
+    expect(acknowledgePage).not.toHaveBeenCalled()
+  })
+
+  it('retains a fresh Bulletin prefix across capped Load more and acknowledges only its complete final page', async () => {
+    const api = installAPI([])
+    const { acknowledgeBulletinRefresh } = installBulletinHints(7)
+    api.teamMessages.mockImplementation((_scope, query: { afterSequence?: number }) => Promise.resolve(
+      (query.afterSequence ?? 0) < 400 ? feedPage((query.afterSequence ?? 0) + 25, true) : feedPage(401)
+    ))
+    render(board({ section: 'feed' }))
+    await waitFor(() => expect(api.teamMessages).toHaveBeenCalledTimes(16))
+    const more = await screen.findByRole('button', { name: 'Load more' })
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    act(() => pushBulletinHint(8))
+    fireEvent.click(more)
+    await waitFor(() => expect(acknowledgeBulletinRefresh).toHaveBeenCalledOnce())
+    expect(api.teamMessages).toHaveBeenCalledTimes(17)
+    expect(api.teamMessages.mock.calls[16][1]).toMatchObject({ afterSequence: 400 })
+    expect(acknowledgeBulletinRefresh).toHaveBeenCalledWith({ scope: hintScope, cursor: bulletinCursor(7) })
+    expect(screen.getByRole('button', { name: 'Bulletin updated · Refresh' })).toBeVisible()
+  })
+
+  it('does not acknowledge Bulletin history continued from a prefetched page or a failed fresh traversal', async () => {
+    const api = installAPI([])
+    const { acknowledgeBulletinRefresh } = installBulletinHints()
+    api.teamMessages.mockResolvedValue(feedPage(25))
+    const view = render(board({ section: 'feed', initialFeedLoad: Promise.resolve({ state: 'ready', page: feedPage(0, true) }) }))
+    await waitFor(() => expect(api.teamMessages).toHaveBeenCalledOnce())
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    view.unmount()
+    api.teamMessages.mockReset().mockResolvedValueOnce(feedPage(25, true)).mockRejectedValueOnce(new Error('Synthetic page failure'))
+    render(board({ section: 'feed', lifecycleCacheKey: 'failed-bulletin-refresh' }))
+    await waitFor(() => expect(api.teamMessages).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Synthetic page failure')).toBeVisible()
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    api.teamMessages.mockResolvedValue(feedPage(26))
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(api.teamMessages).toHaveBeenCalledTimes(3))
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Bulletin updated · Refresh' })).toBeVisible()
+  })
+
+  it('does not acknowledge cached Bulletin rows until their fresh revalidation completes', async () => {
+    const api = installAPI([])
+    api.teamMessages.mockResolvedValue(feedPage())
+    const props = { section: 'feed' as const, lifecycleCacheKey: 'bulletin-hint-cache' }
+    const first = render(board(props))
+    await screen.findByRole('textbox', { name: 'Team bulletin' })
+    first.unmount()
+    const { acknowledgeBulletinRefresh } = installBulletinHints()
+    const fresh = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValue(fresh.promise)
+    render(board(props))
+    expect(screen.getByRole('textbox', { name: 'Team bulletin' })).toBeVisible()
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Bulletin updated · Refresh' })).toBeVisible()
+    await act(async () => fresh.resolve(feedPage()))
+    await waitFor(() => expect(acknowledgeBulletinRefresh).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('button', { name: 'Bulletin updated · Refresh' })).not.toBeInTheDocument()
+  })
+
+  it.each(['team', 'hub', 'profile', 'generation', 'server'] as const)(
+    'does not show or acknowledge another Bulletin’s updates after a %s boundary', async boundary => {
+      installAPI([])
+      const { acknowledgeBulletinRefresh } = installBulletinHints()
+      render(board({ section: 'feed', ...(boundary === 'team' ? { teamId: 'other-team' }
+        : boundary === 'hub' ? { scope: { ...scope, hubIdentity: 'other-hub' } }
+          : boundary === 'profile' ? { scope: { ...scope, profileId: 'other-profile' } }
+            : boundary === 'generation' ? { scope: { ...scope, profileGeneration: scope.profileGeneration + 1 } }
+              : { scope: { ...scope, serverIdentity: 'other-server' } }) }))
+      await screen.findByRole('textbox', { name: 'Team bulletin' })
+      expect(screen.queryByRole('button', { name: 'Bulletin updated · Refresh' })).not.toBeInTheDocument()
+      expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    }
+  )
+
+  it('shows a quiet scoped notice for a hint flood without fetching or moving the list until explicit refresh', async () => {
+    const api = installAPI([])
+    const acknowledgePage = installHints(0)
+    api.teamMessages.mockResolvedValue(page(7))
+    const view = render(board())
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledOnce())
+    const scroll = view.container.querySelector('.network-v2-scroll') as HTMLElement
+    scroll.scrollTop = 137
+    expect(screen.queryByRole('button', { name: 'New mail · Refresh' })).not.toBeInTheDocument()
+    vi.useFakeTimers()
+    floodHints()
+    act(() => vi.advanceTimersByTime(180_000))
+    expect(screen.getByRole('button', { name: 'New mail · Refresh' })).toBeVisible()
+    expect(view.container.querySelector('.network-v2-scroll')).toBe(scroll)
+    expect(scroll.scrollTop).toBe(137)
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    expect(api.teamMessage).not.toHaveBeenCalled()
+    expect(api.recordTeamMessageReceipt).not.toHaveBeenCalled()
+    expect(acknowledgePage).toHaveBeenCalledOnce()
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('button', { name: '新邮件 · 刷新' })).toBeVisible()
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    act(() => setLocale('en'))
+    vi.useRealTimers()
+    api.teamMessages.mockResolvedValue(page(250))
+    fireEvent.click(screen.getByRole('button', { name: 'New mail · Refresh' }))
+    await waitFor(() => expect(acknowledgePage).toHaveBeenCalledTimes(2))
+    expect(api.teamMessages).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('button', { name: 'New mail · Refresh' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Open Arrival 250' })).toBeVisible()
+  })
+
+  it('keeps the selected Mail detail, focus and scroll intact when new hints arrive', async () => {
+    const detail = message({ id: cursor(7).arrival_id!, body: 'Arrival 7' })
+    const api = installAPI([], [detail])
+    installHints(0)
+    api.teamMessages.mockResolvedValue(page(7))
+    const view = render(board())
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Arrival 7' }))
+    await waitFor(() => expect(api.recordTeamMessageReceipt).toHaveBeenCalledOnce())
+    const scroll = view.container.querySelector('.network-v2-detail-body') as HTMLElement
+    const back = screen.getByRole('button', { name: 'Back' })
+    back.focus()
+    scroll.scrollTop = 213
+    const body = screen.getByText('Arrival 7', { selector: 'p' })
+    floodHints()
+    expect(screen.getByRole('button', { name: 'New mail · Refresh' })).toBeVisible()
+    expect(view.container.querySelector('.network-v2-detail-body')).toBe(scroll)
+    expect(screen.getByText('Arrival 7', { selector: 'p' })).toBe(body)
+    expect(scroll.scrollTop).toBe(213)
+    expect(back).toHaveFocus()
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    expect(api.teamMessage).toHaveBeenCalledOnce()
+    expect(api.recordTeamMessageReceipt).toHaveBeenCalledOnce()
+  })
+
+  it.each(['team', 'hub', 'profile', 'generation', 'server', 'recipient', 'human', 'sent', 'bulletin'] as const)(
+    'does not show another mailbox’s arrival notice in a %s context', async boundary => {
+      installAPI([])
+      installHints(250)
+      render(board(boundary === 'team' ? { teamId: 'other-team' }
+        : boundary === 'hub' ? { scope: { ...scope, hubIdentity: 'other-hub' } }
+          : boundary === 'profile' ? { scope: { ...scope, profileId: 'other-profile' } }
+            : boundary === 'generation' ? { scope: { ...scope, profileGeneration: scope.profileGeneration + 1 } }
+              : boundary === 'server' ? { scope: { ...scope, serverIdentity: 'other-server' } }
+                : boundary === 'recipient' ? { addresses: [{ kind: 'server', id: 'other-server', label: 'Other' }] }
+                  : boundary === 'human' ? { addresses: [{ kind: 'human', id: 'server-local', label: 'Human' }] }
+                    : boundary === 'sent' ? { initialMailboxBox: 'sent' } : { section: 'feed' }))
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      expect(screen.queryByRole('button', { name: 'New mail · Refresh' })).not.toBeInTheDocument()
+    }
+  )
 
   it('keeps the dot for arrivals beyond 16 capped pages and continues only with the immutable coverage anchor', async () => {
     const api = installAPI([])

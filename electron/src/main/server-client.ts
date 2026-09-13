@@ -113,6 +113,8 @@ import {
   parseMailHintPacket, TEAM_MAIL_HINTS_MAX_PACKET_CHARS, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
   type MailboxCoverage, type MailHintMailbox, type MailHintPacket
 } from '../shared/team-mail-hints'
+import { parseTeamActivityHintPacket, TEAM_ACTIVITY_HINTS_PROTOCOL, emptyBulletinCursor,
+  type BulletinChangeCursor, type TeamActivityHintPacket } from '../shared/team-bulletin-hints'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 // Snapshot scans have a server-side 30s deadline. Leave response/transport
@@ -2122,11 +2124,13 @@ export class AgentServerClient {
     expectedServerIdentity: string,
     mailbox: MailHintMailbox,
     previousCursor: () => MailboxCoverage | null,
-    onPacket: (packet: MailHintPacket) => void,
+    onPacket: (packet: TeamActivityHintPacket) => void,
     onFatal: () => void,
-    onDisconnect: () => void = () => {}
+    onDisconnect: () => void = () => {},
+    activity?: { previousBulletin(): BulletinChangeCursor | null }
   ): () => void {
     const configuration = this.configuration
+    const protocol = activity ? TEAM_ACTIVITY_HINTS_PROTOCOL : TEAM_MAIL_HINTS_PROTOCOL
     const endpoint = new URL(configurationURL(configuration, TEAM_MAIL_HINTS_PATH))
     endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:'
     let stopped = false
@@ -2148,7 +2152,7 @@ export class AgentServerClient {
     const connect = (): void => {
       if (stopped) return
       retry = null
-      const current = new WebSocket(endpoint, [TEAM_MAIL_HINTS_PROTOCOL, ...agentTokenWebSocketProtocols(configuration.token)])
+      const current = new WebSocket(endpoint, [protocol, ...agentTokenWebSocketProtocols(configuration.token)])
       socket = current
       let disconnected = false
       let first: MailHintPacket | null = null
@@ -2170,16 +2174,20 @@ export class AgentServerClient {
       current.addEventListener('open', () => {
         if (!active()) return
         try {
-          if (current.protocol !== TEAM_MAIL_HINTS_PROTOCOL) throw new Error('Mail protocol was not negotiated')
+          if (current.protocol !== protocol) throw new Error('Mail protocol was not negotiated')
           offered = previousCursor()
-          current.send(JSON.stringify({ version: 1, team_id: mailbox.team_id, previous_cursor: offered }))
+          const previous = activity && offered ? { version: 2,
+            mail: { ...offered, reset: false },
+            bulletin: { ...(activity.previousBulletin() ?? emptyBulletinCursor(mailbox.team_id)), reset: false }
+          } : offered
+          current.send(JSON.stringify({ version: activity ? 2 : 1, team_id: mailbox.team_id, previous_cursor: previous }))
         } catch { fatal() }
       })
       current.addEventListener('message', message => {
         if (!active()) return
         try {
           if (typeof message.data !== 'string' || message.data.length > TEAM_MAIL_HINTS_MAX_PACKET_CHARS) throw new Error('Invalid packet')
-          const packet = parseMailHintPacket(JSON.parse(message.data))
+          const packet = activity ? parseTeamActivityHintPacket(JSON.parse(message.data)) : parseMailHintPacket(JSON.parse(message.data))
           if (packet.server_identity !== expectedServerIdentity || packet.hub_id !== mailbox.hub_id
             || packet.cursor.team_id !== mailbox.team_id
             || (mailbox.recipient_server_id !== null && packet.cursor.recipient_server_id !== mailbox.recipient_server_id)) throw new Error('Scope changed')

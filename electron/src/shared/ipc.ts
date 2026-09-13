@@ -215,6 +215,7 @@ export interface AgentsDockAPI {
   }
   mailHints?: {
     acknowledgePage(input: import('./team-mail-hints').MailHintPageAcknowledgment): Promise<import('./team-mail-hints').MailHintProjection | null>
+    acknowledgeBulletinRefresh?(input: import('./team-bulletin-hints').BulletinHintRefresh): Promise<import('./team-mail-hints').MailHintProjection | null>
   }
   bootstrap(): Promise<BootstrapPayload>
   language: {

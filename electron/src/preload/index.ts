@@ -11,7 +11,8 @@ const api: AgentsDockAPI = {
     revoke: (scope, sessionId, mode, shareId) => ipcRenderer.invoke('chat-shares:revoke', scope, sessionId, mode, shareId)
   },
   mailHints: {
-    acknowledgePage: input => ipcRenderer.invoke('team:mail-hints:acknowledge-page', input)
+    acknowledgePage: input => ipcRenderer.invoke('team:mail-hints:acknowledge-page', input),
+    acknowledgeBulletinRefresh: input => ipcRenderer.invoke('team:mail-hints:acknowledge-bulletin', input)
   },
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
   language: {

@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import type { TeamHubScope } from '@shared/team-hub'
 import { parseMailboxCoverage, type MailArrivalCursor, type MailboxCoverage, type MailHintScope } from '@shared/team-mail-hints'
+import type { BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import type {
   TeamAttachment,
   TeamMessage,
@@ -70,7 +71,10 @@ import {
   type TeamMessagesSnapshotQuery
 } from '../lib/team-network-snapshot-cache'
 import { MarkdownContent } from './MarkdownContent'
-import { acknowledgeMailHintPage, captureMailHintScope, sameMailHintScope } from '../store/app-store'
+import {
+  acknowledgeBulletinHintRefresh, acknowledgeMailHintPage, captureBulletinHintRefresh,
+  captureMailHintScope, sameMailHintScope, selectBulletinHintPending, selectMailHintPending, useAppStore
+} from '../store/app-store'
 import './TeamMessagesBoard.css'
 
 const MAX_CATCH_UP_PAGES_PER_REQUEST = 16
@@ -349,6 +353,9 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
     }
   }
 
+  const refreshFeed = () => { void feed.refresh(); void deletionJournal.refresh() }
+  const activityNotice = <TeamActivityNotice kind="bulletin" scope={scope} teamId={teamId}
+    loading={feed.loading} onRefresh={refreshFeed} />
   if (linked.loading || linked.error) return <LinkedMessageState state={linked} />
   if (selected) {
     return <MessageDetailLoader summary={selected} initialMessage={linked.message} scope={scope} teamId={teamId} onBack={() => setSelected(null)}
@@ -360,8 +367,9 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
       title={t('teamNetwork.mail.bulletin')}
       description={t('teamNetwork.mail.bulletinDescription')}
       loading={feed.loading}
-      onRefresh={() => { void feed.refresh(); void deletionJournal.refresh() }}
+      onRefresh={refreshFeed}
     />
+    {activityNotice}
     {feed.error && <InlineError message={feed.error} onRetry={() => { void feed.refresh(); void deletionJournal.refresh() }} />}
     <div className="network-v2-scroll network-v2-feed-stream">
       {feed.loading && <div className="network-v2-feed-sync" role="status"><LoaderCircle className="spin" size={15} />{t('teamNetwork.mail.syncBulletin')}</div>}
@@ -862,6 +870,10 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
     }
   }
 
+  const refreshMail = () => { void mail.refresh(); void deletionJournal.refresh() }
+  const activityNotice = <TeamActivityNotice kind="mail" scope={scope} teamId={teamId} address={address}
+    inbox={box === 'inbox'} loading={mail.loading} onRefresh={refreshMail} />
+
   if (linked.loading || linked.error) return <LinkedMessageState state={linked} />
   if (selected) {
     return <MessageDetailLoader
@@ -877,6 +889,7 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
         void markRead({ ...selected, ...detail })
       }}
       detailError={mail.error}
+      activityNotice={activityNotice}
       onRetryReceipt={retryAction === 'remove' ? () => void removeFromInbox(selected)
         : capability.mailbox_state?.available === true && address?.kind === 'server' ? undefined : () => void markRead(selected)}
       routeTargets={routeTargets}
@@ -901,7 +914,7 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
       title={t('teamNetwork.mail.mail')}
       description={t('teamNetwork.mail.mailDescription')}
       loading={mail.loading}
-      onRefresh={() => { void mail.refresh(); void deletionJournal.refresh() }}
+      onRefresh={refreshMail}
     >
       <div className="network-v2-segmented" role="group" aria-label={t('teamNetwork.mail.mailbox')}>
         <button type="button" className={box === 'inbox' ? 'active' : ''} onClick={() => setBox('inbox')}><Inbox size={13} />{t('teamNetwork.mail.inbox')}</button>
@@ -912,6 +925,7 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
         if (next) onAddressChange?.(next)
       }}><option value="" disabled>{t('teamNetwork.mail.chooseAddress')}</option>{addresses.map(option => <option key={addressKey(option)} value={addressKey(option)}>{option.label}</option>)}</select></label>}
     </SurfaceHeader>
+    {activityNotice}
     {mail.error && <InlineError message={mail.error} onRetry={mail.refresh} />}
     <div className="network-v2-scroll network-v2-bundle-grid">
       {box === 'inbox' && !address && <EmptyState icon={<Inbox size={23} />} title={t('teamNetwork.mail.noMailboxTitle')} body={t('teamNetwork.mail.noMailboxBody')} />}
@@ -945,6 +959,36 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
       onConfirm={() => void confirmDelete()}
     />}
   </section>
+}
+
+/** Subscribe only this quiet affordance, never a message loader, to arrival hints. */
+function TeamActivityNotice({ kind, scope, teamId, address, inbox, loading, onRefresh }: {
+  kind: 'mail' | 'bulletin'
+  scope: TeamHubScope
+  teamId: string
+  address?: TeamMessageAddress | null
+  inbox?: boolean
+  loading: boolean
+  onRefresh: () => void
+}) {
+  useLocale()
+  const pending = useAppStore(state => {
+    const hintScope = kind === 'bulletin' ? state.mailHints?.bulletin?.scope : state.mailHints?.state?.scope
+    const hasUpdates = kind === 'bulletin' ? selectBulletinHintPending(state)
+      : inbox && address?.kind === 'server' && selectMailHintPending(state)
+        && hintScope?.recipientServerId === address.id
+    return Boolean(hasUpdates && hintScope
+      && hintScope.profileId === scope.profileId && hintScope.profileGeneration === scope.profileGeneration
+      && hintScope.serverIdentity === scope.serverIdentity && hintScope.hubId === scope.hubIdentity
+      && hintScope.teamId === teamId)
+  })
+  if (!pending) return null
+  return <div className="network-v2-activity-notice" role="status">
+    <button type="button" className="quiet-button" disabled={loading} onClick={onRefresh}>
+      {loading ? <LoaderCircle className="spin" size={14} /> : kind === 'bulletin' ? <RadioTower size={14} /> : <Mail size={14} />}
+      {t(kind === 'bulletin' ? 'teamNetwork.mail.bulletinUpdatedRefresh' : 'teamNetwork.mail.newMailRefresh')}
+    </button>
+  </div>
 }
 
 interface MessageBundle {
@@ -1075,7 +1119,7 @@ function LinkedMessageState({ state }: { state: ReturnType<typeof useLinkedTeamM
   </section>
 }
 
-function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, canDelete = false, onDeleted, onLoaded, detailError, onRetryReceipt, routeTargets = [], onRoute, onReply, onRemove, removing, showReceipts, replyContext, threadEnabled = false, ownedAddresses = [] }: {
+function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, canDelete = false, onDeleted, onLoaded, detailError, activityNotice, onRetryReceipt, routeTargets = [], onRoute, onReply, onRemove, removing, showReceipts, replyContext, threadEnabled = false, ownedAddresses = [] }: {
   summary: TeamMessageSummary
   initialMessage?: TeamMessage | null
   scope: TeamHubScope
@@ -1085,6 +1129,7 @@ function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, c
   onDeleted?: (messageId: string) => void
   onLoaded?: (message: TeamMessage) => void
   detailError?: string | null
+  activityNotice?: ReactNode
   onRetryReceipt?: () => void
   routeTargets?: TeamMailRouteTarget[]
   onRoute?: (sessionId: string) => void
@@ -1126,9 +1171,10 @@ function MessageDetailLoader({ summary, initialMessage, scope, teamId, onBack, c
   if (message) return <MessageDetail key={`${scopeKey}:${message.id}`} message={message} mailTitle={mailDisplayTitle(summary)} scope={scope} teamId={teamId} onBack={onBack} canDelete={canDelete} onDeleted={onDeleted} routeTargets={routeTargets} onReply={onReply} threadEnabled={threadEnabled} ownedAddresses={ownedAddresses} actions={<>
     {onRoute && <MessageRouteMenu message={summary} routeTargets={routeTargets} onRoute={onRoute} menuLabel={t('teamNetwork.mail.openInChat')} />}
     {onRemove && <button type="button" className="quiet-button" disabled={removing} onClick={onRemove}><Archive size={14} />{removing ? t('teamNetwork.mail.removing') : t('teamNetwork.mail.removeInbox')}</button>}
-  </>} notice={detailError && <InlineError message={detailError} onRetry={onRetryReceipt ?? (() => setRequest(value => value + 1))} />} showReceipts={showReceipts} replyContext={replyContext} />
+  </>} notice={<>{activityNotice}{detailError && <InlineError message={detailError} onRetry={onRetryReceipt ?? (() => setRequest(value => value + 1))} />}</>} showReceipts={showReceipts} replyContext={replyContext} />
   return <section className="network-v2-surface" aria-label={mailDisplayTitle(summary) || summary.title || t('teamNetwork.mail.teamMessage')}>
     <MessageDetailHeader message={summary} onBack={onBack} />
+    {activityNotice}
     {error
       ? <div className="network-v2-detail-state" role="alert"><span>{localizeMailError(error)}</span><button type="button" className="quiet-button" onClick={() => setRequest(value => value + 1)}>{t('teamNetwork.mail.retry')}</button></div>
       : <div className="network-v2-detail-state" role="status"><LoaderCircle className="spin" size={17} />{t('teamNetwork.mail.loadingMessage')}</div>}
@@ -2095,6 +2141,9 @@ function useTeamMessages(
   // Cache rows/sequence maxima are not coverage. Only a fresh, validated page
   // in this exact stream can supply the immutable next-page predecessor.
   const mailCoverageContinuation = useRef<{ scope: Readonly<MailHintScope>; cursor: Readonly<MailArrivalCursor> } | null>(null)
+  // Only a fresh start can establish Bulletin coverage. Retain its captured
+  // head across bounded, explicit Load more requests, never from cached rows.
+  const bulletinRefreshContinuation = useRef<{ capture: BulletinHintRefresh; nextAfter: number } | null>(null)
   const queryKey = JSON.stringify(query)
   const scopeKey = JSON.stringify(scope)
   const persistSnapshot = useCallback(() => {
@@ -2126,6 +2175,12 @@ function useTeamMessages(
     inFlightGeneration.current = generation
     if (!quiet) append ? setLoadingMore(true) : setLoading(true)
     if (!quiet) setError(null)
+    const bulletinContinuation = bulletinRefreshContinuation.current
+    let bulletinCapture = query.box === 'feed' && !prefetchedLoad
+      ? afterSequence == null ? captureBulletinHintRefresh(scope, query.teamId)
+        : append && bulletinContinuation?.nextAfter === afterSequence ? bulletinContinuation.capture : null
+      : null
+    bulletinRefreshContinuation.current = null
     try {
       let cursor = afterSequence
       const hintScope = retainMessage === retainEveryMessage ? captureMailHintScope(scope, query) : null
@@ -2194,10 +2249,24 @@ function useTeamMessages(
         requestedAfter = coverage && coverage.through_sequence === page.next_after_sequence
           ? Object.freeze({ through_sequence: coverage.through_sequence, arrival_id: coverage.arrival_id }) : null
         mailCoverageContinuation.current = requestedAfter && hintScope ? { scope: hintScope, cursor: requestedAfter } : null
+        if (bulletinCapture && !isPrefetched) {
+          if (page.has_more === false) {
+            // A later hint remains pending: this acknowledges only the head
+            // captured before the first request, never the current live head.
+            bulletinRefreshContinuation.current = null
+            void acknowledgeBulletinHintRefresh(bulletinCapture)
+          } else if (page.next_after_sequence != null && page.next_after_sequence > (cursor ?? 0)) {
+            bulletinRefreshContinuation.current = { capture: bulletinCapture, nextAfter: page.next_after_sequence }
+          } else {
+            bulletinRefreshContinuation.current = null
+            bulletinCapture = null
+          }
+        }
         if (!page.has_more || page.next_after_sequence == null) break
         cursor = page.next_after_sequence
       }
     } catch (cause) {
+      if (requestGeneration.current === generation) bulletinRefreshContinuation.current = null
       if (requestGeneration.current === generation && !quiet) setError(errorMessage(cause))
     } finally {
       if (inFlightGeneration.current === generation) inFlightGeneration.current = null
@@ -2250,6 +2319,7 @@ function useTeamMessages(
     receiptReconcileGeneration.current = null
     receiptReconcileOffset.current = 0
     mailCoverageContinuation.current = null
+    bulletinRefreshContinuation.current = null
     const cached = enabled ? peekTeamMessagesSnapshot(lifecycleCacheKey, query) : null
     const stagedMessages = cached?.messages ?? []
     messagesRef.current = stagedMessages

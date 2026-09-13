@@ -7,6 +7,7 @@ import type {
 import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
 import type { TeamHubScope } from '@shared/team-hub'
 import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type MailHintProjection, type MailHintScope } from '@shared/team-mail-hints'
+import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
@@ -2607,6 +2608,38 @@ function mailHintsFromBootstrap(payload: BootstrapPayload): MailHintProjection |
 /** A scalar selector only: a hint never schedules a page, receipt, or refresh. */
 export function selectMailHintPending(state: MailHintBinding & Pick<AppState, 'mailHints'>): boolean {
   return mailHintProjectionMatches(state.mailHints, state) && Boolean(state.mailHints.state && mailHintPending(state.mailHints.state))
+}
+
+export function selectBulletinHintPending(state: MailHintBinding & Pick<AppState, 'mailHints'>): boolean {
+  return mailHintProjectionMatches(state.mailHints, state) && Boolean(state.mailHints.bulletin && bulletinHintPending(state.mailHints.bulletin))
+}
+
+export function captureBulletinHintRefresh(hubScope: TeamHubScope, teamId: string): BulletinHintRefresh | null {
+  const current = useAppStore.getState()
+  const projection = current.mailHints
+  if (!mailHintProjectionMatches(projection, current) || !projection.bulletin || !projection.state
+    || !projection.state.initialized || projection.state.invalid) return null
+  const { scope, latest } = projection.bulletin
+  if (teamId !== scope.teamId || hubScope.hubIdentity !== scope.hubId
+    || hubScope.profileId !== scope.profileId || hubScope.profileGeneration !== scope.profileGeneration
+    || hubScope.serverIdentity !== scope.serverIdentity) return null
+  return { scope: { ...scope }, cursor: { ...latest } }
+}
+
+export async function acknowledgeBulletinHintRefresh(input: BulletinHintRefresh): Promise<void> {
+  const matches = (): boolean => {
+    const state = useAppStore.getState()
+    return mailHintProjectionMatches(state.mailHints, state) && Boolean(state.mailHints.bulletin
+      && sameMailHintScope(state.mailHints.bulletin.scope, input.scope))
+  }
+  if (!matches() || !window.agentsDock.mailHints?.acknowledgeBulletinRefresh) return
+  try {
+    const projection = await window.agentsDock.mailHints.acknowledgeBulletinRefresh(input)
+    if (!matches()) return
+    const current = useAppStore.getState()
+    const mailHints = mergeMailHintProjections(current, current.mailHints, projection)
+    if (mailHints !== current.mailHints) useAppStore.setState({ mailHints })
+  } catch { /* Optional local notification state must not fail a content refresh. */ }
 }
 
 export function sameMailHintScope(left: MailHintScope, right: MailHintScope): boolean {

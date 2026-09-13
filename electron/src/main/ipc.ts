@@ -47,6 +47,7 @@ export function registerIpc(
   handle('chat-shares:revoke', (scope, sessionId, mode, shareId) => service.revokeChatShare(scope, sessionId, mode, shareId))
   handle('native:retry-storage', () => service.retryLocalStorage())
   handle('team:mail-hints:acknowledge-page', input => service.acknowledgeMailHintPage(input))
+  handle('team:mail-hints:acknowledge-bulletin', input => service.acknowledgeBulletinHintRefresh(input))
   if (options.language) {
     const language = options.language
     handle('language:get', () => language.get())

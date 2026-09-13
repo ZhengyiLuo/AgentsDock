@@ -49,6 +49,7 @@ export interface MailHintProjection {
   profileGeneration: number
   revision: number
   state: MailHintState | null
+  bulletin?: import('./team-bulletin-hints').BulletinHintState | null
 }
 
 export interface MailHintPageAcknowledgment {

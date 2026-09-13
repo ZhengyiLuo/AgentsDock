@@ -1,6 +1,7 @@
 import type { LanguagePreference } from './i18n'
 import type { SharedChatAttribution } from './chat-shares'
 import type { MailHintProjection, TeamMailHintsCapability } from './team-mail-hints'
+import type { TeamActivityHintsCapability } from './team-bulletin-hints'
 
 export interface LanguageSettingsSnapshot {
   preference: LanguagePreference
@@ -1581,10 +1582,11 @@ export interface HealthCapabilities {
   session_fork_completed_prefix_v1?: SessionForkCompletedPrefixCapability
   agent_emergency_alerts_v1?: AgentEmergencyAlertsCapability
   team_mail_hints_v1?: TeamMailHintsCapability
+  team_mail_hints_v2?: TeamActivityHintsCapability
   pinned_items?: PinnedItemsCapability
   port_forwarding_v1?: PortForwardingCapability
   websocket_auth_v1?: ServerCapability
-  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
+  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
 }
 
 export interface Health {

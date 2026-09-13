@@ -14,6 +14,7 @@ import {
 } from './server-client'
 import { PinRevisionConflictError } from './pin-sync'
 import { TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailboxCoverage } from '../shared/team-mail-hints'
+import { emptyBulletinCursor, TEAM_ACTIVITY_HINTS_PROTOCOL, type BulletinChangeCursor } from '../shared/team-bulletin-hints'
 
 async function withLocalHTTPServer(
   handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>,
@@ -80,7 +81,7 @@ describe('Team Mail metadata websocket', () => {
   const snapshot = { type: 'snapshot', server_identity: 'server-a', hub_id: 'hub-a', stream_id: 'a'.repeat(32),
     cursor: { ...cursor, reset: false } }
   afterEach(() => { FakeWebSocket.instances = []; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-  function connect(previous: () => MailboxCoverage | null = () => null) {
+  function connect(previous: () => MailboxCoverage | null = () => null, activity?: { previousBulletin(): BulletinChangeCursor | null }) {
     vi.useFakeTimers()
     vi.stubGlobal('WebSocket', FakeWebSocket)
     vi.spyOn(Math, 'random').mockReturnValue(0)
@@ -88,7 +89,7 @@ describe('Team Mail metadata websocket', () => {
     vi.stubGlobal('fetch', fetchMock)
     const client = new AgentServerClient('https://example.test:7850', 'private-token')
     const packet = vi.fn(), fatal = vi.fn(), disconnected = vi.fn()
-    const stop = client.mailHintStream('server-a', mailbox, previous, packet, fatal, disconnected)
+    const stop = client.mailHintStream('server-a', mailbox, previous, packet, fatal, disconnected, activity)
     return { client, packet, fatal, disconnected, stop, fetchMock, socket: FakeWebSocket.instances.at(-1)! }
   }
   it('uses only bounded metadata and subprotocol credentials, with no idle requests or timers', () => {
@@ -190,6 +191,32 @@ describe('Team Mail metadata websocket', () => {
     expect(test.socket.sent).toEqual([])
     expect(test.fatal).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
+  })
+  it('negotiates one v2 stream with independent retained heads and no idle content requests', () => {
+    const bulletin = emptyBulletinCursor('team-a')
+    const test = connect(() => cursor, { previousBulletin: () => bulletin })
+    expect(test.socket.protocol).toBe(TEAM_ACTIVITY_HINTS_PROTOCOL)
+    test.socket.emit('open')
+    expect(JSON.parse(String(test.socket.sent[0]))).toEqual({ version: 2, team_id: 'team-a',
+      previous_cursor: { version: 2, mail: { ...cursor, reset: false }, bulletin: { ...bulletin, reset: false } } })
+    test.socket.emit('message', JSON.stringify({ ...snapshot,
+      cursor: { version: 2, mail: snapshot.cursor, bulletin: { ...bulletin, reset: false } } }))
+    expect(test.packet).toHaveBeenCalledWith({ ...snapshot, bulletin: { ...bulletin, reset: false } })
+    vi.advanceTimersByTime(600_000)
+    expect(test.fetchMock).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    test.stop()
+  })
+  it('rejects foreign Bulletin metadata without retry loops or silently mixing protocol versions', () => {
+    const test = connect(() => null, { previousBulletin: () => null })
+    test.socket.emit('message', JSON.stringify({ ...snapshot,
+      cursor: { version: 2, mail: snapshot.cursor, bulletin: { ...emptyBulletinCursor('foreign'), reset: false } } }))
+    expect(test.fatal).toHaveBeenCalledOnce()
+    expect(test.packet).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(600_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(test.fetchMock).not.toHaveBeenCalled()
   })
 })
 

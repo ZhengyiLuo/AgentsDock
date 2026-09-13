@@ -62,7 +62,7 @@ import {
   teamNetworkSnapshotKey,
   type TeamNetworkCoreSnapshot
 } from '../lib/team-network-snapshot-cache'
-import { selectMailHintPending, useAppStore } from '../store/app-store'
+import { selectMailHintPending, selectBulletinHintPending, useAppStore } from '../store/app-store'
 import { t, useLocale } from '../lib/i18n'
 
 export type TeamNetworkSection = 'feed' | 'mail' | 'skills' | 'directory'
@@ -182,7 +182,8 @@ export function TeamNetwork({
   const error = displayCopy(errorCopy)
   const notice = displayCopy(noticeCopy)
   const localChatSessions = useAppStore(state => state.sessions)
-  const newMailArrivals = useAppStore(selectMailHintPending)
+  const newMailArrivals = useAppStore(state => selectMailHintPending(state) && state.mailHints?.state?.scope.teamId === selectedTeamId)
+  const newBulletinUpdates = useAppStore(state => selectBulletinHintPending(state) && state.mailHints?.bulletin?.scope.teamId === selectedTeamId)
   const currentChatSessionId = useAppStore(state => state.selectedSessionId)
   const lifecycleEpoch = useRef(0)
   const dataEpoch = useRef(0)
@@ -1555,7 +1556,8 @@ export function TeamNetwork({
         ><Inbox size={15} />{t('teamNetwork.shell.mail')}{newMailArrivals && <span className="status-dot" aria-hidden="true" />}{(unreadMailboxCount > 0 || teamMessageUnreadOverflow) && <b className="network-nav-badge" aria-hidden="true">{unreadMailboxLabel}</b>}</button>
         {newMailArrivals && <span id="team-network-new-mail-arrivals" className="sr-only">{t('teamNetwork.shell.newMailNotice')}</span>}
         {(unreadMailboxCount > 0 || teamMessageUnreadOverflow) && <span id="team-network-mailbox-unread" className="sr-only">{t(unreadMailboxCount === 1 && !teamMessageUnreadOverflow ? 'teamNetwork.shell.unreadOne' : 'teamNetwork.shell.unreadOther', { count: unreadMailboxLabel })}</span>}
-        <button className={section === 'feed' ? 'active' : ''} title={t('teamNetwork.shell.broadcast')} onClick={() => setSection('feed')}><RadioTower size={15} />{t('teamNetwork.shell.bulletin')}</button>
+        <button className={section === 'feed' ? 'active' : ''} title={t('teamNetwork.shell.broadcast')} aria-describedby={newBulletinUpdates ? 'team-network-new-bulletin-updates' : undefined} onClick={() => setSection('feed')}><RadioTower size={15} />{t('teamNetwork.shell.bulletin')}{newBulletinUpdates && <span className="status-dot" aria-hidden="true" />}</button>
+        {newBulletinUpdates && <span id="team-network-new-bulletin-updates" className="sr-only">{t('teamNetwork.shell.newBulletinNotice')}</span>}
         <button className={section === 'directory' ? 'active' : ''} onClick={() => setSection('directory')}><Server size={15} />{humanDirectory ? t('teamNetwork.shell.serversPeople') : t('teamNetwork.shell.servers')}</button>
         <div className="teamspace-nav-spacer" />
         <article className="team-network-nav-footer">
