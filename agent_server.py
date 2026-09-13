@@ -1463,7 +1463,9 @@ PROVIDER_TOOL_DESCRIPTION = (
     "arguments without authority/chat identity flags. Discover permitted chats with "
     "chats list and contact its exact --route. Legacy one-use handles use "
     "chats send|ask --target-index N. For the current inbound reply use chats "
-    "respond-current. Put mail/team message bodies in stdin."
+    "respond-current. Put chats/mail/team message bodies in stdin; Chats also "
+    "accepts --message (choose one, not both). An async send is confirmed only "
+    "by an accepted receipt with message_id; a tool error is not delivery confirmation."
 )
 API_CONTRACT_VERSION = 28
 SESSION_ORDER_STEP = 1000.0
@@ -19793,6 +19795,19 @@ def validate_provider_tool_input(value: Any) -> tuple[str, list[str], str]:
         clean_arguments.append(argument)
     if not clean_arguments:
         raise ProviderToolError("provider tool requires a helper command")
+    if helper == "chats" and stdin:
+        if clean_arguments[0] not in {"send", "ask", "respond-current"}:
+            raise ProviderToolError("this Chats command does not accept a message body on stdin")
+        if not stdin.strip():
+            raise ProviderToolError("message stdin is empty; no message was sent")
+        if any(arg == "--message" or arg.startswith("--message=") for arg in clean_arguments):
+            raise ProviderToolError("choose stdin or --message, not both; no message was sent")
+        if "--message-stdin" not in clean_arguments:
+            if len(clean_arguments) >= PROVIDER_TOOL_MAX_ARGUMENTS:
+                raise ProviderToolError("provider tool has too many arguments")
+            clean_arguments.append("--message-stdin")
+    elif helper == "chats" and "--message-stdin" in clean_arguments:
+        raise ProviderToolError("message stdin is empty; no message was sent")
     return str(helper), clean_arguments, stdin
 
 
@@ -75068,6 +75083,7 @@ async def health() -> dict[str, Any]:
         ),
         "capabilities": {
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
+            "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
                 "available": True,
                 "required": False,

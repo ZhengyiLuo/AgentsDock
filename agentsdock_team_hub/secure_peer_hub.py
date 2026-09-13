@@ -33,6 +33,7 @@ from .secure_peer import (
 from .security import canonical_json
 from .mail_hint_streams import MailHintLease, owned_mail_snapshot
 from .mail_hints import MailHintCapacity, MailHintClosed
+from .notification_hints import NotificationLease, owned_notification_snapshot
 from .store import MAX_NETWORK_BODY_BYTES, HubError, HubStore
 
 
@@ -74,13 +75,14 @@ class SecurePeerHubAdapter:
         self._revoking: set[str] = set()
         self._stream_aborters: dict[str, set[Callable[[], None]]] = {}
         # Passive Mail leases never retain _in_flight or ordinary rate slots.
-        self._mail_leases: dict[str, set[MailHintLease | object]] = {}
+        self._mail_leases: dict[str, set[MailHintLease | NotificationLease | object]] = {}
 
     @_mail_hint_errors
-    def team_mail_hint_snapshot(self, peer: PeerAuthorization, previous_cursor=None) -> dict[str, Any]:
+    def team_mail_hint_snapshot(self, peer: PeerAuthorization, previous_cursor=None, *, version: int = 1) -> dict[str, Any]:
         self._admit(peer.peer_id, write=False)
         try:
-            snapshot, _retained = owned_mail_snapshot(
+            owned = owned_notification_snapshot if version == 2 else owned_mail_snapshot
+            snapshot, _retained = owned(
                 self.store, self._claims(self.store, peer), peer.team_id, previous_cursor,
             )
             return {"hub_id": self.store.hub_id, "cursor": snapshot}
@@ -89,7 +91,8 @@ class SecurePeerHubAdapter:
 
     @_mail_hint_errors
     def subscribe_team_mail_hints(self, peer: PeerAuthorization, previous_cursor=None, *,
-                                  authority_guard: Callable[[], None] | None = None) -> MailHintLease:
+                                  authority_guard: Callable[[], None] | None = None,
+                                  version: int = 1) -> MailHintLease | NotificationLease:
         token = object()
         with self._rate_condition:
             current = self._mail_leases.get(peer.peer_id, set())
@@ -102,8 +105,10 @@ class SecurePeerHubAdapter:
         lease = None
         try:
             claims = self._claims(self.store, peer)
-            _owned, retained = owned_mail_snapshot(self.store, claims, peer.team_id, previous_cursor)
-            subscription, snapshot = self.store.subscribe_team_mail_arrivals(
+            owned = owned_notification_snapshot if version == 2 else owned_mail_snapshot
+            _owned, retained = owned(self.store, claims, peer.team_id, previous_cursor)
+            subscriber = self.store.subscribe_team_notifications if version == 2 else self.store.subscribe_team_mail_arrivals
+            subscription, snapshot = subscriber(
                 claims, peer.team_id, previous_cursor=retained,
             )
 
@@ -117,7 +122,8 @@ class SecurePeerHubAdapter:
                 live = self.store.team_mail_arrival_snapshot(
                     self._claims(self.store, peer), peer.team_id,
                 )
-                if live["recipient_server_id"] != snapshot["recipient_server_id"]:
+                mail_snapshot = snapshot["mail"] if version == 2 else snapshot
+                if live["recipient_server_id"] != mail_snapshot["recipient_server_id"]:
                     raise MailHintClosed("Secure peer Mail binding changed")
 
             def retired() -> None:
@@ -129,7 +135,8 @@ class SecurePeerHubAdapter:
                             self._mail_leases.pop(peer.peer_id, None)
                     self._rate_condition.notify_all()
 
-            lease = MailHintLease(
+            lease_type = NotificationLease if version == 2 else MailHintLease
+            lease = lease_type(
                 subscription, snapshot, hub_id=self.store.hub_id, authorize=authorize,
                 expires_at=peer.certificate_expires_at, on_close=retired,
             )
@@ -159,7 +166,7 @@ class SecurePeerHubAdapter:
             leases = tuple(
                 item for key, members in self._mail_leases.items()
                 if peer_id is None or key == peer_id
-                for item in members if isinstance(item, MailHintLease)
+                for item in members if isinstance(item, (MailHintLease, NotificationLease))
             )
         for lease in leases:
             lease.close()

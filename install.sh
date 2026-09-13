@@ -1534,6 +1534,7 @@ TEAM_HUB_RELEASE_FILES=(
   database.py
   mail_hints.py
   mail_hint_streams.py
+  notification_hints.py
   security.py
   secure_peer.py
   secure_peer_hub.py
@@ -1561,6 +1562,7 @@ TEAM_HUB_RELEASE_FILES=(
   migrations/0019_team_mailbox_state.sql
   migrations/0020_team_mail_arrivals.sql
   migrations/0021_team_mail_threads.sql
+  migrations/0022_team_bulletin_changes.sql
 )
 
 for name in "${RELEASE_FILES[@]}"; do

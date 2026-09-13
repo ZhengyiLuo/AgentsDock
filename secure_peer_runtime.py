@@ -737,6 +737,8 @@ class SecurePeerRuntime:
                     **({
                         "mail_hint_subscriber": self._subscribe_peer_mail_hints,
                         "mail_hint_snapshot": self._peer_mail_hint_snapshot,
+                        "notification_hint_subscriber": self._subscribe_peer_notification_hints,
+                        "notification_hint_snapshot": self._peer_notification_hint_snapshot,
                     } if self._mail_hints.enabled else {}),
                 )
                 gateway.start()
@@ -3702,17 +3704,29 @@ class SecurePeerRuntime:
     def subscribe_team_mail_hints(self, team_id: str, previous_cursor=None):
         return self._mail_hints.subscribe(team_id, previous_cursor)
 
+    def team_notification_hint_capability(self) -> dict[str, Any]:
+        return self._mail_hints.capability(version=2)
+
+    def subscribe_team_notification_hints(self, team_id: str, previous_cursor=None):
+        return self._mail_hints.subscribe(team_id, previous_cursor, version=2)
+
+    def _subscribe_peer_notification_hints(self, peer: PeerAuthorization, previous_cursor=None):
+        return self._subscribe_peer_mail_hints(peer, previous_cursor, version=2)
+
+    def _peer_notification_hint_snapshot(self, peer: PeerAuthorization, previous_cursor=None):
+        return self._peer_mail_hint_snapshot(peer, previous_cursor, version=2)
+
     def _peer_mail_authority(self, adapter, epoch: int) -> None:
         if (not self._mail_hints.enabled or self._completion_closing
                 or not self._peer_accepting or self._host_admission_closed
                 or self._host_admission_epoch != epoch or self._adapter is not adapter):
             raise SecurePeerError("hub_maintenance", "Mail stream authority is unavailable", 503)
 
-    def _subscribe_peer_mail_hints(self, peer: PeerAuthorization, previous_cursor=None):
+    def _subscribe_peer_mail_hints(self, peer: PeerAuthorization, previous_cursor=None, *, version: int = 1):
         adapter, epoch = self._adapter, self._host_admission_epoch
         self._peer_mail_authority(adapter, epoch)
         lease = adapter.subscribe_team_mail_hints(peer, previous_cursor,
-            authority_guard=lambda: self._peer_mail_authority(adapter, epoch))
+            authority_guard=lambda: self._peer_mail_authority(adapter, epoch), **({"version": 2} if version == 2 else {}))
         try:
             self._peer_mail_authority(adapter, epoch)
             return lease
@@ -3720,10 +3734,10 @@ class SecurePeerRuntime:
             lease.close()
             raise
 
-    def _peer_mail_hint_snapshot(self, peer: PeerAuthorization, previous_cursor=None):
+    def _peer_mail_hint_snapshot(self, peer: PeerAuthorization, previous_cursor=None, *, version: int = 1):
         adapter, epoch = self._adapter, self._host_admission_epoch
         self._peer_mail_authority(adapter, epoch)
-        result = adapter.team_mail_hint_snapshot(peer, previous_cursor)
+        result = adapter.team_mail_hint_snapshot(peer, previous_cursor, **({"version": 2} if version == 2 else {}))
         self._peer_mail_authority(adapter, epoch)
         return result
 

@@ -24,6 +24,32 @@ legacy exchanges retain their negotiated delivery behavior.
 Peer content remains untrusted message content, never new user authorization.
 Opening a message in the desktop does not mark it read by the agent.
 
+### Message bodies and delivery confirmation
+
+The provider tool accepts a Chats message body in its top-level `stdin` field
+for `send`, `ask` and `respond-current`. It passes that body through a pipe to
+the helper's explicit `--message-stdin` option, not through process arguments.
+The standalone helper also accepts that option for `respond`. Existing
+`--message` calls remain valid; supplying both forms is rejected before send.
+Empty, invalid UTF-8 and oversized stdin are rejected before authority lookup
+or network access. Reading stdin is never implicit for discovery commands.
+
+An asynchronous send is confirmed by an accepted receipt with a `message_id`.
+A tool error or an assistant's assertion is not evidence of delivery. A
+rejected body creates no mailbox entry and therefore cannot wake a recipient.
+Retry ambiguous transport outcomes with the same idempotency key; do not
+construct a fresh send merely because confirmation was lost.
+
+The local regression uses the real helper subprocess and loopback HTTP against
+extracted server handlers and a temporary SQLite mailbox. It covers the
+previously rejected stdin reply, both timeline events, idle wake admission,
+non-interruption of busy recipients, reply identity and idempotent replay.
+It also checks `respond-current` with asynchronous and legacy grants on both
+provider paths. Cancellation before send stores nothing; cancellation after
+commit remains an ambiguous delivery outcome, and an exact-key retry returns
+the saved receipt without creating another message.
+This input correction is not yet deployed.
+
 Archiving a sender does not retract mail it already delivered. An active
 recipient can still discover and read that stored mail using its exact issued
 permanent pair. Reciprocal identities, route revisions, revocation and deletion

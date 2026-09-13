@@ -35,6 +35,8 @@ IDEMPOTENT_POST_RETRY_DELAYS_SECONDS = (0.1, 0.5)
 IDEMPOTENT_GET_RETRY_DELAYS_SECONDS = (0.1, 0.5)
 PROVIDER_RUNTIME_VALUE_MAX_BYTES = 4096
 PROVIDER_RUNTIME_HANDLE_MAX_COUNT = 64
+MESSAGE_STDIN_MAX_CHARS = 100_000
+MESSAGE_STDIN_MAX_BYTES = 400 * 1024
 
 
 class ChatsCLIError(RuntimeError):
@@ -1014,6 +1016,30 @@ def respond(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def read_message_stdin() -> str:
+    """Read an explicitly selected body, bounded before any authority or I/O."""
+    if sys.stdin.isatty():
+        raise ChatsCLIError("--message-stdin requires piped text; no message was sent")
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
+    raw = stream.read(MESSAGE_STDIN_MAX_BYTES + 1)
+    try:
+        message = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        size = len(message.encode("utf-8"))
+    except (UnicodeDecodeError, UnicodeEncodeError) as exc:
+        raise ChatsCLIError("message stdin is not valid UTF-8; no message was sent") from exc
+    if size > MESSAGE_STDIN_MAX_BYTES or len(message) > MESSAGE_STDIN_MAX_CHARS:
+        raise ChatsCLIError("message stdin is too large; no message was sent")
+    if "\x00" in message or not message.strip():
+        raise ChatsCLIError("message stdin must contain nonempty text; no message was sent")
+    return message
+
+
+def add_message_arguments(command: argparse.ArgumentParser) -> None:
+    body = command.add_mutually_exclusive_group(required=True)
+    body.add_argument("--message")
+    body.add_argument("--message-stdin", action="store_true", help="read the message body from stdin")
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         description="Contact an eligible chat on this AgentsDock server.",
@@ -1059,7 +1085,7 @@ def parser() -> argparse.ArgumentParser:
     send_destination.add_argument("--route")
     send_destination.add_argument("--target")
     send_destination.add_argument("--target-index", type=positive_target_index)
-    command.add_argument("--message", required=True)
+    add_message_arguments(command)
     command.add_argument("--idempotency-key")
     command.add_argument("--mode", choices=["async_route_v1"])
     command.add_argument("--reply-to", help="exact received message ID; asynchronous routes only")
@@ -1073,7 +1099,7 @@ def parser() -> argparse.ArgumentParser:
     ask_destination.add_argument("--route")
     ask_destination.add_argument("--target")
     ask_destination.add_argument("--target-index", type=positive_target_index)
-    ask_command.add_argument("--message", required=True)
+    add_message_arguments(ask_command)
     ask_command.add_argument("--idempotency-key")
     ask_command.add_argument("--mode", choices=["async_route_v1"])
     ask_command.add_argument("--reply-to", help="exact received message ID; asynchronous routes only")
@@ -1103,7 +1129,7 @@ def parser() -> argparse.ArgumentParser:
     )
     response_command.add_argument("--exchange", required=True)
     response_command.add_argument("--inbound-leg", required=True)
-    response_command.add_argument("--message", required=True)
+    add_message_arguments(response_command)
     response_command.add_argument("--request-response", action="store_true")
     response_command.add_argument(
         "--async-response",
@@ -1130,7 +1156,7 @@ def parser() -> argparse.ArgumentParser:
         help="respond using this run's current inbound reply grant",
         allow_abbrev=False,
     )
-    current_response_command.add_argument("--message", required=True)
+    add_message_arguments(current_response_command)
     current_response_command.add_argument(
         "--request-response",
         action="store_true",
@@ -1178,6 +1204,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         args = parser().parse_args(argv)
+        if getattr(args, "message_stdin", False):
+            args.message = read_message_stdin()
         selected_authority = _authority_path(args.authority_file)
         os.environ["AGENTSDOCK_PROVIDER_AUTHORITY_FILE"] = str(
             selected_authority

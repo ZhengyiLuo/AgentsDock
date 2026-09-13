@@ -45,6 +45,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID, ObjectIdentifier
 
 from .security import canonical_json, create_secret_file, ensure_private_directory, read_secret_file
 from .mail_hints import MailArrival, MailHintClosed
+from .notification_hints import NotificationCursor
 
 
 PROTOCOL_VERSION = 1
@@ -215,22 +216,24 @@ class AttachmentFileLease:
 
 
 def _mail_hint_frame(value: Any, *, hub_id: str, team_id: str,
-                     recipient_server_id: str | None = None) -> dict[str, Any]:
+                     recipient_server_id: str | None = None, version: int = 1) -> dict[str, Any]:
     """Strict metadata only; the authenticated connection supplies its realm."""
     if (not isinstance(value, dict) or set(value) != {"type", "hub_id", "cursor"}
             or value["type"] not in {"snapshot", "hint"} or value["hub_id"] != hub_id):
         raise SecurePeerError("remote_invalid", "Invalid Mail hint frame", 502)
     try:
         raw = value["cursor"]
-        cursor = MailArrival.from_dict(raw)
-        if ("reset" not in raw or cursor.team_id != team_id
-                or (recipient_server_id is not None and cursor.recipient_server_id != recipient_server_id)
-                or (value["type"] == "hint" and raw["reset"])):
+        cursor = NotificationCursor.from_dict(raw) if version == 2 else MailArrival.from_dict(raw)
+        mail = cursor.mail if version == 2 else cursor
+        resets = [raw["mail"]["reset"], raw["bulletin"]["reset"]] if version == 2 else [raw.get("reset")]
+        if (any(type(reset) is not bool for reset in resets) or mail.team_id != team_id
+                or (recipient_server_id is not None and mail.recipient_server_id != recipient_server_id)
+                or (value["type"] == "hint" and any(resets))):
             raise ValueError("Mail hint scope changed")
     except (TypeError, ValueError) as exc:
         raise SecurePeerError("remote_invalid", "Invalid Mail hint cursor", 502) from exc
     return {"type": value["type"], "hub_id": hub_id,
-            "cursor": cursor.as_dict(reset=raw["reset"])}
+            "cursor": cursor.as_dict() if version == 2 else cursor.as_dict(reset=raw["reset"])}
 
 
 class PeerMailHintStream:
@@ -242,9 +245,11 @@ class PeerMailHintStream:
 
     def __init__(self, connection: Any, response: Any, sock: Any, *,
                  hub_id: str, team_id: str, expires_at: int,
-                 revalidate: Callable[[], None], clock: Callable[[], float] = time.time) -> None:
+                 revalidate: Callable[[], None], clock: Callable[[], float] = time.time,
+                 version: int = 1) -> None:
         self._connection, self._response, self._socket = connection, response, sock
         self._hub_id, self._team_id = hub_id, team_id
+        self._version = version
         self._expires_at, self._clock, self._revalidate = expires_at, clock, revalidate
         self._guard = threading.Lock()
         self._reader = threading.Lock()
@@ -278,11 +283,12 @@ class PeerMailHintStream:
                 if self._closed or self._clock() >= self._expires_at:
                     raise MailHintClosed("Mail hint authority expired")
                 frame = _mail_hint_frame(value, hub_id=self._hub_id, team_id=self._team_id,
-                                         recipient_server_id=self._recipient)
+                                         recipient_server_id=self._recipient, version=self._version)
                 if (frame["type"] == "snapshot") == self._initialized:
                     raise SecurePeerError("remote_invalid", "Mail hint snapshot order is invalid", 502)
                 self._initialized = True
-                self._recipient = frame["cursor"]["recipient_server_id"]
+                mail = frame["cursor"]["mail"] if self._version == 2 else frame["cursor"]
+                self._recipient = mail["recipient_server_id"]
                 return frame
         except BaseException:
             self.close()
@@ -5458,6 +5464,8 @@ class SecurePeerGateway:
         | None = None,
         mail_hint_subscriber: Callable[[PeerAuthorization, Any], Any] | None = None,
         mail_hint_snapshot: Callable[[PeerAuthorization, Any], Mapping[str, Any]] | None = None,
+        notification_hint_subscriber: Callable[[PeerAuthorization, Any], Any] | None = None,
+        notification_hint_snapshot: Callable[[PeerAuthorization, Any], Mapping[str, Any]] | None = None,
     ) -> None:
         self.store = store
         self.bind_ip = canonical_peer_ipv4(bind_ip)
@@ -5472,6 +5480,8 @@ class SecurePeerGateway:
         # own finite budget, separate from interactive request admission.
         self.mail_hint_subscriber = mail_hint_subscriber
         self.mail_hint_snapshot = mail_hint_snapshot
+        self.notification_hint_subscriber = notification_hint_subscriber
+        self.notification_hint_snapshot = notification_hint_snapshot
         self._mail_guard = threading.Condition(threading.RLock())
         self._mail_streams: dict[object, tuple[str, Callable[[], None]]] = {}
         self._mail_hint_unsubscribe: Callable[[], None] | None = None
@@ -5715,7 +5725,9 @@ class SecurePeerGateway:
 
                 def _mail_hints(self, *, stream: bool) -> None:
                     callback = gateway.mail_hint_subscriber if stream else gateway.mail_hint_snapshot
-                    if callback is None:
+                    notification_callback = (gateway.notification_hint_subscriber if stream
+                                             else gateway.notification_hint_snapshot)
+                    if callback is None and notification_callback is None:
                         raise SecurePeerError("not_found", "Resource not found", 404)
                     self._reject_browser_headers()
                     peer = self._peer()
@@ -5724,13 +5736,19 @@ class SecurePeerGateway:
                         raise SecurePeerError("forbidden", "Team Mail read authority is required", 403)
                     value = _require_exact_keys(self._json_body(MAX_MAIL_HINT_FRAME_BYTES),
                         {"version", "team_id", "previous_cursor"}, context="Mail hint subscription")
-                    if type(value["version"]) is not int or value["version"] != 1 or value["team_id"] != peer.team_id:
+                    version = value["version"]
+                    if type(version) is not int or version not in (1, 2) or value["team_id"] != peer.team_id:
                         raise SecurePeerError("forbidden", "Mail hint team does not match peer authority", 403)
+                    if version == 2:
+                        callback = notification_callback
+                    if callback is None:
+                        raise SecurePeerError("not_found", "Resource not found", 404)
                     previous = value["previous_cursor"]
                     if previous is not None:
                         try:
-                            previous = MailArrival.from_dict(previous).as_dict()
-                            if previous["team_id"] != peer.team_id:
+                            parsed = NotificationCursor.from_dict(previous) if version == 2 else MailArrival.from_dict(previous)
+                            previous = parsed.as_dict()
+                            if parsed.mailbox[0] != peer.team_id:
                                 raise ValueError("Mail hint team changed")
                         except (TypeError, ValueError) as exc:
                             raise SecurePeerError("invalid_request", "Invalid Mail hint cursor", 422) from exc
@@ -5739,7 +5757,7 @@ class SecurePeerGateway:
                         if not isinstance(result, Mapping) or set(result) != {"hub_id", "cursor"}:
                             raise SecurePeerError("hub_unavailable", "Invalid Mail hint snapshot", 503)
                         frame = _mail_hint_frame({"type": "snapshot", **result},
-                            hub_id=gateway.store.hub_id, team_id=peer.team_id)
+                            hub_id=gateway.store.hub_id, team_id=peer.team_id, version=version)
                         self._json(200, {"hub_id": frame["hub_id"], "cursor": frame["cursor"]})
                         return
                     lease = callback(peer, previous)
@@ -5765,7 +5783,7 @@ class SecurePeerGateway:
                         certificate = self.connection.getpeercert(binary_form=True)
                         snapshot = _mail_hint_frame({"type": "snapshot", "hub_id": lease.hub_id,
                             "cursor": lease.snapshot}, hub_id=gateway.store.hub_id,
-                            team_id=peer.team_id, recipient_server_id=lease.recipient_server_id)
+                            team_id=peer.team_id, recipient_server_id=lease.recipient_server_id, version=version)
                         lease.revalidate()
                         watcher = gateway._mail_watcher
                         if watcher is None:
@@ -5792,7 +5810,7 @@ class SecurePeerGateway:
                                     raise MailHintClosed("Mail hint authority changed")
                                 packet = _mail_hint_frame({"type": kind, "hub_id": lease.hub_id, "cursor": cursor},
                                     hub_id=gateway.store.hub_id, team_id=peer.team_id,
-                                    recipient_server_id=lease.recipient_server_id)
+                                    recipient_server_id=lease.recipient_server_id, version=version)
                                 wire = canonical_json(packet) + b"\n"
                                 if len(wire) > MAX_MAIL_HINT_FRAME_BYTES:
                                     raise MailHintClosed("Mail hint frame exceeds bound")
@@ -5981,6 +5999,9 @@ class SecurePeerGateway:
                                     "mail_hints_available": bool(gateway.mail_hint_subscriber is not None
                                                                  and gateway.mail_hint_snapshot is not None
                                                                  and "teamspace.read" in peer.scopes),
+                                    "mail_hints_v2_available": bool(gateway.notification_hint_subscriber is not None
+                                                                    and gateway.notification_hint_snapshot is not None
+                                                                    and "teamspace.read" in peer.scopes),
                                 },
                             )
                             return
@@ -6359,7 +6380,7 @@ class SecurePeerGateway:
             self._server = server
             self._thread = thread
             try:
-                if self.mail_hint_subscriber is not None:
+                if self.mail_hint_subscriber is not None or self.notification_hint_subscriber is not None:
                     self._mail_watcher = _MailHintDisconnectWatcher()
                     self._mail_hint_unsubscribe = self.store.register_mail_hint_revoker(self.close_mail_hint_streams)
                 thread.start()
@@ -6583,6 +6604,7 @@ class SecurePeerClient:
         # One current authenticated capability receipt, not a per-peer cache
         # or polling lane. Existing activation/heartbeat health fills this.
         self._mail_hint_health: tuple[str, str, str, str, int, bool] | None = None
+        self._notification_hint_health: tuple[str, str, str, str, int, bool] | None = None
         self._pairing_request_guard = threading.RLock()
         self._pairing_capacity_lock = pairing_capacity_lock or threading.RLock()
         self._external_actionable_pairing_count = (
@@ -8537,6 +8559,7 @@ class SecurePeerClient:
             or value.get("certificate_expires_at") != row["certificate_expires_at"]
             or type(value.get("remote_route_delivery_available")) is not bool
             or ("mail_hints_available" in value and type(value["mail_hints_available"]) is not bool)
+            or ("mail_hints_v2_available" in value and type(value["mail_hints_v2_available"]) is not bool)
         ):
             raise SecurePeerError("host_identity_mismatch", "Connected peer health identity changed", 409)
         validated_at = self._timestamp()
@@ -8563,10 +8586,18 @@ class SecurePeerClient:
             connection.close()
         self._mail_hint_health = (connection_id, row["certificate_fingerprint"], row["hub_id"],
                                   row["team_id"], validated_at, value.get("mail_hints_available") is True)
+        self._notification_hint_health = (connection_id, row["certificate_fingerprint"], row["hub_id"],
+                                         row["team_id"], validated_at, value.get("mail_hints_v2_available") is True)
         return value
 
     def mail_hint_capability(self, connection_id: str, certificate_fingerprint: str | None = None) -> bool:
         receipt = self._mail_hint_health
+        return bool(receipt is not None and receipt[0] == connection_id
+                    and (certificate_fingerprint is None or receipt[1] == certificate_fingerprint)
+                    and receipt[4] >= self._timestamp() - 120 and receipt[5])
+
+    def notification_hint_capability(self, connection_id: str, certificate_fingerprint: str | None = None) -> bool:
+        receipt = getattr(self, "_notification_hint_health", None)
         return bool(receipt is not None and receipt[0] == connection_id
                     and (certificate_fingerprint is None or receipt[1] == certificate_fingerprint)
                     and receipt[4] >= self._timestamp() - 120 and receipt[5])
@@ -9392,17 +9423,22 @@ class SecurePeerClient:
             )
         return row
 
-    def _prepare_mail_hint_request(self, connection_id: str, previous_cursor: Any) -> tuple[Any, ssl.SSLContext, dict[str, Any]]:
+    def _prepare_mail_hint_request(self, connection_id: str, previous_cursor: Any, *, version: int = 1) -> tuple[Any, ssl.SSLContext, dict[str, Any]]:
+        if type(version) is not int or version not in (1, 2):
+            raise ValueError("Unsupported notification version")
         with self._route_guard:
             row = self._require_active_connection_locked(connection_id, relay_required=False)
             scopes = json.loads(row["requested_scopes_json"])
             if "teamspace.read" not in scopes:
                 raise SecurePeerError("forbidden", "Team Mail read authority is required", 403)
+            if version == 2 and not self.notification_hint_capability(connection_id, row["certificate_fingerprint"]):
+                raise SecurePeerError("unsupported", "Team notifications are not negotiated", 501)
             if previous_cursor is not None:
-                previous_cursor = MailArrival.from_dict(previous_cursor).as_dict()
-                if previous_cursor["team_id"] != row["team_id"]:
+                parsed = NotificationCursor.from_dict(previous_cursor) if version == 2 else MailArrival.from_dict(previous_cursor)
+                previous_cursor = parsed.as_dict()
+                if parsed.mailbox[0] != row["team_id"]:
                     raise SecurePeerError("forbidden", "Mail hint team changed", 403)
-            body = {"version": 1, "team_id": row["team_id"], "previous_cursor": previous_cursor}
+            body = {"version": version, "team_id": row["team_id"], "previous_cursor": previous_cursor}
             return row, self._pinned_context(row, mutual_tls=True), body
 
     def _revalidate_mail_hint_connection(self, connection_id: str, original: Any) -> None:
@@ -9413,19 +9449,25 @@ class SecurePeerClient:
             if any(current[key] != original[key] for key in fields):
                 raise MailHintClosed("Mail hint connection authority changed")
 
-    def team_mail_hint_snapshot(self, connection_id: str, previous_cursor: Any = None) -> dict[str, Any]:
-        row, context, body = self._prepare_mail_hint_request(connection_id, previous_cursor)
+    def team_notification_hint_snapshot(self, connection_id: str, previous_cursor: Any = None) -> dict[str, Any]:
+        return self.team_mail_hint_snapshot(connection_id, previous_cursor, version=2)
+
+    def open_notification_hint_stream(self, connection_id: str, previous_cursor: Any = None) -> PeerMailHintStream:
+        return self.open_mail_hint_stream(connection_id, previous_cursor, version=2)
+
+    def team_mail_hint_snapshot(self, connection_id: str, previous_cursor: Any = None, *, version: int = 1) -> dict[str, Any]:
+        row, context, body = self._prepare_mail_hint_request(connection_id, previous_cursor, version=version)
         status, headers, raw, _leaf = self._request(row["host_ip"], int(row["port"]), "POST",
             "/v1/mail-hints/snapshot", body=body, context=context, maximum_response=MAX_MAIL_HINT_FRAME_BYTES)
         value = self._decode_json_response(status, headers, raw)
         self._revalidate_mail_hint_connection(connection_id, row)
         if set(value) != {"hub_id", "cursor"}:
             raise SecurePeerError("remote_invalid", "Invalid Mail hint snapshot", 502)
-        frame = _mail_hint_frame({"type": "snapshot", **value}, hub_id=row["hub_id"], team_id=row["team_id"])
+        frame = _mail_hint_frame({"type": "snapshot", **value}, hub_id=row["hub_id"], team_id=row["team_id"], version=version)
         return {"hub_id": frame["hub_id"], "cursor": frame["cursor"]}
 
-    def open_mail_hint_stream(self, connection_id: str, previous_cursor: Any = None) -> PeerMailHintStream:
-        row, context, body = self._prepare_mail_hint_request(connection_id, previous_cursor)
+    def open_mail_hint_stream(self, connection_id: str, previous_cursor: Any = None, *, version: int = 1) -> PeerMailHintStream:
+        row, context, body = self._prepare_mail_hint_request(connection_id, previous_cursor, version=version)
         # No client route lock is retained across handshake or lifetime reads.
         connection = http.client.HTTPSConnection(row["host_ip"], int(row["port"]),
             timeout=self.timeout_seconds, context=context)
@@ -9457,7 +9499,7 @@ class SecurePeerClient:
             self._revalidate_mail_hint_connection(connection_id, row)
             return PeerMailHintStream(connection, response, sock, hub_id=row["hub_id"], team_id=row["team_id"],
                 expires_at=int(row["certificate_expires_at"]), clock=self._clock,
-                revalidate=lambda: self._revalidate_mail_hint_connection(connection_id, row))
+                revalidate=lambda: self._revalidate_mail_hint_connection(connection_id, row), version=version)
         except BaseException:
             if response is not None:
                 response.close()
