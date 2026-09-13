@@ -714,21 +714,6 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     return () => { window.removeEventListener('agentsdock:local-send', localSend); window.removeEventListener('agentsdock:jump-latest', jump) }
   }, [focused, sessionId, startLatestNavigation])
 
-  useEffect(() => {
-    const openSearch = (event: Event) => { if (timelineEventTargetsSession(event, sessionId, focused)) setSearchOpen(true) }
-    const findEvent = (event: Event) => {
-      if (!timelineEventTargetsSession(event, sessionId, focused)) return
-      const detail = (event as CustomEvent<string | { eventId: string }>).detail
-      const eventId = typeof detail === 'string' ? detail : detail?.eventId
-      if (!eventId) return
-      const index = projected.current.findIndex(item => timelineItemHasEvent(item, eventId))
-      if (index >= 0) ref.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })
-    }
-    window.addEventListener('agentsdock:find-in-chat', openSearch)
-    window.addEventListener('agentsdock:find-event', findEvent)
-    return () => { window.removeEventListener('agentsdock:find-in-chat', openSearch); window.removeEventListener('agentsdock:find-event', findEvent) }
-  }, [focused, sessionId])
-
   const openSearchResult = useCallback(async (result: TimelineSearchResult) => {
     const directIndex = projected.current.findIndex(item => {
       if (timelineItemHasEvent(item, result.event_id)) return true
@@ -752,6 +737,37 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
       if (lease === historySeekLease.current) setSeekingHistory(false)
     }
   }, [sessionId])
+
+  const openPinnedEvent = useCallback(async (eventId: string, query?: string) => {
+    const lease = ++historySeekLease.current
+    const index = projected.current.findIndex(item => timelineItemHasEvent(item, eventId))
+    if (index >= 0) {
+      ref.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })
+      return
+    }
+    const clean = query?.trim()
+    if (!clean) return
+    try {
+      const result = (await window.agentsDock.timeline.search(sessionId, clean, 100))
+        .find(candidate => candidate.event_id === eventId)
+      if (result && lease === historySeekLease.current) await openSearchResult(result)
+    } catch (error) {
+      if (lease === historySeekLease.current) useAppStore.getState().setError(error instanceof Error ? error.message : String(error))
+    }
+  }, [openSearchResult, sessionId])
+
+  useEffect(() => {
+    const openSearch = (event: Event) => { if (timelineEventTargetsSession(event, sessionId, focused)) setSearchOpen(true) }
+    const findEvent = (event: Event) => {
+      if (!timelineEventTargetsSession(event, sessionId, focused)) return
+      const detail = (event as CustomEvent<string | { eventId: string; query?: string }>).detail
+      const eventId = typeof detail === 'string' ? detail : detail?.eventId
+      if (eventId) void openPinnedEvent(eventId, typeof detail === 'string' ? undefined : detail.query)
+    }
+    window.addEventListener('agentsdock:find-in-chat', openSearch)
+    window.addEventListener('agentsdock:find-event', findEvent)
+    return () => { window.removeEventListener('agentsdock:find-in-chat', openSearch); window.removeEventListener('agentsdock:find-event', findEvent) }
+  }, [focused, openPinnedEvent, sessionId])
 
   useEffect(() => {
     const openHistoryResult = (event: Event) => {

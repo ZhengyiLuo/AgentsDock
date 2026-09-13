@@ -263,12 +263,21 @@ function PinnedSection({ profileScope, sessionId, pins, setPins, files }: { prof
         else runAction(window.agentsDock.files.open(sessionId, file))
       } else if (pin.eventId) {
         window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
-          detail: { sessionId, eventId: pin.eventId }
+          detail: {
+            sessionId,
+            eventId: pin.eventId,
+            query: pinnedMessageSearchQuery(pin)
+          }
         }))
       }
     }
     return <article key={pin.id} className={pin.kind}><Pin className="pin-item-mark" size={11} fill="currentColor" /><button type="button" className="pin-content" aria-label={`Open ${pin.title}`} onClick={open}>{pin.body ? <span className="pin-preview">{pin.body}</span> : <strong>{pin.title}</strong>}<small><b>{pin.body ? pin.title : pin.kind === 'file' ? t("ui.Inspector.file_50009ce") : t("ui.Inspector.message_2f77668")}</b>{pin.subtitle ? ` · ${pin.subtitle}` : ''}</small></button>{file && canOpenInEditor && <button type="button" title={t("ui.Inspector.open_in_editor_f395ae5")} onClick={() => requestOpenAgentFile(sessionId, file)}><FileCode2 size={12} /></button>}<button type="button" aria-label={`Unpin ${pin.title}`} title={t("ui.Inspector.unpin_ee3c716")} disabled={Boolean(removingPinId)} onClick={() => void remove(pin.id)}>{removingPinId === pin.id ? <LoaderCircle className="spin" size={12} /> : <X size={12} />}</button></article>
   })}</div>}</section>
+}
+
+function pinnedMessageSearchQuery(pin: PinnedItem): string {
+  const text = (pin.body || pin.title).replaceAll('"', ' ').replace(/\s+/g, ' ').trim()
+  return text.split(' ').slice(0, 6).join(' ').slice(0, 320)
 }
 
 function pinnedAgentFile(pin: PinnedItem, sessionId: string): AgentFile | null {

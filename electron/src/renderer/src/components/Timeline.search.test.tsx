@@ -223,6 +223,33 @@ describe('Timeline search navigation', () => {
     expect(screen.queryByPlaceholderText('Search full chat history')).not.toBeInTheDocument()
   })
 
+  it('loads an unloaded pinned message from full chat history', async () => {
+    const historicalEvent = timelineEvent(2, { id: 'pinned-event' })
+    search.mockResolvedValue([result(historicalEvent.id, historicalEvent.seq, 'Pinned older answer')])
+    around.mockResolvedValue({
+      session,
+      events: [historicalEvent],
+      has_more: false,
+      next_before: null,
+      latest_seq: 100
+    })
+    render(<Timeline />)
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('agentsdock:find-event', {
+        detail: {
+          sessionId: SESSION_ID,
+          eventId: historicalEvent.id,
+          query: 'Pinned older answer'
+        }
+      }))
+    })
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith(SESSION_ID, 'Pinned older answer', 100))
+    await waitFor(() => expect(around).toHaveBeenCalledWith(SESSION_ID, historicalEvent.seq, expect.any(Number)))
+    expect(await screen.findByText('turn:seq-2:assistant')).toBeInTheDocument()
+  })
+
   it('uses the non-persistent history lane when paging an older search window', async () => {
     const historicalEvent = timelineEvent(40, { id: 'historical-edge' })
     around.mockResolvedValue({
