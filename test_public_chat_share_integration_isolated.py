@@ -144,7 +144,7 @@ class PublicChatShareIntegrationTests(unittest.TestCase):
             preview = client.post(base + "/preview", json={}, headers=headers).json()
             created = client.post(base, json={"confirmed_public": True, "through_bytes": preview["through_bytes"], "digest": preview["digest"]}, headers=headers)
             self.assertEqual(created.status_code, 201, created.text)
-            self.assertIsNone(created.json()["url"])
+            self.assertEqual(created.json()["url"], "http://testserver" + created.json()["path"])
             view = client.get(created.json()["path"])
             self.assertEqual(view.status_code, 200)
             self.assertIn("Reviewed text", view.text)

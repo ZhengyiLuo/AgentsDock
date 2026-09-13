@@ -3,7 +3,7 @@
 Available starting with AgentsServer `0.1.26-beta.64` and a compatible desktop
 sharing interface. The server release includes the scoped browser renderer.
 Direct HTTP links and the two-action creation workflow described below require
-the newer server change; the original beta.64 release requires configured HTTPS.
+AgentsServer `0.1.26-beta.65`; the original beta.64 release requires configured HTTPS.
 
 This opt-in feature shares control of one live chat with one browser. It does not configure
 ingress, open a public listener, or share anything automatically. The desktop
