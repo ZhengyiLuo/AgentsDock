@@ -195,6 +195,7 @@ def read_public_transcript(
     project_event: Callable[[dict], dict | None],
     *,
     through_bytes: int | None = None,
+    message_sink: Callable[[dict], None] | None = None,
 ) -> dict:
     """Read one bounded prefix; a later append never changes an existing preview.
 
@@ -209,7 +210,11 @@ def read_public_transcript(
     ):
         raise PublicTranscriptError("Invalid snapshot boundary")
     messages: list[dict] = []
-    outputs: dict[str, list[str]] = {}
+    # Only digests are retained for receipt deduplication, never a second copy
+    # of the entire assistant transcript during a streamed export.
+    outputs: dict[str, tuple[set[bytes], object, int]] = {}
+    message_count = 0
+    projected_digest = hashlib.sha256(b"[")
     serialized_bytes = 2  # The JSON array delimiters; include every message's metadata/escaping.
     deadline = time.monotonic() + MAX_SCAN_SECONDS
     digest = hashlib.sha256()
@@ -277,24 +282,42 @@ def read_public_transcript(
                 if size > MAX_MESSAGE_BYTES:
                     raise PublicTranscriptError("A message exceeds the 256 KiB sharing limit")
                 normalized = " ".join(text.split())
-                previous = outputs.get(run, [])
+                normalized_digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+                previous = outputs.get(run)
                 if kind == "turn_finished" and (
-                    normalized in previous or normalized == " ".join(previous)
+                    previous is not None and (normalized_digest in previous[0]
+                                              or normalized_digest == previous[1].digest())
                 ):
+                    outputs[run] = ({normalized_digest}, hashlib.sha256(normalized.encode("utf-8")), 1)
                     continue
+                if kind == "turn_finished":
+                    outputs[run] = ({normalized_digest}, hashlib.sha256(normalized.encode("utf-8")), 1)
                 if kind == "assistant_text":
                     # Result receipts often repeat these complete text events.
-                    previous.append(normalized)
-                    outputs[run] = previous
+                    if previous is None:
+                        previous = (set(), hashlib.sha256(), 0)
+                    if previous[2]:
+                        previous[1].update(b" ")
+                    previous[1].update(normalized.encode("utf-8"))
+                    previous[0].add(normalized_digest)
+                    outputs[run] = (previous[0], previous[1], previous[2] + 1)
                 message = {"role": role, "text": text}
                 timestamp = _public_timestamp(event.get("ts"))
                 if timestamp is not None:
                     message["timestamp"] = timestamp
-                serialized_bytes += len(json.dumps(message, ensure_ascii=False, separators=(",", ":"),
-                    allow_nan=False).encode("utf-8")) + bool(messages)
-                if serialized_bytes > MAX_TEXT_BYTES:
-                    raise PublicTranscriptError("Readable chat snapshot exceeds the 2 MiB sharing limit")
-                messages.append(message)
+                encoded_message = json.dumps(message, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"), allow_nan=False).encode("utf-8")
+                serialized_bytes += len(encoded_message) + bool(message_count)
+                if message_sink is None and serialized_bytes > MAX_TEXT_BYTES:
+                    raise PublicTranscriptError("Readable chat preview exceeds 2 MiB; create a paginated share instead")
+                if message_count:
+                    projected_digest.update(b",")
+                projected_digest.update(encoded_message)
+                if message_sink is None:
+                    messages.append(message)
+                else:
+                    message_sink(message)
+                message_count += 1
             if time.monotonic() >= deadline:
                 raise PublicTranscriptError("Chat snapshot processing timed out; no partial snapshot was created")
             final = os.fstat(stream.fileno())
@@ -305,12 +328,13 @@ def read_public_transcript(
                 raise PublicTranscriptError("Chat changed; preview it again")
     except OSError as exc:
         raise PublicTranscriptError("Chat history is unavailable") from exc
-    if not messages:
+    if not message_count:
         raise PublicTranscriptError("This chat has no shareable conversation text")
-    projected_bytes = json.dumps(
-        messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")
+    projected_digest.update(b"]")
+    # v2 permits the same exact-source/projection proof without keeping every
+    # message in RAM. Both preview and streamed creation use the same digest.
     confirmation_digest = hashlib.sha256(
-        b"agentsdock-public-chat-preview-v1\x00" + digest.digest() + b"\x00" + projected_bytes
+        b"agentsdock-public-chat-preview-v2\x00" + digest.digest() + b"\x00" + projected_digest.digest()
     ).hexdigest()
-    return {"messages": messages, "through_bytes": consumed, "digest": confirmation_digest}
+    return {"messages": messages, "through_bytes": consumed, "digest": confirmation_digest,
+            **({"message_count": message_count} if message_sink is not None else {})}

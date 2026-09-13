@@ -1,4 +1,4 @@
-"""Durable single-use invitations and browser capabilities for one exact chat.
+"""Durable reusable access tokens and browser capabilities for one exact chat.
 
 This ledger grants no provider or native API authority. Raw invitation/browser
 tokens are returned once and never persisted. Upload references stay private.
@@ -136,22 +136,23 @@ class InteractiveChatShareStore(PublicChatShareStore):
 
     def redeem(self, share_id, invite):
         digest = token_hash(invite)
-        browser_token = secrets.token_urlsafe(32)
         now = self._now()
         with self._connection(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
-            updated = db.execute("""UPDATE interactive_shares SET browser_hash=?,redeemed_at=?
-                WHERE id=? AND invite_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL
-                AND (expires_at IS NULL OR expires_at>?)""", (token_hash(browser_token), now, share_id, digest, now))
+            # One reusable token admits multiple browsers. Preserve browser_hash
+            # so cookies issued by older releases remain valid after an upgrade.
+            updated = db.execute("""UPDATE interactive_shares SET redeemed_at=COALESCE(redeemed_at,?)
+                WHERE id=? AND invite_hash=? AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at>?)""", (now, share_id, digest, now))
             if updated.rowcount != 1:
                 raise Unavailable()
-        return browser_token
+        return invite
 
     def _authorized(self, db, share_id, browser_token):
         digest = token_hash(browser_token)
-        row = db.execute("""SELECT * FROM interactive_shares WHERE id=? AND browser_hash=?
+        row = db.execute("""SELECT * FROM interactive_shares WHERE id=? AND (browser_hash=? OR invite_hash=?)
             AND redeemed_at IS NOT NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)""",
-            (share_id, digest, self._now())).fetchone()
+            (share_id, digest, digest, self._now())).fetchone()
         if row is None:
             raise Unavailable()
         return row

@@ -4,8 +4,10 @@ Available starting with AgentsServer `0.1.26-beta.64` and a compatible desktop
 sharing interface. The server release includes the scoped browser renderer.
 Direct HTTP links and the two-action creation workflow described below require
 AgentsServer `0.1.26-beta.65`; the original beta.64 release requires configured HTTPS.
+Separate reusable access tokens require AgentsServer `0.1.26-beta.66` and
+AgentsDock `0.2.13-beta.37` or later.
 
-This opt-in feature shares control of one live chat with one browser. It does not configure
+This opt-in feature shares control of one live chat with people holding its access token. It does not configure
 ingress, open a public listener, or share anything automatically. The desktop
 offers **View only** and **Interactive** and uses the connected server's HTTP or
 HTTPS address. No separate domain or origin setup is required for direct access.
@@ -36,24 +38,30 @@ snapshots; browser credentials never authorize management.
   changing global configuration does not rebind an existing share. Legacy clients
   can omit it to use `AGENTSDOCK_PUBLIC_CHAT_BASE_URL` or the management request's origin.
   The response contains `id`, `title`, `created_at`, `expires_at`, `redeemed_at`,
-  `revoked_at`, `warning`, and the one-time `path`/`url`.
+  `revoked_at`, `warning`, token-free `path`/`url`, and a separate 43-character
+  `access_token`. The raw token is returned only at creation; using it is repeatable.
 - `GET` on that management path returns `{shares:[metadata]}` (newest 100), with
   no recoverable invitation/browser token or URL.
 - `DELETE /api/admin/interactive-chat-shares/{session_id}/{share_id}` revokes that
   exact chat/share and returns `{revoked:true}`. Repeated revocation is harmless.
 
-Invitations use `/interactive-chat/{id}#invite={token}`. The secret is in the URL
-fragment, not the server request or access-log path. `GET`/`HEAD` serve only the
-static shell and never consume the invitation. An explicit Join action POSTs the
-token to `/redeem`. The ledger atomically permits one redemption and issues a
-separate browser capability in an HttpOnly, SameSite=Strict, share-path cookie.
+URLs use `/interactive-chat/{id}` and never contain the access token, including
+in query parameters or fragments. Share the URL and token separately.
+`GET`/`HEAD` serve only the static shell. The browser requires manual token entry
+and an explicit Open action; it does not redeem query/fragment tokens.
+The form POSTs `{invitation_token: access_token}` to `/redeem` (the request field
+name is retained for compatibility). The same token can open the share in multiple
+browsers and can be entered again after a cookie is lost. Each browser receives
+an HttpOnly, SameSite=Strict, share-path cookie. Opening another browser never
+rotates or invalidates existing browser access.
 HTTPS uses the Secure-prefixed cookie with Secure enabled; HTTP uses a distinct
 non-prefixed cookie so browsers can actually retain it. Only token hashes are
-persisted. Lost cookies require a new invitation;
-redeemed invitation tokens cannot recreate access.
+persisted. Cookies from earlier releases remain valid, and earlier invitation
+tokens are also reusable under this contract. `redeemed_at` records first use;
+it no longer means the share has been exclusively claimed.
 Reloading an already redeemed URL resumes through the existing browser cookie:
 the viewer reads authenticated state and opens a new scoped stream without
-redeeming again. A new invitation still requires the explicit Open action.
+redeeming again. A browser without a valid cookie requires the explicit Open action.
 Browser back/forward-cache restoration reloads instead of reusing a closed
 connection. Expired or revoked browser access cannot be restored this way.
 
@@ -69,7 +77,9 @@ coalesce for one second. Twenty-second heartbeats recheck access but do not read
 the transcript; there is no event-log polling. Deletion, expiry, and revocation
 deny subsequent access; an idle stream closes on its next access check.
 
-POST requests require the exact share-bound origin and browser CSRF header. Prompt
+Redemption requires the exact share-bound origin and access token. Subsequent
+POST requests require that origin, browser cookie and CSRF header. Revocation
+and expiry deny every browser using the share. Prompt
 fields are only `prompt`, `upload_ids`, and stable `request_id`. Native model,
 backend, references, purpose, force-send, filesystem, and other-chat options are
 not accepted by the prompt endpoint; the approved same-chat controls use the

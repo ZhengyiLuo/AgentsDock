@@ -16,8 +16,9 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
+import agentsdock_chats
 import chat_mailbox
 
 
@@ -247,7 +248,7 @@ class ChatMailboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 before = self.work_snapshot()
                 receipt = await self.send("message-" + kind)
                 self.assertEqual((receipt["state"], receipt["delivery_mode"], receipt["execution_started"]), ("unread", "mailbox", False))
-                self.assertEqual(receipt["wake_policy"], "idle_only")
+                self.assertNotIn("wake_policy", receipt)  # Older helpers require this exact receipt shape.
                 record = await self.ledger.get(receipt["message_id"])
                 self.assertEqual((record["status"], record["queued_id"], record["target_run_id"]), ("stored", None, None))
                 self.assertEqual(self.work_snapshot(), before)
@@ -276,6 +277,32 @@ class ChatMailboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM cross_chat_envelopes").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM chat_mailbox_messages").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM cross_chat_exchanges").fetchone()[0], 0)
+        self.assert_no_execution()
+
+    async def test_actual_mailbox_receipts_round_trip_through_send_and_ask_helpers(self):
+        self.set_recipient("busy")
+        first, repeated = await self.send("wire-retry"), await self.send("wire-retry")
+        keys = []
+        for verb in ("send", "ask"):
+            args = agentsdock_chats.parser().parse_args([
+                verb, "--route", ROUTE, "--message", "Exact synthetic peer message.",
+                "--mode", "async_route_v1", "--idempotency-key", "wire-retry",
+            ])
+            with patch.object(agentsdock_chats, "authority", return_value="synthetic-capability"), \
+                    patch.object(agentsdock_chats, "get_json", return_value={"routes": [
+                        {"route_id": ROUTE, "available": True, "mode": "async_route_v1"}]}):
+                # Validate the REAL handler/SQLite receipt, not a separately
+                # maintained approximation of its response schema.
+                for receipt in (first, repeated):
+                    with patch.object(agentsdock_chats, "post_json", return_value=receipt) as post:
+                        self.assertEqual(args.handler(args), receipt)
+                        keys.append(post.call_args.args[1]["idempotency_key"])
+        self.assertEqual(keys, ["wire-retry"] * 4)
+        self.assertEqual(first["message_id"], repeated["message_id"])
+        self.assertFalse(first["duplicate"])
+        self.assertTrue(repeated["duplicate"])
+        with self.ledger._transaction() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM chat_mailbox_messages").fetchone()[0], 1)
         self.assert_no_execution()
 
     def enable_wake_admission(self, before_admit=None):

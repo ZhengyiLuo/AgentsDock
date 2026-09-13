@@ -145,12 +145,12 @@ class PublicChatShareIntegrationTests(unittest.TestCase):
             created = client.post(base, json={"confirmed_public": True, "through_bytes": preview["through_bytes"], "digest": preview["digest"]}, headers=headers)
             self.assertEqual(created.status_code, 201, created.text)
             self.assertEqual(created.json()["url"], "http://testserver" + created.json()["path"])
-            view = client.get(created.json()["path"])
+            view = client.get(created.json()["token_url"])
             self.assertEqual(view.status_code, 200)
             self.assertIn("Reviewed text", view.text)
             self.assertNotIn("chat-one", view.text)
             self.assertEqual(client.delete(base + "/" + created.json()["share_id"], headers=headers).status_code, 200)
-            self.assertEqual(client.get(created.json()["path"]).status_code, 404)
+            self.assertEqual(client.get(created.json()["token_url"]).status_code, 404)
 
     def test_server_log_redactor_removes_public_bearer_and_query_credentials(self):
         token = "A" * 43

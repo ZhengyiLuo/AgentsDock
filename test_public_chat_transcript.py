@@ -14,7 +14,7 @@ import public_chat_transcript as transcript
 
 def expected_digest(content, messages):
     projected = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(b"agentsdock-public-chat-preview-v1\x00" + hashlib.sha256(content).digest() + b"\x00" + projected).hexdigest()
+    return hashlib.sha256(b"agentsdock-public-chat-preview-v2\x00" + hashlib.sha256(content).digest() + b"\x00" + hashlib.sha256(projected).digest()).hexdigest()
 
 
 class PublicChatTranscriptTests(unittest.TestCase):
@@ -174,6 +174,35 @@ class PublicChatTranscriptTests(unittest.TestCase):
         with mock.patch.object(transcript, "MAX_TEXT_BYTES", 100):
             with self.assertRaisesRegex(transcript.PublicTranscriptError, "2 MiB"):
                 self.read()
+
+    def test_streamed_share_has_no_whole_chat_two_mib_limit(self):
+        count = 24
+        content = self.write_events(*[
+            {"type": "assistant_text", "run_id": str(index), "text": f"Message {index}: " + "x" * (180 * 1024)}
+            for index in range(count)
+        ])
+        seen = []
+        result = self.read(message_sink=lambda message: seen.append((message["role"], message["text"][:20])))
+        self.assertGreater(len(content), 4 * 1024 * 1024)
+        self.assertEqual(result["messages"], [])
+        self.assertEqual(result["message_count"], count)
+        self.assertEqual(result["through_bytes"], len(content))
+        self.assertEqual(len(seen), count)
+        self.assertTrue(seen[0][1].startswith("Message 0:"))
+        self.assertTrue(seen[-1][1].startswith("Message 23:"))
+
+    def test_stream_and_preview_prove_the_same_exact_messages_and_boundary(self):
+        self.write_events({"type": "turn_started", "run_id": "one", "prompt": "Exact 中文\n text", "ts": 1},
+                          {"type": "assistant_text", "run_id": "one", "text": "First"},
+                          {"type": "assistant_text", "run_id": "one", "text": "Second"},
+                          {"type": "turn_finished", "run_id": "one", "result_text": "First Second"})
+        preview = self.read()
+        streamed = []
+        result = self.read(through_bytes=preview["through_bytes"], message_sink=streamed.append)
+        self.assertEqual(streamed, preview["messages"])
+        self.assertEqual(result["digest"], preview["digest"])
+        self.assertEqual(result["through_bytes"], preview["through_bytes"])
+        self.assertEqual(result["message_count"], 3)
 
     def test_empty_or_private_only_chat_is_not_publishable(self):
         for events in ([], [{"type": "tool_finished", "text": "Private"}], [{"type": "assistant_text", "text": "  "}]):

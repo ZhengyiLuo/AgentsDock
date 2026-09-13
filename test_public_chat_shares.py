@@ -75,6 +75,65 @@ class PublicChatShareTests(unittest.TestCase):
         self.assertEqual(row[0], hashlib.sha256(result["token"].encode()).digest())
         self.assertNotIn(b"private-session-123", row[1])
 
+    def test_streamed_snapshot_has_no_whole_chat_ceiling_and_defaults_to_latest_page(self):
+        def emit_messages(emit):
+            for index in range(320):
+                emit({"role": "assistant", "text": f"Message {index}: " + "x" * 8192})
+        share = self.store.create_streamed_share("chat-one", emit_messages, title="Large snapshot")
+        self.assertEqual(share["message_count"], 320)
+        reopened = PublicChatShareStore.open_existing(self.root, now=lambda: self.clock)
+        latest = reopened.get_snapshot_page(share["token"], share_id=share["share_id"])
+        self.assertEqual((latest["page"], latest["page_count"], latest["message_count"]), (3, 4, 320))
+        self.assertTrue(latest["snapshot"]["messages"][-1]["text"].startswith("Message 319:"))
+        count = 0
+        for page in range(latest["page_count"]):
+            value = reopened.get_snapshot_page(share["token"], share_id=share["share_id"], page=page)
+            self.assertLessEqual(len(value["snapshot"]["messages"]), 100)
+            self.assertLessEqual(len(json.dumps(value["snapshot"]).encode()), MAX_SNAPSHOT_BYTES)
+            count += len(value["snapshot"]["messages"])
+        self.assertEqual(count, 320)
+        with self.assertRaises(PublicChatShareUnavailable):
+            reopened.get_snapshot_page(share["token"], share_id="share_" + "0" * 32)
+        with self.assertRaises(PublicChatShareUnavailable):
+            reopened.get_snapshot_page(share["token"], page=4)
+        with reopened._connection(write=True) as db, self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE public_chat_share_pages SET page_index=99")
+        self.store.revoke_share(share["share_id"], session_id="chat-one")
+        for page in (0, 3):
+            with self.assertRaises(PublicChatShareUnavailable):
+                reopened.get_snapshot_page(share["token"], page=page)
+
+    def test_streamed_capture_rolls_back_pages_and_capability_on_late_failure(self):
+        def interrupted(emit):
+            for index in range(205):
+                emit({"role": "user", "text": str(index)})
+            raise ValueError("Synthetic source failure after completed pages")
+        with self.assertRaisesRegex(ValueError, "Synthetic"):
+            self.store.create_streamed_share("chat-one", interrupted)
+        self.assertEqual(self.store.list_shares("chat-one"), [])
+        with self.store._connection() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM public_chat_share_pages").fetchone()[0], 0)
+
+    def test_legacy_snapshot_reads_without_creating_page_schema(self):
+        share = self.create()
+        with self.store._connection(write=True) as db:
+            db.execute("DROP TABLE public_chat_share_pages")
+            db.execute("PRAGMA user_version=2")
+        before = self.store.database_path.read_bytes()
+        legacy = PublicChatShareStore.open_existing(self.root, now=lambda: self.clock)
+        value = legacy.get_snapshot_page(share["token"], share_id=share["share_id"])
+        self.assertEqual((value["page"], value["page_count"]), (0, 1))
+        self.assertEqual(value["snapshot"]["messages"], self.messages)
+        self.assertEqual(self.store.database_path.read_bytes(), before)
+
+    def test_exact_share_id_is_required_when_using_a_common_url(self):
+        first = self.create()
+        second = self.create()
+        self.assertEqual(self.store.get_snapshot(first["token"], share_id=first["share_id"])["messages"], self.messages)
+        for share_id in (second["share_id"], "bad", "share_" + "0" * 32):
+            with self.assertRaises(PublicChatShareUnavailable):
+                self.store.get_snapshot(first["token"], share_id=share_id)
+
     def test_list_is_session_scoped_bounded_and_cannot_recover_tokens(self):
         first = self.create()
         self.clock += 1
@@ -228,9 +287,9 @@ class PublicChatShareTests(unittest.TestCase):
         with self.assertRaises(PublicChatShareUnavailable):
             old.get_snapshot(revoked["token"])
         with old._connection() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
             self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-            self.assertEqual(db.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger'").fetchone()[0], 4)
+            self.assertEqual(db.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger'").fetchone()[0], 6)
         with self.assertRaises(sqlite3.IntegrityError), old._connection(write=True) as db:
             db.execute("DELETE FROM public_chat_shares WHERE share_id=?", (active["share_id"],))
 

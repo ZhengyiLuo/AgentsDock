@@ -53,24 +53,43 @@ class InteractiveShareRouteTests(unittest.TestCase):
         return response.json()
 
     def redeem(self, share):
-        path, invite = share["path"].split("#invite=")
+        path, invite = share["path"], share["access_token"]
         response = self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": invite})
         self.assertEqual(response.status_code, 200, response.text)
         return path, {"Origin": self.origin, "X-Chat-CSRF": response.json()["csrf"]}
 
     def test_scanner_get_never_redeems_and_cookie_is_secure_scoped(self):
         share = self.create()
-        path = share["path"].split("#")[0]
+        path = share["path"]
         self.assertEqual(self.client.get(path).status_code, 200)
         self.assertEqual(self.client.head(path).status_code, 200)
         self.assertEqual(self.client.get(path + "/state").status_code, 404)
-        response = self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["path"].split("#invite=")[1]})
+        response = self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["access_token"]})
         cookie = response.headers["set-cookie"]
         for flag in ("Secure", "HttpOnly", "SameSite=strict", "Path=" + path):
             self.assertIn(flag, cookie)
-        self.assertEqual(self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["path"].split("#invite=")[1]}).status_code, 404)
+        self.assertEqual(self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["access_token"]}).status_code, 200)
         self.assertEqual(self.client.get(path + "/state").json()["messages"], [])
         self.assertNotIn("session_id", self.client.get(path + "/state").text)
+
+    def test_separate_reusable_token_allows_two_browsers_and_revokes_both(self):
+        share = self.create()
+        self.assertNotIn(share["access_token"], share["path"])
+        self.assertNotIn(share["access_token"], share["url"])
+        self.assertNotIn("#", share["url"])
+        self.assertNotIn("token_url", share)
+        path, _ = self.redeem(share)
+        with TestClient(self.client.app, base_url=self.origin) as other:
+            self.assertEqual(other.get(path + "/state").status_code, 404)
+            entered = other.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["access_token"]})
+            self.assertEqual(entered.status_code, 200, entered.text)
+            self.assertEqual(other.get(path + "/state").status_code, 200)
+            self.assertEqual(self.client.get(path + "/state").status_code, 200)
+            listing = self.client.get(self.admin, headers=self.admin_headers)
+            self.assertNotIn(share["access_token"], listing.text)
+            self.assertEqual(self.client.delete(self.admin + "/" + share["id"], headers=self.admin_headers).status_code, 200)
+            self.assertEqual(other.get(path + "/state").status_code, 404)
+            self.assertEqual(self.client.get(path + "/state").status_code, 404)
 
     def test_http_direct_create_cookie_and_csrf_work_without_public_origin(self):
         self.public_origin = ""
@@ -80,7 +99,7 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.assertEqual(share["url"], self.origin + share["path"])
         self.assertEqual(InteractiveChatShareStore.open_existing(self.root).share_origin(share["id"]), self.origin)
         self.load.assert_not_awaited()
-        path, invite = share["path"].split("#invite=")
+        path, invite = share["path"], share["access_token"]
         response = self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": invite})
         self.assertEqual(response.status_code, 200, response.text)
         cookie = response.headers["set-cookie"]
@@ -123,7 +142,7 @@ class InteractiveShareRouteTests(unittest.TestCase):
         direct = "http://192.0.2.42:8080"
         share = self.create(base_url=direct + "/")
         self.assertEqual(share["url"], direct + share["path"])
-        path = share["path"].split("#")[0]
+        path = share["path"]
         self.assertEqual(self.client.get(path).status_code, 403)
         self.client.base_url = direct
         self.origin = direct
@@ -194,7 +213,7 @@ class InteractiveShareRouteTests(unittest.TestCase):
 
     def test_cross_site_invitation_navigation_only_exposes_static_shell(self):
         share = self.create()
-        path = share["path"].split("#")[0]
+        path = share["path"]
         navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
         for method in ("GET", "HEAD"):
             response = self.client.request(method, path, headers=navigation)
@@ -203,7 +222,7 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get(path, headers={**navigation, "Sec-Fetch-Dest": "iframe"}).status_code, 403)
         self.assertEqual(self.client.get(path + "/state", headers=navigation).status_code, 403)
         self.assertEqual(self.client.post(path + "/redeem", headers={**navigation, "Origin": self.origin},
-            json={"invitation_token": share["path"].split("#invite=")[1]}).status_code, 403)
+            json={"invitation_token": share["access_token"]}).status_code, 403)
         self.load.assert_not_called()
         self.redeem(share)  # Cross-site probes did not consume the invitation.
 

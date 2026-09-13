@@ -28,8 +28,8 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.base = "https://share.example.test"
         self.authorize = mock.Mock(side_effect=self.require_auth)
         self.exists = mock.Mock(side_effect=lambda session: session in self.sessions)
-        self.load = mock.Mock(side_effect=lambda session, boundary: read_public_transcript(
-            self.events, lambda event: event, through_bytes=boundary))
+        self.load = mock.Mock(side_effect=lambda session, boundary, **options: read_public_transcript(
+            self.events, lambda event: event, through_bytes=boundary, **options))
         self.store_factory = mock.Mock(side_effect=lambda root: PublicChatShareStore(root, now=lambda: self.clock))
         self.store_factory.open_existing = mock.Mock(side_effect=lambda root: PublicChatShareStore.open_existing(root, now=lambda: self.clock))
         patcher = mock.patch.object(routes, "PublicChatShareStore", self.store_factory)
@@ -65,6 +65,134 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()
 
+    def unlock(self, share, *, token=None, remember=False):
+        return self.client.post(share["path"] + "/unlock", headers={"Origin": str(self.client.base_url).rstrip("/")},
+            data={"access_token": share["access_token"] if token is None else token, **({"remember": "1"} if remember else {})},
+            follow_redirects=False)
+
+    def test_common_url_requires_separate_token_and_remembers_only_scoped_http_cookie(self):
+        share = self.create(title="Private snapshot title")
+        self.assertEqual(share["path"], "/shared-chat/" + share["share_id"])
+        self.assertNotIn(share["access_token"], share["path"])
+        self.assertNotIn(share["access_token"], share["url"])
+        self.assertTrue(share["token_url"].endswith("/share/" + share["access_token"]))
+        for method in ("GET", "HEAD"):
+            response = self.client.request(method, share["path"])
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("Private snapshot title", response.text)
+            self.assertNotIn("Reviewed question", response.text)
+        gate = self.client.get(share["path"])
+        self.assertIn('name="access_token"', gate.text)
+        self.assertIn("form-action 'self'", gate.headers["content-security-policy"])
+        self.assertNotIn("<script", gate.text)
+        entered = self.unlock(share, remember=True)
+        self.assertEqual(entered.status_code, 303, entered.text)
+        self.assertEqual(entered.headers["location"], share["path"] + "?page=0#conversation-end")
+        cookie = entered.headers["set-cookie"]
+        self.assertTrue(cookie.startswith(routes.HTTP_SNAPSHOT_COOKIE + "="))
+        for flag in ("HttpOnly", "SameSite=strict", "Path=" + share["path"], "Max-Age=2592000"):
+            self.assertIn(flag, cookie)
+        self.assertNotIn("Secure", cookie)
+        self.assertNotIn("Domain=", cookie)
+        viewed = self.client.get(share["path"])
+        self.assertIn("Private snapshot title", viewed.text)
+        self.assertIn("Reviewed question", viewed.text)
+        self.assertIn("form-action 'none'", viewed.headers["content-security-policy"])
+        self.assertNotIn(share["access_token"], viewed.text)
+        listing = self.client.get(self.admin, headers=self.auth)
+        self.assertNotIn(share["access_token"], listing.text)
+        self.assertNotIn("access_token", listing.text)
+
+    def test_https_cookie_and_common_url_do_not_accept_other_share_token_or_duplicate_cookies(self):
+        self.client.base_url = self.base
+        first = self.create(title="First private title")
+        second = self.create(title="Second private title")
+        wrong = self.unlock(second, token=first["access_token"])
+        self.assertEqual(wrong.status_code, 403)
+        self.assertNotIn(first["access_token"], wrong.text)
+        self.assertNotIn("Second private title", wrong.text)
+        accepted = self.unlock(first)
+        self.assertEqual(accepted.status_code, 303)
+        self.assertTrue(accepted.headers["set-cookie"].startswith(routes.SNAPSHOT_COOKIE + "="))
+        self.assertIn("Secure", accepted.headers["set-cookie"])
+        self.assertNotIn("Max-Age", accepted.headers["set-cookie"])
+        cookie = f'{routes.SNAPSHOT_COOKIE}={first["access_token"]}'
+        self.assertNotIn("Second private title", self.client.get(second["path"], headers={"Cookie": cookie}).text)
+        self.assertNotIn("First private title", self.client.get(first["path"], headers={"Cookie": cookie + "; " + cookie}).text)
+        self.assertIn("First private title", self.client.get(first["path"]).text)
+
+    def test_unlock_rejects_cross_origin_malformed_and_oversized_posts_without_leaking_token(self):
+        share = self.create(title="Hidden title")
+        origin = str(self.client.base_url).rstrip("/")
+        payload = {"access_token": share["access_token"]}
+        for headers in ({}, {"Origin": "null"}, {"Origin": "https://other.example.test"},
+                        {"Origin": origin, "Sec-Fetch-Site": "cross-site"}):
+            response = self.client.post(share["path"] + "/unlock", headers=headers, data=payload)
+            self.assertEqual(response.status_code, 403)
+            self.assertNotIn("Hidden title", response.text)
+            self.assertNotIn(share["access_token"], response.text)
+            self.assertNotIn("set-cookie", response.headers)
+        for body in ("access_token=bad", "access_token=" + share["access_token"] + "&access_token=" + share["access_token"],
+                     "access_token=" + share["access_token"] + "&unexpected=1"):
+            response = self.client.post(share["path"] + "/unlock", content=body,
+                headers={"Origin": origin, "Content-Type": "application/x-www-form-urlencoded"})
+            self.assertEqual(response.status_code, 403)
+            self.assertNotIn(share["access_token"], response.text)
+        self.assertEqual(self.client.post(share["path"] + "/unlock", headers={"Origin": origin}, json=payload).status_code, 415)
+        self.assertEqual(self.client.post(share["path"] + "/unlock", headers={"Origin": origin,
+            "Content-Type": "application/x-www-form-urlencoded"}, content="x" * 1025).status_code, 413)
+
+    def test_cold_guessed_common_url_or_unlock_never_initializes_storage(self):
+        path = "/shared-chat/share_" + "0" * 32
+        self.assertEqual(self.client.get(path).status_code, 200)
+        self.assertEqual(self.client.get(path, headers={"Cookie": routes.HTTP_SNAPSHOT_COOKIE + "=" + "A" * 43}).status_code, 200)
+        response = self.client.post(path + "/unlock", headers={"Origin": "http://testserver"}, data={"access_token": "A" * 43})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.storage.exists())
+        self.store_factory.assert_not_called()
+        self.load.assert_not_called()
+
+    def test_revocation_and_expiry_deny_every_remembered_snapshot_read(self):
+        revoked = self.create(title="Revoked private title")
+        expired = self.create(title="Expired private title", expires_at=1001)
+        self.assertEqual(self.unlock(revoked).status_code, 303)
+        self.assertEqual(self.unlock(expired).status_code, 303)
+        self.client.delete(self.admin + "/" + revoked["share_id"], headers=self.auth)
+        self.clock = 1002
+        for share in (revoked, expired):
+            page = self.client.get(share["path"] + "?page=0")
+            self.assertNotIn(share["title"], page.text)
+            self.assertIn('name="access_token"', page.text)
+            self.assertEqual(self.unlock(share).status_code, 403)
+            self.assertEqual(self.client.get(share["token_url"]).status_code, 404)
+
+    def test_large_streamed_creation_opens_latest_page_at_end_and_pages_back(self):
+        def stream(session, boundary, *, message_sink):
+            for index in range(450):
+                message_sink({"role": "user", "text": f"Message {index}: " + "x" * 5120})
+            return {"messages": [], "message_count": 450, "digest": "a" * 64, "through_bytes": 100}
+        self.load.side_effect = stream
+        response = self.client.post(self.admin, headers=self.auth, json={"confirmed_public": True})
+        self.assertEqual(response.status_code, 201, response.text)
+        share = response.json()
+        self.assertEqual(share["message_count"], 450)
+        self.assertEqual(self.load.call_count, 1)
+        unlocked = self.unlock(share)
+        self.assertEqual(unlocked.headers["location"], share["path"] + "?page=4#conversation-end")
+        last = self.client.get(share["path"])
+        self.assertIn("Message 449:", last.text)
+        self.assertNotIn("Message 0:", last.text)
+        self.assertIn("450 messages", last.text)
+        self.assertIn('?page=3#conversation-end', last.text)
+        self.assertNotIn(share["access_token"], last.text)
+        first = self.client.get(share["path"] + "?page=0")
+        self.assertIn("Message 0:", first.text)
+        self.assertNotIn("Message 449:", first.text)
+        bearer = self.client.get(share["token_url"], follow_redirects=False)
+        self.assertTrue(bearer.headers["location"].endswith("?page=4#conversation-end"))
+        for query in ("?page=-1", "?page=0&page=1", "?access_token=" + share["access_token"]):
+            self.assertEqual(self.client.get(share["path"] + query).status_code, 404)
+
     def test_preview_has_warning_and_creates_no_public_capability(self):
         response = self.client.post(self.admin + "/preview", headers=self.auth, json={})
         self.assertEqual(response.status_code, 200, response.text)
@@ -99,14 +227,14 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         share = response.json()
         self.assertEqual(share["url"], "http://192.0.2.42:8080" + share["path"])
-        self.load.assert_called_once_with("chat-one", None)
+        self.load.assert_called_once_with("chat-one", None, message_sink=mock.ANY)
         self.store_factory.assert_called_once_with(self.storage)
         self.events.write_text(json.dumps({"type": "turn_started", "prompt": "Later private message"}) + "\n")
-        page = self.client.get(share["url"])
+        page = self.client.get(share["token_url"])
         self.assertEqual(page.status_code, 200, page.text)
         self.assertIn("Reviewed question", page.text)
         self.assertNotIn("Later private message", page.text)
-        self.load.assert_called_once_with("chat-one", None)
+        self.load.assert_called_once_with("chat-one", None, message_sink=mock.ANY)
 
     def test_explicit_link_origin_overrides_configuration_and_preserves_https_fallback(self):
         share = self.create(base_url="http://192.0.2.42:8080/")
@@ -159,7 +287,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.assertNotIn("session_id", share)
         auth_count, load_count = self.authorize.call_count, self.load.call_count
         self.events.unlink()
-        public = self.client.get(share["path"])
+        public = self.client.get(share["token_url"])
         self.assertEqual(public.status_code, 200, public.text)
         self.assertIn("Reviewed question", public.text)
         self.assertNotIn("NEW PRIVATE MESSAGE", public.text)
@@ -178,7 +306,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
     def test_public_html_is_isolated_no_store_and_escapes_untrusted_content(self):
         self.events.write_text(json.dumps({"type": "turn_started", "prompt": '<script>alert(1)</script> ![x](https://remote.invalid/image)'}) + "\n")
         share = self.create(title="<b>Shared title</b>")
-        response = self.client.get(share["path"])
+        response = self.client.get(share["token_url"])
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
         self.assertIn("no-store", response.headers["cache-control"])
@@ -198,7 +326,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("preview it again", response.json()["detail"])
-        self.store_factory.assert_not_called()
+        self.assertEqual(PublicChatShareStore.open_existing(self.storage, now=lambda: self.clock).list_shares("chat-one"), [])
 
     def test_invalid_public_origin_fails_before_persisting_share(self):
         preview = self.preview()
@@ -217,7 +345,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.clock = 1002
         missing = "/share/" + "A" * 43
         responses = [self.client.get(path) for path in (
-            revoked["path"], expired["path"], missing, "/share/malformed", missing + "?format=json",
+            revoked["token_url"], expired["token_url"], missing, "/share/malformed", missing + "?format=json",
         )]
         for response in responses:
             self.assertEqual(response.status_code, 404, response.text)
@@ -231,12 +359,12 @@ class PublicChatShareRouteTests(unittest.TestCase):
         listing = self.client.get(self.admin, headers=self.auth)
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertEqual(listing.json()["shares"][0]["share_id"], share["share_id"])
-        self.assertNotIn(share["path"].rsplit("/", 1)[1], listing.text)
+        self.assertNotIn(share["access_token"], listing.text)
         wrong = self.client.delete("/api/admin/chat-shares/other/" + share["share_id"], headers=self.auth)
         self.assertEqual(wrong.status_code, 404)
-        self.assertEqual(self.client.get(share["path"]).status_code, 200)
+        self.assertEqual(self.client.get(share["token_url"]).status_code, 200)
         self.assertEqual(self.client.delete(self.admin + "/" + share["share_id"], headers=self.auth).status_code, 200)
-        self.assertEqual(self.client.get(share["path"]).status_code, 404)
+        self.assertEqual(self.client.get(share["token_url"]).status_code, 404)
 
     def test_malformed_and_oversized_management_bodies_are_bounded(self):
         for content, content_type, expected in ((b"{}", "text/plain", 415), (b"bad-json", "application/json", 400),
@@ -276,7 +404,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
     def test_viewer_unexpected_failure_keeps_security_headers_and_hides_details(self):
         share = self.create()
         with mock.patch.object(routes, "render_public_chat_html", side_effect=RuntimeError("private internal detail")):
-            response = self.client.get(share["path"])
+            response = self.client.get(share["token_url"])
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(response.headers["referrer-policy"], "no-referrer")
@@ -307,13 +435,13 @@ class PublicChatShareRouteTests(unittest.TestCase):
 
     def test_projection_change_after_review_rejects_creation_even_without_source_change(self):
         preview = self.preview()
-        self.load.side_effect = lambda session, boundary: read_public_transcript(
-            self.events, lambda event: {**event, "prompt": "New unreviewed text"}, through_bytes=boundary)
+        self.load.side_effect = lambda session, boundary, **options: read_public_transcript(
+            self.events, lambda event: {**event, "prompt": "New unreviewed text"}, through_bytes=boundary, **options)
         response = self.client.post(self.admin, headers=self.auth, json={
             "confirmed_public": True, "through_bytes": preview["through_bytes"], "digest": preview["digest"],
         })
         self.assertEqual(response.status_code, 409, response.text)
-        self.store_factory.assert_not_called()
+        self.assertEqual(PublicChatShareStore.open_existing(self.storage, now=lambda: self.clock).list_shares("chat-one"), [])
 
 
 class PublicShareURLTests(unittest.TestCase):

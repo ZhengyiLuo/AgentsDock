@@ -761,15 +761,20 @@ def send_action(args: argparse.Namespace, action: str) -> dict[str, Any]:
     if mode == "async_route_v1":
         receipt_fields = {"ok", "route_id", "action", "accepted", "mode", "message_id", "duplicate"}
         mailbox_fields = {"delivery_mode", "state", "execution_started"}
-        if (set(result) not in (receipt_fields, receipt_fields | mailbox_fields)
+        if (set(result) not in (receipt_fields, receipt_fields | mailbox_fields,
+                               receipt_fields | mailbox_fields | {"wake_policy"})
                 or result.get("ok") is not True or result.get("accepted") is not True
                 or result.get("route_id") != route or result.get("action") != "instruction"
                 or result.get("mode") != mode or not isinstance(result.get("duplicate"), bool)
                 or ("delivery_mode" in result and (result.get("delivery_mode") != "mailbox"
                     or result.get("state") not in {"unread", "read", "cancelled", "deleted"}
                     or result.get("execution_started") is not False))
+                or ("wake_policy" in result and result["wake_policy"] != "idle_only")
                 or re.fullmatch(r"handoff_[0-9a-f]{32}", str(result.get("message_id") or "")) is None):
-            raise ChatsCLIError("AgentsServer returned an invalid asynchronous message receipt")
+            raise ChatsCLIError(
+                "AgentsServer returned an invalid asynchronous message receipt. "
+                "Delivery may already be stored; do not resend with a new idempotency key."
+            )
         return result
     minimal_expected = {"ok", "action", "accepted"}
     if route:

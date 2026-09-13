@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from interactive_chat_shares import InteractiveChatShareStore, Unavailable, Conflict, MAX_SHARE_UPLOAD_BYTES
+from interactive_chat_shares import InteractiveChatShareStore, Unavailable, Conflict, MAX_SHARE_UPLOAD_BYTES, token_hash
 
 
 class InteractiveShareStoreTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class InteractiveShareStoreTests(unittest.TestCase):
         share = share or self.share
         return self.store.redeem(share["id"], share["invitation_token"])
 
-    def test_atomic_one_use_distinct_browser_capability_hashes_only(self):
+    def test_shared_token_admits_multiple_browsers_and_persists_hashes_only(self):
         def attempt(_):
             try:
                 return self.redeem()
@@ -30,11 +30,10 @@ class InteractiveShareStoreTests(unittest.TestCase):
                 return None
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             tokens = [token for token in pool.map(attempt, range(2)) if token]
-        self.assertEqual(len(tokens), 1)
-        self.assertNotEqual(tokens[0], self.share["invitation_token"])
+        self.assertEqual(len(tokens), 2)
+        self.assertEqual(tokens[0], self.share["invitation_token"])
         self.assertEqual(self.store.authenticate(self.share["id"], tokens[0])["session_id"], "chat-one")
-        with self.assertRaises(Unavailable):
-            self.store.authenticate(self.share["id"], self.share["invitation_token"])
+        self.assertEqual(self.store.authenticate(self.share["id"], tokens[1])["session_id"], "chat-one")
         data = self.store.database_path.read_bytes()
         for token in (tokens[0], self.share["invitation_token"]):
             self.assertNotIn(token.encode(), data)
@@ -92,6 +91,24 @@ class InteractiveShareStoreTests(unittest.TestCase):
         self.assertTrue(self.store.revoke_share(self.share["id"], session_id="chat-one"))
         with self.assertRaises(Unavailable):
             self.store.authenticate(self.share["id"], token)
+
+    def test_reusable_token_preserves_legacy_browser_cookie_and_revokes_every_browser(self):
+        legacy_cookie = "L" * 43
+        with self.store._connection(write=True) as db:
+            db.execute("UPDATE interactive_shares SET browser_hash=?,redeemed_at=? WHERE id=?",
+                (token_hash(legacy_cookie), self.now, self.share["id"]))
+        current_cookie = self.redeem()
+        self.assertEqual(self.store.authenticate(self.share["id"], legacy_cookie)["session_id"], "chat-one")
+        self.assertEqual(self.store.authenticate(self.share["id"], current_cookie)["session_id"], "chat-one")
+        other = self.store.create_share("chat-one")
+        with self.assertRaises(Unavailable):
+            self.store.redeem(other["id"], self.share["invitation_token"])
+        self.store.revoke_share(self.share["id"], session_id="chat-one")
+        for token in (legacy_cookie, current_cookie):
+            with self.assertRaises(Unavailable):
+                self.store.authenticate(self.share["id"], token)
+        with self.assertRaises(Unavailable):
+            self.redeem()
 
     def test_uploads_belong_to_exact_share_and_unknown_writes_remain_charged(self):
         token = self.redeem()

@@ -76330,7 +76330,9 @@ def public_chat_share_session_exists(session_id: str) -> bool:
     )
 
 
-def load_public_chat_share_transcript(session_id: str, through_bytes: int | None) -> dict[str, Any]:
+def load_public_chat_share_transcript(
+    session_id: str, through_bytes: int | None, *, message_sink: Callable[[dict], None] | None = None,
+) -> dict[str, Any]:
     """Read a validated, bounded durable snapshot; never discover provider logs."""
     if not public_chat_share_session_exists(session_id):
         raise PublicTranscriptError("Chat is unavailable")
@@ -76352,7 +76354,8 @@ def load_public_chat_share_transcript(session_id: str, through_bytes: int | None
         strip_user_context=strip_agentsdock_generated_user_text,
         fork_internal_purposes=FORK_INTERNAL_PURPOSES,
     )
-    snapshot = read_public_transcript(events_path(session_id), projector, through_bytes=through_bytes)
+    snapshot = read_public_transcript(events_path(session_id), projector, through_bytes=through_bytes,
+                                      message_sink=message_sink)
     if not public_chat_share_session_exists(session_id):
         raise PublicTranscriptError("Chat is unavailable")
     return snapshot
@@ -85423,8 +85426,10 @@ async def submit_provider_route_handoff(
                         "ok": True, "route_id": route_id, "action": "instruction",
                         "accepted": True, "mode": "async_route_v1", "delivery_mode": "mailbox",
                         "message_id": str(handoff["id"]), "duplicate": not created,
+                        # Keep the accepted-mail receipt compatible with existing
+                        # helpers. Wake policy belongs to capability discovery,
+                        # not an extra field on this strict legacy receipt.
                         "state": inbox_state, "execution_started": False,
-                        "wake_policy": "idle_only",
                     }
                 await append_cross_chat_event_once(
                     source_session_id,

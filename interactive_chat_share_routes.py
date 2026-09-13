@@ -27,7 +27,7 @@ WARNING = (
     "and create or run persistent scheduled jobs for this chat. "
     "No file browsing, downloads, terminal, other chats, or server administration are shared. "
     "The existing agent retains its normal tools and context, so they can ask it to use tools "
-    "or return sensitive information. This is not a sandbox. The link can be redeemed once. "
+    "or return sensitive information. This is not a sandbox. Share the URL and reusable access token separately. "
     "Revocation stops future access but cannot erase saved copies, undo accepted work, or remove already configured jobs."
 )
 CONTROL_ACTIONS = frozenset({
@@ -245,8 +245,8 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
         except ValidationError as exc:
             raise HTTPException(400, str(exc)) from None
         invite = created.pop("invitation_token")
-        path = f"/interactive-chat/{created['id']}#invite={invite}"
-        return result({**created, "path": path, "url": base + path, "warning": WARNING}, 201)
+        path = f"/interactive-chat/{created['id']}"
+        return result({**created, "path": path, "url": base + path, "access_token": invite, "warning": WARNING}, 201)
 
     @router.get("/api/admin/interactive-chat-shares/{session_id}")
     async def listing(session_id: str, request: Request):
