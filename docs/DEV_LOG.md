@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-13 — Local main integration build
+
+- Accepted local-only Apple Silicon `1.0.0-beta.2`, build `1161`, from
+  `bc73ab326c5a6fcc4a8425be41384faf9ec3ff1a`, which merges public main
+  `935a76b64af2b2a7c263a15d91af87342dd88381` into the release branch.
+- Include the local-chat import label correction while retaining the released
+  Team Network changes. Scheduled-job controls remain in each row's context
+  menu; this fetched main does not contain visible inline action buttons.
+- Type checks, focused import/menu checks and production compilation passed.
+  All 151 packaged compile-output files match the source build; bundle/fuse
+  audit and strict Developer ID signature verification passed.
+- This local build is not notarized or published and has automatic updates
+  disabled. No running app, installed server or published artifact was replaced.
+
 ## 2026-09-13 — Published server goal-steering correction
 
 - Published [AgentsServer `1.0.0-beta.4`](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.0-beta.4)
