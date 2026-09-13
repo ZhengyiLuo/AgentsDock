@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-13 — Choose a LAN address for chat sharing
+
+- Add one localized Share address field to the existing View only / Interactive
+  dialog, defaulting to the selected server connection. Operators may choose
+  another reachable HTTP or HTTPS address of the same server when creating a
+  share. Previously created links and tokens are unchanged.
+- Keep share management and native credentials on the authenticated connection.
+  The chosen browser address is validated body data, never a probe or a new
+  credential destination. Creation remains one-shot; malformed or mismatched
+  responses cannot silently produce a link at the wrong address.
+- Editing stays local to the dialog, with no polling, address discovery or
+  background refresh. The existing standalone server contract supports this
+  client change without an update or restart.
+
 ## 2026-09-13 — Local main integration build
 
 - Accepted local-only Apple Silicon `1.0.0-beta.2`, build `1161`, from

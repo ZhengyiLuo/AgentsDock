@@ -2352,11 +2352,18 @@ export class AgentServerClient {
   }
 
   async createChatShare(sessionId: string, input: CreateChatShareInput) {
-    // The selected native connection supplies the link origin, never renderer
-    // fields or credentials. Keep management on the existing authenticated path.
-    const body = { ...chatShareCreateBody(input), base_url: new URL(this.configuration.baseURL).origin }
-    return parseCreatedChatShare(await this.privilegedNativeRequest(this.chatSharePath(sessionId, input.mode),
+    // The operator may choose another address for the browser link (e.g. LAN
+    // instead of VPN). It is body data only: management and native credentials
+    // stay on the existing authenticated connection, with no alias probing.
+    const requested = chatShareCreateBody(input)
+    const body = { ...requested, base_url: requested.base_url ?? new URL(this.configuration.baseURL).origin }
+    const created = parseCreatedChatShare(await this.privilegedNativeRequest(this.chatSharePath(sessionId, input.mode),
       { method: 'POST', body: JSON.stringify(body) }, input.mode === 'snapshot' ? CHAT_SHARE_SNAPSHOT_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
+    if ((created.url === null && requested.base_url !== undefined)
+      || (created.url !== null && new URL(created.url).origin !== body.base_url)) {
+      throw new Error('The server did not confirm the selected share address. Check Existing shares before creating another link.')
+    }
+    return created
   }
 
   async revokeChatShare(sessionId: string, mode: ChatShareMode, shareId: string): Promise<void> {

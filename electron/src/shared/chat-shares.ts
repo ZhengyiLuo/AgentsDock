@@ -46,11 +46,31 @@ export type CreateChatShareInput = {
   digest?: string
   title?: string
   expires_at?: number
+  base_url?: string
 } | {
   mode: 'interactive'
   confirmed_interactive: true
   title?: string
   expires_at?: number
+  base_url?: string
+}
+
+/** A share's browser address, never the destination for native credentials. */
+export function normalizeChatShareOrigin(value: unknown): string {
+  try {
+    if (typeof value !== 'string' || value.length > 2048) throw new Error()
+    const clean = value.trim()
+    if (!/^https?:\/\//i.test(clean) || /[\u0000-\u0020\u007f\\?#@]/.test(clean)) throw new Error()
+    const authority = clean.slice(clean.indexOf('://') + 3).replace(/\/$/, '')
+    if (!authority || authority.includes('/')) throw new Error()
+    const url = new URL(clean)
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password
+      || url.pathname !== '/' || url.search || url.hash || url.port === '0') throw new Error()
+    return url.origin
+  } catch {
+    // Parser errors must not echo a pasted token, password, or full share URL.
+    throw new Error('Enter an HTTP or HTTPS server address, without a path, credentials, query, or fragment.')
+  }
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -148,7 +168,8 @@ export function chatShareCreateBody(input: CreateChatShareInput): Record<string,
   const mode = chatShareMode(input.mode)
   if (input.title !== undefined && (typeof input.title !== 'string' || [...input.title].length > 256)) throw new Error('Share title is too long.')
   if (input.expires_at !== undefined && timestamp(input.expires_at)! <= Date.now() / 1000) throw new Error('Share expiry must be in the future.')
-  const optional = { ...(input.title === undefined ? {} : { title: input.title }), ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at }) }
+  const optional = { ...(input.title === undefined ? {} : { title: input.title }), ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at }),
+    ...(input.base_url === undefined ? {} : { base_url: normalizeChatShareOrigin(input.base_url) }) }
   if (mode === 'snapshot' && input.mode === 'snapshot' && input.confirmed_public === true) {
     if (input.through_bytes === undefined && input.digest === undefined) return { ...optional, confirmed_public: true }
     if (!Number.isSafeInteger(input.through_bytes) || (input.through_bytes ?? -1) < 0

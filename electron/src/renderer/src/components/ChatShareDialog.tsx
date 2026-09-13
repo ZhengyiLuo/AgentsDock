@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Copy, LoaderCircle, X } from 'lucide-react'
 import type { Session, WorkspaceProfileScope } from '@shared/types'
-import type { ChatShareMode, ChatShareRecord, CreatedChatShare } from '@shared/chat-shares'
+import { normalizeChatShareOrigin, type ChatShareMode, type ChatShareRecord, type CreatedChatShare } from '@shared/chat-shares'
 import { t, useLocale } from '../lib/i18n'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import './ChatShareDialog.css'
 
-interface Target { session: Session; scope: WorkspaceProfileScope }
+interface Target { session: Session; scope: WorkspaceProfileScope; initialOrigin: string }
 type ListedShare = ChatShareRecord & { mode: ChatShareMode }
 type CreatedShare = CreatedChatShare & { mode: ChatShareMode }
 
@@ -24,6 +24,11 @@ function invitation(value: CreatedChatShare): string {
   return `${value.url ?? value.path}\nToken: ${value.access_token}`
 }
 
+function profileShareOrigin(serverUrl: string | undefined): string {
+  try { return normalizeChatShareOrigin(new URL(serverUrl ?? '').origin) }
+  catch { return '' }
+}
+
 export function ChatShareDialog() {
   const [target, setTarget] = useState<Target | null>(null)
   const profileId = useAppStore(state => state.activeProfileId)
@@ -31,13 +36,14 @@ export function ChatShareDialog() {
   const identity = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null)
   useEffect(() => {
     const open = (event: Event) => {
-      const requested = (event as CustomEvent<Target>).detail
+      const requested = (event as CustomEvent<Pick<Target, 'session' | 'scope'>>).detail
       const state = useAppStore.getState()
       const session = state.sessions.find(row => row.id === requested?.session?.id)
       const scope = captureWorkspaceScope(state)
       if (session && scope?.serverIdentity && !state.switchingProfileId
         && requested.scope?.profileId === scope.profileId && requested.scope.profileGeneration === scope.profileGeneration
-        && requested.scope.serverIdentity === scope.serverIdentity) setTarget({ session, scope })
+        && requested.scope.serverIdentity === scope.serverIdentity) setTarget({ session, scope,
+        initialOrigin: profileShareOrigin(state.profiles.find(profile => profile.id === scope.profileId)?.serverUrl) })
     }
     window.addEventListener('agentsdock:share-chat', open)
     return () => window.removeEventListener('agentsdock:share-chat', open)
@@ -47,8 +53,10 @@ export function ChatShareDialog() {
     target={target} onClose={() => setTarget(null)} /> : null
 }
 
-function ChatSharePanel({ target: { session, scope }, onClose }: { target: Target; onClose: () => void }) {
+function ChatSharePanel({ target: { session, scope, initialOrigin }, onClose }: { target: Target; onClose: () => void }) {
   useLocale()
+  const [shareAddress, setShareAddress] = useState(initialOrigin)
+  const addressHintId = useId()
   const [shares, setShares] = useState<ListedShare[]>([])
   const [created, setCreated] = useState<CreatedShare | null>(null)
   const [busy, setBusy] = useState(false)
@@ -71,12 +79,15 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
     finally { operation.current = false; if (mounted.current) { setBusy(false); setBusyMode(null) } }
   }
   const create = (mode: ChatShareMode) => run(async () => {
+    let baseUrl: string
+    try { baseUrl = normalizeChatShareOrigin(shareAddress) }
+    catch { throw new Error(t('chatShare.invalidAddress')) }
     setBusyMode(mode); setCopied(null); setOpened(false)
     // Creation is deliberately one-shot. A failed/ambiguous response is never
     // replayed; the user can inspect the management list before a new action.
     const value = await window.agentsDock.chatShares.create(scope, session.id, mode === 'snapshot'
-      ? { mode, confirmed_public: true, title: [...session.title].slice(0, 256).join('') }
-      : { mode, confirmed_interactive: true, title: [...session.title].slice(0, 256).join('') })
+      ? { mode, confirmed_public: true, title: [...session.title].slice(0, 256).join(''), base_url: baseUrl }
+      : { mode, confirmed_interactive: true, title: [...session.title].slice(0, 256).join(''), base_url: baseUrl })
     if (!mounted.current) return
     setCreated({ ...value, mode })
     setShares(previous => [listedShare(value, mode), ...previous.filter(item => item.id !== value.id || item.mode !== mode)])
@@ -119,6 +130,12 @@ function ChatSharePanel({ target: { session, scope }, onClose }: { target: Targe
       <header><div><Dialog.Title>{t('chatShare.title')}</Dialog.Title><Dialog.Description>{session.title}</Dialog.Description></div>
         <button type="button" className="icon-button" aria-label={t('chatShare.close')} disabled={busy} onClick={close}><X size={16} /></button></header>
       <div className="form-dialog-body dialog-form">
+        <div className="chat-share-address">
+          <label className="chat-share-field"><span>{t('chatShare.address')}</span>
+            <input type="text" inputMode="url" autoComplete="off" spellCheck={false} disabled={busy || loading}
+              value={shareAddress} onChange={event => setShareAddress(event.currentTarget.value)} aria-describedby={addressHintId} /></label>
+          <p className="chat-share-warning" id={addressHintId}>{t('chatShare.addressHint')}</p>
+        </div>
         <div className="chat-share-actions">{(['snapshot', 'interactive'] as const).map(mode =>
           <button key={mode} type="button" className="primary-button" disabled={busy || loading} onClick={() => void create(mode)}>
             {busyMode === mode && <LoaderCircle className="spin" size={14} />}{t(mode === 'snapshot' ? 'chatShare.viewOnly' : 'chatShare.interactiveAction')}

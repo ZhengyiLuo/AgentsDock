@@ -1,4 +1,6 @@
 .chat-share-dialog { width: min(480px, calc(100vw - 32px)); }
+.chat-share-address { display: grid; gap: var(--space-2); }
+.chat-share-address > p { margin: 0; }
 .chat-share-actions { display: flex; gap: var(--space-5); }
 .chat-share-actions > button { flex: 1; }
 .chat-share-warning { color: var(--muted); font-size: var(--text-size-meta); line-height: var(--line-height-body); }

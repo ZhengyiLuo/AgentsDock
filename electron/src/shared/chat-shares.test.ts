@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatShareCreateBody, isSharedChatCollaborator, parseChatShareList, parseChatSharePreview, parseCreatedChatShare } from './chat-shares'
+import { chatShareCreateBody, isSharedChatCollaborator, normalizeChatShareOrigin, parseChatShareList, parseChatSharePreview, parseCreatedChatShare } from './chat-shares'
 import { updateQueuedTurns } from './queue'
 import type { Event } from './types'
 import { catalogs } from './locales'
@@ -98,12 +98,46 @@ describe('explicit chat sharing boundary', () => {
       expect(() => chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, ...fields })).toThrow()
     }
     expect(() => chatShareCreateBody({ mode: 'snapshot', confirmed_public: false } as never)).toThrow()
-    expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, base_url: 'http://untrusted.example.test' } as never))
+    expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, url: 'http://untrusted.example.test' } as never))
       .toEqual({ confirmed_public: true })
     expect(parseCreatedChatShare({ ...snapshot, path: snapshotPath, url: `http://192.0.2.4:7850${snapshotPath}` }, 'snapshot').path)
       .toBe(snapshotPath)
     for (const url of [`http://192.0.2.4${snapshotPath}?token=other`, `http://192.0.2.4${snapshotPath}#other`]) {
       expect(() => parseCreatedChatShare({ ...snapshot, path: snapshotPath, url }, 'snapshot')).toThrow()
+    }
+  })
+  it('normalizes an explicit share address without changing its scheme, host or non-default port', () => {
+    for (const [value, expected] of [
+      ['http://192.0.2.4:7850', 'http://192.0.2.4:7850'],
+      [' http://192.0.2.4:7850/ ', 'http://192.0.2.4:7850'],
+      ['https://share.example.test:8443/', 'https://share.example.test:8443'],
+      ['http://[2001:db8::4]:7850/', 'http://[2001:db8::4]:7850'],
+      ['HTTPS://SHARE.EXAMPLE.TEST:443', 'https://share.example.test']
+    ]) {
+      expect(normalizeChatShareOrigin(value)).toBe(expected)
+      expect(chatShareCreateBody({ mode: 'snapshot', confirmed_public: true, base_url: value }))
+        .toEqual({ confirmed_public: true, base_url: expected })
+      expect(chatShareCreateBody({ mode: 'interactive', confirmed_interactive: true, base_url: value }))
+        .toEqual({ confirmed_interactive: true, base_url: expected })
+    }
+  })
+  it('rejects invalid share addresses without echoing potentially secret input', () => {
+    for (const value of [null, 42, '', '192.0.2.4:7850', '//192.0.2.4:7850', 'https:example.test',
+      'ftp://example.test', 'file:///etc/passwd', 'http://user:secret@example.test', 'http://@example.test',
+      'http://example.test/path', 'http://example.test/..', 'http://example.test//', 'http://example.test/%2f',
+      'http://example.test?token=secret', 'http://example.test?', 'http://example.test#secret', 'http://example.test#',
+      'http://example.test\\secret', 'http://exa\nmple.test', 'http://example.test:0', 'http://example.test:65536',
+      `http://${'a'.repeat(2048)}`]) {
+      for (const mode of ['snapshot', 'interactive'] as const) {
+        try {
+          chatShareCreateBody({ mode, confirmed_public: true, confirmed_interactive: true, base_url: value } as never)
+          throw new Error('Expected invalid origin rejection')
+        } catch (error) {
+          expect(String(error)).toBe('Error: Enter an HTTP or HTTPS server address, without a path, credentials, query, or fragment.')
+          expect(error).not.toHaveProperty('input')
+          expect(error).not.toHaveProperty('cause')
+        }
+      }
     }
   })
   it('shares a long noisy log without rejecting its small complete text snapshot', () => {
