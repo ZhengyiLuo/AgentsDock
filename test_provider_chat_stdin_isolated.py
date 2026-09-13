@@ -202,6 +202,22 @@ class ProviderChatStdinTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(receipt['execution_started'])
                 self.assertNotIn('wait_for_response', self.posts[-1])
 
+    async def test_cancelled_receipt_retry_round_trips_through_real_helpers(self):
+        for backend in ('codex', 'claude'):
+            with self.subTest(backend=backend):
+                key = f'cancelled-helper-{backend}'
+                first = await self.invoke('sender', 'Synthetic cancelled message', backend=backend, key=key)
+                await self.mail.ledger.mailbox_call('cancel_message', first['message_id'], now=mailbox_fixture.NOW)
+                self.mail.set_recipient('idle')
+                self.mail.ns['schedule_next_queued_turn'].reset_mock()
+                repeated = await self.invoke('sender', 'Synthetic cancelled message', backend=backend, key=key)
+                self.assertEqual((repeated['message_id'], repeated['state'], repeated['duplicate']),
+                                 (first['message_id'], 'cancelled', True))
+                self.assertFalse(repeated['execution_started'])
+                self.mail.ns['schedule_next_queued_turn'].assert_not_called()
+        with self.mail.ledger._transaction() as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM chat_mailbox_messages').fetchone()[0], 2)
+
     async def test_respond_current_stdin_uses_actual_async_and_legacy_grants(self):
         self.mail.set_recipient('busy')
         for backend in ('codex', 'claude'):

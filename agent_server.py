@@ -85428,7 +85428,12 @@ async def submit_provider_route_handoff(
         exchange, leg, created = accepted
         if not leg:
             handoff = exchange
-            if str(handoff.get("status") or "") in {"failed", "cancelled"}:
+            # A canceled mailbox item is a stored, terminal receipt, not a
+            # failed send. Return its original identity/state on an exact retry;
+            # the live route/owner checks above still fence every request.
+            if (str(handoff.get("status") or "") == "failed"
+                    or (str(handoff.get("status") or "") == "cancelled"
+                        and handoff.get("delivery_mode") != "mailbox")):
                 raise generic_provider_route_delivery_error()
             try:
                 if handoff.get("delivery_mode") == "mailbox":
