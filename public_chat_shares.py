@@ -605,7 +605,10 @@ def public_chat_share_headers(*, allow_unlock_form: bool = False) -> dict[str, s
                if allow_unlock_form else "form-action 'none'; frame-ancestors 'none'; sandbox allow-same-origin")
         ),
         "Cache-Control": "no-store",
-        "Referrer-Policy": "no-referrer",
+        # A native navigation form under no-referrer submits Origin: null in
+        # Chromium. Keep an origin on this token-free, same-origin entry page
+        # so strict CSRF validation works; transcript pages disclose no referrer.
+        "Referrer-Policy": "same-origin" if allow_unlock_form else "no-referrer",
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "X-Robots-Tag": "noindex, nofollow, noarchive",
