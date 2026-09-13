@@ -43,6 +43,9 @@ export function messageText(event: Event): string {
   else {
     try { text = JSON.stringify(raw, null, 2) } catch { text = String(raw) }
   }
+  if (!text.trim() && event.type === 'turn_finished' && event.stopped !== true && typeof event.exit_code === 'number' && event.exit_code !== 0) {
+    text = `Agent turn failed with exit code ${event.exit_code}.`
+  }
   if (!inputEvent) return text
   const visibleText = stripInjectedProviderAuthority(text)
   return isImportedClaudeTaskNotification(event, visibleText) ? '' : visibleText
