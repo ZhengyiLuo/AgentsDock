@@ -150,6 +150,64 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get(path + "/state").status_code, 200)
         self.assertTrue(any(item.name == HTTP_COOKIE and not item.secure for item in self.client.cookies.jar))
 
+    def test_native_connection_creates_lan_share_without_rebinding_existing_share(self):
+        original = self.create(title="Existing connection share")
+        lan_origin = "http://192.0.2.42:7850"
+        share = self.create(base_url=lan_origin + "/", title="LAN collaboration")
+        path = share["path"]
+        self.assertEqual(share["url"], lan_origin + path)
+        self.assertNotIn(share["access_token"], share["url"])
+        ledger = InteractiveChatShareStore.open_existing(self.root)
+        self.assertEqual(ledger.share_origin(original["id"]), self.origin)
+        self.assertEqual(ledger.share_origin(share["id"]), lan_origin)
+        self.assertEqual(self.client.get(original["path"]).status_code, 200)
+        self.assertEqual(self.client.get(path).status_code, 403)
+        self.assertEqual(self.client.post(path + "/redeem", headers={"Origin": self.origin},
+            json={"invitation_token": share["access_token"]}).status_code, 403)
+
+        with TestClient(self.client.app, base_url=lan_origin) as lan:
+            self.assertEqual(lan.get(path).status_code, 200)
+            self.assertEqual(lan.get(path + "/state").status_code, 404)
+            self.assertEqual(lan.get(original["path"]).status_code, 403)
+            self.assertEqual(lan.post(path + "/redeem", headers={"Origin": lan_origin},
+                json={"invitation_token": "A" * 43}).status_code, 404)
+            entered = lan.post(path + "/redeem", headers={"Origin": lan_origin},
+                json={"invitation_token": share["access_token"]})
+            self.assertEqual(entered.status_code, 200, entered.text)
+            cookie = next(item for item in lan.cookies.jar if item.name == HTTP_COOKIE)
+            self.assertFalse(cookie.secure)
+            self.assertFalse(cookie.domain_specified)
+            self.assertEqual(cookie.path, path)
+            self.assertIn("HttpOnly", entered.headers["set-cookie"])
+            self.assertIn("SameSite=strict", entered.headers["set-cookie"])
+            self.assertEqual(lan.get(path + "/state").status_code, 200)
+
+            headers = {"Origin": lan_origin, "X-Chat-CSRF": entered.json()["csrf"]}
+            control = {"action": "turn.steer", "payload": {"prompt": "LAN follow-up"},
+                "request_id": "control_lan_000001"}
+            for denied in ({"Origin": lan_origin}, {**headers, "Origin": self.origin},
+                           {**headers, "X-Chat-CSRF": "0" * 64},
+                           {**headers, "Sec-Fetch-Site": "cross-site"}):
+                with self.subTest(headers=denied):
+                    self.assertEqual(lan.post(path + "/controls", headers=denied, json=control).status_code, 403)
+            self.control.assert_not_awaited()
+            accepted = lan.post(path + "/controls", headers=headers, json=control)
+            self.assertEqual(accepted.status_code, 202, accepted.text)
+            self.control.assert_awaited_once_with("chat-one", "turn.steer", {"prompt": "LAN follow-up"},
+                share_id=share["id"], request_id=control["request_id"])
+            self.assertEqual(lan.post(path + "/prompts", headers=headers,
+                json={"prompt": "LAN question", "request_id": "prompt_lan_000001"}).status_code, 202)
+            self.submit.assert_awaited_once()
+            # Even replaying the correct LAN cookie at origin A cannot widen
+            # the immutable share binding or authorize a native control route.
+            self.assertEqual(self.client.get(path + "/state", headers={
+                "Cookie": HTTP_COOKIE + "=" + cookie.value}).status_code, 403)
+            self.assertEqual(self.client.delete(self.admin + "/" + share["id"],
+                headers=self.admin_headers).status_code, 200)
+            self.assertEqual(lan.get(path + "/state").status_code, 404)
+            self.assertEqual(lan.post(path + "/redeem", headers={"Origin": lan_origin},
+                json={"invitation_token": share["access_token"]}).status_code, 404)
+
     def test_invalid_explicit_origin_does_not_create_a_grant(self):
         for base in (None, "", False, "ftp://example.test", "http://example.test/private", "http://@example.test",
                      "http://user:password@example.test", "http://example.test?token=value"):

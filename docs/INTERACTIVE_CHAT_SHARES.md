@@ -33,10 +33,20 @@ snapshots; browser credentials never authorize management.
 
 - `POST /api/admin/interactive-chat-shares/{session_id}` accepts
   `{confirmed_interactive:true,title?,expires_at?,base_url?}`. Expiry is future Unix seconds.
-  The native client derives `base_url` from its selected authenticated connection.
+  `base_url` may be a different reachable address of this same server, such as
+  a LAN IP, while creation still uses the existing authenticated connection.
+  Clients can default it to that connection's origin and let the operator
+  choose another address before creating the share.
   The exact validated HTTP/HTTPS origin is bound to the share in the ledger;
   changing global configuration does not rebind an existing share. Legacy clients
   can omit it to use `AGENTSDOCK_PUBLIC_CHAT_BASE_URL` or the management request's origin.
+  For example, creating through a Tailscale connection with
+  `base_url:"http://192.0.2.42:7850"` returns a LAN-address link (substitute the
+  server's actual LAN address). Recipients enter the same separately returned
+  access token at that origin. This does not open a listener, change firewall
+  rules, discover interfaces, or verify that the chosen address is reachable.
+  Editing an existing link's hostname/IP is not supported: create a new share
+  for the desired address. The previous share keeps its own origin and token.
   The response contains `id`, `title`, `created_at`, `expires_at`, `redeemed_at`,
   `revoked_at`, `warning`, token-free `path`/`url`, and a separate 43-character
   `access_token`. The raw token is returned only at creation; using it is repeatable.

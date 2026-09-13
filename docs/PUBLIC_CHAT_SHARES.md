@@ -50,6 +50,15 @@ POSTs; bodies are limited to 8 KiB and a five-second receive deadline.
    session's share. Revoking an existing share is idempotent. Listing/revocation
    remain available after the original chat is deleted.
 
+Creation may stay on the existing authenticated connection while `base_url`
+selects another reachable address of the same server for the returned links,
+such as its LAN IP. This does not change the server's listener or firewall,
+perform address discovery, or verify reachability. The common URL still needs
+the separate access token; the optional `token_url` includes it. Unlike an
+interactive share, a snapshot does not persist an origin binding: access is
+token-gated, and its unlock form requires the exact origin being visited.
+Cookies remain host-only and scoped to that snapshot's path.
+
 `GET`/`HEAD /shared-chat/{share_id}` initially shows a generic token-entry page,
 including for unknown well-formed IDs. It does not open or create snapshot
 storage before a cookie or entered token needs checking. A native form submits

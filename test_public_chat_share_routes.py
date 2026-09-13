@@ -244,6 +244,48 @@ class PublicChatShareRouteTests(unittest.TestCase):
         configured = self.create()
         self.assertEqual(configured["url"], self.base + configured["path"])
 
+    def test_create_over_one_connection_returns_token_gated_lan_snapshot(self):
+        management_origin = "https://connection.example.test"
+        lan_origin = "http://192.0.2.42:7850"
+        self.client.base_url = management_origin
+        share = self.create(base_url=lan_origin + "/", title="LAN snapshot")
+        self.assertEqual(share["url"], lan_origin + share["path"])
+        self.assertEqual(share["token_url"], lan_origin + "/share/" + share["access_token"])
+        self.assertNotIn(share["access_token"], share["url"])
+        self.assertEqual(self.client.base_url.host, "connection.example.test")
+
+        with TestClient(self.client.app, base_url=lan_origin) as lan:
+            gate = lan.get(share["path"])
+            self.assertEqual(gate.status_code, 200)
+            self.assertIn('name="access_token"', gate.text)
+            self.assertNotIn("Reviewed question", gate.text)
+            self.assertNotIn("LAN snapshot", gate.text)
+            denied = lan.post(share["path"] + "/unlock", headers={"Origin": management_origin},
+                data={"access_token": share["access_token"]}, follow_redirects=False)
+            self.assertEqual(denied.status_code, 403)
+            self.assertNotIn("set-cookie", denied.headers)
+            entered = lan.post(share["path"] + "/unlock", headers={"Origin": lan_origin},
+                data={"access_token": share["access_token"]}, follow_redirects=False)
+            self.assertEqual(entered.status_code, 303, entered.text)
+            cookie = next(item for item in lan.cookies.jar if item.name == routes.HTTP_SNAPSHOT_COOKIE)
+            self.assertFalse(cookie.secure)
+            self.assertFalse(cookie.domain_specified)
+            self.assertEqual(cookie.path, share["path"])
+            self.assertIn("HttpOnly", entered.headers["set-cookie"])
+            self.assertIn("SameSite=strict", entered.headers["set-cookie"])
+            page = lan.get(entered.headers["location"])
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Reviewed question", page.text)
+            self.assertNotIn(share["access_token"], page.text)
+            self.assertEqual(lan.get(share["token_url"]).status_code, 200)
+            # Snapshot links are bearer-token gated, not persisted-origin
+            # capabilities; do not accidentally impose interactive semantics.
+            self.assertNotIn("Reviewed question", self.client.get(share["path"]).text)
+            self.assertEqual(self.client.delete(self.admin + "/" + share["share_id"],
+                headers=self.auth).status_code, 200)
+            self.assertNotIn("Reviewed question", lan.get(share["path"]).text)
+            self.assertEqual(lan.get(share["token_url"]).status_code, 404)
+
     def test_invalid_explicit_origins_fail_before_loading_or_persisting(self):
         for base in (None, "", False, "ftp://example.test", "http://example.test/private", "http://@example.test",
                      "http://user:password@example.test", "http://example.test?token=value"):
