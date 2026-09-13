@@ -48,7 +48,8 @@ It also checks `respond-current` with asynchronous and legacy grants on both
 provider paths. Cancellation before send stores nothing; cancellation after
 commit remains an ambiguous delivery outcome, and an exact-key retry returns
 the saved receipt without creating another message.
-This input correction is not yet deployed.
+This input correction is available in AgentsServer `1.0.0-beta.3`. Installing
+the desktop app alone does not update the running server.
 
 Archiving a sender does not retract mail it already delivered. An active
 recipient can still discover and read that stored mail using its exact issued

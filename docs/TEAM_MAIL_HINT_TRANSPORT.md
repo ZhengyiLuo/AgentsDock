@@ -1,10 +1,12 @@
 # Team Mail and Bulletin hint transport
 
-## Current v2 candidate — not deployed
+## V2 release availability
 
 The existing v1 mail lane is enabled by the application in beta.66 and
 `1.0.0-beta.1`. The historical v1 acceptance notes below retain their original
-candidate status. This v2 extension is local work, not a published server update.
+candidate status. The v2 extension is published in `1.0.0-beta.3`; desktop
+indicators require AgentsDock `1.0.0-beta.2`. Publication does not install either
+component or restart an existing server.
 
 An authenticated `team_mail_hints_v2` health capability advertises `version:2`,
 the same `/api/team-mail-hints/events` path, protocol
