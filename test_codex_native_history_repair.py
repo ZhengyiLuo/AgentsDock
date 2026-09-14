@@ -43,8 +43,8 @@ class CodexNativeHistoryRepairTests(unittest.TestCase):
                     "transport": "app-server", "provider_thread_id": PROVIDER, "provider_turn_id": turn, "result_text": answer, **fields}])
         self.fixture()
 
-    def fixture(self, mutate_checkpoint=None):
-        source = [{"type": "session_meta", "payload": {"id": PROVIDER}}, *self.raw]
+    def fixture(self, mutate_checkpoint=None, *, source_headers=None):
+        source = [*(source_headers or [{"type": "session_meta", "payload": {"id": PROVIDER}}]), *self.raw]
         raw = b"".join((json.dumps(row) + "\n").encode() for row in source)
         self.source.write_bytes(raw)
         stat = self.source.stat()
@@ -178,6 +178,43 @@ class CodexNativeHistoryRepairTests(unittest.TestCase):
         self.assertTrue(all(self.cache.project_event("chat", row) is None for row in self.native))
         item = self.parse(self.raw[0])
         filtered = filter_native_codex_history_items("chat", PROVIDER, self.events, [item])
+        self.assertEqual(filtered[0]["text"], "")
+        self.assertTrue(filtered[0]["metadata_only"])
+        self.assertEqual(before, (self.events.read_bytes(), self.source.read_bytes()))
+
+    def test_current_mailbox_wake_in_fork_delta_keeps_original_native_owner(self):
+        # Use the real infrastructure input, not a text-prefix suppression rule.
+        # The observed fork had its own completed native wake and subsequently
+        # replayed it as provider-authored user.text in a checkpointed delta.
+        tree = ast.parse(Path(__file__).with_name("agent_server.py").read_text())
+        assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "CHAT_MAILBOX_WAKE_PROMPT"
+                for target in node.targets))
+        wake_text = ast.literal_eval(assignment.value)
+        self.assertEqual(len(wake_text), 551)
+        self.wake_fixture()
+        self.raw[0]["payload"]["content"][0]["text"] = wake_text
+        self.native[0]["provider_input_sha256"] = hashlib.sha256(wake_text.encode()).hexdigest()
+        parent = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        headers = [
+            {"type": "session_meta", "payload": {"id": PROVIDER, "forked_from_id": parent}},
+            {"type": "session_meta", "payload": {"id": parent}},
+        ]
+        prefix = b"".join((json.dumps(row) + "\n").encode() for row in headers)
+        self.fixture(lambda checkpoint: checkpoint.update(
+            previous_present=True, previous_source_offset=len(prefix),
+            previous_source_digest=hashlib.sha256(prefix).hexdigest()), source_headers=headers)
+        before = self.events.read_bytes(), self.source.read_bytes()
+        self.prepare()
+        projected = self.cache.project_event("chat", self.imports[0])
+        self.assertEqual(projected["prompt"], "")
+        self.assertTrue(projected["metadata_only"])
+        self.assertEqual(projected["provider_origin"]["native_event_id"], self.native[0]["id"])
+        self.assertEqual(projected["provider_origin"]["session_id"], PROVIDER)
+        self.assertIsNone(self.cache.project_event("chat", self.native[0]))
+        parsed = self.parse(self.raw[0])
+        self.assertTrue(parsed["provider_user_authored"])
+        filtered = filter_native_codex_history_items("chat", PROVIDER, self.events, [parsed])
         self.assertEqual(filtered[0]["text"], "")
         self.assertTrue(filtered[0]["metadata_only"])
         self.assertEqual(before, (self.events.read_bytes(), self.source.read_bytes()))
