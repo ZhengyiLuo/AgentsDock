@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-13 — Local live-activity build
+
+- Accepted local-only Apple Silicon `1.0.0-beta.2`, build `1163`, from
+  `f76c1f4087d855924a4498f831d8c30e05b8ac0b`, including live activity freshness,
+  quiet-run/compaction indicators and native Codex subagent display names.
+- Type checks, the full desktop suite, production compilation and isolated
+  light/dark renderer journeys pass. All 86 packaged compiled files match the
+  validated output; strict Developer ID signature, entitlements and fuse checks
+  pass. Existing app bundles were preserved.
+- This local app has automatic updates disabled and is not notarized or
+  published. It was not launched or installed over a running app.
+- Source-proven duplicate answers and leaked native wake imports still require
+  the matching standalone server update; this app alone cannot fix the older
+  server's history reconciliation.
+
 ## 2026-09-13 — Live activity and mailbox replay
 
 - Preserve newer streamed run ownership when an older health request finishes
