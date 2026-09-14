@@ -91,6 +91,7 @@ def load_projection() -> dict:
         "filter_native_codex_history_items": filter_native_codex_history_items,
         "filter_native_claude_mailbox_wake_items": filter_native_claude_mailbox_wake_items,
         "CLAUDE_PROJECTS_ROOT": Path("unused-project-root"),
+        "CODEX_SESSIONS_ROOT": Path("unused-codex-root"),
         "CODEX_NATIVE_HISTORY_REPAIR_CACHE": CodexNativeHistoryRepairCache(),
         "hashlib": hashlib, "hmac": hmac, "deque": deque, "defaultdict": defaultdict,
         "ClaudeInterruptionTracker": ClaudeInterruptionTracker,
