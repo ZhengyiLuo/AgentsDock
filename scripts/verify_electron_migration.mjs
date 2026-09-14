@@ -6,6 +6,11 @@
  * Run after BOTH the canonical release and legacy mirror are public:
  * node scripts/verify_electron_migration.mjs --from-version 0.2.13-beta.33 \
  *   --to-version 1.0.0-beta.1 --output "$RUNNER_TEMP/agentsdock-migration"
+ * For stable promotion, run separate disposable jobs with:
+ *   --from-version 0.2.12 --to-version 1.0.0 --track stable
+ *   --from-version 1.0.0-beta.2 --to-version 1.0.0 --track beta
+ * The track is the saved subscription, not the target release's metadata.
+ * Beta remains the default for the existing bridge acceptance command.
  */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -25,7 +30,7 @@ export function parseArguments(argv) {
   const options = {}
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i]
-    if (!['--from-version', '--to-version', '--output'].includes(key) || !argv[i + 1] || options[key]) {
+    if (!['--from-version', '--to-version', '--output', '--track'].includes(key) || !argv[i + 1] || options[key]) {
       throw new Error(`Invalid or duplicate argument: ${key}`)
     }
     options[key] = argv[i + 1]
@@ -33,8 +38,18 @@ export function parseArguments(argv) {
   assert(VERSION.test(options['--from-version']), 'A valid source desktop version is required')
   assert(VERSION.test(options['--to-version']), 'A valid target desktop version is required')
   assert(options['--from-version'] !== options['--to-version'], 'Migration versions must differ')
+  const track = options['--track'] ?? 'beta'
+  assert(track === 'stable' || track === 'beta', 'Track must be stable or beta')
+  assert(track !== 'stable' || !options['--to-version'].includes('-'), 'Stable track cannot offer a prerelease target')
   assert(isAbsolute(options['--output'] ?? ''), 'Output must be an absolute path')
-  return { from: options['--from-version'], to: options['--to-version'], output: resolve(options['--output']) }
+  return { from: options['--from-version'], to: options['--to-version'], track, output: resolve(options['--output']) }
+}
+
+export function assertMigrationTrack(track, status, persistedTrack) {
+  assert(track === 'stable' || track === 'beta', 'Track must be stable or beta')
+  assert.equal(status.track, track, 'Updater changed the selected test subscription')
+  assert.equal(typeof persistedTrack, 'string', 'Saved update track is missing')
+  assert.equal(persistedTrack.trim(), track, 'Saved update track changed during migration')
 }
 
 function run(command, args) {
@@ -200,7 +215,9 @@ export async function main(argv = process.argv.slice(2)) {
       }]
     }
     await writeFile(join(profileDirectory, 'settings.json'), `${JSON.stringify(fixture)}\n`)
-    await writeFile(join(profileDirectory, 'update-track'), 'beta\n')
+    // Seed only this disposable profile, before launch. Never switch the real
+    // updater's track to make a target appear or repair a failed assertion.
+    await writeFile(join(profileDirectory, 'update-track'), `${options.track}\n`)
     await writeFile(join(profileDirectory, 'app-language.json'), '{"preference":"en"}\n')
     const port = await freePort()
     const launch = () => {
@@ -219,18 +236,20 @@ export async function main(argv = process.argv.slice(2)) {
     const before = await client.evaluate('window.agentsDock.updates.status()')
     assert.equal(before.currentVersion, options.from)
     assert.equal(before.channel, 'direct')
+    assertMigrationTrack(options.track, before, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     const beforeBootstrap = await client.evaluate('window.agentsDock.bootstrap()')
     assert.equal(beforeBootstrap.activeProfileId, fixture.activeProfileId, 'Old app did not use the isolated test profile')
     assert.equal(beforeBootstrap.profiles.find(profile => profile.id === 'migration-smoke')?.name, fixture.profiles[0].name)
     await client.clickButton(['Open app settings', 'App settings', 'Settings'])
     await client.clickButton(['Updates'])
     await client.screenshot(join(options.output, '01-legacy-updater.png'))
-    const downloaded = await until('Published bridge download', async () => {
+    const downloaded = await until('Published target download', async () => {
       const status = await client.evaluate('window.agentsDock.updates.status()')
       if (status.state === 'error' || status.state === 'disabled') throw new Error(status.message)
       return status.state === 'downloaded' ? status : null
     }, 8 * 60_000)
-    assert.equal(downloaded.availableVersion, options.to, 'Legacy feed did not offer the expected bridge')
+    assert.equal(downloaded.availableVersion, options.to, 'Source feed did not offer the expected target')
+    assertMigrationTrack(options.track, downloaded, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     await client.screenshot(join(options.output, '02-bridge-ready.png'))
     await client.clickButton(['Restart to update'])
     client.close()
@@ -248,7 +267,7 @@ export async function main(argv = process.argv.slice(2)) {
     await until('Updated app ready', () => client.evaluate('Boolean(window.agentsDock?.updates)'))
     const after = await client.evaluate('window.agentsDock.updates.status()')
     assert.equal(after.currentVersion, options.to)
-    assert.equal(after.track, 'beta')
+    assertMigrationTrack(options.track, after, await readFile(join(profileDirectory, 'update-track'), 'utf8'))
     assert.equal(after.channel, 'direct')
     const afterBootstrap = await client.evaluate('window.agentsDock.bootstrap()')
     assert.equal(afterBootstrap.activeProfileId, fixture.activeProfileId)
@@ -258,16 +277,16 @@ export async function main(argv = process.argv.slice(2)) {
     assert.equal(settings.activeProfileId, fixture.activeProfileId)
     assert.equal(settings.profiles.find(profile => profile.id === 'migration-smoke')?.name, fixture.profiles[0].name)
     assert.equal(settings.profiles.find(profile => profile.id === 'migration-smoke')?.serverUrl, fixture.profiles[0].serverUrl)
-    assert.equal((await readFile(join(profileDirectory, 'update-track'), 'utf8')).trim(), 'beta')
     assert.equal(JSON.parse(await readFile(join(profileDirectory, 'app-language.json'), 'utf8')).preference, 'en')
     await client.clickButton(['Open app settings', 'App settings', 'Settings'])
     await client.clickButton(['Updates'])
-    await until('Bridge checked its canonical feed', async () => {
+    await until('Updated app checked its canonical feed', async () => {
       const status = await client.evaluate('window.agentsDock.updates.status()')
       return status.state === 'not-available' && status.currentVersion === options.to
     })
     await client.screenshot(join(options.output, '03-canonical-feed-current.png'))
-    const receipt = { from: options.from, to: options.to, sourceZIP: previous.zipSHA256, targetZIP: expected.zipSHA256,
+    const receipt = { from: options.from, to: options.to, track: options.track, beforeTrack: before.track, afterTrack: after.track,
+      sourceZIP: previous.zipSHA256, targetZIP: expected.zipSHA256,
       installedASAR: expected.asarSHA256, nativeRelaunchObserved: Boolean(relaunched), preserved: ['profile', 'update-track', 'language'],
       checks: ['signed old package', 'real UI download/install', 'native replacement/relaunch', 'public target identity', 'new feed check'],
       completedAt: new Date().toISOString() }
