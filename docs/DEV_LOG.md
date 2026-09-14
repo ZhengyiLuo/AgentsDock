@@ -2,6 +2,13 @@
 
 ## 2026-09-14 — 1.0.0 stable accepted
 
+- With explicit approval, replaced the published release record in place at
+  22:44 UTC (release ID `388756248`) using the exact original three signed
+  assets. Original metadata and downloads were preserved for recovery.
+  Fresh draft and public downloads passed signature, digest and source-file
+  verification. The source tag, runtime, release notes and version remain
+  unchanged; no rebuild or live deployment was performed. The paired desktop
+  replacement corrects untitled subagent headings without a server change.
 - Published source: `c12efa92c8e91358bbbbba041f29b7a00a1d434e`.
 - Promotes the validated beta.8 runtime without additional API, dependency,
   signing-key or storage-schema changes. The release notes compare the full
