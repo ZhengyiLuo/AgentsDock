@@ -63,7 +63,12 @@ jobs:
           if [[ "${RELEASE_TAG#v}" == *-* ]]; then
             release_args+=(--prerelease)
           fi
+          notes_file="docs/RELEASE_${RELEASE_TAG#v}.md"
+          if [[ -s "$notes_file" ]]; then
+            release_args+=(--notes-file "$notes_file")
+          else
+            release_args+=(--generate-notes)
+          fi
           gh release create "$RELEASE_TAG" dist/* "${release_args[@]}" \
             --title "AgentsServer $RELEASE_TAG" \
-            --target "$GITHUB_SHA" \
-            --generate-notes
+            --target "$GITHUB_SHA"
