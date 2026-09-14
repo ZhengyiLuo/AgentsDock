@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-14 — Project licensing
+
+- Add the Apache License 2.0 and project attribution notice. Preserve existing
+  Expo, SwiftTerm, native-module, and other third-party licensing terms.
+- Document licensing in the README and contribution guide, and declare it in
+  first-party desktop, mobile, website, and Team Hub package metadata.
+- Include the project LICENSE and NOTICE in future Electron packages. Existing
+  published artifacts and tags are unchanged; no release is cut by this change.
+- Validate the canonical license text, package metadata, preserved component
+  licenses, and Electron's actual resource-copy behavior with focused checks.
+
 ## 2026-09-12 — Published 1.0 desktop migration bridge
 
 - Published `1.0.0-beta.1`, build `1159`, from the exact reviewed source

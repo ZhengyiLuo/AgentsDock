@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "agentsdock-team-hub"
 version = "0.0.1"
 description = "AgentsDock Team Hub service foundation"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 dependencies = [
   "cryptography>=44,<48",

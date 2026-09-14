@@ -4,6 +4,7 @@
   "desktopName": "agentsdock.desktop",
   "version": "0.2.0",
   "private": true,
+  "license": "Apache-2.0",
   "packageManager": "pnpm@11.9.0",
   "description": "AgentsDock cross-platform Electron client",
   "author": "AgentsDock",
@@ -14,7 +15,7 @@
     "build:icon": "../scripts/build_electron_icon.sh",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --test ../scripts/tests/verify_electron_compile_output.test.mjs",
+    "test": "vitest run && node --test ../scripts/tests/verify_electron_compile_output.test.mjs ../scripts/tests/project_license.test.mjs",
     "test:watch": "vitest",
     "package:mac": "pnpm build:icon && pnpm build && electron-builder --mac zip dmg",
     "package:mas": "pnpm build:icon && pnpm build && electron-builder --mac mas",
@@ -44,6 +45,10 @@
       "!**/*.{ts,tsx}",
       "!**/*.{d.ts,d.mts,d.cts}",
       "!**/{test,tests,__tests__,docs,examples}/**"
+    ],
+    "extraResources": [
+      { "from": "../LICENSE", "to": "licenses/AgentsDock-LICENSE" },
+      { "from": "../NOTICE", "to": "licenses/AgentsDock-NOTICE" }
     ],
     "electronFuses": {
       "runAsNode": false,
