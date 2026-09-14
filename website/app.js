@@ -2,7 +2,8 @@
 // fallback (see [data-dl] anchors in index.html). On load we ask the GitHub
 // Releases API for the newest builds and upgrade each link in place, so the
 // site always points at the latest version without a manual edit per release.
-const RELEASES_API = 'https://api.github.com/repos/ZhengyiLuo/AgentsDock-Releases/releases?per_page=30'
+const DESKTOP_RELEASES_API = 'https://api.github.com/repos/ZhengyiLuo/AgentsDock/releases?per_page=30'
+const ANDROID_RELEASES_API = 'https://api.github.com/repos/ZhengyiLuo/AgentsDock-Releases/releases?per_page=30'
 
 // Match the right asset for each platform button by file-name pattern.
 const ASSET_MATCHERS = {
@@ -23,22 +24,28 @@ function findAsset(release, matcher) {
   return asset && asset.browser_download_url
 }
 
-async function loadRelease() {
+async function loadReleases(url) {
   let releases
   try {
-    const res = await fetch(RELEASES_API, { cache: 'no-store' })
+    const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) throw new Error(`Releases API returned ${res.status}`)
     releases = await res.json()
     if (!Array.isArray(releases) || !releases.length) throw new Error('No releases')
   } catch {
-    return // keep the hardcoded fallback links + copy already in the HTML
+    return [] // keep the hardcoded fallback links + copy already in the HTML
   }
 
   // Newest release first — by publish date, INCLUDING betas/prereleases, so
   // every button tracks the absolute latest build (not just the latest stable).
-  const sorted = releases
+  return releases
     .filter(r => !r.draft)
     .sort((a, b) => new Date(b.published_at) - new Date(a.published_at))
+}
+
+async function loadRelease() {
+  // Desktop releases moved to the public source repository. A failed lookup
+  // keeps its canonical HTML links; the older mirror must not replace them.
+  const sorted = await loadReleases(DESKTOP_RELEASES_API)
 
   // The newest release that actually ships each platform's asset. Desktop
   // builds (dmg/AppImage/exe) travel together; Android ships in its own release.
@@ -55,7 +62,14 @@ async function loadRelease() {
     if (label && version) label.textContent = `Version ${version}`
   }
 
-  setPlatformHref('android', findAsset(latestWith(ASSET_MATCHERS.android), ASSET_MATCHERS.android))
+}
+
+async function loadAndroidRelease() {
+  // Android still publishes separately to the legacy repository.
+  const sorted = await loadReleases(ANDROID_RELEASES_API)
+  const android = sorted.find(r => (r.assets || []).some(a => ASSET_MATCHERS.android.test(a.name)))
+  setPlatformHref('android', findAsset(android, ASSET_MATCHERS.android))
 }
 
 loadRelease()
+loadAndroidRelease()
