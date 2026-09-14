@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import re
 from collections import deque
 from contextlib import suppress
 from copy import deepcopy
@@ -25,7 +26,23 @@ FUNCTIONS = {
     "async_route_queue_fields",
     "active_snapshot_input",
     "stop_turn",
+    "canonical_provider_cross_chat_route_alias",
+    "canonical_provider_cross_chat_route_actions",
+    "normalized_provider_cross_chat_routes",
+    "normalized_provider_cross_chat_route_snapshot",
+    "provider_route_snapshot_allows_native_steer",
 }
+
+
+def saved_route_snapshots():
+    """Real durable route DTO shape: automatic metadata, no route_kind."""
+    return [{
+        "route_id": f"route_{index + 1:032x}", "revision": f"rev_{index + 11:032x}",
+        "pair_id": f"pair_{index + 21:032x}", "paired_route_id": f"route_{index + 31:032x}",
+        "target_session_id": f"sess_synthetic_{index}", "alias": f"synthetic_{index}",
+        "actions": ["instruction", "request_reply"],
+        "created_at": "2026-09-09T10:00:00Z", "updated_at": "2026-09-10T10:00:00Z",
+    } for index in range(3)]
 
 
 class AdmissionHTTPException(Exception):
@@ -71,6 +88,16 @@ def load_admission():
         "CODEX_TRANSPORT_APP_SERVER": "app_server",
         "CLAUDE_TRANSPORT_AGENT_SDK": "agent_sdk",
         "CODEX_GOAL_STEER_CLIENT_CAPABILITY": "codex_goal_steer_v1",
+        "PROVIDER_CROSS_CHAT_ROUTE_KIND_REFERENCE": "prompt_reference",
+        "PROVIDER_CROSS_CHAT_ROUTE_KIND_AMBIENT": "ambient_local",
+        "AGENT_AMBIENT_LOCAL_HANDOFFS_ENABLED": True,
+        "PROVIDER_CROSS_CHAT_ROUTE_ALIAS_RE": re.compile(r"^[a-z][a-z0-9_-]{0,31}$"),
+        "PROVIDER_CROSS_CHAT_ROUTE_ID_RE": re.compile(r"^route_[0-9a-f]{32}$"),
+        "PROVIDER_CROSS_CHAT_ROUTE_REVISION_RE": re.compile(r"^rev_[0-9a-f]{32}$"),
+        "PROVIDER_CROSS_CHAT_ROUTE_PAIR_ID_RE": re.compile(r"^pair_[0-9a-f]{32}$"),
+        "PROVIDER_CROSS_CHAT_RECIPROCAL_EFFECT_ID_RE": re.compile(r"^exchange_[0-9a-f]{32}$"),
+        "PROVIDER_CROSS_CHAT_ROUTE_ACTIONS": ("instruction", "request_reply"),
+        "PROVIDER_CROSS_CHAT_ROUTE_ACTION_SET": {"instruction", "request_reply"},
         "CROSS_CHAT_DELIVERY_PURPOSES": {"local_delivery", "peer_delivery"},
         "LOCAL_CROSS_CHAT_DELIVERY_PURPOSE": "local_delivery",
     }
@@ -148,7 +175,7 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
             "queued_codex_runtime_matches_active": Mock(return_value=True),
             "queued_claude_runtime_matches_active": Mock(return_value=False),
             "provider_route_snapshot_allows_native_steer": Mock(
-                side_effect=lambda snapshot: not snapshot or snapshot == [{"intrinsic": True}],
+                side_effect=self.ns["provider_route_snapshot_allows_native_steer"],
             ),
             **self.forbidden,
         })
@@ -248,7 +275,7 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_authority_bearing_followups_stay_queued_without_stop(self):
         for field in (
             "chat_references", "team_references", "cross_chat_obligation_ids",
-            "cross_chat_exchange_ids", "provider_cross_chat_route_snapshot",
+            "cross_chat_exchange_ids",
             "secure_peer_route_snapshots", "cross_chat_envelope_id",
             "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
         ):
@@ -262,7 +289,6 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
             "chat_references", "team_references", "cross_chat_obligation_ids",
             "cross_chat_exchange_ids", "cross_chat_envelope_id",
             "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
-            "provider_cross_chat_route_snapshot",
         ):
             with self.subTest(field=field):
                 self.current[field] = [{"id": "scoped-reference"}]
@@ -368,6 +394,58 @@ class GoalFollowupAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.active["native_steer_queue"] = None
         self.active["codex_goal_steer_queue"] = asyncio.Queue()
         await self.assert_admitted_to_goal_lane(self.active["codex_goal_steer_queue"])
+
+    async def test_saved_route_metadata_allows_plain_goal_steering_without_replacing_authority(self):
+        for ordinary in (False, True):
+            for current_routes in ([], saved_route_snapshots()):
+                for files in ([], ["file_synthetic_attachment"]):
+                    with self.subTest(ordinary=ordinary, current_routes=bool(current_routes), files=files):
+                        self.setUp()
+                        routes = saved_route_snapshots()
+                        self.assertEqual(self.ns["normalized_provider_cross_chat_route_snapshot"](routes), routes)
+                        self.assertFalse(self.ns["provider_route_snapshot_allows_native_steer"](routes))
+                        self.selected.update(
+                            prompt="Status report!", model="gpt-6-astra", effort="xhigh",
+                            file_ids=files, provider_cross_chat_route_snapshot=routes,
+                            provider_team_mail_route_snapshot=[{"route_id": "mail_" + "1" * 32, "revision": "rev_" + "2" * 32}],
+                        )
+                        self.current["provider_cross_chat_route_snapshot"] = current_routes
+                        authority = self.active["provider_authority"] = {"proof": "existing-owner-only"}
+                        lane = self.active["native_steer_queue"]
+                        if ordinary:
+                            self.active.pop("codex_native_operation_kind")
+                            self.current["purpose"] = "scheduled_job"
+                            self.active["native_steer_queue"] = None
+                            lane = self.active["codex_goal_steer_queue"] = asyncio.Queue()
+                        await self.assert_admitted_to_goal_lane(lane)
+                        self.assertIs(self.active["provider_authority"], authority)
+                        self.assertEqual(self.selected["provider_cross_chat_route_snapshot"], routes)
+
+    async def test_saved_routes_do_not_relax_explicit_reference_or_command_rejections(self):
+        for field, value in (
+            ("chat_references", [{"session_id": "new-target"}]),
+            ("team_references", [{"id": "new-team"}]),
+            ("skill_selection", {"name": "provider-command"}),
+            ("prompt", "/mail server remote New message"),
+            ("provider_cross_chat_route_snapshot", [
+                *saved_route_snapshots(), {**saved_route_snapshots()[0], "route_kind": "prompt_reference"},
+            ]),
+        ):
+            with self.subTest(field=field):
+                self.setUp()
+                self.selected["provider_cross_chat_route_snapshot"] = saved_route_snapshots()
+                self.selected[field] = value
+                await self.assert_rejected()
+
+    async def test_saved_routes_still_require_ordinary_non_goal_authority_replacement(self):
+        self.session.pop("codex_goal")
+        self.active.pop("codex_native_operation_kind")
+        self.current.pop("purpose")
+        self.selected["provider_cross_chat_route_snapshot"] = saved_route_snapshots()
+        before = self.snapshot()
+        with self.assertRaises(self.ns["NonNativeForceSendRequiresLifecycleLock"]):
+            await self.ns["_run_queued_turn_now_once"]("chat", "q-followup", require_native=True)
+        self.assert_untouched(before)
 
     async def test_goal_created_while_waiting_for_queue_lock_uses_goal_lane(self):
         goal = self.session.pop("codex_goal")

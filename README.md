@@ -772,6 +772,34 @@ without losing chat state:
 | `AGENTSDOCK_HANDOFF_DIGEST_CHARS` | Final digest character cap | `56000` |
 | `AGENTSDOCK_CODE_DIFF_SNAPSHOT_TIMEOUT_SECONDS` | Maximum time for each isolated Git worktree snapshot | `120` |
 
+### Codex subagent concurrency
+
+Server chat admission and a Codex thread's spawned-agent slots are separate.
+AgentsServer does not inject a default subagent count. Codex's supported setting
+is `agents.max_concurrent_threads_per_session`; `agents.max_threads` is its
+legacy alias. Unset means **Codex chooses its default**, not unlimited. See the
+[official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+Native clients can read or change the server default with
+`GET` / `PUT /api/admin/codex/subagents`. The PUT body is
+`{"max_concurrent_threads_per_session": 12}`; use `null` to remove the override.
+The field is required and accepts only a positive, losslessly represented JSON
+integer (at most `9007199254740991`) or `null`, never strings, booleans, or zero.
+Both endpoints require exactly one native token header and reject browser,
+cookie, bearer, and URL-token credentials. PUT uses bounded JSON framing.
+
+Responses include `configurable`, `scope: "server"`, the configured nullable
+value, `provider_config_key`, and `applies_to: "new_or_reloaded_threads"`.
+Legacy `exec` transport reports `configurable: false` with
+`reason: "unsupported_transport"`; it cannot silently save an ineffective setting.
+
+The choice persists in `admin/codex-settings.json` without replacing other
+settings. It is passed as a real dotted-key override when native threads start,
+resume unloaded, or fork. Already-loaded chats need **Reload provider** while
+idle; no current turn, goal, child agent, or provider process is interrupted by
+saving this setting. Explicit chat overrides take precedence. No polling or
+background configuration refresh is added.
+
 ## Context Digests
 
 `POST /api/sessions/{session_id}/digest` creates a real LLM-summarized handoff
@@ -1329,6 +1357,8 @@ The server exposes JSON endpoints under `/api`.
 - `GET /api/sessions/{session_id}/tmux`
 - `GET /api/runtime/catalog`
 - `GET /api/admin/update`
+- `GET /api/admin/codex/subagents`
+- `PUT /api/admin/codex/subagents`
 - `POST /api/admin/update/check`
 - `POST /api/admin/update/start`
 - `GET /ws/sessions/{session_id}`

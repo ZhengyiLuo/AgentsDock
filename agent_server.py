@@ -9056,6 +9056,14 @@ class CodexGoalsAdminRequest(BaseModel):
     enabled: bool
 
 
+class CodexSubagentsAdminRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    # Bound only by lossless JSON/desktop integer transport, not an app quota.
+    max_concurrent_threads_per_session: int | None = Field(
+        ..., strict=True, ge=1, le=9007199254740991,
+    )
+
+
 class CodexInteractionResponseRequest(BaseModel):
     response: dict[str, Any]
 
@@ -23365,9 +23373,19 @@ def codex_goal_followup_requires_native(
 
 def codex_goal_steer_selection_is_plain(selected: dict[str, Any]) -> bool:
     """User text/attachments may steer without changing runtime authority."""
+    routes = selected.get("provider_cross_chat_route_snapshot")
     return (
         CODEX_GOAL_STEER_CLIENT_CAPABILITY in (selected.get("client_capabilities") or [])
         and str(selected.get("prompt") or "").strip().split(maxsplit=1)[:1] != ["/mail"]
+        and selected.get("skill_selection") is None
+        # Saved/ambient snapshots are automatic queue metadata and are never
+        # applied by the owner-preserving goal lane. Explicit new @ grants
+        # still require separate work, even without their structured refs.
+        and not any(
+            isinstance(route, dict)
+            and route.get("route_kind") == PROVIDER_CROSS_CHAT_ROUTE_KIND_REFERENCE
+            for route in (routes if isinstance(routes, list) else [])
+        )
         and not any(selected.get(field) for field in (
         "purpose", "chat_references", "team_references",
         "secure_peer_route_snapshots", "cross_chat_obligation_ids",
@@ -23574,18 +23592,18 @@ async def _run_queued_turn_now_once(
                     and not interrupted_turn.get("cross_chat_envelope_id")
                     and not interrupted_turn.get("cross_chat_exchange_id")
                     and not interrupted_turn.get("cross_chat_exchange_leg_id")
-                    # Native steering issues a fresh helper authority for the
-                    # selected logical run. Intrinsic ambient snapshots may
-                    # cross that boundary because their frozen target ceiling
-                    # is copied into the replacement authority; legacy or
-                    # mixed route grants still require a normal stop/start.
-                    and provider_route_snapshot_allows_native_steer(
-                        interrupted_turn.get(
-                            "provider_cross_chat_route_snapshot"
+                    # Only ordinary logical-run replacement issues fresh
+                    # authority. A goal steer keeps its exact owner and does
+                    # not apply automatic saved-route snapshots from the queue.
+                    and (
+                        goal_followup or (
+                            provider_route_snapshot_allows_native_steer(
+                                interrupted_turn.get("provider_cross_chat_route_snapshot")
+                            )
+                            and provider_route_snapshot_allows_native_steer(
+                                selected.get("provider_cross_chat_route_snapshot")
+                            )
                         )
-                    )
-                    and provider_route_snapshot_allows_native_steer(
-                        selected.get("provider_cross_chat_route_snapshot")
                     )
                     and (
                         (
@@ -54363,13 +54381,14 @@ async def send_codex_goal_steer(
             and str(active.get("codex_control_reservation_id") or "") == reservation_id
             and str(current.get("codex_control_reservation_id") or "") == reservation_id
             and codex_goal_steer_selection_is_plain(selected)
+            and current.get("skill_selection") is None
             and not any(current.get(field) for field in (
                 "chat_references", "team_references", "secure_peer_route_snapshots",
                 "cross_chat_obligation_ids", "cross_chat_exchange_ids",
                 "cross_chat_envelope_id", "cross_chat_exchange_id", "cross_chat_exchange_leg_id",
             ))
-            and provider_route_snapshot_allows_native_steer(selected.get("provider_cross_chat_route_snapshot"))
-            and provider_route_snapshot_allows_native_steer(current.get("provider_cross_chat_route_snapshot"))
+            # Route snapshots are not consumed here: only user text/files are
+            # sent, under the exact existing authority, run and subscription.
             and queued_codex_runtime_matches_active(session_id, selected, active)
         )
 
@@ -73135,7 +73154,9 @@ async def require_agent_token(request: Request, call_next):
         request.url.path == "/api/admin/team-hub/host"
         or request.url.path.startswith("/api/admin/team-hub/host/")
     )
-    codex_goals_admin_route = request.url.path == "/api/admin/codex/goals"
+    codex_goals_admin_route = request.url.path in {
+        "/api/admin/codex/goals", "/api/admin/codex/subagents",
+    }
     public_chat_shares_admin_route = (
         request.url.path == "/api/admin/chat-shares"
         or request.url.path.startswith("/api/admin/chat-shares/")
@@ -73319,7 +73340,7 @@ async def require_agent_token(request: Request, call_next):
             declared_size, transport_error = privileged_native_json_transport(
                 request,
                 max_body_bytes=CODEX_GOALS_ADMIN_MAX_BODY_BYTES,
-                label="Codex goals",
+                label="Codex settings",
                 require_content_length=True,
             )
             if transport_error is not None:
@@ -76000,6 +76021,81 @@ def codex_goals_admin_status() -> dict[str, Any]:
     }
 
 
+def read_codex_admin_settings() -> dict[str, Any]:
+    """Read the whole document before a leaf edit; never erase unreadable data."""
+    try:
+        value = json.loads(CODEX_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503, detail="Codex settings could not be read safely",
+        ) from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=503, detail="Codex settings must be a JSON object")
+    return value
+
+
+def codex_subagents_admin_status() -> dict[str, Any]:
+    settings = read_codex_admin_settings()
+    config = settings.get("thread_config", {})
+    if not isinstance(config, dict) or not isinstance(config.get("agents", {}), dict):
+        raise HTTPException(status_code=503, detail="Codex thread settings must be JSON objects")
+    config = sanitize_codex_thread_config(config, source=str(CODEX_SETTINGS_FILE))
+    agents = config.get("agents") or {}
+    return {
+        "max_concurrent_threads_per_session": agents.get("max_concurrent_threads_per_session"),
+        "configurable": CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC,
+        "reason": "unsupported_transport" if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC else None,
+        "scope": "server",
+        "provider_config_key": "agents.max_concurrent_threads_per_session",
+        "applies_to": "new_or_reloaded_threads",
+        "message": (
+            "Applies to new or reloaded Codex threads. Existing chats need Reload provider "
+            "when idle. A chat-specific override takes precedence. No override means "
+            "Codex chooses its default, not unlimited."
+        ),
+    }
+
+
+async def get_codex_subagents_admin() -> dict[str, Any]:
+    return codex_subagents_admin_status()
+
+
+async def put_codex_subagents_admin(req: CodexSubagentsAdminRequest) -> dict[str, Any]:
+    if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC:
+        raise HTTPException(
+            status_code=409, detail="Subagent configuration requires native Codex app-server transport",
+        )
+    # Share the goals writer lock: both controls own leaves of the same file.
+    # There are no provider calls, unloads, or modifications of running work.
+    async with CODEX_GOALS_CONFIG_LOCK:
+        settings = read_codex_admin_settings()
+        config = settings.get("thread_config", {})
+        if not isinstance(config, dict) or not isinstance(config.get("agents", {}), dict):
+            raise HTTPException(status_code=503, detail="Codex thread settings must be JSON objects")
+        config = dict(config)
+        agents = dict(config.get("agents", {}))
+        agents.pop(CODEX_THREAD_CONFIG_LEGACY_MAX_THREADS_KEY, None)
+        agents.pop("max_concurrent_threads_per_session", None)
+        if req.max_concurrent_threads_per_session is not None:
+            agents["max_concurrent_threads_per_session"] = req.max_concurrent_threads_per_session
+        if agents:
+            config["agents"] = agents
+        else:
+            config.pop("agents", None)
+        if config:
+            settings["thread_config"] = config
+        else:
+            settings.pop("thread_config", None)
+        settings["updated_at"] = update_utc_now()
+        try:
+            atomic_update_json(CODEX_SETTINGS_FILE, settings)
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="Codex settings could not be saved") from exc
+        return codex_subagents_admin_status()
+
+
 def queued_turn_backend(session_id: str, item: dict[str, Any]) -> str:
     session = STORE.sessions.get(session_id) or {}
     return str(
@@ -76811,6 +76907,7 @@ async def put_codex_goals_admin(
         requested = bool(req.enabled)
         if requested == CODEX_GOALS_ENABLED:
             return codex_goals_admin_status()
+        settings = read_codex_admin_settings()
         await reserve_codex_goals_reconfiguration()
         transition: dict[str, int] = {
             "paused_goal_count": 0,
@@ -76826,6 +76923,7 @@ async def put_codex_goals_admin(
             atomic_update_json(
                 CODEX_SETTINGS_FILE,
                 {
+                    **settings,
                     "goals_enabled": requested,
                     "updated_at": update_utc_now(),
                 },
@@ -77308,6 +77406,21 @@ async def put_codex_goals_admin_endpoint(
 ) -> dict[str, Any]:
     require_native_admin_control(request)
     return await put_codex_goals_admin(req)
+
+
+@app.get("/api/admin/codex/subagents")
+async def get_codex_subagents_admin_endpoint(request: Request) -> dict[str, Any]:
+    require_native_admin_control(request)
+    return await get_codex_subagents_admin()
+
+
+@app.put("/api/admin/codex/subagents")
+async def put_codex_subagents_admin_endpoint(
+    req: CodexSubagentsAdminRequest,
+    request: Request,
+) -> dict[str, Any]:
+    require_native_admin_control(request)
+    return await put_codex_subagents_admin(req)
 
 
 @app.get("/api/admin/team-hub/host")

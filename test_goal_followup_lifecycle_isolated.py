@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from codex_app_server import CodexAppServerDisconnected
-from test_goal_followup_admission_isolated import AdmissionHTTPException
+from test_goal_followup_admission_isolated import AdmissionHTTPException, saved_route_snapshots
 import test_goal_native_steer_isolated as native_goal_fixture
 
 
@@ -274,6 +274,41 @@ class GoalFollowupLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["file_ids"], ["synthetic-visible-file"])
         self.assert_original_owner()
         await self.finish_runner(runner)
+
+    async def test_scheduled_goal_and_continuation_ignore_automatic_saved_routes(self):
+        self.current["purpose"] = "scheduled_job"
+        owner_routes = self.current["provider_cross_chat_route_snapshot"] = saved_route_snapshots()[:1]
+        runner = await self.start()
+        queued_routes = saved_route_snapshots()
+        task, _ = self.followup(
+            prompt="Status report!", provider_cross_chat_route_snapshot=queued_routes,
+            provider_team_mail_route_snapshot=[{"route_id": "mail_" + "1" * 32, "revision": "rev_" + "2" * 32}],
+        )
+        result = await asyncio.wait_for(task, 5)
+        self.assert_original_owner()
+        self.assertEqual((result["run_id"], result["interrupted"]), ("operation", False))
+        self.assertEqual(self.current["purpose"], "scheduled_job")
+        self.assertIs(self.current["provider_cross_chat_route_snapshot"], owner_routes)
+        self.assertEqual(self.calls[0][2][0]["text"], "Status report!")
+
+        self.turn.push("turn/completed", turn={"id": "turn-1", "status": "completed"})
+        await self.wait(lambda: self.active.get("codex_native_operation_kind") == "goal_resume")
+        self.turn.push("turn/started", provider_turn="turn-2", turn={"id": "turn-2"})
+        await self.wait(lambda: self.active.get("provider_turn_id") == "turn-2")
+        task, _ = self.followup(
+            prompt="Review this attachment", file_ids=["synthetic-private-file"],
+            display_file_ids=["synthetic-visible-file"],
+            provider_cross_chat_route_snapshot=queued_routes,
+        )
+        await asyncio.wait_for(task, 5)
+        self.assert_original_owner()
+        self.assertIs(self.current["provider_cross_chat_route_snapshot"], owner_routes)
+        self.assertEqual([(row[0], row[1]) for row in self.calls], [("thread", "turn-1"), ("thread", "turn-2")])
+        steers = [row for kind, row in self.events if kind == "turn_steered"]
+        self.assertEqual([row["prompt"] for row in steers], ["Status report!", "Review this attachment"])
+        self.assertEqual(steers[1]["file_ids"], ["synthetic-visible-file"])
+        self.assertNotIn("provider_cross_chat_route_snapshot", steers[1])
+        await self.finish_runner(runner, turn="turn-2")
 
     async def test_goal_created_after_admission_does_not_rotate_logical_authority(self):
         self.goal["status"] = "paused"
