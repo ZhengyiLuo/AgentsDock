@@ -3,8 +3,10 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import type { Event, ProviderHistoryOrigin } from '@shared/types'
 import { isImportedSourceProvenNativeReplay, mergeProviderInterruptionEvent } from '@shared/provider-origin'
-import { importedCrossChatDelivery, projectTimeline, renderTimelineItems } from './timeline'
+import { importedCrossChatDelivery, isAgentVisibleEvent, projectTimeline, renderTimelineItems } from './timeline'
 import { cachedTimelineProjection, clearTimelineProjectionCache } from './timeline-projection-cache'
+import { buildTimelineLandmarks } from './timeline-minimap'
+import { updateActiveSessions } from '../store/app-store'
 
 type StoredFixtureFields = Partial<Event> & { transport?: string; provider_history_sanitized?: boolean }
 const event = (seq: number, type: string, extra: StoredFixtureFields): Event => ({
@@ -67,6 +69,39 @@ function asyncDeliveryReplayFixture() {
 }
 
 describe('source-proven native Codex history copies', () => {
+  it('keeps import checkpoint, silent inputs and terminal invisible and inert during each broadcast prefix', () => {
+    const { originals, corrected, terminal } = asyncDeliveryReplayFixture()
+    const checkpoint = event(299, 'history_imported', {
+      run_id: 'import_synthetic_batch', imported: true, metadata_only: true,
+      message: 'Imported 2 rough messages from codex history.'
+    })
+    const batch = [checkpoint, ...corrected, { ...terminal, metadata_only: true, result_text: '',
+      message: 'Imported history replay finished.' }]
+    const originalRows = renderTimelineItems(projectTimeline(originals, []))
+    const visibleSeq = (events: Event[]) => events.reduce((latest, row) =>
+      isAgentVisibleEvent(row) ? Math.max(latest, row.seq) : latest, 0)
+    const idle = new Set<string>()
+    const running = new Set(['example-chat', 'another-running-chat'])
+    clearTimelineProjectionCache()
+    for (let length = 1; length <= batch.length; length++) {
+      const prefix = batch.slice(0, length)
+      const rows = cachedTimelineProjection('async-import-bookkeeping', prefix, []).rendered
+      expect(rows).toEqual([])
+      expect(buildTimelineLandmarks(rows)).toEqual([])
+      expect(prefix.some(isAgentVisibleEvent)).toBe(false)
+      expect(prefix.reduce(updateActiveSessions, idle)).toBe(idle)
+      expect(prefix.reduce(updateActiveSessions, running)).toBe(running)
+      expect(visibleSeq([...originals, ...prefix])).toBe(visibleSeq(originals))
+      expect(renderTimelineItems(projectTimeline([...originals, ...prefix], []))).toEqual(originalRows)
+    }
+    // Older ordinary import markers lacked control-only flags. Their status
+    // text is still bookkeeping, not public activity or a new-message signal.
+    const oldCheckpoint = { ...checkpoint, imported: undefined, metadata_only: undefined }
+    expect(renderTimelineItems(projectTimeline([oldCheckpoint, ...batch.slice(1)], []))).toEqual([])
+    expect(isAgentVisibleEvent(oldCheckpoint)).toBe(false)
+    expect(updateActiveSessions(running, oldCheckpoint)).toBe(running)
+  })
+
   it('uses server proof on a tail-only page without relaxing complete async wrapper or human provenance checks', () => {
     const { originals, imported, corrected, terminal } = asyncDeliveryReplayFixture()
     const snapshot = structuredClone([...originals, ...imported])
