@@ -25,6 +25,7 @@ import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../stor
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
 import { CodexServerSettings } from './CodexServerSettings'
+import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
 import { ServerManagement } from './ServerManagement'
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings'
@@ -2693,6 +2694,7 @@ export function SettingsDialog() {
       profileId={activeProfileId}
       profileGeneration={profileGeneration}
     />
+    <CodexSubagentSettings connected={connected} profileId={activeProfileId} profileGeneration={profileGeneration} />
     <footer><button type="button" className="primary-button" onClick={closeSettings}>{t("ui.Dialogs.SettingsDialog.done_11a6767")}</button></footer>
   </div>
   return <>

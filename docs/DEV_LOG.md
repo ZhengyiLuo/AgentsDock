@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-14 — Native Codex subagent setting
+
+- Add Codex subagent limit to desktop Settings > Server. A positive integer
+  sets the server's native provider override; clearing it uses Codex's default,
+  not an unlimited sentinel. The main agent is excluded from this count.
+- Read on opening the settings page and write only on Save. No polling,
+  keystroke requests, chat-state writes or provider restarts are introduced.
+- Show when an older server, non-admin connection or legacy exec transport
+  cannot change the setting. Preserve drafts on failed saves and ignore stale
+  replies after switching servers. Explain new/reloaded-thread scope and
+  chat-specific override precedence; provide English and Chinese labels.
+- Use exact native-admin GET/PUT transport with request validation. Real
+  loopback transport and service-scope checks cover token framing, reset,
+  errors and profile races; component checks cover local editing and no polls.
+- Requires AgentsServer 1.0.0-beta.8 for the setting. That server release also
+  fixes plain goal steering with automatically attached saved chat routes;
+  the active goal's owner and existing permissions remain unchanged.
+
 ## 2026-09-14 — Project licensing
 
 - Add the Apache License 2.0 and project attribution notice. Preserve existing

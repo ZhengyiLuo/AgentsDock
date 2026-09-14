@@ -250,6 +250,17 @@ export interface CodexGoalsConfiguration {
   message: string
 }
 
+/** Server override, not the provider's resolved or currently running limit. */
+export interface CodexSubagentsConfiguration {
+  configurable: boolean
+  reason?: 'unsupported_transport' | null
+  max_concurrent_threads_per_session: number | null
+  message: string
+  scope?: 'server'
+  provider_config_key?: string
+  applies_to?: 'new_or_reloaded_threads'
+}
+
 export type CodexReviewTarget =
   | { type: 'uncommittedChanges' }
   | { type: 'baseBranch'; branch: string }

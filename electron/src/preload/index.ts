@@ -188,6 +188,8 @@ const api: AgentsDockAPI = {
   codex: {
     serverGoals: () => ipcRenderer.invoke('codex:server-goals:get'),
     setServerGoals: enabled => ipcRenderer.invoke('codex:server-goals:set', enabled),
+    serverSubagents: () => ipcRenderer.invoke('codex:server-subagents:get'),
+    setServerSubagents: limit => ipcRenderer.invoke('codex:server-subagents:set', limit),
     runtime: sessionId => ipcRenderer.invoke('codex:runtime', sessionId),
     loadThread: sessionId => ipcRenderer.invoke('codex:thread:load', sessionId),
     resolveInteraction: (sessionId, interactionId, response) => (

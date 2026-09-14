@@ -46,6 +46,7 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -2042,6 +2043,14 @@ export class AppService {
         throw error
       }
     })
+  }
+
+  async codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
+    return this.codexRequest(scope => scope.client.codexServerSubagents())
+  }
+
+  async setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
+    return this.codexRequest(scope => scope.client.setCodexServerSubagents(limit))
   }
 
   async setCodexServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration> {

@@ -1310,6 +1310,78 @@ describe('AgentServerClient server-wide Codex goals', () => {
   })
 })
 
+describe('AgentServerClient server-wide Codex subagents', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('uses only the exact prefixed native admin GET/PUT route and preserves null reset', async () => {
+    const calls: Array<{ method: string; url: string; headers: IncomingMessage['headers']; body: string }> = []
+    const fetchMock = vi.fn(() => { throw new Error('Privileged settings must use native transport') })
+    vi.stubGlobal('fetch', fetchMock)
+    await withLocalHTTPServer(async (request, response) => {
+      const body = await incomingBody(request)
+      calls.push({ method: request.method ?? '', url: request.url ?? '', headers: request.headers, body })
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ configurable: true, scope: 'server',
+        max_concurrent_threads_per_session: request.method === 'PUT'
+          ? JSON.parse(body).max_concurrent_threads_per_session : 4,
+        applies_to: 'new_or_reloaded_threads', message: 'Synthetic acknowledged setting.' }))
+    }, async baseURL => {
+      const client = new AgentServerClient(`${baseURL}/mounted`, 'synthetic-admin-token')
+      try {
+        await expect(client.codexServerSubagents()).resolves.toMatchObject({
+          configurable: true, max_concurrent_threads_per_session: 4,
+          applies_to: 'new_or_reloaded_threads'
+        })
+        await expect(client.setCodexServerSubagents(32)).resolves.toMatchObject({ max_concurrent_threads_per_session: 32 })
+        await expect(client.setCodexServerSubagents(null)).resolves.toMatchObject({ max_concurrent_threads_per_session: null })
+      } finally { client.dispose() }
+    })
+    expect(calls.map(call => [call.method, call.url])).toEqual([
+      ['GET', '/mounted/api/admin/codex/subagents'],
+      ['PUT', '/mounted/api/admin/codex/subagents'],
+      ['PUT', '/mounted/api/admin/codex/subagents']
+    ])
+    expect(calls[0].body).toBe('')
+    expect(JSON.parse(calls[1].body)).toEqual({ max_concurrent_threads_per_session: 32 })
+    expect(JSON.parse(calls[2].body)).toEqual({ max_concurrent_threads_per_session: null })
+    for (const call of calls) {
+      expect(call.headers['x-agentsdock-token']).toBe('synthetic-admin-token')
+      expect(call.headers.origin).toBeUndefined()
+      expect(call.headers.cookie).toBeUndefined()
+      expect(call.headers['sec-fetch-mode']).toBeUndefined()
+      expect(call.headers.authorization).toBeUndefined()
+      if (call.method === 'PUT') expect(call.headers['content-length']).toBe(String(Buffer.byteLength(call.body)))
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '4', undefined])(
+    'rejects invalid subagent limit %s before transport', invalid => {
+      const client = new AgentServerClient('http://127.0.0.1:1', 'synthetic-token')
+      try {
+        expect(() => client.setCodexServerSubagents(invalid as number)).toThrow('positive whole number')
+      } finally { client.dispose() }
+    }
+  )
+
+  it.each([401, 403, 404, 405, 501])('preserves authenticated HTTP %s errors without fallback or retry', async status => {
+    let requests = 0
+    await withLocalHTTPServer((_request, response) => {
+      requests += 1
+      response.statusCode = status
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ detail: 'Synthetic unsupported or unauthorized setting.' }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'synthetic-token')
+      try {
+        await expect(client.codexServerSubagents()).rejects.toMatchObject({ status })
+        await expect(client.setCodexServerSubagents(8)).rejects.toMatchObject({ status })
+      } finally { client.dispose() }
+    })
+    expect(requests).toBe(2)
+  })
+})
+
 describe('AgentServerClient session ordering', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 

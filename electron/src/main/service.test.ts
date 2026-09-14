@@ -778,6 +778,73 @@ describe('server-wide Codex goals compatibility', () => {
   })
 })
 
+describe('server-wide Codex subagents scope', () => {
+  const configuration = { configurable: true, max_concurrent_threads_per_session: 8,
+    scope: 'server', applies_to: 'new_or_reloaded_threads', message: 'Synthetic setting.' }
+
+  function harness() {
+    const client = {
+      codexServerSubagents: vi.fn().mockResolvedValue(configuration),
+      setCodexServerSubagents: vi.fn().mockResolvedValue(configuration)
+    }
+    const scope = { profileId: 'profile-a', generation: 1, namespace: 'profile:profile-a', client }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope, activeProfileId: scope.profileId, profileGeneration: scope.generation,
+      validatedGeneration: scope.generation, profileResetIsPending: vi.fn().mockReturnValue(false) })
+    return { service, client, scope }
+  }
+
+  it('delegates explicit read/save/reset to the captured validated profile without extra refresh', async () => {
+    const { service, client } = harness()
+    const refresh = vi.fn(() => { throw new Error('Unexpected settings refresh') })
+    Object.assign(service, { refreshAll: refresh })
+    await expect(service.codexServerSubagents()).resolves.toEqual(configuration)
+    await expect(service.setCodexServerSubagents(32)).resolves.toEqual(configuration)
+    await expect(service.setCodexServerSubagents(null)).resolves.toEqual(configuration)
+    expect(client.codexServerSubagents).toHaveBeenCalledOnce()
+    expect(client.setCodexServerSubagents.mock.calls).toEqual([[32], [null]])
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it.each(['read', 'write'] as const)('rejects a late %s result after profile generation changes', async operation => {
+    const { service, client } = harness()
+    const response = deferred<typeof configuration>()
+    const called = deferred<void>()
+    client[operation === 'read' ? 'codexServerSubagents' : 'setCodexServerSubagents']
+      .mockImplementation(() => { called.resolve(); return response.promise })
+    const pending = operation === 'read' ? service.codexServerSubagents() : service.setCodexServerSubagents(32)
+    await called.promise
+    const otherClient = { codexServerSubagents: vi.fn(), setCodexServerSubagents: vi.fn() }
+    Object.assign(service, { scope: { profileId: 'profile-a', generation: 2, client: otherClient }, profileGeneration: 2 })
+    response.resolve(configuration)
+    await expect(pending).rejects.toThrow('superseded')
+    expect(otherClient.codexServerSubagents).not.toHaveBeenCalled()
+    expect(otherClient.setCodexServerSubagents).not.toHaveBeenCalled()
+  })
+
+  it('does not write when profile validation is superseded before dispatch', async () => {
+    const { service, client } = harness()
+    const validation = deferred<void>()
+    Object.assign(service, { validatedGeneration: 0, refreshAll: vi.fn(() => validation.promise) })
+    const pending = service.setCodexServerSubagents(32)
+    Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
+    validation.resolve()
+    await expect(pending).rejects.toThrow('superseded')
+    expect(client.setCodexServerSubagents).not.toHaveBeenCalled()
+  })
+
+  it.each([401, 403, 404, 405, 501])('preserves HTTP %s for the renderer compatibility message without retrying', async status => {
+    const { service, client } = harness()
+    const error = new ServerError(status, 'Synthetic unavailable setting.')
+    client.codexServerSubagents.mockRejectedValue(error)
+    client.setCodexServerSubagents.mockRejectedValue(error)
+    await expect(service.codexServerSubagents()).rejects.toBe(error)
+    await expect(service.setCodexServerSubagents(32)).rejects.toBe(error)
+    expect(client.codexServerSubagents).toHaveBeenCalledOnce()
+    expect(client.setCodexServerSubagents).toHaveBeenCalledOnce()
+  })
+})
+
 describe('provider command compatibility', () => {
   it.each([404, 405, 501])('treats an older server HTTP %s as unsupported', async status => {
     const client = {

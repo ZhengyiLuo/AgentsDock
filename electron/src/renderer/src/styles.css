@@ -2219,6 +2219,11 @@ button.tool-event-toggle:hover { background: #242424; }
 .codex-server-settings-copy small { color: var(--faint); font-size: var(--text-size-meta); line-height: 1.4; }
 .codex-server-settings.error .codex-server-settings-copy small { color: var(--danger); }
 .codex-server-settings-spinner { flex: none; color: var(--muted); }
+.codex-subagent-settings { align-items: flex-start; }
+.codex-subagent-settings-controls { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-2); }
+.codex-subagent-settings-controls input { width: 150px; max-width: 100%; min-height: var(--control-height-lg); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-2) var(--space-3); font-size: var(--text-size-ui); }
+.codex-subagent-settings-controls input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.codex-subagent-settings-controls input:disabled { opacity: .6; }
 .analytics-privacy-settings { min-height: 64px; display: flex; align-items: center; gap: 10px; padding: 10px 11px; background: #272727; border: 1px solid #323232; border-radius: 7px; }
 .analytics-privacy-settings-icon { width: 30px; height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); background: color-mix(in srgb, var(--accent), transparent 88%); border-radius: 7px; }
 .analytics-privacy-settings-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }

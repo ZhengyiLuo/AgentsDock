@@ -41,6 +41,7 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -699,6 +700,18 @@ export class AgentServerClient {
   }
   codexServerGoals(): Promise<CodexGoalsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/goals')
+  }
+  codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
+    return this.privilegedNativeRequest('/api/admin/codex/subagents')
+  }
+  setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
+    if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
+      throw new Error('Subagent limit must be a positive whole number or null for Codex default.')
+    }
+    return this.privilegedNativeRequest('/api/admin/codex/subagents', {
+      method: 'PUT',
+      body: JSON.stringify({ max_concurrent_threads_per_session: limit })
+    })
   }
   setCodexServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/goals', {
@@ -2860,7 +2873,7 @@ function isPrivilegedNativeControlTarget(
   const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'
     : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')
-  if (path === '/api/admin/codex/goals') {
+  if (path === '/api/admin/codex/goals' || path === '/api/admin/codex/subagents') {
     return !target.search && (method === 'GET' || method === 'PUT')
   }
   if (path === '/api/admin/update') {
