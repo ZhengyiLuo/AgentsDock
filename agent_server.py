@@ -48,6 +48,7 @@ import threading
 import time
 import unicodedata
 import uuid
+import weakref
 from collections import Counter, OrderedDict, defaultdict, deque
 from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
@@ -13513,6 +13514,7 @@ CODEX_SUBAGENT_LIVE_GENERATIONS: dict[str, int] = {}
 # update these maps on the event loop. Protect compound mutations and snapshots
 # so a semantic-page rebuild never iterates a dictionary that is changing.
 CODEX_SUBAGENT_INDEX_LOCK = threading.RLock()
+CODEX_SUBAGENT_TRANSITION_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 CODEX_COMPACTION_TERMINAL_HISTORY_LIMIT = 128
 
 
@@ -29929,17 +29931,43 @@ async def emit_codex_subagent_state(
     session_id: str,
     child_thread_id: str,
     status: Any,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    """Serialize one child's complete read/append/publish transition only.
+
+    Parent collaboration packets and child rename packets have separate
+    transport callback lanes. Their child state must still commit in order.
+    Weak ownership removes an idle lock as soon as its last caller exits.
+    """
+    child_thread_id = str(child_thread_id or "").strip()
+    if not child_thread_id or session_id not in STORE.sessions:
+        return None
+    with CODEX_SUBAGENT_INDEX_LOCK:
+        lock = CODEX_SUBAGENT_TRANSITION_LOCKS.get(child_thread_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            CODEX_SUBAGENT_TRANSITION_LOCKS[child_thread_id] = lock
+    async with lock:
+        return await _emit_codex_subagent_state_once(session_id, child_thread_id, status, **kwargs)
+
+
+async def _emit_codex_subagent_state_once(
+    session_id: str,
+    child_thread_id: str,
+    status: Any,
     *,
     parent_thread_id: str | None = None,
     run_id: str | None = None,
     tool_id: str | None = None,
     name: Any = None,
+    title: Any = ...,
     nickname: Any = None,
     agent_path: Any = None,
     activity: Any = None,
     summary: Any = None,
     persist_event: bool = True,
     inherit_run_id: bool = True,
+    identity_only: bool = False,
 ) -> dict[str, Any] | None:
     """Persist one authoritative Codex child lifecycle transition.
 
@@ -29971,7 +29999,20 @@ async def emit_codex_subagent_state(
         previous = dict(CODEX_SUBAGENT_STATE.get(child_thread_id) or {})
     if previous and str(previous.get("session_id") or "") != session_id:
         previous = {}
+    if identity_only and not previous:
+        return None
     normalized = normalize_subagent_status(status or previous.get("subagent_status"))
+    title_fields: dict[str, Any] = {}
+    if isinstance(title, str) and title.strip() and not useful_subagent_identity_text(title):
+        title = ...
+    if title is None or isinstance(title, str):
+        title_fields["subagent_title"] = useful_subagent_identity_text(title) or None
+    elif "subagent_title" in previous:
+        previous_title = previous.get("subagent_title")
+        title_fields["subagent_title"] = (
+            useful_subagent_identity_text(previous_title)
+            if isinstance(previous_title, str) else None
+        ) or None
     clean_nickname = (
         useful_subagent_identity_text(nickname)
         or useful_subagent_identity_text(previous.get("subagent_nickname"))
@@ -30014,6 +30055,7 @@ async def emit_codex_subagent_state(
             tool_id or previous.get("subagent_tool_id") or child_thread_id
         ),
         "subagent_name": clean_name,
+        **title_fields,
         "subagent_nickname": clean_nickname or None,
         "subagent_path": clean_path or None,
         "subagent_kind": "collaborator",
@@ -30025,12 +30067,20 @@ async def emit_codex_subagent_state(
         "subagent_parent_thread_id": resolved_parent or None,
         "subagent_log": log,
     }
+    if identity_only:
+        # Preserve the exact stored lifecycle payload even if a late rename
+        # overlaps a terminal transition or comes from another generation.
+        payload = {key: previous.get(key) for key in payload if key != "subagent_title"}
+        payload.update(title_fields)
+        if isinstance(previous.get("ts"), str):
+            payload["ts"] = previous["ts"]
     comparable_keys = (
         "run_id",
         "backend",
         "subagent_id",
         "subagent_tool_id",
         "subagent_name",
+        "subagent_title",
         "subagent_nickname",
         "subagent_path",
         "subagent_status",
@@ -30040,16 +30090,17 @@ async def emit_codex_subagent_state(
         "subagent_log",
     )
     manager = CODEX_APP_SERVER_MANAGER
-    with CODEX_SUBAGENT_INDEX_LOCK:
-        if (
-            normalized in {"starting", "running"}
-            and manager is not None
-            and getattr(manager, "ready", False) is True
-            and isinstance(getattr(manager, "generation", None), int)
-        ):
-            CODEX_SUBAGENT_LIVE_GENERATIONS[child_thread_id] = manager.generation
-        else:
-            CODEX_SUBAGENT_LIVE_GENERATIONS.pop(child_thread_id, None)
+    if not identity_only:
+        with CODEX_SUBAGENT_INDEX_LOCK:
+            if (
+                normalized in {"starting", "running"}
+                and manager is not None
+                and getattr(manager, "ready", False) is True
+                and isinstance(getattr(manager, "generation", None), int)
+            ):
+                CODEX_SUBAGENT_LIVE_GENERATIONS[child_thread_id] = manager.generation
+            else:
+                CODEX_SUBAGENT_LIVE_GENERATIONS.pop(child_thread_id, None)
     if previous and all(previous.get(key) == payload.get(key) for key in comparable_keys):
         with CODEX_SUBAGENT_INDEX_LOCK:
             CODEX_SUBAGENT_SESSION_INDEX[child_thread_id] = session_id
@@ -30271,6 +30322,7 @@ async def reconcile_codex_subagents(
             status,
             parent_thread_id=source_parent_thread_id or root_thread_id,
             name=thread.get("preview"),
+            title=thread.get("name", ...),
             nickname=nickname,
             agent_path=agent_path,
             activity=f"Subagent {status}",
@@ -52370,6 +52422,14 @@ async def project_codex_notification(notification: dict[str, Any]) -> None:
         else {}
     )
     thread_id = str(params.get("threadId") or "")
+    started_thread = params.get("thread") if method == "thread/started" else None
+    if method == "thread/started":
+        if not isinstance(started_thread, dict):
+            return
+        started_id = started_thread.get("id")
+        if not isinstance(started_id, str) or not started_id or (thread_id and thread_id != started_id):
+            return
+        thread_id = started_id
     session_id = codex_session_id_for_thread(thread_id)
     quarantined_session_id = CODEX_QUARANTINED_GOAL_THREADS.get(thread_id)
     root_thread_id = session_codex_thread_id(
@@ -52479,6 +52539,28 @@ async def project_codex_notification(notification: dict[str, Any]) -> None:
                     active["provider_turn_id"] = turn_id
                     active["provider_turn_ready"] = True
     if not session_id:
+        return
+
+    if method in {"thread/name/updated", "thread/started"}:
+        # A provider title is identity, not new work or a child lifecycle tick.
+        # Root/unknown threads cannot create a child through a rename packet.
+        title = (started_thread.get("name", ...) if isinstance(started_thread, dict)
+                 else params.get("threadName", ...))
+        if not is_child_thread or not (title is None or isinstance(title, str)):
+            return
+        with CODEX_SUBAGENT_INDEX_LOCK:
+            previous = dict(CODEX_SUBAGENT_STATE.get(thread_id) or {})
+        if not previous or previous.get("session_id") != session_id:
+            return
+        await emit_codex_subagent_state(
+            session_id,
+            thread_id,
+            previous.get("subagent_status"),
+            title=title,
+            run_id=previous.get("run_id"),
+            inherit_run_id=False,
+            identity_only=True,
+        )
         return
 
     if method in {"item/started", "item/completed"}:
