@@ -1,5 +1,21 @@
 # Development and release log
 
+## 2026-09-14 — 1.0.0 stable accepted
+
+- Published source: `c12efa92c8e91358bbbbba041f29b7a00a1d434e`.
+- Promotes the validated beta.8 runtime without additional API, dependency,
+  signing-key or storage-schema changes. The release notes compare the full
+  upgrade from the previous stable 0.1.25 and distinguish the latest beta.
+- [Release workflow](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/34901118266)
+  passed: 4,026 tests, two skipped; package and manifest signing succeeded.
+- Independent download verification passed: Ed25519 signature, stable channel,
+  API contract 28, all three asset digests and all 78 packaged source files.
+  Archive SHA-256:
+  `0e9dfa4711c1d5ae6d46f83e3d8078c93980d2d9e0fdc997af24c5b640a345c8`.
+- [Stable release](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.0)
+  is the latest stable server release. Publication did not install or restart
+  a live server or change active work. Team Network remains a beta feature.
+
 ## 2026-09-14 — 1.0.0-beta.8 accepted
 
 - Published source: `0abf6c7777aff11cecc758c31ae100a88c125781`.
