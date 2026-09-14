@@ -37,3 +37,10 @@ See the component READMEs for server and mobile development instructions.
   reports. Redact logs and use a minimal synthetic reproduction.
 - Preserve third-party license notices and dependency integrity data.
 - Do not turn a build or test into an automatic release or deployment.
+
+## Licensing
+
+Unless explicitly stated otherwise, contributions to Apache-licensed project
+code are submitted under the [Apache License 2.0](LICENSE), as described in
+section 5 of the license. Only contribute material you have the right to submit.
+Preserve separate component licenses and attribution notices; see [NOTICE](NOTICE).

@@ -215,5 +215,7 @@ are managed separately; see [release channels](docs/DIRECT_RELEASES.md).
 
 ## License
 
-This repository does not currently include a project-wide license. Third-party
-components retain their existing license and attribution notices.
+AgentsDock's original code is licensed under the [Apache License 2.0](LICENSE),
+except where a component explicitly states another license. See [NOTICE](NOTICE)
+for attribution and separately licensed components. Existing third-party
+copyrights, licenses, and notices remain in effect.

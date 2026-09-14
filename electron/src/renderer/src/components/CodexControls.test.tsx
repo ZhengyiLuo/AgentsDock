@@ -66,12 +66,10 @@ let runtimeResponse = runtime
 let runtimeFailure: Error | null = null
 
 describe('Codex controls', () => {
-  const updateSession = vi.fn().mockResolvedValue(session)
   const loadThread = vi.fn()
   const shell = vi.fn().mockResolvedValue({ accepted: true, operation_id: 'op-1' })
   const compact = vi.fn().mockResolvedValue({ accepted: true, operation_id: 'op-2' })
   const rollback = vi.fn().mockResolvedValue({ accepted: true, thread: {} })
-  const permissionProfiles = vi.fn().mockResolvedValue(runtime.permission_profiles)
   const setGoal = vi.fn().mockResolvedValue({ goal: runtime.goal, time_budget_seconds: runtime.time_budget_seconds })
   const clearGoal = vi.fn().mockResolvedValue({ goal: null, time_budget_seconds: null })
   const backgroundTerminals = vi.fn().mockResolvedValue({ supported: true, terminals: [] })
@@ -80,10 +78,6 @@ describe('Codex controls', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    updateSession.mockImplementation(async (_sessionId: string, patch: Partial<Session>) => ({
-      ...useAppStore.getState().sessions.find(candidate => candidate.id === session.id),
-      ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined))
-    }) as Session)
     runtimeResponse = runtime
     runtimeFailure = null
     loadThread.mockImplementation(async () => ({
@@ -107,7 +101,6 @@ describe('Codex controls', () => {
           )),
           loadThread,
           resolveInteraction: vi.fn(),
-          permissionProfiles,
           goal: vi.fn().mockResolvedValue({ goal: runtime.goal, time_budget_seconds: runtime.time_budget_seconds }),
           setGoal,
           clearGoal,
@@ -119,7 +112,6 @@ describe('Codex controls', () => {
           terminateBackgroundTerminal,
           cleanBackgroundTerminals
         },
-        sessions: { update: updateSession },
         events: { on: vi.fn().mockReturnValue(() => undefined) }
       } as unknown as AgentsDockAPI
     })
@@ -130,7 +122,7 @@ describe('Codex controls', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows native thread status and saves per-chat permission controls', async () => {
+  it('shows native thread status without duplicating composer permissions', async () => {
     renderControls()
 
     const trigger = await screen.findByRole('button', { name: 'Codex controls: Approval needed' })
@@ -140,36 +132,20 @@ describe('Codex controls', () => {
     expect(await screen.findByRole('heading', { name: 'Codex thread controls' })).toBeInTheDocument()
     expect(screen.getByText('Live state from Codex app-server')).toBeInTheDocument()
     expect(screen.getByRole('progressbar', { name: '80k of 88k usable context tokens used' })).toBeInTheDocument()
-    expect(screen.getByDisplayValue('Workspace write')).toBeInTheDocument()
-    expect(await screen.findByLabelText('Approval prompts')).toHaveDisplayValue('Ask when more access is needed')
-    expect(await screen.findByText('Codex asks before it needs to cross the current sandbox boundary.')).toBeInTheDocument()
-    expect(await screen.findByLabelText('Who approves?')).toHaveDisplayValue('Me (Codex default)')
-    expect(await screen.findByText('Approval requests pause for your decision.')).toBeInTheDocument()
-
-    await userEvent.setup().selectOptions(screen.getByLabelText('Filesystem sandbox'), 'read-only')
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Save permissions' }))
-
-    await waitFor(() => expect(updateSession).toHaveBeenCalledWith('chat-1', expect.objectContaining({
-      codex_approval_policy: 'on-request',
-      codex_sandbox_mode: 'read-only',
-      codex_approvals_reviewer: 'user'
-    })))
+    expect(screen.queryByText('Permissions and approvals')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save permissions' })).not.toBeInTheDocument()
   })
 
-  it('disables shared permission and goal dialogs when access is lost, while keeping Close available', async () => {
+  it('disables shared goal controls when access is lost, while keeping Close available', async () => {
     Object.assign(window.agentsDock, { sharedChat: true })
     useAppStore.setState({ connected: true })
     renderControls()
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
-    expect(await screen.findByRole('button', { name: 'Save permissions' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: 'Save goal' })).toBeEnabled()
     act(() => { useAppStore.setState({ connected: false }) })
-    expect(screen.getByRole('button', { name: 'Save permissions' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Save goal' })).toBeDisabled()
-    expect(screen.getByLabelText('Approval prompts')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Refresh Codex status' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Close Codex controls' })).toBeEnabled()
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Save permissions' }))
-    expect(updateSession).not.toHaveBeenCalled()
   })
 
   it('opens goal controls only for the addressed Codex chat', async () => {
@@ -993,38 +969,6 @@ describe('Codex controls', () => {
 
     await waitFor(() => expect(loadThread).toHaveBeenCalledWith('chat-1'))
     expect(screen.getByRole('button', { name: 'Codex controls: Idle' })).toBeInTheDocument()
-  })
-
-  it('discovers permission profiles when the runtime cache is cold', async () => {
-    runtimeResponse = { ...runtime, permission_profiles: [] }
-    renderControls()
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
-    expect(await screen.findByRole('option', { name: 'Workspace' })).toBeInTheDocument()
-    expect(permissionProfiles).toHaveBeenCalledWith('chat-1')
-  })
-
-  it('shows permission-profile turn contention as a warning instead of an error', async () => {
-    const contention = 'Error invoking remote method codex:permission-profiles: Error: wait for active Codex turn to finish'
-    runtimeResponse = { ...runtime, permission_profiles: [] }
-    permissionProfiles.mockRejectedValueOnce(new Error(contention))
-    renderControls()
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
-
-    const warning = await screen.findByRole('status')
-    expect(warning).toHaveTextContent('Codex is busy. Permission profiles will refresh after the active turn finishes.')
-    expect(warning).toHaveClass('codex-field-warning')
-    expect(screen.queryByText(contention)).not.toBeInTheDocument()
-  })
-
-  it('keeps unexpected permission-profile failures as actionable errors', async () => {
-    runtimeResponse = { ...runtime, permission_profiles: [] }
-    permissionProfiles.mockRejectedValueOnce(new Error('Permission profile service unavailable'))
-    renderControls()
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Codex controls: Approval needed' }))
-
-    const error = await screen.findByRole('alert')
-    expect(error).toHaveTextContent('Permission profile service unavailable')
-    expect(error).toHaveClass('codex-field-error')
   })
 
   it('requires confirmation before stopping every background terminal', async () => {

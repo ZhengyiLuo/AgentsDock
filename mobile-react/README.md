@@ -4,6 +4,14 @@ This directory contains the shipping iPhone/iPad React Native client. Its bundle
 identifier is `com.zhengyiluo.ZenithDock`, shared with TestFlight; installing a
 development build with this identifier can replace the installed TestFlight app.
 
+## License
+
+AgentsDock's original mobile code is licensed under the
+[Apache License 2.0](../LICENSE), except where otherwise stated. The local
+[LICENSE](LICENSE) preserves the upstream Expo template's MIT notice; it does
+not replace the project license. Separately licensed native modules and
+vendored dependencies retain their own terms. See [NOTICE](../NOTICE).
+
 ## Local development
 
 ```bash

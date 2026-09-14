@@ -279,6 +279,7 @@ export class TimelineProjector {
   private readonly providerInteractionAuditByKey = new Map<string, SystemItem>()
   private readonly crossChatTerminalStatusByExchange = new Map<string, NonNullable<Event['exchange_status']>>()
   private readonly nativeCrossChatDeliveries = new Map<string, NativeCrossChatDelivery>()
+  private readonly nativeCrossChatFinishesByProviderTurn = new Map<string, Map<string, Event>>()
   private readonly crossChatDeliveryReceipts = new Map<string, Event>()
   private readonly conflictingCrossChatReceiptRuns = new Set<string>()
   private readonly importedCrossChatInputs = new Map<string, Event>()
@@ -829,7 +830,7 @@ export class TimelineProjector {
       if (event.imported === true) {
         if (event.type === 'turn_started') {
           this.importedCrossChatInputByRun.delete(runId)
-          if (event.provider_origin && importedCrossChatDelivery(event)) {
+          if (event.provider_origin && importedCrossChatDeliveryCandidate(event)) {
             this.importedCrossChatInputs.set(event.id, event)
             this.importedCrossChatInputByRun.set(runId, event.id)
             changed = true
@@ -859,7 +860,14 @@ export class TimelineProjector {
       if (event.type === 'turn_started') {
         this.nativeCrossChatDeliveries.set(runId, { start: event, deliveryKey })
         changed = true
-      } else if (event.type === 'turn_finished' && event.provider_session_id) {
+      } else if (event.type === 'turn_finished' && crossChatProviderSessionId(event)) {
+        const providerTurnKey = codexProviderTurnKey(event.provider_thread_id, event.provider_turn_id)
+        if (providerTurnKey) {
+          const owners = this.nativeCrossChatFinishesByProviderTurn.get(providerTurnKey) ?? new Map<string, Event>()
+          owners.set(runId, event)
+          this.nativeCrossChatFinishesByProviderTurn.set(providerTurnKey, owners)
+          changed = true
+        }
         const native = this.nativeCrossChatDeliveries.get(runId)
         if (native && native.deliveryKey === deliveryKey
           && native.start.backend === event.backend && native.start.session_id === event.session_id) {
@@ -883,12 +891,31 @@ export class TimelineProjector {
     const candidates = new Map<string, string>()
     const originsByRun = new Map<string, Set<string>>()
     for (const event of this.importedCrossChatInputs.values()) {
-      const delivery = importedCrossChatDelivery(event)!
+      const delivery = importedCrossChatDeliveryCandidate(event)!
       const origin = event.provider_origin!
       if (typeof origin.timestamp !== 'string') continue
       const sourceTime = Date.parse(origin.timestamp)
       if (!origin.event_id || !origin.session_id || !Number.isFinite(sourceTime)
         || String(origin.provider) !== event.backend) continue
+      const providerTurnKey = origin.provider === 'codex'
+        ? codexProviderTurnKey(origin.session_id, origin.turn_id)
+        : null
+      const providerTurnMatches = providerTurnKey
+        ? [...(this.nativeCrossChatFinishesByProviderTurn.get(providerTurnKey) ?? [])]
+            .filter(([, finish]) => {
+              if (finish.session_id !== event.session_id || finish.backend !== 'codex') return false
+              const finishTime = Date.parse(finish.ts)
+              return Number.isFinite(finishTime) && sourceTime <= finishTime
+            })
+        : []
+      if (hasProviderUserProvenance(event)) {
+        // Codex currently labels AgentsDock's own cross-chat provider input as
+        // `user.text`. Thread + turn ownership narrows the candidate, but does
+        // not identify its input: a human can steer within that same turn.
+        // Require the exact receipt/body, native start and time bounds below.
+        // Pages missing that evidence stay visible for source-proven repair.
+        if (providerTurnMatches.length !== 1) continue
+      }
       const matches = (byHash.get(importedCrossChatBodyHash(event, delivery.body)) ?? []).filter(native => {
         const receipt = this.crossChatDeliveryReceipts.get(native.start.run_id!)!
         const startTime = Date.parse(native.start.ts)
@@ -896,7 +923,8 @@ export class TimelineProjector {
         const kind = delivery.kind === 'final_result' ? 'reply' : delivery.kind
         return native.start.session_id === event.session_id
           && native.start.backend === event.backend
-          && native.finish!.provider_session_id === origin.session_id
+          && crossChatProviderSessionId(native.finish!) === origin.session_id
+          && (!hasProviderUserProvenance(event) || native.start.run_id === providerTurnMatches[0][0])
           && (delivery.mode === 'async_route_v1'
             ? isAsyncCrossChatMessage(receipt) && (receipt.kind || receipt.handoff_action) === kind
               && delivery.ordinal === 1 && delivery.maxLegs === 1
@@ -926,7 +954,7 @@ export class TimelineProjector {
       // A repeated answer needs its own provider-message identity proof. A
       // matched input never authorizes hiding the rest of an imported run.
       if (output && output.session_id === event.session_id && output.backend === event.backend
-        && String(origin.provider) === event.backend && origin.session_id === native.finish!.provider_session_id
+        && String(origin.provider) === event.backend && origin.session_id === crossChatProviderSessionId(native.finish!)
         && normalizeAssistantOutput(output.text || '')
         && normalizeAssistantOutput(output.text || '') === normalizeAssistantOutput(event.text || event.result_text || '')) {
         outputAliases.add(event.id)
@@ -2187,11 +2215,27 @@ export function importedCrossChatDelivery(event: Event): ImportedCrossChatDelive
 }
 
 function parseImportedCrossChatDelivery(event: Event): ImportedCrossChatDelivery | null {
+  if (hasProviderUserProvenance(event)) return null
+  return importedCrossChatDeliveryCandidate(event)
+}
+
+function importedCrossChatDeliveryCandidate(event: Event): ImportedCrossChatDelivery | null {
   if (event.type !== 'turn_started' || event.imported !== true
     || !event.run_id?.startsWith('import_')
-    || (event.backend !== 'codex' && event.backend !== 'claude')
-    || hasProviderUserProvenance(event)) return null
+    || (event.backend !== 'codex' && event.backend !== 'claude')) return null
   return parseCrossChatDeliveryPrompt(event.prompt)
+}
+
+function codexProviderTurnKey(threadId: string | null | undefined, turnId: string | null | undefined): string | null {
+  const thread = threadId?.trim() || ''
+  const turn = turnId?.trim() || ''
+  return thread && turn ? `${thread}\0${turn}` : null
+}
+
+function crossChatProviderSessionId(event: Event): string {
+  return event.backend === 'codex'
+    ? event.provider_thread_id?.trim() || event.provider_session_id?.trim() || ''
+    : event.provider_session_id?.trim() || ''
 }
 
 function parseCrossChatDeliveryPrompt(prompt: Event['prompt']): ImportedCrossChatDelivery | null {

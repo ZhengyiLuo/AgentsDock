@@ -83,10 +83,16 @@ export function ClaudeRuntimeProvider({ session, capability, children }: ClaudeR
   const capabilityAvailable = isClaudeCapabilityAvailable(capability)
   const supported = Boolean(session?.backend === 'claude' && bridgeAvailable && capabilityAvailable)
 
-  useEffect(() => () => {
-    requestEpoch.current += 1
-    sessionIdRef.current = undefined
-  }, [])
+  useEffect(() => {
+    // React StrictMode replays effects without rendering between cleanup and
+    // setup. Restore the current identity so the replayed initial refresh is
+    // not mistaken for a stale session.
+    sessionIdRef.current = session?.id
+    return () => {
+      requestEpoch.current += 1
+      sessionIdRef.current = undefined
+    }
+  }, [session?.id])
 
   const refreshRuntime = useCallback(async (errorTarget: 'runtime' | 'contextUsage') => {
     const sessionId = session?.id

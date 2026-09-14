@@ -9,6 +9,7 @@ import {
   activeTraceProgressPreview,
   codexLifecycleSemanticKey,
   crossChatSemanticKey,
+  isTimelineError,
   jobDisplayEvents,
   jobDisplaySelection,
   jobResultPresentation,
@@ -114,27 +115,53 @@ assert(!internalDelivery.some(row => row.kind === 'message' && row.role === 'use
 assert(internalDelivery.some(row => row.kind === 'message' && row.role === 'assistant'), 'cross-chat delivery assistant output should remain visible')
 assert(internalDelivery.some(row => row.kind === 'trace'), 'cross-chat delivery reasoning should remain visible')
 
+const mailboxWakeFailure = projectTimeline([
+  event(24, 'chat_conversation_message_received', {
+    message: 'Agent mail stored in the chat inbox.',
+    source_session_id: 'sender',
+    target_session_id: 'chat-1',
+  }),
+  event(25, 'turn_started', {
+    run_id: 'mailbox-wake',
+    purpose: 'chat_mailbox_wake',
+    prompt: 'Internal mailbox wake prompt that must not look user-authored.',
+  }),
+  event(26, 'turn_finished', {
+    run_id: 'mailbox-wake',
+    purpose: 'chat_mailbox_wake',
+    exit_code: 143,
+  }),
+], [])
+assert(
+  mailboxWakeFailure.some(row => row.kind === 'system' && row.event.type === 'chat_conversation_message_received'),
+  'mailbox receipt lifecycle should remain visible in the chat timeline',
+)
+assert(!mailboxWakeFailure.some(row => row.kind === 'message' && row.role === 'user'), 'synthetic mailbox wake prompts must never render as user messages')
+const mailboxWakeFailureRow = mailboxWakeFailure.find(row => row.kind === 'system' && row.event.type === 'turn_finished')
+assert(mailboxWakeFailureRow?.kind === 'system' && isTimelineError(mailboxWakeFailureRow.event), 'failed mailbox wake terminals should render as error rows')
+assert(rowText(mailboxWakeFailureRow) === 'Agent turn failed with exit code 143.', 'failed mailbox wake terminals should explain the exit code')
+
 const contiguousOccurrences = projectTimeline([
-  event(24, 'job_ran', {
+  event(27, 'job_ran', {
     run_id: 'scheduled-run-1',
     job_id: 'job-occurrences',
     job_title: 'Occurrence monitor',
     job_occurrence_id: 'occurrence-1',
   }),
-  event(25, 'reasoning_summary', { run_id: 'scheduled-run-1', text: 'First occurrence reasoning.' }),
-  event(26, 'job_finished', {
+  event(28, 'reasoning_summary', { run_id: 'scheduled-run-1', text: 'First occurrence reasoning.' }),
+  event(29, 'job_finished', {
     run_id: 'scheduled-run-1',
     job_id: 'job-occurrences',
     job_occurrence_id: 'occurrence-1',
     result_text: 'First occurrence result.',
   }),
-  event(27, 'job_ran', {
+  event(30, 'job_ran', {
     run_id: 'scheduled-run-2',
     job_id: 'job-occurrences',
     job_title: 'Occurrence monitor',
     job_occurrence_id: 'occurrence-2',
   }),
-  event(28, 'job_finished', {
+  event(31, 'job_finished', {
     run_id: 'scheduled-run-2',
     job_id: 'job-occurrences',
     job_occurrence_id: 'occurrence-2',
@@ -142,7 +169,7 @@ const contiguousOccurrences = projectTimeline([
   }),
 ], [])
 assert(
-  contiguousOccurrences.length === 1 && contiguousOccurrences[0]?.kind === 'job' && contiguousOccurrences[0].seq === 24,
+  contiguousOccurrences.length === 1 && contiguousOccurrences[0]?.kind === 'job' && contiguousOccurrences[0].seq === 27,
   'contiguous occurrences of one job must share one card anchored at the segment start',
 )
 assert(

@@ -313,6 +313,82 @@ describe('projectTimeline', () => {
     expect(rows[1].kind === 'message' && messageItemText(rows[1])).toBe('I will use that result.')
   })
 
+  it('hides a Codex cross-chat provider replay only with exact receipt proof and unique native turn ownership', () => {
+    const owner = {
+      backend: 'codex' as const,
+      run_id: 'native-delivery',
+      purpose: 'cross_chat_handoff_delivery',
+      source_session_id: 'peer-chat',
+      target_session_id: 'chat-1',
+      cross_chat_exchange_id: 'exchange-one',
+      cross_chat_exchange_leg_id: 'leg-one'
+    }
+    const imported = event(4, 'turn_started', {
+      backend: 'codex', imported: true, run_id: 'import_provider_replay',
+      ts: '2026-09-14T00:46:06.152Z',
+      prompt: importedDeliveryPrompt('request', 'Write an original song.', 'Financial learning'),
+      provider_user_authored: true,
+      provider_origin: { provider: 'codex', kind: 'user', event_id: 'provider-input',
+        session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-14T00:46:06.152Z' }
+    })
+    // The provider turn is not exact input proof: require its native start and
+    // full-body receipt too. Incomplete semantic pages must stay conservative.
+    const native = [
+      event(0, 'turn_started', { ...owner, ts: '2026-09-14T00:46:01Z', prompt: 'Handle the incoming handoff.' }),
+      event(1, 'cross_chat_exchange_leg_started', { ...owner, target_run_id: owner.run_id,
+        ts: '2026-09-14T00:46:01Z', exchange_leg_kind: 'request', exchange_ordinal: 2, exchange_max_legs: 2,
+        handoff_body_sha256: createHash('sha256').update('Write an original song.').digest('hex') }),
+      event(2, 'assistant_text', { ...owner, ts: '2026-09-14T00:46:19Z', text: 'Original song written.' }),
+      event(3, 'turn_finished', { ...owner, ts: '2026-09-14T00:46:20Z',
+        provider_thread_id: 'provider-thread', provider_turn_id: 'provider-turn', result_text: 'Original song written.' })
+    ]
+    const rows = renderTimelineItems(projectTimeline([
+      ...native,
+      imported,
+      event(5, 'turn_finished', { backend: 'codex', imported: true, run_id: imported.run_id })
+    ], []))
+    expect(importedCrossChatDelivery(imported)).toBeNull()
+    expect(rows.some(row => row.kind === 'message' && row.role === 'user')).toBe(false)
+    expect(rows.some(row => row.kind === 'system' && row.importedDelivery)).toBe(false)
+    expect(rows.some(row => row.kind === 'message' && row.role === 'assistant'
+      && messageItemText(row) === 'Original song written.')).toBe(true)
+
+    const incremental = new TimelineProjector([])
+    expect(incremental.append(native)).toBe(true)
+    expect(incremental.append([
+      imported,
+      event(5, 'turn_finished', { backend: 'codex', imported: true, run_id: imported.run_id })
+    ])).toBe(true)
+    expect(renderTimelineItems(incremental.items)
+      .some(row => row.kind === 'message' && row.role === 'user')).toBe(false)
+
+    for (const unproven of [
+      { ...imported, provider_origin: { ...imported.provider_origin!, turn_id: 'another-turn' } },
+      { ...imported, provider_origin: { ...imported.provider_origin!, session_id: 'another-thread' } },
+      { ...imported, provider_origin: { ...imported.provider_origin!, timestamp: '2026-09-14T00:47:06.152Z' } },
+      { ...imported, provider_origin: { ...imported.provider_origin!, timestamp: '2026-09-14T00:46:00Z' } },
+      { ...imported, prompt: importedDeliveryPrompt('request', 'A genuine human correction in the same provider turn.', 'Financial learning') },
+      { ...imported, prompt: `Quoted wrapper:\n${imported.prompt}` }
+    ]) {
+      const visible = renderTimelineItems(projectTimeline([...native, unproven], []))
+      expect(visible.some(row => row.kind === 'message' && row.role === 'user')).toBe(true)
+    }
+    for (const incomplete of [native.slice(1), native.filter(record => record.seq !== 1), native.slice(2)]) {
+      const visible = renderTimelineItems(projectTimeline([...incomplete, imported], []))
+      expect(visible.some(row => row.kind === 'message' && row.role === 'user')).toBe(true)
+    }
+    const conflictingReceipt = { ...native[1], id: 'conflicting-receipt', seq: 6, handoff_body_sha256: 'b'.repeat(64) }
+    expect(renderTimelineItems(projectTimeline([...native, conflictingReceipt, imported], []))
+      .some(row => row.kind === 'message' && row.role === 'user')).toBe(true)
+    const ambiguousOwner = event(6, 'turn_finished', {
+      ...owner, run_id: 'another-native-delivery', ts: '2026-09-14T00:46:21Z',
+      provider_thread_id: 'provider-thread', provider_turn_id: 'provider-turn'
+    })
+    expect(incremental.append([ambiguousOwner])).toBe(false)
+    expect(renderTimelineItems(projectTimeline([...native, ambiguousOwner, imported], []))
+      .some(row => row.kind === 'message' && row.role === 'user')).toBe(true)
+  })
+
   it('keeps multiple deliveries and ordinary messages distinct inside one imported run', () => {
     const common = { backend: 'claude' as const, imported: true, run_id: 'import_shared' }
     const events = [
