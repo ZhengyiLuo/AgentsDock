@@ -12,6 +12,7 @@ export function NativeFileDragSurface({ sessionId, file, className, children }: 
   children: ReactNode
 }) {
   useLocale()
+  const shared = window.agentsDock.sharedChat === true
   const [preparing, setPreparing] = useState(false)
   const dragRequest = useRef<Promise<boolean> | null>(null)
 
@@ -33,13 +34,14 @@ export function NativeFileDragSurface({ sessionId, file, className, children }: 
   return (
     <article
       className={className}
-      draggable
+      draggable={!shared}
       aria-busy={preparing}
-      data-native-file-drag
+      data-native-file-drag={shared ? undefined : true}
       data-native-drag-preparing={preparing || undefined}
       title={preparing ? t("ui.NativeFileDragSurface.NativeFileDragSurface.preparing_for_drag_5e2642b", { "file": String(file.filename) }) : undefined}
       onDragStart={event => {
         event.preventDefault()
+        if (shared) return
         if (ignoresNativeDrag(event.target)) return
         void beginNativeDrag().catch(reportError)
       }}

@@ -104,6 +104,40 @@ describe('MediaPreviewDialog', () => {
   })
 })
 
+describe('shared browser video controls', () => {
+  afterEach(() => { cleanup(); resetTransientCloseStackForTests() })
+  it('reuses playback and gallery controls without native file actions or dragging', () => {
+    const blocked = vi.fn().mockRejectedValue(new Error('Native operation must not run'))
+    const mediaURL = vi.fn((_profile: string, _generation: number, _session: string, id: string) => `/interactive-chat/interactive_${'a'.repeat(32)}/media/${id}`)
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sharedChat: true, native: { analyticsDisabled: true },
+      files: { mediaURL, beginDrag: blocked, open: blocked, reveal: blocked, save: blocked },
+      pins: { put: blocked, remove: blocked }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ activeProfileId: 'shared-chat', profileGeneration: 1, sessions: [{ id: 'shared-one', title: 'Synthetic shared chat', backend: 'codex' }] })
+    const files = [1, 2].map(index => ({ id: `video_${index}.${'a'.repeat(64)}`, session_id: 'shared-one', filename: `clip-${index}.mp4`, content_type: 'video/mp4', size: 4096 }))
+    const view = render(<MediaGrid files={files} sessionId="shared-one" onFind={blocked} profileScope={{ profileId: 'shared-chat', profileGeneration: 1, serverIdentity: 'synthetic-share' }} />)
+    expect(view.container.querySelector('.media-tile')).toHaveAttribute('draggable', 'false')
+    expect(view.container.querySelector('[data-native-file-drag]')).toBeNull()
+    fireEvent.dragStart(view.container.querySelector('.media-tile')!)
+    for (const name of ['Open in Editor', 'Download', 'Show in Folder', 'Open', 'Pin file', 'Find in Chat']) expect(screen.queryByTitle(name)).toBeNull()
+    fireEvent.click(view.container.querySelector('.media-preview')!)
+    const player = document.querySelector('.media-dialog video')!
+    expect(player).toHaveAttribute('src', `/interactive-chat/interactive_${'a'.repeat(32)}/media/${files[0].id}`)
+    expect(player).toHaveAttribute('controls'); expect(player).toHaveAttribute('playsinline')
+    expect(player).toHaveAttribute('controlslist', 'nodownload')
+    expect(screen.queryByRole('button', { name: 'Download' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Next media' }))
+    expect(document.querySelector('.media-dialog video')).toHaveAttribute('src', expect.stringContaining(files[1].id))
+    fireEvent.keyDown(window, { key: 'ArrowLeft' })
+    expect(document.querySelector('.media-dialog video')).toHaveAttribute('src', expect.stringContaining(files[0].id))
+    fireEvent.click(screen.getByRole('button', { name: 'Close media preview' }))
+    expect(document.querySelector('.media-dialog')).toBeNull()
+    expect(blocked).not.toHaveBeenCalled()
+  })
+})
+
 describe('MediaGrid documents', () => {
   beforeEach(() => useAppStore.setState({
     activeProfileId: 'profile-a',

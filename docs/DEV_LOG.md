@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-13 — Video playback in shared chats
+
+- Interactive shares now reuse the existing chat video thumbnails and player
+  for videos attached to sent messages or explicitly published by the agent.
+  View only snapshots include native video players for those captured videos.
+- The matching standalone server provides token-checked playback and seeking
+  for the exact shared chat. Unused uploads, unrelated files and workspace paths
+  remain inaccessible. Revocation checks are demand-driven; no polling or extra
+  stored video copies were added.
+- Preserve native event identities and chronology through current, historical
+  and trace views. Unsupported native file actions stay hidden in shared mode;
+  the normal desktop file controls are unchanged.
+- Desktop type checks, focused media/bridge tests, the full desktop suite and
+  production compilation pass. Isolated server checks cover ownership, token
+  entry, byte ranges, revocation, file mutation and cancellation cleanup.
+- Isolated browser acceptance passed for an uploaded WebM and a distinct
+  agent-published H.264 MP4 in both viewers: decoded frames, playback, seeking,
+  separate token entry and blocked media requests after revocation. Testing
+  used synthetic chats and hidden browser windows, not live user sessions.
+- This requires a server update, including the generated shared-web bundle.
+  Existing Interactive links can be refreshed afterward; older text-only View
+  only snapshots must be recreated to include videos. Browser codec support
+  still applies. No desktop package, server deployment or release was made.
+
 ## 2026-09-13 — Choose a LAN address for chat sharing
 
 - Add one localized Share address field to the existing View only / Interactive

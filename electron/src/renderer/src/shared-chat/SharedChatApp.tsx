@@ -55,7 +55,7 @@ export function receiveSharedChatState(value: SharedChatState, prefix: string) {
       syncBySession: { [session.id]: previous.syncBySession[session.id] ?? { status: 'cached', error: null } },
       syncStatus: previous.syncBySession[session.id]?.status ?? 'cached',
       activeSessionIds: new Set(value.active ? [session.id] : []),
-      snapshots: { [session.id]: { session, events, queuedTurns: value.queue, files: [], filesTotal: 0,
+      snapshots: { [session.id]: { session, events, queuedTurns: value.queue, files: value.files ?? [], filesTotal: value.files?.length ?? 0,
         hasMoreEvents: prefixEvents.length ? old?.hasMoreEvents === true : value.hasMoreEvents === true,
         nextTimelineBefore: prefixEvents.length ? old?.nextTimelineBefore : value.nextTimelineBefore,
         eventsTotal: value.eventsTotal, semanticPaging: true, historyVerified: true, cachedAt: Date.now(),

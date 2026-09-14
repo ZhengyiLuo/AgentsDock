@@ -1,7 +1,8 @@
 import type { AgentsDockAPI } from '@shared/ipc'
 import { secureRandomUUID } from '../lib/browser-crypto'
 import { copySharedChatText } from './clipboard'
-import type { AgentFile, AppEventMap, ClaudeRuntimeSnapshot, CodexGoalSnapshot, CodexRuntimeSnapshot, Event, Health, Job, LanguageSettingsSnapshot, NativeFileRef, QueuedTurn, RuntimeCatalog, Session, SessionSnapshot, TimelinePage, ViewState } from '@shared/types'
+import { isSharedVideoId, projectSharedVideoEvents } from './videos'
+import type { AgentFile, AppEventMap, ClaudeRuntimeSnapshot, CodexGoalSnapshot, CodexRuntimeSnapshot, Event, Health, Job, LanguageSettingsSnapshot, NativeFileRef, QueuedTurn, RuntimeCatalog, Session, SessionSnapshot, TimelinePage, TimelineTracePage, ViewState } from '@shared/types'
 
 /** The server emits native DTOs, scoped and sanitized for the one redeemed chat. */
 export interface SharedChatState {
@@ -20,6 +21,8 @@ export interface SharedChatState {
   hasMoreEvents?: boolean
   nextTimelineBefore?: number | null
   eventsTotal?: number | null
+  /** Bridge-derived metadata only; never trust a wire-level file inventory. */
+  files?: AgentFile[]
 }
 
 const denied = (): never => { throw new Error('This action is not available in a shared chat.') }
@@ -54,6 +57,7 @@ export function createSharedChatBridge(
   const preferences = new Map<string, unknown>()
   const staged = new Map<string, File>()
   const uploaded = new Map<string, AgentFile>()
+  const videos = new Map<string, AgentFile>()
   const listeners = new Map<string, Set<(value: never) => void>>()
   const emit = <K extends keyof AppEventMap>(name: K, value: AppEventMap[K]) => {
     for (const listener of listeners.get(name) ?? []) listener(value as never)
@@ -105,6 +109,12 @@ export function createSharedChatBridge(
       const [identity, generation] = next.revision.split(':')
       if (oldIdentity === identity && BigInt(generation) <= BigInt(oldGeneration)) return
     }
+    if (!catalogOnly) {
+      if (state && state.revision.split(':')[0] !== next.revision.split(':')[0]) videos.clear()
+      const projected = projectSharedVideoEvents(next.events, next.session.id)
+      for (const file of projected.files) videos.set(file.id, file)
+      next = { ...next, events: projected.events, files: [...videos.values()] }
+    }
     state = discoveredCatalog ? { ...next, runtime_catalog: discoveredCatalog } : next
     receive(state)
     emit('server:sessions', { profileId: 'shared-chat', profileGeneration: 1, serverIdentity: prefix, sessions: [next.session] })
@@ -141,20 +151,45 @@ export function createSharedChatBridge(
   }
   async function timelinePage(name: 'timeline.older' | 'timeline.around', payload: Record<string, unknown>): Promise<TimelinePage> {
     const id = current().session.id
+    const identity = current().revision.split(':')[0]
     const page = await action(name, payload, true)
     exact(id)
     if (!page || typeof page !== 'object' || !Array.isArray(page.events)
+      || current().revision.split(':')[0] !== identity
       || (page.session !== undefined && page.session?.id !== id)
       || page.events.some((event: Event) => !event || (event.session_id && event.session_id !== id))) {
       throw new Error('Invalid shared chat history page.')
     }
     // Native semantic readers return events and paging metadata only. The
     // desktop store also requires Session; use our exact sanitized snapshot.
-    return { ...page, session: current().session }
+    return { ...page, events: projectPageVideos(page.events), session: current().session }
+  }
+  function projectPageVideos(events: Event[]): Event[] {
+    const projected = projectSharedVideoEvents(events, current().session.id)
+    if (projected.files.some(file => !videos.has(file.id))) {
+      for (const file of projected.files) videos.set(file.id, file)
+      // Native history pages carry no file inventory. Commit known attachment
+      // metadata before the store merges their unchanged event IDs/sequences.
+      state = { ...current(), files: [...videos.values()] }
+      receive(state)
+    }
+    return projected.events
+  }
+  async function tracePage(id: string, runId: string, anchorSeq: number, after = 0, limit = 100): Promise<TimelineTracePage> {
+    exact(id)
+    const identity = current().revision.split(':')[0]
+    const page = await action('timeline.trace', { run_id: runId, anchor_seq: anchorSeq, after, limit }, true)
+    exact(id)
+    if (!page || !Array.isArray(page.events) || current().revision.split(':')[0] !== identity
+      || page.events.some((event: Event) => !event || (event.session_id && event.session_id !== id))) {
+      throw new Error('Invalid shared chat history page.')
+    }
+    return { ...page, events: projectPageVideos(page.events) }
   }
   function snapshot(): SessionSnapshot {
     const value = current()
-    return { session: value.session, events: value.events, queuedTurns: value.queue, files: [], filesTotal: 0,
+    const files = [...videos.values()]
+    return { session: value.session, events: value.events, queuedTurns: value.queue, files, filesTotal: files.length,
       hasMoreEvents: value.hasMoreEvents === true, nextTimelineBefore: value.nextTimelineBefore,
       eventsTotal: value.eventsTotal, semanticPaging: true, historyVerified: true, cachedAt: Date.now(), viewState }
   }
@@ -172,7 +207,7 @@ export function createSharedChatBridge(
     native: group({ analyticsDisabled: true, log: async () => undefined, writeClipboard: copySharedChatText, readyForNotifications: async () => false, readyForSecurePeerInvite: async () => false }),
     preferences: { get: async <T>(key: string, fallback: T) => preferences.has(key) ? preferences.get(key) as T : fallback, set: async (key: string, value: unknown) => { preferences.set(key, value) }, getScoped: async <T>(_scope: unknown, key: string, fallback: T) => preferences.has(key) ? preferences.get(key) as T : fallback, setScoped: async (_scope: unknown, key: string, value: unknown) => { preferences.set(key, value) } },
     sessions: group({ list: async () => [current().session], update: async (id: string, patch: Record<string, unknown>) => { exact(id); const allowed = new Set(['title', 'model', 'effort', 'system_prompt', 'codex_approval_policy', 'codex_sandbox_mode', 'codex_permission_profile', 'codex_approvals_reviewer', 'claude_permission_mode', 'cursor_permission_mode', 'provider_jobs_access']); const payload = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)); if (Object.keys(payload).some(key => !allowed.has(key))) denied(); await action('settings.update', payload); return current().session }, markRead: async (id: string) => { exact(id); return current().session } }),
-    timeline: group({ cached: async (id: string) => { exact(id); return snapshot() }, open: async (id: string) => { exact(id); await refresh(); return snapshot() }, older: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, historicalOlder: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, around: async (id: string, anchorSeq: number, limit = 100) => { exact(id); return timelinePage('timeline.around', { anchor_seq: anchorSeq, limit }) }, trace: async (id: string, runId: string, anchorSeq: number, after = 0, limit = 100) => { exact(id); return action('timeline.trace', { run_id: runId, anchor_seq: anchorSeq, after, limit }, true) }, index: async (id: string) => { exact(id); return action('timeline.index', {}, true) }, subscribe: async (id: string) => { exact(id) }, unsubscribe: async (id: string) => { exact(id) }, saveViewState: async (_scope: unknown, value: ViewState) => { exact(value.sessionId); viewState = value }, getViewState: async (_scope: unknown, id: string) => { exact(id); return viewState }, search: async (id: string) => { exact(id); return [] } }),
+    timeline: group({ cached: async (id: string) => { exact(id); return snapshot() }, open: async (id: string) => { exact(id); await refresh(); return snapshot() }, older: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, historicalOlder: async (id: string, before: number, limit = 100) => { exact(id); return timelinePage('timeline.older', { before, limit }) }, around: async (id: string, anchorSeq: number, limit = 100) => { exact(id); return timelinePage('timeline.around', { anchor_seq: anchorSeq, limit }) }, trace: tracePage, index: async (id: string) => { exact(id); return action('timeline.index', {}, true) }, subscribe: async (id: string) => { exact(id) }, unsubscribe: async (id: string) => { exact(id) }, saveViewState: async (_scope: unknown, value: ViewState) => { exact(value.sessionId); viewState = value }, getViewState: async (_scope: unknown, id: string) => { exact(id); return viewState }, search: async (id: string) => { exact(id); return [] } }),
     turns: { send: async (input: { sessionId: string; prompt: string; fileIds: string[]; chatReferences?: unknown[]; teamReferences?: unknown[]; skillSelection?: unknown }) => {
       exact(input.sessionId)
       if (input.chatReferences?.length || input.teamReferences?.length || input.skillSelection || input.fileIds.length > 4 || input.fileIds.some(id => !uploaded.has(id))) denied()
@@ -247,8 +282,12 @@ export function createSharedChatBridge(
           for (const path of paths) staged.delete(path)
         }
       },
-      mediaURL: () => '',
-      list: async (id: string) => { exact(id); return { files: [], total: 0, has_more: false } },
+      mediaURL: (profileId: string, generation: number, id: string, fileId: string) => {
+        if (closed || !state || profileId !== 'shared-chat' || generation !== 1 || id !== state.session.id
+          || !isSharedVideoId(fileId) || !videos.has(fileId)) return ''
+        return `${prefix}/media/${encodeURIComponent(fileId)}`
+      },
+      list: async (id: string) => { exact(id); const files = [...videos.values()]; return { files, total: files.length, has_more: false } },
       findEvent: async (id: string) => { exact(id); return null }
     })
   }
@@ -280,6 +319,6 @@ export function createSharedChatBridge(
         apply(state, true)
       }
     },
-    close() { closed = true; source?.close(); listeners.clear(); staged.clear(); uploaded.clear(); discoveredCatalog = null }
+    close() { closed = true; source?.close(); listeners.clear(); staged.clear(); uploaded.clear(); videos.clear(); discoveredCatalog = null }
   }
 }
