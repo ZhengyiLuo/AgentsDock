@@ -59,13 +59,14 @@
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.2/AgentsDock-1.0.0-beta.2-win-x64.exe">Windows (unsigned preview)</a>
   ·
-  <a href="https://testflight.apple.com/join/2JjWy2Z2">iPhone &amp; iPad</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">Release page</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.12">Stable 0.2.12</a>
+  <br />
+  <strong>Mobile:</strong>
+  <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad</a>
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
-  <br />
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">New desktop beta releases</a>
-  ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.12">Current stable desktop release</a>
   <br />
   <br />
   <strong>
