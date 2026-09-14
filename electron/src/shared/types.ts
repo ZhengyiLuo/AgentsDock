@@ -991,6 +991,7 @@ export interface Event extends SharedChatAttribution {
   subagent_id?: string | null
   subagent_tool_id?: string | null
   subagent_name?: string | null
+  subagent_title?: string | null
   subagent_nickname?: string | null
   subagent_path?: string | null
   subagent_task?: string | null

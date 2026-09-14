@@ -15,6 +15,67 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it('uses the exact Codex display title and retains its nickname and path separately', () => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-1', subagent_status: 'running',
+      subagent_title: 'Public resources', subagent_nickname: 'Kepler the 2nd',
+      subagent_name: 'Kepler the 2nd', subagent_path: '/root/public_resources'
+    })])
+    expect(subagentDisplayName(agent)).toBe('Public resources')
+    expect(subagentDetailText(agent)).toBe('Kepler the 2nd')
+    expect(subagentLogText(agent)).toContain('Kepler the 2nd')
+    expect(subagentLogText(agent)).toContain('/root/public_resources')
+    setLocale('zh-CN')
+    expect(subagentDisplayName(agent)).toBe('Public resources')
+  })
+
+  it('keeps one child through rename, missing or malformed titles, and explicit clear', () => {
+    const state = (seq: number, extra: Partial<Event> = {}) => event(seq, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-1', subagent_status: 'completed',
+      subagent_started_at: '2026-07-12T09:00:00Z', ...extra
+    })
+    const events = [
+      state(1, { subagent_title: 'Initial audit', subagent_nickname: 'Kepler the 2nd' }),
+      state(2, { subagent_title: 'Review letters audit' }),
+      state(3), state(4, { subagent_title: { wrong: 'shape' } as unknown as string }),
+      state(5, { subagent_title: '[AgentsDock context] internal context' })
+    ]
+    const [agent] = subagentsFromEvents(events)
+    expect(subagentsFromEvents(events)).toHaveLength(1)
+    expect(subagentDisplayName(agent)).toBe('Review letters audit')
+    expect(agent).toMatchObject({ key: 'codex:subagent:child-1', status: 'completed',
+      startedAt: '2026-07-12T09:00:00Z' })
+    for (const cleared of [null, '', '  ']) {
+      const [after] = subagentsFromEvents([...events, state(6, { subagent_title: cleared }), state(7)])
+      expect(subagentDisplayName(after)).toBe('Kepler the 2nd')
+      expect(after.key).toBe(agent.key)
+      expect(isSubagentActive(after)).toBe(false)
+    }
+  })
+
+  it('does not turn a cleared title into a persistent fallback name', () => {
+    const [agent] = subagentsFromEvents([
+      event(1, 'subagent_state', { subagent_id: 'child-1', subagent_status: 'running',
+        subagent_title: 'Publications audit', subagent_name: 'Codex subagent' }),
+      event(2, 'subagent_state', { subagent_id: 'child-1', subagent_status: 'running', subagent_title: null })
+    ])
+    expect(subagentDisplayName(agent)).toBe('Codex subagent')
+  })
+
+  it('renames a completed child without changing its original lifecycle time or key', () => {
+    const completed = event(1, 'subagent_state', { backend: 'codex', subagent_id: 'child-1',
+      subagent_title: 'Initial audit', subagent_nickname: 'Kepler the 2nd', subagent_status: 'completed',
+      subagent_started_at: '2026-07-12T09:59:00Z', subagent_activity: 'Audit complete' })
+    // Identity snapshots carry a new sequence but the server retains lifecycle ts.
+    const renamed = { ...completed, seq: 2, id: 'event-2', subagent_title: 'Public resources' }
+    const [before] = subagentsFromEvents([completed])
+    const [after] = subagentsFromEvents([completed, renamed])
+    expect(subagentDisplayName(after)).toBe('Public resources')
+    expect(after).toMatchObject({ key: before.key, startedAt: before.startedAt,
+      updatedAt: before.updatedAt, status: 'completed', log: before.log })
+    expect(isSubagentActive(after)).toBe(false)
+  })
+
   it('keeps exact-owner tracking loss inactive despite late raw or structured progress', () => {
     const raw = (seq: number, subtype: string, run = 'run-1') => event(seq, 'raw_event', {
       backend: 'claude', run_id: run,

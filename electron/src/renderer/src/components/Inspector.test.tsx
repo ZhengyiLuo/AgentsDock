@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import type { Health, RuntimeCatalog, Session } from '@shared/types'
+import type { Event, Health, RuntimeCatalog, Session } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { Inspector } from './Inspector'
 
@@ -615,6 +615,92 @@ describe('Inspector', () => {
 
     expect(screen.getByText('Completed audit')).toBeInTheDocument()
     expect(screen.getByText('Stopped audit')).toBeInTheDocument()
+  })
+
+  it('renames a live Codex row and its open output panel in place without changing activity or count', () => {
+    const session: Session = { id: 'chat-1', title: 'Named children', backend: 'codex' }
+    const original: Event = {
+      id: 'child-start', seq: 1, session_id: session.id, run_id: 'parent-run',
+      type: 'subagent_state', ts: '2026-09-13T12:00:00Z', backend: 'codex',
+      subagent_id: 'child-1', subagent_title: 'Timeline reviewer', subagent_nickname: 'Curie',
+      subagent_task: 'Check source provenance', subagent_path: '/root/review', subagent_status: 'running',
+      subagent_activity: 'Original output stays visible'
+    }
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events: [original], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    const row = container.querySelector('.subagent-list > button')!
+    expect(row.querySelector('strong')).toHaveTextContent('Timeline reviewer')
+    expect(row.querySelector('code')).toHaveTextContent('Curie')
+    fireEvent.click(row)
+    const panel = container.querySelector('.output-panel')!
+    const append = (patch: Partial<Event>) => act(() => useAppStore.setState(state => {
+      const previous = state.snapshots[session.id]
+      const seq = previous.events.length + 1
+      return { snapshots: { ...state.snapshots, [session.id]: { ...previous, events: [...previous.events, {
+        id: `child-update-${seq}`, seq, type: 'subagent_state', session_id: session.id,
+        run_id: 'parent-run', ts: `2026-09-13T12:00:0${seq}Z`, backend: 'codex',
+        subagent_id: 'child-1', subagent_status: 'running', ...patch
+      }] } } }
+    }))
+    const assertStable = () => {
+      expect(container.querySelectorAll('.subagent-list > button')).toHaveLength(1)
+      expect(container.querySelector('.subagent-list > button')).toBe(row)
+      expect(container.querySelector('.output-panel')).toBe(panel)
+      expect(row.querySelector('.subagent-state.running')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Subagents 1 active/i })).toHaveAttribute('aria-expanded', 'true')
+      expect(panel).toHaveTextContent('Original output stays visible')
+    }
+    append({ subagent_title: 'Renamed timeline reviewer' })
+    assertStable()
+    expect(row.querySelector('strong')).toHaveTextContent('Renamed timeline reviewer')
+    expect(panel.querySelector('header > strong')).toHaveTextContent('Renamed timeline reviewer')
+    expect(screen.getByRole('button', { name: 'Copy Renamed timeline reviewer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close Renamed timeline reviewer' })).toBeInTheDocument()
+    append({ subagent_activity: 'Later output does not erase the title' })
+    append({ subagent_title: { invalid: true } } as unknown as Partial<Event>)
+    assertStable()
+    expect(panel.querySelector('header > strong')).toHaveTextContent('Renamed timeline reviewer')
+    expect(panel).toHaveTextContent('Later output does not erase the title')
+  })
+
+  it.each([
+    { clear: null, nickname: 'Curie', task: 'Review provenance', expected: 'Curie' },
+    { clear: '', nickname: 'Curie', task: 'Review provenance', expected: 'Curie' },
+    { clear: null, nickname: undefined, task: 'Review provenance', expected: 'Review provenance' },
+    { clear: '', nickname: undefined, task: undefined, expected: 'review' }
+  ])('clears a Codex title to $expected without closing its output panel ($clear)', ({ clear, nickname, task, expected }) => {
+    const session: Session = { id: 'chat-1', title: 'Named child', backend: 'codex' }
+    const original: Event = {
+      id: 'named-child', seq: 1, session_id: session.id, run_id: 'parent-run',
+      type: 'subagent_state', ts: '2026-09-13T12:00:00Z', backend: 'codex',
+      subagent_id: 'child-1', subagent_title: 'Temporary title', subagent_nickname: nickname,
+      subagent_task: task, subagent_path: '/root/review', subagent_status: 'running',
+      subagent_activity: 'Retained output'
+    }
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events: [original], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    const row = container.querySelector('.subagent-list > button')!
+    fireEvent.click(row)
+    const panel = container.querySelector('.output-panel')!
+    act(() => useAppStore.setState(state => ({ snapshots: { ...state.snapshots, [session.id]: {
+      ...state.snapshots[session.id], events: [original, {
+        id: 'title-cleared', seq: 2, session_id: session.id, run_id: 'parent-run', type: 'subagent_state',
+        ts: '2026-09-13T12:00:01Z', backend: 'codex', subagent_id: 'child-1',
+        subagent_title: clear, subagent_status: 'running'
+      }]
+    } } })))
+    expect(container.querySelector('.subagent-list > button')).toBe(row)
+    expect(container.querySelector('.output-panel')).toBe(panel)
+    expect(row.querySelector('strong')?.textContent).toBe(expected)
+    expect(panel.querySelector('header > strong')?.textContent).toBe(expected)
+    expect(row.querySelector('.subagent-state.running')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Subagents 1 active/i })).toBeInTheDocument()
+    expect(panel).toHaveTextContent('Retained output')
+    expect(panel).not.toHaveTextContent('Temporary title')
   })
 
   it('labels a history-only section as zero active and leaves its history closed by default', async () => {

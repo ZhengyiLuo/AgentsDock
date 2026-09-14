@@ -154,6 +154,7 @@ function SubagentsSection({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(activeCount > 0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [output, setOutput] = useState<ReturnType<typeof subagentsFromEvents>[number] | null>(null)
+  const selectedOutput = output && (agents.find(agent => agent.key === output.key) || output)
   const [, setClock] = useState(0)
 
   useEffect(() => {
@@ -185,7 +186,7 @@ function SubagentsSection({ sessionId }: { sessionId: string }) {
         {historyOpen && <SubagentList agents={historicalAgents} onSelect={setOutput} history />}
       </div>}
     </div>}
-    {output && <OutputPanel title={subagentDisplayName(output)} text={subagentLogText(agents.find(agent => agent.key === output.key) || output)} onClose={() => setOutput(null)} />}
+    {selectedOutput && <OutputPanel title={subagentDisplayName(selectedOutput)} text={subagentLogText(selectedOutput)} onClose={() => setOutput(null)} />}
   </section>
 }
 

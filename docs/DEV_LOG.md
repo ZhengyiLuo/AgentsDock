@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-13 — Codex subagent display names
+
+- Show the explicit Codex child-thread title before its nickname, task or path
+  fallback. Names stay literal in every locale. Nicknames and paths remain
+  available in details; no names are generated from prompts.
+- Accept optional `subagent_title` snapshots from the standalone server's
+  existing thread metadata and name-update stream. Omitted or malformed fields
+  retain the known title; explicit clearing restores the existing fallback.
+- Keep one stable child row and update an already-open output panel's title in
+  place. Naming does not introduce polling, new provider requests or UI timers.
+- Desktop type checks, production compilation, the full suite and focused
+  rename/clear/lifecycle regressions pass. Isolated full-renderer checks cover
+  dark/light and narrow layouts, including renaming and clearing a title while
+  the output panel stays open. The change requires the matching
+  standalone server update to supply explicit titles. No installed application,
+  running server or published release has been changed.
+
 ## 2026-09-13 — Large-history cron and mailbox replay correction
 
 - Correct the standalone server's native-history proof path for large chats.

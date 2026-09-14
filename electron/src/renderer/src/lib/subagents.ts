@@ -15,6 +15,7 @@ export interface SubagentActivity {
   runId: string
   backend: 'claude' | 'codex'
   name: string
+  title?: string | null
   nickname?: string
   path?: string
   task?: string
@@ -320,6 +321,7 @@ export function subagentLogText(agent: SubagentActivity): string {
   const task = subagentTaskLabel(agent)
   const header = [
     subagentDisplayName(agent),
+    agent.nickname && agent.nickname !== subagentDisplayName(agent) ? agent.nickname : '',
     agent.path && agent.path !== subagentDisplayName(agent) ? t('timeline.subagent.path', { path: agent.path }) : '',
     task && task !== agent.name && task !== agent.path ? t('timeline.subagent.task', { task }) : '',
     `${agent.backend} · ${agent.kind || 'subagent'} · ${subagentStatusLabel(agent.status)}`,
@@ -329,6 +331,7 @@ export function subagentLogText(agent: SubagentActivity): string {
 }
 
 export function subagentDisplayName(agent: SubagentActivity): string {
+  if (agent.title) return agent.title
   if (agent.nickname) return agent.nickname
   const task = subagentTaskLabel(agent)
   if (task) return task
@@ -346,6 +349,7 @@ function subagentTaskLabel(agent: SubagentActivity): string {
 
 export function subagentDetailText(agent: SubagentActivity): string {
   const displayName = subagentDisplayName(agent)
+  if (agent.title && agent.nickname && agent.nickname !== displayName) return agent.nickname
   if (agent.path && agent.path !== displayName) return agent.path
   const task = subagentTaskLabel(agent)
   if (task && task !== displayName) return task
@@ -389,6 +393,7 @@ function normalizedStatus(value: unknown): SubagentStatus {
 }
 
 interface SubagentIdentity {
+  title?: string | null
   nickname?: string
   path?: string
   task?: string
@@ -409,7 +414,14 @@ function subagentEventIdentity(event: Event): SubagentIdentity {
   const explicitTask = cleanIdentityText(identityEvent.subagent_task || identityEvent.task_name)
   const projectedName = cleanIdentityText(event.subagent_name)
   const projectedPath = subagentPath(projectedName)
+  // Omitted fields from older servers preserve identity; an explicit clear
+  // falls back to the provider nickname without changing the child identity.
+  const title = event.subagent_title === null
+    || typeof event.subagent_title === 'string' && !event.subagent_title.trim() ? null
+    : typeof event.subagent_title === 'string' ? cleanIdentityText(event.subagent_title) || undefined
+      : undefined
   return {
+    title,
     nickname: nickname || undefined,
     path: explicitPath || projectedPath || undefined,
     task: explicitTask || (!projectedPath ? projectedName : '') || undefined
@@ -417,6 +429,7 @@ function subagentEventIdentity(event: Event): SubagentIdentity {
 }
 
 function applySubagentIdentity(agent: SubagentActivity, identity: SubagentIdentity): void {
+  if (identity.title !== undefined) agent.title = identity.title
   if (identity.nickname) agent.nickname = identity.nickname
   if (identity.path) agent.path = identity.path
   if (identity.task) agent.task = identity.task
