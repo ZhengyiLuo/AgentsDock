@@ -13,28 +13,22 @@ import {
   CircleGauge,
   ClipboardCheck,
   Goal,
-  KeyRound,
   LoaderCircle,
   MessageSquareCode,
   Pause,
   Pencil,
   Play,
   RefreshCw,
-  Shield,
   Sparkles,
   SquareTerminal,
   Trash2,
   X
 } from 'lucide-react'
 import type {
-  CodexApprovalPolicy,
-  CodexApprovalsReviewer,
   CodexGoalSnapshot,
   CodexGoalStatus,
   CodexReviewTarget,
-  CodexSandboxMode,
-  JsonValue,
-  Session
+  JsonValue
 } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import {
@@ -45,19 +39,12 @@ import {
   type CodexContextUsage
 } from '../lib/codex-token-usage'
 import {
-  CODEX_APPROVAL_PROMPT_LABELS,
-  CODEX_APPROVAL_REVIEWER_LABELS,
-  codexApprovalPromptHelp,
-  codexApprovalReviewerHelp
-} from '../lib/codex-permission-copy'
-import {
   codexBridge,
   codexStatusLabel,
   codexStatusTone,
   type CodexBackgroundTerminal,
   useCodexRuntime
 } from './CodexRuntimeContext'
-import { queueCodexPermissionUpdate } from '../lib/codex-permission-updates'
 import { useTransientClose } from '../lib/transient-close'
 import { CodexInteractionCard } from './CodexInteractionShelf'
 import './CodexControls.css'
@@ -400,7 +387,6 @@ export function CodexControlsPanel({ focusGoal = false }: { focusGoal?: boolean 
         : <fieldset className="codex-controls-body" disabled={sharedDisconnected}>
           <PendingControlsSection />
           <ThreadStatusSection />
-          <PermissionSettings session={session} onNotice={setNotice} />
           <GoalSettings onNotice={setNotice} autoFocusObjective={focusGoal} />
           {!window.agentsDock.sharedChat && <ThreadActions onNotice={setNotice} />}
           {!window.agentsDock.sharedChat && <BackgroundTerminals onNotice={setNotice} />}
@@ -473,135 +459,6 @@ function ThreadStatusSection() {
       <ProgressDatum label={t("ui.CodexControls.ThreadStatusSection.elapsed_a194a68")} value={elapsed} maximum={timeLimit ?? 0} suffix="s" />
     </div>}
   </section>
-}
-
-function PermissionSettings({ session, onNotice }: { session: Session; onNotice(value: string): void }) {
-  useLocale()
-  const { runtime, run } = useCodexRuntime()
-  const [policy, setPolicy] = useState<CodexApprovalPolicy>(session.codex_approval_policy ?? 'never')
-  const [sandbox, setSandbox] = useState<CodexSandboxMode>(session.codex_sandbox_mode ?? 'danger-full-access')
-  const [profile, setProfile] = useState(session.codex_permission_profile ?? '')
-  const [reviewer, setReviewer] = useState<CodexApprovalsReviewer>(session.codex_approvals_reviewer ?? 'user')
-  const [profiles, setProfiles] = useState(runtime?.permission_profiles ?? [])
-  const [profilesError, setProfilesError] = useState<string | null>(null)
-  const [profilesBusy, setProfilesBusy] = useState(false)
-
-  useEffect(() => {
-    setPolicy(session.codex_approval_policy ?? 'never')
-    setSandbox(session.codex_sandbox_mode ?? 'danger-full-access')
-    setProfile(session.codex_permission_profile ?? '')
-    setReviewer(session.codex_approvals_reviewer ?? 'user')
-  }, [
-    session.id,
-    session.codex_approval_policy,
-    session.codex_approvals_reviewer,
-    session.codex_permission_profile,
-    session.codex_sandbox_mode
-  ])
-  useEffect(() => {
-    if (runtime?.permission_profiles?.length) {
-      setProfiles(runtime.permission_profiles)
-      setProfilesError(null)
-      setProfilesBusy(false)
-    }
-  }, [runtime?.permission_profiles])
-  useEffect(() => {
-    let cancelled = false
-    const bridge = codexBridge()
-    if (!bridge || runtime?.permission_profiles?.length) return
-    setProfilesError(null)
-    setProfilesBusy(false)
-    void bridge.permissionProfiles(session.id)
-      .then(items => {
-        if (!cancelled) {
-          setProfiles(items)
-          setProfilesBusy(false)
-        }
-      })
-      .catch(cause => {
-        if (!cancelled) {
-          const detail = cause instanceof Error ? cause.message : String(cause)
-          const busy = permissionProfilesBusy(detail)
-          setProfilesBusy(busy)
-          setProfilesError(busy
-            ? 'Codex is busy. Permission profiles will refresh after the active turn finishes.'
-            : detail)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [runtime?.permission_profiles, runtime?.status?.type, session.id])
-
-  const save = () => runSilently(run(async () => {
-    const patch = {
-      codex_approval_policy: policy,
-      codex_sandbox_mode: sandbox,
-      codex_permission_profile: profile || null,
-      codex_approvals_reviewer: reviewer
-    }
-    await queueCodexPermissionUpdate(session.id, patch)
-    onNotice('Permission settings saved for this chat.')
-  }))
-  return <section className="codex-control-section">
-    <div className="codex-section-heading"><Shield size={15} /><div><strong>{t("ui.CodexControls.PermissionSettings.permissions_and_approvals_03a4ee8")}</strong><small>{t("ui.CodexControls.PermissionSettings.applied_to_future_interactive_turns_in_thi_24d12bf")}</small></div></div>
-    <div className="codex-control-fields two-column">
-      <label>
-        <span>{t("ui.CodexControls.PermissionSettings.permission_profile_ffcd396")}</span>
-        <select value={profile} onChange={event => setProfile(event.target.value)}>
-          <option value="">{t("ui.CodexControls.PermissionSettings.custom_settings_4229eea")}</option>
-          {profiles.map(item => {
-            const value = item.id || item.name || ''
-            return value ? <option key={value} value={value} disabled={item.allowed === false}>{item.name || value}</option> : null
-          })}
-        </select>
-        <small>{t("ui.CodexControls.PermissionSettings.a_profile_replaces_the_custom_sandbox_poli_8f6c13b")}</small>
-        {profilesError && <small
-          className={profilesBusy ? 'codex-field-warning' : 'codex-field-error'}
-          role={profilesBusy ? 'status' : 'alert'}
-        >{profilesError}</small>}
-      </label>
-      <label>
-        <span>{t("ui.CodexControls.PermissionSettings.who_approves_58343a1")}</span>
-        <select
-          aria-label={t("ui.CodexControls.PermissionSettings.who_approves_58343a1")}
-          value={reviewer}
-          onChange={event => setReviewer(event.target.value as CodexApprovalsReviewer)}
-        >
-          {Object.entries(CODEX_APPROVAL_REVIEWER_LABELS).map(([value, label]) =>
-            <option key={value} value={value}>{label}</option>
-          )}
-        </select>
-        <small>{codexApprovalReviewerHelp(reviewer, policy)}</small>
-      </label>
-      <label>
-        <span>{t("ui.CodexControls.PermissionSettings.approval_prompts_60d8110")}</span>
-        <select
-          aria-label={t("ui.CodexControls.PermissionSettings.approval_prompts_60d8110")}
-          value={policy}
-          onChange={event => setPolicy(event.target.value as CodexApprovalPolicy)}
-        >
-          {Object.entries(CODEX_APPROVAL_PROMPT_LABELS).map(([value, label]) =>
-            <option key={value} value={value}>{label}</option>
-          )}
-        </select>
-        <small>{codexApprovalPromptHelp(policy, sandbox, Boolean(profile))}</small>
-      </label>
-      <label>
-        <span>{t("ui.CodexControls.PermissionSettings.filesystem_sandbox_8e1f1cf")}</span>
-        <select disabled={Boolean(profile)} value={sandbox} onChange={event => setSandbox(event.target.value as CodexSandboxMode)}>
-          <option value="read-only">{t("ui.CodexControls.PermissionSettings.read_only_8ac7673")}</option>
-          <option value="workspace-write">{t("ui.CodexControls.PermissionSettings.workspace_write_30f7aaa")}</option>
-          <option value="danger-full-access">{t("ui.CodexControls.PermissionSettings.full_access_f19611c")}</option>
-        </select>
-      </label>
-    </div>
-    <div className="codex-section-actions"><button type="button" className="quiet-button" onClick={save}><KeyRound size={14} />{" "}{t("ui.CodexControls.PermissionSettings.save_permissions_1eab372")}</button></div>
-  </section>
-}
-
-function permissionProfilesBusy(error: string): boolean {
-  return /wait for (?:the )?(?:\d+ )?active codex turns? to finish/i.test(error)
 }
 
 function GoalSettings({ onNotice, autoFocusObjective = false }: { onNotice(value: string): void; autoFocusObjective?: boolean }) {

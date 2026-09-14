@@ -985,6 +985,8 @@ export interface Event extends SharedChatAttribution {
   stopped?: boolean | null
   is_error?: boolean | null
   provider_session_id?: string | null
+  /** Codex thread identity on native turn lifecycle events. */
+  provider_thread_id?: string | null
   tool_id?: string | null
   tool?: ToolCall | null
   subagent_id?: string | null
