@@ -10,9 +10,13 @@ from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 import hashlib
 import hmac
+import json
+import os
 from pathlib import Path
 import re
+import stat
 import threading
+import time
 from typing import Callable
 from datetime import datetime
 
@@ -30,6 +34,95 @@ _PROVIDER_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 _NATIVE_LEADING_DECORATION_RE = re.compile(
     r"(?m)^[ \t]*(?:(?::[A-Za-z0-9_+\-]+:|[\U0001F300-\U0001FAFF\u2600-\u27BF]\ufe0f?)[ \t]*)+"
 )
+NATIVE_PROOF_LINE_BYTES = 4 * 1024 * 1024
+NATIVE_PROOF_SECONDS = 30.0
+
+
+class CodexNativeHistoryProofUnavailable(ValueError):
+    """Incomplete evidence must defer import, not become a new human message."""
+
+
+@dataclass
+class _NativeReadBudget:
+    cancelled: Callable[[], bool] | None = None
+    deadline: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.deadline is None:
+            self.deadline = time.monotonic() + NATIVE_PROOF_SECONDS
+
+    def check(self) -> None:
+        if ((self.cancelled is not None and self.cancelled())
+                or time.monotonic() >= self.deadline):
+            raise CodexNativeHistoryProofUnavailable("Codex history proof was cancelled or exceeded its work budget")
+
+
+def _native_stamp(path: Path) -> tuple[int, int, int, int]:
+    """Pin a regular file without a total-size cutoff or following symlinks."""
+    value = path.lstat()
+    if not stat.S_ISREG(value.st_mode):
+        raise _Unproven()
+    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+
+
+def _native_records(path: Path, expected: tuple[int, int, int, int], budget: _NativeReadBudget,
+                    *, end: int | None = None):
+    """Stream one fixed prefix; tool volume does not consume retained-key budget.
+
+    A source proof needs only the prefix ending at its newest checkpoint. Never
+    parse or hash a later unrelated source tail. Cancellation is checked between
+    individually bounded records, including records that carry no public text.
+    """
+    budget.check()
+    boundary = expected[2] if end is None else end
+    if type(boundary) is not int or not 0 <= boundary <= expected[2]:
+        raise _Unproven()
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                         | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != expected:
+            raise _Unproven()
+        offset = 0
+        while offset < boundary:
+            budget.check()
+            line = stream.readline(min(NATIVE_PROOF_LINE_BYTES + 1, boundary - offset))
+            if not line or len(line) > NATIVE_PROOF_LINE_BYTES or not line.endswith(b"\n"):
+                raise _Unproven()
+            offset += len(line)
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                raise _Unproven()
+            yield record, offset, line
+        info = os.fstat(stream.fileno())
+        if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != expected:
+            raise _Unproven()
+    budget.check()
+    if _native_stamp(path) != expected:
+        raise _Unproven()
+
+
+def _native_event_identity(event: dict) -> dict:
+    """Keep bounded public identity, never retain tool bodies or message text."""
+    return {key: event[key] for key in ("id", "seq", "type", "phase", "item_id")
+            if key in event and (type(event[key]) is int or isinstance(event[key], str) and len(event[key]) <= 256)}
+
+
+def _native_import_batch(event: dict) -> dict:
+    result = {key: event.get(key) for key in ("seq", "provider_session_id", "source_path")}
+    checkpoint = event.get("_history_sync_checkpoint")
+    if isinstance(checkpoint, dict) and isinstance(checkpoint.get("cursor"), dict):
+        result["_history_sync_checkpoint"] = {
+            **{key: checkpoint.get(key) for key in (
+                "version", "previous_present", "previous_source_offset", "previous_source_digest")},
+            "cursor": {key: checkpoint["cursor"].get(key) for key in (
+                "version", "backend", "provider_session_id", "source_path", "source_offset",
+                "source_dev", "source_ino", "source_digest")},
+        }
+    # Unexpected huge metadata cannot make the retained compact proof unbounded.
+    if len(json.dumps(result)) > 16 * 1024:
+        raise _Unproven()
+    return result
 
 
 def _native_assistant_text(text: str) -> str:
@@ -387,10 +480,12 @@ def _replay_target(event: dict) -> tuple | None:
     if (kind is None or event.get("backend") != "codex" or event.get("imported") is not True
         or not isinstance(event.get("run_id"), str) or not event["run_id"].startswith("import_")
         or type(event.get("seq")) is not int or event["seq"] <= 0
-        or not isinstance(event.get("id"), str) or not event["id"]
+        or not isinstance(event.get("id"), str) or not 0 < len(event["id"]) <= 256
         or not isinstance(body, str) or not body or len(body) > 4 * 1024 * 1024
-        or not isinstance(event.get("ts"), str)
-        or event.get("source_text_sha256") is not None and not isinstance(event.get("source_text_sha256"), str)):
+        or not isinstance(event.get("ts"), str) or not 0 < len(event["ts"]) <= 64
+        or event.get("source_text_sha256") is not None and (
+            not isinstance(event.get("source_text_sha256"), str)
+            or not _DIGEST.fullmatch(event["source_text_sha256"]))):
         return None
     # Human authorship does not make a duplicate a second human message.
     # Retain the original authorship flag; only this exact ledger copy is aliased.
@@ -419,26 +514,32 @@ def _native_mailbox_wake_hash(event: dict) -> str | None:
 
 
 def _prove_native_replays(session_id: str, provider_id: str, events: Path, source: Path | None,
-                          root: Path, parse_item: Callable[[dict], dict | None]) -> _NativeProof:
+                          root: Path, parse_item: Callable[[dict], dict | None],
+                          budget: _NativeReadBudget) -> _NativeProof:
     if not _PROVIDER_ID.fullmatch(provider_id):
         raise _Unproven()
-    stamp = _stamp(events)
-    if stamp[2] > MAX_EVENTS_BYTES:
-        raise _Unproven()
+    stamp = _native_stamp(events)
     batches, terminals, candidates, native, owners = {}, {}, [], {}, {}
-    for event, _offset, _line in _records(events, stamp):
+    previous_seq, retained = 0, 0
+    for event, _offset, _line in _native_records(events, stamp, budget):
+        seq = event.get("seq")
+        if type(seq) is not int or seq <= previous_seq:
+            raise _Unproven()
+        previous_seq = seq
         if event.get("session_id") not in (None, "", session_id):
             continue
         run = event.get("run_id")
-        if not isinstance(run, str) or not run:
+        if not isinstance(run, str) or not 0 < len(run) <= 256:
             continue
         if run.startswith("import_"):
             if event.get("type") == "history_imported" and event.get("backend") == "codex":
                 if run in batches:
                     raise _Unproven()
-                batches[run] = event
+                batches[run] = _native_import_batch(event)
             elif event.get("type") == "turn_finished" and event.get("imported") is True and event.get("backend") == "codex":
-                terminals.setdefault(run, []).append(event.get("seq"))
+                ends = terminals.setdefault(run, [])
+                if len(ends) < 2:
+                    ends.append(seq)
             else:
                 target = _replay_target(event)
                 if target:
@@ -447,19 +548,24 @@ def _prove_native_replays(session_id: str, provider_id: str, events: Path, sourc
             if event.get("type") == "turn_finished" and event.get("backend") == "codex" and event.get("transport") == "app-server":
                 thread, turn = event.get("provider_thread_id"), event.get("provider_turn_id")
                 if isinstance(thread, str) and _PROVIDER_ID.fullmatch(thread) and isinstance(turn, str) and 0 < len(turn) <= 256:
-                    owners.setdefault((thread, turn), set()).add(run)
+                    owned = owners.setdefault((thread, turn), set())
+                    retained += run not in owned
+                    owned.add(run)
             kind = "user" if event.get("type") == "turn_started" else "assistant" if event.get("type") in ("assistant_text", "reasoning_summary", "turn_finished") else None
             body = event.get("prompt") if kind == "user" else event.get("result_text") if event.get("type") == "turn_finished" else event.get("text")
             if kind and isinstance(body, str) and body and len(body) <= 4 * 1024 * 1024:
-                native.setdefault((run, kind, _text_key(body)), []).append(event)
+                native.setdefault((run, kind, _text_key(body)), []).append(_native_event_identity(event))
+                retained += 1
             elif kind == "user" and (wake_hash := _native_mailbox_wake_hash(event)):
-                native.setdefault((run, kind, wake_hash), []).append(event)
-        if len(candidates) + len(batches) + len(native) + len(owners) > MAX_KEYS:
+                native.setdefault((run, kind, wake_hash), []).append(_native_event_identity(event))
+                retained += 1
+        if len(candidates) + len(batches) + len(terminals) + retained > MAX_KEYS:
             raise _Unproven()
     if not candidates:
         return _NativeProof(provider_id)
     groups = {}
     for run, batch in batches.items():
+        budget.check()
         checkpoint = batch.get("_history_sync_checkpoint")
         cursor = checkpoint.get("cursor") if isinstance(checkpoint, dict) else None
         ends = terminals.get(run, [])
@@ -476,24 +582,21 @@ def _prove_native_replays(session_id: str, provider_id: str, events: Path, sourc
     selected = ([current] if current in groups else []) + sorted(
         (key for key in groups if key != current), key=lambda key: max(row[0] for row in groups[key].values()), reverse=True,
     )[:MAX_PRIOR_SOURCE_PATHS]
-    budget = _SourceBudget(MAX_AGGREGATE_SOURCE_BYTES, MAX_AGGREGATE_SOURCE_RECORDS)
     proofs = {}
     for thread, path in selected:
-        try:
-            proofs.update(_prove_native_source(thread, Path(path), root, groups[(thread, path)], candidates, native, owners, parse_item, budget))
-        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
-            continue
+        proofs.update(_prove_native_source(thread, Path(path), root, groups[(thread, path)], candidates, native, owners, parse_item, budget))
+    budget.check()
     return _NativeProof(provider_id, proofs)
 
 
 def _prove_native_source(thread: str, source: Path, root: Path, batches: dict, candidates: list,
-                         native: dict, owners: dict, parse_item: Callable, budget: _SourceBudget) -> dict:
+                         native: dict, owners: dict, parse_item: Callable, budget: _NativeReadBudget) -> dict:
     if (not source.is_absolute() or source.is_symlink() or source.suffix != ".jsonl"
         or not (source.stem == thread or source.stem.endswith("-" + thread))):
         raise _Unproven()
     source = source.resolve(strict=True)
     source.relative_to(root.resolve(strict=True))
-    stamp = _stamp(source)
+    stamp = _native_stamp(source)
     wanted, eligible = {}, {}
     for run, (first, last, checkpoint) in batches.items():
         cursor = checkpoint["cursor"]
@@ -512,13 +615,16 @@ def _prove_native_source(thread: str, source: Path, root: Path, batches: dict, c
         eligible[run] = (first, last, start, end, expected, previous)
     if not eligible:
         return {}
-    budget.reserve(stamp[2])
+    # Only source messages capable of proving requested imported rows need to
+    # occupy memory. Tools/private reasoning still contribute to exact digests.
+    candidate_keys = {(target[4], target[5], target[8]) for target in candidates
+                      if target[1] in eligible}
     digest, verified, canonical, occurrences = hashlib.sha256(), set(), {}, {}
     assistant_native_keys = {}
     allowed_header_owners, header_parents = {thread}, {}
     context_turn = None
-    for record, offset, line in _records(source, stamp):
-        budget.consume_record()
+    retained = 0
+    for record, offset, line in _native_records(source, stamp, budget, end=max(wanted)):
         payload = record.get("payload")
         if offset == len(line) or record.get("type") == "session_meta":
             if record.get("type") != "session_meta" or not isinstance(payload, dict):
@@ -557,20 +663,27 @@ def _prove_native_source(thread: str, source: Path, root: Path, batches: dict, c
             origin = {**origin, "kind": runtime_kind}
         turn = origin["turn_id"] if origin else context_turn
         timestamp = record.get("timestamp")
-        if not isinstance(turn, str) or not isinstance(timestamp, str):
+        if (not isinstance(turn, str) or not 0 < len(turn) <= 256
+                or not isinstance(timestamp, str) or not 0 < len(timestamp) <= 64):
             continue
         key = (turn, item["kind"], _text_key(item["text"]), item.get("source_text_sha256"))
+        if (item["kind"], key[2], key[3]) not in candidate_keys:
+            continue
         if item["kind"] == "assistant":
             cleaned = _native_assistant_text(item["text"])
             if cleaned:
                 assistant_native_keys[key] = _text_key(cleaned)
         if origin:
-            canonical.setdefault(key, {})[origin["event_id"]] = origin
+            ids = canonical.setdefault(key, {})
+            retained += origin["event_id"] not in ids
+            ids[origin["event_id"]] = origin
         occurrences.setdefault((item["kind"], key[2], timestamp, key[3]), []).append((offset, key))
-        if len(canonical) + len(occurrences) > MAX_KEYS:
+        retained += 1
+        if retained > MAX_KEYS:
             raise _Unproven()
     proofs = {}
     for target in candidates:
+        budget.check()
         seq, run, _id, _type, kind, body_key, timestamp, _human, source_hash = target
         batch = eligible.get(run)
         if not batch:
@@ -578,7 +691,11 @@ def _prove_native_source(thread: str, source: Path, root: Path, batches: dict, c
         first, last, start, end, expected, previous = batch
         if not (first < seq < last and (end, expected) in verified and (start == 0 or (start, previous) in verified)):
             continue
-        matches = {key for offset, key in occurrences.get((kind, body_key, timestamp, source_hash), []) if start < offset <= end}
+        matches = set()
+        for offset, key in occurrences.get((kind, body_key, timestamp, source_hash), []):
+            budget.check()
+            if start < offset <= end:
+                matches.add(key)
         if len(matches) != 1:
             continue
         key = next(iter(matches))
@@ -613,27 +730,37 @@ def _prove_native_source(thread: str, source: Path, root: Path, batches: dict, c
         proofs[target] = {**next(iter(source_ids.values())), "native_event_id": representative["id"], "source_text_sha256": body_key}
         if len(proofs) > MAX_TARGETS:
             raise _Unproven()
+    budget.check()
     return proofs
 
 
 class CodexNativeHistoryRepairCache(CodexGoalHistoryRepairCache):
     """An explicit history boundary prepares proof; per-event projection does no IO."""
     def prepare(self, session_id: str, provider_id: str, events_path: Path, source_path: Path | None,
-                root: Path, parse_item: Callable[[dict], dict | None]) -> bool:
+                root: Path, parse_item: Callable[[dict], dict | None], *,
+                cancelled: Callable[[], bool] | None = None, deadline: float | None = None) -> bool:
         with self._prepare_lock:
             with self._lock:
                 previous = self._proofs.get(session_id)
                 if previous and previous.provider_id == provider_id:
                     return False
                 self._preparing, self._cancelled = session_id, False
+            budget = _NativeReadBudget(lambda: self._cancelled or bool(cancelled and cancelled()), deadline)
             try:
-                proof = _prove_native_replays(session_id, provider_id, events_path, source_path, root, parse_item)
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
-                proof = _NativeProof(provider_id)
+                proof = _prove_native_replays(
+                    session_id, provider_id, events_path, source_path, root, parse_item,
+                    budget,
+                )
+                budget.check()
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+                with self._lock:
+                    self._preparing = None
+                # Unavailable proof is neither a negative answer nor a prepared
+                # cache entry. The explicit worker decides when to retry it.
+                raise CodexNativeHistoryProofUnavailable("Codex native history proof is incomplete") from exc
             with self._lock:
                 self._preparing = None
-                if self._cancelled:
-                    return False
+                budget.check()
                 self._proofs[session_id] = proof
                 self._proofs.move_to_end(session_id)
                 while len(self._proofs) > MAX_SESSIONS:
@@ -675,28 +802,40 @@ class CodexNativeHistoryRepairCache(CodexGoalHistoryRepairCache):
                 **({"_agentsdock_imported_prompt_hidden": True} if event["type"] == "turn_started" else {})}
 
 
-def filter_native_codex_history_items(session_id: str, provider_id: str, events: Path, items: list[dict]) -> list[dict]:
+def filter_native_codex_history_items(session_id: str, provider_id: str, events: Path, items: list[dict], *,
+                                      cancelled: Callable[[], bool] | None = None,
+                                      deadline: float | None = None) -> list[dict]:
     """An existing verified import boundary can omit exact completed native copies.
 
-    This reads only the bounded native ledger, never reopens a provider source.
+    This streams only the native ledger, never reopens a provider source.
     The caller supplies items parsed from its verified cursor range.
+    Incomplete proof raises; the caller must defer import and its cursor commit.
     """
+    if not items:
+        return []
     try:
         if not _PROVIDER_ID.fullmatch(provider_id):
-            return items
-        stamp = _stamp(events)
-        if stamp[2] > MAX_EVENTS_BYTES:
-            return items
+            raise _Unproven()
+        budget = _NativeReadBudget(cancelled, deadline)
+        stamp = _native_stamp(events)
         owners, native, assistant_items, wake_keys, native_count = {}, {}, {}, set(), 0
-        for event, _offset, _line in _records(events, stamp):
+        previous_seq, owner_count = 0, 0
+        for event, _offset, _line in _native_records(events, stamp, budget):
+            seq = event.get("seq")
+            if type(seq) is not int or seq <= previous_seq:
+                raise _Unproven()
+            previous_seq = seq
             run = event.get("run_id")
             if (event.get("session_id") not in (None, "", session_id) or event.get("imported") is True
-                or event.get("backend") not in (None, "codex") or not isinstance(run, str) or run.startswith("import_")):
+                or event.get("backend") not in (None, "codex") or not isinstance(run, str)
+                or not 0 < len(run) <= 256 or run.startswith("import_")):
                 continue
             if (event.get("type") == "turn_finished" and event.get("backend") == "codex"
                 and event.get("transport") == "app-server" and event.get("provider_thread_id") == provider_id
-                and isinstance(event.get("provider_turn_id"), str)):
-                owners.setdefault(event["provider_turn_id"], set()).add(run)
+                and isinstance(event.get("provider_turn_id"), str) and 0 < len(event["provider_turn_id"]) <= 256):
+                owned = owners.setdefault(event["provider_turn_id"], set())
+                owner_count += run not in owned
+                owned.add(run)
             kind = "user" if event.get("type") == "turn_started" else "assistant" if event.get("type") in ("assistant_text", "reasoning_summary", "turn_finished") else None
             body = event.get("prompt") if kind == "user" else event.get("result_text") if event.get("type") == "turn_finished" else event.get("text")
             wake_hash = _native_mailbox_wake_hash(event) if kind == "user" else None
@@ -704,19 +843,20 @@ def filter_native_codex_history_items(session_id: str, provider_id: str, events:
                 keys = native.setdefault(run, {})
                 key = (kind, wake_hash or _text_key(body))
                 native_count += key not in keys
-                if isinstance(event.get("id"), str):
+                if isinstance(event.get("id"), str) and 0 < len(event["id"]) <= 256:
                     keys.setdefault(key, event["id"])
                     if wake_hash:
                         wake_keys.add((run, wake_hash))
                     item_id = _public_assistant_item_id(event)
                     if item_id is not None:
                         assistant_items[(run, item_id, key[1])] = event["id"]
-            if native_count + len(owners) + len(assistant_items) > MAX_KEYS:
-                return items
+            if native_count + owner_count + len(assistant_items) > MAX_KEYS:
+                raise _Unproven()
         # A hidden wake has no public prompt body. Require a single exact source
         # item in this verified import range, in addition to native turn ownership.
         wake_source_ids = {}
         for item in items if wake_keys else ():
+            budget.check()
             origin = item.get("provider_origin")
             if (item.get("kind") == "user" and isinstance(item.get("text"), str)
                 and isinstance(origin, dict)):
@@ -724,6 +864,7 @@ def filter_native_codex_history_items(session_id: str, provider_id: str, events:
                 wake_source_ids.setdefault(key, set()).add(origin.get("event_id"))
         result = []
         for item in items:
+            budget.check()
             origin = item.get("provider_origin")
             runs = owners.get(origin.get("turn_id"), set()) if isinstance(origin, dict) else set()
             owned = (isinstance(origin, dict) and origin.get("provider") == "codex"
@@ -747,6 +888,7 @@ def filter_native_codex_history_items(session_id: str, provider_id: str, events:
                     "provider_history_repair": "source_proven_native_replay",
                     "provider_origin": {**origin, "session_id": provider_id,
                         "native_event_id": native[next(iter(runs))][key], "source_text_sha256": key[1]}})
+        budget.check()
         return result
-    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
-        return items
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+        raise CodexNativeHistoryProofUnavailable("Codex native import ownership proof is incomplete") from exc

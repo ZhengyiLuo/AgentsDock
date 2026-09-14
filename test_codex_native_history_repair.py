@@ -6,8 +6,13 @@ from pathlib import Path
 import re
 import tempfile
 import unittest
+from unittest import mock
+import codex_history_repair as repair
 
-from codex_history_repair import CodexNativeHistoryRepairCache, filter_native_codex_history_items, _native_assistant_text
+from codex_history_repair import (
+    CodexNativeHistoryRepairCache, CodexNativeHistoryProofUnavailable,
+    filter_native_codex_history_items, _native_assistant_text,
+)
 from test_codex_goal_history_isolated import load_projection
 
 PROVIDER = "11111111-2222-3333-4444-555555555555"
@@ -203,6 +208,206 @@ class CodexNativeHistoryRepairTests(unittest.TestCase):
         self.assertIsNone(self.cache.project_event("chat", self.imports[0]))
         items = [self.parse(self.raw[0]), self.parse(self.raw[-1])]
         self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, items), items)
+
+    def large_tool_fixture(self):
+        """Actual bytes beyond the incident's 48 MB ledger / 213 MB rollout.
+
+        Streaming fixture creation deliberately does not allocate/read back
+        either whole log. Tools are irrelevant proof inputs, not fake messages.
+        """
+        source_rows = [json.loads(line) for line in self.source.read_text().splitlines()]
+        ledger_rows = [json.loads(line) for line in self.events.read_text().splitlines()]
+        body = "x" * (1024 * 1024)
+        tool = (json.dumps({"type": "response_item", "payload": {
+            "type": "function_call_output", "output": body}}) + "\n").encode()
+        digest = hashlib.sha256()
+        with self.source.open("wb") as stream:
+            header = (json.dumps(source_rows[0]) + "\n").encode()
+            stream.write(header); digest.update(header)
+            while stream.tell() < 213_000_000:
+                stream.write(tool); digest.update(tool)
+            for row in source_rows[1:]:
+                line = (json.dumps(row) + "\n").encode()
+                stream.write(line); digest.update(line)
+        stamp = self.source.stat()
+        for row in ledger_rows:
+            if row.get("type") == "history_imported":
+                row["_history_sync_checkpoint"]["cursor"].update(
+                    source_dev=stamp.st_dev, source_ino=stamp.st_ino,
+                    source_offset=stamp.st_size, source_digest=digest.hexdigest())
+        with self.events.open("wb") as stream:
+            for row in ledger_rows:
+                stream.write((json.dumps(row) + "\n").encode())
+            seq = max(row["seq"] for row in ledger_rows)
+            while stream.tell() < 48_104_032:
+                seq += 1
+                stream.write((json.dumps({"seq": seq, "type": "tool_completed",
+                    "session_id": "chat", "run_id": "native-2", "output": body}) + "\n").encode())
+        self.assertGreater(self.source.stat().st_size, 213_000_000)
+        self.assertGreater(self.events.stat().st_size, 48_104_032)
+
+    def test_actual_large_tool_heavy_logs_repair_cron_wake_without_hiding_real_user(self):
+        self.wake_fixture()
+        self.raw.append({**self.raw[0], "timestamp": "2026-09-11T12:09:00Z", "payload": {
+            **self.raw[0]["payload"], "id": "genuine-user-item",
+            "internal_chat_message_metadata_passthrough": {
+                "turn_id": "unowned-human-turn", "content_item_kinds": ["user.text"]}}})
+        self.fixture()
+        self.large_tool_fixture()
+        def identity(path):
+            value = path.stat()
+            return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
+        before = identity(self.events), identity(self.source)
+        self.prepare()
+        wake = self.cache.project_event("chat", self.imports[0])
+        cron = self.cache.project_event("chat", self.imports[2])
+        self.assertEqual(wake["prompt"], "")
+        self.assertEqual(wake["provider_origin"]["native_event_id"], "native-input-1")
+        self.assertEqual(cron["prompt"], "")
+        self.assertEqual(cron["provider_origin"]["native_event_id"], "native-input-2")
+        self.assertIsNone(self.cache.project_event("chat", self.imports[-1]))
+        self.assertTrue(all(self.cache.project_event("chat", row) is None for row in self.native))
+        self.assertEqual(self.native[3]["purpose"], "scheduled_job")
+        items = [self.parse(row) for row in self.raw]
+        filtered = filter_native_codex_history_items("chat", PROVIDER, self.events, items)
+        self.assertEqual([row["text"] for row in filtered], ["", "", self.wake_text])
+        self.assertEqual(before, (identity(self.events), identity(self.source)))
+
+    def test_source_proof_stops_at_frozen_checkpoint_not_later_unrelated_tail(self):
+        # Later source bytes are outside every imported checkpoint. Even a
+        # partial in-progress record must not invalidate the immutable prefix.
+        with self.source.open("ab") as stream:
+            stream.write(b'{"type":"response_item","payload":')
+        self.prepare()
+        self.assertEqual(len(self.cache.signature("chat")), 4)
+
+    def test_cancelled_or_expired_proof_is_not_cached_or_returned_as_raw_import(self):
+        for arguments in ({"cancelled": lambda: True}, {"deadline": 0.0}):
+            with self.subTest(arguments=arguments):
+                with self.assertRaises(CodexNativeHistoryProofUnavailable):
+                    self.cache.prepare("chat", PROVIDER, self.events, self.source, self.root, self.parse, **arguments)
+                self.assertFalse(self.cache.is_prepared("chat", PROVIDER))
+                with self.assertRaises(CodexNativeHistoryProofUnavailable):
+                    filter_native_codex_history_items("chat", PROVIDER, self.events,
+                                                     [self.parse(self.raw[0])], **arguments)
+        self.prepare()
+        self.assertEqual(len(self.cache.signature("chat")), 4)
+
+    def test_relevant_key_budget_exhaustion_defers_instead_of_importing_raw_text(self):
+        with mock.patch("codex_history_repair.MAX_KEYS", 1):
+            with self.assertRaises(CodexNativeHistoryProofUnavailable):
+                filter_native_codex_history_items("chat", PROVIDER, self.events, [self.parse(self.raw[0])])
+            with self.assertRaises(CodexNativeHistoryProofUnavailable):
+                self.prepare()
+        self.assertFalse(self.cache.is_prepared("chat", PROVIDER))
+        self.prepare()
+        self.assertEqual(len(self.cache.signature("chat")), 4)
+
+    def test_mid_scan_cancellation_and_prepared_projection_need_no_further_io(self):
+        checks = 0
+
+        def cancel_between_records():
+            nonlocal checks
+            checks += 1
+            return checks >= 5
+
+        with self.assertRaises(CodexNativeHistoryProofUnavailable):
+            self.cache.prepare("chat", PROVIDER, self.events, self.source, self.root,
+                               self.parse, cancelled=cancel_between_records)
+        self.assertEqual(checks, 5)
+        self.assertFalse(self.cache.is_prepared("chat", PROVIDER))
+        self.prepare()
+        with mock.patch("codex_history_repair._native_records", side_effect=AssertionError("hot-path read")):
+            self.prepare()
+            self.assertEqual(self.cache.project_event("chat", self.imports[0])["prompt"], "")
+            self.assertIsNone(self.cache.project_event("chat", self.native[0]))
+
+    def test_source_mutation_during_proof_never_publishes_or_caches_partial_proof(self):
+        changed = False
+
+        def mutating_parse(record):
+            nonlocal changed
+            item = self.parse(record)
+            if item is not None and not changed:
+                changed = True
+                with self.source.open("ab") as stream:
+                    stream.write(b'{}\n')
+            return item
+
+        with self.assertRaises(CodexNativeHistoryProofUnavailable):
+            self.cache.prepare("chat", PROVIDER, self.events, self.source, self.root, mutating_parse)
+        self.assertTrue(changed)
+        self.assertFalse(self.cache.is_prepared("chat", PROVIDER))
+        self.assertFalse(self.cache.signature("chat"))
+        self.fixture(); self.prepare()
+        self.assertEqual(len(self.cache.signature("chat")), 4)
+
+    def test_ledger_mutation_or_bad_sequence_defers_new_import(self):
+        calls = 0
+
+        def mutate_without_cancel():
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                with self.events.open("ab") as stream:
+                    stream.write(b'{"seq":201,"type":"tool_completed"}\n')
+            return False
+
+        with self.assertRaises(CodexNativeHistoryProofUnavailable):
+            filter_native_codex_history_items("chat", PROVIDER, self.events,
+                                             [self.parse(self.raw[0])], cancelled=mutate_without_cancel)
+        self.fixture()
+        with self.events.open("ab") as stream:
+            stream.write(b'{"seq":1,"type":"tool_completed"}\n')
+        with self.assertRaises(CodexNativeHistoryProofUnavailable):
+            filter_native_codex_history_items("chat", PROVIDER, self.events, [self.parse(self.raw[0])])
+
+    def test_retained_source_hash_must_be_absent_or_exact_digest(self):
+        for value in ("f" * (2 * 1024 * 1024), "f" * 63, "g" * 64, {"hash": "f" * 64}):
+            with self.subTest(kind=type(value).__name__, size=len(value)):
+                self.assertIsNone(repair._replay_target({**self.imports[0], "source_text_sha256": value}))
+        self.assertIsNotNone(repair._replay_target(self.imports[0]))
+        self.assertIsNotNone(repair._replay_target({**self.imports[0], "source_text_sha256": "f" * 64}))
+
+    def test_expiry_after_source_scan_stops_target_matching_without_cached_proof(self):
+        clock = {"now": 0.0}
+        original = repair._native_records
+
+        def records_then_expire(path, *args, **kwargs):
+            yield from original(path, *args, **kwargs)
+            if path == self.source:
+                clock["now"] = 6.0
+
+        with mock.patch.object(repair, "_native_records", side_effect=records_then_expire), \
+                mock.patch.object(repair.time, "monotonic", side_effect=lambda: clock["now"]):
+            with self.assertRaises(CodexNativeHistoryProofUnavailable):
+                self.cache.prepare("chat", PROVIDER, self.events, self.source, self.root, self.parse, deadline=5.0)
+        self.assertFalse(self.cache.is_prepared("chat", PROVIDER))
+        self.assertFalse(self.cache.signature("chat"))
+
+    def test_expiry_acquiring_final_cache_lock_cannot_admit_completed_proof(self):
+        clock = {"now": 0.0}
+
+        class ExpiringLock:
+            acquisitions = 0
+
+            def __enter__(lock):
+                lock.acquisitions += 1
+                if lock.acquisitions == 2:
+                    clock["now"] = 6.0
+
+            def __exit__(lock, *_args):
+                return False
+
+        with mock.patch.object(self.cache, "_lock", ExpiringLock()), \
+                mock.patch.object(repair.time, "monotonic", side_effect=lambda: clock["now"]):
+            with self.assertRaises(CodexNativeHistoryProofUnavailable):
+                self.cache.prepare("chat", PROVIDER, self.events, self.source, self.root, self.parse, deadline=5.0)
+        self.assertFalse(self.cache.is_prepared("chat", PROVIDER))
+        self.assertIsNone(self.cache._preparing)
+        self.prepare()
+        self.assertEqual(len(self.cache.signature("chat")), 4)
 
 
 if __name__ == "__main__":

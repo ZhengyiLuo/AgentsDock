@@ -142,7 +142,10 @@ from agentsdock_team_hub.secure_peer import SecurePeerError
 from secure_peer_runtime import SECURE_PEER_HEARTBEAT_SECONDS, SecurePeerRuntime
 from team_mail_websocket import serve_team_mail_hints
 from claude_history_repair import ClaudeMetadataRepairCache, enrich_interruption_origins, filter_native_claude_mailbox_wake_items
-from codex_history_repair import CodexGoalHistoryRepairCache, CodexNativeHistoryRepairCache, codex_public_item_origin, filter_native_codex_history_items
+from codex_history_repair import (
+    CodexGoalHistoryRepairCache, CodexNativeHistoryRepairCache, CodexNativeHistoryProofUnavailable,
+    codex_public_item_origin, filter_native_codex_history_items,
+)
 from claude_history_provenance import ClaudeInterruptionTracker, normalize_claude_interruption_context
 from claude_background_reconciliation import (
     CONSUMED_EVENT as CLAUDE_BACKGROUND_CONSUMED_EVENT,
@@ -31341,10 +31344,16 @@ def prepare_codex_native_history_repair(session_id: str) -> None:
         return
     cursor = normalized_history_sync_cursor(session)
     source = Path(cursor["source_path"]) if cursor else find_codex_history(provider_id)
-    changed = CODEX_NATIVE_HISTORY_REPAIR_CACHE.prepare(
-        session_id, provider_id, events_path(session_id), source, CODEX_SESSIONS_ROOT,
-        lambda event: codex_history_event_item(event, expected_session_id=session_id),
-    )
+    try:
+        changed = CODEX_NATIVE_HISTORY_REPAIR_CACHE.prepare(
+            session_id, provider_id, events_path(session_id), source, CODEX_SESSIONS_ROOT,
+            lambda event: codex_history_event_item(event, expected_session_id=session_id),
+        )
+    except CodexNativeHistoryProofUnavailable:
+        # Incomplete evidence is retryable at a later explicit read boundary,
+        # not a successful empty proof and not a reason to break chat opening.
+        logger.debug("native history repair deferred session=%s", session_id)
+        return
     if changed:
         HISTORY_SEARCH_REPAIR_DIRTY.add(session_id)
         HISTORY_SEARCH_DIRTY.add(session_id)
@@ -47871,12 +47880,21 @@ async def sync_provider_history(
         # cursor. A cursor moves only after that authoritative commit; if the
         # registry save then fails, retry recovers the embedded checkpoint
         # without relying on ambiguous content alignment.
-        result = await append_imported_history(
-            sess,
-            source_path,
-            fresh,
-            sync_checkpoint=checkpoint,
-        )
+        try:
+            result = await append_imported_history(
+                sess,
+                source_path,
+                fresh,
+                sync_checkpoint=checkpoint,
+            )
+        except CodexNativeHistoryProofUnavailable:
+            # Do not persist next_cursor: these source bytes have not yet been
+            # proven against native history. A later explicit sync can retry.
+            return {
+                "imported": 0, "source_path": str(source_path), "deferred": True,
+                "reason": "native_history_proof_unavailable",
+                "message": "History reconciliation deferred; no messages were imported.",
+            }
     if next_cursor is not None:
         if caught_up:
             timeline_seq = max(
@@ -48043,6 +48061,28 @@ def schedule_provider_history_sync(sess: dict[str, Any]) -> None:
     asyncio.create_task(run_provider_history_sync(session_id))
 
 
+async def filter_codex_history_for_import(
+    session_id: str, provider_id: str, items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Cancellable read-only proof, with no durable effects or event-loop I/O."""
+    cancelled = threading.Event()
+    worker = asyncio.create_task(asyncio.to_thread(
+        filter_native_codex_history_items, session_id, provider_id,
+        events_path(session_id), items, cancelled=cancelled.is_set,
+    ))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        cancelled.set()
+        # The worker notices cancellation at its next bounded read. It never
+        # writes history; still retrieve its eventual error after detachment.
+        def consume_late_result(done):
+            if not done.cancelled():
+                done.exception()
+        worker.add_done_callback(consume_late_result)
+        raise
+
+
 async def append_imported_history(
     sess: dict[str, Any],
     source_path: Path,
@@ -48054,7 +48094,7 @@ async def append_imported_history(
     provider_id = str(session_provider_id(sess) or "")
     backend = str(sess.get("backend") or DEFAULT_BACKEND).lower()
     if backend == BACKEND_CODEX and sync_checkpoint is not None:
-        items = await asyncio.to_thread(filter_native_codex_history_items, session_id, provider_id, events_path(session_id), items)
+        items = await filter_codex_history_for_import(session_id, provider_id, items)
     elif backend == BACKEND_CLAUDE and sync_checkpoint is not None:
         def normalize_wake_user(source_event: dict[str, Any]) -> str | None:
             item = claude_history_event_item(source_event, expected_session_id=session_id)
@@ -48426,12 +48466,21 @@ async def import_session_history(sess: dict[str, Any], *, force: bool = False, l
             "message": "Already up to date with the provider transcript.",
         }
     else:
-        result = await append_imported_history(
-            sess,
-            source_path,
-            fresh,
-            sync_checkpoint=checkpoint,
-        )
+        try:
+            result = await append_imported_history(
+                sess,
+                source_path,
+                fresh,
+                sync_checkpoint=checkpoint,
+            )
+        except CodexNativeHistoryProofUnavailable:
+            # Do not persist next_cursor: these source bytes have not yet been
+            # proven against native history. A later explicit sync can retry.
+            return {
+                "imported": 0, "source_path": str(source_path), "deferred": True,
+                "reason": "native_history_proof_unavailable",
+                "message": "History reconciliation deferred; no messages were imported.",
+            }
     if next_cursor is not None:
         if caught_up:
             timeline_seq = max(

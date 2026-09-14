@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock
@@ -32,6 +33,7 @@ FUNCTIONS = {
     "parse_claude_history_events", "parse_provider_history_delta", "history_item_cursor_digest",
     "history_dedup_key", "reconcile_cursor_history_items", "unsynced_history_items",
     "append_imported_history", "append_staged_imported_history", "imported_history_terminal_event",
+    "filter_codex_history_for_import",
     "seed_claude_interruption_context", "normalized_history_sync_cursor", "load_provider_history_with_cursor",
     "should_bump_session_updated_at", "is_agent_visible_event",
     "bounded_jsonl_events", "bounded_jsonl_events_range",
@@ -78,7 +80,7 @@ def load_projection() -> dict:
         *selected,
     ], type_ignores=[]))
     namespace = {
-        "re": re, "datetime": datetime, "json": json, "uuid": uuid, "asyncio": asyncio,
+        "re": re, "datetime": datetime, "json": json, "uuid": uuid, "asyncio": asyncio, "threading": threading,
         "filter_native_codex_history_items": filter_native_codex_history_items,
         "filter_native_claude_mailbox_wake_items": filter_native_claude_mailbox_wake_items,
         "CLAUDE_PROJECTS_ROOT": Path("unused-project-root"),
@@ -367,6 +369,9 @@ class ImportedHistoryProvenanceTests(unittest.IsolatedAsyncioTestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.projection["events_path"] = lambda _session_id: Path(temporary.name) / "events.jsonl"
+        # A complete empty ledger is valid ownership evidence. A missing file
+        # now correctly defers Codex imports instead of silently bypassing proof.
+        self.projection["events_path"]("app-chat").touch()
         self.session = {"id": "app-chat", "backend": "claude", "claude_session_id": SESSION_ID}
 
         async def durable(_session_id, specifications):
