@@ -10,6 +10,16 @@
   border-radius: var(--radius-control);
 }
 .codex-status-button:hover { color: var(--text); background: var(--surface-3); }
+.agent-running-status,
+.agent-running-status:hover { color: var(--muted); background: var(--surface-2); cursor: default; }
+.agent-sync-status,
+.agent-sync-status:hover {
+  color: var(--amber);
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--amber), var(--border) 62%);
+  cursor: default;
+}
+.agent-sync-status > svg { flex: 0 0 auto; }
 .codex-status-button > span,
 .codex-attention-dot {
   width: 7px;

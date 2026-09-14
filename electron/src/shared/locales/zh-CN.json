@@ -848,6 +848,7 @@
   "ui.ChatHeader.ChatHeader.rename_e84e258": "重命名 {name}",
   "ui.ChatHeader.ChatHeader.session_copied_673328f": "会话 ID 已复制",
   "ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59": "交换会话窗格",
+  "ui.ChatHeader.ChatHeader.syncing_8eeb25e": "正在同步",
   "ui.ChatHeader.ChatHeader.unarchive_chat_54953a7": "取消归档会话",
   "ui.ChatHeader.ChatHeader.unpin_chat_1944e0e": "取消置顶会话",
   "ui.ChatHeader.ChatHeader.wait_for_the_active_turn_to_finish_before__04bf06b": "请等待当前轮次结束后再创建此会话的分支",

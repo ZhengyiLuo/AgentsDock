@@ -40,6 +40,7 @@ describe('ChatHeader', () => {
       syncSessionId: null,
       syncStatus: 'idle',
       syncError: null,
+      syncBySession: {},
       sessions: [],
       selectedSessionId: null,
       acknowledgeEmergency: originalAcknowledgeEmergency,
@@ -235,6 +236,70 @@ describe('ChatHeader', () => {
 
     expect(screen.getByRole('button', { name: /Codex controls:/ })).toBeInTheDocument()
     expect(container.querySelector('.codex-context-indicator')).toBeNull()
+  })
+
+  it('keeps the running status visible for Codex without the controls capability', () => {
+    const session = { id: 'chat', title: 'Chat', backend: 'codex' as const }
+    useAppStore.setState({
+      sessions: [session],
+      selectedSessionId: session.id,
+      activeSessionIds: new Set([session.id])
+    })
+
+    render(<ChatHeader />)
+
+    expect(screen.getByRole('status', { name: 'Codex Running' })).toHaveTextContent('CodexRunning')
+    expect(screen.queryByRole('button', { name: /Codex controls:/ })).not.toBeInTheDocument()
+  })
+
+  it('shows the same running status for Claude', () => {
+    const session = { id: 'chat', title: 'Chat', backend: 'claude' as const }
+    useAppStore.setState({
+      sessions: [session],
+      selectedSessionId: session.id,
+      activeSessionIds: new Set([session.id])
+    })
+
+    render(<ChatHeader />)
+
+    expect(screen.getByRole('status', { name: 'Claude Running' })).toHaveTextContent('ClaudeRunning')
+  })
+
+  it('does not fabricate a lifecycle status for an idle Claude chat', () => {
+    const session = { id: 'chat', title: 'Chat', backend: 'claude' as const }
+    useAppStore.setState({ sessions: [session], selectedSessionId: session.id })
+
+    render(<ChatHeader />)
+
+    expect(screen.queryByRole('status', { name: 'Claude Running' })).not.toBeInTheDocument()
+  })
+
+  it('shows Syncing from the displayed pane without leaking the focused pane status', () => {
+    const selected = { id: 'selected', title: 'Selected', backend: 'codex' as const }
+    const displayed = { id: 'displayed', title: 'Displayed', backend: 'claude' as const }
+    useAppStore.setState({
+      connected: true,
+      sessions: [selected, displayed],
+      selectedSessionId: selected.id,
+      syncSessionId: selected.id,
+      syncStatus: 'live',
+      syncBySession: {
+        [selected.id]: { status: 'live', error: null },
+        [displayed.id]: { status: 'syncing', error: null }
+      }
+    })
+
+    render(<ChatHeader session={displayed} focused={false} />)
+    expect(screen.getByRole('status', { name: 'Syncing' })).toBeInTheDocument()
+
+    act(() => useAppStore.setState({
+      syncStatus: 'syncing',
+      syncBySession: {
+        [selected.id]: { status: 'syncing', error: null },
+        [displayed.id]: { status: 'live', error: null }
+      }
+    }))
+    expect(screen.queryByRole('status', { name: 'Syncing' })).not.toBeInTheDocument()
   })
 
   it('moves a chat from its folder label and keeps that action out of the chat menu', async () => {

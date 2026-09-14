@@ -848,6 +848,7 @@
   "ui.ChatHeader.ChatHeader.rename_e84e258": "Rename {name}",
   "ui.ChatHeader.ChatHeader.session_copied_673328f": "Session copied",
   "ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59": "Swap chat panes",
+  "ui.ChatHeader.ChatHeader.syncing_8eeb25e": "Syncing",
   "ui.ChatHeader.ChatHeader.unarchive_chat_54953a7": "Unarchive chat",
   "ui.ChatHeader.ChatHeader.unpin_chat_1944e0e": "Unpin chat",
   "ui.ChatHeader.ChatHeader.wait_for_the_active_turn_to_finish_before__04bf06b": "Wait for the active turn to finish before forking this chat",
