@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-14 — Untitled subagent headings
+
+- Correct the inspector fallback for native children without an explicit
+  title: show a readable task/path heading and retain the provider nickname
+  underneath. Explicit titles, child identities, ordering and selected output
+  remain unchanged; no polling or provider-state writes are added.
+- Regression cases reproduce the former nickname-first behavior and cover
+  null/omitted titles, title clearing, legacy identity fields, locale changes,
+  separator-only tasks and sixteen simultaneously active children.
+- Inspect the actual inspector in isolated offscreen Electron at narrow width
+  in light and dark themes, including completed children and open output.
+- Prepare an explicitly approved replacement desktop 1.0.0, not a version
+  bump. Existing 1.0.0 installations need a manual reinstall to receive it.
+  The server 1.0.0 runtime is unchanged. Release acceptance is recorded only
+  after package and publication verification.
+
 ## 2026-09-14 — Local subagent-settings build accepted
 
 - Accepted Apple Silicon local `1.0.0-beta.2`, build `1165`, from committed

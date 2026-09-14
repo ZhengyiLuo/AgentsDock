@@ -11,6 +11,13 @@ since [1.0.0-beta.2](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.
 Use **AgentsServer 1.0.0** for the complete paired feature set. Installing the
 desktop alone does not add missing server capabilities or restart your server.
 
+**Replacement 1.0.0 desktop package:** untitled subagents now show their task
+or readable task path as the heading, with the provider nickname underneath.
+Explicit native titles remain unchanged. If you already installed the original
+1.0.0 package, download and reinstall this replacement: the unchanged version
+number does not trigger an automatic upgrade. The paired server package is
+unchanged; this naming correction requires only the replacement desktop app.
+
 ## Highlights for users upgrading from 0.2.12
 
 ### More capable agent workflows
@@ -118,8 +125,9 @@ desktop alone does not add missing server capabilities or restart your server.
   Reads and saves are bound to the displayed server and generation; editing
   makes no requests and saving adds no polling or provider restart.
 - **Native subagent titles:** the inspector prefers an explicit child-thread
-  title, then its nickname and existing task/path fallback. Rename and clear
-  updates preserve the same child row and open output panel.
+  title, then a readable task or task path, then the provider nickname. Keep
+  differing nicknames underneath for identification. Rename and clear updates
+  preserve the same child row and open output panel.
 - **Paired goal-steering correction:** the updated server accepts plain
   follow-ups with automatically attached saved-route metadata, including goals
   created during scheduled work and resumed goals. It retains the current

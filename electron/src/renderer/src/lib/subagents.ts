@@ -332,24 +332,35 @@ export function subagentLogText(agent: SubagentActivity): string {
 
 export function subagentDisplayName(agent: SubagentActivity): string {
   if (agent.title) return agent.title
-  if (agent.nickname) return agent.nickname
   const task = subagentTaskLabel(agent)
-  if (task) return task
+  if (task) return readableSubagentTask(task)
   if (agent.path) {
     const segments = agent.path.split('/').filter(Boolean)
-    return segments.at(-1) || agent.path
+    const leaf = segments.length > 1 ? segments.at(-1) : undefined
+    if (leaf && leaf !== agent.id) return readableSubagentTask(leaf)
   }
+  if (agent.nickname) return agent.nickname
   return cleanIdentityText(agent.name) || (agent.backend === 'claude' ? 'Claude subagent' : 'Codex subagent')
 }
 
 function subagentTaskLabel(agent: SubagentActivity): string {
   const task = cleanIdentityText(agent.task)
-  return task && task !== agent.id && !subagentPath(task) ? task : ''
+  // Older state records also copy the nickname into subagent_name, which the
+  // parser retains as a legacy task fallback. That is not a task description.
+  return task && task !== agent.id && task !== agent.nickname && !subagentPath(task) ? task : ''
+}
+
+function readableSubagentTask(task: string): string {
+  // Format task identifiers for display only; never rename the provider thread
+  // or alter the stored path, nickname, identity, or selected output panel.
+  const label = task.replace(/[_-]+/g, ' ').trim() || task
+  if (!task.includes(' ') || task.includes('_')) return label.charAt(0).toUpperCase() + label.slice(1)
+  return task
 }
 
 export function subagentDetailText(agent: SubagentActivity): string {
   const displayName = subagentDisplayName(agent)
-  if (agent.title && agent.nickname && agent.nickname !== displayName) return agent.nickname
+  if (agent.nickname && agent.nickname !== displayName) return agent.nickname
   if (agent.path && agent.path !== displayName) return agent.path
   const task = subagentTaskLabel(agent)
   if (task && task !== displayName) return task
@@ -415,7 +426,7 @@ function subagentEventIdentity(event: Event): SubagentIdentity {
   const projectedName = cleanIdentityText(event.subagent_name)
   const projectedPath = subagentPath(projectedName)
   // Omitted fields from older servers preserve identity; an explicit clear
-  // falls back to the provider nickname without changing the child identity.
+  // falls back to task/path, then nickname, without changing child identity.
   const title = event.subagent_title === null
     || typeof event.subagent_title === 'string' && !event.subagent_title.trim() ? null
     : typeof event.subagent_title === 'string' ? cleanIdentityText(event.subagent_title) || undefined
@@ -424,7 +435,7 @@ function subagentEventIdentity(event: Event): SubagentIdentity {
     title,
     nickname: nickname || undefined,
     path: explicitPath || projectedPath || undefined,
-    task: explicitTask || (!projectedPath ? projectedName : '') || undefined
+    task: explicitTask || (!projectedPath && projectedName !== nickname ? projectedName : '') || undefined
   }
 }
 
