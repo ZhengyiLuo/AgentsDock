@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-14 — Local subagent-settings build accepted
+
+- Accepted Apple Silicon local `1.0.0-beta.2`, build `1165`, from committed
+  source `a1ef7b0f6314b74c1244d8504f9643099fbf3eb7`. This supersedes local
+  build `1164` with caller-bound server selection for settings requests.
+- Type checks, focused native HTTP/service scope tests, production compilation,
+  and the full desktop suite pass. One existing secure-peer cancellation test
+  failed in the initial concurrent full run, then passed independently and in
+  the full rerun; its source was not changed in this work.
+- Isolated offscreen Electron validation covers light/dark narrow layouts,
+  local typing, save/disabled states, compatibility hints and profile-switch
+  races. It does not launch the production app or access a live server.
+- All 86 packaged compiled files match validated output. Developer ID signature,
+  hardened runtime, entitlements, fuses and packaged version checks pass.
+  Existing app bundles are preserved; this package is not installed, notarized
+  or publicly released, and local automatic updates are disabled.
+- The control requires standalone server `1.0.0-beta.8`. Publishing that server
+  is separate from updating a live installation; no live runs are interrupted.
+
 ## 2026-09-14 — Native Codex subagent setting
 
 - Add Codex subagent limit to desktop Settings > Server. A positive integer
