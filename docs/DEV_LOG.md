@@ -15,6 +15,12 @@
   conflicting receipts and large histories. No server process was imported or
   started locally. Desktop regression checks and isolated component rendering
   preserve original purple messages, real user quotations and inactive state.
+- Read-only validation against the reported stored records passed for both
+  historical projection and first-import filtering; original delivery and
+  answer events and provider transcript bytes remain unchanged.
+- Keep control-only Codex imports from moving sidebar recency forward to the
+  import time or backward to an old source timestamp. Eight focused boundary
+  checks passed, including unchanged unread state and native run ownership.
 - Version remains 1.0.0 by explicit approval. Release publication and signed
   asset acceptance are still pending; no live deployment or restart performed.
 

@@ -16579,6 +16579,34 @@ def is_agent_visible_event(event_type: str, event: dict[str, Any]) -> bool:
 
 def should_bump_session_updated_at(event_type: str, event: dict[str, Any]) -> bool:
     if (
+        event.get("metadata_only") is True and event.get("imported") is True
+        and event.get("backend") == BACKEND_CODEX
+        and isinstance(event.get("run_id"), str) and event["run_id"].startswith("import_")
+        and all(event.get(key) in (None, "") for key in ("prompt", "text", "result_text", "output", "error"))
+        and all(event.get(key) in (None, []) for key in ("file_ids", "display_file_ids", "files", "attachments"))
+        and all(event.get(key) is None or event.get(key) is False for key in ("is_error", "stopped"))
+    ):
+        # A control-only import's marker is stamped at import time, whereas
+        # its silent input retains source time. Neither represents new work
+        # nor may move the chat forward/backward in the sidebar.
+        if event_type in {"history_imported", "turn_finished"}:
+            return False
+        origin = event.get("provider_origin")
+        if (event_type == "turn_started" and event.get("prompt") == ""
+            and event.get("provider_history_repair") == "source_proven_native_replay"
+            and isinstance(origin, dict) and origin.get("provider") == "codex" and origin.get("kind") == "user"
+            and all(isinstance(origin.get(key), str) and 0 < len(origin[key]) <= 256
+                    for key in ("event_id", "session_id", "turn_id", "native_event_id"))
+            and isinstance(origin.get("source_text_sha256"), str)
+            and re.fullmatch(r"[a-f0-9]{64}", origin["source_text_sha256"])
+            and isinstance(origin.get("timestamp"), str) and len(origin["timestamp"]) <= 64
+            and origin["timestamp"] == event.get("ts")):
+            try:
+                if datetime.fromisoformat(origin["timestamp"].replace("Z", "+00:00")).utcoffset() is not None:
+                    return False
+            except ValueError:
+                pass
+    if (
         event.get("metadata_only") is True
         and event.get("imported") is True
         and event.get("backend") == BACKEND_CLAUDE

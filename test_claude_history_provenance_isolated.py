@@ -347,7 +347,7 @@ class ClaudeHistoryProvenanceTests(unittest.TestCase):
         self.assertTrue(bump("history_imported", {}))
         self.assertTrue(bump("turn_started", {"prompt": "Real user"}))
         self.assertTrue(bump("turn_started", {"prompt": "Real user", "metadata_only": True}))
-        self.assertTrue(bump("history_imported", {"metadata_only": True, "imported": True, "backend": "codex", "run_id": "import_test"}))
+        self.assertFalse(bump("history_imported", {"metadata_only": True, "imported": True, "backend": "codex", "run_id": "import_test"}))
 
     def test_distinct_interruption_ids_survive_adjacent_and_cursor_dedup(self) -> None:
         make = self.projection["normalized_history_item"]
