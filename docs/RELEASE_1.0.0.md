@@ -15,8 +15,11 @@ desktop alone does not add missing server capabilities or restart your server.
 or readable task path as the heading, with the provider nickname underneath.
 Explicit native titles remain unchanged. If you already installed the original
 1.0.0 package, download and reinstall this replacement: the unchanged version
-number does not trigger an automatic upgrade. The paired server package is
-unchanged; this naming correction requires only the replacement desktop app.
+number does not trigger an automatic upgrade. This naming correction requires
+only the replacement desktop app. Separately, the rebuilt AgentsServer 1.0.0
+package repairs old cross-chat delivery wrappers imported as user messages;
+that history correction requires the updated server package, not another
+desktop rendering change.
 
 ## Highlights for users upgrading from 0.2.12
 

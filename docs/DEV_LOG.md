@@ -1,5 +1,16 @@
 # Public development log
 
+## 2026-09-14 — Partial-page cross-chat replay regression
+
+- Reproduce two old, owned async deliveries reimported as provider user text.
+  Full-history desktop projection can correlate the original receipts; a
+  recent-only page cannot establish that proof locally.
+- Add regression coverage for the server's existing source-proven replay
+  marker on recent-only pages, stale cache merges, older-page overlap and a
+  genuinely user-authored quotation. Original agent messages and answers keep
+  their positions. This adds no desktop runtime change or background polling;
+  the correction requires the rebuilt standalone server package.
+
 ## 2026-09-14 — Untitled subagent headings
 
 - Correct the inspector fallback for native children without an explicit
