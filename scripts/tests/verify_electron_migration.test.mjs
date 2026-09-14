@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
-import { assertMigrationTrack, parseArguments } from '../verify_electron_migration.mjs'
+import { assertMigrationTrack, locateMigrationUpdateSettings, parseArguments } from '../verify_electron_migration.mjs'
 
 const valid = ['--from-version', '0.2.13-beta.33', '--to-version', '1.0.0-beta.1', '--output', '/tmp/migration-argument-test']
 
@@ -62,5 +62,39 @@ test('refuses Beta and Stable installer journeys on an ordinary developer machin
     assert.equal(child.status, 1)
     assert.match(child.stderr, /restricted to disposable macOS GitHub runners/)
     assert.doesNotMatch(child.stderr, /download failed|Checksum|ENOENT/)
+  }
+})
+
+function updateSettingsFixture({ tab = false, hiddenTab = false, panels = ['App updates v0.2.12'] } = {}) {
+  const scrolled = []
+  const buttons = tab ? [{ disabled: false, getAttribute: () => null, textContent: 'Updates', getClientRects: () => hiddenTab ? [] : [{}] }] : []
+  const cards = panels.map((heading, index) => ({
+    getClientRects: () => [{}],
+    querySelector: selector => selector === '.update-copy strong' ? { textContent: heading }
+      : selector === '[aria-label="App update channel"]' ? {} : null,
+    scrollIntoView: options => scrolled.push({ index, options })
+  }))
+  return { scrolled, document: { querySelectorAll: selector => selector === 'button' ? buttons : selector === '.update-panel' ? cards : [] } }
+}
+
+test('uses the bridge Updates tab without scrolling or changing subscription controls', () => {
+  const fixture = updateSettingsFixture({ tab: true })
+  assert.equal(locateMigrationUpdateSettings(fixture.document), 'tab')
+  assert.deepEqual(fixture.scrolled, [])
+})
+
+test('scrolls the actual pre-1.0 Stable inline App updates card into the viewport', () => {
+  const fixture = updateSettingsFixture({ tab: true, hiddenTab: true, panels: ['Server updates', 'App updates v0.2.12'] })
+  // Execute the same standalone function source sent to the real CDP page.
+  const locateInPage = Function(`return (${locateMigrationUpdateSettings.toString()})`)()
+  assert.equal(locateInPage(fixture.document), 'inline')
+  assert.deepEqual(fixture.scrolled, [{ index: 1, options: { block: 'center', inline: 'nearest', behavior: 'instant' } }])
+})
+
+test('unknown or ambiguous settings fail navigation instead of bypassing the UI', () => {
+  for (const panels of [[], ['Server updates'], ['App updates v0.2.12', 'App updates v0.2.12']]) {
+    const fixture = updateSettingsFixture({ panels })
+    assert.equal(locateMigrationUpdateSettings(fixture.document), null)
+    assert.deepEqual(fixture.scrolled, [])
   }
 })

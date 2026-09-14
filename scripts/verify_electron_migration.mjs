@@ -171,6 +171,30 @@ async function connect(port) {
   }
 }
 
+// The last pre-1.0 Stable app has one scrolling Settings panel, while the
+// bridge has an Updates tab. Navigate those real controls without changing
+// the update channel or invoking the installer outside the rendered UI.
+export function locateMigrationUpdateSettings(document) {
+  const updatesTab = [...document.querySelectorAll('button')].find(button =>
+    !button.disabled && (button.getAttribute('aria-label') || button.textContent).trim() === 'Updates' &&
+    button.getClientRects().length)
+  if (updatesTab) return 'tab'
+  const panels = [...document.querySelectorAll('.update-panel')].filter(panel =>
+    panel.getClientRects().length &&
+    /^App updates(?:\s|$)/.test(panel.querySelector('.update-copy strong')?.textContent?.trim() ?? '') &&
+    panel.querySelector('[aria-label="App update channel"]'))
+  if (panels.length !== 1) return null
+  panels[0].scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+  return 'inline'
+}
+
+async function openMigrationUpdateSettings(client) {
+  await client.clickButton(['Open app settings', 'App settings', 'Settings'])
+  const target = await until('App update settings navigation', () =>
+    client.evaluate(`(${locateMigrationUpdateSettings.toString()})(document)`))
+  if (target === 'tab') await client.clickButton(['Updates'])
+}
+
 function processesFor(app) {
   const executable = `${app}/Contents/MacOS/AgentsDock`
   return run('/bin/ps', ['-axo', 'pid=,command=']).split('\n').flatMap(line => {
@@ -240,8 +264,7 @@ export async function main(argv = process.argv.slice(2)) {
     const beforeBootstrap = await client.evaluate('window.agentsDock.bootstrap()')
     assert.equal(beforeBootstrap.activeProfileId, fixture.activeProfileId, 'Old app did not use the isolated test profile')
     assert.equal(beforeBootstrap.profiles.find(profile => profile.id === 'migration-smoke')?.name, fixture.profiles[0].name)
-    await client.clickButton(['Open app settings', 'App settings', 'Settings'])
-    await client.clickButton(['Updates'])
+    await openMigrationUpdateSettings(client)
     await client.screenshot(join(options.output, '01-legacy-updater.png'))
     const downloaded = await until('Published target download', async () => {
       const status = await client.evaluate('window.agentsDock.updates.status()')
@@ -278,8 +301,7 @@ export async function main(argv = process.argv.slice(2)) {
     assert.equal(settings.profiles.find(profile => profile.id === 'migration-smoke')?.name, fixture.profiles[0].name)
     assert.equal(settings.profiles.find(profile => profile.id === 'migration-smoke')?.serverUrl, fixture.profiles[0].serverUrl)
     assert.equal(JSON.parse(await readFile(join(profileDirectory, 'app-language.json'), 'utf8')).preference, 'en')
-    await client.clickButton(['Open app settings', 'App settings', 'Settings'])
-    await client.clickButton(['Updates'])
+    await openMigrationUpdateSettings(client)
     await until('Updated app checked its canonical feed', async () => {
       const status = await client.evaluate('window.agentsDock.updates.status()')
       return status.state === 'not-available' && status.currentVersion === options.to
