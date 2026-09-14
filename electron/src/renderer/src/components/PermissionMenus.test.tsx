@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { ClaudeRuntimeSnapshot, CodexRuntimeSnapshot, CursorPermissionMode, Session } from '@shared/types'
@@ -146,6 +147,23 @@ describe('controlled permission menus', () => {
 
     view.rerender(claudeMenu(false, onOpenChange))
     expect(screen.queryByRole('heading', { name: 'Claude permissions' })).not.toBeInTheDocument()
+  })
+
+  it('loads Claude permissions when effects are replayed by StrictMode', async () => {
+    const runtime = vi.fn().mockResolvedValue(claudeRuntime)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        claude: { runtime },
+        events: { on: vi.fn().mockReturnValue(() => undefined) }
+      } as unknown as AgentsDockAPI
+    })
+
+    render(<StrictMode>{claudeMenu(false, vi.fn())}</StrictMode>)
+
+    expect(await screen.findByRole('button', { name: 'Claude permissions: Ask for access' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Claude permissions loading' })).not.toBeInTheDocument()
+    expect(runtime).toHaveBeenCalledWith('claude-chat')
   })
 
   it('honors the controlled Cursor open state and reports explicit close changes', async () => {
