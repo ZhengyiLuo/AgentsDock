@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-13 — Large-history cron and mailbox replay correction
+
+- Correct the standalone server's native-history proof path for large chats.
+  Tool-heavy logs no longer bypass duplicate checks at a total-file-size limit.
+  Incomplete or cancelled proof defers import without advancing its cursor.
+- Existing desktop projection keeps the original scheduled-job group and purple
+  mailbox delivery while suppressing only source-proven imported copies. Genuine
+  human messages remain intact, including identical quoted text.
+- Add a combined desktop regression fixture covering interior same-ID repairs,
+  stale event replay, overlapping older pages and SQLite reopen. Type checks and
+  focused tests pass. Isolated full-renderer checks verify the read receipt,
+  chronology, chat reopen and renderer reload in light and dark themes.
+- This requires a server update; no desktop runtime change, package, deployment
+  or release was made. Delivery, wake behavior, jobs and provider transcripts are
+  unchanged. No polling or per-event filesystem reads were added.
+
 ## 2026-09-13 — Video playback in shared chats
 
 - Interactive shares now reuse the existing chat video thumbnails and player
