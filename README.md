@@ -7,10 +7,10 @@
       alt="AgentsDock website"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0-beta.2">
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0">
     <img
-      src="https://img.shields.io/badge/desktop-v1.0.0--beta.2-EA7233"
-      alt="Desktop 1.0.0-beta.2"
+      src="https://img.shields.io/badge/desktop-v1.0.0-EA7233"
+      alt="Desktop 1.0.0 stable"
     />
   </a>
   <a href="https://discord.gg/ZGDrhEWqPt">
@@ -50,18 +50,18 @@
   without living in a terminal. Easily review files and rich media.
   <br />
   <br />
-  <strong>Desktop beta 1.0.0-beta.2:</strong>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.2/AgentsDock-1.0.0-beta.2-mac-universal.dmg">macOS</a>
+  <strong>Desktop stable 1.0.0:</strong>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg">macOS</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.2/AgentsDock-1.0.0-beta.2-linux-x86_64.AppImage">Linux x86_64</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage">Linux x86_64</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.2/AgentsDock-1.0.0-beta.2-linux-arm64.AppImage">Linux ARM64</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage">Linux ARM64</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0-beta.2/AgentsDock-1.0.0-beta.2-win-x64.exe">Windows (unsigned preview)</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe">Windows (unsigned installer)</a>
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">Release page</a>
   ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.12">Stable 0.2.12</a>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0">1.0.0 release notes</a>
   <br />
   <strong>Mobile:</strong>
   <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad</a>
@@ -106,7 +106,7 @@ model requests, and clients may cache content on your devices.
 
 1. **Install the app.** Get a desktop build from
    [public GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock/releases)
-   ([current stable](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.12)),
+   ([current stable](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0)),
    or find the current iPhone/iPad distribution link on
    [the website](https://agentsdock.net/#downloads).
 2. **Set up AgentsServer.** Direct macOS and Linux builds provide
