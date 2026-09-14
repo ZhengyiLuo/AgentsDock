@@ -31,9 +31,27 @@ This prevents concurrent parent lifecycle and child rename notifications from
 overwriting each other's fields or resurrecting terminal state. Unrelated
 children do not share the lock, and idle locks are not retained indefinitely.
 
+Reopening a chat also repairs an already-recorded terminal child's changed native
+title, nickname or path with one durable `subagent_state` correction. It preserves
+the original lifecycle timestamp, status, run, start time, summary and log, so it
+does not make completed work look new or active. Unchanged reads append nothing.
+Recovery compares against the durable child record even if an older server
+already learned the corrected identity in memory without an event ID/sequence;
+omitted provider fields retain that recovered identity. Legacy metadata without
+event identity can still rehydrate silently, and unknown historical terminal
+children remain memory-only. Neither is advertised as a durable timeline event.
+
+Reconciliation captures the child state before reading the provider and checks
+it again under the child transition lock. A newer lifecycle or rename that
+arrives during that read wins over the stale snapshot. No polling or additional
+provider reads are added.
+
 `test_codex_subagent_identity_isolated.py` exercises the extracted server
 projector, emitter and reconciliation with synthetic state, plus the actual
 app-server notification router without starting its process. Tests cover
 real-title recovery, explicit clear, malformed values, ownership isolation,
 terminal/live-state preservation, ordered started/rename notifications, and
 gated rename/completion races in both orders.
+It also covers terminal identity recovery, ID-less memory and legacy metadata,
+repeat/restart idempotence, strict snapshot event identity, unchanged unread and
+chat-recency projection, and reconciliation/new-run races in both orders.

@@ -29968,6 +29968,7 @@ async def _emit_codex_subagent_state_once(
     persist_event: bool = True,
     inherit_run_id: bool = True,
     identity_only: bool = False,
+    reconcile_expected_state: Any = ...,
 ) -> dict[str, Any] | None:
     """Persist one authoritative Codex child lifecycle transition.
 
@@ -29998,7 +29999,46 @@ async def _emit_codex_subagent_state_once(
     with CODEX_SUBAGENT_INDEX_LOCK:
         previous = dict(CODEX_SUBAGENT_STATE.get(child_thread_id) or {})
     if previous and str(previous.get("session_id") or "") != session_id:
+        if reconcile_expected_state is not ...:
+            return None
         previous = {}
+    identity_previous = previous
+    terminal_identity_only = False
+    if reconcile_expected_state is not ...:
+        indexed = (STORE.sessions.get(session_id) or {}).get("codex_subagents")
+        indexed_state = indexed.get(child_thread_id) if isinstance(indexed, dict) else None
+        indexed_state = dict(indexed_state) if (
+            isinstance(indexed_state, dict)
+            and indexed_state.get("session_id") == session_id
+            and indexed_state.get("subagent_id") == child_thread_id
+            and indexed_state.get("backend") in {None, BACKEND_CODEX}
+            and indexed_state.get("type") in {None, "subagent_state"}
+        ) else {}
+        durable = indexed_state if (
+            durable_event_seq(indexed_state) is not None
+            and isinstance(indexed_state.get("id"), str)
+            and bool(indexed_state["id"].strip())
+            and indexed_state.get("backend") == BACKEND_CODEX
+            and indexed_state.get("type") == "subagent_state"
+        ) else {}
+        # Legacy metadata can restore ownership/status without pretending to
+        # be a durable Event. Snapshot filtering remains strict below.
+        previous = previous or indexed_state
+        # The provider read happens outside this child's transition lock. A
+        # lifecycle/rename committed during that read must beat its stale view.
+        if previous != (reconcile_expected_state or {}):
+            return previous or None
+        identity_previous = previous
+        if not persist_event and durable:
+            # A known terminal child's native identity can be newer than its
+            # durable event. Earlier silent reconciliation may already have
+            # replaced memory with corrected identity but no event ID/seq.
+            # Retain that trusted identity fallback for omitted provider
+            # fields, but borrow lifecycle fields from the durable baseline.
+            previous = durable
+            terminal_identity_only = True
+            persist_event = True
+            name = None  # A provider preview is not an identity correction.
     if identity_only and not previous:
         return None
     normalized = normalize_subagent_status(status or previous.get("subagent_status"))
@@ -30007,24 +30047,24 @@ async def _emit_codex_subagent_state_once(
         title = ...
     if title is None or isinstance(title, str):
         title_fields["subagent_title"] = useful_subagent_identity_text(title) or None
-    elif "subagent_title" in previous:
-        previous_title = previous.get("subagent_title")
+    elif "subagent_title" in identity_previous:
+        previous_title = identity_previous.get("subagent_title")
         title_fields["subagent_title"] = (
             useful_subagent_identity_text(previous_title)
             if isinstance(previous_title, str) else None
         ) or None
     clean_nickname = (
         useful_subagent_identity_text(nickname)
-        or useful_subagent_identity_text(previous.get("subagent_nickname"))
+        or useful_subagent_identity_text(identity_previous.get("subagent_nickname"))
     )
     clean_path = (
         useful_subagent_identity_text(agent_path)
-        or useful_subagent_identity_text(previous.get("subagent_path"))
+        or useful_subagent_identity_text(identity_previous.get("subagent_path"))
     )
     clean_name = (
         clean_nickname
         or clean_path
-        or useful_subagent_identity_text(previous.get("subagent_name"))
+        or useful_subagent_identity_text(identity_previous.get("subagent_name"))
         or useful_subagent_identity_text(name)
         or "Codex subagent"
     )
@@ -30067,11 +30107,16 @@ async def _emit_codex_subagent_state_once(
         "subagent_parent_thread_id": resolved_parent or None,
         "subagent_log": log,
     }
-    if identity_only:
+    if identity_only or terminal_identity_only:
         # Preserve the exact stored lifecycle payload even if a late rename
         # overlaps a terminal transition or comes from another generation.
-        payload = {key: previous.get(key) for key in payload if key != "subagent_title"}
-        payload.update(title_fields)
+        identity_fields = dict(title_fields)
+        if terminal_identity_only:
+            identity_fields.update({key: payload[key] for key in (
+                "subagent_name", "subagent_nickname", "subagent_path",
+            )})
+        payload = {key: previous.get(key) for key in payload if key not in identity_fields}
+        payload.update(identity_fields)
         if isinstance(previous.get("ts"), str):
             payload["ts"] = previous["ts"]
     comparable_keys = (
@@ -30090,7 +30135,7 @@ async def _emit_codex_subagent_state_once(
         "subagent_log",
     )
     manager = CODEX_APP_SERVER_MANAGER
-    if not identity_only:
+    if not identity_only and not terminal_identity_only:
         with CODEX_SUBAGENT_INDEX_LOCK:
             if (
                 normalized in {"starting", "running"}
@@ -30104,6 +30149,8 @@ async def _emit_codex_subagent_state_once(
     if previous and all(previous.get(key) == payload.get(key) for key in comparable_keys):
         with CODEX_SUBAGENT_INDEX_LOCK:
             CODEX_SUBAGENT_SESSION_INDEX[child_thread_id] = session_id
+            if reconcile_expected_state is not ...:
+                CODEX_SUBAGENT_STATE[child_thread_id] = previous
         return previous
 
     if not persist_event:
@@ -30229,6 +30276,20 @@ async def reconcile_codex_subagents(
     list_descendants = getattr(manager, "list_descendant_threads", None)
     if not root_thread_id or manager is None or not callable(list_descendants):
         return {"reconciled": 0, "descendants": 0}
+    durable_children = session.get("codex_subagents")
+    expected_states = {
+        child_id: dict(state)
+        for child_id, state in (
+            durable_children.items() if isinstance(durable_children, dict) else []
+        )
+        if isinstance(state, dict) and state.get("session_id") == session_id
+    }
+    with CODEX_SUBAGENT_INDEX_LOCK:
+        expected_states.update({
+            child_id: dict(state)
+            for child_id, state in CODEX_SUBAGENT_STATE.items()
+            if state.get("session_id") == session_id
+        })
     try:
         descendants = await list_descendants(root_thread_id)
     except Exception as exc:
@@ -30264,28 +30325,13 @@ async def reconcile_codex_subagents(
             len(ordered),
             CODEX_SUBAGENT_RECONCILE_LIMIT,
         )
-    durable_children = session.get("codex_subagents")
-    if not isinstance(durable_children, dict):
-        durable_children = {}
-
     reconciled = 0
     silent = 0
     for thread in ordered[:CODEX_SUBAGENT_RECONCILE_LIMIT]:
         child_thread_id = str(thread.get("id") or "").strip()
         if not child_thread_id:
             continue
-        with CODEX_SUBAGENT_INDEX_LOCK:
-            CODEX_SUBAGENT_SESSION_INDEX[child_thread_id] = session_id
-            previous = dict(CODEX_SUBAGENT_STATE.get(child_thread_id) or {})
-            if not previous:
-                # Rehydrate from the chat's durable snapshot so a restart does
-                # not make every known child look like a new transition.
-                durable = durable_children.get(child_thread_id)
-                if isinstance(durable, dict) and str(
-                    durable.get("session_id") or session_id
-                ) == session_id:
-                    previous = dict(durable)
-                    CODEX_SUBAGENT_STATE[child_thread_id] = dict(durable)
+        previous = expected_states.get(child_thread_id) or {}
         status = codex_child_status_from_thread(thread.get("status"))
         turns = thread.get("turns") if isinstance(thread.get("turns"), list) else []
         latest_turn = turns[0] if turns else None
@@ -30302,11 +30348,10 @@ async def reconcile_codex_subagents(
             # Unknown states must not manufacture an immortal active card.
             status = "completed"
         nickname, agent_path, source_parent_thread_id = codex_subagent_thread_identity(thread)
-        # Only a real transition deserves a timeline event: a child that is
-        # still active, or one whose status differs from what this chat last
-        # recorded. A terminal child that is already terminal (or that this
-        # process has never seen) is learned in memory only; its terminal
-        # transition was recorded when it happened.
+        # Active/status transitions are durable. The locked emitter also
+        # persists a changed native identity for an already-durable terminal
+        # child, without manufacturing another lifecycle transition. Unknown
+        # historical terminal children remain memory-only.
         normalized_status = normalize_subagent_status(status)
         previous_status = (
             normalize_subagent_status(previous.get("subagent_status"))
@@ -30327,6 +30372,7 @@ async def reconcile_codex_subagents(
             agent_path=agent_path,
             activity=f"Subagent {status}",
             persist_event=persist_event,
+            reconcile_expected_state=previous,
         )
         reconciled += 1
         if not persist_event:
