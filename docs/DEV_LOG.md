@@ -1,5 +1,35 @@
 # Public development log
 
+## 2026-09-14 — Desktop 1.0.0 replacement accepted
+
+- Published desktop `1.0.0`, build `1167`, from committed source
+  `45eb06c9db69cf0afad0fe8a1a38cf0823f1c035`. The canonical release is
+  [AgentsDock v1.0.0](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0).
+  This includes the native subagent setting and corrected untitled-child
+  headings. The separate server history-proof correction requires the rebuilt
+  standalone server; installing the desktop alone does not repair server imports.
+- The explicitly approved same-version replacement preserves a verified backup
+  of the withdrawn package. Existing `1.0.0` installations need a manual
+  download/reinstall; same-version automatic discovery is not claimed.
+- All four native package gates pass. macOS is universal, Developer ID signed,
+  notarized and Gatekeeper-verified; Linux x64/arm64 and Windows x64 artifacts
+  pass their package and launch checks. Windows remains an explicitly approved
+  unsigned preview. The platform source suites pass: 4,130 checks on macOS and
+  each Linux architecture, and 4,094 on Windows, with platform-specific skips.
+- Both public repositories contain the same fourteen sealed artifacts. All
+  eight public update-metadata files match the accepted replacement bytes.
+  GitHub permanently retired the deleted immutable legacy `v1.0.0` tag, so the
+  [legacy compatibility mirror](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/1.0.0)
+  uses the exact tag `1.0.0`. App versions, package filenames, signatures and
+  canonical `v1.0.0` are unchanged; the frozen legacy tag was not modified.
+- Actual native updates from Stable `0.2.12` and Beta `1.0.0-beta.2` both install
+  the new `1.0.0` ZIP, whose SHA-256 is
+  `f6914dfc7cba0ab9d762e0185c41e948a98709afb87bf113b091c3abcab919c2`.
+  Real UI download/install and native replacement/relaunch pass; each journey
+  retains its profile, language and original channel, then checks the canonical
+  feed. Final UI screenshots were reviewed. Validation used disposable CI
+  profiles, not live user apps or servers.
+
 ## 2026-09-14 — Partial-page cross-chat replay regression
 
 - Reproduce two old, owned async deliveries reimported as provider user text.
@@ -24,8 +54,8 @@
   in light and dark themes, including completed children and open output.
 - Prepare an explicitly approved replacement desktop 1.0.0, not a version
   bump. Existing 1.0.0 installations need a manual reinstall to receive it.
-  The server 1.0.0 runtime is unchanged. Release acceptance is recorded only
-  after package and publication verification.
+  The desktop naming correction is separate from the rebuilt server's
+  history-proof correction. Package and publication acceptance is recorded above.
 
 ## 2026-09-14 — Local subagent-settings build accepted
 
