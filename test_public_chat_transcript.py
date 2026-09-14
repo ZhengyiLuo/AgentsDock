@@ -75,8 +75,52 @@ class PublicChatTranscriptTests(unittest.TestCase):
         result = transcript.read_public_transcript(self.path, projector)
         self.assertEqual([message["text"] for message in result["messages"]], ["Question", "Visible progress", "Answer"])
         self.assertEqual([call.args[0]["type"] for call in projector.call_args_list],
-                         ["turn_started", "reasoning_summary", "assistant_text", "turn_finished"])
+                         ["turn_started", "reasoning_summary", "artifact_created", "assistant_text", "turn_finished"])
         self.assertEqual(result["messages"][1], {"role": "assistant", "text": "Visible progress", "timestamp": 2})
+
+    def test_only_projected_user_attachments_and_committed_artifacts_publish_videos(self):
+        video = {"id": "video_ZmlsZQ." + "a" * 64, "filename": "demo.mp4",
+                 "content_type": "video/mp4", "size": 10}
+        content = self.write_events(
+            {"type": "turn_started", "prompt": "", "shared_videos": [video], "ts": 1},
+            {"type": "file_uploaded", "shared_videos": [video]},
+            {"type": "tool_finished", "shared_videos": [video]},
+            {"type": "artifact_created", "artifact": {"path": "/private/source.mp4"},
+             "text": "Private artifact metadata", "shared_videos": [video], "ts": 2},
+            {"type": "assistant_text", "run_id": "one", "text": "Published", "shared_videos": [video]},
+            {"type": "turn_finished", "run_id": "one", "result_text": "Published", "shared_videos": [video]},
+        )
+        result = self.read()
+        self.assertEqual(result["messages"], [
+            {"role": "user", "text": "", "timestamp": 1, "videos": [video]},
+            {"role": "assistant", "text": "", "timestamp": 2, "videos": [video]},
+            {"role": "assistant", "text": "Published"},
+        ])
+        self.assertEqual(result["digest"], expected_digest(content, result["messages"]))
+        self.assertNotIn("private", json.dumps(result["messages"]).lower())
+        streamed = []
+        reread = self.read(message_sink=streamed.append)
+        self.assertEqual(streamed, result["messages"])
+        self.assertEqual(reread["digest"], result["digest"])
+
+    def test_video_projection_change_invalidates_preview_and_later_artifacts_are_excluded(self):
+        video = {"id": "video_ZmlsZQ." + "a" * 64, "filename": "demo.mp4",
+                 "content_type": "video/mp4", "size": 10}
+        self.write_events({"type": "artifact_created", "shared_videos": [video]})
+        first = self.read()
+        changed = transcript.read_public_transcript(self.path,
+            lambda event: {**event, "shared_videos": [{**video, "id": "video_ZmlsZQ." + "b" * 64}]})
+        self.assertNotEqual(first["digest"], changed["digest"])
+        with self.path.open("ab") as stream:
+            stream.write(json.dumps({"type": "artifact_created", "shared_videos": [video]}).encode() + b"\n")
+        self.assertEqual(self.read(through_bytes=first["through_bytes"]), first)
+        self.assertEqual(len(self.read()["messages"]), 2)
+
+    def test_invalid_video_metadata_fails_explicitly_instead_of_partial_snapshot(self):
+        self.write_events({"type": "turn_started", "prompt": "Public"},
+                          {"type": "artifact_created", "shared_videos": [{"id": "/private/file.mp4"}]})
+        with self.assertRaisesRegex(transcript.PublicTranscriptError, "video metadata"):
+            self.read()
 
     def test_claude_full_text_and_aggregate_result_are_not_duplicated(self):
         first = "Full first paragraph.\n\nUnicode 中文 remains literal."

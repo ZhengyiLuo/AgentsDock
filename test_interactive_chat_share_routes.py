@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -32,13 +33,14 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.save = mock.AsyncMock(return_value="private-file-reference")
         self.wait = mock.AsyncMock(return_value=False)
         self.control = mock.AsyncMock(return_value={"accepted": True, "result": {"ok": True}})
+        self.open_video = mock.AsyncMock()
         def authorize(request):
             if request.headers.get("x-agentsdock-token") != "synthetic-native-admin" or request.headers.get("origin") or request.headers.get("cookie"):
                 raise HTTPException(403, "Native administration required")
         self.router = create_interactive_chat_share_router(storage_root=self.root, authorize=authorize,
             session_exists=lambda session: session in self.sessions, public_base_url=lambda: self.public_origin,
             load_transcript=self.load, submit_prompt=self.submit, save_upload=self.save, wait_for_change=self.wait,
-            chat_control=self.control)
+            chat_control=self.control, open_video=self.open_video)
         app = FastAPI()
         app.include_router(self.router)
         self.client = TestClient(app, base_url=self.origin, raise_server_exceptions=False)
@@ -71,6 +73,97 @@ class InteractiveShareRouteTests(unittest.TestCase):
         self.assertEqual(self.client.post(path + "/redeem", headers={"Origin": self.origin}, json={"invitation_token": share["access_token"]}).status_code, 200)
         self.assertEqual(self.client.get(path + "/state").json()["messages"], [])
         self.assertNotIn("session_id", self.client.get(path + "/state").text)
+
+    def video_fixture(self):
+        path = self.root.parent / "synthetic.mp4"
+        data = b"0123456789abcdef"
+        path.write_bytes(data)
+        handles = []
+        async def open_video(session_id, handle):
+            descriptor = os.open(path, os.O_RDONLY)
+            handles.append(descriptor)
+            return {"file_fd": descriptor, "filename": path.name, "content_type": "video/mp4", "size": len(data)}
+        self.open_video.side_effect = open_video
+        handle = "video_" + "a" * 16 + "." + "b" * 64
+        return handle, data, handles
+
+    def test_scoped_video_requires_cookie_and_grant_before_opening(self):
+        handle, _, _ = self.video_fixture()
+        share = self.create()
+        url = share["path"] + "/media/" + handle
+        for headers in ({}, self.admin_headers, {"Authorization": "Bearer " + share["access_token"]}):
+            self.assertEqual(self.client.get(url, headers=headers).status_code, 404)
+        self.open_video.assert_not_awaited()
+        self.redeem(share)
+        for headers in ({"Origin": "https://foreign.example.test"}, {"Sec-Fetch-Site": "cross-site"}):
+            self.assertEqual(self.client.get(url, headers=headers).status_code, 403)
+        self.assertEqual(self.client.get(url + "?token=ignored").status_code, 403)
+        self.assertEqual(self.client.get(share["path"] + "/media/not-advertised").status_code, 404)
+        self.open_video.assert_not_awaited()
+        other = self.create()
+        self.assertEqual(self.client.get(other["path"] + "/media/" + handle).status_code, 404)
+
+    def test_scoped_video_range_head_and_revoke_close_every_descriptor(self):
+        handle, data, handles = self.video_fixture()
+        share = self.create()
+        self.redeem(share)
+        url = share["path"] + "/media/" + handle
+        full = self.client.get(url)
+        self.assertEqual((full.status_code, full.content), (200, data))
+        self.assertEqual(full.headers["content-type"], "video/mp4")
+        self.assertEqual(full.headers["accept-ranges"], "bytes")
+        self.assertEqual(full.headers["cache-control"], "no-store")
+        self.assertIn("media-src 'self'", self.client.get(share["path"]).headers["content-security-policy"])
+        for value, expected in (("bytes=3-7", data[3:8]), ("bytes=8-", data[8:]), ("bytes=-4", data[-4:])):
+            response = self.client.get(url, headers={"Range": value})
+            self.assertEqual((response.status_code, response.content), (206, expected))
+        response = self.client.head(url)
+        self.assertEqual((response.status_code, response.content), (200, b""))
+        self.assertEqual(response.headers["content-length"], str(len(data)))
+        self.assertEqual(self.client.get(url, headers={"Range": "bytes=99-"}).status_code, 416)
+        for call in self.open_video.await_args_list:
+            self.assertEqual(call.args, ("chat-one", handle))
+        for descriptor in handles:
+            with self.assertRaises(OSError): os.fstat(descriptor)
+        accepted_calls = self.open_video.await_count
+        self.client.delete(self.admin + "/" + share["id"], headers=self.admin_headers)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.open_video.await_count, accepted_calls)
+
+    def test_video_denied_after_open_during_revocation_and_session_removal(self):
+        handle, _, handles = self.video_fixture()
+        share = self.create()
+        self.redeem(share)
+        original = self.open_video.side_effect
+        async def revoked_during_open(session_id, media_id):
+            opened = await original(session_id, media_id)
+            InteractiveChatShareStore.open_existing(self.root).revoke_share(share["id"], session_id=session_id)
+            return opened
+        self.open_video.side_effect = revoked_during_open
+        response = self.client.get(share["path"] + "/media/" + handle)
+        self.assertEqual((response.status_code, response.content), (404, b""))
+        for descriptor in handles:
+            with self.assertRaises(OSError): os.fstat(descriptor)
+        self.sessions.clear()
+        self.assertEqual(self.client.get(share["path"] + "/media/" + handle).status_code, 404)
+
+    def test_video_changed_before_response_is_unavailable_and_descriptor_closed(self):
+        handle, _, handles = self.video_fixture()
+        share = self.create()
+        self.redeem(share)
+        original = self.open_video.side_effect
+        async def changed_during_open(session_id, media_id):
+            opened = await original(session_id, media_id)
+            info = os.fstat(opened["file_fd"])
+            opened["file_revision"] = (info.st_dev, info.st_ino, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns - 1, info.st_uid, info.st_mode, info.st_nlink)
+            return opened
+        self.open_video.side_effect = changed_during_open
+        response = self.client.get(share["path"] + "/media/" + handle)
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(str(self.root), response.text)
+        for descriptor in handles:
+            with self.assertRaises(OSError): os.fstat(descriptor)
 
     def test_separate_reusable_token_allows_two_browsers_and_revokes_both(self):
         share = self.create()

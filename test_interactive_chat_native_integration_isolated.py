@@ -4,7 +4,9 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import json
+from pathlib import Path
 import re
+import tempfile
 import time
 from types import MethodType, SimpleNamespace
 import unittest
@@ -16,10 +18,12 @@ from interactive_chat_controls import ChatControlError, InteractiveChatControls
 from interactive_chat_native import shared_events, shared_native_value, shared_session
 from test_interactive_chat_controls import native_models
 from test_interactive_chat_integration_isolated import load_glue
+from test_shared_chat_video_native_integration_isolated import install_media_glue, register_synthetic_video
 
 
 def load_native_glue():
     namespace, tree = load_glue()
+    install_media_glue(namespace, tree)
     names = {"interactive_chat_native_page", "interactive_chat_native_snapshot",
              "steer_interactive_chat_prompt", "run_interactive_chat_job", "control_interactive_chat",
              "get_cross_chat_handoff", "public_cross_chat_envelope", "is_async_route_message",
@@ -122,6 +126,35 @@ class InteractiveChatNativeGlueTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(capability["available"])
         self.assertEqual(capability["default"], "blocked")
         self.native["runtime_catalog"].assert_not_awaited()
+
+    async def test_native_page_issues_real_media_and_discards_event_supplied_handles(self):
+        with tempfile.TemporaryDirectory(prefix="native-page-video-") as directory:
+            root = Path(directory)
+            own = register_synthetic_video(root)
+            other = register_synthetic_video(root, "e", "chat-two")
+            self.native["FILES_ROOT"] = root
+            fake = {"id": "video_ZmFrZQ." + "a" * 64, "filename": "fake.mp4", "content_type": "video/mp4", "size": 1}
+            self.native["read_semantic_timeline_page"].return_value = {"events": [
+                {"id": "sent", "session_id": "chat-one", "type": "turn_started", "prompt": "Sent",
+                 "file_ids": [own], "shared_videos": [fake]},
+                {"id": "artifact", "session_id": "chat-one", "type": "artifact_created",
+                 "artifact": {"id": own, "path": "/private/owner"}},
+                {"id": "foreign", "session_id": "chat-one", "type": "turn_started", "prompt": "Other",
+                 "file_ids": [other]},
+                {"id": "raw", "session_id": "chat-one", "type": "assistant_text", "text": "Visible",
+                 "shared_videos": [fake]},
+                {"id": "upload", "session_id": "chat-one", "type": "file_uploaded", "file": {"id": own}},
+            ]}
+            result = await self.native["interactive_chat_native_page"]("chat-one")
+        rows = {row["id"]: row for row in result["events"]}
+        self.assertEqual(set(rows), {"sent", "artifact", "foreign", "raw"})
+        self.assertEqual(rows["sent"]["shared_videos"], rows["artifact"]["shared_videos"])
+        self.assertNotEqual(rows["sent"]["shared_videos"][0]["id"], fake["id"])
+        self.assertNotIn("shared_videos", rows["foreign"])
+        self.assertNotIn("shared_videos", rows["raw"])
+        self.assertNotIn("file_ids", rows["sent"])
+        self.assertNotIn("artifact", rows["artifact"])
+        self.assertNotIn("/private/owner", json.dumps(result))
 
     async def test_handoff_read_uses_native_body_revision_and_participant_visibility(self):
         original = "Original synthetic message.\n" * 180

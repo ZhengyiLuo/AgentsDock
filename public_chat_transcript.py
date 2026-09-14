@@ -16,6 +16,8 @@ import stat
 import time
 from typing import Callable
 
+from shared_chat_videos import normalize_shared_chat_videos
+
 # Retained for the legacy incremental text-view adapter, not full snapshots.
 MAX_LOG_BYTES = 64 * 1024 * 1024
 MAX_LINE_BYTES = 1024 * 1024
@@ -253,7 +255,7 @@ def read_public_transcript(
                 kind = raw.get("type")
                 if not isinstance(kind, str):
                     raise PublicTranscriptError("Chat history contains an invalid event type")
-                if kind not in {"turn_started", "assistant_text", "turn_finished", "reasoning_summary"} and not _is_goal_followup(raw):
+                if kind not in {"turn_started", "assistant_text", "turn_finished", "reasoning_summary", "artifact_created"} and not _is_goal_followup(raw):
                     continue
                 if kind == "reasoning_summary" and raw.get("phase") != "commentary":
                     continue
@@ -265,13 +267,26 @@ def read_public_transcript(
                 run = str(event.get("run_id") or "")
                 if len(run) > 1024:
                     raise PublicTranscriptError("Chat history has an oversized run identity")
+                # Only the trusted projector can publish descriptors from an
+                # actual user attachment or committed artifact. Tool payloads,
+                # arbitrary Markdown paths and final receipts grant no media.
+                videos = []
+                if kind in {"turn_started", "artifact_created"} or _is_goal_followup(event):
+                    try:
+                        videos = normalize_shared_chat_videos(event.get("shared_videos", []))
+                    except ValueError as exc:
+                        raise PublicTranscriptError("Chat history has invalid shared video metadata") from exc
                 if kind == "turn_started" or _is_goal_followup(event):
                     outputs.pop(run, None)
                     role, text = "user", event.get("prompt")
+                elif kind == "artifact_created":
+                    role, text = "assistant", ""
                 else:
                     role = "assistant"
                     text = event.get("result_text") if kind == "turn_finished" else event.get("text")
-                if not isinstance(text, str) or not text.strip():
+                if not isinstance(text, str):
+                    text = "" if videos else None
+                if text is None or (not text.strip() and not videos):
                     continue
                 # Preserve the reviewed plaintext, including indentation and
                 # leading/trailing newlines. Strip only for emptiness/dedup.
@@ -302,6 +317,8 @@ def read_public_transcript(
                     previous[0].add(normalized_digest)
                     outputs[run] = (previous[0], previous[1], previous[2] + 1)
                 message = {"role": role, "text": text}
+                if videos:
+                    message["videos"] = videos
                 timestamp = _public_timestamp(event.get("ts"))
                 if timestamp is not None:
                     message["timestamp"] = timestamp

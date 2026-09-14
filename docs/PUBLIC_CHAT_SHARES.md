@@ -8,7 +8,9 @@ and AgentsDock `0.2.13-beta.37` or later.
 This optional API creates a fixed, explicitly requested chat snapshot. Nothing is
 shared automatically. It does not open a listener, configure ingress, publish an
 existing chat, or add background polling. The public viewer cannot continue a
-conversation or access session APIs, files, tools, or the live transcript.
+conversation or access session APIs, file browsing, tools, or the live transcript.
+New snapshots can include videos explicitly attached or published in the chat;
+this does not grant access to arbitrary files.
 
 The normal share URL contains no token. Recipients enter the separately supplied
 access token before seeing any title or conversation text. An optional view-only
@@ -83,8 +85,9 @@ Pages use escaped static HTML with
 green user bubbles, readable assistant cards, timestamps, responsive light/dark
 layouts and a safe basic assistant Markdown subset (headings, lists, code and tables).
 No JSON mode, conversation actions, scripts, external links, images, or remote
-resources are provided. Only internal pagination links and the entry form are
-active. CSP allows same-origin forms only on the entry page, disables scripts,
+resources are provided. Internal pagination links, the entry form, and native
+video controls are active. CSP permits same-origin media only, allows same-origin
+forms only on the entry page, disables scripts,
 and retains same-origin sandbox identity so pagination preserves Strict cookies.
 Invalid/revoked/expired access reveals no conversation metadata. Responses use
 no-store, no-referrer and noindex headers. AgentsServer access logs redact the bearer path; any
@@ -129,11 +132,51 @@ than publishing a truncated chat. There is no aggregate readable-snapshot byte
 ceiling: larger conversations produce more pages without building one large
 JSON object or HTML document. A single oversized record/message still fails;
 this API never silently drops the remaining conversation to fit.
-The projection keeps readable user/assistant text and visible commentary;
-tools, hidden reasoning, artifacts, internal digest/status runs, and structurally
+The projection keeps readable user/assistant text, visible commentary, and
+video descriptors from actual user attachments or committed artifact publication;
+tools, hidden reasoning, other artifacts, internal digest/status runs, and structurally
 proven imported delivery-control segments are excluded. Existing provenance-
 aware user-context projection is applied; ambiguous quotations are preserved.
 Previewing/sharing reads only the local durable chat log, not provider logs.
+
+## Explicitly shared videos
+
+Video playback is limited to registered videos explicitly attached or published
+in the captured chat prefix. Merely uploading an unused file, mentioning a local
+path, or returning a tool payload does not share it. Supported media types are
+MP4, WebM, QuickTime, and Ogg video; actual codec support depends on the browser.
+The viewer uses native controls with metadata preloading and no autoplay.
+
+Each captured message may carry a bounded `videos` array of opaque signed IDs,
+filenames, content types, and sizes. The confirmation digest includes those
+descriptors, so a changed video projection invalidates a prior preview. Existing
+text-only preview digests retain their exact representation. Descriptors are
+stored in the existing immutable JSON pages; no media database, background scan,
+or extra video copy is created. The SQLite schema remains v3. Older binaries can
+still read unchanged text-only snapshots, but their strict message validator
+cannot render newly created video-bearing pages; do not downgrade a deployment
+that needs to serve those pages.
+
+The common viewer requests `/shared-chat/{share_id}/media/{page}/{message}/{video}`
+with its existing share-scoped cookie. Optional bearer-link viewers use the same
+indices below `/share/{token}/media/`. These GET/HEAD routes authenticate the exact
+share, resolve only the selected frozen page, and then securely open the registered
+video for the stored chat. They never accept native file IDs, paths, workspace
+URLs, or admin credentials from the browser. Native registry handles are not
+included in rendered HTML. Query credentials and cross-origin media requests
+are rejected. Streams support one HTTP byte range, including seek, suffix ranges,
+HEAD and 416 responses. Every request and active stream access check verifies
+expiry/revocation; no background polling is added. Responses are no-store,
+same-origin, no-referrer, and nosniff. Operator-managed proxies must also redact
+the optional bearer media paths under `/share/*`.
+
+Snapshot media identity is fixed, but its bytes are not copied into snapshot
+storage. Removal or alteration of a registered video, or rotation of the server
+signing token, can make that video unavailable. The server must reject changed
+registry files rather than serve replacement content. Text remains immutable;
+old snapshots never gain videos from later events or new projection rules.
+Create a new snapshot to include newly supported videos. Revocation cannot
+retract video bytes already delivered or copies saved by a recipient.
 
 This implementation has only been exercised with synthetic isolated test state;
 checks include more than 64 MiB of raw tool noise, over 2,000 public messages,

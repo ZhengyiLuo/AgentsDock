@@ -9,6 +9,7 @@ import asyncio
 import hmac
 import ipaddress
 import json
+import os
 from pathlib import Path
 import re
 import threading
@@ -23,6 +24,8 @@ from public_chat_shares import (
     render_public_chat_unlock_html,
 )
 from public_chat_transcript import PublicTranscriptError
+from shared_chat_video_stream import SharedVideoResponse
+from shared_chat_videos import SharedVideoUnavailable
 
 PUBLIC_SHARE_PATH_RE = re.compile(r'''(/share/)[^/?\s"']+''')
 SNAPSHOT_COOKIE = "__Secure-AgentsDock-View"
@@ -30,8 +33,8 @@ HTTP_SNAPSHOT_COOKIE = "AgentsDock-View"
 WARNING = (
     "Anyone with this link and its access token can read and copy this snapshot. "
     "The optional token-in-link URL opens it directly. Review it for secrets "
-    "before sharing. New messages are not added. Files, tools, and private runtime "
-    "instructions are excluded. Revocation cannot erase copies already saved."
+    "before sharing. New messages are not added. Explicitly attached or published videos are included; "
+    "other files, tools, and private runtime instructions are excluded. Revocation cannot erase copies already saved."
 )
 
 
@@ -76,7 +79,7 @@ def public_share_url(base: str, token: str) -> str | None:
 
 
 def create_public_chat_share_router(
-    *, storage_root, authorize, session_exists, load_transcript, public_base_url,
+    *, storage_root, authorize, session_exists, load_transcript, public_base_url, open_video=None,
 ) -> APIRouter:
     """Callbacks are explicit: no access to a global server/token on import."""
     router = APIRouter()
@@ -234,6 +237,14 @@ def create_public_chat_share_router(
     def cookie_name(request):
         return SNAPSHOT_COOKIE if request.url.scheme == "https" else HTTP_SNAPSHOT_COOKIE
 
+    def cookie_token(request):
+        cookies = [part.strip().partition("=")[2]
+            for header in request.headers.getlist("cookie") for part in header.split(";")
+            if part.strip().partition("=")[0] == cookie_name(request)]
+        if len(cookies) != 1 or TOKEN_PATTERN.fullmatch(cookies[0]) is None:
+            raise PublicChatShareUnavailable()
+        return cookies[0]
+
     def requested_page(request):
         if not request.url.query:
             return None
@@ -350,5 +361,66 @@ def create_public_chat_share_router(
             # the unauthenticated viewer, including an unexpected failure.
             return Response("Shared conversation temporarily unavailable.", status_code=503, headers=headers)
         return Response(content if request.method == "GET" else b"", media_type="text/html", headers=headers)
+
+    async def video_response(request, token, page, message_index, video_index, *, share_id=None):
+        headers = {**public_chat_share_headers(), "Cross-Origin-Resource-Policy": "same-origin"}
+        file_fd = None
+        try:
+            if open_video is None or request.url.query:
+                raise PublicChatShareUnavailable()
+            expected_origin = chat_share_origin(str(request.base_url))
+            origins = request.headers.getlist("origin")
+            fetch_sites = request.headers.getlist("sec-fetch-site")
+            if (origins and origins != [expected_origin] or len(fetch_sites) > 1
+                    or any(site in {"cross-site", "same-site"} for site in fetch_sites)):
+                raise PublicChatShareUnavailable()
+            indices = (page, message_index, video_index)
+            if any(re.fullmatch(r"[0-9]{1,10}", index) is None for index in indices):
+                raise PublicChatShareUnavailable()
+            value = await worker(lambda: store().get_snapshot_video(token, share_id=share_id,
+                page=int(page), message_index=int(message_index), video_index=int(video_index)), public=True)
+            descriptor = value["video"]
+            opened = await open_video(value["session_id"], descriptor["id"])
+            file_fd = opened.get("file_fd")
+            if (type(file_fd) is not int or file_fd < 0
+                    or any(opened.get(key) != descriptor[key] for key in ("size", "content_type", "filename"))):
+                raise PublicChatShareUnavailable()
+
+            async def reauthorize():
+                try:
+                    await worker(lambda: store().authorize_access(token, share_id=share_id), public=True)
+                except PublicChatShareUnavailable:
+                    raise HTTPException(404, "Shared video unavailable") from None
+
+            response_fd, file_fd = file_fd, None  # Constructor owns it even on validation failure.
+            response = SharedVideoResponse(response_fd, byte_size=opened["size"],
+                content_type=opened["content_type"], filename=opened["filename"], request=request,
+                reauthorize=reauthorize, file_revision=opened.get("file_revision"),
+                extra_headers={key: value for key, value in headers.items() if key != "Content-Type"})
+            return response
+        except (PublicChatShareUnavailable, PublicChatShareValidationError, SharedVideoUnavailable):
+            return Response("Shared video unavailable.", status_code=404, headers=headers)
+        except HTTPException as exc:
+            status = exc.status_code if exc.status_code in {404, 416, 503} else 404
+            return Response("Shared video unavailable.", status_code=status, headers={**headers, **(exc.headers or {})})
+        except Exception:
+            return Response("Shared video temporarily unavailable.", status_code=503, headers=headers)
+        finally:
+            if type(file_fd) is int and file_fd >= 0:
+                os.close(file_fd)
+
+    @router.api_route("/shared-chat/{share_id}/media/{page}/{message_index}/{video_index}",
+                      methods=["GET", "HEAD"], include_in_schema=False)
+    async def common_video(share_id: str, page: str, message_index: str, video_index: str, request: Request):
+        try:
+            token = cookie_token(request)
+        except PublicChatShareUnavailable:
+            return Response("Shared video unavailable.", status_code=404, headers=public_chat_share_headers())
+        return await video_response(request, token, page, message_index, video_index, share_id=share_id)
+
+    @router.api_route("/share/{token}/media/{page}/{message_index}/{video_index}",
+                      methods=["GET", "HEAD"], include_in_schema=False)
+    async def bearer_video(token: str, page: str, message_index: str, video_index: str, request: Request):
+        return await video_response(request, token, page, message_index, video_index)
 
     return router

@@ -54,6 +54,74 @@ class PublicChatShareTests(unittest.TestCase):
     def create(self, **kwargs):
         return self.store.create_share("private-session-123", self.messages, **kwargs)
 
+    def test_video_descriptors_are_frozen_scoped_and_not_exposed_in_rendered_urls(self):
+        video = {"id": "video_ZmlsZQ." + "a" * 64, "filename": 'demo "clip".mp4',
+                 "content_type": "video/mp4", "size": 10}
+        original = dict(video)
+        self.messages[1]["videos"] = [video]
+        share = self.create()
+        video["filename"] = "changed.mp4"
+        self.assertEqual(self.store.get_snapshot_video(share["token"], share_id=share["share_id"],
+            page=0, message_index=1, video_index=0), {"session_id": share["session_id"], "video": original})
+        page = self.store.get_snapshot_page(share["token"])
+        self.assertNotIn("session_id", page)
+        path = "/shared-chat/" + share["share_id"]
+        rendered = render_public_chat_html(page["snapshot"], navigation_base=path).decode()
+        self.assertIn(f'src="{path}/media/0/1/0"', rendered)
+        self.assertIn('controls preload="metadata" playsinline', rendered)
+        self.assertIn("demo &quot;clip&quot;.mp4", rendered)
+        self.assertNotIn(original["id"], rendered)
+        self.assertNotIn(share["token"], rendered)
+        self.assertNotIn(share["session_id"], rendered)
+        self.assertIn("media-src 'self'", public_chat_share_headers()["Content-Security-Policy"])
+        self.assertNotIn("<script", rendered)
+        self.assertIn('src="/share/' + share["token"] + '/media/0/1/0"', render_public_chat_html(
+            page["snapshot"], navigation_base="/share/" + share["token"]).decode())
+
+    def test_video_access_checks_exact_frozen_page_and_current_revocation_or_expiry(self):
+        video = {"id": "video_ZmlsZQ." + "a" * 64, "filename": "demo.webm",
+                 "content_type": "video/webm", "size": 10}
+        def emit(sink):
+            for index in range(101):
+                sink({"role": "assistant", "text": str(index), **({"videos": [video]} if index == 100 else {})})
+        share = self.store.create_streamed_share("chat-video", emit, expires_at=self.clock + 10)
+        self.assertEqual(self.store.get_snapshot_video(share["token"], page=1, message_index=0,
+            video_index=0)["video"], video)
+        for options in ({"page": 0, "message_index": 0, "video_index": 0},
+                        {"page": 1, "message_index": 0, "video_index": 1},
+                        {"page": 1, "message_index": -1, "video_index": 0},
+                        {"page": 1, "message_index": True, "video_index": 0},
+                        {"page": 2, "message_index": 0, "video_index": 0}):
+            with self.subTest(options=options), self.assertRaises(PublicChatShareUnavailable):
+                self.store.get_snapshot_video(share["token"], **options)
+        self.store.authorize_access(share["token"], share_id=share["share_id"])
+        with self.assertRaises(PublicChatShareUnavailable):
+            self.store.authorize_access(share["token"], share_id="share_" + "0" * 32)
+        self.clock += 10
+        with self.assertRaises(PublicChatShareUnavailable):
+            self.store.authorize_access(share["token"])
+        with self.assertRaises(PublicChatShareUnavailable):
+            self.store.get_snapshot_video(share["token"], page=1, message_index=0, video_index=0)
+        self.clock -= 10
+        self.store.revoke_share(share["share_id"], session_id="chat-video")
+        with self.assertRaises(PublicChatShareUnavailable):
+            self.store.authorize_access(share["token"])
+
+    def test_invalid_video_descriptors_never_persist_or_expand_legacy_snapshots(self):
+        legacy = self.create()
+        video = {"id": "video_ZmlsZQ." + "a" * 64, "filename": "demo.mp4",
+                 "content_type": "video/mp4", "size": 10}
+        for change in ({"id": "/api/files/private"}, {"filename": "../demo.mp4"},
+                       {"content_type": "text/html"}, {"size": True}, {"size": 0},
+                       {"path": "/private/demo.mp4"}):
+            with self.subTest(change=change), self.assertRaises(PublicChatShareValidationError):
+                self.store.create_share("chat-one", [{"role": "assistant", "text": "", "videos": [{**video, **change}]}])
+        self.messages[0]["videos"] = [video]
+        self.assertNotIn("videos", self.store.get_snapshot(legacy["token"])["messages"][0])
+        with self.assertRaises(PublicChatShareUnavailable):
+            self.store.get_snapshot_video(legacy["token"], page=0, message_index=0, video_index=0)
+        self.assertEqual(self.store.list_shares("chat-one"), [])
+
     def test_snapshot_is_durable_private_and_detached_from_inputs(self):
         result = self.create(title="My conversation")
         self.assertEqual(len(base64.urlsafe_b64decode(result["token"] + "=")), 32)

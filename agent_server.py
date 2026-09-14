@@ -155,6 +155,8 @@ from claude_background_reconciliation import (
 )
 from public_chat_share_routes import create_public_chat_share_router, redact_public_share_path
 from interactive_chat_share_routes import create_interactive_chat_share_router
+from shared_chat_videos import (SharedVideoUnavailable, shared_chat_video_descriptor,
+                               open_shared_chat_video)
 from interactive_chat_projection import IncrementalChatTranscript
 from interactive_chat_runtime import InteractiveChatLiveState
 from interactive_chat_native import shared_events, shared_native_value, shared_session
@@ -76529,6 +76531,73 @@ def public_chat_share_session_exists(session_id: str) -> bool:
     )
 
 
+def shared_chat_event_videos(session_id: str, event: dict[str, Any]) -> list[dict[str, Any]]:
+    """Issue media references only for published artifacts or sent attachments."""
+    if (not is_client_visible_event(event) or not event_files_belong_to_session(event, session_id)
+            or event.get("session_id") not in (None, "", session_id) or event.get("metadata_only") is True):
+        return []
+    kind = event.get("type")
+    legacy = False
+    if kind == "artifact_created":
+        artifact = event.get("artifact")
+        if not isinstance(artifact, dict):
+            return []
+        file_ids = [artifact.get("id")]
+        legacy = event_establishes_session_file_origin(event, session_id)
+    elif kind in {"turn_started", "turn_steered"} and (event.get("purpose") is None or (
+            event.get("native_goal_steer") is True and event.get("provider_user_authored") is True)):
+        file_ids = event.get("display_file_ids") if isinstance(event.get("display_file_ids"), list) else event.get("file_ids")
+        if not isinstance(file_ids, list):
+            return []
+    else:
+        return []
+    if len(file_ids) > 32:
+        raise ValueError("Shared chat attachment metadata is too large")
+    output, seen = [], set()
+    for file_id in file_ids:
+        if not isinstance(file_id, str) or file_id in seen:
+            continue
+        seen.add(file_id)
+        try:
+            output.append(shared_chat_video_descriptor(FILES_ROOT, AGENT_TOKEN, session_id, file_id,
+                                                       legacy_owner=legacy))
+        except SharedVideoUnavailable:
+            # Non-video and unavailable registry entries confer no capability.
+            continue
+    return output
+
+
+def project_shared_chat_event_videos(session_id: str, event: dict[str, Any]) -> dict[str, Any]:
+    clean = dict(event)
+    clean.pop("shared_videos", None)
+    videos = shared_chat_event_videos(session_id, event)
+    if videos:
+        clean["shared_videos"] = videos
+    return clean
+
+
+def shared_chat_video_events(events: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
+    # Native and public readers supply already-projected visible events.
+    return shared_events([project_shared_chat_event_videos(session_id, event) for event in events], session_id)
+
+
+async def open_shared_chat_video_for_share(session_id: str, handle: str) -> dict[str, Any]:
+    if not public_chat_share_session_exists(session_id):
+        raise HTTPException(404, "Shared video is unavailable")
+    task = asyncio.create_task(asyncio.to_thread(open_shared_chat_video, FILES_ROOT, AGENT_TOKEN, session_id, handle))
+    try:
+        return await asyncio.shield(task)
+    except BaseException:
+        def close_late(done):
+            if not done.cancelled():
+                try:
+                    os.close(done.result()["file_fd"])
+                except (Exception, asyncio.CancelledError):
+                    pass
+        task.add_done_callback(close_late)
+        raise
+
+
 def load_public_chat_share_transcript(
     session_id: str, through_bytes: int | None, *, message_sink: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
@@ -76553,7 +76622,10 @@ def load_public_chat_share_transcript(
         strip_user_context=strip_agentsdock_generated_user_text,
         fork_internal_purposes=FORK_INTERNAL_PURPOSES,
     )
-    snapshot = read_public_transcript(events_path(session_id), projector, through_bytes=through_bytes,
+    def project_with_videos(event):
+        projected = projector(event)
+        return project_shared_chat_event_videos(session_id, projected) if projected is not None else None
+    snapshot = read_public_transcript(events_path(session_id), project_with_videos, through_bytes=through_bytes,
                                       message_sink=message_sink)
     if not public_chat_share_session_exists(session_id):
         raise PublicTranscriptError("Chat is unavailable")
@@ -76645,7 +76717,7 @@ async def interactive_chat_native_page(session_id: str, **options: Any) -> dict[
     # Reuse the native semantic index. Unlike get_session(), opening a shared
     # page does not reconcile queues or start provider-history imports.
     page = await asyncio.to_thread(read_semantic_timeline_page, session_id, **options)
-    page["events"] = shared_events(page["events"], session_id)
+    page["events"] = await asyncio.to_thread(shared_chat_video_events, page["events"], session_id)
     return {**page, "has_more": bool(page.get("semantic_omitted_before")),
             "next_before": page.get("next_semantic_before"), "semantic_paging": True}
 
@@ -76822,11 +76894,11 @@ async def control_interactive_chat(session_id: str, action: str, payload: dict[s
         elif action == "timeline.trace":
             value = await asyncio.to_thread(read_indexed_run_trace, session_id, payload.get("run_id") or "",
                 anchor_seq=payload.get("anchor_seq"), after_seq=payload.get("after") or 0, limit=limit)
-            value["events"] = shared_events(value.get("events", []), session_id)
+            value["events"] = await asyncio.to_thread(shared_chat_video_events, value.get("events", []), session_id)
         elif action == "jobs.runs":
             value = await asyncio.to_thread(read_scheduled_job_runs, session_id, payload.get("id") or "",
                 before_seq=payload.get("before_seq"), timeline_group_id=payload.get("timeline_group_id"), limit=limit)
-            value["runs"] = shared_events(value.get("runs", []), session_id)
+            value["runs"] = await asyncio.to_thread(shared_chat_video_events, value.get("runs", []), session_id)
             value["supported"] = True
         else:
             async with INTERACTIVE_CHAT_CATALOG_LOCK:
@@ -76874,6 +76946,7 @@ app.include_router(create_interactive_chat_share_router(
     save_upload=save_interactive_chat_upload,
     wait_for_change=INTERACTIVE_CHAT_LIVE.wait,
     chat_control=control_interactive_chat,
+    open_video=open_shared_chat_video_for_share,
 ))
 
 
@@ -76883,6 +76956,7 @@ app.include_router(create_public_chat_share_router(
     session_exists=public_chat_share_session_exists,
     load_transcript=load_public_chat_share_transcript,
     public_base_url=lambda: agentsdock_setting("PUBLIC_CHAT_BASE_URL", ""),
+    open_video=open_shared_chat_video_for_share,
 ))
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 import public_chat_share_routes as routes
 from public_chat_shares import PublicChatShareStore, PublicChatShareValidationError
 from public_chat_transcript import read_public_transcript
+from shared_chat_videos import SharedVideoUnavailable
 
 
 class PublicChatShareRouteTests(unittest.TestCase):
@@ -30,6 +32,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
         self.exists = mock.Mock(side_effect=lambda session: session in self.sessions)
         self.load = mock.Mock(side_effect=lambda session, boundary, **options: read_public_transcript(
             self.events, lambda event: event, through_bytes=boundary, **options))
+        self.open_video = mock.AsyncMock()
         self.store_factory = mock.Mock(side_effect=lambda root: PublicChatShareStore(root, now=lambda: self.clock))
         self.store_factory.open_existing = mock.Mock(side_effect=lambda root: PublicChatShareStore.open_existing(root, now=lambda: self.clock))
         patcher = mock.patch.object(routes, "PublicChatShareStore", self.store_factory)
@@ -38,7 +41,7 @@ class PublicChatShareRouteTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(routes.create_public_chat_share_router(
             storage_root=self.storage, authorize=self.authorize, session_exists=self.exists,
-            load_transcript=self.load, public_base_url=lambda: self.base,
+            load_transcript=self.load, public_base_url=lambda: self.base, open_video=self.open_video,
         ))
         self.client = TestClient(app, raise_server_exceptions=False)
         self.client.__enter__()
@@ -69,6 +72,135 @@ class PublicChatShareRouteTests(unittest.TestCase):
         return self.client.post(share["path"] + "/unlock", headers={"Origin": str(self.client.base_url).rstrip("/")},
             data={"access_token": share["access_token"] if token is None else token, **({"remember": "1"} if remember else {})},
             follow_redirects=False)
+
+    def create_video_share(self):
+        self.video_bytes = b"0123456789video-contents"
+        self.video_path = self.root / "published.mp4"
+        self.video_path.write_bytes(self.video_bytes)
+        self.video = {"id": "video_ZmlsZQ." + "a" * 64, "filename": "published.mp4",
+                      "content_type": "video/mp4", "size": len(self.video_bytes)}
+        self.events.write_text(json.dumps({"type": "artifact_created", "shared_videos": [self.video]}) + "\n")
+        self.video_fds = []
+        async def open_video(session_id, handle):
+            self.assertEqual(session_id, "chat-one")
+            self.assertEqual(handle, self.video["id"])
+            descriptor = os.open(self.video_path, os.O_RDONLY)
+            self.video_fds.append(descriptor)
+            return {"file_fd": descriptor, **{key: self.video[key] for key in ("size", "filename", "content_type")}}
+        self.open_video.side_effect = open_video
+        return self.create()
+
+    def assert_video_fds_closed(self):
+        for descriptor in self.video_fds:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_video_cookie_and_bearer_paths_play_seek_and_head_without_native_credentials(self):
+        share = self.create_video_share()
+        path = share["path"] + "/media/0/0/0"
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.open_video.assert_not_called()
+        self.assertEqual(self.unlock(share).status_code, 303)
+        before = self.load.call_count
+        for target in (path, "/share/" + share["access_token"] + "/media/0/0/0"):
+            full = self.client.get(target)
+            self.assertEqual(full.status_code, 200, full.text)
+            self.assertEqual(full.content, self.video_bytes)
+            self.assertEqual(full.headers["content-type"], "video/mp4")
+            self.assertEqual(full.headers["cache-control"], "no-store")
+            self.assertEqual(full.headers["accept-ranges"], "bytes")
+            self.assertEqual(full.headers["x-content-type-options"], "nosniff")
+            for value, expected, content_range in (
+                ("bytes=2-5", self.video_bytes[2:6], f"bytes 2-5/{len(self.video_bytes)}"),
+                ("bytes=10-", self.video_bytes[10:], f"bytes 10-{len(self.video_bytes)-1}/{len(self.video_bytes)}"),
+                ("bytes=-5", self.video_bytes[-5:], f"bytes {len(self.video_bytes)-5}-{len(self.video_bytes)-1}/{len(self.video_bytes)}"),
+            ):
+                response = self.client.get(target, headers={"Range": value})
+                self.assertEqual(response.status_code, 206, response.text)
+                self.assertEqual(response.content, expected)
+                self.assertEqual(response.headers["content-range"], content_range)
+                self.assertEqual(response.headers["content-length"], str(len(expected)))
+            head = self.client.head(target)
+            self.assertEqual(head.status_code, 200)
+            self.assertEqual(head.content, b"")
+            self.assertEqual(head.headers["content-length"], str(len(self.video_bytes)))
+            ranged_head = self.client.head(target, headers={"Range": "bytes=0-2"})
+            self.assertEqual(ranged_head.status_code, 206)
+            self.assertEqual(ranged_head.headers["content-length"], "3")
+            self.assertEqual(ranged_head.content, b"")
+        self.assertEqual(self.load.call_count, before, "Playback must not rescan the source chat")
+        self.assert_video_fds_closed()
+
+    def test_video_access_is_exact_share_page_and_not_an_arbitrary_file_route(self):
+        share = self.create_video_share()
+        other = self.create()
+        self.unlock(share)
+        path = share["path"] + "/media/0/0/0"
+        for target, headers in (
+            (other["path"] + "/media/0/0/0", {}),
+            (share["path"] + "/media/1/0/0", {}),
+            (share["path"] + "/media/0/0/1", {}),
+            (share["path"] + "/media/0/-1/0", {}),
+            (share["path"] + "/media/0/0/private.mp4", {}),
+            (path + "?file=/private/path", {}),
+            (path, {"Origin": "https://attacker.test"}),
+            (path, {"Sec-Fetch-Site": "cross-site"}),
+            (path, {"Sec-Fetch-Site": "same-site"}),
+            (path, {"Cookie": routes.HTTP_SNAPSHOT_COOKIE + "=" + share["access_token"] + "; "
+                + routes.HTTP_SNAPSHOT_COOKIE + "=" + share["access_token"]}),
+        ):
+            with self.subTest(target=target, headers=headers):
+                response = self.client.get(target, headers=headers)
+                self.assertEqual(response.status_code, 404, response.text)
+                self.assertNotIn(self.video["id"], response.text)
+        self.open_video.assert_not_called()
+        self.assertEqual(self.client.delete(self.admin + "/" + share["share_id"], headers=self.auth).status_code, 200)
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.client.get("/share/" + share["access_token"] + "/media/0/0/0").status_code, 404)
+        self.open_video.assert_not_called()
+
+    def test_video_invalid_range_and_changed_registry_metadata_release_file_descriptor(self):
+        share = self.create_video_share()
+        self.unlock(share)
+        path = share["path"] + "/media/0/0/0"
+        for value in ("bytes=9999-", "bytes=4-2", "bytes=0-1,4-5", "bytes=-0", "bananas"):
+            with self.subTest(value=value):
+                response = self.client.get(path, headers={"Range": value})
+                self.assertEqual(response.status_code, 416, response.text)
+                self.assertEqual(response.headers["content-range"], f"bytes */{len(self.video_bytes)}")
+        self.assert_video_fds_closed()
+        original_open = self.open_video.side_effect
+        async def changed(session_id, handle):
+            value = await original_open(session_id, handle)
+            return {**value, "size": value["size"] + 1}
+        self.open_video.side_effect = changed
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assert_video_fds_closed()
+
+    def test_video_rechecks_revocation_after_native_open_before_returning_any_bytes(self):
+        share = self.create_video_share()
+        self.unlock(share)
+        original_open = self.open_video.side_effect
+        async def revoked(session_id, handle):
+            value = await original_open(session_id, handle)
+            PublicChatShareStore(self.storage, now=lambda: self.clock).revoke_share(share["share_id"], session_id="chat-one")
+            return value
+        self.open_video.side_effect = revoked
+        response = self.client.get(share["path"] + "/media/0/0/0")
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertNotEqual(response.content, self.video_bytes)
+        self.assert_video_fds_closed()
+
+    def test_missing_registry_video_has_uniform_unavailable_response_without_native_details(self):
+        share = self.create_video_share()
+        self.unlock(share)
+        self.open_video.side_effect = SharedVideoUnavailable()
+        response = self.client.get(share["path"] + "/media/0/0/0")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.text, "Shared video unavailable.")
+        self.assertNotIn(self.video["id"], response.text)
+        self.assertNotIn("chat-one", response.text)
+        self.assertEqual(response.headers["cache-control"], "no-store")
 
     def test_common_url_requires_separate_token_and_remembers_only_scoped_http_cookie(self):
         share = self.create(title="Private snapshot title")

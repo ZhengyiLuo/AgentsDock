@@ -25,6 +25,8 @@ import stat
 import time
 from typing import Any, Callable, Iterator
 
+from shared_chat_videos import normalize_shared_chat_videos
+
 
 MAX_MESSAGE_TEXT_BYTES = 256 * 1024
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
@@ -93,8 +95,8 @@ def _snapshot(messages: Any, title: Any, created_at: Any) -> tuple[dict[str, Any
         ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8"))
     projected: list[dict[str, Any]] = []
     for message in messages:
-        if not isinstance(message, dict) or set(message) - {"role", "text", "timestamp"}:
-            raise PublicChatShareValidationError("Messages may contain only role, text, and timestamp.")
+        if not isinstance(message, dict) or set(message) - {"role", "text", "timestamp", "videos"}:
+            raise PublicChatShareValidationError("Messages may contain only role, text, timestamp, and videos.")
         role = message.get("role")
         text = message.get("text")
         if role not in ("user", "assistant") or not isinstance(text, str):
@@ -103,6 +105,13 @@ def _snapshot(messages: Any, title: Any, created_at: Any) -> tuple[dict[str, Any
         if total_bytes > MAX_SNAPSHOT_BYTES:
             raise PublicChatShareValidationError("Snapshot is too large.")
         item = {"role": role, "text": text}
+        if "videos" in message:
+            try:
+                videos = normalize_shared_chat_videos(message["videos"])
+            except ValueError as exc:
+                raise PublicChatShareValidationError("Invalid shared video metadata.") from exc
+            if videos:
+                item["videos"] = videos
         if "timestamp" in message:
             item["timestamp"] = _timestamp(message["timestamp"], "message timestamp")
         serialized_bytes += len(json.dumps(item, ensure_ascii=False, separators=(",", ":"),
@@ -407,6 +416,11 @@ class PublicChatShareStore:
         return self.get_snapshot_page(token, share_id=share_id, page=0)["snapshot"]
 
     def get_snapshot_page(self, token: str, *, share_id: str | None = None, page: int | None = None) -> dict[str, Any]:
+        value = self._get_snapshot_page(token, share_id=share_id, page=page)
+        value.pop("session_id")
+        return value
+
+    def _get_snapshot_page(self, token: str, *, share_id: str | None = None, page: int | None = None) -> dict[str, Any]:
         # Invalid input is rejected before storage I/O, without echoing a token.
         if not isinstance(token, str) or TOKEN_PATTERN.fullmatch(token) is None:
             raise PublicChatShareUnavailable()
@@ -418,7 +432,7 @@ class PublicChatShareStore:
         current_time = _timestamp(self._now(), "current time")
         with self._connection() as connection:
             row = connection.execute(
-                """SELECT s.share_id, s.message_count, s.snapshot_json, s.snapshot_sha256 FROM public_chat_shares AS s
+                """SELECT s.share_id, s.session_id, s.message_count, s.snapshot_json, s.snapshot_sha256 FROM public_chat_shares AS s
                    WHERE s.token_hash = ? AND (? IS NULL OR s.share_id = ?)
                    AND (s.expires_at IS NULL OR s.expires_at > ?)
                    AND NOT EXISTS (SELECT 1 FROM public_chat_share_revocations AS r
@@ -427,6 +441,7 @@ class PublicChatShareStore:
             ).fetchone()
             if row is None:
                 raise PublicChatShareUnavailable()
+            session_id = row["session_id"]
             message_count = row["message_count"]
             has_pages = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_chat_share_pages'").fetchone()
             page_count = 1 + (connection.execute("SELECT count(*) FROM public_chat_share_pages WHERE share_id=?", (row["share_id"],)).fetchone()[0] if has_pages else 0)
@@ -452,7 +467,41 @@ class PublicChatShareStore:
             snapshot, _ = _snapshot(decoded["messages"], decoded["title"], decoded["created_at"])
         except (ValueError, UnicodeError, RecursionError) as exc:
             raise PublicChatShareUnavailable() from exc
-        return {"snapshot": snapshot, "page": page, "page_count": page_count, "message_count": message_count}
+        return {"snapshot": snapshot, "page": page, "page_count": page_count, "message_count": message_count,
+                "session_id": session_id}
+
+    def get_snapshot_video(self, token: str, *, page: int, message_index: int, video_index: int,
+                           share_id: str | None = None) -> dict[str, Any]:
+        """Resolve only a descriptor already frozen in this exact bounded page."""
+        if any(type(index) is not int or not 0 <= index <= 2**31 - 1
+               for index in (page, message_index, video_index)):
+            raise PublicChatShareUnavailable()
+        value = self._get_snapshot_page(token, share_id=share_id, page=page)
+        try:
+            video = value["snapshot"]["messages"][message_index]["videos"][video_index]
+        except (IndexError, KeyError):
+            raise PublicChatShareUnavailable() from None
+        return {"session_id": value["session_id"], "video": video}
+
+    def authorize_access(self, token: str, *, share_id: str | None = None) -> None:
+        """Cheap read-only stream recheck; never reload or render a transcript page."""
+        if (not isinstance(token, str) or TOKEN_PATTERN.fullmatch(token) is None
+                or share_id is not None and (not isinstance(share_id, str)
+                    or SHARE_ID_PATTERN.fullmatch(share_id) is None)):
+            raise PublicChatShareUnavailable()
+        token_hash = hashlib.sha256(token.encode("ascii")).digest()
+        current_time = _timestamp(self._now(), "current time")
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM public_chat_shares AS s
+                   WHERE s.token_hash = ? AND (? IS NULL OR s.share_id = ?)
+                   AND (s.expires_at IS NULL OR s.expires_at > ?)
+                   AND NOT EXISTS (SELECT 1 FROM public_chat_share_revocations AS r
+                                   WHERE r.share_id = s.share_id)""",
+                (token_hash, share_id, share_id, current_time),
+            ).fetchone()
+        if row is None:
+            raise PublicChatShareUnavailable()
 
 
 _STYLE = """html{color-scheme:light dark;--page:#f7f8fa;--surface:#fff;--ink:#222831;--muted:#69727e;--line:#e4e7eb;--green:#287346;--user:#e6f3e9;--user-line:#d1e7d8;--code:#f3f5f7;--mark:#ecf5ee}
@@ -468,6 +517,7 @@ main{max-width:864px;margin:0 auto;padding:54px 32px 36px}.conversation-header{p
 @media(max-width:600px){.masthead{height:62px}.masthead-inner{padding:0 20px}.masthead-label{font-size:11px}main{padding:32px 18px 28px}h1{font-size:27px;letter-spacing:-.8px}.conversation-header{padding-bottom:24px;margin-bottom:25px}.eyebrow{margin-bottom:13px;font-size:10px}.description{font-size:13px}.metadata{font-size:11px;gap:5px 7px}.transcript{gap:24px}.user{width:94%}.message-body{padding:17px 18px;font-size:14px}.message time{font-size:10px}.markdown h2{font-size:19px}.markdown h3{font-size:17px}.code-block pre{padding:12px}.markdown th,.markdown td{padding:9px 11px}.conversation-footer{font-size:11px}}
 @media print{html{color-scheme:light;--page:#fff;--surface:#fff;--ink:#111;--muted:#555;--line:#ddd;--user:#f0f7f2;--user-line:#ddd;--code:#f5f5f5;--mark:#f0f7f2;--green:#286b43}body{font-size:11pt}.masthead{height:48px}main{max-width:none;padding:24px 0}.message-body{break-inside:avoid}.code-block pre{white-space:pre-wrap;overflow-wrap:anywhere}.table-wrap{overflow:visible}.conversation-footer{margin-top:24px}}
 """
+_STYLE += "\n.shared-video{margin:16px 0 0;white-space:normal}.shared-video video{display:block;width:100%;max-height:65vh;background:#111;border-radius:10px}.shared-video figcaption,.video-caption{margin-top:7px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}"
 _STYLE_HASH = base64.b64encode(hashlib.sha256(_STYLE.encode("utf-8")).digest()).decode("ascii")
 
 
@@ -600,7 +650,7 @@ def public_chat_share_headers(*, allow_unlock_form: bool = False) -> dict[str, s
         "Content-Security-Policy": (
             "default-src 'none'; script-src 'none'; "
             f"style-src 'sha256-{_STYLE_HASH}'; "
-            "img-src 'none'; connect-src 'none'; base-uri 'none'; "
+            "img-src 'none'; media-src 'self'; connect-src 'none'; base-uri 'none'; "
             + ("form-action 'self'; frame-ancestors 'none'; sandbox allow-forms allow-same-origin"
                if allow_unlock_form else "form-action 'none'; frame-ancestors 'none'; sandbox allow-same-origin")
         ),
@@ -688,10 +738,19 @@ def render_public_chat_html(snapshot: dict[str, Any], *, page: int = 0, page_cou
             stamp = timestamp.strftime("%b %d · %H:%M UTC")
             parts.append(f'<time datetime="{timestamp.isoformat()}">{stamp}</time>')
         parts.append('</div>')
-        if role == "user":
-            parts.append(f'<div class="message-body plain-text">{html.escape(message["text"], quote=True)}</div>')
-        else:
-            parts.append(f'<div class="message-body markdown">{_render_message_markdown(message["text"])}</div>')
+        content = (html.escape(message["text"], quote=True) if role == "user"
+                   else _render_message_markdown(message["text"]))
+        parts.append(f'<div class="message-body {"plain-text" if role == "user" else "markdown"}">{content}')
+        for video_index, video in enumerate(message.get("videos", [])):
+            filename = html.escape(video["filename"], quote=True)
+            if navigation_base is None:
+                parts.append(f'<p class="video-caption">Video: {filename}</p>')
+                continue
+            source = f"{navigation_base}/media/{page}/{index}/{video_index}"
+            parts.append(f'<figure class="shared-video"><video controls preload="metadata" playsinline '
+                         f'aria-label="{filename}" src="{source}">Your browser cannot play this video.</video>'
+                         f'<figcaption>{filename}</figcaption></figure>')
+        parts.append('</div>')
         parts.append('</section>')
     parts.append(f'</div>{navigation}<footer class="conversation-footer"><p>This is a saved copy. Replies and updates stay in the original chat.</p><p class="footer-brand">Shared with AgentsDock</p></footer><div id="conversation-end"></div></main></body></html>')
     rendered = "".join(parts).encode("utf-8")

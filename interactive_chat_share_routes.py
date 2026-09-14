@@ -20,12 +20,15 @@ from interactive_chat_shares import (
 from public_chat_share_routes import chat_share_origin
 import interactive_chat_share_web as web
 from interactive_chat_controls import ChatControlError
+from shared_chat_video_stream import SharedVideoResponse
+from shared_chat_videos import VIDEO_ID, SharedVideoUnavailable
 
 WARNING = (
     "Trusted full chat control: this person can read this chat, send or steer prompts, upload files, "
     "stop work, manage the queue and goals, change model/permission settings, respond to approvals, "
     "and create or run persistent scheduled jobs for this chat. "
-    "No file browsing, downloads, terminal, other chats, or server administration are shared. "
+    "Attached and published videos are playable and can be saved by viewers. "
+    "No general file browsing, terminal, other chats, or server administration are shared. "
     "The existing agent retains its normal tools and context, so they can ask it to use tools "
     "or return sensitive information. This is not a sandbox. Share the URL and reusable access token separately. "
     "Revocation stops future access but cannot erase saved copies, undo accepted work, or remove already configured jobs."
@@ -43,12 +46,12 @@ HTTP_COOKIE = "AgentsDock-Chat"
 HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "X-Robots-Tag": "noindex, nofollow, noarchive", "Cross-Origin-Resource-Policy": "same-origin",
-    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; media-src 'self'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 }
 
 
 def create_interactive_chat_share_router(*, storage_root, authorize, session_exists, public_base_url,
-    load_transcript, submit_prompt, save_upload, wait_for_change, chat_control=None):
+    load_transcript, submit_prompt, save_upload, wait_for_change, chat_control=None, open_video=None):
     """Callbacks are scoped by the durable share ledger, not browser identities.
 
     A durable request ledger prevents repeated callback execution; ambiguous
@@ -309,6 +312,26 @@ def create_interactive_chat_share_router(*, storage_root, authorize, session_exi
         value = await snapshot(grant)
         await auth(request, share_id)
         return result({**value, "csrf": csrf_token(token)})
+
+    @router.api_route("/interactive-chat/{share_id}/media/{handle}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def video(share_id: str, handle: str, request: Request):
+        grant, _ = await auth(request, share_id)
+        if open_video is None or len(handle) > 1024 or VIDEO_ID.fullmatch(handle) is None:
+            raise HTTPException(404, "Shared video is unavailable")
+        try:
+            opened = await open_video(grant["session_id"], handle)
+        except (SharedVideoUnavailable, OSError, ValueError):
+            raise HTTPException(404, "Shared video is unavailable") from None
+        async def reauthorize():
+            await auth(request, share_id)
+        try:
+            # Construction owns the descriptor even if its pinned revision
+            # changed between resolution and response initialization.
+            return SharedVideoResponse(opened["file_fd"], byte_size=opened["size"],
+                content_type=opened["content_type"], filename=opened["filename"], request=request,
+                reauthorize=reauthorize, extra_headers=HEADERS, file_revision=opened.get("file_revision"))
+        except (OSError, ValueError):
+            raise HTTPException(404, "Shared video is unavailable") from None
 
     @router.post("/interactive-chat/{share_id}/prompts", include_in_schema=False)
     async def prompt(share_id: str, request: Request):
