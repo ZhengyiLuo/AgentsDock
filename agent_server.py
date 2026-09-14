@@ -48335,12 +48335,15 @@ def schedule_provider_history_sync(sess: dict[str, Any]) -> None:
 
 async def filter_codex_history_for_import(
     session_id: str, provider_id: str, items: list[dict[str, Any]],
+    *, source_path: Path | None = None, sync_checkpoint: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Cancellable read-only proof, with no durable effects or event-loop I/O."""
     cancelled = threading.Event()
     worker = asyncio.create_task(asyncio.to_thread(
         filter_native_codex_history_items, session_id, provider_id,
         events_path(session_id), items, cancelled=cancelled.is_set,
+        source_path=source_path, root=CODEX_SESSIONS_ROOT, sync_checkpoint=sync_checkpoint,
+        parse_item=lambda record: codex_history_event_item(record, expected_session_id=session_id),
     ))
     try:
         return await asyncio.shield(worker)
@@ -48366,7 +48369,9 @@ async def append_imported_history(
     provider_id = str(session_provider_id(sess) or "")
     backend = str(sess.get("backend") or DEFAULT_BACKEND).lower()
     if backend == BACKEND_CODEX and sync_checkpoint is not None:
-        items = await filter_codex_history_for_import(session_id, provider_id, items)
+        items = await filter_codex_history_for_import(
+            session_id, provider_id, items, source_path=source_path, sync_checkpoint=sync_checkpoint,
+        )
     elif backend == BACKEND_CLAUDE and sync_checkpoint is not None:
         def normalize_wake_user(source_event: dict[str, Any]) -> str | None:
             item = claude_history_event_item(source_event, expected_session_id=session_id)

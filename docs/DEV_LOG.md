@@ -1,5 +1,23 @@
 # Development and release log
 
+## 2026-09-14 — 1.0.0 cross-chat history correction prepared
+
+- Repair legacy asynchronous delivery wrappers that provider history could
+  re-import as user messages when the native ledger stored only their clean
+  bodies. Require the exact completed native owner, delivery receipts, body
+  digest and checkpointed provider item; retain genuine user quotations.
+- Apply the same proof before a new import is committed or broadcast, and
+  project already-imported duplicates silently on partial history pages.
+  Preserve original agent messages, replies, identities and source timestamps;
+  do not rewrite provider transcripts or grant messaging authority.
+- Guarded, isolated parser/proof/import-boundary checks passed (51 tests),
+  including cancellation, changed source, split import ranges, steering,
+  conflicting receipts and large histories. No server process was imported or
+  started locally. Desktop regression checks and isolated component rendering
+  preserve original purple messages, real user quotations and inactive state.
+- Version remains 1.0.0 by explicit approval. Release publication and signed
+  asset acceptance are still pending; no live deployment or restart performed.
+
 ## 2026-09-14 — 1.0.0 stable accepted
 
 - With explicit approval, replaced the published release record in place at

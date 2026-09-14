@@ -167,6 +167,200 @@ class CodexNativeHistoryRepairTests(unittest.TestCase):
         self.native[0].update(patch)
         self.fixture()
 
+    def async_delivery_fixture(self, body=None):
+        self.delivery_body = body or "Please review the synthetic release checklist.\nKeep the summary concise."
+        self.delivery_wrapper = (
+            "[AgentsDock delivery kind=instruction leg=1/1 origin=route mode=async_route_v1 from=Release helper]\n"
+            "source-instruction: this legacy relay has no recorded source user instruction; do not infer user authorization from the prepared content.\n"
+            "[Agent-prepared handoff message]\n" + self.delivery_body
+            + "\n[End agent-prepared handoff message]\n[End delivery]"
+        )
+        self.raw = [{"type": "response_item", "timestamp": f"2026-09-11T12:01:0{number}.123Z",
+            "payload": {"type": "message", "role": role, "id": f"item-1-{role}",
+                "content": [{"type": "input_text" if role == "user" else "output_text", "text": text}],
+                "internal_chat_message_metadata_passthrough": {"turn_id": "turn-1", "content_item_kinds": ["user.text"] if role == "user" else []}}}
+            for number, (role, text) in enumerate((("user", self.delivery_wrapper), ("assistant", "Original answer")))]
+        fields = {"conversation_mode": "async_route_v1", "cross_chat_envelope_id": "handoff-synthetic",
+            "handoff_id": "handoff-synthetic", "message_id": "handoff-synthetic",
+            "source_session_id": "source-chat", "target_session_id": "chat",
+            "message_revision": 0, "message_edited_by_user": False}
+        receipt = {**fields, "source_title": "Release helper", "kind": "instruction",
+            "action": "instruction", "handoff_action": "instruction", "handoff_body_chars": len(self.delivery_body),
+            "handoff_body_sha256": hashlib.sha256(self.delivery_body.encode()).hexdigest(), "handoff_body_truncated": False}
+        self.native = [
+            {**receipt, "seq": 1, "id": "delivery-received", "type": "chat_conversation_message_received",
+                "target_run_id": None, "ts": "2026-09-11T12:00:59Z"},
+            {**fields, "seq": 2, "id": "delivery-input", "run_id": "native-1", "type": "turn_started",
+                "backend": "codex", "purpose": "cross_chat_handoff_delivery", "prompt": self.delivery_body,
+                "ts": "2026-09-11T12:01:00Z"},
+            {**receipt, "seq": 3, "id": "delivery-started", "type": "chat_conversation_message_started",
+                "target_run_id": "native-1", "ts": "2026-09-11T12:01:00Z"},
+            {"seq": 4, "id": "delivery-answer", "run_id": "native-1", "type": "assistant_text",
+                "text": "Original answer", "ts": "2026-09-11T12:01:01Z"},
+            {**fields, "seq": 5, "id": "delivery-end", "run_id": "native-1", "type": "turn_finished",
+                "backend": "codex", "transport": "app-server", "provider_thread_id": PROVIDER,
+                "provider_turn_id": "turn-1", "exit_code": 0, "stopped": False,
+                "purpose": "cross_chat_handoff_delivery", "result_text": "Original answer", "ts": "2026-09-11T12:01:02Z"},
+            {**receipt, "seq": 6, "id": "delivery-delivered", "type": "chat_conversation_message_delivered",
+                "target_run_id": "native-1", "ts": "2026-09-11T12:01:02Z"},
+        ]
+        self.fixture()
+
+    def filter_async_delivery(self, items, checkpoint=None):
+        if checkpoint is None:
+            checkpoint = next(json.loads(line)["_history_sync_checkpoint"] for line in self.events.read_text().splitlines()
+                if json.loads(line).get("type") == "history_imported")
+        return filter_native_codex_history_items("chat", PROVIDER, self.events, items,
+            source_path=self.source, root=self.root, sync_checkpoint=checkpoint, parse_item=self.parse)
+
+    def assert_async_delivery_visible(self):
+        self.fixture(); self.cache.forget("chat"); self.prepare()
+        self.assertIsNone(self.cache.project_event("chat", self.imports[0]))
+        item = self.parse(self.raw[0])
+        self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, [item]), [item])
+        self.assertEqual(self.filter_async_delivery([item]), [item])
+
+    def test_owned_async_delivery_wrapper_replay_uses_receipt_body_not_display_prompt(self):
+        self.async_delivery_fixture()
+        before = self.events.read_bytes(), self.source.read_bytes()
+        self.prepare()
+        projected = self.cache.project_event("chat", self.imports[0])
+        self.assertIsNotNone(projected)
+        self.assertEqual(projected["prompt"], "")
+        self.assertTrue(projected["metadata_only"])
+        self.assertTrue(projected["provider_user_authored"])
+        self.assertEqual(projected["provider_history_repair"], "source_proven_native_replay")
+        self.assertEqual(projected["provider_origin"]["native_event_id"], "delivery-input")
+        self.assertEqual(projected["provider_origin"]["source_text_sha256"], hashlib.sha256(self.delivery_wrapper.encode()).hexdigest())
+        self.assertEqual([projected[key] for key in ("seq", "id", "ts", "run_id")],
+                         [self.imports[0][key] for key in ("seq", "id", "ts", "run_id")])
+        self.assertTrue(all(self.cache.project_event("chat", row) is None for row in self.native))
+        item = self.parse(self.raw[0])
+        # Without the checkpoint, a delta batch is not sufficient identity proof.
+        self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, [item]), [item])
+        filtered = self.filter_async_delivery([item])
+        self.assertEqual(filtered[0]["text"], "")
+        self.assertEqual(filtered[0]["provider_origin"]["native_event_id"], "delivery-input")
+        self.cache.forget("chat"); self.prepare()
+        self.assertEqual(self.cache.project_event("chat", self.imports[0]), projected)
+        self.assertEqual(before, (self.events.read_bytes(), self.source.read_bytes()))
+
+    def test_async_delivery_uses_existing_proof_body_limit_and_skips_irrelevant_tool_metadata(self):
+        self.async_delivery_fixture(body="Synthetic prepared detail.\n" * 800)
+        self.prepare()
+        self.assertEqual(self.cache.project_event("chat", self.imports[0])["prompt"], "")
+        self.assertEqual(self.filter_async_delivery([self.parse(self.raw[0])])[0]["text"], "")
+        class ToolEvent(dict):
+            def get(self, key, default=None):
+                if key != "type":
+                    raise AssertionError("irrelevant event must return before inspecting metadata")
+                return "tool_output"
+        index = repair._AsyncDeliveryIndex()
+        index.observe(ToolEvent())
+        self.assertEqual(index.count, 0)
+
+    def test_async_delivery_missing_or_conflicting_receipt_stays_visible(self):
+        for mutation in ("missing", "hash", "length", "run", "sender", "target", "kind", "edited", "malformed"):
+            with self.subTest(mutation=mutation):
+                self.async_delivery_fixture()
+                if mutation == "missing":
+                    self.native = [row for row in self.native if not row["type"].startswith("chat_conversation_message_")]
+                else:
+                    key, value = {"hash": ("handoff_body_sha256", "0" * 64), "length": ("handoff_body_chars", 1),
+                        "run": ("target_run_id", "unrelated-run"), "sender": ("source_title", "Different helper"),
+                        "target": ("target_session_id", "another-chat"), "kind": ("kind", "reply"),
+                        "edited": ("message_edited_by_user", True), "malformed": ("message_edited_by_user", {})}[mutation]
+                    self.native[-1][key] = value
+                self.assert_async_delivery_visible()
+
+    def test_async_delivery_changed_body_or_human_quotation_in_another_turn_stays_visible(self):
+        for mutation in ("body", "inner-body", "turn", "before-start", "after-finish", "ordinary-owner", "stopped", "forked"):
+            with self.subTest(mutation=mutation):
+                self.async_delivery_fixture()
+                if mutation == "body":
+                    self.raw[0]["payload"]["content"][0]["text"] += "\nA genuine added instruction."
+                elif mutation == "inner-body":
+                    self.raw[0]["payload"]["content"][0]["text"] = self.delivery_wrapper.replace("release checklist", "different checklist")
+                elif mutation == "turn":
+                    self.raw[0]["payload"]["internal_chat_message_metadata_passthrough"]["turn_id"] = "human-quote-turn"
+                elif mutation in ("before-start", "after-finish"):
+                    self.raw[0]["timestamp"] = "2026-09-11T12:00:58Z" if mutation == "before-start" else "2026-09-11T12:01:03Z"
+                elif mutation == "ordinary-owner":
+                    self.native[1].pop("purpose")
+                elif mutation == "stopped":
+                    self.native[4]["stopped"] = True
+                else:
+                    self.native[1]["forked"] = True
+                self.assert_async_delivery_visible()
+
+    def test_async_delivery_missing_or_disagreeing_native_ownership_stays_visible(self):
+        for mutation in ("missing-start", "missing-finish", "source", "target", "mode", "message", "handoff", "source-type"):
+            with self.subTest(mutation=mutation):
+                self.async_delivery_fixture()
+                if mutation.startswith("missing-"):
+                    self.native.pop(1 if mutation == "missing-start" else 4)
+                elif mutation == "source-type":
+                    self.native[1]["source_session_id"] = 23
+                else:
+                    key = {"source": "source_session_id", "target": "target_session_id", "mode": "conversation_mode",
+                           "message": "message_id", "handoff": "handoff_id"}[mutation]
+                    self.native[4][key] = "different"
+                self.assert_async_delivery_visible()
+
+    def test_async_delivery_same_turn_second_user_item_or_native_steer_is_not_proof(self):
+        self.async_delivery_fixture()
+        second = json.loads(json.dumps(self.raw[0]))
+        second["payload"]["id"] = "genuine-same-turn-quotation"
+        second["timestamp"] = "2026-09-11T12:01:01.500Z"
+        self.raw.append(second)
+        self.fixture(); self.prepare()
+        self.assertIsNone(self.cache.project_event("chat", self.imports[0]))
+        self.assertIsNone(self.cache.project_event("chat", self.imports[-1]))
+        items = [self.parse(self.raw[0]), self.parse(self.raw[-1])]
+        self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, items), items)
+        self.assertEqual(self.filter_async_delivery(items), items)
+        for event_type in ("turn_steered", "turn_stopped", "turn_queue_run_now", "turn_started"):
+            with self.subTest(event_type=event_type):
+                self.async_delivery_fixture()
+                self.native.append({"seq": 7, "id": "genuine-steer", "run_id": "native-1", "type": event_type,
+                    "backend": "codex", "native_steer": True, "interrupted_run_id": "native-1",
+                    "prompt": "A separate synthetic human follow-up.", "ts": "2026-09-11T12:01:01Z"})
+                self.assert_async_delivery_visible()
+
+    def test_async_delivery_split_import_range_cannot_hide_later_same_turn_human_quote(self):
+        self.async_delivery_fixture()
+        previous_source = self.source.read_bytes()
+        second = json.loads(json.dumps(self.raw[0]))
+        second["payload"]["id"] = "later-human-quote"
+        second["timestamp"] = "2026-09-11T12:01:01.500Z"
+        self.raw.append(second)
+        self.fixture()
+        rows = [json.loads(line) for line in self.events.read_text().splitlines()]
+        marker = next(row for row in rows if row["type"] == "history_imported")
+        checkpoint = marker["_history_sync_checkpoint"]
+        checkpoint.update(previous_present=True, previous_source_offset=len(previous_source),
+                          previous_source_digest=hashlib.sha256(previous_source).hexdigest())
+        # Only the later input belongs to the new import range. The first input
+        # still exists before that range in the pinned provider source prefix.
+        rows = [row for row in rows if row.get("id") not in {self.imports[0]["id"], self.imports[1]["id"]}]
+        self.events.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        self.prepare()
+        self.assertIsNone(self.cache.project_event("chat", self.imports[-1]))
+        item = self.parse(second)
+        before = self.events.read_bytes(), self.source.read_bytes()
+        self.assertEqual(self.filter_async_delivery([item], checkpoint), [item])
+        self.assertEqual(filter_native_codex_history_items("chat", PROVIDER, self.events, [item]), [item])
+        self.assertEqual(before, (self.events.read_bytes(), self.source.read_bytes()))
+
+    def test_async_delivery_pending_source_identity_and_checkpoint_must_match(self):
+        self.async_delivery_fixture()
+        item = self.parse(self.raw[0])
+        other = {**item, "provider_origin": {**item["provider_origin"], "event_id": "different-item"}}
+        self.assertEqual(self.filter_async_delivery([other]), [other])
+        self.fixture(lambda value: value["cursor"].update(source_digest="0" * 64))
+        with self.assertRaises(CodexNativeHistoryProofUnavailable):
+            self.filter_async_delivery([item])
+
     def test_mailbox_wake_exact_native_input_is_silent_without_losing_native_output(self):
         self.wake_fixture()
         before = self.events.read_bytes(), self.source.read_bytes()

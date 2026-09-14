@@ -10,10 +10,16 @@ and updates. Existing capabilities such as Team Hub hosting, secure pairing,
 scheduled jobs, provider history import and Codex goals have been extended and
 hardened; they are not all new features of this release.
 
-**Already on 1.0.0-beta.8?** This is its stable-channel promotion, not another
-runtime feature update. The stable candidate has the same server behavior as
-beta.8; subsequent changes are release bookkeeping and documentation. There is
-no additional API, dependency, signing-key or storage-schema change from beta.8.
+**Already on 1.0.0-beta.8?** This stable replacement additionally repairs
+source-proven cross-chat delivery wrappers imported as user messages. It uses
+the saved delivery receipt and exact native provider-turn identity, preserving
+the original agent message and genuine user input. There is no additional API,
+dependency, signing-key or storage-schema change from beta.8.
+
+**Replacing the original 1.0.0:** the version number is intentionally unchanged.
+Already-installed 1.0.0 servers will not discover this as a newer version;
+explicitly reinstall the verified replacement package to receive this repair.
+Installing only the desktop replacement does not apply a server history fix.
 
 - [Previous stable release: 0.1.25](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v0.1.25)
 - [Full implementation comparison through beta.8](https://github.com/ZhengyiLuo/AgentsServer/compare/v0.1.25...v1.0.0-beta.8)
@@ -161,6 +167,11 @@ See [native goal behavior](https://github.com/ZhengyiLuo/AgentsServer/blob/v1.0.
   instructions, control notices and assistant answers on recent and historical
   pages. Native scheduled events retain their job identity; real user messages
   and ambiguous quotations remain visible. No text-prefix heuristic hides them.
+- Correlate legacy async cross-chat wrappers with their saved prepared-message
+  receipts and exact completed provider turn. A provider's full delivery
+  wrapper differs from the clean message body in the timeline; importing it
+  must not create another green user message. Apply the same proof to old
+  imported records and new history catch-up, including partial history pages.
 - Handle tool-heavy, large and forked Codex histories with streamed, bounded
   proof instead of rejecting them solely at the former aggregate-size limits.
   Incomplete or changed evidence defers the batch without advancing its durable

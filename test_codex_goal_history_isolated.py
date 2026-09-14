@@ -102,6 +102,7 @@ def load_projection():
         "CODEX_NATIVE_HISTORY_REPAIR_CACHE": SimpleNamespace(project_event=lambda *_: None, forget=lambda *_: None),
         "codex_public_item_origin": codex_public_item_origin,
         "filter_native_codex_history_items": filter_native_codex_history_items,
+        "CODEX_SESSIONS_ROOT": Path("/synthetic-provider-history"),
         "strip_agentsdock_generated_user_text": lambda text, **kwargs: text,
         "strip_all_legacy_agentsdock_provider_authority_suffixes": lambda text, **kwargs: text,
         "session_provider_id": lambda session: session.get("codex_thread_id"),
