@@ -47,6 +47,7 @@ import type {
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
   CodexSubagentsConfiguration,
+  CodexServerSettingsScope,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -2045,12 +2046,22 @@ export class AppService {
     })
   }
 
-  async codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
-    return this.codexRequest(scope => scope.client.codexServerSubagents())
+  async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.codexServerSubagents()
+    this.assertCurrentScope(scope)
+    return result
   }
 
-  async setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
-    return this.codexRequest(scope => scope.client.setCodexServerSubagents(limit))
+  async setCodexServerSubagents(expected: CodexServerSettingsScope, limit: number | null): Promise<CodexSubagentsConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.setCodexServerSubagents(limit)
+    this.assertCurrentScope(scope)
+    return result
   }
 
   async setCodexServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration> {

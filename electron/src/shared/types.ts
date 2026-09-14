@@ -250,6 +250,9 @@ export interface CodexGoalsConfiguration {
   message: string
 }
 
+/** Server selection displayed by the caller, checked before sending an admin request. */
+export type CodexServerSettingsScope = Pick<WorkspaceProfileScope, 'profileId' | 'profileGeneration'>
+
 /** Server override, not the provider's resolved or currently running limit. */
 export interface CodexSubagentsConfiguration {
   configurable: boolean

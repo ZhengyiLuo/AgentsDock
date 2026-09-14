@@ -781,6 +781,7 @@ describe('server-wide Codex goals compatibility', () => {
 describe('server-wide Codex subagents scope', () => {
   const configuration = { configurable: true, max_concurrent_threads_per_session: 8,
     scope: 'server', applies_to: 'new_or_reloaded_threads', message: 'Synthetic setting.' }
+  const caller = { profileId: 'profile-a', profileGeneration: 1 }
 
   function harness() {
     const client = {
@@ -798,9 +799,9 @@ describe('server-wide Codex subagents scope', () => {
     const { service, client } = harness()
     const refresh = vi.fn(() => { throw new Error('Unexpected settings refresh') })
     Object.assign(service, { refreshAll: refresh })
-    await expect(service.codexServerSubagents()).resolves.toEqual(configuration)
-    await expect(service.setCodexServerSubagents(32)).resolves.toEqual(configuration)
-    await expect(service.setCodexServerSubagents(null)).resolves.toEqual(configuration)
+    await expect(service.codexServerSubagents(caller)).resolves.toEqual(configuration)
+    await expect(service.setCodexServerSubagents(caller, 32)).resolves.toEqual(configuration)
+    await expect(service.setCodexServerSubagents(caller, null)).resolves.toEqual(configuration)
     expect(client.codexServerSubagents).toHaveBeenCalledOnce()
     expect(client.setCodexServerSubagents.mock.calls).toEqual([[32], [null]])
     expect(refresh).not.toHaveBeenCalled()
@@ -812,7 +813,7 @@ describe('server-wide Codex subagents scope', () => {
     const called = deferred<void>()
     client[operation === 'read' ? 'codexServerSubagents' : 'setCodexServerSubagents']
       .mockImplementation(() => { called.resolve(); return response.promise })
-    const pending = operation === 'read' ? service.codexServerSubagents() : service.setCodexServerSubagents(32)
+    const pending = operation === 'read' ? service.codexServerSubagents(caller) : service.setCodexServerSubagents(caller, 32)
     await called.promise
     const otherClient = { codexServerSubagents: vi.fn(), setCodexServerSubagents: vi.fn() }
     Object.assign(service, { scope: { profileId: 'profile-a', generation: 2, client: otherClient }, profileGeneration: 2 })
@@ -826,7 +827,7 @@ describe('server-wide Codex subagents scope', () => {
     const { service, client } = harness()
     const validation = deferred<void>()
     Object.assign(service, { validatedGeneration: 0, refreshAll: vi.fn(() => validation.promise) })
-    const pending = service.setCodexServerSubagents(32)
+    const pending = service.setCodexServerSubagents(caller, 32)
     Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
     validation.resolve()
     await expect(pending).rejects.toThrow('superseded')
@@ -838,11 +839,31 @@ describe('server-wide Codex subagents scope', () => {
     const error = new ServerError(status, 'Synthetic unavailable setting.')
     client.codexServerSubagents.mockRejectedValue(error)
     client.setCodexServerSubagents.mockRejectedValue(error)
-    await expect(service.codexServerSubagents()).rejects.toBe(error)
-    await expect(service.setCodexServerSubagents(32)).rejects.toBe(error)
+    await expect(service.codexServerSubagents(caller)).rejects.toBe(error)
+    await expect(service.setCodexServerSubagents(caller, 32)).rejects.toBe(error)
     expect(client.codexServerSubagents).toHaveBeenCalledOnce()
     expect(client.setCodexServerSubagents).toHaveBeenCalledOnce()
   })
+
+  it.each(['different-profile', 'same-profile-new-generation'] as const)(
+    'rejects a stale renderer caller before validation or either server is contacted: %s', async transition => {
+      const { service, client } = harness()
+      const otherClient = { codexServerSubagents: vi.fn(), setCodexServerSubagents: vi.fn() }
+      const profileId = transition === 'different-profile' ? 'profile-b' : caller.profileId
+      const validation = vi.fn(() => { throw new Error('Stale caller reached validation') })
+      Object.assign(service, {
+        scope: { profileId, generation: 2, client: otherClient },
+        activeProfileId: profileId, profileGeneration: 2, ensureValidatedScope: validation
+      })
+      await expect(service.codexServerSubagents(caller)).rejects.toThrow('superseded')
+      await expect(service.setCodexServerSubagents(caller, 32)).rejects.toThrow('superseded')
+      expect(validation).not.toHaveBeenCalled()
+      for (const candidate of [client, otherClient]) {
+        expect(candidate.codexServerSubagents).not.toHaveBeenCalled()
+        expect(candidate.setCodexServerSubagents).not.toHaveBeenCalled()
+      }
+    }
+  )
 })
 
 describe('provider command compatibility', () => {

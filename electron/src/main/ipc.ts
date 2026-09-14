@@ -268,8 +268,8 @@ export function registerIpc(
 
   handle('codex:server-goals:get', () => service.codexServerGoals())
   handle('codex:server-goals:set', enabled => service.setCodexServerGoals(Boolean(enabled)))
-  handle('codex:server-subagents:get', () => service.codexServerSubagents())
-  handle('codex:server-subagents:set', limit => service.setCodexServerSubagents(limit))
+  handle('codex:server-subagents:get', scope => service.codexServerSubagents(scope))
+  handle('codex:server-subagents:set', (scope, limit) => service.setCodexServerSubagents(scope, limit))
   handle('codex:runtime', sessionId => service.codexRuntime(sessionId))
   handle('codex:thread:load', sessionId => service.loadCodexThread(sessionId))
   handle('codex:interaction:resolve', (sessionId, interactionId, response) => (

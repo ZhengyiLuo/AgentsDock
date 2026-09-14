@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { LoaderCircle, Users } from 'lucide-react'
 import { t } from '@shared/i18n'
-import type { CodexSubagentsConfiguration } from '@shared/types'
+import type { CodexServerSettingsScope, CodexSubagentsConfiguration } from '@shared/types'
 import { useLocale } from '../lib/i18n'
 
 export function CodexSubagentSettings({ connected, profileId, profileGeneration }: {
@@ -12,6 +12,7 @@ export function CodexSubagentSettings({ connected, profileId, profileGeneration 
   useLocale()
   const fieldId = useId()
   const [configuration, setConfiguration] = useState<CodexSubagentsConfiguration | null>(null)
+  const [configurationScope, setConfigurationScope] = useState<CodexServerSettingsScope | null>(null)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -31,18 +32,20 @@ export function CodexSubagentSettings({ connected, profileId, profileGeneration 
   useEffect(() => {
     const request = ++requestRef.current
     setConfiguration(null)
+    setConfigurationScope(null)
     setDraft('')
     setError(null)
     setUnavailable(null)
     setSaved(false)
     setSaving(false)
     const read = window.agentsDock.codex?.serverSubagents
-    setLoading(connected && typeof read === 'function')
-    if (connected) {
+    setLoading(connected && Boolean(profileId) && typeof read === 'function')
+    if (connected && profileId) {
       if (typeof read !== 'function') setUnavailable('update')
-      else void read().then(next => {
+      else void read({ profileId, profileGeneration }).then(next => {
         if (request !== requestRef.current) return
         setConfiguration(next)
+        setConfigurationScope({ profileId, profileGeneration })
         setDraft(next.max_concurrent_threads_per_session?.toString() ?? '')
       }).catch(reason => {
         if (request === requestRef.current) showFailure(reason)
@@ -55,17 +58,18 @@ export function CodexSubagentSettings({ connected, profileId, profileGeneration 
 
   const limit = draft.trim() === '' ? null : Number(draft)
   const valid = limit === null || (/^\d+$/.test(draft.trim()) && Number.isSafeInteger(limit) && limit >= 1)
-  const editable = connected && configuration?.configurable === true && !unavailable && !loading && !saving
+  const scopeMatches = configurationScope?.profileId === profileId && configurationScope?.profileGeneration === profileGeneration
+  const editable = connected && profileId != null && scopeMatches && configuration?.configurable === true && !unavailable && !loading && !saving
   const changed = configuration != null && limit !== configuration.max_concurrent_threads_per_session
 
   async function save() {
-    if (!editable || !valid || !changed) return
+    if (!editable || !valid || !changed || !profileId) return
     const request = ++requestRef.current
     setSaving(true)
     setError(null)
     setSaved(false)
     try {
-      const next = await window.agentsDock.codex.setServerSubagents(limit)
+      const next = await window.agentsDock.codex.setServerSubagents({ profileId, profileGeneration }, limit)
       if (request !== requestRef.current) return
       setConfiguration(next)
       setDraft(next.max_concurrent_threads_per_session?.toString() ?? '')

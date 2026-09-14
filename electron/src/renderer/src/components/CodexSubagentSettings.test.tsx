@@ -9,7 +9,7 @@ const snapshot = (limit: number | null): CodexSubagentsConfiguration => ({
   configurable: true, max_concurrent_threads_per_session: limit, message: 'Saved',
   applies_to: 'new_or_reloaded_threads', scope: 'server'
 })
-function bridge(read = vi.fn().mockResolvedValue(snapshot(null)), write = vi.fn().mockImplementation(async limit => snapshot(limit))) {
+function bridge(read = vi.fn().mockResolvedValue(snapshot(null)), write = vi.fn().mockImplementation(async (_scope, limit) => snapshot(limit))) {
   Object.defineProperty(window, 'agentsDock', { configurable: true,
     value: { codex: { serverSubagents: read, setServerSubagents: write } } as unknown as AgentsDockAPI })
   return { read, write }
@@ -31,7 +31,8 @@ describe('Codex subagent settings', () => {
     expect(read).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByText('Saved. Running agents were not changed.')
-    expect(write).toHaveBeenCalledExactlyOnceWith(32)
+    expect(write).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, 32)
+    expect(read).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 })
     expect(input).toHaveValue('32')
     expect(screen.getByText(/Reload provider when idle/)).toBeInTheDocument()
   })
@@ -42,7 +43,7 @@ describe('Codex subagent settings', () => {
     const input = await screen.findByDisplayValue('4')
     fireEvent.change(input, { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(write).toHaveBeenCalledExactlyOnceWith(null))
+    await waitFor(() => expect(write).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, null))
   })
 
   it.each(['0', '-1', '2.5', 'no', '9007199254740992'])('rejects invalid limit %s without an API write', async value => {

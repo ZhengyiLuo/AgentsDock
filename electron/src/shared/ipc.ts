@@ -22,6 +22,7 @@ import type {
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
   CodexSubagentsConfiguration,
+  CodexServerSettingsScope,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -388,8 +389,8 @@ export interface AgentsDockAPI {
   codex: {
     serverGoals(): Promise<CodexGoalsConfiguration>
     setServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration>
-    serverSubagents(): Promise<CodexSubagentsConfiguration>
-    setServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration>
+    serverSubagents(scope: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration>
+    setServerSubagents(scope: CodexServerSettingsScope, limit: number | null): Promise<CodexSubagentsConfiguration>
     runtime(sessionId: string): Promise<CodexRuntimeSnapshot>
     loadThread(sessionId: string): Promise<CodexRuntimeSnapshot>
     resolveInteraction(

@@ -11,6 +11,9 @@
   cannot change the setting. Preserve drafts on failed saves and ignore stale
   replies after switching servers. Explain new/reloaded-thread scope and
   chat-specific override precedence; provide English and Chinese labels.
+- Bind settings reads and writes to the server selection displayed by the
+  renderer, checking it before dispatch as well as after the response. A stale
+  screen cannot send its old draft to a newly selected server.
 - Use exact native-admin GET/PUT transport with request validation. Real
   loopback transport and service-scope checks cover token framing, reset,
   errors and profile races; component checks cover local editing and no polls.
