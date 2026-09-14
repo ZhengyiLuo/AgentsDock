@@ -204,13 +204,19 @@ describe('Codex controls', () => {
     renderControls()
 
     expect(await screen.findByRole('button', { name: 'Codex controls: Idle' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Codex controls: Idle' }).querySelector('.spin')).toBeNull()
 
     act(() => {
       useAppStore.setState({ activeSessionIds: new Set([session.id]) })
     })
 
     expect(await screen.findByRole('button', { name: 'Codex controls: Running' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Codex controls: Running' }).querySelector('.spin')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Codex controls: Idle' })).not.toBeInTheDocument()
+    act(() => {
+      useAppStore.setState({ activeSessionIds: new Set() })
+    })
+    expect(screen.getByRole('button', { name: 'Codex controls: Idle' }).querySelector('.spin')).toBeNull()
   })
 
   it('quietly polls active threads for fresh context occupancy', async () => {

@@ -125,7 +125,7 @@ export function CodexStatusButton() {
         aria-label={t("ui.CodexControls.CodexStatusButton.codex_controls_36c63bd", { "label": String(label) })}
         title={t("ui.CodexControls.CodexStatusButton.codex_thread_controls_51ea35d")}
       >
-        {loading ? <LoaderCircle className="spin" size={11} /> : <span aria-hidden="true" />}
+        {loading || tone === 'active' ? <LoaderCircle className="spin" size={11} aria-hidden="true" /> : <span aria-hidden="true" />}
         <b>Codex</b>
         <small>{label}</small>
         <ChevronRight size={12} aria-hidden="true" />

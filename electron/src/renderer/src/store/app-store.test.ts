@@ -231,7 +231,7 @@ describe('live run state', () => {
     expect(empty.size).toBe(0)
     expect(updateActiveSessions(running, event('turn_finished')).size).toBe(0)
     expect(updateActiveSessions(running, event('turn_stopped')).size).toBe(0)
-    expect(updateActiveSessions(running, event('error')).size).toBe(0)
+    expect(updateActiveSessions(running, event('error'))).toBe(running)
     expect(updateActiveSessions(running, event('tool_finished'))).toBe(running)
     expect(updateActiveSessions(running, event('turn_started'))).toBe(running)
   })
@@ -2409,6 +2409,102 @@ describe('selected live timeline', () => {
       await vi.advanceTimersByTimeAsync(40)
       expect(changed).not.toHaveBeenCalled()
       unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not replace streamed activity with cached health on a connection-only notice', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const idleHealth: Health = { ok: true, api_contract_version: 8, websocket_runtime: true, active: [] }
+      useAppStore.setState({ connected: true, health: idleHealth, activeSessionIds: new Set() })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0, event: {
+        ...eventFor('chat-a', 2), type: 'turn_started', run_id: 'wake-run', purpose: 'chat_mailbox_wake', prompt: ''
+      } })
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+      handlers.get('server:connection')?.({ profileId: null, profileGeneration: 0, connected: true })
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+      // An explicit fresh health result still has authority to settle a run
+      // whose terminal was missed. Main fences older in-flight responses.
+      handlers.get('server:connection')?.({ profileId: null, profileGeneration: 0, connected: true, health: idleHealth })
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['turn_started', 'turn_finished'])('does not let pending %s activity override a newer explicit health result', async type => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const wasStart = type === 'turn_started'
+      useAppStore.setState({ connected: true, health: { ok: true, active: wasStart ? [] : ['chat-a'] },
+        activeSessionIds: new Set(wasStart ? [] : ['chat-a']) })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        activeSession: wasStart, activeRunId: wasStart ? 'older-run' : null,
+        event: { ...eventFor('chat-a', 2), type, run_id: 'older-run' }
+      })
+      // No timer advance: Health arrives while the lifecycle event is still
+      // waiting for its normal transcript batch, possibly during typing.
+      const freshHealth: Health = { ok: true, active: wasStart ? [] : ['chat-a'],
+        active_runs: wasStart ? [] : [{ session_id: 'chat-a', run_id: 'newer-run' }] }
+      handlers.get('server:connection')?.({ profileId: null, profileGeneration: 0, connected: true, health: freshHealth })
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(!wasStart)
+      expect(useAppStore.getState().health).toBe(freshHealth)
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let another profile health supersede pending activity', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      useAppStore.setState({ activeSessionIds: new Set() })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        activeSession: true, activeRunId: 'current-run',
+        event: { ...eventFor('chat-a', 2), type: 'turn_started', run_id: 'current-run' }
+      })
+      handlers.get('server:connection')?.({ profileId: 'other', profileGeneration: 1, connected: true, health: { ok: true, active: [] } })
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps main-process run ownership for a delayed terminal and then accepts the current completion', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      useAppStore.setState({ activeSessionIds: new Set(['chat-a']), health: {
+        ok: true, active: ['chat-a'], active_runs: [{ session_id: 'chat-a', run_id: 'previous-run' }]
+      } })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        activeSession: true, activeRunId: 'current-run',
+        event: { ...eventFor('chat-a', 2), type: 'turn_started', run_id: 'current-run' }
+      })
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().health?.active_runs).toEqual([{ session_id: 'chat-a', run_id: 'current-run' }])
+      const publish = (seq: number, run: string, activeSession: boolean) => handlers.get('server:event')?.({
+        profileId: null, profileGeneration: 0, activeSession, activeRunId: activeSession ? 'current-run' : null,
+        event: { ...eventFor('chat-a', seq), type: 'turn_finished', run_id: run }
+      })
+      publish(3, 'previous-run', true)
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+      expect(useAppStore.getState().health?.active_runs).toEqual([{ session_id: 'chat-a', run_id: 'current-run' }])
+      publish(4, 'current-run', false)
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(false)
+      expect(useAppStore.getState().health?.active_runs).toEqual([])
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(4)
     } finally {
       vi.useRealTimers()
     }

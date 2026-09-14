@@ -1680,7 +1680,12 @@ export interface ProfileConnectionEvent extends ProfileEventContext {
 }
 export interface ProfileSyncEvent extends ProfileEventContext { sessionId: string; state: ChatSyncStatus; error?: string }
 export interface ProfileSessionsEvent extends ProfileEventContext { sessions: Session[] }
-export interface ProfileAgentEvent extends ProfileEventContext { event: Event }
+export interface ProfileAgentEvent extends ProfileEventContext {
+  event: Event
+  /** Main-process lifecycle projection; never persisted in the transcript. */
+  activeSession?: boolean
+  activeRunId?: string | null
+}
 export interface ProviderRuntimeChanged {
   type: 'provider_runtime_changed'
   session_id: string

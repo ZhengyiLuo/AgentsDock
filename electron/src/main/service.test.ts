@@ -1243,6 +1243,7 @@ describe('embedded Team Hub discovery', () => {
         capabilities: { team_hub_host_control_v1: hostControl(false), team_hub_v1: inactiveHub }
       },
       ensureValidatedScope: vi.fn().mockResolvedValue(undefined), assertCurrentScope: vi.fn(), adoptHealth,
+      readActivityHealth: vi.fn((_scope: unknown, read: () => Promise<Health>) => read()),
       emitProfiles: vi.fn()
     })
     const expected = { profileId: 'profile-a', profileGeneration: 7, serverIdentity: 'server-a' }
@@ -2888,6 +2889,107 @@ function managedUpdateHealth(version = 9): Health {
 }
 
 describe('background connection event publication', () => {
+  it('forwards owner-safe activity hints without rewriting events or overriding legacy no-run starts', () => {
+    const client = fakeClient()
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { id: 73, on: vi.fn(), send } } as never)
+    const internals = service as unknown as {
+      scope: unknown
+      health: Health | null
+      adoptHealth(scope: unknown, health: Health): unknown
+      emitAgentEvent(scope: unknown, event: Event): void
+    }
+    internals.adoptHealth(internals.scope, {
+      ok: true, active: ['chat-a'], active_runs: [{ session_id: 'chat-a', run_id: 'new-run' }]
+    })
+    const oldEnd: Event = { id: 'old-end', session_id: 'chat-a', seq: 10, type: 'turn_finished', ts: 'now', run_id: 'old-run' }
+    internals.emitAgentEvent(internals.scope, oldEnd)
+    expect(send).toHaveBeenCalledWith('server:event', expect.objectContaining({
+      event: oldEnd, activeSession: true, activeRunId: 'new-run'
+    }))
+    const legacy: Event = { id: 'legacy-start', session_id: 'chat-b', seq: 11, type: 'turn_started', ts: 'now' }
+    internals.emitAgentEvent(internals.scope, legacy)
+    const forwarded = send.mock.calls.filter(([channel]) => channel === 'server:event').at(-1)?.[1]
+    expect(forwarded.event).toBe(legacy)
+    expect(forwarded).not.toHaveProperty('activeSession')
+    expect(forwarded).not.toHaveProperty('activeRunId')
+    internals.health = null
+    internals.emitAgentEvent(internals.scope, { ...legacy, seq: 12, run_id: 'unverified-run' })
+    expect(internals.health).toBeNull()
+    expect(send.mock.calls.filter(([channel]) => channel === 'server:event').at(-1)?.[1]).not.toHaveProperty('activeSession')
+  })
+
+  it('rejects stale profile health capture before altering the new scope activity projection', async () => {
+    const client = fakeClient()
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const internals = service as unknown as {
+      scope: { generation: number }
+      readActivityHealth(scope: unknown, read: () => Promise<Health>): Promise<Health>
+    }
+    const read = vi.fn(async () => ({ ok: true }))
+    await expect(internals.readActivityHealth({ ...internals.scope, generation: -1 }, read)).rejects.toThrow()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('does not let early idle health erase a streamed start while the session list is still pending', async () => {
+    const sessions = deferred<Session[]>()
+    const idle: Health = { ok: true, server_identity: 'server-a', server_instance_id: 'boot-a', active: [] }
+    const client = fakeClient({ health: async () => ({ ...idle }), sessions: () => sessions.promise })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { id: 73, on: vi.fn(), send } } as never)
+    const internals = service as unknown as {
+      scope: unknown
+      adoptHealth(scope: unknown, health: Health): unknown
+      emitConnection(scope: unknown, connected: boolean, health: Health): void
+      emitAgentEvent(scope: unknown, event: Event): void
+      refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
+    }
+    internals.adoptHealth(internals.scope, idle)
+    internals.emitConnection(internals.scope, true, idle)
+    const pending = internals.refreshAll(false, false, internals.scope)
+    await Promise.resolve()
+    await Promise.resolve()
+    internals.emitAgentEvent(internals.scope, {
+      id: 'wake-start', session_id: 'chat-a', seq: 10, type: 'turn_started', ts: 'now',
+      run_id: 'wake-run', purpose: 'chat_mailbox_wake', prompt: ''
+    })
+    expect((await service.bootstrap()).health?.active).toEqual(['chat-a'])
+    sessions.resolve([])
+    await pending
+    const connections = () => send.mock.calls.filter(([channel]) => channel === 'server:connection')
+    expect(connections().at(-1)?.[1].health.active).toEqual(['chat-a'])
+    // This later request begins AFTER the live transition, so a truly idle
+    // server can clear stale activity even if its body equals the first one.
+    await internals.refreshAll(false, false, internals.scope)
+    expect(connections().at(-1)?.[1].health.active).toEqual([])
+    expect((await service.bootstrap()).health?.active).toEqual([])
+  })
+
+  it('does not let a delayed active health response resurrect a streamed completion', async () => {
+    const response = deferred<Health>()
+    const active: Health = { ok: true, server_identity: 'server-a', server_instance_id: 'boot-a', active: ['chat-a'] }
+    const client = fakeClient({ health: () => response.promise })
+    const { service } = createProfileService({ 'http://a.test:7850': [client] })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { id: 73, on: vi.fn(), send } } as never)
+    const internals = service as unknown as {
+      scope: unknown
+      adoptHealth(scope: unknown, health: Health): unknown
+      emitAgentEvent(scope: unknown, event: Event): void
+      refreshAll(announce: boolean, includeJobs: boolean, scope: unknown): Promise<void>
+    }
+    internals.adoptHealth(internals.scope, active)
+    const pending = internals.refreshAll(false, false, internals.scope)
+    internals.emitAgentEvent(internals.scope, {
+      id: 'wake-end', session_id: 'chat-a', seq: 11, type: 'turn_finished', ts: 'now', run_id: 'wake-run'
+    })
+    response.resolve(active)
+    await pending
+    expect(send.mock.calls.filter(([channel]) => channel === 'server:connection').at(-1)?.[1].health.active).toEqual([])
+  })
+
   it('suppresses telemetry-only health churn while retaining meaningful health changes', async () => {
     const client = fakeClient()
     const { service } = createProfileService({ 'http://a.test:7850': [client] })

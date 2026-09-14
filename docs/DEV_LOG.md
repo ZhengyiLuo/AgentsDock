@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-13 — Live activity and mailbox replay
+
+- Preserve newer streamed run ownership when an older health request finishes
+  late. Connection-only notifications do not replace live activity with cached
+  health. Fresh idle health can still settle a run whose terminal was missed.
+- Show a compact Working indicator when an owned run has no visible trace yet,
+  including a quiet mailbox wake. Show Compacting context during live compaction
+  and animate the Running header; completed and historical views stay settled.
+- Keep activity reconciliation local and scoped to the connected server. No
+  polling, provider requests, synthetic chat messages or minimap rows are added.
+- The separate large-history server correction also suppresses source-proven
+  duplicate answers imported after mailbox wakes, retaining the original answer,
+  peer deliveries and real human messages. It requires a server update.
+- Type checks, the full desktop suite and production compilation pass. Isolated
+  full-renderer checks cover quiet wake, live compaction, resumed progress and
+  actual completion in both themes, with stable timeline geometry and no added
+  user messages. The duplicate correction was also checked against source-proven
+  native/import pairs without changing stored transcripts or message delivery.
+- No installed app, running server or published release has been changed in
+  this pass.
+
 ## 2026-09-13 — Codex subagent display names
 
 - Show the explicit Codex child-thread title before its nickname, task or path

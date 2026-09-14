@@ -596,10 +596,11 @@ function RunActivityHeader({ item, events, open, detailsId, onToggle }: { item: 
     return () => window.clearInterval(timer)
   }, [live])
   const duration = activityDuration(item, events, now)
+  const compacting = live && item.lifecycle?.some(marker => marker.event.type === 'codex_compaction_started')
   const title = item.continues ? t('timeline.activity.progress') : stopped
     ? t('timeline.activity.stoppedAfter', { duration })
     : live
-      ? t('timeline.activity.workingFor', { duration })
+      ? compacting ? t('timeline.ui.compactingContext') : t('timeline.activity.workingFor', { duration })
       : t('timeline.activity.workedFor', { duration })
   if (live) {
     return <div className="run-activity-summary">

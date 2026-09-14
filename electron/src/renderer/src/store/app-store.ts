@@ -365,6 +365,10 @@ const olderLoads = new Map<string, Promise<number>>()
 const prefetchLoads = new Map<string, Promise<void>>()
 const snapshotAccess = new Map<string, number>()
 const pendingLiveEvents = new Map<string, PendingLiveEventBatch>()
+interface LiveActivityHint { active: boolean; runId?: string | null }
+const liveEventActivityHints = new WeakMap<Event, LiveActivityHint>()
+const liveEventActivityEpochs = new WeakMap<Event, number>()
+let liveActivityAuthorityEpoch = 0
 const timelineDeferredEvents = new Map<string, DeferredTimelineEventBatch>()
 const queuedTurnsRequestLeases = new Map<string, number>()
 const readStateMutationLeases = new Map<string, number>()
@@ -511,6 +515,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           : payload)
       }
       if (!profileEventMatches(payload, get())) return
+      // Explicit main-process Health already reconciles events that arrived
+      // during its request. Pending transcript batches must not apply their
+      // older activity hints afterward. Do not flush heavy rendering here.
+      if (payload.health) liveActivityAuthorityEpoch += 1
       const version = payload.health?.api_contract_version ?? MINIMUM_AGENT_API_CONTRACT
       const incompatible = version < MINIMUM_AGENT_API_CONTRACT
       const error = incompatible ? `Server upgrade required: this app needs agent API v${MINIMUM_AGENT_API_CONTRACT}, but the server reports v${version}.` : payload.error ?? null
@@ -535,7 +543,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const websocketUnavailable = health?.websocket_runtime === false
       const websocketError = websocketUnavailable ? WEBSOCKET_RUNTIME_ERROR : null
-      const incomingActiveSessionIds = healthActiveSessionIDs(health)
+      // A connection-only notice carries no new activity evidence. Reusing
+      // cached Health here used to erase a newer streamed turn_started.
+      const incomingActiveSessionIds = payload.health
+        ? healthActiveSessionIDs(health)
+        : current.activeSessionIds
       const syncStatus = websocketUnavailable && current.selectedSessionId
         ? 'error'
         : !connected && current.selectedSessionId
@@ -855,7 +867,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (discontinuity) scheduleTimelineRepair(sessionId, captureProfileScope(get()))
       }),
       window.agentsDock.events.on('server:event', payload => {
-        if (profileEventMatches(payload, get())) enqueueLiveEvent(payload.event)
+        if (profileEventMatches(payload, get())) enqueueLiveEvent(payload.event,
+          typeof payload.activeSession === 'boolean'
+            ? { active: payload.activeSession, runId: payload.activeRunId }
+            : undefined)
       }),
       window.agentsDock.events.on('native:notification', route => {
         void openProfileNotificationRoute(route, get).catch(error => get().setError(errorMessage(error)))
@@ -3734,6 +3749,24 @@ function mergeReadStateReceipt(
 }
 function stableArray<T>(previous: T[], next: T[]): T[] { return jsonEquivalent(previous, next) ? previous : next }
 function healthActiveSessionIDs(health?: Health | null): Set<string> { return new Set(health?.active ?? health?.active_sessions ?? []) }
+function healthWithLiveActivity(health: Health | null, sessionId: string, hint: LiveActivityHint): Health | null {
+  if (!health) return health
+  const ids = healthActiveSessionIDs(health)
+  if (hint.active) ids.add(sessionId)
+  else ids.delete(sessionId)
+  let runs = health.active_runs
+  if (runs || typeof hint.runId === 'string') {
+    runs = (runs ?? []).filter(row => row.session_id !== sessionId
+      || hint.active && (hint.runId === undefined || row.run_id === hint.runId))
+    if (hint.active && typeof hint.runId === 'string' && !runs.some(row => row.session_id === sessionId)) {
+      runs.push({ session_id: sessionId, run_id: hint.runId })
+    }
+  }
+  const next: Health = { ...health, active: [...ids],
+    ...(health.active_sessions ? { active_sessions: [...ids] } : {}),
+    ...(runs ? { active_runs: runs } : {}) }
+  return jsonEquivalent(health, next) ? health : next
+}
 function healthIsCompatible(health?: Health | null): boolean {
   return (health?.api_contract_version ?? MINIMUM_AGENT_API_CONTRACT) >= MINIMUM_AGENT_API_CONTRACT
 }
@@ -3796,6 +3829,10 @@ function subscribeToTimeline(sessionId: string, after: number, request: number, 
 }
 
 export function updateActiveSessions(current: Set<string>, event: Event): Set<string> {
+  return updateActiveSessionsWithHint(current, event)
+}
+
+function updateActiveSessionsWithHint(current: Set<string>, event: Event, activeHint?: boolean): Set<string> {
   if (isImportedProviderControlMetadata(event)) return current
   // Import batches describe historical turns, not live provider ownership.
   // Their synthetic terminal must not clear a different run that is working
@@ -3805,12 +3842,13 @@ export function updateActiveSessions(current: Set<string>, event: Event): Set<st
   // the provider turn alive, so treating this as a real stop makes the header
   // flash idle before the steered logical run is projected.
   if (isNativeSteerTransitionStop(event)) return current
-  const terminal = event.type === 'turn_finished' || event.type === 'turn_stopped' || event.type === 'error'
+  const terminal = event.type === 'turn_finished' || event.type === 'turn_stopped'
   if (event.type !== 'turn_started' && !terminal) return current
+  const desired = activeHint ?? event.type === 'turn_started'
   const active = current.has(event.session_id)
-  if (event.type === 'turn_started' ? active : !active) return current
+  if (desired === active) return current
   const next = new Set(current)
-  if (event.type === 'turn_started') next.add(event.session_id)
+  if (desired) next.add(event.session_id)
   else next.delete(event.session_id)
   return next
 }
@@ -3955,7 +3993,7 @@ function refreshCrossChatQueue(sessionId: string, scope: RendererProfileScope): 
   })()
 }
 
-function enqueueLiveEvent(event: Event): void {
+function enqueueLiveEvent(event: Event, activeHint?: LiveActivityHint): void {
   const scope = captureProfileScope()
   let pending = pendingLiveEvents.get(event.session_id)
   if (pending && !profileScopesEqual(pending.scope, scope)) {
@@ -3970,6 +4008,8 @@ function enqueueLiveEvent(event: Event): void {
   if (resident) event = mergeProviderInterruptionEvent(resident, event)
   const pendingIndex = pending?.eventIndexById.get(event.id)
   if (pending && pendingIndex !== undefined) event = mergeProviderInterruptionEvent(pending.events[pendingIndex], event)
+  if (activeHint) liveEventActivityHints.set(event, activeHint)
+  liveEventActivityEpochs.set(event, liveActivityAuthorityEpoch)
   const queueRefreshSessionId = crossChatQueueRefreshSessionId(event)
   if (eventAffectsQueuedTurns(event)) invalidateQueuedTurnsRequests(event.session_id)
   if (queueRefreshSessionId) invalidateQueuedTurnsRequests(queueRefreshSessionId)
@@ -4012,8 +4052,16 @@ function upsertPendingLiveEvent(batch: PendingLiveEventBatch, event: Event): boo
   const existingIndex = batch.eventIndexById.get(event.id)
   if (existingIndex !== undefined) {
     const previous = batch.events[existingIndex]
+    const activeHint = liveEventActivityHints.get(event)
+    const activityEpoch = liveEventActivityEpochs.get(event)
     event = mergeProviderInterruptionEvent(previous, event)
-    if (previous === event || jsonEquivalent(previous, event)) return false
+    if (previous === event || jsonEquivalent(previous, event)) {
+      if (activeHint) liveEventActivityHints.set(previous, activeHint)
+      if (activityEpoch !== undefined) liveEventActivityEpochs.set(previous, activityEpoch)
+      return false
+    }
+    if (activeHint) liveEventActivityHints.set(event, activeHint)
+    if (activityEpoch !== undefined) liveEventActivityEpochs.set(event, activityEpoch)
     batch.events[existingIndex] = event
     if (
       (existingIndex > 0 && batch.events[existingIndex - 1].seq > event.seq)
@@ -4113,6 +4161,7 @@ function flushLiveEvents(forceAll = false): void {
   }
   useAppStore.setState(state => {
     let activeSessionIds = state.activeSessionIds
+    let health = state.health
     let snapshots = state.snapshots
     let connected = state.connected
     let connectionError = state.connectionError
@@ -4125,7 +4174,12 @@ function flushLiveEvents(forceAll = false): void {
       const existingEvents = snapshot ? indexedEvents(snapshot.events) : undefined
       const events = batch.events.map(event => {
         const previous = existingEvents?.get(event.id)
-        return previous ? mergeProviderInterruptionEvent(previous, event) : event
+        const merged = previous ? mergeProviderInterruptionEvent(previous, event) : event
+        const hint = liveEventActivityHints.get(event)
+        if (hint) liveEventActivityHints.set(merged, hint)
+        const epoch = liveEventActivityEpochs.get(event)
+        if (epoch !== undefined) liveEventActivityEpochs.set(merged, epoch)
+        return merged
       })
       if (
         sessionId === state.selectedSessionId
@@ -4137,7 +4191,14 @@ function flushLiveEvents(forceAll = false): void {
         syncStatus = 'live'
         syncError = null
       }
-      for (const event of events) activeSessionIds = updateActiveSessions(activeSessionIds, event)
+      for (const event of events) {
+        if ((liveEventActivityEpochs.get(event) ?? liveActivityAuthorityEpoch) < liveActivityAuthorityEpoch) continue
+        const hint = liveEventActivityHints.get(event)
+        activeSessionIds = updateActiveSessionsWithHint(activeSessionIds, event, hint?.active)
+        if (hint && !isImportedHistoryRecord(event) && !isImportedProviderControlMetadata(event)) {
+          health = healthWithLiveActivity(health, event.session_id, hint)
+        }
+      }
       if (!snapshot) continue
       if (snapshot.historyDiscontinuity) {
         const deferred = timelineDeferredEvents.get(sessionId)
@@ -4195,6 +4256,7 @@ function flushLiveEvents(forceAll = false): void {
       : state.connectionGeneration
     if (
       activeSessionIds === state.activeSessionIds
+      && health === state.health
       && snapshots === state.snapshots
       && connected === state.connected
       && connectionGeneration === state.connectionGeneration
@@ -4204,6 +4266,7 @@ function flushLiveEvents(forceAll = false): void {
     ) return state
     return {
       activeSessionIds,
+      health,
       snapshots,
       connected,
       connectionGeneration,

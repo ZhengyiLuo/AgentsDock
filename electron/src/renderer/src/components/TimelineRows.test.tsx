@@ -1955,6 +1955,44 @@ describe('timeline pin state', () => {
     expect(container.querySelector('.system-icon .spin')).toBeInTheDocument()
   })
 
+  it('keeps an owned run visibly live through compaction until its actual finish', () => {
+    const progress: Event = {
+      id: 'working', session_id: 'chat-1', seq: 10, type: 'reasoning_summary',
+      phase: 'commentary', ts: '2026-07-10T14:30:00Z', text: 'Checking the incoming message.'
+    }
+    const compacting: Event = {
+      id: 'compact-start', session_id: 'chat-1', seq: 11, type: 'codex_compaction_started',
+      ts: '2026-07-10T14:30:14Z', compaction_id: 'compact-live'
+    }
+    const item: ProgressItem = {
+      kind: 'progress', id: 'progress-live', key: 'progress-live', seq: 11,
+      active: true, startedAt: progress.ts, events: [progress],
+      lifecycle: [{
+        kind: 'system', id: 'compact-live', key: 'codex:compaction:compact-live',
+        seq: 11, event: compacting, anchorTs: compacting.ts
+      }]
+    }
+    const row = (value: ProgressItem) => <TimelineRowView item={value} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
+    const { container, rerender } = render(row(item))
+    expect(container.querySelector('.run-activity-summary')).toHaveTextContent('Compacting context…')
+    expect(container.querySelector('.run-activity-summary .activity-ring')).not.toBeNull()
+    expect(screen.queryByText('Worked for 14s')).not.toBeInTheDocument()
+
+    const completed: ProgressItem = {
+      ...item,
+      lifecycle: item.lifecycle!.map(marker => ({
+        ...marker, event: { ...marker.event, type: 'codex_compaction_completed', ts: '2026-07-10T14:32:00Z' }
+      }))
+    }
+    rerender(row(completed))
+    expect(container.querySelector('.run-activity-summary')).toHaveTextContent('Working for')
+    expect(container.querySelector('.run-activity-summary .activity-ring')).not.toBeNull()
+
+    rerender(row({ ...completed, active: false, finishedAt: '2026-07-10T14:33:00Z' }))
+    expect(container.querySelector('.run-activity-summary')).toHaveTextContent('Worked for 3m')
+    expect(container.querySelector('.run-activity-summary .activity-ring')).toBeNull()
+  })
+
   it('renders an in-turn compaction between live updates in one progress surface', () => {
     const before: Event = {
       id: 'before', session_id: 'chat-1', seq: 10, type: 'reasoning_summary',

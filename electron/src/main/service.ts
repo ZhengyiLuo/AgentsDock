@@ -9,6 +9,7 @@ import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } fro
 import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
+import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   localSessionImportBatchLimit,
@@ -386,6 +387,9 @@ export class AppService {
   private timelineReconcileInFlight = new Set<string>()
   private subagentSnapshotInFlight = new Map<string, Promise<SubagentSnapshot | null>>()
   private healthFailureCount = 0
+  private readonly activityHealth = new ActivityHealthProjection()
+  private readonly healthActivityRequests = new WeakMap<Health, ActivityHealthRequest>()
+  private readonly adoptedHealthSnapshots = new WeakMap<Health, Health>()
   private pendingEventCache = new Map<string, PendingEventBatch>()
   private eventCacheTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
@@ -676,7 +680,7 @@ export class AppService {
     try { this.settings.update(value) }
     catch (error) { nextClient.dispose(); throw error }
     const scope = this.activateProfile(profileId, false, true, nextClient)
-    const health = await scope.client.health()
+    const health = await this.readActivityHealth(scope, () => scope.client.health())
     if (!this.isCurrentScope(scope)) throw staleProfileError()
     if (health.ok !== true) {
       const error = new Error('Server health check reported unavailable.')
@@ -838,7 +842,7 @@ export class AppService {
       throw new Error('AgentsServer did not confirm an existing Host rename.')
     }
 
-    const health = await context.scope.client.health()
+    const health = await this.readActivityHealth(context.scope, () => context.scope.client.health())
     this.assertCurrentScope(context.scope)
     const current = this.teamHubServerScope()
     if (
@@ -1868,10 +1872,10 @@ export class AppService {
         if (probeBudgetMs <= 0) break
         let nextHealth: Health | null = null
         try {
-          nextHealth = await reconnectClient.health(
+          nextHealth = await this.readActivityHealth(scope, () => reconnectClient.health(
             Math.max(1, Math.min(this.serverRestartHealthTimeoutMs, probeBudgetMs)),
             'error'
-          )
+          ))
         } catch { /* A disconnect is expected while the managed service restarts. */ }
         assertRestartScope()
 
@@ -4586,7 +4590,7 @@ export class AppService {
   ): Promise<void> {
     const started = Date.now()
     const [health, sessions, jobs] = await Promise.allSettled([
-      scope.client.health(),
+      this.readActivityHealth(scope, () => scope.client.health()),
       scope.client.sessions(),
       includeJobs ? scope.client.jobs() : Promise.resolve(this.jobs)
     ])
@@ -4825,7 +4829,6 @@ export class AppService {
 
   private adoptHealth(scope: ConnectionScope, health: Health): ConnectionScope {
     this.assertCurrentScope(scope)
-    this.noteServerInstanceForRuntime(health)
     if (this.profileResetIsPending(scope)) {
       throw new Error('This server profile is waiting for its prior identity reset to finish.')
     }
@@ -4840,6 +4843,10 @@ export class AppService {
       const duplicate = this.settings.listProfiles().find(candidate => candidate.id !== scope.profileId && candidate.serverIdentity === identity)
       if (duplicate) throw new Error(`Server identity ${identity} already belongs to “${duplicate.name}”.`)
     }
+    const originalHealth = health
+    health = this.activityHealth.accept(this.activityScope(scope), health, this.healthActivityRequests.get(health))
+    this.adoptedHealthSnapshots.set(originalHealth, health)
+    this.noteServerInstanceForRuntime(health)
     if (identity && identity !== scope.namespace) {
       this.flushEventCache()
       this.settings.setProfileServerIdentity(scope.profileId, identity)
@@ -4879,6 +4886,19 @@ export class AppService {
     } else this.mailHints.retire()
     if (!portForwardingCapabilityAvailable(health)) this.portTunnels.disposeAll()
     return scope
+  }
+
+  private activityScope(scope: ConnectionScope): string {
+    return JSON.stringify([scope.profileId, scope.generation])
+  }
+
+  private async readActivityHealth(scope: ConnectionScope, read: () => Promise<Health>): Promise<Health> {
+    // Capture BEFORE dispatch, not after health/sessions/jobs have all settled.
+    this.assertCurrentScope(scope)
+    const request = this.activityHealth.capture(this.activityScope(scope))
+    const health = await read()
+    this.healthActivityRequests.set(health, request)
+    return health
   }
 
   private async reconcileTimelineAndStream(scope: ConnectionScope, sessionId: string, cachedLast: number, lease: number): Promise<void> {
@@ -6073,6 +6093,7 @@ export class AppService {
 
   private emitConnection(scope: ConnectionScope, connected: boolean, health?: Health, error?: string): void {
     if (!this.isCurrentScope(scope)) return
+    if (health) health = this.adoptedHealthSnapshots.get(health) ?? health
     const connectionState: ServerConnectionState = connected
       ? health ? connectionStateForHealth(health) : this.profileRuntime.get(scope.profileId)?.connectionState ?? 'online'
       : this.profileRuntime.get(scope.profileId)?.connectionState ?? 'offline'
@@ -6223,9 +6244,24 @@ export class AppService {
 
   private emitAgentEvent(scope: ConnectionScope, event: Event): void {
     if (!this.isCurrentScope(scope)) return
+    const previousHealth = this.health
+    const projectedHealth = this.activityHealth.observe(this.activityScope(scope), event)
+    // Activity cannot re-establish authority after a failed identity/health
+    // check cleared the service's validated capabilities.
+    if (this.health) this.health = projectedHealth ?? this.health
+    if (this.health !== previousHealth) {
+      // A fresh idle sample must still be published after a streamed start,
+      // even if it equals the last pre-start connection payload byte-for-byte.
+      this.lastConnectionPayload = ''
+    }
     this.emit('server:event', {
       profileId: scope.profileId,
       profileGeneration: scope.generation,
+      ...(this.health && event.run_id?.trim() && Number.isSafeInteger(event.seq)
+        && ['turn_started', 'turn_finished', 'turn_stopped', 'error'].includes(event.type)
+        ? { activeSession: (this.health.active ?? this.health.active_sessions ?? []).includes(event.session_id),
+          activeRunId: this.activityHealth.runId(event.session_id) }
+        : {}),
       event
     })
   }

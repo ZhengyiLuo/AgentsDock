@@ -947,9 +947,11 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     : hasOlderMessages || loadingOlder
       ? <div className="history-loader"><button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? <><LoaderCircle className="spin" size={13} /> {t('timeline.ui.loadingOlderMessages')}</> : olderRemaining ? t('timeline.history.showOlderRemaining', { count: olderRemaining.toLocaleString(getLocale()) }) : t('timeline.history.showOlder')}</button></div>
       : <div className="history-start">{t('timeline.ui.beginningOfConversation')}</div>, [getLocale(), hasOlderMessages, historicalPaging, historicalWindow, loadOlder, loadingOlder, olderRemaining, returnToLatest])
+  const showLiveStatus = timelineNeedsLiveStatus(items, liveTurnState, Boolean(historicalWindow))
   const footer = useCallback(() => historicalWindow && historicalPaging === 'newer'
     ? <div className="history-loader"><span><LoaderCircle className="spin" size={13} />  {t('timeline.ui.loadingNewerMessages')}</span></div>
-    : <TimelineFooter />, [getLocale(), historicalPaging, historicalWindow])
+    : <TimelineFooter live={showLiveStatus} />,
+  [getLocale(), historicalPaging, historicalWindow, showLiveStatus])
   const components = useMemo(() => ({ Header: header, Footer: footer }), [footer, header])
   const itemContent = useCallback((index: number, item: RenderTimelineItem) => (
     <div
@@ -1076,7 +1078,22 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
   )
 }
 
-function TimelineFooter() { return <div className="timeline-end" /> }
+function TimelineFooter({ live = false }: { live?: boolean }) {
+  return <>
+    {live && <div className="virtual-row timeline-live-status" role="status">
+      <div className="run-activity-summary"><span className="activity-ring" aria-hidden="true" /><strong>{t('timeline.ui.working')}</strong></div>
+    </div>}
+    <div className="timeline-end" />
+  </>
+}
+
+/** An owned live run can precede its first visible event or the loaded page. */
+export function timelineNeedsLiveStatus(items: readonly RenderTimelineItem[], live: boolean | null, historical: boolean): boolean {
+  return live === true && !historical && !items.some(item => (
+    item.kind === 'progress' && item.active === true && !item.stoppedAt
+    || item.kind === 'trace' && item.active === true
+  ))
+}
 
 function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
   return a.size === b.size && [...a].every(value => b.has(value))
