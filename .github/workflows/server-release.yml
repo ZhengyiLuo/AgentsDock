@@ -9,6 +9,11 @@ on:
         description: Existing or new release tag matching VERSION (for example v0.1.0)
         required: true
         type: string
+      prepare_only:
+        description: Test, package and sign for manual verification without publishing
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -54,7 +59,16 @@ jobs:
             -inkey "$RUNNER_TEMP/agents-server-release.pem" \
             -in dist/agents-server-manifest.json \
             -out dist/agents-server-manifest.sig
+      - name: Hold signed assets for manual verification
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_only
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-release-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
       - name: Publish GitHub release
+        if: github.event_name != 'workflow_dispatch' || !inputs.prepare_only
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
