@@ -1,6 +1,19 @@
 # Development and release log
 
-## 2026-09-14 — 1.0.0 ordinary Codex child continuation prepared
+## 2026-09-14 — 1.0.0 continuation and history replacement accepted
+
+- Published source: `6f7a43c324a252f4ca847375b17524092752d3c2`.
+- [Clean release workflow](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/34915559905)
+  passed: 4,087 tests, two skipped; package and manifest signing succeeded.
+  Published at 2026-09-15 01:18:12 UTC as release ID `388807461`.
+- Fresh public downloads passed Ed25519 signature verification, all three
+  GitHub asset digests, stable/API 28 metadata and byte-for-byte comparison of
+  all 78 packaged source files against the release commit. Archive SHA-256:
+  `3dc9f0466f314d9e9f75dfc586cc3fc180e3f179de77e5657f578aa81e6b7bfb`.
+- [The replacement](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.0)
+  is the latest public stable server release. Version remains 1.0.0 by explicit
+  approval; existing 1.0.0 installations require an explicit reinstall.
+  Earlier same-version publication records below are historical.
 
 - Retain ordinary parent ownership across native completion while its current
   children finish. Use a receive-order child lifecycle tracker and one guarded
@@ -31,11 +44,14 @@
 - Correct the Cursor idle-warning test to arm its short test deadline after
   actual provider readiness, rather than counting process startup as a second
   idle period. Runtime deadlines and behavior are unchanged by that fixture fix.
-- Keep the explicitly approved 1.0.0 replacement version. Clean release CI and
-  signed-download acceptance remain pending. No live server, app or user task
-  was installed, opened, restarted or changed by these checks.
+- Read-only compatibility review of desktop build 1167 confirms its existing
+  active-run contract keeps Working/Running and Stop available during child
+  collection. This was a source review, not a live UI test; no desktop runtime
+  change is required for this correction.
+- No live server, app or user task was installed, opened, restarted or changed
+  by these checks or publication.
 
-## 2026-09-14 — 1.0.0 cross-chat history correction prepared
+## 2026-09-14 — 1.0.0 cross-chat history correction included
 
 - Repair legacy asynchronous delivery wrappers that provider history could
   re-import as user messages when the native ledger stored only their clean
@@ -56,10 +72,10 @@
 - Keep control-only Codex imports from moving sidebar recency forward to the
   import time or backward to an old source timestamp. Eight focused boundary
   checks passed, including unchanged unread state and native run ownership.
-- Version remains 1.0.0 by explicit approval. Release publication and signed
-  asset acceptance are still pending; no live deployment or restart performed.
+- Included in the accepted 1.0.0 replacement above. No live deployment or
+  restart performed.
 
-## 2026-09-14 — 1.0.0 stable accepted
+## 2026-09-14 — original 1.0.0 stable accepted (superseded above)
 
 - With explicit approval, replaced the published release record in place at
   22:44 UTC (release ID `388756248`) using the exact original three signed
