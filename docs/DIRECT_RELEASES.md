@@ -54,13 +54,15 @@ public-feed update, legacy Stable → stable `1.0.0`, and bridge → stable
 `1.0.0` with production-style packages and isolated user data. Verify offline
 and failed checks, rejected invalid signatures/checksums, retained settings,
 and explicit installation. Local packages containing `disable-auto-update`
-cannot establish upgrade acceptance. Stable Windows distribution requires
-Authenticode unless the release owner explicitly approves an unsigned Windows
-installer for that release. Both preparation and publication must pass the
-separate `allow_unsigned_windows` approval; its signing state is sealed into
-the release identity. Unsigned installers must be clearly labeled and can show
-Windows security warnings. The exception never relaxes macOS signing,
-notarization, checksum verification, or source identity checks.
+cannot establish upgrade acceptance. The release owner's standing distribution
+policy permits unsigned Windows installers for authorized desktop releases.
+Do not ask again for each version unless that policy changes. Explicit release
+authorization is still required; this policy does not authorize publishing on
+its own. Pass `allow_unsigned_windows=true` during both preparation and
+publication when using that policy; the signing state remains sealed into the
+release identity. Unsigned installers must be clearly labeled and can show
+Windows security warnings. This does not relax macOS signing, notarization,
+checksum verification, or source identity checks.
 
 The private publication workflow accepts a separately pinned public migration
 QA commit. Stable `1.0.0` requires that pin and runs two disposable macOS jobs
