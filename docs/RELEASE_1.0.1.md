@@ -31,3 +31,6 @@
   AgentsServer update on both the host and joining server.
 - No new Team Network polling, periodic roster reloads or inbox refresh timers
   are introduced. This desktop release does not restart or update your servers.
+- macOS packages are Developer ID signed and notarized. Windows installers
+  remain unsigned under the established distribution policy and may display
+  Windows security warnings.
