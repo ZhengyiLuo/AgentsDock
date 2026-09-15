@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-15 — Desktop 1.0.1 accepted
+
+- Published stable [AgentsDock 1.0.1](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.1),
+  build `1168`, from reviewed source `9a13649eb5a8f01d83c4c33b8bd3af3a70163cda`.
+  Includes member self-rename, durable join observation and force-update
+  confirmation recovery. See [release notes](RELEASE_1.0.1.md).
+- All four native build and package gates passed, followed by independent
+  package replay before publication. macOS is universal, Developer ID signed,
+  notarized and Gatekeeper-accepted. Windows remains unsigned under the
+  release owner's standing distribution policy; its status is explicit in
+  both public release listings.
+- The canonical and legacy repositories publish the same fourteen artifacts.
+  Both stable update feeds resolve to `1.0.1` for macOS, Linux x64, Linux arm64
+  and Windows. The sealed checksum manifest's SHA-256 is
+  `b1fcdc86950f190891ee6c0ea4e9bd1fd8a4495886b821362ed270d6e5250b58`;
+  the verified Mac update ZIP is
+  `c0649157f5f31a7b9cea37f447f7a3e465666d3f5a4f5a057b764353f01dbfc9`.
+- Confirmed the downloaded Mac package contains the member-rename renderer,
+  preload and main-process implementation. No installed app, live server,
+  mobile distribution or unrelated worktree change was included.
+
 ## 2026-09-15 — Member self-rename, desktop 1.0.1 candidate
 
 - Committed member self-rename in `ee277b162b34a341d2d771e92bea2697342bcc3e`.
