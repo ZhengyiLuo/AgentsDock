@@ -558,11 +558,16 @@ class SecurePeerHubAdapter:
             not isinstance(recipients, list)
             or not 1 <= len(recipients) <= 16
             or any(
-                not isinstance(item, dict) or not set(item).issubset({"kind", "id"})
+                not isinstance(item, dict) or not set(item).issubset({
+                    "kind", "id", "mail_route_lifecycle_id",
+                })
                 for item in recipients
             )
         ):
             raise HubError("invalid_request", "Request body is invalid", 422)
+        # A durable @@ grant pins the recipient's inbox incarnation. Preserve
+        # that precondition across mTLS just like the direct Hub API; the store
+        # validates its value and checks it inside the message transaction.
         skill = value.get("skill")
         if skill is not None and (
             not isinstance(skill, dict)

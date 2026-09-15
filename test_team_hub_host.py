@@ -1781,7 +1781,7 @@ class VendoredTeamHubParityTests(unittest.TestCase):
             "migrations/__init__.py": "aaf340c45c8d39c2939814977ba4cef8eb6b3bd0671b0f7542ebe06f5431d6ec",
             "notification_hints.py": "794f76b4240f8c534bdb3c5928c702d02dfc8e022d44224cb8fe8b4b9d9d96d2",
             "secure_peer.py": "7bf416fb3ded441b0f2b8ffbf9b635ba6adf12804557bb67d8feb7aa86408ba7",
-            "secure_peer_hub.py": "9ca9575befc532ac6a69b166271c3cc50f23e6f9c92810d0dd13b014b89f1a8d",
+            "secure_peer_hub.py": "027e2a21854776d31cd4cfc7e0d65358259ffd1f1a9b21de85efd2ea6a1e32fd",
             "security.py": "0c1895c7443e7be07a2f53c7e4c4228e3ee04c65d6cd36f039b7bbba1813e4fa",
             "service.py": "bf4900abe5c861498d5ebd74a3e046eb6a0cf431c6ce7507dc329502feba57b3",
             "store.py": "3975f15beb036775ade158aae3c7a1bcb6aa4bbe5a59547810613c91c4918d7d",

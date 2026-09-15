@@ -1,5 +1,29 @@
 # Development and release log
 
+## 2026-09-14 — 1.0.1-beta.1 member mail gateway correction
+
+- Preserve the recipient's `mail_route_lifecycle_id` in the secure-peer mail
+  adapter. Durable `@@` grants already attach this inbox-identity precondition,
+  and the Hub API/store already support it; the adapter's older field allowlist
+  rejected valid member sends before the message could reach the store.
+- Keep value, recipient ownership and incarnation checks inside the existing
+  message transaction. Do not remove the precondition, widen peer permissions,
+  re-enroll members or retry mail automatically.
+- Reproduce the failure through real private-socketpair mTLS with a freshly
+  approved member, exact mention resolution and durable grant admission. The
+  former tests passed an unbound recipient and missed this field mismatch.
+- This correction belongs on the receiving Team host. No desktop contract,
+  database migration, polling or live restart is introduced by the source fix.
+- Focused guarded acceptance passed 38 tests, including fresh-member-to-host
+  and fresh-member-to-member mail through actual private-socketpair mTLS,
+  exact `@@` resolution and durable route admission, threaded replies,
+  idempotent retries, and revocation/rejoin between resolution and commit.
+  Unknown fields and malformed or stale inbox identities still reject without
+  committing mail. No live sends, approvals, provider runs or server restarts
+  were performed. Publication and downloaded-asset acceptance follow below.
+- Keep this beta limited to the mail gateway correction. Uncommitted cron
+  history and subagent assignment work is not part of this release.
+
 ## 2026-09-14 — 1.0.0 continuation and history replacement accepted
 
 - Published source: `6f7a43c324a252f4ca847375b17524092752d3c2`.
