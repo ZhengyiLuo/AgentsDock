@@ -2,6 +2,13 @@
 
 ## Build 176: recipient picker accessibility
 
+Accepted release: **0.1.2 (176)**, active for internal TestFlight testing with
+automatic notifications enabled. Binary source `361ab5d` passed both CI jobs,
+all 112 library/API/store modules and 485 rendered/contract checks. Apple
+validation/upload/processing and signed archive/export, framework ABI, privacy,
+production-feature and matching-symbol checks passed. External beta review was
+not submitted; physical-device touch/pixel acceptance remains unverified.
+
 This focused change keeps both local-chat and Team Network recipient lists
 above the keyboard in native phone/tablet sheets. Search retains focus on open,
 with an explicit Hide keyboard action. Row selection remains a completed press,

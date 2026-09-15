@@ -2,6 +2,13 @@
 
 ## Mobile chat and server recipient pickers — 0.1.2 (176)
 
+- Apple validation, upload and processing completed successfully. Build 176
+  is active for internal TestFlight testing with automatic notifications
+  enabled. External beta review was not submitted. Binary source: `361ab5d`.
+- Both CI jobs passed for that exact source commit. The signed archive and
+  exported IPA passed distribution-signature, version, framework ABI, privacy,
+  production-feature and fixture-exclusion checks, with matching app/debug
+  symbols. Build artifacts and release logs remain on the external volume.
 - Local verification passed all 112 library/API/store modules and 485
   rendered/contract checks, TypeScript, and focused goal/settings/file-transfer
   interactions. Focused suites overlap; counts are not a unique combined total.
