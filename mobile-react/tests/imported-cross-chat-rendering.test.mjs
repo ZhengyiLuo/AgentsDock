@@ -19,7 +19,7 @@ fixture.client = new Proxy({}, { get: (_, method) => (...args) => {
 } })
 const mocks = {
   'react-native': `import { createElement } from 'react';
-    export const View = 'View', ActivityIndicator = 'ActivityIndicator';
+    export const View = 'View', ActivityIndicator = 'ActivityIndicator', ScrollView = 'ScrollView';
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({ pressed: false }) : props.children);
     export const StyleSheet = { create: value => value, absoluteFill: {}, hairlineWidth: 0.5, flatten: value => Array.isArray(value) ? Object.assign({}, ...value.flat(Infinity)) : value };
     export const useColorScheme = () => globalThis.__importedDeliveryFixture.theme;

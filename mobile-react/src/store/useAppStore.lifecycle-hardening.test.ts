@@ -96,6 +96,7 @@ const cachedEvent: Event = {
   text: 'Cached response',
 }
 const snapshot: Snapshot = {
+  verifiedServerVersion: 'test-lifecycle',
   cacheVersion: SNAPSHOT_CACHE_VERSION,
   session,
   events: [cachedEvent],

@@ -234,6 +234,17 @@ export interface CodexGoalsConfiguration {
   message: string
 }
 
+/** Server override, not the provider's currently running or resolved limit. */
+export interface CodexSubagentsConfiguration {
+  configurable: boolean
+  reason?: 'unsupported_transport' | null
+  max_concurrent_threads_per_session: number | null
+  message: string
+  scope?: 'server'
+  provider_config_key?: string
+  applies_to?: 'new_or_reloaded_threads'
+}
+
 export type CodexReviewTarget =
   | { type: 'uncommittedChanges' }
   | { type: 'baseBranch'; branch: string }
@@ -599,7 +610,8 @@ export interface AgentCrossChatRoute {
 
 export interface AgentCrossChatRoutesSnapshot {
   routes: AgentCrossChatRoute[]
-  max_routes: number
+  /** Null is the negotiated unlimited-route contract; legacy servers return a number. */
+  max_routes: number | null
 }
 
 export interface DeleteAgentCrossChatRouteResponse {
@@ -642,6 +654,42 @@ export interface TeamReference {
   grant_intent: true
 }
 
+export type ChatInboxState = 'unread' | 'read' | 'cancelled' | 'deleted'
+
+export interface ChatInboxMessage {
+  message_id: string
+  conversation_id: string
+  conversation_mode: 'async_route_v1'
+  delivery_mode: 'mailbox'
+  source_session_id: string
+  source_title: string
+  target_session_id: string
+  state: ChatInboxState
+  created_at: string
+  received_at: string | null
+  read_at: string | null
+  reply_to_message_id: string | null
+  body: string
+  body_chars: number
+  body_sha256: string
+  message_revision: number
+}
+
+export interface ChatInboxPage {
+  session_id: string
+  messages: ChatInboxMessage[]
+  next_cursor: string | null
+  has_more: boolean
+  senders: Array<{ source_session_id: string; source_title: string; unread_count: number }>
+}
+
+export interface ChatInboxDeleteReceipt {
+  ok: true
+  session_id: string
+  message_id: string
+  state: 'deleted'
+}
+
 export interface CrossChatHandoffSummary {
   id: string
   kind: ChatReferenceAction
@@ -650,6 +698,8 @@ export interface CrossChatHandoffSummary {
   target_session_id: string
   action: ChatReferenceAction
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  inbox_state?: ChatInboxState | null
   conversation_id?: string | null
   message_id?: string | null
   status: string
@@ -665,6 +715,10 @@ export interface CrossChatHandoff extends CrossChatHandoffSummary {
   body: string
   body_chars: number
   body_sha256: string
+  /** Recipient-effective text; body remains the sender's original. */
+  target_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
 }
 
 export type CrossChatExchangeStatus = 'waiting_request' | 'active' | 'completed' | 'failed' | 'cancelled' | 'expired'
@@ -734,6 +788,10 @@ export interface QueuedTurn {
   target_session_id?: string | null
   source_title?: string | null
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  message_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
   cross_chat_envelope_id?: string | null
   cross_chat_exchange_id?: string | null
   cross_chat_exchange_leg_id?: string | null
@@ -784,6 +842,32 @@ export interface CodeDiffFileSummary {
   binary?: boolean | null
 }
 
+/** Source identity for a server-verified synthetic provider interruption. */
+export interface ProviderInterruptionOrigin {
+  provider: 'claude'
+  kind: 'interruption'
+  event_id: string
+  session_id: string
+  timestamp: string
+  cause: 'steer' | 'stop' | 'unknown'
+  parent_event_id?: string | null
+  prompt_id?: string | null
+}
+
+export interface ProviderHistoryOrigin {
+  provider: 'claude' | 'codex'
+  kind?: 'assistant' | 'user' | 'subagent_notification' | 'turn_aborted' | 'provider_notice'
+  event_id?: string
+  session_id?: string
+  timestamp?: string
+  parent_event_id?: string | null
+  prompt_id?: string | null
+  turn_id?: string
+  native_event_id?: string
+  source_text_sha256?: string
+  cause?: never
+}
+
 export interface Event {
   seq: number
   id: string
@@ -795,6 +879,17 @@ export interface Event {
   imported?: boolean | null
   /** The provider-import source already removed generated-only prompt wrappers. */
   provider_history_sanitized?: boolean | null
+  metadata_only?: boolean | null
+  provider_runtime_context?: 'goal' | 'subagent_notification' | 'turn_aborted' | 'provider_notice' | null
+  provider_history_repair?: 'source_proven_import' | 'source_proven_assistant_replay' | 'source_proven_native_replay' | null
+  provider_origin?: ProviderInterruptionOrigin | ProviderHistoryOrigin | null
+  provider_message_id?: string | null
+  provider_thread_id?: string | null
+  provider_turn_id?: string | null
+  mailbox_wake_id?: string | null
+  mailbox_wake_through_seq?: number | null
+  provider_generated?: boolean | null
+  provider_input_sha256?: string | null
   queued_id?: string | null
   promoted?: boolean | null
   secure_peer_envelope_id?: string | null
@@ -815,6 +910,14 @@ export interface Event {
   cross_chat_envelope_id?: string | null
   watch_id?: string | null
   conversation_mode?: 'async_route_v1' | null
+  delivery_mode?: 'mailbox' | null
+  inbox_state?: ChatInboxState | null
+  received_at?: string | null
+  read_at?: string | null
+  reply_to_message_id?: string | null
+  message_body?: string | null
+  message_edited_by_user?: boolean | null
+  message_revision?: number | null
   conversation_id?: string | null
   message_id?: string | null
   correlation_id?: string | null
@@ -882,6 +985,7 @@ export interface Event {
   subagent_id?: string | null
   subagent_tool_id?: string | null
   subagent_name?: string | null
+  subagent_title?: string | null
   subagent_kind?: string | null
   subagent_status?: string | null
   subagent_activity?: string | null
@@ -932,6 +1036,8 @@ export interface Event {
   turn_id?: string | null
   item_id?: string | null
   native_steer?: boolean | null
+  native_goal_steer?: boolean | null
+  provider_user_authored?: boolean | null
   superseded_by_run_id?: string | null
   steer_interrupted_run_id?: string | null
   stopped?: boolean | null
@@ -1112,12 +1218,15 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     agent_ambient_local_handoffs?: boolean
     exact_queued_delivery_skip?: boolean
     exact_queued_delivery_reorder?: boolean
+    async_queued_message_controls?: boolean
+    chat_mailbox_v1?: boolean
     exact_queued_peer_delivery_skip?: boolean
     secure_peer_fifo_barriers?: boolean
     async_route_v1?: boolean
     [key: string]: JsonValue | undefined
   }
   agent_routes?: {
+    chat_mailbox_v1?: { available?: boolean }
     async_route_v1?: {
       available?: boolean
       client_capability?: string
@@ -1125,7 +1234,7 @@ export interface CrossChatHandoffsCapability extends ServerCapability {
     }
     client_capability?: string
     policy?: 'default_deny'
-    max_routes_per_chat?: number
+    max_routes_per_chat?: number | null
     transcript_access?: boolean
     actions?: Array<'instruction' | 'request_reply'>
     [key: string]: JsonValue | Array<'instruction' | 'request_reply'> | undefined
@@ -1171,6 +1280,7 @@ export interface AgentTeamMailCapability extends ServerCapability {
 }
 
 export interface HealthCapabilities {
+  local_session_import_v1?: LocalSessionImportCapability
   scheduled_jobs?: ScheduledJobsCapability
   agent_emergency_alerts_v1?: AgentEmergencyAlertsCapability
   provider_jobs_access_control_v1?: ProviderJobsAccessControlCapability
@@ -1188,7 +1298,35 @@ export interface HealthCapabilities {
   team_hub_v1?: TeamHubV1Capability
   server_updates?: ServerUpdatesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
-  [key: string]: JsonValue | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
+  [key: string]: JsonValue | LocalSessionImportCapability | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
+}
+
+export interface LocalSessionImportCapability extends ServerCapability {
+  version: 1
+  max_batch_items: number
+  max_list_items: number
+}
+export interface LocalSessionCandidate {
+  provider_session_id: string
+  backend: Backend
+  label: string
+  updated_at: string
+  cwd: string | null
+}
+export interface BulkImportSessionItem {
+  provider_session_id: string
+  backend: Backend
+  cwd?: string | null
+  title?: string | null
+}
+export interface BulkImportSessionResult {
+  provider_session_id: string
+  backend: Backend
+  session_id: string | null
+  ok: boolean
+  imported: number
+  code?: string
+  error?: string
 }
 
 export interface Health {
@@ -1199,6 +1337,7 @@ export interface Health {
   api_contract_version?: number
   active?: string[]
   active_sessions?: string[]
+  active_runs?: Array<Record<string, JsonValue>>
   max_active_agent_runs?: number
   default_cwd?: string | null
   queued?: Record<string, number>
@@ -1283,6 +1422,8 @@ export interface FilesPage { files: AgentFile[]; total: number; offset: number; 
 
 export interface Snapshot {
   cacheVersion?: number
+  /** Server build which last verified the full tail; absent legacy caches revalidate lazily. */
+  verifiedServerVersion?: string | null
   session: Session
   events: Event[]
   queuedTurns: QueuedTurn[]

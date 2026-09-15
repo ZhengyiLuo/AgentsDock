@@ -2,7 +2,7 @@ import type { AgentCrossChatRoutesSnapshot, ChatReference } from '../types'
 
 /** Count only explicit new grants; repeated references never invent extra routes. */
 export function agentRouteCapacityError(snapshot: AgentCrossChatRoutesSnapshot | undefined, references: readonly ChatReference[]): string | null {
-  if (!snapshot || !Number.isSafeInteger(snapshot.max_routes) || snapshot.max_routes < 0) return null
+  if (!snapshot || snapshot.max_routes === null || !Number.isSafeInteger(snapshot.max_routes) || snapshot.max_routes < 0) return null
   const granted = new Set(snapshot.routes.map(route => route.target_session_id))
   const pending = new Set(references.flatMap(reference => (
     reference.target_kind !== 'secure_peer' && reference.action === 'route' && reference.grant_intent === true && !granted.has(reference.session_id)

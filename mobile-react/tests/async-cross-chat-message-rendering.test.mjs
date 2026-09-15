@@ -4,6 +4,7 @@ import { createRequire, isBuiltin } from 'node:module'
 import path from 'node:path'
 import { after, test } from 'node:test'
 import { pathToFileURL } from 'node:url'
+import { createHash } from 'node:crypto'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { build } from 'esbuild'
@@ -12,7 +13,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const require = createRequire(import.meta.url)
 const listeners = new Set()
 const calls = []
-const client = { validationRevision: 1 }
+const client = { validationRevision: 1, isValidated: true }
 const fixture = {
   state: null, theme: 'dark', client, links: [],
   subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
@@ -83,6 +84,7 @@ function reset() {
     profiles: [{ id: 'profile-a', serverIdentity: 'server-a' }],
     sessions: [{ id: 'sender', title: 'Renamed agent' }, { id: 'recipient', title: 'Renamed mobile' }],
     switchingProfileId: null, workspaceAdopting: false, pins: [], snapshots: {},
+    selectSession: async id => { calls.push(['navigate', id]); publish({ selectedSessionId: id }) },
   }
   client.crossChatHandoff = async id => { calls.push(['handoff', id]); return handoff() }
   client.crossChatExchange = async () => { throw new Error('Async messages must not load exchanges') }
@@ -92,6 +94,75 @@ function publish(patch = {}) {
   fixture.state = { ...fixture.state, ...patch }
   for (const listener of listeners) listener()
 }
+
+const outgoingMailbox = (patch = {}) => event({ session_id: 'sender', delivery_mode: 'mailbox', type: 'chat_conversation_message_registered', handoff_status: 'stored', inbox_state: 'unread', ...patch })
+function enableMailbox() {
+  fixture.state.selectedSessionId = 'sender'
+  fixture.state.health.capabilities = { cross_chat_handoffs_v1: { available: true, features: { chat_mailbox_v1: true } } }
+}
+test('outgoing mailbox labels and confirmed cancellation are receipt-based and duplicate-safe', async () => {
+  reset(); enableMailbox()
+  const pending = deferred()
+  client.cancelCrossChatHandoff = async id => { calls.push(['cancel', id]); return pending.promise }
+  const renderer = await render(outgoingMailbox())
+  try {
+    assert.match(visible(renderer), /Inbox · unread/)
+    const button = byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.onPress
+    await act(async () => { button(); button() })
+    assert.deepEqual(calls, [['cancel', 'message-a']])
+    assert.doesNotMatch(visible(renderer), /Cancelled/)
+    await act(async () => pending.resolve(handoff({ status: 'cancelled' })))
+    assert.match(visible(renderer), /Cancelled/)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 0)
+    await act(async () => button())
+    assert.equal(calls.length, 1)
+  } finally { await act(async () => renderer.unmount()) }
+})
+for (const patch of [{ id: 'wrong' }, { source_session_id: 'wrong' }, { target_session_id: 'wrong' }, { conversation_id: 'wrong' }, { status: 'stored' }]) test(`mailbox cancellation rejects mismatched ${Object.keys(patch)[0]} and permits explicit retry`, async () => {
+  reset(); enableMailbox()
+  client.cancelCrossChatHandoff = async id => { calls.push(['cancel', id]); return handoff({ status: 'cancelled', ...patch }) }
+  const renderer = await render(outgoingMailbox())
+  try {
+    await act(async () => byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.onPress())
+    assert.match(visible(renderer), /did not confirm cancellation/)
+    assert.match(visible(renderer), /Inbox · unread/)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 1)
+  } finally { await act(async () => renderer.unmount()) }
+})
+for (const patch of [{ profileGeneration: 2 }, { selectedSessionId: 'elsewhere' }, { workspaceAdopting: true }, { health: { server_instance_id: 'other' } }]) test(`late mailbox cancellation cannot affect changed ${Object.keys(patch)[0]}`, async () => {
+  reset(); enableMailbox()
+  const pending = deferred(); client.cancelCrossChatHandoff = async () => pending.promise
+  const renderer = await render(outgoingMailbox())
+  try {
+    const callback = byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.onPress
+    await act(async () => callback())
+    await act(async () => publish(patch))
+    await act(async () => pending.resolve(handoff({ status: 'cancelled' })))
+    assert.doesNotMatch(visible(renderer), /Cancelled/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+for (const patch of [{ inbox_state: 'read' }, { handoff_status: 'registered' }, { type: 'chat_conversation_message_deleted' }]) test(`mailbox ${JSON.stringify(patch)} never offers cancellation`, async () => {
+  reset(); enableMailbox(); const renderer = await render(outgoingMailbox(patch))
+  try { assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 0) }
+  finally { await act(async () => renderer.unmount()) }
+})
+test('peer heading navigates exact authenticated local identity once without reading mailbox or sending', async () => {
+  reset(); const renderer = await render(event({ source_title: 'Untrusted different label' }))
+  try {
+    const callback = byID(renderer, 'cross-chat-peer-sender')[0].props.onPress
+    await act(async () => { callback(); callback() })
+    assert.deepEqual(calls, [['navigate', 'sender']])
+  } finally { await act(async () => renderer.unmount()) }
+})
+test('old peer heading cannot navigate after selection/identity changes', async () => {
+  reset(); const renderer = await render()
+  try {
+    const callback = byID(renderer, 'cross-chat-peer-sender')[0].props.onPress
+    await act(async () => publish({ selectedSessionId: 'other' }))
+    await act(async () => callback())
+    assert.deepEqual(calls, [])
+  } finally { await act(async () => renderer.unmount()) }
+})
 function deferred() {
   let resolve, reject
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
@@ -113,13 +184,39 @@ const visible = renderer => renderer.root.findAll(node => node.type === 'Text' |
   .flatMap(node => node.children.filter(child => typeof child === 'string')).join('\n')
 const patchLabel = patch => Object.entries(patch).map(([field, value]) => `${field}=${String(value)}`).join(', ')
 
+for (const session_id of ['recipient', 'sender']) test(`mixed lifecycle keeps the ${session_id} card async after started and delivered, never stale queued`, async () => {
+  reset(); publish({ selectedSessionId: session_id })
+  const lifecycle = ['received', 'queued', 'started', 'delivered'].map((status, index) => event({
+    id: `async-${status}`, seq: index + 1, session_id,
+    type: `chat_conversation_message_${status}`, handoff_status: status,
+    handoff_preview: `Authenticated ${status} message.`,
+  }))
+  const legacy = event({ id: 'legacy-queued', seq: 5, session_id, type: 'cross_chat_handoff_queued', conversation_mode: undefined,
+    handoff_status: 'queued', handoff_preview: 'Stale legacy queued content', source_title: 'Untrusted compatibility label' })
+  const renderer = await render(lifecycle.slice(0, 3))
+  try {
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-surface').length, 1)
+    assert.equal(content(renderer), lifecycle[2].handoff_preview)
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([...lifecycle.slice(0, 3), legacy])))))
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-surface').length, 1)
+    assert.equal(content(renderer), lifecycle[2].handoff_preview)
+    assert.doesNotMatch(visible(renderer), /Queued|Stale legacy|Untrusted compatibility/)
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([...lifecycle, legacy])))))
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-surface').length, 1)
+    assert.equal(content(renderer), lifecycle[3].handoff_preview)
+    assert.doesNotMatch(visible(renderer), /Queued|Stale legacy|Untrusted compatibility/)
+    assert.equal(byID(renderer, 'cross-chat-handoff-message-a').length, 0, 'no legacy queued card survives row recycling')
+    assert.deepEqual(calls, [], 'compatibility metadata cannot trigger a new body lookup')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
 for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${theme} async message uses readable incoming/outgoing surfaces at ${width}px`, async () => {
   reset(); fixture.theme = theme
   const renderer = await render(event(), width)
   try {
     assert.match(visible(renderer), /Research agent/)
     assert.doesNotMatch(visible(renderer), /Renamed agent|Agent conversation|Reply expected|End conversation|Source request|Provider authority/)
-    assert.equal(renderer.root.findAllByType('Pressable').length, 0, 'A complete short message has no exchange or routing actions')
+    assert.equal(renderer.root.findAllByType('Pressable').length, 1, 'The only action is local peer navigation, not sending or granting a route')
     const surface = flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style)
     assert.equal(surface.alignSelf, 'flex-end')
     assert.equal(surface.width, width > 720 ? '82%' : '94%')
@@ -133,7 +230,7 @@ for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${t
     await act(async () => renderer.root.findAll(node => node.type === 'SelectableText' && node.props.onPress)[0].props.onPress())
     assert.deepEqual(fixture.links, ['https://example.com/review'])
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(row(event({ session_id: 'sender', type: 'chat_conversation_message_registered' })), width))))
-    assert.match(visible(renderer), /Sent to Mobile agent/)
+    assert.match(visible(renderer), /To Mobile agent/)
     assert.equal(flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style).alignSelf, 'flex-start')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
@@ -307,7 +404,8 @@ test('message body and sender labels cannot create chat routes or reply controls
     assert.match(visible(renderer), /@Different chat/)
     assert.match(visible(renderer), /@Research agent/)
     assert.equal(renderer.root.findAll(node => node.type === 'SelectableText' && node.props.onPress).length, 0)
-    assert.equal(renderer.root.findAllByType('Pressable').length, 0)
+    assert.equal(renderer.root.findAllByType('Pressable').length, 1)
+    assert.equal(byID(renderer, 'cross-chat-peer-sender').length, 1, 'Peer ID comes from the event, never sender label or body')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
 })
@@ -343,13 +441,142 @@ for (const body of [undefined, null, '', '   ']) test(`malformed or empty full b
   try {
     await press(renderer)
     assert.equal(content(renderer), event().handoff_preview)
-    assert.match(visible(renderer), /did not return a message body/)
+    assert.match(visible(renderer), /did not return (?:a|this) message body/)
     assert.equal(toggle(renderer).props.accessibilityLabel, 'View message')
   } finally { await act(async () => renderer.unmount()) }
 })
 
 const legacyEvent = patch => event({ type: 'cross_chat_handoff_queued', conversation_mode: undefined, handoff_status: 'queued', ...patch })
 const pressID = async (renderer, id) => act(async () => byID(renderer, id)[0].props.onPress())
+
+test('timeline dispatches passive mailbox messages into a folded inbox without queue or run controls', async () => {
+  reset()
+  const renderer = await render(event({ type: 'chat_conversation_message_received', delivery_mode: 'mailbox', inbox_state: 'unread', message_revision: 0 }))
+  try {
+    assert.equal(byID(renderer, 'chat-inbox').length, 1)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a').length, 0)
+    assert.equal(renderer.root.findAllByType(MarkdownContent).length, 0)
+    await pressID(renderer, 'chat-inbox-toggle')
+    assert.equal(content(renderer), event().handoff_preview)
+    assert.match(visible(renderer), /unread/)
+    assert.equal(byID(renderer, 'chat-inbox-delete-message-a')[0].props.disabled, true)
+    assert.deepEqual(calls, [], 'Unsupported/offline mailbox expansion is local-only')
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('recipient edits use the exact target revision and hash, never the immutable original body', async () => {
+  reset()
+  const body = 'Current **recipient** edit.'
+  const hash = createHash('sha256').update(body).digest('hex')
+  client.crossChatHandoff = async () => handoff({ message_revision: 2, message_edited_by_user: true, target_body: body })
+  const renderer = await render(event({ message_revision: 2, message_edited_by_user: true, handoff_preview: 'Edited preview…', handoff_body_sha256: hash, handoff_body_truncated: true }))
+  try {
+    await press(renderer)
+    assert.equal(content(renderer), body)
+    assert.doesNotMatch(visible(renderer), /complete authenticated agent message/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('a revision change removes old loaded text and fences old requests before presenting its replacement', async () => {
+  reset()
+  const initial = event({ handoff_preview: 'Old preview…', handoff_body_truncated: true })
+  const renderer = await render(initial)
+  try {
+    await press(renderer)
+    assert.match(content(renderer), /complete/)
+    const changed = { ...initial, id: 'event-edit', seq: 2, message_revision: 1, message_edited_by_user: true,
+      message_body: undefined, handoff_preview: undefined, handoff_body_truncated: undefined }
+    const pending = deferred()
+    client.crossChatHandoff = async () => pending.promise
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([initial, changed])))))
+    assert.equal(renderer.root.findAllByType(MarkdownContent).length, 0)
+    assert.ok(toggle(renderer), 'Missing edited body must remain loadable')
+    await press(renderer)
+    const newer = { ...changed, id: 'event-newer', seq: 3, message_revision: 2, message_body: 'Newest recipient text' }
+    await act(async () => renderer.update(React.createElement(TimelineRowView, props(row([initial, changed, newer])))))
+    await act(async () => pending.resolve(handoff({ message_revision: 1, message_edited_by_user: true, target_body: 'Stale recipient text' })))
+    assert.equal(content(renderer), 'Newest recipient text')
+    assert.doesNotMatch(visible(renderer), /Old preview|Stale recipient|complete/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('sender detail remains original after the recipient edits its local message', async () => {
+  reset(); publish({ selectedSessionId: 'sender' })
+  client.crossChatHandoff = async () => handoff({ message_revision: 2, message_edited_by_user: true, target_body: 'Recipient-only edit' })
+  const renderer = await render(event({ session_id: 'sender', message_revision: 0, handoff_body_truncated: true }))
+  try {
+    await press(renderer)
+    assert.equal(content(renderer), handoff().body)
+    assert.doesNotMatch(visible(renderer), /Recipient-only/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+for (const mismatch of ['revision', 'hash', 'edited flag']) test(`edited detail rejects ${mismatch} mismatch without falling back to original`, async () => {
+  reset()
+  const body = 'Current edit'
+  const hash = createHash('sha256').update(body).digest('hex')
+  client.crossChatHandoff = async () => handoff({ message_revision: mismatch === 'revision' ? 1 : 2,
+    message_edited_by_user: mismatch !== 'edited flag', target_body: mismatch === 'hash' ? 'Wrong body' : body })
+  const renderer = await render(event({ message_revision: 2, message_edited_by_user: true, handoff_body_sha256: hash, handoff_body_truncated: true, handoff_preview: 'Edited preview…' }))
+  try {
+    await press(renderer)
+    assert.equal(content(renderer), 'Edited preview…')
+    assert.ok(renderer.root.findAll(node => node.props.accessibilityRole === 'alert').length)
+  } finally { await act(async () => renderer.unmount()) }
+})
+
+test('lazy activity pages remain on their side of an async message and retain original tool ownership', async () => {
+  reset()
+  const activity = (seq, type, patch = {}) => ({ id: `trace-${seq}`, seq, type, session_id: 'recipient', ts: '2026-09-11T12:00:00Z', run_id: 'run', ...patch })
+  const events = [activity(1, 'turn_started', { prompt: 'Work' }),
+    activity(2, 'tool_started', { tool_id: 'read', tool: { id: 'read', name: 'Read' }, text: 'Before tool' }),
+    event({ id: 'boundary', seq: 3, type: 'chat_conversation_message_registered', source_session_id: 'recipient', target_session_id: 'sender' }),
+    activity(4, 'reasoning_summary', { text: 'After message thinking' }),
+    activity(5, 'tool_finished', { tool_id: 'read', output: 'Late result belongs before message' })]
+  const loadedCommentary = activity(2.5, 'reasoning_summary', { phase: 'commentary', text: 'Already visible live commentary' })
+  publish({ loadRunTrace: async () => ({ events: [...events, loadedCommentary], next_after: 5, has_more: false }) })
+  const traces = projectTimeline(events, []).filter(value => value.kind === 'trace')
+  assert.equal(traces.length, 2)
+  for (const [index, trace] of traces.entries()) {
+    let renderer
+    await act(async () => { renderer = TestRenderer.create(React.createElement(TimelineRowView, { ...props(row(event())), row: trace })) })
+    try {
+      const header = renderer.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel?.includes('Show details.'))[0]
+      assert.match(header.props.accessibilityLabel, index === 0 ? /Activity continues/ : /Reasoning trace/)
+      await act(async () => header.props.onPress())
+      await pressID(renderer, `trace-show-more-${trace.key}`)
+      assert.doesNotMatch(visible(renderer), /Already visible live commentary/)
+      if (index === 0) {
+        assert.match(visible(renderer), /Late result belongs before message/)
+        assert.doesNotMatch(visible(renderer), /After message thinking/)
+      } else {
+        assert.match(visible(renderer), /After message thinking/)
+        assert.doesNotMatch(visible(renderer), /Late result belongs before message|Before tool/)
+      }
+      await pressID(renderer, `trace-show-less-${trace.key}`)
+      await act(async () => header.props.onPress())
+    } finally { await act(async () => renderer.unmount()) }
+  }
+})
+
+test('the live tail after an async message stays visibly Working without announcing old progress again', async () => {
+  reset()
+  const events = [event({ id: 'start', seq: 1, type: 'turn_started', run_id: 'run', prompt: 'Work' }),
+    event({ id: 'progress', seq: 2, type: 'reasoning_summary', run_id: 'run', phase: 'commentary', text: 'Earlier update' }),
+    event({ id: 'send', seq: 3, type: 'chat_conversation_message_registered', source_session_id: 'recipient', target_session_id: 'sender' })]
+  const progress = projectTimeline(events, []).filter(value => value.kind === 'progress')
+  assert.equal(progress.length, 2)
+  for (const [index, item] of progress.entries()) {
+    let renderer
+    await act(async () => { renderer = TestRenderer.create(React.createElement(TimelineRowView, { ...props(row(event())), row: item })) })
+    try {
+      const host = byID(renderer, 'trace-live-updates')[0]
+      assert.equal(host.props.accessibilityLiveRegion, index === 0 ? 'none' : 'polite')
+      if (index === 1) assert.match(visible(renderer), /Working…/)
+    } finally { await act(async () => renderer.unmount()) }
+  }
+})
+
 for (const status of ['running', 'delivered']) test(`legacy cancel shows returned ${status} state without claiming cancellation`, async () => {
   reset(); publish({ selectedSessionId: 'sender' })
   client.cancelCrossChatHandoff = async () => handoff({ status })

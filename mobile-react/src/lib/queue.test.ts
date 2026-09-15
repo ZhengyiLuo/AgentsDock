@@ -4,6 +4,11 @@ import {
   isDeliveryBarrierQueuedTurn,
   isUserQueuedTurn,
   isVisibleQueuedTurn,
+  isNativeGoalSteerEvent,
+  asyncQueuedMessageControlsAvailable,
+  isAsyncQueuedChatMessage,
+  isScheduledJobQueuedTurn,
+  queueSnapshotRequiresRefresh,
   queuedMoveCrossesDeliveryBarrier,
   queuedTurnHasEarlierDeliveryBarrier,
   resolveNewQueuedTurn,
@@ -65,6 +70,33 @@ const securePeer = updateQueuedTurns([], event('turn_queued', { queued_id: 'secu
 assert(!isUserQueuedTurn(securePeer), 'secure-peer delivery plumbing must never become user-editable')
 assert(!isVisibleQueuedTurn(securePeer), 'secure-peer delivery plumbing must stay hidden from the local queue shelf')
 assert(isDeliveryBarrierQueuedTurn(securePeer), 'hidden secure-peer deliveries must still participate in FIFO barrier ordering')
+const scheduled = { ...securePeer, purpose: 'scheduled_job' }
+assert(isScheduledJobQueuedTurn(scheduled), 'scheduled queue ownership must be explicit')
+assert(!isUserQueuedTurn(scheduled) && !isVisibleQueuedTurn(scheduled), 'scheduled work must never acquire user edit/send controls')
+assert(isDeliveryBarrierQueuedTurn(scheduled), 'hidden scheduled work must retain its immutable FIFO position')
+const mailbox = { ...crossChat, conversation_mode: 'async_route_v1' as const, delivery_mode: 'mailbox' as const }
+assert(!isAsyncQueuedChatMessage(mailbox) && !isVisibleQueuedTurn(mailbox), 'passive mail must never appear as ordinary queued provider work')
+assert(asyncQueuedMessageControlsAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: { available: true, features: { async_queued_message_controls: true } } } }), 'async recipient controls require an explicit gate')
+assert(!asyncQueuedMessageControlsAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: { available: true, features: {} } } }), 'older servers cannot acquire recipient edit/send controls')
+
+let editedQueue = updateQueuedTurns([], event('turn_queued', {
+  queued_id: 'edited', purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1',
+  prompt: 'Preview', message_body: 'Full original message', message_revision: 0, message_edited_by_user: false,
+}))
+assert(editedQueue[0].prompt === 'Full original message', 'full recipient body must replace only the public preview')
+editedQueue = updateQueuedTurns(editedQueue, event('turn_queue_updated', { queued_id: 'edited', message_body: 'Recipient edit', message_revision: 2, message_edited_by_user: true }))
+for (const receipt of [
+  event('turn_queue_updated', { queued_id: 'edited', prompt: 'Stale preview', message_body: 'Old full body', message_revision: 1, message_edited_by_user: false }),
+  event('turn_queue_updated', { queued_id: 'edited', prompt: 'Partial revision', message_revision: 3 }),
+  event('turn_queue_delivery_fenced', { queued_id: 'edited', purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1', prompt: 'Fenced preview' }),
+  event('turn_queue_delivery_fenced', { queued_id: 'edited', prompt: 'Sparse fenced preview' }),
+]) {
+  editedQueue = updateQueuedTurns(editedQueue, receipt)
+  assert(editedQueue[0].prompt === 'Recipient edit' && editedQueue[0].message_revision === 2 && editedQueue[0].message_edited_by_user === true, 'old, partial, or fenced receipts cannot downgrade an atomic recipient edit')
+  assert(isAsyncQueuedChatMessage(editedQueue[0]) && !isUserQueuedTurn(editedQueue[0]), 'a sparse receipt must not reclassify an exact delivery owner as editable ordinary user work')
+}
+const invalidRevision = updateQueuedTurns([], event('turn_queued', { queued_id: 'invalid', purpose: 'cross_chat_handoff_delivery', conversation_mode: 'async_route_v1', prompt: 'Preview', message_body: 'Unbound body', message_revision: -1, message_edited_by_user: true }))
+assert(invalidRevision[0].message_body === undefined && invalidRevision[0].prompt === 'Preview', 'invalid revision must not bind a body to recipient controls')
 
 const barrierQueue: QueuedTurn[] = [
   { queued_id: 'after-secure', session_id: 'chat-1', prompt: 'After secure', file_ids: [], position: 4 },
@@ -81,9 +113,63 @@ assert(!queuedMoveCrossesDeliveryBarrier(barrierQueue, 'before', 'up'), 'moving 
 assert(!queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'before'), 'run now should remain available before all delivery barriers')
 assert(queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-local'), 'run now must remain FIFO behind a local cross-chat delivery')
 assert(queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-secure'), 'run now must remain FIFO behind a hidden secure-peer delivery')
+assert(!queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-secure', true), 'the exact async controls contract permits an explicit run-now priority change')
+assert(queuedTurnHasEarlierDeliveryBarrier([
+  { queued_id: 'promoted', prompt: 'In flight', file_ids: [], position: 0, promoted: true },
+  { queued_id: 'next', prompt: 'Next', file_ids: [], position: 1 },
+], 'next', true), 'even negotiated priority cannot overtake an already promoted owner')
+for (const capability of [
+  { available: false, features: { async_queued_message_controls: true } },
+  { available: true, features: { async_queued_message_controls: false } },
+  { available: true, features: { async_queued_message_controls: 'true' as unknown as boolean } },
+]) {
+  const supported = asyncQueuedMessageControlsAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: capability } })
+  assert(!supported && queuedTurnHasEarlierDeliveryBarrier(barrierQueue, 'after-secure', supported), 'near-miss capability flags must retain every legacy FIFO barrier')
+}
 
 const existing: QueuedTurn = { queued_id: 'existing', session_id: 'chat-1', prompt: 'Earlier', file_ids: [] }
 const created: QueuedTurn = { queued_id: 'created', session_id: 'chat-1', prompt: 'Send this now', file_ids: [] }
 assert(resolveNewQueuedTurn(' Send this now ', new Set(['existing']), [existing, created]) === 'created', 'older server responses must resolve the exact newly queued message')
+
+const waiting: QueuedTurn[] = [
+  { queued_id: 'first', session_id: 'chat-1', prompt: 'Same text', file_ids: [], position: 1 },
+  { queued_id: 'second', session_id: 'chat-1', prompt: 'Same text', file_ids: [], position: 2 },
+  { ...crossChat, position: 3 },
+]
+const nativeGoalSteer = event('turn_steered', {
+  queued_id: 'first', run_id: 'active-goal-run', native_goal_steer: true,
+  native_steer: true, backend: 'codex', purpose: 'codex_goal_resume', provider_user_authored: true,
+})
+assert(isNativeGoalSteerEvent(nativeGoalSteer), 'the complete native goal acknowledgement must be recognized')
+assert(updateQueuedTurns(waiting, nativeGoalSteer).map(turn => turn.queued_id).join(',') === 'second,handoff', 'goal steering must drain only its exact queued owner, even when another prompt has the same text')
+for (const patch of [
+  { type: 'turn_steer_requested' }, { native_goal_steer: false }, { native_steer: false },
+  { backend: 'claude' as const }, { purpose: 'ordinary' }, { provider_user_authored: false },
+  { run_id: '' }, { run_id: '   ' },
+]) {
+  assert(!isNativeGoalSteerEvent({ ...nativeGoalSteer, ...patch }), 'a partial or unrelated steering event must not count as delivered')
+  assert(updateQueuedTurns(waiting, { ...nativeGoalSteer, ...patch }) === waiting, 'partial native steering metadata must not drain the queue')
+}
+assert(updateQueuedTurns(waiting, { ...nativeGoalSteer, queued_id: null }) === waiting, 'goal steering without a queued identity must not infer one from text')
+assert(updateQueuedTurns(waiting, { ...nativeGoalSteer, queued_id: 'unknown' }) === waiting, 'unknown native steering identity must preserve the existing queue reference')
+
+const drained = updateQueuedTurns(waiting, event('turn_queue_run_now', { queued_id: 'second', superseded_queued_ids: ['first'] }))
+assert(drained.length === 1 && drained[0] === waiting[2], 'run now must remove the exact selected and superseded IDs while retaining unrelated incoming deliveries')
+assert(updateQueuedTurns(waiting, event('turn_queue_run_now', { queued_id: 'unknown', superseded_queued_ids: ['first', 'first', 'missing'] })).map(turn => turn.queued_id).join(',') === 'second,handoff', 'supersession remains effective if the selected row already left the local queue')
+assert(updateQueuedTurns(waiting, event('unrelated_event', { superseded_queued_ids: ['first', 'second'] })) === waiting, 'unrelated events cannot use retained supersession metadata to remove queued messages')
+assert(updateQueuedTurns(waiting, event('turn_queue_run_now', { superseded_queued_ids: ['first'] })) === waiting, 'run-now metadata without its exact selected identity must not drain rows')
+
+const positions = waiting.map(turn => ({ queued_id: turn.queued_id, position: turn.position! }))
+assert(!queueSnapshotRequiresRefresh(event('queue_snapshot', { positions }), waiting), 'complete known membership needs only the existing order reducer')
+assert(queueSnapshotRequiresRefresh(event('queue_snapshot', { positions: [] }), waiting), 'an empty snapshot must request an authoritative read when local rows remain')
+assert(!queueSnapshotRequiresRefresh(event('queue_snapshot', { positions: [] }), []), 'empty local and snapshot queues must not cause redundant reads')
+assert(queueSnapshotRequiresRefresh(event('queue_snapshot', { positions: positions.slice(1) }), waiting), 'missing cached IDs must request a full queue read without assuming a broad clear')
+assert(queueSnapshotRequiresRefresh(event('queue_snapshot', { positions: [{ queued_id: 'unknown', position: 1 }] }), waiting), 'unknown queued IDs require details from the public queue endpoint')
+assert(queueSnapshotRequiresRefresh(event('queue_snapshot', { positions: [positions[0], positions[0], positions[2]] }), waiting), 'duplicate snapshot identities cannot stand in for complete membership')
+assert(queueSnapshotRequiresRefresh(event('queue_snapshot', { positions: [{ queued_id: 'first', position: NaN }] }), waiting), 'malformed ordering must be repaired from the public endpoint')
+assert(!queueSnapshotRequiresRefresh(event('turn_queue_reordered', { positions: [] }), waiting), 'partial reorder events do not acquire snapshot semantics')
+assert(!queueSnapshotRequiresRefresh(event('queue_snapshot'), waiting), 'missing snapshot positions must not invent authoritative membership')
+assert(updateQueuedTurns(waiting, event('queue_snapshot', { positions: [] })) === waiting, 'the reducer must not clear cached rows directly from a position-only snapshot')
+assert(updateQueuedTurns(waiting, event('queue_snapshot', { positions: positions.slice(1) })).length === waiting.length, 'a partial position list must preserve unlisted IDs until authoritative refresh')
 
 console.log('queue reconciliation regressions passed')

@@ -1,4 +1,5 @@
 import type { AgentFile, Backend, Event, Session } from '../types'
+import { hasProviderUserProvenance, mergeProviderInterruptionEvent } from './provider-origin'
 
 const fullDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -99,6 +100,7 @@ function isImportedClaudeTaskNotification(event: Event, text: string): boolean {
     event.type !== 'turn_started'
     || event.backend !== 'claude'
     || event.provider_history_sanitized === true
+    || hasProviderUserProvenance(event)
     || !(event.imported === true || event.run_id?.startsWith('import_') === true)
   ) return false
   const trimmed = text.trim()
@@ -163,9 +165,13 @@ export function runtimeSummary(session: Session): string {
 export function mergeEvents(current: Event[], incoming: Event[]): Event[] {
   if (!incoming.length) return current
   if (!current.length) return incoming.length === 1 ? incoming : [...incoming].sort((a, b) => a.seq - b.seq)
-  if (incoming.length === 1 && incoming[0].seq > current[current.length - 1].seq) return [...current, incoming[0]]
+  if (incoming.length === 1 && incoming[0].seq > current[current.length - 1].seq
+    && !current.some(event => event.id === incoming[0].id)) return [...current, incoming[0]]
   const byId = new Map(current.map(event => [event.id, event]))
-  for (const event of incoming) byId.set(event.id, event)
+  for (const event of incoming) {
+    const previous = byId.get(event.id)
+    byId.set(event.id, previous ? mergeProviderInterruptionEvent(previous, event) : event)
+  }
   const merged = [...byId.values()].sort((a, b) => a.seq - b.seq)
   return merged.length === current.length && merged.every((event, index) => event === current[index])
     ? current

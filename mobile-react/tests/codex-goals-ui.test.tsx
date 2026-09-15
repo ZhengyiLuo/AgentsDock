@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
 import { create, act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
+import { View } from 'react-native'
+import { AppTypographyProvider } from '../src/components/AppText'
 import { CodexGoalBar, CodexGoalEditor } from '../src/components/CodexGoalBar'
 import { CodexStatusButton } from '../src/components/CodexControls'
 import { CodexRuntimeProvider, useCodexRuntime } from '../src/components/CodexRuntimeContext'
 import { announceCodexGoalsConfigurationChanged } from '../src/lib/codex-goals-configuration'
 import type { CodexGoal, CodexGoalInput, CodexGoalSnapshot, CodexRuntimeSnapshot, Health, Session } from '../src/types'
 import { resetComponentStore, setTestClient, useAppStore } from './component-mocks/app-store'
-import { Alert } from './component-mocks/react-native'
+import { Alert, Keyboard, StyleSheet } from './component-mocks/react-native'
 
 const goal: CodexGoal = { threadId: 'thread-a', objective: 'Finish the mobile goal controls', status: 'active', tokenBudget: 1000, tokensUsed: 120, timeUsedSeconds: 20, createdAt: 1, updatedAt: 2 }
 const health = { ok: true, capabilities: { codex_controls: { available: true, version: 1, interactive_client_capability: 'codex_interactive_v1', features: { goals: true } } } } as Health
@@ -25,9 +27,12 @@ let context: ReturnType<typeof useCodexRuntime>
 const observations: Array<string | null> = []
 function Probe() { context = useCodexRuntime(); observations.push(context.runtime?.goal?.status ?? null); return null }
 const mounted: ReactTestRenderer[] = []
+function goalTree(content: 'bar' | 'editor' | 'status' = 'bar', sessionId = 'chat-a') {
+  return <AppTypographyProvider><CodexRuntimeProvider sessionId={sessionId}><Probe />{content === 'bar' ? <CodexGoalBar /> : content === 'editor' ? <CodexGoalEditor /> : <CodexStatusButton compact={false} />}</CodexRuntimeProvider></AppTypographyProvider>
+}
 async function mount(content: 'bar' | 'editor' | 'status' = 'bar') {
   let tree!: ReactTestRenderer
-  await act(async () => { tree = create(<CodexRuntimeProvider sessionId="chat-a"><Probe />{content === 'bar' ? <CodexGoalBar /> : content === 'editor' ? <CodexGoalEditor /> : <CodexStatusButton compact={false} />}</CodexRuntimeProvider>) })
+  await act(async () => { tree = create(goalTree(content)) })
   mounted.push(tree)
   return tree
 }
@@ -44,6 +49,121 @@ beforeEach(() => {
 })
 afterEach(async () => { for (const tree of mounted.splice(0)) await act(async () => tree.unmount()) })
 
+test('goal starts as one accessible compact header and only mounts progress and controls when expanded', async () => {
+  const tree = await mount()
+  const header = node(tree, 'codex-goal-details')
+  assert.equal(header.props.accessibilityRole, 'button')
+  assert.equal(header.props.accessibilityState.expanded, false)
+  assert.match(header.props.accessibilityLabel, /Show goal details\. Pursuing goal\./)
+  assert.ok(Number(StyleSheet.flatten(header.props.style)?.minHeight) >= 44)
+  assert.equal(node(tree, 'codex-goal-objective').props.numberOfLines, 1)
+  assert.equal(node(tree, 'codex-goal-objective').props.ellipsizeMode, 'tail')
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal')
+  for (const id of ['codex-goal-body', 'codex-goal-progress', 'codex-goal-toggle', 'codex-goal-edit', 'codex-goal-clear', 'codex-goal-objective-full']) assert.equal(nodes(tree, id).length, 0)
+  const chevrons = header.findAll(child => child.type === 'ChevronDown')
+  assert.equal(chevrons.length, 1)
+  assert.deepEqual(chevrons[0].props.style.transform, [{ rotate: '-90deg' }])
+  await press(tree, 'codex-goal-details')
+  assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, true)
+  const body = node(tree, 'codex-goal-body')
+  assert.ok(Number(StyleSheet.flatten(body.props.style)?.maxHeight) >= 120)
+  assert.ok(Number(StyleSheet.flatten(body.props.style)?.maxHeight) <= 160)
+  for (const id of ['codex-goal-progress', 'codex-goal-toggle', 'codex-goal-edit', 'codex-goal-clear', 'codex-goal-objective-full']) assert.equal(body.findAll(child => typeof child.type === 'string' && child.props.testID === id).length, 1)
+  await press(tree, 'codex-goal-details')
+  assert.equal(nodes(tree, 'codex-goal-body').length, 0)
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal')
+})
+
+test('both fold choices survive repeated counter, objective and status refreshes', async () => {
+  let value = runtime()
+  setTestClient({ codexRuntime: async () => value })
+  const tree = await mount()
+  for (const expanded of [false, true, false]) {
+    if (node(tree, 'codex-goal-details').props.accessibilityState.expanded !== expanded) await press(tree, 'codex-goal-details')
+    for (const [index, status] of (['active', 'blocked', 'paused', 'complete'] as const).entries()) {
+      value = runtime({ ...goal, objective: `Updated objective ${expanded} ${index}`, status, updatedAt: 10 + index, tokensUsed: 200 + index, timeUsedSeconds: 30 + index })
+      await act(async () => { await context.refresh() })
+      assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, expanded)
+      assert.equal(nodes(tree, 'codex-goal-body').length, Number(expanded))
+      assert.equal(contents(node(tree, 'codex-goal-objective')), value.goal?.objective)
+      assert.ok(contents(node(tree, 'codex-goal-state')).length > 0)
+    }
+  }
+})
+
+test('fold choice resets on profile generation and chat changes but survives reconnects', async () => {
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  await act(async () => useAppStore.setState({ connected: false }))
+  await act(async () => useAppStore.setState({ connected: true }))
+  assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, true)
+  for (const next of [{ activeProfileId: 'profile-b' }, { profileGeneration: 2 }]) {
+    await act(async () => useAppStore.setState(next))
+    assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, false)
+    await press(tree, 'codex-goal-details')
+  }
+  await act(async () => {
+    useAppStore.setState({ sessions: [session, { ...session, id: 'chat-b' }], selectedSessionId: 'chat-b' })
+    tree.update(goalTree('bar', 'chat-b'))
+  })
+  assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, false)
+  assert.equal(nodes(tree, 'codex-goal-toggle').length, 0)
+})
+
+test('a collapsed goal keeps a truncated alert and exposes the full error on expansion', async () => {
+  const message = 'Goal update failed. '.repeat(80)
+  setTestClient({ codexRuntime: async () => runtime(), setCodexGoal: async () => { throw new Error(message) } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  await press(tree, 'codex-goal-toggle')
+  assert.equal(contents(node(tree, 'codex-goal-error')), message)
+  assert.equal(node(tree, 'codex-goal-error').props.numberOfLines, undefined)
+  await press(tree, 'codex-goal-details')
+  assert.equal(node(tree, 'codex-goal-error').props.accessibilityRole, 'alert')
+  assert.equal(node(tree, 'codex-goal-error').props.numberOfLines, 1)
+  assert.equal(node(tree, 'codex-goal-error').props.ellipsizeMode, 'tail')
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal')
+  assert.match(node(tree, 'codex-goal-details').props.accessibilityHint, /Goal alert/)
+  await press(tree, 'codex-goal-details')
+  assert.equal(contents(node(tree, 'codex-goal-error')), message)
+  assert.equal(node(tree, 'codex-goal-error').props.numberOfLines, undefined)
+})
+
+test('long goals keep bounded scrolling and reachable keyboard-safe controls in a narrow large-text host', async () => {
+  const objective = 'Long objective with details for a narrow phone. '.repeat(80)
+  setTestClient({ codexRuntime: async () => runtime({ ...goal, objective }) })
+  useAppStore.setState({ fontScale: 1.6 })
+  const tree = await mount()
+  await act(async () => tree.update(<View testID="narrow-keyboard-host" style={{ width: 280, maxHeight: 220 }}>{goalTree()}</View>))
+  assert.equal(node(tree, 'codex-goal-objective').props.numberOfLines, 1)
+  assert.ok(Number(StyleSheet.flatten(node(tree, 'codex-goal-objective').props.style)?.fontSize) > 12)
+  await press(tree, 'codex-goal-details')
+  const body = node(tree, 'codex-goal-body')
+  assert.equal(body.props.nestedScrollEnabled, true)
+  assert.equal(body.props.keyboardShouldPersistTaps, 'always')
+  assert.equal(StyleSheet.flatten(body.props.style)?.maxHeight, 152)
+  assert.equal(contents(node(tree, 'codex-goal-objective-full')), objective)
+  assert.equal(node(tree, 'codex-goal-objective-full').props.numberOfLines, undefined)
+  for (const id of ['codex-goal-toggle', 'codex-goal-edit', 'codex-goal-clear']) {
+    const control = node(tree, id)
+    const style = StyleSheet.flatten(control.props.style({ pressed: false }))
+    assert.ok(Number(style?.minHeight) >= 44)
+    assert.ok(Number(style?.minWidth) >= 44)
+  }
+  const originalDismiss = Keyboard.dismiss
+  let dismissals = 0
+  Keyboard.dismiss = () => { dismissals++ }
+  try {
+    await press(tree, 'codex-goal-edit')
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)) })
+    assert.equal(nodes(tree, 'codex-goal-editor').length, 1)
+    assert.ok(dismissals > 0)
+    await press(tree, 'codex-goal-editor-close')
+    assert.equal(nodes(tree, 'codex-goal-editor').length, 0)
+    assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, true)
+  } finally { Keyboard.dismiss = originalDismiss }
+})
+
 test('Pause is single-flight and applies the returned snapshot before stale refreshes settle', async () => {
   const staleRead = deferred<CodexRuntimeSnapshot>()
   const freshRead = deferred<CodexRuntimeSnapshot>()
@@ -52,14 +172,17 @@ test('Pause is single-flight and applies the returned snapshot before stale refr
   let reads = 0
   setTestClient({ codexRuntime: () => ++reads === 1 ? Promise.resolve(runtime()) : reads === 2 ? staleRead.promise : freshRead.promise, setCodexGoal: async (id, input) => { assert.equal(id, 'chat-a'); inputs.push(input); return save.promise } })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   await act(async () => { void context.refresh() })
   const tap = node(tree, 'codex-goal-toggle').props.onPress
   await act(async () => { tap(); tap() })
   assert.deepEqual(inputs, [{ status: 'paused' }])
   assert.equal(node(tree, 'codex-goal-toggle').props.disabled, true)
+  await press(tree, 'codex-goal-details')
   const paused = { ...goal, status: 'paused' as const, updatedAt: 3 }
   await act(async () => save.resolve({ goal: paused, time_budget_seconds: 600 }))
   assert.equal(contents(node(tree, 'codex-goal-state')), 'Goal paused')
+  assert.equal(node(tree, 'codex-goal-details').props.accessibilityState.expanded, false)
   const applied = observations.length
   await act(async () => staleRead.resolve(runtime(goal)))
   assert.equal(contents(node(tree, 'codex-goal-state')), 'Goal paused')
@@ -73,6 +196,7 @@ test('Resume sends only status; Clear requires confirmation and rejects duplicat
   let cleared = 0
   setTestClient({ codexRuntime: async () => value, setCodexGoal: async (_id, input) => { inputs.push(input); value = runtime({ ...goal, status: 'active' }); return { goal: value.goal, time_budget_seconds: 600 } }, clearCodexGoal: async () => { cleared++; value = { ...runtime(null), time_budget_seconds: null }; return { goal: null, time_budget_seconds: null } } })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Resume goal')
   await press(tree, 'codex-goal-toggle')
   assert.deepEqual(inputs, [{ status: 'active' }])
@@ -147,10 +271,11 @@ test('server configuration immediately disables actions and ignores other server
   let writes = 0
   setTestClient({ codexRuntime: () => ++reads === 1 ? Promise.resolve(runtime()) : read.promise, setCodexGoal: async () => { writes++; return { goal, time_budget_seconds: 600 } } })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   await act(async () => announceCodexGoalsConfigurationChanged('another-profile', 1, false))
   assert.equal(nodes(tree, 'codex-goal-toggle').length, 1)
   await act(async () => announceCodexGoalsConfigurationChanged('profile-a', 1, false))
-  assert.equal(contents(node(tree, 'codex-goal-state')), 'Goals disabled')
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal · Goals disabled')
   assert.equal(nodes(tree, 'codex-goal-toggle').length, 0)
   await act(async () => { await assert.rejects(context.updateGoal({ status: 'active' }), /disabled on this server/) })
   assert.equal(writes, 0)
@@ -174,6 +299,7 @@ test('late goal mutation results cannot replace the newly selected server snapsh
   const save = deferred<CodexGoalSnapshot>()
   setTestClient({ codexRuntime: async () => runtime(), setCodexGoal: () => save.promise })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   await press(tree, 'codex-goal-toggle')
   const otherGoal = { ...goal, objective: 'Other server goal', status: 'blocked' as const }
   await act(async () => { setTestClient({ codexRuntime: async () => runtime(otherGoal) }); useAppStore.setState({ activeProfileId: 'profile-b', profileGeneration: 2 }) })
@@ -187,6 +313,7 @@ test('Clear confirmation cannot delete a replacement goal or another selected se
   let clears = 0
   setTestClient({ codexRuntime: async () => value, clearCodexGoal: async () => { clears++; return { goal: null, time_budget_seconds: null } } })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   await press(tree, 'codex-goal-clear')
   value = runtime({ ...goal, objective: 'Replacement goal', createdAt: 100 })
   await act(async () => { await context.refresh() })
@@ -205,6 +332,7 @@ test('blocked, budget-limited and complete goals show honest states without a re
   let value = runtime({ ...goal, status: 'blocked' })
   setTestClient({ codexRuntime: async () => value })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   for (const [status, label] of [['blocked', 'Goal blocked'], ['budgetLimited', 'Budget limited'], ['complete', 'Goal complete']] as const) {
     value = runtime({ ...goal, status })
     await act(async () => { await context.refresh() })
@@ -233,6 +361,7 @@ test('direct Edit opens the goal editor and refreshes the current chat', async (
   let reads = 0
   setTestClient({ codexRuntime: async () => { reads++; return runtime({ ...goal, status: 'paused' }) } })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   const before = reads
   await press(tree, 'codex-goal-edit')
   assert.equal(nodes(tree, 'codex-goal-editor').length, 1)
@@ -246,8 +375,9 @@ test('explicitly unsupported goals stay read-only and unavailable runtime action
   let writes = 0
   setTestClient({ codexRuntime: async () => value, setCodexGoal: async () => { writes++; return { goal, time_budget_seconds: 600 } } })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   await act(async () => useAppStore.setState({ health: { ...health, capabilities: { codex_controls: { available: true, version: 1, interactive_client_capability: 'codex_interactive_v1', features: { goals: false } } } } as Health }))
-  assert.equal(contents(node(tree, 'codex-goal-state')), 'Goals unavailable')
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal · Goals unavailable')
   assert.equal(nodes(tree, 'codex-goal-toggle').length, 0)
   await act(async () => { await assert.rejects(context.updateGoal({ status: 'active' }), /unavailable/) })
   assert.equal(writes, 0)
@@ -264,6 +394,7 @@ test('a late pre-reconnect failure cannot clear a newer mutation or report a sta
   let writes = 0
   setTestClient({ codexRuntime: async () => runtime(), setCodexGoal: () => ++writes === 1 ? first.promise : second.promise })
   const tree = await mount()
+  await press(tree, 'codex-goal-details')
   await press(tree, 'codex-goal-toggle')
   await act(async () => useAppStore.setState({ connected: false }))
   await act(async () => useAppStore.setState({ connected: true }))
@@ -281,6 +412,7 @@ test('a lifecycle start does not count the preceding idle interval as goal time'
   Date.now = () => now
   try {
     const tree = await mount()
+    await press(tree, 'codex-goal-details')
     assert.match(contents(node(tree, 'codex-goal-progress')), /^20s \/ 10m elapsed/)
     now += 120_000
     await act(async () => useAppStore.setState({ activeSessionIds: new Set(['chat-a']) }))

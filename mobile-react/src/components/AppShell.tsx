@@ -20,6 +20,7 @@ import { Text } from './AppText'
 import { CodeReview } from './CodeReview'
 import { DigestDialog, JobDialog, ProcessDialog, SearchDialog, ServerSetupDialog, SettingsDialog, TmuxDialog } from './Dialogs'
 import { Inspector } from './Inspector'
+import { ImportChatDialog, importChatAvailable } from './ImportChatDialog'
 import { Sidebar } from './Sidebar'
 import { ServerProfilesSheet, type ServerProfileListItem } from './ServerProfiles'
 import { TerminalView } from './TerminalView'
@@ -83,6 +84,7 @@ function AppShellContent() {
   const [inspectorVisible, setInspectorVisible] = useState(true)
   const [settings, setSettings] = useState(false)
   const [teamNetwork, setTeamNetwork] = useState(false)
+  const [importChat, setImportChat] = useState(false)
   const [setupDismissed, setSetupDismissed] = useState(true)
   const setupNextMode = useRef<'edit-active' | null>(null)
   const [servers, setServers] = useState<'manage' | 'add' | 'edit-active' | null>(null)
@@ -274,6 +276,7 @@ function AppShellContent() {
     setMobileChatOpen(false)
     setSettings(false)
     setTeamNetwork(false)
+    setImportChat(false)
     setOptions(false)
     setSearch(false)
     setDigest(false)
@@ -343,7 +346,7 @@ function AppShellContent() {
   if (!initialized) return <View style={[styles.fill, { backgroundColor: colors.background }]}><Loading label="Starting AgentsDock" /></View>
 
   const connectionKey = `${activeProfileId ?? 'none'}:${profileGeneration}`
-  const sidebar = <Sidebar key={`sidebar:${connectionKey}`} profiles={serverProfileItems} activeProfileId={activeProfileId} switchingProfileId={switchingProfileId} onSwitchServer={switchServer} onAddServer={() => openServers('add')} onManageServers={() => openServers('manage')} onSettings={openSettings} onTeamNetwork={openTeamNetwork} onNewChat={() => void quickNewChat()} onOpenChat={() => { trackEvent('chat_opened'); openMobileChat() }} />
+  const sidebar = <Sidebar key={`sidebar:${connectionKey}`} profiles={serverProfileItems} activeProfileId={activeProfileId} switchingProfileId={switchingProfileId} onSwitchServer={switchServer} onAddServer={() => openServers('add')} onManageServers={() => openServers('manage')} onSettings={openSettings} onTeamNetwork={openTeamNetwork} onNewChat={() => void quickNewChat()} onImportChat={() => { if (importChatAvailable(useAppStore.getState())) { dismissAppKeyboard(); setImportChat(true) } }} onOpenChat={() => { trackEvent('chat_opened'); openMobileChat() }} />
   const chat = selected
     ? <ChatScreen key={`${connectionKey}:${selected.id}`} sessionId={selected.id} compact={compact} onBack={closeMobileChat} onOptions={openOptions} onSearch={openSearch} onToggleInspector={() => setInspectorVisible(value => !value)} onReview={openReview} onSetupServer={() => openServers('add')} onOpenMcp={() => openClaudeMcp(selected.id)} />
     : <NoChat connecting={connecting} onSettings={() => openServers('manage')} />
@@ -415,6 +418,7 @@ function AppShellContent() {
     />
     <SettingsDialog key={`settings:${connectionKey}`} visible={modalScopeCurrent && settings} onClose={() => setSettings(false)} />
     <TeamNetwork key={`team-network:${connectionKey}`} visible={modalScopeCurrent && teamNetwork} onClose={() => setTeamNetwork(false)} />
+    <ImportChatDialog key={`import-chat:${connectionKey}`} visible={modalScopeCurrent && importChat} onClose={() => setImportChat(false)} onOpened={() => { setImportChat(false); openMobileChat() }} />
     <ClaudeMcpDialog key={`claude-mcp:${connectionKey}:${mcpSessionId ?? 'closed'}`} visible={modalScopeCurrent && mcpSessionId != null && mcpSessionId === selected?.id} sessionId={mcpSessionId} onClose={() => setMcpSessionId(null)} />
     <SearchDialog visible={modalScopeCurrent && search && !isWelcomeSession(selected?.id)} sessionId={selected?.id} onClose={() => setSearch(false)} />
     <DigestDialog visible={modalScopeCurrent && digest} source={selected} onClose={() => setDigest(false)} />

@@ -24,6 +24,7 @@ import { BackendMark } from './BackendMark'
 import { IconButton, SheetCloseButton } from './ui'
 import { RuntimeHealthPanel } from './RuntimeHealth'
 import { CodexServerSettings } from './CodexServerSettings'
+import { CodexSubagentSettings } from './CodexSubagentSettings'
 import appConfig from '../../app.json'
 import { AndroidUpdateSettings } from './AndroidUpdater'
 import { AnalyticsSettings } from './AnalyticsSettings'
@@ -108,6 +109,7 @@ export function SettingsDialog({ visible, onClose }: { visible: boolean; onClose
     <AndroidUpdateSettings />
     <RuntimeHealthPanel />
     <CodexServerSettings visible={visible} />
+    <CodexSubagentSettings visible={visible} />
     <Label text="Server address" /><TextInput testID="settings-server-url" accessibilityLabel="Server address" value={url} onChangeText={setURL} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="100.x.y.z:7850" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Label text="Access token" /><TextInput testID="settings-access-token" accessibilityLabel="Access token" value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Server token" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.raised }]} />
     <Text style={[styles.help, { color: colors.muted }]}>The address stays exactly as typed while editing. It is normalized only after Apply. HTTP is allowed for private LAN and Tailscale servers.</Text>

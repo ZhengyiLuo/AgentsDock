@@ -9,6 +9,10 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
+  BulkImportSessionItem,
+  BulkImportSessionResult,
+  LocalSessionCandidate,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -22,6 +26,8 @@ import type {
   ClaudeMcpSnapshot,
   ClaudeRuntimeSnapshot,
   ChatReference,
+  ChatInboxPage,
+  ChatInboxDeleteReceipt,
   TeamReference,
   CreateJobInput,
   CreateSessionInput,
@@ -65,6 +71,9 @@ import type {
 import { normalizeServerURL } from '../lib/format'
 import { createUploadFormData } from '../lib/upload-form'
 import { teamNetworkRequestPath } from '../lib/team-network'
+import { parseChatInboxDelete, parseChatInboxPage } from '../lib/chat-mailbox'
+import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT, parseLocalSessionCandidatesResponse,
+  parseBulkImportSessionItems, parseBulkImportSessionResultsResponse } from '../lib/local-session-import'
 
 interface SessionResponse {
   session: Session
@@ -253,6 +262,17 @@ export class AgentServerClient {
       method: 'PUT', body: JSON.stringify({ enabled }),
     }, 30_000, false, 'native-control')
   }
+  codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
+    return this.request('/api/admin/codex/subagents', {}, 30_000, false, 'native-control')
+  }
+  setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
+    if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
+      throw new Error('Subagent limit must be a positive whole number or null for Codex default.')
+    }
+    return this.request('/api/admin/codex/subagents', {
+      method: 'PUT', body: JSON.stringify({ max_concurrent_threads_per_session: limit }),
+    }, 30_000, false, 'native-control')
+  }
   serverUpdateStatus(): Promise<ServerUpdateStatus> { return this.get('/api/admin/update') }
   cancelServerUpdate(scheduleId: string): Promise<ServerUpdateStatus> {
     return this.post('/api/admin/update/cancel', { schedule_id: scheduleId })
@@ -317,6 +337,21 @@ export class AgentServerClient {
     return this.delete(`/api/sessions/${encodeURIComponent(sessionId)}/workspace/entry?${query}`)
   }
 
+  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT): Promise<LocalSessionCandidate[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT) {
+      throw new Error('Import Chat local session limit is invalid.')
+    }
+    return parseLocalSessionCandidatesResponse(await this.get<unknown>(`/api/local-sessions?limit=${limit}`), limit)
+  }
+
+  async bulkImportSessions(items: BulkImportSessionItem[]): Promise<BulkImportSessionResult[]> {
+    const normalized = parseBulkImportSessionItems(items, LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT)
+    const response = await this.request<unknown>('/api/sessions/bulk-import', {
+      method: 'POST', body: JSON.stringify({ items: normalized }),
+    }, 120_000)
+    return parseBulkImportSessionResultsResponse(response, normalized)
+  }
+
   async createSession(input: CreateSessionInput): Promise<Session> {
     return (await this.post<{ session: Session }>('/api/sessions', {
       title: input.title,
@@ -334,7 +369,7 @@ export class AgentServerClient {
       cursor_permission_mode: input.cursor_permission_mode ?? null,
       provider_jobs_access: input.provider_jobs_access ?? null,
       provider_session_id: input.providerId || null,
-      import_history: Boolean(input.providerId),
+      import_history: Boolean(input.providerId) && input.backend !== 'cursor',
     })).session
   }
 
@@ -618,12 +653,17 @@ export class AgentServerClient {
     chatReferences?: readonly ChatReference[],
     clientCapabilities?: readonly string[],
     teamReferences?: readonly TeamReference[],
+    expectedMessageRevision?: number,
   ): Promise<void> {
+    if (expectedMessageRevision !== undefined && (!Number.isSafeInteger(expectedMessageRevision) || expectedMessageRevision < 0)) {
+      throw new Error('Invalid queued message revision.')
+    }
     await this.patch(`/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}`, {
       prompt,
       ...(chatReferences ? { chat_references: chatReferences.map(reference => ({ ...reference })) } : {}),
       ...(clientCapabilities ? { client_capabilities: [...clientCapabilities] } : {}),
       ...(teamReferences ? { team_references: teamReferences.map(reference => ({ ...reference })) } : {}),
+      ...(expectedMessageRevision !== undefined ? { expected_message_revision: expectedMessageRevision } : {}),
     })
   }
   async crossChatHandoff(envelopeId: string): Promise<CrossChatHandoff> {
@@ -632,7 +672,16 @@ export class AgentServerClient {
     )).handoff
   }
   agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
-    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)
+  }
+  async chatInbox(sessionId: string, cursor: string | null = null, limit = 25): Promise<ChatInboxPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25 || cursor !== null && !/^\d+$/u.test(cursor)) throw new Error('Invalid inbox page request.')
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (cursor !== null) query.set('cursor', cursor)
+    return parseChatInboxPage(await this.get<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox?${query}`), sessionId, limit)
+  }
+  async deleteChatInboxMessage(sessionId: string, messageId: string): Promise<ChatInboxDeleteReceipt> {
+    return parseChatInboxDelete(await this.delete<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox/${encodeURIComponent(messageId)}`), sessionId, messageId)
   }
   deleteAgentHandoffRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
     if (!expectedRevision.trim()) throw new Error('Refresh this grant before revoking it.')

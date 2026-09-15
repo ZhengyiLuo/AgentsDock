@@ -13,6 +13,8 @@ The mobile UI supports:
 
 - Feed list, immutable message detail, and posting a Markdown update to everyone.
 - Passive Inbox and Sent mail. Opening an unread Inbox message records its read receipt; it never wakes or steers an agent.
+- Explicit 25-message pagination, typed body/identity verification, and negotiated revision-aware Mark read/Mark unread. Remove affects only the selected server mailbox address and requires confirmation.
+- Route/Reply stages an exact message link and structured sender reference in a chosen local chat, preserving its draft. It does not send a message, start an agent, or infer a reply to the original fanout.
 - Versioned Skills list and detail, including permission-gated Pin/Unpin and Archive/Restore.
 - Server, registered-agent, and people directory, including permission-gated agent registration for a server owned by the authenticated caller.
 

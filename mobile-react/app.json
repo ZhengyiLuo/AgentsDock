@@ -2,7 +2,7 @@
   "expo": {
     "name": "AgentsDock",
     "slug": "agentsdock-react",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "scheme": "com.zhengyiluo.ZenithDock",
     "orientation": "default",
     "icon": "./assets/icon.png",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zhengyiluo.ZenithDock",
-      "buildNumber": "171",
+      "buildNumber": "174",
       "privacyManifests": {
         "NSPrivacyTracking": false,
         "NSPrivacyCollectedDataTypes": []

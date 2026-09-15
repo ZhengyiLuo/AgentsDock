@@ -1,4 +1,14 @@
 import type { Event, Snapshot } from '../types'
+import { isImportedProviderControlMetadata, isImportedProviderInterruption } from './provider-origin'
+
+/** Proven silent imports differ from an empty, unverified transport-only page. */
+export function isSilentImportedHistoryEvent(event: Event): boolean {
+  return isImportedProviderControlMetadata(event) && !isImportedProviderInterruption(event)
+}
+
+export function isVerifiedSilentHistory(events: readonly Event[]): boolean {
+  return events.length > 0 && events.every(isSilentImportedHistoryEvent)
+}
 
 // Version 5 drops caches created before provider-only prompt suffixes were
 // removed ahead of mobile truncation. A fresh server page can sanitize the
