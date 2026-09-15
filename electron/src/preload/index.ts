@@ -49,6 +49,7 @@ const api: AgentsDockAPI = {
     postMessage: (scope, input) => ipcRenderer.invoke('team-hub:message:post', scope, input),
     networkCapabilities: scope => ipcRenderer.invoke('team-hub:network:capabilities', scope),
     network: (scope, query) => ipcRenderer.invoke('team-hub:network:get', scope, query),
+    renameNetworkServer: (scope, input) => ipcRenderer.invoke('team-hub:network:server:rename', scope, input),
     registerNetworkAgent: (scope, input) => ipcRenderer.invoke('team-hub:network:agent:register', scope, input),
     bulletin: (scope, query) => ipcRenderer.invoke('team-hub:network:bulletin:list', scope, query),
     postBulletin: (scope, input) => ipcRenderer.invoke('team-hub:network:bulletin:post', scope, input),

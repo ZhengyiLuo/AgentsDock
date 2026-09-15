@@ -32,6 +32,7 @@ import type {
   TeamNetworkPassiveRequestDetails,
   TeamNetworkPassiveRequestReply,
   TeamNetworkProjectionPage,
+  TeamNetworkServerProfile,
   TeamNetworkReceiptState,
   TeamAttachment,
   TeamAttachmentDeclaration,
@@ -67,6 +68,7 @@ import {
   parseTeamNetworkPassiveRequestCreated,
   parseTeamNetworkPassiveRequestDetails,
   parseTeamNetworkProjection,
+  parseTeamNetworkServerProfileResponse,
   parseTeamAttachmentDeclaration,
   parseTeamAttachmentResponse,
   parseTeamMessagePage,
@@ -459,6 +461,12 @@ export class TeamHubClient {
       `/v1/teams/${segment(teamId)}/network?${query}`,
       accessToken
     ).then(parseTeamNetworkProjection)
+  }
+
+  renameNetworkServer(accessToken: string, teamId: string, displayName: string): Promise<{ server: TeamNetworkServerProfile }> {
+    return this.authenticated(`/v1/teams/${segment(teamId)}/network/server-profile`, accessToken, {
+      method: 'POST', body: { display_name: displayName }
+    }).then(parseTeamNetworkServerProfileResponse)
   }
 
   registerNetworkAgent(

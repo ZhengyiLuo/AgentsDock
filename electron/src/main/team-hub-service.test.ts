@@ -342,7 +342,7 @@ function harness(
     redeemInvitation: vi.fn(), acceptInvitation: vi.fn(), recoverDevice: vi.fn(), createInvitation: vi.fn(),
     invitations: vi.fn(), revokeInvitation: vi.fn(), updateMember: vi.fn(),
     createNodeEnrollment: vi.fn(), createChannel: vi.fn(), messages: vi.fn(), postMessage: vi.fn(),
-    securePeers: vi.fn(), revokeSecurePeer: vi.fn(), network: vi.fn(), registerNetworkAgent: vi.fn(),
+    securePeers: vi.fn(), revokeSecurePeer: vi.fn(), network: vi.fn(), registerNetworkAgent: vi.fn(), renameNetworkServer: vi.fn(),
     networkBulletin: vi.fn(), postNetworkBulletin: vi.fn(), deleteNetworkBulletin: vi.fn(), networkDeletions: vi.fn(), networkMailbox: vi.fn(),
     sendNetworkMailbox: vi.fn(), networkItem: vi.fn(), recordNetworkDeliveryReceipt: vi.fn(),
     createNetworkPassiveRequest: vi.fn(), networkPassiveRequest: vi.fn(), replyNetworkPassiveRequest: vi.fn(),
@@ -560,7 +560,7 @@ describe('pending-only secure pairing completion observer', () => {
   })
 })
 
-async function connectTransientPeer(test: ReturnType<typeof harness>) {
+async function connectTransientPeer(test: ReturnType<typeof harness>, principalKind: 'node' | 'service' = 'node') {
   const profileScope = {
     profileId: 'server-profile-1',
     profileGeneration: 1,
@@ -570,13 +570,13 @@ async function connectTransientPeer(test: ReturnType<typeof harness>) {
     healthError: 'transport' | 'peer_revoked' | 'peer_authentication_required' | 'retryable_unavailable' | null
     peerSessionError: 'transport' | 'peer_revoked' | 'peer_authentication_required' | 'retryable_unavailable' | null
     healthHubIdentity: string
-    peerSessionPrincipalKind: 'node' | 'human'
+    peerSessionPrincipalKind: 'node' | 'service' | 'human'
     dataError: 'retryable_unavailable' | 'authentication_required' | null
   } = {
     healthError: null,
     peerSessionError: null,
     healthHubIdentity: 'hub-remote',
-    peerSessionPrincipalKind: 'node',
+    peerSessionPrincipalKind: principalKind,
     dataError: null
   }
   const peerHeaders: Headers[] = []
@@ -630,7 +630,7 @@ async function connectTransientPeer(test: ReturnType<typeof harness>) {
     } : {
       session: { id: 'peer-session', device_label: 'Paired server', expires_at: '2027-01-01T00:00:00Z' },
       principal: {
-        id: 'peer-node',
+        id: peerBehavior.peerSessionPrincipalKind === 'service' ? 'service_secure_peer_fixture' : 'peer-node',
         kind: peerBehavior.peerSessionPrincipalKind,
         display_name: 'Client node',
         email: null
@@ -707,6 +707,157 @@ async function connectDurablePeer(test: ReturnType<typeof harness>) {
   })
   return { profileScope, connectionId }
 }
+
+describe('TeamHubService member self rename', () => {
+  async function member(principalKind: 'node' | 'service' = 'service') {
+    const test = harness()
+    const peer = await connectTransientPeer(test, principalKind)
+    const scope = scopeFrom(test.service.status())
+    const server = { id: 'peer-node', server_identity: scope.serverIdentity, display_name: 'Member',
+      status: 'active', is_host: false, owned_by_caller: true }
+    const state = {
+      server,
+      receipt: { id: server.id, server_identity: server.server_identity, display_name: 'New name' },
+      errorStatus: 0,
+      errorCode: 'forbidden',
+      beforeRead: null as null | (() => void | Promise<void>),
+      beforeReceipt: null as null | (() => void | Promise<void>),
+      reads: 0,
+      writes: [] as Array<{ url: string; body: unknown; headers: Headers }>
+    }
+    const existingFetch = peer.secureFetch.getMockImplementation()!
+    peer.secureFetch.mockImplementation(async (input, init = {}) => {
+      const url = String(input instanceof Request ? input.url : input)
+      const path = new URL(url).pathname
+      const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+        status, headers: { 'Content-Type': 'application/json' }
+      })
+      if (path.endsWith('/network')) {
+        state.reads += 1
+        await state.beforeRead?.()
+        return jsonResponse({ network: { id: 'team-1', display_name: 'Team', hub_id: 'hub-remote' },
+          servers: [state.server], agents: [], next_after_server_id: state.server.id, has_more: false })
+      }
+      if (path.endsWith('/network/server-profile')) {
+        state.writes.push({ url, body: JSON.parse(String(init.body)), headers: new Headers(init.headers) })
+        await state.beforeReceipt?.()
+        return state.errorStatus
+          ? jsonResponse({ error: { code: state.errorCode, message: 'Member connection is read-only.' } }, state.errorStatus)
+          : jsonResponse({ server: state.receipt })
+      }
+      return existingFetch(input, init)
+    })
+    const input = { teamId: 'team-1', serverId: server.id, displayName: 'New name' }
+    return { test, peer, scope, state, input }
+  }
+
+  it('writes once over the exact member proxy and changes no local server identity or host role', async () => {
+    const { test, scope, state, input } = await member()
+    const before = test.service.status()
+    expect(before.principal).toMatchObject({ id: 'service_secure_peer_fixture', kind: 'service' })
+    expect(before.principal?.id).not.toBe(input.serverId)
+    await expect(test.service.renameNetworkServer(scope, { ...input, displayName: '  New name  ' }))
+      .resolves.toEqual(state.receipt)
+    expect(state.reads).toBe(1)
+    expect(state.writes).toHaveLength(1)
+    expect(state.writes[0].url).toContain(`/api/team-hub-secure/${TRANSIENT_CONNECTION_ID}/v1/teams/team-1/network/server-profile`)
+    expect(state.writes[0].body).toEqual({ display_name: 'New name' })
+    expect(state.writes[0].headers.get('Authorization')).toBeNull()
+    expect(test.service.status()).toEqual(before)
+    expect(test.discovery.configureTeamHubServerRole).not.toHaveBeenCalled()
+    expect(test.discovery.deactivateSecurePeerConnection).not.toHaveBeenCalled()
+  })
+
+  it('retains compatibility with older node-shaped peer sessions', async () => {
+    const { test, scope, state, input } = await member('node')
+    expect(test.service.status().principal?.kind).toBe('node')
+    await expect(test.service.renameNetworkServer(scope, input)).resolves.toEqual(state.receipt)
+    expect(state.writes).toHaveLength(1)
+  })
+
+  it('rejects a different target, wrong ownership, host rows, and unavailable members before writing', async () => {
+    for (const change of [{ id: 'another-node' }, { owned_by_caller: false }, { is_host: true },
+      { status: 'offline' }, { server_identity: 'another-server' }]) {
+      const { test, scope, state, input } = await member()
+      Object.assign(state.server, change)
+      await expect(test.service.renameNetworkServer(scope, input)).rejects.toThrow()
+      expect(state.writes).toHaveLength(0)
+    }
+    const { test, scope, state, input } = await member()
+    await expect(test.service.renameNetworkServer(scope, { ...input, serverId: 'foreign-node' })).rejects.toThrow()
+    expect(state.writes).toHaveLength(0)
+  })
+
+  it('rejects malformed names, inactive teams, and stale caller scopes before roster or write I/O', async () => {
+    const { test, scope, state, input } = await member()
+    for (const displayName of ['', 'a\nb', '😀'.repeat(41)]) {
+      await expect(test.service.renameNetworkServer(scope, { ...input, displayName })).rejects.toThrow()
+    }
+    await expect(test.service.renameNetworkServer(scope, { ...input, teamId: 'foreign-team' })).rejects.toThrow()
+    for (const change of [{ profileGeneration: scope.profileGeneration + 1 }, { generation: scope.generation + 1 },
+      { connectionId: 'foreign-connection' }, { hostServerIdentity: 'foreign-host' },
+      { hubIdentity: 'foreign-hub' }, { serverIdentity: 'foreign-server' }]) {
+      await expect(test.service.renameNetworkServer({ ...scope, ...change }, input)).rejects.toThrow()
+    }
+    expect(state.reads).toBe(0)
+    expect(state.writes).toHaveLength(0)
+  })
+
+  it('keeps human and designated host sessions out of the member-only lane', async () => {
+    const test = harness()
+    const scope = await connectWithTeamMessages(test)
+    await expect(test.service.renameNetworkServer(scope, {
+      teamId: 'team-1', serverId: 'node-1', displayName: 'New name'
+    })).rejects.toThrow('paired member')
+    expect(test.client.network).not.toHaveBeenCalled()
+    expect(test.client.renameNetworkServer).not.toHaveBeenCalled()
+    expect(test.discovery.configureTeamHubServerRole).not.toHaveBeenCalled()
+  })
+
+  it('fences profile changes during ownership reads and late write receipts', async () => {
+    for (const boundary of ['beforeRead', 'beforeReceipt'] as const) {
+      const { test, scope, state, input } = await member()
+      state[boundary] = () => test.setServerScope({ profileId: 'replacement-profile', profileGeneration: 2,
+        serverIdentity: 'replacement-server', serverName: 'Replacement', serverUrl: 'http://127.0.0.1:7851' })
+      await expect(test.service.renameNetworkServer(scope, input)).rejects.toThrow(/changed/)
+      expect(state.writes).toHaveLength(boundary === 'beforeRead' ? 0 : 1)
+      expect(test.discovery.configureTeamHubServerRole).not.toHaveBeenCalled()
+    }
+  })
+
+  it('fences replacement connection identity observed during the roster lookup', async () => {
+    const { test, scope, state, input } = await member()
+    state.beforeRead = () => test.setDiscovery({ transport: 'secure_peer', designatedHost: false,
+      connectionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      basePath: '/api/team-hub-secure/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      hostServerIdentity: 'different-host', hubIdentity: 'different-hub' })
+    await expect(test.service.renameNetworkServer(scope, input)).rejects.toThrow(/changed/)
+    expect(state.writes).toHaveLength(0)
+  })
+
+  it('rejects mismatched returned IDs, identities and names after one write', async () => {
+    for (const change of [{ id: 'foreign-node' }, { server_identity: 'foreign-server' }, { display_name: 'Wrong name' }]) {
+      const { test, scope, state, input } = await member()
+      Object.assign(state.receipt, change)
+      await expect(test.service.renameNetworkServer(scope, input)).rejects.toThrow('mismatched server rename')
+      expect(state.writes).toHaveLength(1)
+    }
+  })
+
+  it('surfaces read-only and legacy host errors without changing role or retrying the write', async () => {
+    for (const [status, code, message] of [[403, 'forbidden', 'read-only'], [404, 'not_found', 'does not support'],
+      [405, 'method_not_allowed', 'does not support'], [501, 'unsupported', 'does not support'],
+      [403, 'route_forbidden', 'does not support'], [401, 'authentication_required', 'Retry the action once']] as const) {
+      const { test, scope, state, input } = await member()
+      state.errorStatus = status
+      state.errorCode = code
+      await expect(test.service.renameNetworkServer(scope, input)).rejects.toThrow(message)
+      expect(state.writes).toHaveLength(1)
+      expect(test.discovery.configureTeamHubServerRole).not.toHaveBeenCalled()
+      expect(test.discovery.deactivateSecurePeerConnection).not.toHaveBeenCalled()
+    }
+  })
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()

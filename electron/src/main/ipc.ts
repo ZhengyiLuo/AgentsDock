@@ -81,6 +81,7 @@ export function registerIpc(
     handle('team-hub:message:post', (scope, input) => teamHub.postMessage(scope, input))
     handle('team-hub:network:capabilities', scope => teamHub.networkCapabilities(scope))
     handle('team-hub:network:get', (scope, query) => teamHub.network(scope, query))
+    handle('team-hub:network:server:rename', (scope, input) => teamHub.renameNetworkServer(scope, input))
     handle('team-hub:network:agent:register', (scope, input) => teamHub.registerNetworkAgent(scope, input))
     handle('team-hub:network:bulletin:list', (scope, query) => teamHub.bulletin(scope, query))
     handle('team-hub:network:bulletin:post', (scope, input) => teamHub.postBulletin(scope, input))

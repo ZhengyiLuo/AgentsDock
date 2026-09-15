@@ -41,6 +41,23 @@ const trustedEvent = {
 describe('Team Hub IPC registration', () => {
   beforeEach(() => harness.handlers.clear())
 
+  it('routes member rename through exact scoped IPC and blocks untrusted frames', async () => {
+    const result = { id: 'node-1', server_identity: 'server-1', display_name: 'New name' }
+    const renameNetworkServer = vi.fn().mockResolvedValue(result)
+    registerIpc({} as AppService, {} as AppUpdateManager, new Proxy({ renameNetworkServer }, {
+      get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn()
+    }) as unknown as LazyTeamHubService)
+    const scope = { profileId: 'member', profileGeneration: 3, generation: 4, serverIdentity: 'server-1',
+      hubIdentity: 'hub-1', connectionId: 'connection-1', hostServerIdentity: 'host-1' }
+    const input = { teamId: 'team-1', serverId: 'node-1', displayName: 'New name' }
+    const handler = harness.handlers.get('team-hub:network:server:rename')!
+    await expect(handler(trustedEvent, scope, input)).resolves.toEqual(result)
+    expect(renameNetworkServer).toHaveBeenCalledExactlyOnceWith(scope, input)
+    expect(() => handler({ sender: { id: 2, getURL: () => 'https://untrusted.invalid/' },
+      senderFrame: { url: 'https://untrusted.invalid/', parent: null } }, scope, input)).toThrow('untrusted renderer')
+    expect(renameNetworkServer).toHaveBeenCalledTimes(1)
+  })
+
   it('routes Team Network role configuration with the immutable originating server scope', async () => {
     const configureServerRole = vi.fn().mockResolvedValue({ designatedHost: true })
     registerIpc({} as AppService, {} as AppUpdateManager, new Proxy({ configureServerRole }, {

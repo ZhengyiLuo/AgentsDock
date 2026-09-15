@@ -25,6 +25,7 @@ import type {
   TeamNetworkPostBulletinInput,
   TeamNetworkProjectionQuery,
   TeamNetworkRegisterAgentInput,
+  TeamNetworkRenameServerInput,
   TeamNetworkReplyPassiveRequestInput,
   TeamNetworkSendMailboxInput,
   TeamAttachmentCacheInput,
@@ -116,6 +117,7 @@ export class LazyTeamHubService {
   postMessage(scope: TeamHubScope, input: TeamHubPostMessageInput) { return this.requireService().postMessage(scope, input) }
   networkCapabilities(scope: TeamHubScope) { return this.requireService().networkCapabilities(scope) }
   network(scope: TeamHubScope, query: TeamNetworkProjectionQuery) { return this.requireService().network(scope, query) }
+  renameNetworkServer(scope: TeamHubScope, input: TeamNetworkRenameServerInput) { return this.requireService().renameNetworkServer(scope, input) }
   registerNetworkAgent(scope: TeamHubScope, input: TeamNetworkRegisterAgentInput) { return this.requireService().registerNetworkAgent(scope, input) }
   bulletin(scope: TeamHubScope, query: TeamNetworkBulletinQuery) { return this.requireService().bulletin(scope, query) }
   postBulletin(scope: TeamHubScope, input: TeamNetworkPostBulletinInput) { return this.requireService().postBulletin(scope, input) }

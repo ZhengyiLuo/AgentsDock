@@ -62,6 +62,14 @@ export interface TeamNetworkServer {
   owned_by_caller: boolean
 }
 
+export type TeamNetworkServerProfile = Pick<TeamNetworkServer, 'id' | 'server_identity' | 'display_name'>
+
+export interface TeamNetworkRenameServerInput {
+  teamId: string
+  serverId: string
+  displayName: string
+}
+
 export interface TeamNetworkAgent {
   id: string
   server_id: string
@@ -1553,6 +1561,27 @@ export function parseTeamNetworkPassiveRequestDetails(value: unknown): TeamNetwo
   }
 }
 
+export function parseTeamNetworkRenameServerInput(value: unknown): TeamNetworkRenameServerInput {
+  const item = strictInputRecord(value, 'Server rename', ['teamId', 'serverId', 'displayName'])
+  return {
+    teamId: opaqueId(item.teamId, 'team'),
+    serverId: opaqueId(item.serverId, 'server'),
+    displayName: memberServerName(item.displayName)
+  }
+}
+
+export function parseTeamNetworkServerProfileResponse(value: unknown): { server: TeamNetworkServerProfile } {
+  const response = strictRecord(value, 'server profile response', ['server'])
+  const server = strictRecord(response.server, 'server profile', ['id', 'server_identity', 'display_name'])
+  const name = memberServerName(server.display_name)
+  if (name !== server.display_name) throw invalidContract('server profile name')
+  return { server: {
+    id: opaqueId(server.id, 'server'),
+    server_identity: opaqueId(server.server_identity, 'server identity'),
+    display_name: name
+  } }
+}
+
 export function parseTeamNetworkRegisterAgentInput(value: unknown): TeamNetworkRegisterAgentInput {
   const item = strictInputRecord(value, 'Agent registration', ['teamId', 'externalAgentId', 'backend', 'displayName', 'idempotencyKey'])
   return {
@@ -2318,6 +2347,15 @@ function opaqueId(value: unknown, label: string): string {
 
 function nullableId(value: unknown, label: string): string | null {
   return value == null ? null : opaqueId(value, label)
+}
+
+function memberServerName(value: unknown): string {
+  if (typeof value !== 'string' || !isWellFormed(value)
+    || /[\u0000-\u001f\u007f-\u009f]/.test(value)
+    || !value.trim() || Buffer.byteLength(value.trim(), 'utf8') > 160) {
+    throw new Error('Server name must be nonempty, contain no control characters, and use at most 160 UTF-8 bytes.')
+  }
+  return value.trim()
 }
 
 function displayName(value: unknown, label: string): string {

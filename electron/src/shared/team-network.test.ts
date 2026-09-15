@@ -12,6 +12,8 @@ import {
   parseTeamNetworkPostBulletinInput,
   parseTeamNetworkProjection,
   parseTeamNetworkProjectionQuery,
+  parseTeamNetworkRenameServerInput,
+  parseTeamNetworkServerProfileResponse,
   parseTeamNetworkSendMailboxInput,
   parseAgentTeamMessagesCapability,
   parseTeamAttachmentDeclareInput,
@@ -40,6 +42,33 @@ import {
   teamBulletinAliasAvailable,
   teamAllServersAliasAvailable
 } from './team-network'
+
+describe('member server profile rename contract', () => {
+  const input = { teamId: 'team-1', serverId: 'node-1', displayName: '  New name  ' }
+  const server = { id: 'node-1', server_identity: 'identity-1', display_name: 'New name' }
+
+  it('normalizes only surrounding whitespace and bounds UTF-8 bytes', () => {
+    expect(parseTeamNetworkRenameServerInput(input)).toEqual({ ...input, displayName: 'New name' })
+    for (const displayName of ['x'.repeat(160), '😀'.repeat(40)]) {
+      expect(parseTeamNetworkRenameServerInput({ ...input, displayName }).displayName).toBe(displayName)
+    }
+    for (const displayName of ['', '   ', 'x'.repeat(161), '😀'.repeat(41), 'a\nb', 'a\tb',
+      'a\u0000b', 'a\u0085b', '\ud800']) {
+      expect(() => parseTeamNetworkRenameServerInput({ ...input, displayName })).toThrow()
+    }
+    expect(() => parseTeamNetworkRenameServerInput({ ...input, role: 'host' })).toThrow()
+    expect(() => parseTeamNetworkRenameServerInput({ ...input, serverId: '' })).toThrow()
+  })
+
+  it('accepts only an exact identity/name subset receipt without normalization', () => {
+    expect(parseTeamNetworkServerProfileResponse({ server })).toEqual({ server })
+    for (const value of [{ server: { ...server, is_host: false } }, { server, ok: true },
+      { server: { ...server, display_name: ' New name ' } },
+      { server: { ...server, server_identity: '' } }, { server: { ...server, display_name: 'x'.repeat(161) } }]) {
+      expect(() => parseTeamNetworkServerProfileResponse(value)).toThrow()
+    }
+  })
+})
 
 describe('Team Mail coverage metadata', () => {
   const anchor = `tmsg_${'a'.repeat(32)}`

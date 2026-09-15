@@ -156,6 +156,8 @@ import type {
   TeamNetworkProjectionPage,
   TeamNetworkProjectionQuery,
   TeamNetworkRegisterAgentInput,
+  TeamNetworkRenameServerInput,
+  TeamNetworkServerProfile,
   TeamNetworkReplyPassiveRequestInput,
   TeamNetworkSendMailboxInput,
   TeamAttachment,
@@ -252,6 +254,7 @@ export interface AgentsDockAPI {
     postMessage(scope: TeamHubScope, input: TeamHubPostMessageInput): Promise<TeamHubMessage>
     networkCapabilities(scope: TeamHubScope): Promise<TeamNetworkCapabilities>
     network(scope: TeamHubScope, query: TeamNetworkProjectionQuery): Promise<TeamNetworkProjectionPage>
+    renameNetworkServer(scope: TeamHubScope, input: TeamNetworkRenameServerInput): Promise<TeamNetworkServerProfile>
     registerNetworkAgent(scope: TeamHubScope, input: TeamNetworkRegisterAgentInput): Promise<TeamNetworkAgent>
     bulletin(scope: TeamHubScope, query: TeamNetworkBulletinQuery): Promise<TeamNetworkBulletinPage>
     postBulletin(scope: TeamHubScope, input: TeamNetworkPostBulletinInput): Promise<TeamNetworkBulletinPost>
