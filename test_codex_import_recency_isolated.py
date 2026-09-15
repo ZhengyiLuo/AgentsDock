@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock
@@ -74,6 +75,74 @@ class CodexImportRecencyTests(unittest.IsolatedAsyncioTestCase):
                               ("chat_conversation_message_received", {}), ("job_ran", {}), ("file_uploaded", {})):
             with self.subTest(kind=kind):
                 self.assertTrue(self.ns["should_bump_session_updated_at"](kind, payload))
+
+    def native_child_notice(self, *, human=False):
+        return {"timestamp": "2026-09-14T12:00:00Z", "ordinal": 23,
+            "type": "response_item", "payload": {"type": "message", "id": "native-notice",
+            "role": "user", "content": [{"type": "input_text", "text":
+                '<subagent_notification>\n{"agent_path":"child","status":{"completed":"CHILD_RESULT"}}\n</subagent_notification>'}],
+            "internal_chat_message_metadata_passthrough": {"turn_id": "native-turn",
+                "create_time": 1789387200,
+                "content_item_kinds": ["user.text" if human else "multi_agent.subagent_notification"]}}}
+
+    async def test_native_child_notice_import_is_silent_and_keeps_recency(self):
+        ns = self.ns
+        source = self.native_child_notice()
+        before = copy.deepcopy(source)
+        item = ns["codex_history_event_item"](source)
+        self.assertEqual(item["provider_runtime_context"], "subagent_notification")
+        ns["append_durable_event_batch"] = AsyncMock(side_effect=lambda _sid, events: [
+            {"seq": index} for index, _event in enumerate(events, 1)])
+        ns["append_imported_events"] = AsyncMock(side_effect=lambda _sid, events: len(events))
+        for name, sink in (("append_imported_history", "append_durable_event_batch"),
+                           ("append_staged_imported_history", "append_imported_events")):
+            session = {"id": "synthetic-chat", "backend": "codex", "codex_thread_id": "synthetic-root",
+                "updated_at": "2026-09-13T12:00:00Z", "latest_agent_event_seq": 7,
+                "active_run": {"run_id": "current-owner", "backend": "codex"}}
+            previous = copy.deepcopy(session)
+            ns["STORE"] = SimpleNamespace(sessions={session["id"]: session}, save=AsyncMock())
+            await ns[name](session, Path("unused"), [item])
+            rows = ns[sink].await_args.args[1]
+            for index, (kind, payload) in enumerate(rows, 10):
+                self.assertFalse(ns["should_bump_session_updated_at"](kind, payload), (name, kind))
+                self.assertFalse(ns["is_agent_visible_event"](kind, payload), (name, kind))
+                await ns["update_session_event_metadata"](session["id"], {
+                    "id": f"event-{index}", "seq": index, "session_id": session["id"],
+                    "ts": "2026-09-14T15:00:00Z", "type": kind, **payload})
+            for key in ("updated_at", "latest_agent_event_seq", "active_run"):
+                self.assertEqual(session[key], previous[key], (name, key))
+            starts = [payload for kind, payload in rows if kind == "turn_started"]
+            self.assertEqual(len(starts), 1)
+            self.assertEqual(starts[0]["prompt"], "")
+            self.assertTrue(starts[0]["metadata_only"])
+            ns["STORE"].save.assert_not_awaited()
+            for patch in ({"provider_user_authored": True}, {"prompt": "Real content"},
+                          {"provider_runtime_context": "unknown"},
+                          {"provider_origin": {**starts[0]["provider_origin"], "source_text_sha256": "bad"}}):
+                self.assertTrue(ns["should_bump_session_updated_at"]("turn_started", {**starts[0], **patch}))
+        self.assertEqual(source, before)
+
+    async def test_same_native_notice_quoted_by_human_stays_visible(self):
+        item = self.ns["codex_history_event_item"](self.native_child_notice(human=True))
+        self.assertTrue(item["provider_user_authored"])
+        self.assertNotIn("provider_runtime_context", item)
+        self.ns["append_durable_event_batch"] = AsyncMock(side_effect=lambda _sid, events: [
+            {"seq": index} for index, _event in enumerate(events, 1)])
+        await self.ns["append_imported_history"]({"id": "synthetic-chat", "backend": "codex",
+            "codex_thread_id": "synthetic-root"}, Path("unused"), [item])
+        rows = self.ns["append_durable_event_batch"].await_args.args[1]
+        self.assertNotIn("metadata_only", rows[0][1])
+        start = next(payload for kind, payload in rows if kind == "turn_started")
+        self.assertIn("CHILD_RESULT", start["prompt"])
+        self.assertTrue(self.ns["should_bump_session_updated_at"]("turn_started", start))
+
+    def test_v2_native_agent_message_is_not_reimported_as_user_or_assistant(self):
+        source = {"type": "response_item", "timestamp": "2026-09-14T12:00:00Z", "payload": {
+            "type": "agent_message", "id": "typed-child-result", "author": "/root/child",
+            "recipient": "/root", "content": [{"type": "input_text", "text": "CHILD_RESULT"}]}}
+        before = copy.deepcopy(source)
+        self.assertIsNone(self.ns["codex_history_event_item"](source))
+        self.assertEqual(source, before)
 
 
 if __name__ == "__main__":

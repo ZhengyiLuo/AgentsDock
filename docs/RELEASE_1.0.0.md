@@ -11,9 +11,10 @@ scheduled jobs, provider history import and Codex goals have been extended and
 hardened; they are not all new features of this release.
 
 **Already on 1.0.0-beta.8?** This stable replacement additionally repairs
-source-proven cross-chat delivery wrappers imported as user messages. It uses
-the saved delivery receipt and exact native provider-turn identity, preserving
-the original agent message and genuine user input. There is no additional API,
+source-proven cross-chat delivery wrappers imported as user messages, and keeps
+ordinary Codex parents supervised while their subagents finish. History repair
+uses the saved delivery receipt and exact native provider-turn identity,
+preserving the original agent message and genuine user input. There is no additional API,
 dependency, signing-key or storage-schema change from beta.8.
 
 **Replacing the original 1.0.0:** the version number is intentionally unchanged.
@@ -120,6 +121,14 @@ unencrypted; use HTTPS on untrusted networks. See
 
 ## Native goals, steering and subagents
 
+- Keep an ordinary Codex run owned when its native parent turn ends before its
+  children. Once the currently owned children finish, collect their native
+  notifications using an empty-input continuation on the same thread. No goal,
+  synthetic user prompt, repeated reminder or polling loop is required.
+- Preserve that parent's runtime authority, chronological answers and controls
+  through collection. A spontaneous native continuation wins over a queued
+  continuation request; Stop, stale owners and uncertain delivery cannot
+  silently replay the original prompt or submit a duplicate continuation.
 - Preserve a Codex goal's local owner across the ordinary first turn that
   creates it and later native continuation turns. An intermediate final answer
   no longer prematurely ends the surrounding goal operation.

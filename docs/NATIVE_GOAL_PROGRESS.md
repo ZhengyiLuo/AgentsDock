@@ -1,5 +1,32 @@
 # Native goal progress and retry notices
 
+## Ordinary parent runs with unfinished subagents
+
+An ordinary run does not need a persistent goal to collect delegated results.
+If its native parent completes while owned children are active, retain the same
+run, native thread subscription and authority. Track child lifecycle events in
+receive order, rather than polling or consulting asynchronously updated cards.
+Once those children drain, send one native `turn/start` with `input: []` to
+consume Codex's pending child notifications. Do not manufacture a user prompt
+or copy the child answer into another input. A native spontaneous continuation
+takes precedence over that request at the actual transport write boundary.
+
+Keep earlier answers at their original positions. Only the latest collected
+answer becomes the surrounding run's terminal result. Explicit Stop and
+owner/process changes fence further continuation; Send now retains its existing
+control semantics. Historical child cards, unrelated chats and children of a
+fork's source do not establish live ownership for the fork.
+
+The empty-input primitive was verified against native Codex
+`0.154.0-alpha.6.2`, with both v1 and v2 subagents, using a sandboxed local fake
+Responses provider. In each case the child completed after the parent, no
+spontaneous parent turn followed during the bounded observation, and empty
+input produced a new parent turn with the exact native child result and no new
+`userMessage` item. These are real native protocol checks with synthetic model
+responses, not a claim of real-model reasoning or production GUI validation.
+
+## Persistent native goals
+
 One persistent native Codex goal reservation spans several provider turns.
 An intermediate final answer is not the end of that AgentsDock operation.
 Keep the shared `run_id` and preserve `provider_turn_id`, `item_id`, and the

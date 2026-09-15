@@ -16593,10 +16593,18 @@ def should_bump_session_updated_at(event_type: str, event: dict[str, Any]) -> bo
             return False
         origin = event.get("provider_origin")
         if (event_type == "turn_started" and event.get("prompt") == ""
-            and event.get("provider_history_repair") == "source_proven_native_replay"
-            and isinstance(origin, dict) and origin.get("provider") == "codex" and origin.get("kind") == "user"
+            and isinstance(origin, dict) and origin.get("provider") == "codex"
+            and (
+                (event.get("provider_history_repair") == "source_proven_native_replay"
+                    and origin.get("kind") == "user"
+                    and isinstance(origin.get("native_event_id"), str)
+                    and 0 < len(origin["native_event_id"]) <= 256)
+                or (event.get("provider_user_authored") is not True
+                    and event.get("provider_runtime_context") in ("subagent_notification", "turn_aborted", "provider_notice")
+                    and origin.get("kind") == event["provider_runtime_context"])
+            )
             and all(isinstance(origin.get(key), str) and 0 < len(origin[key]) <= 256
-                    for key in ("event_id", "session_id", "turn_id", "native_event_id"))
+                    for key in ("event_id", "session_id", "turn_id"))
             and isinstance(origin.get("source_text_sha256"), str)
             and re.fullmatch(r"[a-f0-9]{64}", origin["source_text_sha256"])
             and isinstance(origin.get("timestamp"), str) and len(origin["timestamp"]) <= 64
@@ -29325,6 +29333,7 @@ def active_snapshot_input(active: dict[str, Any]) -> dict[str, Any]:
             "codex_app_server_turn",
             "native_steer_queue",
             "codex_goal_steer_queue",
+            "codex_child_continuation_stop",
             "owner_task",
         }
     }
@@ -48422,6 +48431,13 @@ async def append_imported_history(
     metadata_only = bool(items) and all(item.get("kind") == "interruption" or (
         item.get("provider_history_repair") in {"source_proven_import", "source_proven_native_replay", "source_proven_assistant_replay"}
         and item.get("text") == ""
+    ) or (
+        backend == BACKEND_CODEX and item.get("kind") == "user"
+        and item.get("provider_user_authored") is not True
+        and item.get("provider_runtime_context") in ("subagent_notification", "turn_aborted", "provider_notice")
+        and isinstance(item.get("provider_origin"), dict)
+        and item["provider_origin"].get("provider") == "codex"
+        and item["provider_origin"].get("kind") == item["provider_runtime_context"]
     ) for item in items)
     items = [item for item in items if item.get("kind") != "interruption" or (
         backend == BACKEND_CLAUDE
@@ -48546,7 +48562,14 @@ async def append_staged_imported_history(
     session_id = str(sess["id"])
     provider_id = str(session_provider_id(sess) or "")
     backend = str(sess.get("backend") or DEFAULT_BACKEND).lower()
-    metadata_only = bool(items) and all(item.get("kind") == "interruption" for item in items)
+    metadata_only = bool(items) and all(item.get("kind") == "interruption" or (
+        backend == BACKEND_CODEX and item.get("kind") == "user"
+        and item.get("provider_user_authored") is not True
+        and item.get("provider_runtime_context") in ("subagent_notification", "turn_aborted", "provider_notice")
+        and isinstance(item.get("provider_origin"), dict)
+        and item["provider_origin"].get("provider") == "codex"
+        and item["provider_origin"].get("kind") == item["provider_runtime_context"]
+    ) for item in items)
     items = [item for item in items if item.get("kind") != "interruption" or (
         backend == BACKEND_CLAUDE
         and (normalized_history_provider_origin(item.get("provider_origin")) or {}).get("kind") == "interruption"
@@ -52698,6 +52721,70 @@ async def project_codex_notification(notification: dict[str, Any]) -> None:
         and indexed_child_session_id == session_id
     )
     if method == "turn/started" and thread_id and not is_child_thread:
+        # Stop may win while an ordinary parent is between native turns. A
+        # child result can then start B while A's already-completed supervisor
+        # is draining cleanup. Keep that new B under the same explicit Stop;
+        # never leave it running merely because admission observed idle A.
+        stopped_continuation = False
+        stopped_continuation_turn: str | None = None
+        value = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        incoming_turn_id = str(params.get("turnId") or value.get("id") or "")
+
+        def stopped_continuation_still_current() -> bool:
+            current_handle = getattr(getattr(manager, "client", None), "_turns_by_thread", {}).get(thread_id)
+            exact_live_turn = bool(
+                current_handle is handle and not getattr(handle, "_closed", False)
+                and not getattr(handle, "_completed", True)
+                and getattr(handle, "turn_id", "") == incoming_turn_id
+            )
+            cleanup_gap = bool(getattr(handle, "_closed", False) and current_handle is None)
+            return bool(
+                incoming_turn_id and incoming_turn_id not in getattr(handle, "_completed_turn_ids", set())
+                and ACTIVE.get(session_id) is stopping_owner
+                and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == stopping_owner.get("run_id")
+                and session_id in BUSY_SESSIONS and stopping_owner.get("stop_requested")
+                and CODEX_APP_SERVER_MANAGER is manager
+                and type(getattr(handle, "transport_generation", None)) is int
+                and handle.transport_generation > 0
+                and handle.transport_generation == getattr(manager, "generation", None)
+                and (exact_live_turn or cleanup_gap)
+            )
+
+        async with ACTIVE_LOCK:
+            stopping_owner = ACTIVE.get(session_id)
+            manager = CODEX_APP_SERVER_MANAGER
+            handle = (stopping_owner or {}).get("codex_app_server_turn")
+            if (
+                stopping_owner and stopping_owner.get("stop_requested")
+                and stopping_owner.get("provider_thread_id") == thread_id
+                and isinstance(stopping_owner.get("codex_child_continuation_stop"), asyncio.Event)
+                and handle is not None and manager is not None
+                and getattr(handle, "transport_generation", None) == getattr(manager, "generation", None)
+                and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == stopping_owner.get("run_id")
+                and session_id in BUSY_SESSIONS
+            ):
+                stopped_continuation = True
+                if stopped_continuation_still_current() and (
+                    stopping_owner.get("provider_turn_id") != incoming_turn_id
+                    or not stopping_owner.get("native_interrupt_sent")
+                ):
+                    stopping_owner["provider_turn_id"] = incoming_turn_id
+                    stopping_owner["native_interrupt_sent"] = True
+                    stopped_continuation_turn = incoming_turn_id
+        if stopped_continuation:
+            if stopped_continuation_turn:
+                try:
+                    await manager.client._request_connected(
+                        "turn/interrupt", {"threadId": thread_id, "turnId": stopped_continuation_turn},
+                        timeout=CODEX_GOAL_CONTROL_TIMEOUT_SECONDS,
+                        before_send=stopped_continuation_still_current,
+                    )
+                except Exception:
+                    async with ACTIVE_LOCK:
+                        if ACTIVE.get(session_id) is stopping_owner and stopping_owner.get("provider_turn_id") == stopped_continuation_turn:
+                            stopping_owner["native_interrupt_sent"] = False
+                    logger.warning("could not interrupt stopped Codex child continuation session=%s turn=%s", session_id, stopped_continuation_turn)
+            return
         owner_session_id = session_id or quarantined_session_id
         if owner_session_id and not await codex_thread_has_local_run_owner(
             owner_session_id,
@@ -64591,6 +64678,353 @@ async def run_codex_app_server(
     handled_notification_sequence = 0
     last_activity = time.monotonic()
     cancelled_exit = False
+    child_notification_handler: Any = None
+    child_continuation_stop = asyncio.Event()
+    child_continuation_stop_task: asyncio.Task[bool] | None = None
+    child_completion_pending: dict[str, bool] = {}
+    received_parent_turn_ids: set[str] = set()
+    completed_native_turn_ids: set[str] = set()
+    child_continuation_generation = 0
+    native_answer_turn_id = ""
+    waiting_for_child_continuation = False
+    waiting_parent_turn_id = ""
+    child_continuation_changes = asyncio.Event()
+    child_continuation_change_task: asyncio.Task[bool] | None = None
+    child_continuation_attempts: set[str] = set()
+    active_child_ids: set[str] = set()
+    child_acceptance_parent_id = ""
+
+    def install_child_continuation_observer() -> None:
+        """Capture native descendant activity in receive order, without IO.
+
+        Card projection is asynchronous and serialized per child, not across
+        the entire family. A child can therefore finish before the ordinary
+        consumer processes the preceding parent completion. Keep that exact
+        completion's pending flag, rather than consulting a later card cache.
+        """
+        nonlocal child_notification_handler, child_continuation_generation
+        add_handler = getattr(manager, "add_notification_handler", None)
+        if standalone_provider_context or not callable(add_handler):
+            return
+        generation = getattr(manager, "generation", None)
+        if type(generation) is not int or generation < 1:
+            return
+        child_continuation_generation = generation
+        owner = ACTIVE.get(session_id)
+        known_children: set[str] = set()
+        active_children = active_child_ids
+        child_turn_ids: dict[str, str] = {}
+        child_activity_items: set[tuple[str, str]] = set()
+        # Force Send preserves running children while replacing their parent
+        # logical turn. Only a live native-generation proof can seed the new
+        # supervisor; old persisted cards never manufacture pending work.
+        with CODEX_SUBAGENT_INDEX_LOCK:
+            for child, state in CODEX_SUBAGENT_STATE.items():
+                if (
+                    child != provider_id
+                    and CODEX_SUBAGENT_SESSION_INDEX.get(child) == session_id
+                    and CODEX_SUBAGENT_LIVE_GENERATIONS.get(child) == generation
+                    and state.get("subagent_status") in {"starting", "running"}
+                ):
+                    known_children.add(child)
+                    active_children.add(child)
+
+        def observe_native(notification: dict[str, Any]) -> None:
+            current = ACTIVE.get(session_id)
+            session = STORE.sessions.get(session_id)
+            if not (
+                current is owner and current
+                and current.get("run_id") == current_run_id
+                and current.get("provider_thread_id") == provider_id
+                and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == current_run_id
+                and session_id in BUSY_SESSIONS
+                and session is not None and not session.get("archived")
+                and not current.get("stop_requested")
+                and current_run_id not in STOPPED_RUNS
+                and getattr(manager, "generation", None) == generation
+            ):
+                return
+            method = notification.get("method")
+            params = notification.get("params")
+            if not isinstance(params, dict):
+                return
+            thread = params.get("threadId")
+            if method == "thread/started" and isinstance(params.get("thread"), dict):
+                started = params["thread"]
+                child = started.get("id")
+                _nickname, _path, parent = codex_subagent_thread_identity(started)
+                if isinstance(child, str) and child and child != provider_id and (
+                    parent == provider_id or parent in known_children
+                ):
+                    known_children.add(child)
+                    if codex_child_status_from_thread(started.get("status")) in {None, "running"}:
+                        active_children.add(child)
+                return
+            if thread != provider_id and thread not in known_children:
+                return
+            turn_value = params.get("turn")
+            turn_id = params.get("turnId") or (
+                turn_value.get("id") if isinstance(turn_value, dict) else None
+            )
+            if thread == provider_id and method == "turn/completed" and isinstance(turn_id, str):
+                child_completion_pending.setdefault(turn_id, bool(active_children))
+            elif method == "turn/started" and isinstance(turn_id, str) and turn_id:
+                if thread == provider_id:
+                    if turn is not None and (
+                        turn_id in getattr(turn, "_completed_turn_ids", set())
+                        or (turn.turn_id and turn.turn_id != turn_id)
+                    ):
+                        return
+                    received_parent_turn_ids.add(turn_id)
+                    # The retained native handle has already rebound at the
+                    # router. Make Stop/Force Send see that exact new turn too.
+                    current["provider_turn_id"] = turn_id
+                    current["provider_turn_ready"] = True
+                    current["codex_child_continuation_waiting"] = False
+                    current["native_interrupt_sent"] = False
+                else:
+                    child_turn_ids[thread] = turn_id
+                    active_children.add(thread)
+            elif thread != provider_id and method in {"turn/completed", "thread/closed", "thread/status/changed"}:
+                if method == "turn/completed" and child_turn_ids.get(thread) not in {None, turn_id}:
+                    return
+                if method == "thread/status/changed":
+                    status = codex_child_status_from_thread(params.get("status"))
+                    if status == "running":
+                        active_children.add(thread)
+                    elif status:
+                        active_children.discard(thread)
+                else:
+                    active_children.discard(thread)
+            if method not in {"item/started", "item/completed"}:
+                return
+            item = params.get("item")
+            if not isinstance(item, dict):
+                return
+            if item.get("type") == "subAgentActivity":
+                child = item.get("agentThreadId")
+                if isinstance(child, str) and child and child != provider_id:
+                    key = (child, str(item.get("id") or ""))
+                    if key in child_activity_items:
+                        return
+                    child_activity_items.add(key)
+                    known_children.add(child)
+                    if item.get("kind") == "interrupted":
+                        active_children.discard(child)
+                    elif item.get("kind") == "started":
+                        active_children.add(child)
+                return
+            if item.get("type") not in {"collabAgentToolCall", "collabToolCall"}:
+                return
+            operation = re.sub(r"[^a-z0-9]", "", str(item.get("tool") or "").lower())
+            states = codex_collaboration_states(item)
+            for child in dict.fromkeys([*codex_collaboration_thread_ids(item), *states]):
+                if child == provider_id:
+                    continue
+                was_known = child in known_children
+                known_children.add(child)
+                state = states.get(child) or {}
+                status = normalize_subagent_status(state.get("status")) if state.get("status") is not None else None
+                if status and status not in {"starting", "running"}:
+                    active_children.discard(child)
+                elif operation in {"closeagent", "interruptagent"} and method == "item/completed":
+                    active_children.discard(child)
+                elif operation in {"spawnagent", "resumeagent", "sendinput", "sendmessage", "followuptask"}:
+                    key = (child, str(item.get("id") or ""))
+                    if key not in child_activity_items:
+                        child_activity_items.add(key)
+                        # A very fast new child may finish before spawn's
+                        # completed tool packet. Do not revive that child.
+                        if (
+                            operation == "spawnagent" and (not was_known or child in active_children)
+                        ) or (
+                            operation != "spawnagent" and status in {"starting", "running"}
+                        ):
+                            active_children.add(child)
+
+        def observe(notification: dict[str, Any]) -> None:
+            active_before = len(active_children)
+            parent_before = len(received_parent_turn_ids)
+            observe_native(notification)
+            params = notification.get("params") or {}
+            if (
+                active_before != len(active_children)
+                or parent_before != len(received_parent_turn_ids)
+                or (notification.get("method") == "turn/started" and params.get("threadId") == provider_id)
+            ):
+                child_continuation_changes.set()
+
+        child_notification_handler = observe
+        owner["codex_child_continuation_stop"] = child_continuation_stop
+        add_handler(observe)
+
+    async def retain_ordinary_child_continuation(notification: dict[str, Any]) -> bool:
+        nonlocal turn_completed, waiting_for_child_continuation, waiting_parent_turn_id
+        params = notification.get("params") or {}
+        value = params.get("turn") or {}
+        completed_id = str(params.get("turnId") or value.get("id") or "")
+        pending_children = child_completion_pending.pop(completed_id, False)
+        if (
+            child_notification_handler is None or terminal_status != "completed"
+            or delivery_unknown or goal_steer_recovery_fenced
+        ):
+            return False
+        # Goal activation and its provider-tool projection must win before
+        # deciding whether this remains an ordinary, non-goal supervisor.
+        await manager.wait_for_notification_handler(project_codex_notification, provider_id)
+        async with ACTIVE_LOCK:
+            active = ACTIVE.get(session_id)
+            live_goal = (STORE.sessions.get(session_id) or {}).get("codex_goal")
+            if not (
+                active and active.get("run_id") == current_run_id
+                and active.get("codex_app_server_turn") is turn
+                and active.get("provider_thread_id") == provider_id
+                and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == current_run_id
+                and session_id in BUSY_SESSIONS
+                and not active.get("stop_requested")
+                and current_run_id not in STOPPED_RUNS
+                and getattr(manager, "generation", None) == child_continuation_generation
+                and not (isinstance(live_goal, dict) and live_goal.get("status") == "active")
+                and (pending_children or received_parent_turn_ids - completed_native_turn_ids)
+            ):
+                return False
+            waiting_for_child_continuation = bool(getattr(turn, "_completed", True))
+            waiting_parent_turn_id = completed_id
+            active["codex_child_continuation_waiting"] = waiting_for_child_continuation
+            if waiting_for_child_continuation:
+                active["provider_turn_ready"] = False
+                active["provider_turn_id"] = None
+            # Keep the original logical run, provider authority, thread pin,
+            # Stop owner, and subscription. A child terminal notification does
+            # not finish this wait: only Codex's next parent turn can do that.
+            turn_completed = False
+            child_continuation_changes.set()
+        await flush_pending_unknown(final=True)
+        return True
+
+    async def continue_after_owned_children() -> None:
+        """Consume native pending child notifications once, with no user text."""
+        nonlocal waiting_for_child_continuation, last_activity
+        nonlocal child_acceptance_parent_id
+        nonlocal provisional_thread_invalidated, delivery_unknown
+        if (
+            not waiting_for_child_continuation or active_child_ids
+            or not waiting_parent_turn_id
+            or waiting_parent_turn_id in child_continuation_attempts
+        ):
+            return
+
+        def before_send() -> bool:
+            active = ACTIVE.get(session_id)
+            live_session = STORE.sessions.get(session_id)
+            live_goal = (live_session or {}).get("codex_goal")
+            return bool(
+                active and active.get("run_id") == current_run_id
+                and active.get("codex_app_server_turn") is turn
+                and active.get("provider_thread_id") == provider_id
+                and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == current_run_id
+                and session_id in BUSY_SESSIONS
+                and live_session is not None and not live_session.get("archived")
+                and session_id not in DELETING_SESSIONS
+                and session_id not in DELETED_SESSION_TOMBSTONES
+                and not active.get("stop_requested")
+                and current_run_id not in STOPPED_RUNS
+                and getattr(manager, "generation", None) == child_continuation_generation
+                and active.get("codex_child_continuation_waiting") is True
+                and not active_child_ids
+                and not (isinstance(live_goal, dict) and live_goal.get("status") == "active")
+            )
+
+        if not before_send():
+            return
+        # Mark before awaiting the guarded write. An ambiguous transport result
+        # must never cause a second empty native turn or replay the user prompt.
+        attempted_parent_id = waiting_parent_turn_id
+        child_continuation_attempts.add(attempted_parent_id)
+        child_acceptance_parent_id = attempted_parent_id
+        try:
+            continued_turn_id = await turn.continue_after_subagents(
+                before_send=before_send,
+                client_user_message_id=current_run_id,
+                responsesapi_client_metadata={
+                    "agentsdock_run_id": current_run_id,
+                    "agentsdock_run_proof": codex_provider_mcp_run_proof(
+                        session_id, provider_id, current_run_id,
+                    ),
+                },
+            )
+        except asyncio.CancelledError as exc:
+            if getattr(exc, "request_sent", None) is False:
+                child_acceptance_parent_id = ""
+            # The shielded finalizer retains the stream through this same
+            # bounded acceptance window. Never replay a possibly sent request.
+            raise
+        except CodexAppServerError as exc:
+            if not getattr(exc, "request_sent", False) or isinstance(exc, CodexAppServerRequestError):
+                child_acceptance_parent_id = ""
+                raise
+            accepted = await reconcile_child_continuation_acceptance()
+            if not accepted:
+                if child_continuation_owner_current():
+                    delivery_unknown = True
+                    provisional_thread_invalidated = True
+                    await manager.retire_generation(child_continuation_generation)
+                child_acceptance_parent_id = ""
+                raise
+            child_acceptance_parent_id = ""
+            continued_turn_id = turn.turn_id
+        child_acceptance_parent_id = ""
+        if continued_turn_id is None:
+            # A new child, Stop, or spontaneous parent turn won before any
+            # bytes were sent. Only that proven non-send may retry on a later
+            # child drain; ambiguous delivery keeps the one-shot fence.
+            child_continuation_attempts.discard(attempted_parent_id)
+            return
+        if continued_turn_id:
+            waiting_for_child_continuation = False
+            last_activity = time.monotonic()
+            await bind_active_turn_and_reconcile_stop()
+
+    def child_continuation_owner_current() -> bool:
+        active = ACTIVE.get(session_id)
+        return bool(
+            active and active.get("run_id") == current_run_id
+            and active.get("codex_app_server_turn") is turn
+            and active.get("provider_thread_id") == provider_id
+            and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == current_run_id
+            and session_id in BUSY_SESSIONS
+            and getattr(manager, "generation", None) == child_continuation_generation
+            and getattr(turn, "transport_generation", None) == child_continuation_generation
+        )
+
+    async def reconcile_child_continuation_acceptance() -> bool:
+        """Bound a lost empty-input acknowledgement without replay or polling."""
+        def new_native_turn() -> bool:
+            return bool(
+                child_continuation_owner_current()
+                and turn.turn_id and turn.turn_id != child_acceptance_parent_id
+            )
+
+        if new_native_turn():
+            return True
+        if not child_continuation_owner_current():
+            return False
+        deadline = time.monotonic() + max(0.01, float(CODEX_APP_SERVER_AMBIGUOUS_ACCEPT_SECONDS))
+        # Empty-input turns contain no clientUserMessageId/userMessage in
+        # native list_turns. Never guess the newest turn from that endpoint.
+        # Only this retained, exact-generation native handle proves acceptance.
+        while child_continuation_owner_current():
+            if new_native_turn():
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            child_continuation_changes.clear()
+            try:
+                await asyncio.wait_for(child_continuation_changes.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+        return new_native_turn()
 
     async def detach_native_steer_admission() -> None:
         """Stop Force Send admission into this runner before queue cleanup."""
@@ -65508,10 +65942,16 @@ async def run_codex_app_server(
             active_owned = bool(
                 active
                 and str(active.get("run_id") or "") == current_run_id
+                and active.get("codex_app_server_turn") is turn
+                and active.get("provider_thread_id") == provider_id
                 and session_id in BUSY_SESSIONS
                 and str(
                     (CURRENT_TURNS.get(session_id) or {}).get("run_id") or ""
                 ) == current_run_id
+                and (
+                    not child_continuation_generation
+                    or getattr(manager, "generation", None) == child_continuation_generation
+                )
             )
             if active_owned:
                 active["provider_turn_ready"] = True
@@ -65554,6 +65994,7 @@ async def run_codex_app_server(
         nonlocal terminal_status, terminal_error, turn_completed
         nonlocal pending_unknown_message, pending_unknown_item_id
         nonlocal ambiguous_turn_start, error_emitted
+        nonlocal native_answer_turn_id, waiting_for_child_continuation
         method = str(notification.get("method") or "")
         params = (
             notification.get("params")
@@ -65562,6 +66003,22 @@ async def run_codex_app_server(
         )
         item = params.get("item") if isinstance(params.get("item"), dict) else {}
         item_id = str(params.get("itemId") or item.get("id") or "")
+
+        native_turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        native_turn_id = str(params.get("turnId") or native_turn.get("id") or "")
+        if method in {"turn/started", "turn/completed"} and native_turn_id in completed_native_turn_ids:
+            # A retained stream may repeat A's terminal after B has started.
+            # It cannot finish or rebind the live B supervisor.
+            return False
+        if method == "turn/started" and native_turn_id:
+            waiting_for_child_continuation = False
+            if native_answer_turn_id and native_answer_turn_id != native_turn_id:
+                # Preserve previous answers as their original timeline events;
+                # only the latest native answer belongs in terminal result_text.
+                await flush_pending_unknown(final=True)
+                text_parts.clear()
+                seen_text.clear()
+            native_answer_turn_id = native_turn_id
 
         if turn is not None and turn.turn_id:
             ambiguous_turn_start = False
@@ -65703,6 +66160,8 @@ async def run_codex_app_server(
             elif terminal_status == "completed":
                 terminal_error = None
             turn_completed = True
+            if native_turn_id:
+                completed_native_turn_ids.add(native_turn_id)
             return True
         return False
 
@@ -66068,6 +66527,7 @@ async def run_codex_app_server(
 
                 turn_start_attempted = True
                 turn_start_epoch = time.time()
+                install_child_continuation_observer()
                 try:
                     turn = await manager.start_turn(
                         provider_id,
@@ -66133,6 +66593,8 @@ async def run_codex_app_server(
                     )
                     if active_owned:
                         active["codex_app_server_turn"] = turn
+                        if not native_answer_turn_id:
+                            native_answer_turn_id = str(turn.turn_id or "")
                         active["provider_thread_id"] = provider_id
                         active["provider_session_id"] = provider_id
                         active["provider_turn_id"] = turn.turn_id or None
@@ -66166,11 +66628,13 @@ async def run_codex_app_server(
                     next_sequenced_notification()
                 )
                 steer_task = asyncio.create_task(steer_queue.get())
+                child_continuation_stop_task = asyncio.create_task(child_continuation_stop.wait())
+                child_continuation_change_task = asyncio.create_task(child_continuation_changes.wait())
                 try:
                     while not turn_completed:
                         if await reconcile_ambiguous_start():
                             break
-                        wait_timeout = 5.0
+                        wait_timeout = None if waiting_for_child_continuation else 5.0
                         if (
                             ambiguous_turn_start
                             and turn is not None
@@ -66180,16 +66644,25 @@ async def run_codex_app_server(
                             wait_timeout = max(
                                 0.01,
                                 min(
-                                    wait_timeout,
+                                    wait_timeout or 5.0,
                                     max(0.0, ambiguous_accept_deadline - now),
                                     max(0.0, ambiguous_reconcile_at - now),
                                 ),
                             )
                         done, _pending = await asyncio.wait(
-                            {notification_task, steer_task},
+                            {notification_task, steer_task, child_continuation_stop_task, child_continuation_change_task}
+                            if waiting_for_child_continuation else {notification_task, steer_task},
                             timeout=wait_timeout,
                             return_when=asyncio.FIRST_COMPLETED,
                         )
+                        if child_continuation_stop_task in done:
+                            if turn is not None and not getattr(turn, "_completed", False):
+                                await bind_active_turn_and_reconcile_stop()
+                                waiting_for_child_continuation = False
+                                continue  # Observe the interrupted native B terminal before releasing.
+                            terminal_status = "interrupted"
+                            turn_completed = True
+                            break
                         if not done:
                             if provider_run_owns_pending_cross_chat_live_wait(
                                 session_id,
@@ -66255,6 +66728,23 @@ async def run_codex_app_server(
                         # when both became ready together.
                         if notification_task in done:
                             sequence, notification = notification_task.result()
+                            async with ACTIVE_LOCK:
+                                current_owner = ACTIVE.get(session_id)
+                                still_owned = bool(
+                                    current_owner
+                                    and current_owner.get("run_id") == current_run_id
+                                    and current_owner.get("codex_app_server_turn") is turn
+                                    and (CURRENT_TURNS.get(session_id) or {}).get("run_id") == current_run_id
+                                    and session_id in BUSY_SESSIONS
+                                    and (
+                                        not child_continuation_generation
+                                        or getattr(manager, "generation", None) == child_continuation_generation
+                                    )
+                                )
+                            if not still_owned:
+                                terminal_status = "interrupted"
+                                turn_completed = True
+                                break
                             handled_notification_sequence = max(
                                 handled_notification_sequence,
                                 sequence,
@@ -66264,10 +66754,18 @@ async def run_codex_app_server(
                             async with logical_state_lock:
                                 completed = await handle_notification(notification)
                             if completed:
-                                break
+                                if not await retain_ordinary_child_continuation(notification):
+                                    break
                             notification_task = asyncio.create_task(
                                 next_sequenced_notification()
                             )
+                            if steer_task not in done:
+                                continue
+
+                        if child_continuation_change_task in done:
+                            child_continuation_changes.clear()
+                            await continue_after_owned_children()
+                            child_continuation_change_task = asyncio.create_task(child_continuation_changes.wait())
                             if steer_task not in done:
                                 continue
 
@@ -66386,7 +66884,7 @@ async def run_codex_app_server(
                                 )
                     cleanup_tasks = [
                         task
-                        for task in (notification_task, steer_task)
+                        for task in (notification_task, steer_task, child_continuation_stop_task, child_continuation_change_task)
                         if task is not None
                     ]
                     for task in cleanup_tasks:
@@ -66417,6 +66915,9 @@ async def run_codex_app_server(
                     )
                 ):
                     # Complete the initial answer, but not the supervised run.
+                    if child_notification_handler is not None:
+                        manager.remove_notification_handler(child_notification_handler)
+                        child_notification_handler = None
                     # Its thread-wide stream already contains any early native
                     # continuation, including goals created by provider tools.
                     await flush_pending_unknown(final=True)
@@ -66518,7 +67019,12 @@ async def run_codex_app_server(
                 provider_runtime_env=runtime_env,
             )
             return
-        if turn is not None and turn.turn_id and not turn_completed:
+        if (
+            turn is not None and turn.turn_id and not turn_completed
+            and (not child_continuation_attempts or (
+                child_continuation_owner_current() and not getattr(turn, "_completed", False)
+            ))
+        ):
             with suppress(CodexAppServerError):
                 await turn.interrupt()
         if not planned_transport_shutdown:
@@ -66537,6 +67043,7 @@ async def run_codex_app_server(
     finally:
         async def settle_transport_finalizer() -> None:
             """Retire every owner before cancellation can escape the runner."""
+            nonlocal provisional_thread_invalidated, child_acceptance_parent_id
 
             try:
                 if pending_goal_steer_handoff is not None:
@@ -66558,8 +67065,25 @@ async def run_codex_app_server(
                         await goal_time_budget_task
                 await stop_manifest_watcher()
                 if turn is not None:
+                    if child_acceptance_parent_id:
+                        # A cancelled empty continuation is exactly as unsafe
+                        # to abandon as the first ambiguous turn/start. Keep
+                        # its original subscription until a new native ID can
+                        # be interrupted, or retire only that exact generation.
+                        accepted = await reconcile_child_continuation_acceptance()
+                        interrupted = bool(accepted and turn._completed)
+                        if accepted and not interrupted and child_continuation_owner_current():
+                            try:
+                                await turn.interrupt()
+                            except CodexAppServerError:
+                                pass
+                            else:
+                                interrupted = True
+                        if not interrupted and child_continuation_owner_current():
+                            provisional_thread_invalidated = True
+                            await manager.retire_generation(child_continuation_generation)
+                        child_acceptance_parent_id = ""
                     if cancelled_provisional_turn:
-                        nonlocal provisional_thread_invalidated
                         interrupted = turn_completed
                         try:
                             bound = await reconcile_cancelled_provisional_acceptance()
@@ -66597,6 +67121,8 @@ async def run_codex_app_server(
                         provider_id,
                     )
             finally:
+                if child_notification_handler is not None:
+                    manager.remove_notification_handler(child_notification_handler)
                 if cancelled_exit:
                     await reconcile_cancelled_runner_exit()
 
@@ -66620,6 +67146,7 @@ async def run_codex_app_server(
     recover_resume = (
         not delivery_unknown
         and not goal_steer_recovery_fenced
+        and not child_continuation_attempts
         and goal_continuation_result is None
         and should_recover_codex_resume(
             allow_rollover=allow_resume_rollover,
@@ -87623,7 +88150,11 @@ async def stop_turn(
                 ),
             )
         if active:
-            if require_provider_turn_ready and (
+            if require_provider_turn_ready and not (
+                active.get("transport") == CODEX_TRANSPORT_APP_SERVER
+                and active.get("codex_child_continuation_waiting") is True
+                and isinstance(active.get("codex_child_continuation_stop"), asyncio.Event)
+            ) and (
                 not active.get("provider_turn_ready")
                 or (
                     active.get("transport") == CODEX_TRANSPORT_APP_SERVER
@@ -87633,6 +88164,9 @@ async def stop_turn(
                 deferred = True
             else:
                 active["stop_requested"] = True
+                child_stop = active.get("codex_child_continuation_stop")
+                if isinstance(child_stop, asyncio.Event):
+                    child_stop.set()
                 if active.get("transport") == CLAUDE_TRANSPORT_AGENT_SDK:
                     active["claude_permissions_open"] = False
                 if active.get("run_id"):
@@ -87646,6 +88180,7 @@ async def stop_turn(
                     active.get("transport") == CODEX_TRANSPORT_APP_SERVER
                     and native_turn is not None
                     and getattr(native_turn, "turn_id", "")
+                    and not getattr(native_turn, "_completed", False)
                     and not active.get("native_interrupt_sent")
                 ):
                     active["native_interrupt_sent"] = True

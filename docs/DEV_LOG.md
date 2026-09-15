@@ -1,5 +1,35 @@
 # Development and release log
 
+## 2026-09-14 — 1.0.0 ordinary Codex child continuation prepared
+
+- Retain ordinary parent ownership across native completion while its current
+  children finish. Use a receive-order child lifecycle tracker and one guarded
+  empty-input native continuation to collect pending results. Keep existing
+  run authority and original answer positions; add no fake prompt or polling.
+- Fence Stop, steering, delayed native turn acknowledgements and unsubscribe
+  cleanup by their exact owner and native turn. Uncertain continuation delivery
+  is not permission to replay the original user request.
+- Native Codex `0.154.0-alpha.6.2` v1 and v2 subagent probes confirmed the
+  empty-input primitive consumes the exact child result without a new native
+  user-message item. Probes used an isolated OS-sandboxed native binary and a
+  local synthetic Responses provider, not AgentsServer or real model calls.
+- Six immediate child-completion repetitions using the modified transport
+  passed (three per native subagent mode). The native continuation DTO does not
+  expose a client user-message identity: uncertain acceptance is proved only
+  by the retained native stream, never by guessing the latest history turn.
+- Preserve sidebar recency, unread state and active ownership when importing
+  typed native child notifications. Both import paths keep those records silent;
+  identical user-authored quotations remain visible.
+- The final guarded transport, ordinary/native-goal lifecycle and history
+  regression group passed 254 tests, including 30 new ordinary continuation
+  scenarios. The guard rejects any import of the server monolith.
+- Correct the Cursor idle-warning test to arm its short test deadline after
+  actual provider readiness, rather than counting process startup as a second
+  idle period. Runtime deadlines and behavior are unchanged by that fixture fix.
+- Keep the explicitly approved 1.0.0 replacement version. Clean release CI and
+  signed-download acceptance remain pending. No live server, app or user task
+  was installed, opened, restarted or changed by these checks.
+
 ## 2026-09-14 — 1.0.0 cross-chat history correction prepared
 
 - Repair legacy asynchronous delivery wrappers that provider history could
