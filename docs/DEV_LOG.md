@@ -1,6 +1,19 @@
 # Public development log
 
-## Mobile desktop catch-up — build 174 source
+## Mobile desktop catch-up — 0.1.2 (174)
+
+- Apple validation, upload, and processing completed successfully; build 174
+  is active for internal TestFlight testing with automatic notifications
+  enabled. External beta review was not submitted. Binary source: `f686a2e`.
+- Both source CI jobs passed for that exact commit. Local verification passed
+  all 108 library/API/store test modules, 452 rendered/contract checks, 20 goal,
+  18 server-goal and 9 subagent-setting component checks, and file-transfer
+  interactions. Focused suites overlap broad suites; these are not a unique
+  combined test count or physical-device acceptance tests.
+- The signed arm64 iPhone/iPad archive and exported IPA passed version,
+  distribution-signature, framework ABI, privacy, production-feature and
+  fixture-exclusion checks, with matching app/debug symbols. Final build
+  artifacts and release logs remain on the external development volume.
 
 - Merge committed desktop `2ce43b9` and bring source-proven history repairs,
   run-owned activity reconciliation, and lazy server-version revalidation to

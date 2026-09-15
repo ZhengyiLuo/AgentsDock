@@ -4,7 +4,15 @@
 
 Reference: committed desktop `2ce43b9` (1.0.0), merged into the mobile release
 branch before implementation. Uncommitted desktop work is not part of this
-snapshot. Release acceptance is recorded separately after Apple processing.
+snapshot.
+
+Accepted release: **0.1.2 (174)**, active for internal TestFlight testing with
+automatic notifications enabled. Binary source `f686a2e` passed both CI jobs;
+Apple validation/upload/processing and local signed archive/export, ABI,
+privacy, production-feature and matching-symbol checks passed. Local suites
+passed 108 library/API/store modules, 452 rendered/contract checks, and focused
+goal/settings/file-transfer interactions. These categories overlap and do not
+claim physical-device acceptance. External beta review was not submitted.
 
 | Surface | Implemented behavior | Verification |
 | --- | --- | --- |
