@@ -109,7 +109,7 @@ SCOPE_ORDER = (
     "cross_chat.instruction",
     "cross_chat.request_reply",
 )
-CAPABILITIES = frozenset({"teamspace", "cross_chat", "cert_renewal"})
+CAPABILITIES = frozenset({"teamspace", "cross_chat", "cert_renewal", "durable_pairing_approval"})
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{7,239}$")
 _LABEL_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
@@ -1451,6 +1451,7 @@ class SecurePeerStore:
             "hub_id": self.hub_id,
             "host_ca_fingerprint": self.ca_fingerprint,
             "pairing_available": True,
+            "durable_pairing_approval_v1": True,
         }
 
     def cross_chat_consent_status(self) -> dict[str, Any]:
@@ -1729,7 +1730,7 @@ class SecurePeerStore:
         return int(
             connection.execute(
                 "UPDATE pairing_requests SET status='expired',decided_at=? "
-                "WHERE status='pending' AND expires_at<=?" + identity_clause,
+                "WHERE status='pending' AND expires_at>0 AND expires_at<=?" + identity_clause,
                 arguments,
             ).rowcount
         )
@@ -1753,7 +1754,7 @@ class SecurePeerStore:
                 raise SecurePeerError("invalid_request", "Pairing source endpoint is invalid", 400)
             source_endpoint = f"[{source_ip}]:{source_port}" if source_address.version == 6 else f"{source_ip}:{source_port}"
         timestamp = self._timestamp()
-        expires_at = min(
+        expires_at = 0 if "durable_pairing_approval" in normalized["capabilities"] else min(
             int(normalized["created_at"]) + PAIRING_TTL_SECONDS,
             timestamp + PAIRING_TTL_SECONDS,
         )
@@ -1784,7 +1785,7 @@ class SecurePeerStore:
                     raise SecurePeerError("idempotency_conflict", "request_id was reused with different content", 409)
                 if (
                     existing["status"] == "pending"
-                    and int(existing["expires_at"]) <= timestamp
+                    and 0 < int(existing["expires_at"]) <= timestamp
                 ):
                     connection.execute(
                         """UPDATE pairing_requests SET status='expired',decided_at=?
@@ -1809,11 +1810,11 @@ class SecurePeerStore:
                     "Pairing request time is outside the allowed window",
                     410,
                 )
-            if expires_at <= timestamp:
+            if 0 < expires_at <= timestamp:
                 raise SecurePeerError("pairing_expired", "Pairing request has expired", 410)
             connection.execute(
                 """UPDATE pairing_requests SET status='expired',decided_at=?
-                WHERE status='pending' AND expires_at<=?""",
+                WHERE status='pending' AND expires_at>0 AND expires_at<=?""",
                 (timestamp, timestamp),
             )
             connection.execute(
@@ -1849,19 +1850,6 @@ class SecurePeerStore:
             total_count = int(
                 connection.execute("SELECT COUNT(*) AS count FROM pairing_requests").fetchone()["count"]
             )
-            source_pending = (
-                int(
-                    connection.execute(
-                        """SELECT COUNT(*) AS count FROM pairing_requests
-                        WHERE status='pending' AND source_ip=?""",
-                        (source_ip,),
-                    ).fetchone()["count"]
-                )
-                if source_ip is not None
-                else 0
-            )
-            if source_pending >= 16:
-                raise SecurePeerError("rate_limited", "Too many pending pairings from this source", 429)
             if (
                 pending_count >= PAIRING_STATUS_LIMIT
                 or actionable_count + external_actionable_count
@@ -1929,7 +1917,7 @@ class SecurePeerStore:
         if row is None or not hmac.compare_digest(bytes(row["poll_token_hash"]), digest):
             raise SecurePeerError("pairing_unavailable", "Pairing is unavailable", 404)
         timestamp = self._timestamp()
-        if row["status"] == "pending" and int(row["expires_at"]) <= timestamp:
+        if row["status"] == "pending" and 0 < int(row["expires_at"]) <= timestamp:
             connection.execute(
                 "UPDATE pairing_requests SET status='expired',decided_at=? WHERE id=? AND status='pending'",
                 (timestamp, pairing_id),
@@ -2305,7 +2293,7 @@ class SecurePeerStore:
             row = connection.execute("SELECT * FROM pairing_requests WHERE id=?", (pairing_id,)).fetchone()
             if row is None:
                 raise SecurePeerError("pairing_unavailable", "Pairing is unavailable", 404)
-            if row["status"] == "pending" and int(row["expires_at"]) <= timestamp:
+            if row["status"] == "pending" and 0 < int(row["expires_at"]) <= timestamp:
                 self._expire_pending_pairings(
                     connection,
                     timestamp,
@@ -2462,7 +2450,7 @@ class SecurePeerStore:
             row = connection.execute("SELECT * FROM pairing_requests WHERE id=?", (pairing_id,)).fetchone()
             if row is None:
                 raise SecurePeerError("pairing_unavailable", "Pairing is unavailable", 404)
-            if row["status"] == "pending" and int(row["expires_at"]) <= timestamp:
+            if row["status"] == "pending" and 0 < int(row["expires_at"]) <= timestamp:
                 self._expire_pending_pairings(
                     connection,
                     timestamp,
@@ -6628,7 +6616,10 @@ class SecurePeerClient:
             return False
         return (
             isinstance(capabilities, list)
-            and capabilities == list(self._pairing_capabilities)
+            and all(isinstance(item, str) for item in capabilities)
+            and capabilities == sorted(set(capabilities))
+            and [item for item in capabilities if item != "durable_pairing_approval"]
+            == [item for item in self._pairing_capabilities if item != "durable_pairing_approval"]
             and (
                 "cross_chat" in self._pairing_capabilities
                 or not any(scope.startswith("cross_chat.") for scope in requested_scopes)
@@ -6692,14 +6683,14 @@ class SecurePeerClient:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     """UPDATE client_join_intents SET status='expired',updated_at=?
-                    WHERE status='pending' AND expires_at<=?""",
+                    WHERE status='pending' AND expires_at>0 AND expires_at<=?""",
                     (timestamp, timestamp),
                 )
                 rows = connection.execute(
                     """SELECT connection_id,pairing_id,pairing_expires_at
                     FROM client_connections
                     WHERE status='pending' AND pairing_expires_at IS NOT NULL
-                    AND pairing_expires_at<=?
+                    AND pairing_expires_at>0 AND pairing_expires_at<=?
                     ORDER BY pairing_expires_at,connection_id LIMIT ?""",
                     (timestamp, limit),
                 ).fetchall()
@@ -7408,7 +7399,9 @@ class SecurePeerClient:
                 host_ca_fingerprint=observed_fp,
                 request_id=canonical_request_id,
                 created_at=timestamp,
-                capabilities=self._pairing_capabilities,
+                capabilities=sorted({
+                    item for item in self._pairing_capabilities if item != "durable_pairing_approval"
+                } | ({"durable_pairing_approval"} if health.get("durable_pairing_approval_v1") is True else set())),
                 requested_scopes=requested_values,
             )
             connection_id = str(uuid.uuid4())
@@ -7477,7 +7470,7 @@ class SecurePeerClient:
                             connection_id,
                             canonical_request_id,
                             timestamp,
-                            timestamp + PAIRING_TTL_SECONDS,
+                            0 if "durable_pairing_approval" in request["capabilities"] else timestamp + PAIRING_TTL_SECONDS,
                             timestamp,
                         ),
                     )
@@ -7578,13 +7571,15 @@ class SecurePeerClient:
             or not isinstance(response.get("poll_token"), str)
             or _POLL_TOKEN_RE.fullmatch(response["poll_token"]) is None
             or type(response.get("expires_at")) is not int
+            or response.get("expires_at", -1) < 0
+            or (response.get("expires_at") == 0 and "durable_pairing_approval" not in request["capabilities"])
             or response.get("status")
             not in {"pending", "approved", "rejected", "cancelled", "expired"}
         ):
             self._retire_pairing_attempt(attempt)
             raise SecurePeerError("transcript_mismatch", "Pairing transcript confirmation failed", 409)
         response_received_at = self._timestamp()
-        if response["status"] == "pending" and (
+        if response["status"] == "pending" and response["expires_at"] != 0 and (
             response["expires_at"] <= response_received_at
             or response["expires_at"]
             > int(request["created_at"]) + PAIRING_TTL_SECONDS
@@ -7623,7 +7618,8 @@ class SecurePeerClient:
             if intent is not None:
                 # Even an already-approved POST replay must retain the original
                 # local authorization deadline after a lost initial response.
-                pairing_expires_at = min(int(intent["expires_at"]), response["expires_at"])
+                deadlines = [value for value in (int(intent["expires_at"]), response["expires_at"]) if value > 0]
+                pairing_expires_at = min(deadlines) if deadlines else 0
                 connection.execute(
                     "UPDATE client_join_intents SET expires_at=? WHERE connection_id=? AND request_id=?",
                     (pairing_expires_at, connection_id, canonical_request_id),
@@ -7732,13 +7728,14 @@ class SecurePeerClient:
             first_error: tuple[str, str] | None = None
             timestamp = self._timestamp()
             for row in rows:
-                if int(row["created_at"]) <= timestamp - PAIRING_ATTEMPT_RETENTION_SECONDS:
-                    retired += int(self._retire_pairing_attempt(row))
-                    continue
                 try:
                     request = json.loads(row["request_json"])
                     if not isinstance(request, dict):
                         raise PermissionError("persisted pairing request is invalid")
+                    if ("durable_pairing_approval" not in request.get("capabilities", [])
+                            and int(row["created_at"]) <= timestamp - PAIRING_ATTEMPT_RETENTION_SECONDS):
+                        retired += int(self._retire_pairing_attempt(row))
+                        continue
                     requested = SecurePeerStore._canonical_scopes(
                         request.get("requested_scopes")
                     )
@@ -7871,7 +7868,7 @@ class SecurePeerClient:
                 "SELECT status,expires_at FROM client_join_intents WHERE connection_id=?",
                 (canonical,),
             ).fetchone()
-            return {"state": row["status"], "deadline": int(row["expires_at"])} if row is not None else None
+            return {"state": row["status"], "deadline": int(row["expires_at"]) or None} if row is not None else None
         finally:
             connection.close()
 
@@ -7890,7 +7887,7 @@ class SecurePeerClient:
             row = connection.execute(
                 """SELECT c.*,i.status AS intent_state,i.expires_at AS intent_deadline,
                 (SELECT value FROM client_meta WHERE key='active_connection_id') AS active_id,
-                ((i.status='pending' AND i.expires_at>?
+                ((i.status='pending' AND (i.expires_at=0 OR i.expires_at>?)
                 AND c.status IN ('pending','approved')) OR
                 (i.status='completed' AND c.status='connected' AND c.connection_id=
                  (SELECT value FROM client_meta WHERE key='active_connection_id')))
@@ -7902,7 +7899,7 @@ class SecurePeerClient:
             ).fetchone()
             if row is None:
                 raise SecurePeerError("connection_unavailable", "Secure peer connection is unavailable", 404)
-            deadline = int(row["intent_deadline"]) if row["intent_deadline"] is not None else None
+            deadline = (int(row["intent_deadline"]) or None) if row["intent_deadline"] is not None else None
             state = row["intent_state"]
             if state == "pending" and deadline is not None and deadline <= timestamp:
                 state = "expired"
@@ -7932,13 +7929,13 @@ class SecurePeerClient:
                 """SELECT c.*,i.expires_at AS auto_completion_deadline,1 AS complete_on_approval
                 FROM client_connections c JOIN client_join_intents i
                 ON i.connection_id=c.connection_id AND i.request_id=c.pairing_request_id
-                WHERE i.status='pending' AND i.expires_at>?
+                WHERE i.status='pending' AND (i.expires_at=0 OR i.expires_at>?)
                 AND c.status IN ('pending','approved')
                 ORDER BY i.created_at,i.connection_id LIMIT ?""",
                 (self._timestamp(), bounded_limit),
             ).fetchall()
             return [
-                {**self._public_connection(row, active), "auto_completion_deadline": int(row["auto_completion_deadline"])}
+                {**self._public_connection(row, active), "auto_completion_deadline": int(row["auto_completion_deadline"]) or None}
                 for row in rows
             ]
         finally:
@@ -7950,7 +7947,7 @@ class SecurePeerClient:
         try:
             active = self._active_id(connection)
             rows = connection.execute(
-                """SELECT c.*,((i.status='pending' AND i.expires_at>?
+                """SELECT c.*,((i.status='pending' AND (i.expires_at=0 OR i.expires_at>?)
                 AND c.status IN ('pending','approved')) OR
                 (i.status='completed' AND c.status='connected' AND c.connection_id=
                  (SELECT value FROM client_meta WHERE key='active_connection_id')))
@@ -7970,7 +7967,7 @@ class SecurePeerClient:
         connection = self._connect()
         try:
             row = connection.execute(
-                """SELECT c.*,((i.status='pending' AND i.expires_at>?
+                """SELECT c.*,((i.status='pending' AND (i.expires_at=0 OR i.expires_at>?)
                 AND c.status IN ('pending','approved')) OR
                 (i.status='completed' AND c.status='connected' AND c.connection_id=
                  (SELECT value FROM client_meta WHERE key='active_connection_id')))
@@ -8139,6 +8136,17 @@ class SecurePeerClient:
         remote_status = response.get("status")
         if remote_status not in {"pending", "approved", "rejected", "cancelled", "expired"}:
             raise SecurePeerError("remote_invalid", "Pairing response status is invalid", 502)
+        if response.get("expires_at") == 0:
+            try:
+                request = json.loads(row["pairing_request_json"])
+                durable = (type(response["expires_at"]) is int
+                           and isinstance(request, dict)
+                           and self._pairing_request_matches_configured_policy(request)
+                           and "durable_pairing_approval" in request.get("capabilities", []))
+            except (TypeError, ValueError):
+                durable = False
+            if not durable:
+                raise SecurePeerError("remote_invalid", "Pairing response expiry is invalid", 502)
         timestamp = self._timestamp()
         certificate_path: str | None = row["certificate_path"]
         certificate_fp: str | None = row["certificate_fingerprint"]
@@ -8184,7 +8192,7 @@ class SecurePeerClient:
                 "SELECT expires_at FROM client_join_intents WHERE connection_id=? AND request_id=?",
                 (connection_id, row["pairing_request_id"]),
             ).fetchone()
-            if intent is not None and int(intent["expires_at"]) <= timestamp:
+            if intent is not None and 0 < int(intent["expires_at"]) <= timestamp:
                 # Network I/O and certificate validation may cross the original
                 # Join deadline. Recheck at the same commit that accepts approval.
                 remote_status = "expired"
@@ -8683,7 +8691,7 @@ class SecurePeerClient:
         def require_pending(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
             if (
                 row["intent_status"] != "pending"
-                or int(row["intent_deadline"]) <= self._timestamp()
+                or 0 < int(row["intent_deadline"]) <= self._timestamp()
                 or row["status"] != "approved"
             ):
                 raise SecurePeerError("automatic_join_unavailable", "Automatic join is no longer authorized", 409)
@@ -8717,7 +8725,7 @@ class SecurePeerClient:
                 timestamp = self._timestamp()
                 changed = connection.execute(
                     """UPDATE client_join_intents SET status='completed',updated_at=?
-                    WHERE connection_id=? AND request_id=? AND status='pending' AND expires_at>?""",
+                    WHERE connection_id=? AND request_id=? AND status='pending' AND (expires_at=0 OR expires_at>?)""",
                     (timestamp, canonical, current["pairing_request_id"], timestamp),
                 ).rowcount
                 if changed != 1:

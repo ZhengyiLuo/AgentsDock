@@ -1,5 +1,32 @@
 # Development and release log
 
+## 2026-09-15 — Durable join approval waiting (unreleased)
+
+- New explicitly submitted joins negotiate a signed durable-approval
+  capability when both servers support it. Pending approval and automatic-join
+  consent then wait for a decision rather than expiring after ten minutes.
+  Preserve the exact request and consent through restart and lost-response
+  recovery; no extra authority or automatic approval is created.
+- Remove the shared-IP cap of 16 pending requests, which can reject legitimate
+  teammates behind one network. Keep overall storage/response/flood bounds,
+  identity and signature checks, host approval, cancellation, revocation,
+  connection replacement fences and certificate validity.
+- A 600-second HTTP observation window no longer falsely expires a pending
+  Join. Return an explicit observation-window result while retaining consent;
+  desktop observers can renew the same long-held read without inbox polling.
+  Project a durable approval deadline as null, not the Unix epoch.
+- Existing positive legacy deadlines remain unchanged; old expired, rejected
+  or cancelled requests are never revived. A new request and updated host and
+  joining servers are required for durable waiting. Older binaries do not
+  understand the new stored zero deadline; see the contract's downgrade note.
+- Local isolated checks exercise eight-day approval waiting, restart,
+  lost-response replay beyond the old attempt-retention window, shared-NAT
+  admission, cancel/approval races, observer cleanup and old/new compatibility.
+  The combined guarded acceptance run passes 121 checks, including the fresh
+  member mail flow and release source manifest. Production state, provider
+  processes and live network endpoints are excluded from this local harness.
+  No live approval, server restart, installation or publication performed.
+
 ## 2026-09-15 — 1.0.1-beta.1 publication verified (UTC)
 
 - Published source: `ce5a245546cbc8d4b55c16a05afc31a25104e6fa`.

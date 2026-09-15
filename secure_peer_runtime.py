@@ -985,7 +985,7 @@ class SecurePeerRuntime:
 
     def _pairing_completion_snapshot(
         self, pairing_id: str, *, expected_transcript_hash: str
-    ) -> tuple[dict[str, Any], int]:
+    ) -> tuple[dict[str, Any], int | None]:
         selected = self._outgoing_for_pairing(pairing_id)
         snapshot = self.client.auto_completion_snapshot(str(selected["connection_id"]))
         connection = snapshot["connection"]
@@ -994,7 +994,13 @@ class SecurePeerRuntime:
         ):
             raise SecurePeerError("pairing_changed", "Pairing transcript changed", 409)
         state = str(snapshot.get("state") or "unavailable")
-        deadline = int(snapshot.get("deadline") or 0)
+        # Negotiated durable approvals have no decision deadline. The client
+        # validates that contract before persisting consent; a transport
+        # observation window must never expire that durable Join.
+        raw_deadline = snapshot.get("deadline")
+        deadline = int(raw_deadline) if raw_deadline is not None else None
+        if deadline == 0:
+            deadline = None
         if self._completion_closing:
             state = "unavailable"
         elif state == "completed" and not connection.get("active"):
@@ -1003,7 +1009,7 @@ class SecurePeerRuntime:
             state = "cancelled"
         elif state == "pending" and (self._host_role_active or connection.get("status") == "error"):
             state = "cancelled"
-        elif state == "pending" and deadline <= int(time.time()):
+        elif state == "pending" and deadline is not None and deadline <= int(time.time()):
             state = "expired"
         if state not in {"pending", "completed", "cancelled", "expired"}:
             state = "unavailable"
@@ -1038,7 +1044,9 @@ class SecurePeerRuntime:
                 )
                 if receipt["completion_state"] != "pending":
                     return receipt
-                remaining = max(0.0, min(observer_deadline - loop.time(), deadline - time.time()))
+                remaining = max(0.0, observer_deadline - loop.time())
+                if deadline is not None:
+                    remaining = min(remaining, max(0.0, deadline - time.time()))
                 try:
                     await asyncio.wait_for(changed.wait(), timeout=remaining)
                 except asyncio.TimeoutError:
@@ -1050,7 +1058,8 @@ class SecurePeerRuntime:
                         expected_transcript_hash=expected_transcript_hash,
                     )
                     return (
-                        {**latest, "completion_state": "expired"}
+                        {**latest, "completion_state": "unavailable",
+                         "reason": "observation_window_elapsed"}
                         if latest["completion_state"] == "pending"
                         else latest
                     )
@@ -1423,13 +1432,16 @@ class SecurePeerRuntime:
             "certificate_expires_at": _iso8601(item.get("certificate_expires_at")),
             "certificate_fingerprint": item.get("certificate_fingerprint"),
             "last_seen_at": _iso8601(item.get("last_seen_at")),
-            "expires_at": _iso8601(item.get("expires_at")),
+            "expires_at": _iso8601(None if item.get("expires_at") == 0 else item.get("expires_at")),
             "error": item.get("error"),
         }
 
     def _outgoing_pairing(self, item: Mapping[str, Any]) -> dict[str, Any]:
         connection_id = str(item.get("connection_id"))
         active = bool(item.get("active"))
+        pairing_deadline = item.get("expires_at")
+        if pairing_deadline is None:
+            pairing_deadline = item.get("pairing_expires_at")
         trust_state = self._trust_state(item.get("status"))
         transport_state = self._transport_state(
             item,
@@ -1465,7 +1477,7 @@ class SecurePeerRuntime:
             "certificate_expires_at": _iso8601(item.get("certificate_expires_at")),
             "certificate_fingerprint": item.get("certificate_fingerprint"),
             "last_seen_at": _iso8601(item.get("last_validated_at")),
-            "expires_at": _iso8601(item.get("expires_at") or item.get("pairing_expires_at")),
+            "expires_at": _iso8601(None if pairing_deadline == 0 else pairing_deadline),
             "error": item.get("error"),
         }
 

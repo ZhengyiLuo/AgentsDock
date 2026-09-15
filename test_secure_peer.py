@@ -3109,12 +3109,17 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
             clock=clock,
             timeout_seconds=5,
         )
-        pending = client.begin_pairing(
-            self.host_ip,
-            self.port,
-            expected_ca_fingerprint=self.store.ca_fingerprint,
-            requested_scopes=["teamspace.read"],
-        )
+        # Explicitly model an old host: negotiated durable requests do not
+        # expire, while this legacy expiry/key-retirement contract still does.
+        legacy_health = dict(self.store.public_health())
+        legacy_health.pop("durable_pairing_approval_v1", None)
+        with mock.patch.object(self.store, "public_health", return_value=legacy_health):
+            pending = client.begin_pairing(
+                self.host_ip,
+                self.port,
+                expected_ca_fingerprint=self.store.ca_fingerprint,
+                requested_scopes=["teamspace.read"],
+            )
         self.assertIsInstance(pending["pairing_expires_at"], int)
         self.assertGreater(pending["pairing_expires_at"], clock.value)
         clock.value = pending["pairing_expires_at"] + 1
@@ -3170,12 +3175,15 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
                 self.assertEqual(list(self.client.keys_dir.iterdir()), [])
 
     def test_outgoing_expiry_cas_wins_over_concurrent_approved_poll(self) -> None:
-        pending = self.client.begin_pairing(
-            self.host_ip,
-            self.port,
-            expected_ca_fingerprint=self.store.ca_fingerprint,
-            requested_scopes=["teamspace.read"],
-        )
+        legacy_health = dict(self.store.public_health())
+        legacy_health.pop("durable_pairing_approval_v1", None)
+        with mock.patch.object(self.store, "public_health", return_value=legacy_health):
+            pending = self.client.begin_pairing(
+                self.host_ip,
+                self.port,
+                expected_ca_fingerprint=self.store.ca_fingerprint,
+                requested_scopes=["teamspace.read"],
+            )
         incoming = self.store.list_pairings(status="pending")[0]
         self.store.approve_pairing(
             incoming["pairing_id"],
