@@ -8,9 +8,14 @@
 - Render exact native-goal follow-ups as chronological user-message segments,
   including attachments, display text, history reloads and bounded lazy traces.
   Do not merge separate human messages by equal text.
+- Preserve exact visible file ownership across live queue removal and native
+  acknowledgements with empty file lists. Keep queue bookkeeping hidden and
+  fence the bounded file-only association to its validated server scope.
 - Keep labeled Stop, Steer and Queue controls visible in active chats. Rebalance
   the keyboard layout for the complete collapsed goal/queue headers and expose
   a queue review sheet with full errors and touch-sized message actions.
+  Short portrait keyboards collapse secondary tools while retaining folded
+  panels, primary actions and keyboard dismissal.
 - Offer explicit Edit/Save recovery for messages queued by an older client,
   retaining their queue IDs. Saving is separate from steering and never
   automatically resends a prompt or changes a goal. An unchanged Save refreshes

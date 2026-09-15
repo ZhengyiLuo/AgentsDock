@@ -15,6 +15,12 @@ export interface ComposerViewportLimits {
   auxiliaryMaxHeight: number
 }
 
+export function composerKeyboardToolsCollapsed(width: number, height: number, keyboardVisible: boolean): boolean {
+  // Keep one primary row on short phones. Portrait retains its folded panels;
+  // only the much tighter landscape layout hides the auxiliary rail.
+  return keyboardVisible && (height < 500 || (width < 720 && height < 700))
+}
+
 export function composerViewportLimits(width: number, height: number, keyboardVisible: boolean): ComposerViewportLimits {
   const compact = width < 720 || Math.min(width, height) < 600
   if (!compact) {

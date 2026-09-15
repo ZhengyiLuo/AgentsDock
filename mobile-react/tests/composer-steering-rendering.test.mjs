@@ -360,6 +360,45 @@ test('constrained landscape includes real header, card borders, shell padding an
   } finally {await stop(renderer)}
 })
 
+test('iPhone SE portrait keeps both folded panels and all primary touch targets within the real keyboard budget',async()=>{
+  queued();fixture.width=375;fixture.height=667;fixture.codexRuntime=goalRuntime()
+  const renderer=await render({expandQueue:false})
+  try {
+    await type(renderer,'Long short-screen draft\n'.repeat(100))
+    await act(async()=>byID(renderer,'chat-composer-input')[0].props.onContentSizeChange({nativeEvent:{contentSize:{height:9000}}}))
+    const headerSource=await readFile('src/components/ChatHeader.tsx','utf8')
+    const headerHeight=Number(headerSource.match(/root: \{ minHeight: (\d+)/)[1])
+    const available=667-291-20-headerHeight
+    const input=styleOf(byID(renderer,'chat-composer-input')[0].props.style)
+    const actions=styleOf(byID(renderer,'chat-primary-actions')[0].props.style)
+    const shell=styleOf(byID(renderer,'chat-composer')[0].props.style)
+    const rail=byID(renderer,'composer-auxiliary-scroll')[0]
+    assert.equal(available,288)
+    assert.equal(input.height,78)
+    assert.equal(actions.minHeight,44)
+    assert.equal(shell.paddingVertical,0)
+    assert.equal(styleOf(rail.props.style).maxHeight,116)
+    assert.equal(rail.props.accessibilityElementsHidden,false)
+    assert.equal(rail.props.pointerEvents,'auto')
+    assert.ok(input.height+actions.minHeight+2+2*shell.paddingVertical+shell.gap+styleOf(rail.props.style).maxHeight<=available)
+    assert.equal(byID(renderer,'chat-attach').length,0)
+    for(const id of ['codex-goal-details','queued-section-toggle','chat-stop','chat-send-now','chat-send','chat-review-queue','chat-hide-keyboard']) {
+      const target=byID(renderer,id)[0]
+      assert.ok(target,id)
+      const style=styleOf(target.props.style)
+      assert.ok((style.height??style.minHeight)>=44,id)
+      assert.notEqual(target.props.disabled,true,id)
+    }
+    await click(renderer,'chat-review-queue')
+    assert.equal(byID(renderer,'queued-review-sheet').length,1)
+    assert.deepEqual(fixture.sends,[])
+    assert.equal(store.getState().drafts.chat,'Long short-screen draft\n'.repeat(100))
+    await click(renderer,'queued-review-close')
+    await act(async()=>renderer.update(React.createElement(Composer,{sessionId:'chat',keyboardVisible:false,onSent(){},onOpenMcp(){}})))
+    assert.equal(byID(renderer,'chat-attach').length,1,'keyboard dismissal restores secondary tools')
+  } finally {await stop(renderer)}
+})
+
 test('measured large-text action height reduces draft growth rather than clipping controls inside the card',async()=>{
   queued()
   const renderer=await render({expandQueue:false,keyboardVisible:false})

@@ -29,6 +29,7 @@ import {
   COMPOSER_INPUT_MAX_HEIGHT,
   COMPOSER_INPUT_MIN_HEIGHT,
   composerInputHeight,
+  composerKeyboardToolsCollapsed,
   composerViewportLimits,
   measuredComposerInputHeight,
 } from '../lib/composer-input-size'
@@ -247,7 +248,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const compactToolbar = composerWidth === 0 || isCompactComposerToolbar(composerWidth)
   const denseToolbar = compactToolbar && (composerWidth === 0 ? width < 352 : isDenseComposerToolbar(composerWidth))
   const viewportLimits = composerViewportLimits(width, height, keyboardVisible)
-  const constrainedKeyboard = keyboardVisible && height < 500
+  const constrainedKeyboard = composerKeyboardToolsCollapsed(width, height, keyboardVisible)
   const primaryInputBudget = active && !constrainedKeyboard ? Math.max(COMPOSER_INPUT_MIN_HEIGHT, COMPOSER_CARD_MAX_HEIGHT - primaryActionsHeight - 50) : COMPOSER_INPUT_MAX_HEIGHT
   const displayedInputHeight = Math.min(composerInputHeight(draft, inputHeight), viewportLimits.inputMaxHeight, primaryInputBudget)
   const hasGoalPanel = !welcome && backend === 'codex'

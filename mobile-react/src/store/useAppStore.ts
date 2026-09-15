@@ -50,6 +50,7 @@ import { SNAPSHOT_CACHE_VERSION, shouldReplaceCachedTimeline, snapshotLatestSeq 
 import { historyNeedsServerRevalidation } from '../lib/history-server-version'
 import { asyncQueuedMessageControlsAvailable, crossChatQueueRefreshSessionId, isAsyncQueuedChatMessage, isNativeGoalSteerEvent, isUserQueuedTurn, queueSnapshotRequiresRefresh, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier, resolveNewQueuedTurn, updateQueuedTurns } from '../lib/queue'
 import { QueueReconciliationState } from '../lib/queue-reconciliation'
+import { NativeGoalFileAssociation } from '../lib/native-goal-file-association'
 import { isAgentActivityEvent } from '../lib/codex-controls'
 import {
   agentCrossChatRoutesAvailable,
@@ -297,6 +298,26 @@ function queueReconciliationState(scope: ConnectionScope, sessionId: string, get
   let state = owner.sessions.get(sessionId)
   if (!state) { state = new QueueReconciliationState(); owner.sessions.set(sessionId, state) }
   return state
+}
+
+// Queue packets remain outside the transcript. Keep only their bounded public
+// file-ID association until an exact native goal acknowledgement arrives.
+const nativeGoalFileScopes = new WeakMap<ConnectionScope, {
+  validationRevision: number
+  identity: string | undefined
+  instance: string | undefined
+  files: NativeGoalFileAssociation
+}>()
+function nativeGoalFileAssociation(scope: ConnectionScope, get: () => AppState): NativeGoalFileAssociation {
+  const validationRevision = scope.client.validationRevision
+  const identity = get().health?.server_identity
+  const instance = get().health?.server_instance_id
+  let owner = nativeGoalFileScopes.get(scope)
+  if (!owner || owner.validationRevision !== validationRevision || owner.identity !== identity || owner.instance !== instance) {
+    owner = { validationRevision, identity, instance, files: new NativeGoalFileAssociation() }
+    nativeGoalFileScopes.set(scope, owner)
+  }
+  return owner.files
 }
 
 function captureConnection(): ConnectionScope { return activeConnection }
@@ -1275,6 +1296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const promise = (async () => {
       if (NativeAppState.currentState !== 'active') return
       const currentScope = captureAgentRouteGuard(scope, get)
+      const nativeFileRead = nativeGoalFileAssociation(scope, get).captureAcknowledgementRead()
       const queueState = queueReconciliationState(scope, sessionId, get)
       const queueRevision = queueState.revision
       const sessionRead = sessionMutations.captureRead()
@@ -1335,9 +1357,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         const queueChanged = queueState.revision !== queueRevision
           || current?.queuedTurns !== existingAtStart?.queuedTurns
         const queuedTurns = queueChanged ? current?.queuedTurns ?? [] : page.queued_turns
-        if (!queueChanged) queueState.commitSnapshot(page.latest_seq)
+        // Only a true forward delta can complete a live attachment handoff.
+        // The read captures pre-request ownership and rejects later edits or
+        // removal, while allowing run-now to drain the visible queue. Never
+        // borrow file IDs from this response's queue or from historical pages.
         const incomingEvents = mergeAndSanitizeIncomingEvents(current?.events ?? [], page.events
-          .filter(event => event.session_id === sessionId && Number.isFinite(event.seq)))
+          .filter(event => event.session_id === sessionId && Number.isFinite(event.seq))
+          .map(event => !fetchedFullTail && event.seq > after && isNativeGoalSteerEvent(event)
+            && !isImportedHistoryRecord(event) && !isImportedProviderControlMetadata(event)
+            ? nativeFileRead(event) : event))
+        if (!queueChanged) {
+          queueState.commitSnapshot(page.latest_seq)
+          nativeGoalFileAssociation(scope, get).rememberSnapshot(sessionId, page.queued_turns.filter(isUserQueuedTurn), page.latest_seq ?? undefined)
+        }
         const replaceEvents = (fetchedFullTail && (fullTailSemanticPaging === true || revalidateServerVersion))
           || shouldReplaceCachedTimeline(current, incomingEvents, page.latest_seq, page.has_more, fetchedFullTail)
         const now = Date.now()
@@ -3069,7 +3101,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       return false
     }
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
-    return scope ? queueAction(scope, sessionId, () => scope.client.removeQueued(sessionId, queuedId), set, get) : false
+    if (!scope) return false
+    const current = captureAgentRouteGuard(scope, get)
+    return queueAction(scope, sessionId, async () => {
+      await scope.client.removeQueued(sessionId, queuedId)
+      if (current()) nativeGoalFileAssociation(scope, get).forget(sessionId, queuedId)
+    }, set, get)
   },
   async skipQueuedDelivery(sessionId, queuedId, expectedGeneration) {
     if (get().workspaceAdopting) return false
@@ -4447,6 +4484,16 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
   const sessionId = event.session_id
   const silentImport = isImportedHistoryRecord(event) || isImportedProviderControlMetadata(event)
   const acceptQueueEvent = !silentImport && queueReconciliationState(scope, sessionId, get).observe(event)
+  const fileAssociation = !silentImport && captureAgentRouteGuard(scope, get)() ? nativeGoalFileAssociation(scope, get) : null
+  if (fileAssociation) {
+    const queueProducer = event.type === 'turn_queued' || event.type === 'turn_queue_updated' || event.type === 'turn_queue_delivery_fenced'
+    const previousOwner = get().snapshots[sessionId]?.queuedTurns.find(turn => turn.queued_id === event.queued_id)
+    const userOwner = !queueProducer || isUserQueuedTurn({ queued_id: event.queued_id ?? '', prompt: '', file_ids: [],
+      purpose: event.purpose ?? previousOwner?.purpose, delivery_mode: event.delivery_mode ?? previousOwner?.delivery_mode })
+    if (userOwner && (acceptQueueEvent || isNativeGoalSteerEvent(event))) {
+      event = fileAssociation.observe(event)
+    }
+  }
   const timelineInternal = TIMELINE_INTERNAL_EVENT_TYPES.has(event.type)
   const nativeSteerSupersession = isNativeSteerSupersession(event)
   const terminalEvent = !silentImport && ['turn_finished', 'turn_stopped'].includes(event.type) && !nativeSteerSupersession
@@ -4484,6 +4531,10 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
     } : {}
     if (!snapshot) return { ...healthState, activeSessionIds: active, sessions, profiles, ...selectedSync }
     const queuedTurns = acceptQueueEvent ? updateQueuedTurns(snapshot.queuedTurns, event) : snapshot.queuedTurns
+    if (fileAssociation && acceptQueueEvent && ['turn_queued', 'turn_queue_updated', 'turn_queue_delivery_fenced'].includes(event.type)) {
+      fileAssociation.rememberSnapshot(sessionId,
+        queuedTurns.filter(turn => turn.queued_id === event.queued_id && isUserQueuedTurn(turn)), event.seq)
+    }
     const queuedRunStatus = !silentImport && (acceptQueueEvent || event.type === 'turn_started' || isNativeGoalSteerEvent(event))
       ? queuedRunStatusForEvent(state.queuedRunStatus, sessionId, queuedTurns, event)
       : state.queuedRunStatus
@@ -4790,6 +4841,7 @@ function setSnapshotQueue(scope: ConnectionScope, sessionId: string, queuedTurns
   if (!connectionIsCurrent(scope)) return
   const snapshot = get().snapshots[sessionId]
   if (!snapshot) return
+  nativeGoalFileAssociation(scope, get).rememberSnapshot(sessionId, queuedTurns.filter(isUserQueuedTurn), snapshot.latestSeq ?? -1)
   queueReconciliationState(scope, sessionId, get).commitSnapshot()
   const next = { ...snapshot, queuedTurns, cachedAt: Date.now() }
   set({

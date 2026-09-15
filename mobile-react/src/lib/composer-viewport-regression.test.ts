@@ -6,6 +6,7 @@ import {
   COMPOSER_INPUT_MAX_HEIGHT,
   COMPOSER_INPUT_MIN_HEIGHT,
   COMPOSER_INPUT_LANDSCAPE_HEIGHT,
+  composerKeyboardToolsCollapsed,
   composerViewportLimits,
 } from './composer-input-size'
 
@@ -14,6 +15,14 @@ function assert(value: unknown, message: string): asserts value {
 }
 
 const portraitPhoneWithKeyboard = composerViewportLimits(393, 852, true)
+assert(!composerKeyboardToolsCollapsed(393, 852, true), 'a tall portrait phone keeps secondary tools available')
+assert(composerKeyboardToolsCollapsed(375, 667, true), 'a short portrait phone needs a single primary row above its keyboard')
+assert(!composerKeyboardToolsCollapsed(375, 667, false), 'dismissing the keyboard restores short portrait tools')
+assert(composerKeyboardToolsCollapsed(812, 375, true), 'landscape phone keeps the single-row fallback')
+assert(!composerKeyboardToolsCollapsed(1024, 768, true), 'regular tablet layout remains unchanged')
+const shortPortrait = composerViewportLimits(375, 667, true)
+assert(shortPortrait.auxiliaryMaxHeight === COMPOSER_AUXILIARY_COMPACT_KEYBOARD_MAX_HEIGHT, 'short portrait must keep both folded goal/queue headers')
+assert(shortPortrait.inputMaxHeight <= 78, 'short portrait input growth remains bounded')
 assert(
   portraitPhoneWithKeyboard.inputMaxHeight === COMPOSER_INPUT_COMPACT_KEYBOARD_MAX_HEIGHT,
   'a portrait phone keyboard must cap the growing input',

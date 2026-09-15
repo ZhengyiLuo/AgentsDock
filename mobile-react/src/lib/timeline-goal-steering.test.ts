@@ -186,6 +186,19 @@ test('an ack-only partial page uses explicit native files but never guesses from
   assert.deepEqual(messages(projectTimeline([steer(5, { prompt: '', file_ids: ['input-file'] })], [attachment]), 'user')[0].files, [attachment])
 })
 
+test('native queue recovery uses visible file selections rather than provider replay files', () => {
+  const files = [file('visible', 'chat'), file('provider-replay', 'chat')]
+  for (const type of ['turn_queued', 'turn_queue_updated']) {
+    for (const display of [['visible'], []]) {
+      const queued = event(1, type, { queued_id: 'queued-5', display_file_ids: display, file_ids: ['provider-replay'] })
+      const rows = messages(projectTimeline([queued, steer(5, { prompt: 'Visible input' })], files), 'user')
+      assert.deepEqual(rows[0].files.map(value => value.id), display)
+      const nativeOverride = messages(projectTimeline([queued, steer(5, { prompt: 'Visible input', display_file_ids: [] })], files), 'user')
+      assert.deepEqual(nativeOverride[0].files, [])
+    }
+  }
+})
+
 test('files attach only to the exact native follow-up, not an earlier user or generated output row', () => {
   const first = file('first', 'chat'), second = file('second', 'chat'), generated = file('generated', 'chat')
   const source = [event(1, 'turn_started', { prompt: 'Initial input', file_ids: ['first'] }),

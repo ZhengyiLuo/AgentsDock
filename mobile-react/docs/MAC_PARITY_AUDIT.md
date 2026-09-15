@@ -11,6 +11,14 @@ Phone controls use labeled Stop/Steer/Queue actions. Collapsed goal/queue header
 include their padding and margins in the keyboard height budget. A queue review
 sheet exposes full errors and message actions, including when the compact
 landscape layout hides the auxiliary rail.
+Short portrait keyboards also collapse secondary tools while preserving the
+folded panels and primary controls. Live attachment ownership survives queue
+removal before the native acknowledgement, without retaining private queue
+payloads or enriching imported history from today's queue.
+If an old attachment-only acknowledgement has neither explicit file IDs nor
+an available earlier queue receipt or saved acknowledgement, mobile does not
+guess ownership from unrelated files. That cold-history case requires server
+attachment provenance.
 
 Messages already queued by an older client retain their old capabilities.
 An explicit Edit/Save updates the same queued message before a separate Steer;

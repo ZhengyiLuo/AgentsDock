@@ -438,8 +438,8 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       && typeof event.queued_id === 'string' && event.queued_id.trim()
       ? JSON.stringify([event.session_id, event.queued_id]) : null
     if (queuedInputKey) {
-      if (event.type === 'turn_queued' || event.type === 'turn_queue_updated' && event.file_ids != null) {
-        const ids = event.file_ids ?? []
+      if (event.type === 'turn_queued' || event.type === 'turn_queue_updated' && (event.display_file_ids != null || event.file_ids != null)) {
+        const ids = event.display_file_ids ?? event.file_ids ?? []
         if (Array.isArray(ids) && ids.every(id => typeof id === 'string' && id.trim())) {
           queuedInputFileIds.set(queuedInputKey, [...ids])
         } else queuedInputFileIds.delete(queuedInputKey)
@@ -565,7 +565,8 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       // queued item owns its latest file selection, including an empty update.
       // This is presentation only: never infer files from text or another run.
       const queuedFiles = queuedInputKey ? queuedInputFileIds.get(queuedInputKey) : undefined
-      const input = queuedFiles ? { ...event, file_ids: [...queuedFiles] } : event
+      const input = event.display_file_ids != null ? { ...event, file_ids: [...event.display_file_ids] }
+        : queuedFiles ? { ...event, file_ids: [...queuedFiles], display_file_ids: [...queuedFiles] } : event
       if (queuedInputKey) queuedInputFileIds.delete(queuedInputKey)
       const previous = turns.get(event.run_id!)
       if (previous) {
