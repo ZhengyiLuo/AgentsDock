@@ -1,6 +1,18 @@
 # Public development log
 
-## Mobile goal steering and accessible queue controls — build 175 source
+## Mobile goal steering and accessible queue controls — 0.1.2 (175)
+
+- Apple validation, upload and processing completed successfully. Build 175
+  is active for internal TestFlight testing with automatic notifications
+  enabled. External beta review was not submitted. Binary source: `d328087`.
+- Both CI jobs passed for that exact source commit. Local verification passed
+  all 112 library/API/store modules and 478 rendered/contract checks, plus
+  focused goal/settings/file-transfer interactions. Focused suites overlap;
+  these counts are not a unique combined total or physical-device acceptance.
+- Signed archive and exported IPA passed version, distribution-signature,
+  framework ABI, privacy, production-feature and fixture-exclusion checks,
+  with matching app/debug symbols. Build artifacts and release logs remain
+  on the external development volume.
 
 - Negotiate the native Codex goal-steering capability on supported Codex
   connections. Preserve the goal and active owner when explicitly steering a

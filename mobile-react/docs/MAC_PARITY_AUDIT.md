@@ -2,6 +2,13 @@
 
 ## Build 175: active-goal steering and queue accessibility
 
+Accepted release: **0.1.2 (175)**, active for internal TestFlight testing with
+automatic notifications enabled. Binary source `d328087` passed both CI jobs,
+all 112 library/API/store modules and 478 rendered/contract checks. Apple
+validation/upload/processing and local signed archive/export, framework ABI,
+privacy, production-feature and matching-symbol checks passed. External beta
+review was not submitted; physical-device touch/pixel QA remains unverified.
+
 This focused follow-up closes omissions in build 174's goal workflow: native
 goal-steering capability negotiation and chronological rendering of the exact
 native follow-up, including attachments and reloaded history. Queue admission
@@ -30,8 +37,7 @@ the full server error remains available rather than promising every refusal can
 be repaired by Save.
 
 Synthetic tests and signed-build verification do not substitute for physical
-device touch/pixel acceptance. Release acceptance is recorded after Apple
-validation and processing, independently of these source changes.
+device touch/pixel acceptance. Apple release acceptance is a separate gate.
 
 ## Desktop catch-up for build 174
 
