@@ -20,9 +20,14 @@
 - Preserve sidebar recency, unread state and active ownership when importing
   typed native child notifications. Both import paths keep those records silent;
   identical user-authored quotations remain visible.
-- The final guarded transport, ordinary/native-goal lifecycle and history
+- The guarded transport, ordinary/native-goal lifecycle and history
   regression group passed 254 tests, including 30 new ordinary continuation
   scenarios. The guard rejects any import of the server monolith.
+- Final ordering review added an exact completed-parent check so delayed
+  consumption of an already-finished native follow-up cannot start another
+  unnecessary turn. Stop skips interruption only for an explicitly completed
+  native handle. The final targeted group passed 153 checks, including both
+  regressions; full clean release acceptance follows separately.
 - Correct the Cursor idle-warning test to arm its short test deadline after
   actual provider readiness, rather than counting process startup as a second
   idle period. Runtime deadlines and behavior are unchanged by that fixture fix.

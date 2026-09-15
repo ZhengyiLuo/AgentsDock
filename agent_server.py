@@ -64931,6 +64931,7 @@ async def run_codex_app_server(
                 and current_run_id not in STOPPED_RUNS
                 and getattr(manager, "generation", None) == child_continuation_generation
                 and active.get("codex_child_continuation_waiting") is True
+                and turn.turn_id == waiting_parent_turn_id
                 and not active_child_ids
                 and not (isinstance(live_goal, dict) and live_goal.get("status") == "active")
             )
@@ -88180,7 +88181,7 @@ async def stop_turn(
                     active.get("transport") == CODEX_TRANSPORT_APP_SERVER
                     and native_turn is not None
                     and getattr(native_turn, "turn_id", "")
-                    and not getattr(native_turn, "_completed", False)
+                    and getattr(native_turn, "_completed", False) is not True
                     and not active.get("native_interrupt_sent")
                 ):
                     active["native_interrupt_sent"] = True

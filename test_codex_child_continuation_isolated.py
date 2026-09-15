@@ -10,6 +10,7 @@ import ast
 from pathlib import Path
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock
 
@@ -329,6 +330,41 @@ class CodexChildContinuationTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(runner, 5)
         self.assertEqual(self.continuation_calls, [])
 
+    async def test_completed_successor_cannot_continue_under_predecessor_wait(self):
+        runner = await self.start_ordinary()
+        next_native = self.turn.next_notification_with_sequence
+        successor_read = asyncio.Event()
+        release_successor = asyncio.Event()
+
+        async def gated_next(*args, **kwargs):
+            sequence, packet = await next_native(*args, **kwargs)
+            if (
+                packet.get("method") == "turn/started"
+                and packet.get("params", {}).get("turnId") == "turn-2"
+            ):
+                successor_read.set()
+                await release_successor.wait()
+            return sequence, packet
+
+        self.turn.next_notification_with_sequence = gated_next
+        self.spawn()
+        self.completed()  # A finishes with an active child.
+        self.child_completed()
+        self.route("turn/started", turn_id="turn-2", turn={"id": "turn-2", "status": "inProgress"})
+        self.answer("B already collected the child", turn_id="turn-2")
+        self.completed(turn_id="turn-2")
+        await asyncio.wait_for(successor_read.wait(), 5)
+        await self.settle_callbacks()
+        # The native handle already represents completed B, but the consumer
+        # is still waiting on A. A's child-drain signal cannot authorize C.
+        self.turn.continue_after_subagents.assert_not_awaited()
+        self.assertFalse(runner.done())
+        release_successor.set()
+        await asyncio.wait_for(runner, 5)
+        self.turn.continue_after_subagents.assert_not_awaited()
+        self.assertEqual(self.ns["finalize_owned_turn_finished"].await_args.kwargs["payload"]["result_text"],
+                         "B already collected the child")
+
     async def wait_with_child(self):
         runner = await self.start_ordinary()
         self.spawn()
@@ -643,6 +679,33 @@ class CodexChildContinuationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AdmissionChecked):
             await namespace["stop_turn"]("chat", expected_run_id="operation", require_provider_turn_ready=True)
         self.assertNotIn("stop_requested", startup)
+
+    async def test_stop_skips_native_interrupt_only_for_explicit_completed_true(self):
+        class AdmissionChecked(Exception):
+            pass
+
+        namespace = dict(self.ns)
+        exec(PROJECTION_CODE, namespace)
+        namespace.update({
+            "SESSION_TURN_TASKS": {}, "CODEX_NATIVE_ACTION_TASKS": {},
+            "empty_subagent_stop_result": Mock(side_effect=AdmissionChecked),
+        })
+        for label, native_turn, should_interrupt in (
+            ("missing", SimpleNamespace(turn_id="turn-1"), True),
+            ("false", SimpleNamespace(turn_id="turn-1", _completed=False), True),
+            ("true", SimpleNamespace(turn_id="turn-1", _completed=True), False),
+            ("unset mock", Mock(turn_id="turn-1"), True),
+        ):
+            with self.subTest(completion=label):
+                active = {
+                    "run_id": "operation", "backend": "codex", "transport": "app_server",
+                    "provider_turn_ready": True, "provider_session_id": "thread",
+                    "codex_app_server_turn": native_turn,
+                }
+                namespace["ACTIVE"]["chat"] = active
+                with self.assertRaises(AdmissionChecked):
+                    await namespace["stop_turn"]("chat", expected_run_id="operation")
+                self.assertEqual(active.get("native_interrupt_sent", False), should_interrupt)
 
     async def test_snapshot_does_not_serialize_private_continuation_event(self):
         runner = await self.wait_with_child()
