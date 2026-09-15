@@ -3244,12 +3244,16 @@ class SecurePeerLiveTLSTests(unittest.TestCase):
     def test_client_schema_migration_preserves_legacy_unknown_pairing_deadline(
         self,
     ) -> None:
-        pending = self.client.begin_pairing(
-            self.host_ip,
-            self.port,
-            expected_ca_fingerprint=self.store.ca_fingerprint,
-            requested_scopes=["teamspace.read"],
-        )
+        legacy_health = dict(self.store.public_health())
+        legacy_health.pop("durable_pairing_approval_v1", None)
+        with mock.patch.object(self.store, "public_health", return_value=legacy_health):
+            pending = self.client.begin_pairing(
+                self.host_ip,
+                self.port,
+                expected_ca_fingerprint=self.store.ca_fingerprint,
+                requested_scopes=["teamspace.read"],
+            )
+        self.assertGreater(pending["pairing_expires_at"], 0)
         database = self.client._connect()
         try:
             database.execute(
