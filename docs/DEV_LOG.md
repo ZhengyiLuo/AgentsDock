@@ -1,6 +1,30 @@
 # Development and release log
 
-## 2026-09-15 — Durable join approval waiting (unreleased)
+## 2026-09-15 — 1.0.1-beta.1 replacement accepted
+
+- Republished the explicitly authorized same-version beta from source
+  `d209ab4c77ac5a970232359fb4317aafd79dfc1b`. The canonical
+  [beta.1 release](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.1-beta.1)
+  and tag now identify the revised durable-join implementation while retaining
+  the earlier Team Mail gateway correction. A verified backup of the original
+  package is retained; unrelated unfinished changes are excluded.
+- [Release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/34946030454)
+  passed 4,128 tests with two skipped, packaging and manifest signing. Its
+  prepare-only mode held the signed assets for verification before the existing
+  release was replaced. The redundant tag-push run was cancelled afterward.
+- Fresh unauthenticated public downloads pass Ed25519 signature verification,
+  all three asset digest checks, Beta/API 28 metadata and byte-for-byte
+  comparison of all 78 packaged source files with the accepted commit.
+  Archive SHA-256:
+  `24e3a1d388fa4730a8020230491562cc63d976bea3329b0fdd8a45c5af759f62`.
+- Durable joins require the revised server on both host and joining server.
+  Already-installed beta.1 instances require manual reinstall from the
+  verified archive; Check for updates and Force update reject equal versions.
+  Matching desktop observation/display changes remain separately committed.
+- The stable release remains 1.0.0. Publication performed no live server
+  restart, installation, request approval or mail send.
+
+## 2026-09-15 — Durable join approval waiting implementation
 
 - New explicitly submitted joins negotiate a signed durable-approval
   capability when both servers support it. Pending approval and automatic-join
@@ -25,7 +49,8 @@
   The combined guarded acceptance run passes 121 checks, including the fresh
   member mail flow and release source manifest. Production state, provider
   processes and live network endpoints are excluded from this local harness.
-  No live approval, server restart, installation or publication performed.
+  These local checks performed no live approval, server restart, installation
+  or publication.
 
 ## 2026-09-15 — 1.0.1-beta.1 publication verified (UTC)
 

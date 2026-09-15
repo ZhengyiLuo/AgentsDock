@@ -44,9 +44,11 @@ than creating duplicate messages.
   archive.
 
 This is an explicitly authorized **same-version replacement** of
-`1.0.1-beta.1`. If that version is already installed, use the manual server
-update/reinstall path to obtain the revised archive; a version-only update
-check may not offer it. Existing servers are not restarted by publication.
+`1.0.1-beta.1`. If that version is already installed, manually reinstall from
+the revised, signature-verified server archive using the existing service
+user and configuration. **Check for updates and Force update cannot install
+this same-version replacement.** The installer retains the previous runtime
+for rollback. Publication itself does not restart any server.
 
 ## Validation and scope
 
