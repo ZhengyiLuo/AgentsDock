@@ -197,7 +197,12 @@ export function interactiveClientCapabilities(
     : session?.backend === 'codex'
       ? codexInteractiveClientCapability(health)
       : null
-  if (interactive) capabilities.push(interactive)
+  if (interactive) {
+    capabilities.push(interactive)
+    // Goal follow-ups retain their running owner instead of stop/restart.
+    // Opt in only for Codex when Mobile can surface its interactive controls.
+    if (session?.backend === 'codex') capabilities.push('codex_goal_steer_v1')
+  }
   if (crossChatHandoffsAvailable(health)) {
     capabilities.push(CROSS_CHAT_HANDOFFS_V1_CLIENT_CAPABILITY)
     if (crossChatCapabilityVersion(health) >= 2) {

@@ -1,4 +1,29 @@
-# Mobile / Mac parity — 2026-09-14
+# Mobile / Mac parity — 2026-09-15
+
+## Build 175: active-goal steering and queue accessibility
+
+This focused follow-up closes omissions in build 174's goal workflow: native
+goal-steering capability negotiation and chronological rendering of the exact
+native follow-up, including attachments and reloaded history. Queue admission
+and explicit Steer remain separate actions; neither pauses or replaces a goal.
+
+Phone controls use labeled Stop/Steer/Queue actions. Collapsed goal/queue headers
+include their padding and margins in the keyboard height budget. A queue review
+sheet exposes full errors and message actions, including when the compact
+landscape layout hides the auxiliary rail.
+
+Messages already queued by an older client retain their old capabilities.
+An explicit Edit/Save updates the same queued message before a separate Steer;
+an unchanged Save updates only client capabilities, preserving content, files
+and reference metadata. It does not resend the original prompt. The current
+server contract does not expose an atomic additive capability update, so Run now
+does not silently rewrite the queued item's capability list. A goal-steering refusal can have other causes;
+the full server error remains available rather than promising every refusal can
+be repaired by Save.
+
+Synthetic tests and signed-build verification do not substitute for physical
+device touch/pixel acceptance. Release acceptance is recorded after Apple
+validation and processing, independently of these source changes.
 
 ## Desktop catch-up for build 174
 

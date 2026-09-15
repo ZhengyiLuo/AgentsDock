@@ -2232,7 +2232,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         return false
       }
     }
-    const clientCapabilities = interactiveClientCapabilities(session, get().health)
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
     if (!scope) return false
     if (teamReferences.some(reference => reference.recipient_kind !== 'server')) {
@@ -2284,8 +2283,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (consumedDraft) void saveCurrentWorkspace(get)
     const queuedBeforeSend = new Set((get().snapshots[sessionId]?.queuedTurns ?? []).map(turn => turn.queued_id))
     const sessionRead = sessionMutations.captureRead()
+    const admittedServerIdentity = get().health?.server_identity
     const queueScopeCurrent = captureAgentRouteGuard(scope, get)
     try {
+      const clientCapabilities = interactiveClientCapabilities(session, get().health)
       const response = await scope.client.sendTurn(
         sessionId,
         prompt,
@@ -2296,7 +2297,29 @@ export const useAppStore = create<AppState>((set, get) => ({
         chatReferences,
         teamReferences,
       )
-      if (!queueScopeCurrent()) return false
+      if (!queueScopeCurrent()) {
+        // A successful POST is not safe to replay after a server restart or
+        // revalidation. Discard its stale projection, but reconcile the same
+        // selected server/chat through a fresh, current-scope read.
+        const current = get()
+        if (connectionIsCurrent(scope) && scope.client.isValidated
+          && current.activeProfileId === scope.profileId && current.profileGeneration === scope.generation
+          && current.connected && !current.connecting && !current.switchingProfileId && !current.workspaceAdopting
+          && current.selectedSessionId === sessionId && admittedServerIdentity
+          && current.health?.server_identity === admittedServerIdentity) {
+          const admittedFiles = new Set(files)
+          set(state => ({
+            // Remove only the exact admitted selections. A newly picked file
+            // (even with a reused ID) belongs to the next draft and survives.
+            uploads: consumeComposer ? { ...state.uploads,
+              [sessionId]: (state.uploads[sessionId] ?? []).filter(file => !admittedFiles.has(file)),
+            } : state.uploads,
+            error: 'The server accepted this message before the connection changed. Refresh the chat before sending it again.',
+          }))
+          void get().syncSelectedSession('recovery')
+        }
+        return false
+      }
       const stateAfterSend = get()
       if (chatReferences.some(reference => reference.action === 'route' && reference.grant_intent === true)) {
         void get().refreshAgentRoutes(sessionId, expectedGeneration)
@@ -2881,12 +2904,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
     if (!scope) return false
     const normalizedPrompt = prompt.trim()
-    if (!normalizedPrompt) {
+    const previousPrompt = queued?.display_prompt ?? queued?.prompt ?? ''
+    const attachmentOnly = !normalizedPrompt && !previousPrompt.trim() && !queued?.prompt.trim() && Boolean(queued?.file_ids.length)
+      && !(queued?.chat_references?.length || queued?.team_references?.length || chatReferences?.length || teamReferencesInput?.length)
+    if (!normalizedPrompt && !attachmentOnly) {
       set({ error: 'Queued message cannot be empty.' })
       return false
     }
     const leadingWhitespace = prompt.length - prompt.trimStart().length
-    const previousPrompt = queued?.display_prompt ?? queued?.prompt ?? ''
     const rawReferences = chatReferences ?? reconcileChatReferences(
       previousPrompt,
       prompt,
@@ -2954,20 +2979,37 @@ export const useAppStore = create<AppState>((set, get) => ({
         return false
       }
     }
-    return queueAction(
+    const queuedEditIdentity = queuedUserEditIdentity(queued, sessionId)
+    if (queued && (!queuedEditIdentity || queuedEditIdentity !== queuedUserEditIdentity(
+      get().snapshots[sessionId]?.queuedTurns.find(value => value.queued_id === queuedId), sessionId,
+    ))) {
+      set({ error: 'This queued message changed while its edit was being checked. Your edit was not sent; reopen the current message.' })
+      return false
+    }
+    const previousRunStatus = get().queuedRunStatus[sessionId]
+    // An unchanged Save is a client upgrade, not a rewrite of this message's
+    // saved grant ceiling. Omit content and reference fields entirely.
+    const capabilityOnly = attachmentOnly || Boolean(queued && normalizedPrompt === queued.prompt && normalizedPrompt === previousPrompt
+      && chatReferencesEqual(validReferences, queued.chat_references ?? [])
+      && teamReferencesEqual(teamReferences, queued.team_references ?? []))
+    const current = captureAgentRouteGuard(scope, get)
+    const updated = await queueAction(
       scope,
       sessionId,
-      () => scope.client.updateQueued(
-        sessionId,
-        queuedId,
-        normalizedPrompt,
-        validReferences,
-        interactiveClientCapabilities(source, state.health),
-        teamReferences,
-      ),
+      () => {
+        const dispatch = get()
+        const capabilities = interactiveClientCapabilities(dispatch.sessions.find(value => value.id === sessionId), dispatch.health)
+        return capabilityOnly ? scope.client.updateQueuedCapabilities(sessionId, queuedId, capabilities)
+          : scope.client.updateQueued(sessionId, queuedId, normalizedPrompt, validReferences, capabilities, teamReferences)
+      },
       set,
       get,
     )
+    if (updated && current() && previousRunStatus?.queued_id === queuedId && previousRunStatus.goal_steer_rejected
+      && get().queuedRunStatus[sessionId] === previousRunStatus) {
+      set(state => ({ queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId) }))
+    }
+    return updated
   },
   async updateQueuedAgentMessage(sessionId, queuedId, prompt, expectedMessageRevision, expectedGeneration) {
     const scope = validatedConnectionOrReport(get, set, expectedGeneration)
@@ -3240,6 +3282,11 @@ export const useAppStore = create<AppState>((set, get) => ({
               queuedId,
               error,
               Boolean(reconciledTurns?.some(value => value.queued_id === queuedId)),
+              Boolean(session?.backend === 'codex'
+                && interactiveClientCapabilities(session, get().health).includes('codex_goal_steer_v1')
+                && reconciledTurns?.some(value => value.queued_id === queuedId && isUserQueuedTurn(value) && !value.promoted
+                  && (!value.session_id || value.session_id === sessionId))
+                && isGoalSteerRejection(error, queuedId)),
             ),
           ),
         }))
@@ -4615,16 +4662,31 @@ function queuedRunStatusMap(
   return next
 }
 
-function queuedRunFailureStatus(queuedId: string, error: unknown, queueConfirmed: boolean): QueuedRunStatus {
+function isGoalSteerRejection(error: unknown, queuedId: string): boolean {
+  if (!(error instanceof ServerError) || error.status !== 409) return false
+  if (error.detail && typeof error.detail === 'object') {
+    const detail = error.detail as { code?: unknown; guard?: unknown; queued_id?: unknown }
+    return detail.code === 'force_send_blocked' && detail.guard === 'active_goal_requires_native_steer'
+      && (detail.queued_id === undefined || detail.queued_id === queuedId)
+  }
+  // Match only the exact known refusal when detail is serialized as text.
+  return error.detail === 'This follow-up cannot safely steer the active Codex goal. It remains queued; the goal was not paused.'
+}
+
+function queuedRunFailureStatus(queuedId: string, error: unknown, queueConfirmed: boolean, goalSteerRejected = false): QueuedRunStatus {
   const detail = errorMessage(error).trim()
   const genericInternalError = /^500(?:\s+internal server error)?$/i.test(detail)
   const summary = queueConfirmed
     ? 'Could not run this queued message now. It is still queued.'
     : 'Could not confirm whether this queued message started. Refresh the chat before retrying.'
+  const message = genericInternalError ? `${summary} The server reported an internal error.` : `${summary} ${detail}`
   return {
     queued_id: queuedId,
     tone: 'error',
-    message: genericInternalError ? `${summary} The server reported an internal error.` : `${summary} ${detail}`,
+    message: goalSteerRejected
+      ? `${message} If this message was queued before the app update, choose Edit, then Save to update this same queued message; then tap Steer. Do not resend it as a new message.`
+      : message,
+    ...(goalSteerRejected ? { goal_steer_rejected: true } : {}),
   }
 }
 
@@ -4673,6 +4735,12 @@ function editableQueuedAgentOwner(turn: QueuedTurn | undefined, sessionId: strin
     || !turn.cross_chat_envelope_id
     || !Number.isSafeInteger(turn.message_revision) || (turn.message_revision ?? -1) < 0) return null
   return JSON.stringify([turn.queued_id, turn.cross_chat_envelope_id, turn.source_session_id, turn.target_session_id ?? sessionId])
+}
+
+function queuedUserEditIdentity(turn: QueuedTurn | undefined, sessionId: string): string | null {
+  if (!turn || !isUserQueuedTurn(turn) || turn.promoted || turn.session_id && turn.session_id !== sessionId) return null
+  return JSON.stringify([turn.queued_id, turn.session_id ?? sessionId, turn.backend ?? null, turn.model ?? null, turn.effort ?? null,
+    turn.prompt, turn.display_prompt ?? null, turn.file_ids, turn.chat_references ?? [], turn.team_references ?? []])
 }
 
 async function queueAction(scope: ConnectionScope, sessionId: string, action: () => Promise<void>, set: (value: Partial<AppState>) => void, get: () => AppState): Promise<boolean> {

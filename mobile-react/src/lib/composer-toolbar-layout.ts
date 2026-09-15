@@ -12,7 +12,7 @@ export const COMPOSER_PERMISSION_FACE_SIZE = 28
 export const COMPOSER_STOP_FACE_SIZE = 30
 export const COMPOSER_SEND_FACE_SIZE = 32
 export const COMPOSER_EMPTY_CARD_MIN_HEIGHT = 90
-export const COMPOSER_CARD_MAX_HEIGHT = 230
+export const COMPOSER_CARD_MAX_HEIGHT = 278
 export const COMPOSER_SHELL_PADDING = 10
 
 interface CompactToolbarState {
@@ -30,8 +30,10 @@ export function isDenseComposerToolbar(width: number): boolean {
 }
 
 export function compactComposerToolbarRequiredWidth(state: CompactToolbarState, dense: boolean): number {
-  // Attach, quick messages, and Send are always present.
-  let width = COMPOSER_TOOLBAR_TOUCH_SIZE * 3
+  // Active chats put labeled Stop / Steer / Queue in a separate pinned row.
+  // The tool row retains Attach and quick messages, plus a keyboard-dismiss
+  // target. Idle chats additionally keep a labeled Send target in this row.
+  let width = state.active ? COMPOSER_TOOLBAR_TOUCH_SIZE * 3 : COMPOSER_TOOLBAR_TOUCH_SIZE * 2 + 82
   // The zero-width spacer remains a flex child and participates in `gap`.
   let childCount = 4
   if (state.backend) {
@@ -44,14 +46,6 @@ export function compactComposerToolbarRequiredWidth(state: CompactToolbarState, 
     childCount += 1
   }
   if (state.backend) {
-    width += COMPOSER_TOOLBAR_TOUCH_SIZE
-    childCount += 1
-  }
-  if (state.active) {
-    width += COMPOSER_TOOLBAR_TOUCH_SIZE
-    childCount += 1
-  }
-  if (state.active && state.hasReadyContent) {
     width += COMPOSER_TOOLBAR_TOUCH_SIZE
     childCount += 1
   }

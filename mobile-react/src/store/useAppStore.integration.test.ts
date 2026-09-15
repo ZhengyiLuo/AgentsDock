@@ -1645,7 +1645,7 @@ try {
       assert.equal(await useAppStore.getState().sendPrompt(false, generation, 'shared-session'), true)
       assert.equal(
         JSON.stringify(capturedClientCapabilities[0]),
-        JSON.stringify(['codex_interactive_v1']),
+        JSON.stringify(['codex_interactive_v1', 'codex_goal_steer_v1']),
         'a Codex session must opt into interactive controls only when the server advertises the v1 capability',
       )
 

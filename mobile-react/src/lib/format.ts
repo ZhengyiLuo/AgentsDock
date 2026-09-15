@@ -1,5 +1,6 @@
 import type { AgentFile, Backend, Event, Session } from '../types'
 import { hasProviderUserProvenance, mergeProviderInterruptionEvent } from './provider-origin'
+import { isNativeGoalSteerEvent } from './native-goal-steering'
 
 const fullDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -35,7 +36,7 @@ export function normalizeServerURL(value: string): string {
 }
 
 export function messageText(event: Event): string {
-  const inputEvent = event.type === 'turn_started' || event.type === 'turn_queued' || event.type === 'turn_queue_run_now'
+  const inputEvent = event.type === 'turn_started' || event.type === 'turn_queued' || event.type === 'turn_queue_run_now' || isNativeGoalSteerEvent(event)
   const raw = inputEvent && event.display_prompt != null
     ? event.display_prompt
     : event.result_text ?? event.text ?? event.prompt ?? event.message ?? event.error ?? event.output ?? ''

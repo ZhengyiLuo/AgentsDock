@@ -5,6 +5,7 @@ import {
   COMPOSER_INPUT_COMPACT_KEYBOARD_MAX_HEIGHT,
   COMPOSER_INPUT_MAX_HEIGHT,
   COMPOSER_INPUT_MIN_HEIGHT,
+  COMPOSER_INPUT_LANDSCAPE_HEIGHT,
   composerViewportLimits,
 } from './composer-input-size'
 
@@ -24,7 +25,7 @@ assert(
 
 const landscapePhoneWithKeyboard = composerViewportLimits(852, 393, true)
 assert(
-  landscapePhoneWithKeyboard.inputMaxHeight === COMPOSER_INPUT_MIN_HEIGHT,
+  landscapePhoneWithKeyboard.inputMaxHeight === COMPOSER_INPUT_LANDSCAPE_HEIGHT,
   'a landscape phone keyboard must reserve room for the toolbar before growing the input',
 )
 assert(

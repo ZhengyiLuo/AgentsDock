@@ -4,6 +4,7 @@ import { foldMarkdownSource } from './math'
 import { importedCrossChatDelivery, type ImportedCrossChatDelivery } from './imported-cross-chat-delivery'
 import { isChatMailboxEvent } from './chat-mailbox'
 import { isVerifiedSilentHistory } from './history'
+import { isNativeGoalSteerEvent } from './native-goal-steering'
 import {
   hasProviderUserProvenance, isImportedHistoryRecord, isImportedClaudeControlCompanion,
   isImportedCodexRuntimeContext, isImportedProviderControlMetadata, isImportedProviderInterruption,
@@ -59,6 +60,10 @@ interface Turn {
   failedAt?: string
   stoppedAt?: string
   historical?: boolean
+  /** Native goal messages divide display slices without replacing the run owner. */
+  afterSeq?: number
+  throughSeq?: number
+  continues?: boolean
 }
 
 // A terminal exchange summary must override stale "active" leg packets, but
@@ -197,6 +202,7 @@ function jobProjectionAssignments(events: readonly Event[]): Map<Event, JobProje
       stableOccurrenceId && explicitJobId ? `${explicitJobId}\0occurrence:${stableOccurrenceId}` : runId
     )
     const topLevel = event.type === 'emergency_alert_raised'
+      || isNativeGoalSteerEvent(event)
       || Boolean(providerInteractionAuditKey(event))
       || Boolean(codexLifecycleSemanticKey(event))
       || isHandoffDigestEvent(event)
@@ -207,6 +213,7 @@ function jobProjectionAssignments(events: readonly Event[]): Map<Event, JobProje
       const boundaryKey = providerInteractionAuditKey(event)
         || codexLifecycleSemanticKey(event)
         || crossChatSemanticKey(event)
+        || (isNativeGoalSteerEvent(event) ? `turn:${event.run_id}:start-${event.seq}` : null)
         || (event.run_id ? `turn:${event.run_id}` : `event:${event.id}`)
       if (!createdKeys.has(boundaryKey)) {
         createdKeys.add(boundaryKey)
@@ -259,6 +266,9 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   const crossChatTerminalStatusByExchange = new Map<string, NonNullable<Event['exchange_status']>>()
   const stopRows = new Map<string, SystemRow>()
   const providerInteractionRows = new Map<string, SystemRow>()
+  const nativeGoalInputIds = new Set<string>()
+  const nativeGoalInputKeys = new Set<string>()
+  const queuedInputFileIds = new Map<string, string[]>()
   let active: Turn | null = null
 
   // Provider output from scheduled work does not always repeat job_title.
@@ -424,6 +434,19 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       }
       continue
     }
+    const queuedInputKey = typeof event.session_id === 'string' && event.session_id.trim()
+      && typeof event.queued_id === 'string' && event.queued_id.trim()
+      ? JSON.stringify([event.session_id, event.queued_id]) : null
+    if (queuedInputKey) {
+      if (event.type === 'turn_queued' || event.type === 'turn_queue_updated' && event.file_ids != null) {
+        const ids = event.file_ids ?? []
+        if (Array.isArray(ids) && ids.every(id => typeof id === 'string' && id.trim())) {
+          queuedInputFileIds.set(queuedInputKey, [...ids])
+        } else queuedInputFileIds.delete(queuedInputKey)
+      } else if (event.type === 'turn_unqueued' || event.type === 'turn_started') {
+        queuedInputFileIds.delete(queuedInputKey)
+      }
+    }
     const deliveredDigest = digestBody(event)
     if (deliveredDigest) {
       appendDigestEvent({
@@ -530,6 +553,38 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       items.push({ kind: 'system', key: `event:${event.id}`, seq: event.seq, event })
       continue
     }
+    if (isNativeGoalSteerEvent(event)) {
+      const key = `turn:${event.run_id}:start-${event.seq}`
+      const identity = typeof event.id === 'string' && event.id.trim() ? `${event.session_id}\0${event.run_id}\0${event.id}` : null
+      // HTTP and live-stream receipts can replay the same authoritative packet.
+      // Never collapse different inputs merely because their text is equal.
+      if ((identity && nativeGoalInputIds.has(identity)) || nativeGoalInputKeys.has(key)) continue
+      if (identity) nativeGoalInputIds.add(identity)
+      nativeGoalInputKeys.add(key)
+      // Native acknowledgements may omit attachments. The exact same-chat
+      // queued item owns its latest file selection, including an empty update.
+      // This is presentation only: never infer files from text or another run.
+      const queuedFiles = queuedInputKey ? queuedInputFileIds.get(queuedInputKey) : undefined
+      const input = queuedFiles ? { ...event, file_ids: [...queuedFiles] } : event
+      if (queuedInputKey) queuedInputFileIds.delete(queuedInputKey)
+      const previous = turns.get(event.run_id!)
+      if (previous) {
+        previous.continues = !previous.finishedAt
+        previous.finishedAt ||= event.ts
+        previous.throughSeq = Math.min(previous.finishedSeq ?? event.seq - 1, event.seq - 1)
+      }
+      const next = createTurn(event, key)
+      next.afterSeq = event.seq
+      if (messageText(input).trim() || input.file_ids?.length) next.user = input
+      for (const id of input.file_ids ?? []) {
+        const file = filesById.get(id)
+        if (file && nativeGoalFileBelongsToSession(file, event.session_id)
+          && !next.files.some(value => value.id === id)) next.files.push(file)
+      }
+      turns.set(event.run_id!, next)
+      active = next
+      continue
+    }
     if (event.type === 'turn_started') {
       const interruptedRunId = event.steer_interrupted_run_id?.trim()
       const predecessor = interruptedRunId ? turns.get(interruptedRunId) : null
@@ -596,6 +651,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
           if (
             'kind' in item
             || !item.user?.file_ids?.includes(file.id)
+            || isNativeGoalSteerEvent(item.user) && !nativeGoalFileBelongsToSession(file, item.user.session_id)
             || item.files.some(value => value.id === file.id)
           ) continue
           item.files.push(file)
@@ -739,6 +795,9 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
         active: traceActive,
         runActive: traceActive,
         terminalSeq: item.finishedSeq,
+        ...(item.afterSeq !== undefined ? { afterSeq: item.afterSeq } : {}),
+        ...(item.throughSeq !== undefined ? { throughSeq: item.throughSeq } : {}),
+        ...(item.continues ? { continues: true } : {}),
       })
     }
     if (traceActive && currentTurn?.key === item.key) {
@@ -753,6 +812,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
           seq: progress.at(-1)!.seq,
           events: visibleProgress,
           hiddenCount: progress.length - visibleProgress.length,
+          ...(item.afterSeq !== undefined ? { afterSeq: item.afterSeq } : {}),
         }
       }
     }
@@ -769,6 +829,11 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   // it after lifecycle markers and already-positioned completed answers mirrors
   // Mac without allowing a successor's progress to reshuffle older rows.
   return interleaveCrossChatMessages(liveProgress ? [...orderedRows, liveProgress] : orderedRows, completedAssistantRows)
+}
+
+function nativeGoalFileBelongsToSession(file: AgentFile, sessionId: string): boolean {
+  const owner = String(file.session_id ?? '').trim()
+  return !owner || owner === sessionId
 }
 
 function traceToolKey(event: Event): string {

@@ -833,6 +833,8 @@ export interface QueuedRunStatus {
   tone: 'info' | 'error'
   message: string
   delivery_uncertain?: boolean
+  /** Confirmed queued user item rejected by the native Codex goal guard. */
+  goal_steer_rejected?: boolean
 }
 
 export interface CodeDiffFileSummary {
