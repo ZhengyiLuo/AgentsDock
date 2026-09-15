@@ -270,10 +270,28 @@ async function waitFor(condition: () => boolean, message: string): Promise<void>
 const serverA = new MockAgentsServer('a', 'token-a', 'server-a', 'A live')
 const serverB = new MockAgentsServer('b', 'token-b', 'server-b', 'B live')
 const originalSetInterval = globalThis.setInterval
+const originalFetch = globalThis.fetch
+const optionalFetchStarted = deferred()
+const optionalFetchGate = deferred()
+const fetchDispatches: Array<{ origin: string; path: string; appState: string }> = []
 let refreshTick: () => void = () => {}
 
 try {
   const [serverURLA, serverURLB] = await Promise.all([serverA.listen(), serverB.listen()])
+  let heldOptionalFetch = false
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    fetchDispatches.push({ origin: url.origin, path: url.pathname, appState: NativeAppState.currentState })
+    // Reconnect intentionally publishes sessions before optional catalog/jobs
+    // requests settle. Reproduce delayed wire arrival independently of Node's
+    // socket scheduling so it cannot be mistaken for a background dispatch.
+    if (url.origin === serverURLB && url.pathname === '/api/jobs' && !heldOptionalFetch) {
+      heldOptionalFetch = true
+      optionalFetchStarted.resolve()
+      await optionalFetchGate.promise
+    }
+    return originalFetch(input, init)
+  }
   await AsyncStorage.clear()
   ;(SecureStore as typeof SecureStore & { __resetSecureStore(): void }).__resetSecureStore()
   ;(Notifications as typeof Notifications & { __resetNotifications(): void }).__resetNotifications()
@@ -364,11 +382,23 @@ try {
   assert(serverB.requests.length > 0)
   assert(serverB.requests.every(request => request.token === 'token-b'))
 
+  // Session readiness is not an optional-request drain barrier. Both reads
+  // were started while foregrounded; let the held request reach the server
+  // before taking the no-background-network baseline.
+  await optionalFetchStarted.promise
+  optionalFetchGate.resolve()
+  await waitFor(
+    () => ['/api/runtime/catalog', '/api/jobs'].every(path => serverB.requests.some(request => request.path === path)),
+    'foreground validation optional requests should reach Beta before background sampling',
+  )
+  assert.equal(fetchDispatches.some(request => request.appState === 'background'), false, 'all setup fetches were dispatched while active')
   const appState = NativeAppState as typeof NativeAppState & { __emitAppState(state: string): void }
   appState.__emitAppState('background')
   const backgroundRequestCount = serverB.requests.length
+  const backgroundDispatchCount = fetchDispatches.length
   for (let minute = 0; minute < 5; minute += 1) refreshTick()
   await nextTurn()
+  assert.equal(fetchDispatches.length, backgroundDispatchCount, 'background refresh ticks must start no fetches')
   assert.equal(serverB.requests.length, backgroundRequestCount, 'background refresh ticks must perform no network work')
   appState.__emitAppState('active')
   await waitFor(() => serverB.requests.length > backgroundRequestCount, 'foregrounding should perform one reconciliation refresh')
@@ -2392,6 +2422,8 @@ try {
 
   console.log('multi-server store integration regressions passed')
 } finally {
+  optionalFetchGate.resolve()
+  globalThis.fetch = originalFetch
   globalThis.setInterval = originalSetInterval
   await Promise.all([serverA.close(), serverB.close()])
 }

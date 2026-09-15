@@ -16,15 +16,18 @@ export function CodexServerSettings({ visible }: { visible: boolean }) {
   const ready = useAppStore(state => state.connected && !state.connecting && !state.workspaceAdopting && !state.switchingProfileId)
   const health = useAppStore(state => state.health)
   if (!visible || !profileId || !codexControlsCapability(health)) return null
-  return <ScopedGoalSettings key={`${profileId}:${generation}`} connection={client} profileId={profileId} generation={generation} ready={ready} />
+  const scope = { profileId, generation, identity: health?.server_identity, instance: health?.server_instance_id,
+    validation: client.validationRevision }
+  return <ScopedGoalSettings key={JSON.stringify(scope)} connection={client} scope={scope} ready={ready} />
 }
 
-function ScopedGoalSettings({ connection, profileId, generation, ready }: {
+interface Scope { profileId: string; generation: number; identity?: string; instance?: string; validation: number }
+function ScopedGoalSettings({ connection, scope, ready }: {
   connection: AgentServerClient
-  profileId: string
-  generation: number
+  scope: Scope
   ready: boolean
 }) {
+  const { profileId, generation } = scope
   const colors = usePalette()
   const [configuration, setConfiguration] = useState<CodexGoalsConfiguration | null>(null)
   const [loading, setLoading] = useState(false)
@@ -34,11 +37,14 @@ function ScopedGoalSettings({ connection, profileId, generation, ready }: {
   const epoch = useRef(0)
   const mounted = useRef(false)
   const savingRef = useRef(false)
-  const confirmingRef = useRef(false)
+  const confirmingRef = useRef<symbol | null>(null)
   const current = () => {
     const state = useAppStore.getState()
     return mounted.current && client === connection && connection.isValidated
+      && connection.validationRevision === scope.validation
       && state.activeProfileId === profileId && state.profileGeneration === generation
+      && state.health?.server_identity === scope.identity && state.health?.server_instance_id === scope.instance
+      && Boolean(codexControlsCapability(state.health))
       && state.connected && !state.connecting && !state.workspaceAdopting && !state.switchingProfileId
   }
 
@@ -50,7 +56,7 @@ function ScopedGoalSettings({ connection, profileId, generation, ready }: {
   useEffect(() => {
     const request = ++epoch.current
     savingRef.current = false
-    confirmingRef.current = false
+    confirmingRef.current = null
     setSaving(false)
     setConfiguration(null)
     setError(null)
@@ -97,15 +103,20 @@ function ScopedGoalSettings({ connection, profileId, generation, ready }: {
   const change = (enabled: boolean) => {
     if (!current() || savingRef.current || confirmingRef.current || !configuration?.configurable) return
     if (enabled) { void save(true); return }
-    confirmingRef.current = true
+    const confirmation = Symbol()
+    confirmingRef.current = confirmation
     const request = epoch.current
+    const cancelConfirmation = () => {
+      if (confirmingRef.current === confirmation) confirmingRef.current = null
+    }
     Alert.alert('Disable goals on this server?', 'This pauses existing goals across all chats and disables automatic goal continuation.', [
-      { text: 'Cancel', style: 'cancel', onPress: () => { confirmingRef.current = false } },
+      { text: 'Cancel', style: 'cancel', onPress: cancelConfirmation },
       { text: 'Disable goals', style: 'destructive', onPress: () => {
-        confirmingRef.current = false
-        if (request === epoch.current) void save(false)
+        if (confirmingRef.current !== confirmation) return
+        confirmingRef.current = null
+        if (request === epoch.current && current()) void save(false)
       } },
-    ], { cancelable: true, onDismiss: () => { confirmingRef.current = false } })
+    ], { cancelable: true, onDismiss: cancelConfirmation })
   }
 
   const detail = !ready ? 'Connect to view the server-wide goal setting.'
@@ -121,7 +132,7 @@ function ScopedGoalSettings({ connection, profileId, generation, ready }: {
           disabled={!ready || saving || !configuration?.configurable} value={configuration?.enabled ?? false} onValueChange={change} />}
     </View>
     <Text accessibilityRole={error ? 'alert' : undefined} style={[styles.detail, { color: error ? colors.red : colors.muted }]}>{saving ? 'Saving goal setting…' : detail}</Text>
-    {error ? <IconButton testID="codex-server-goals-retry" label="Retry goal setting" icon={RefreshCw} disabled={saving || loading} onPress={() => setReload(value => value + 1)} /> : null}
+    {error ? <IconButton testID="codex-server-goals-retry" label="Retry goal setting" icon={RefreshCw} disabled={!ready || saving || loading} onPress={() => { if (current() && !savingRef.current && !confirmingRef.current) setReload(value => value + 1) }} /> : null}
   </View>
 }
 

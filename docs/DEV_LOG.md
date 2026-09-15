@@ -14,6 +14,9 @@
 - Bring Team Mail paging, revisioned read/unread, address-specific removal,
   and draft-only Route/Reply into the server-proxy mobile workflow.
 - Preserve folded goals/queues and file-transfer progress/retry controls.
+  Fence server-wide goal confirmations and responses against revalidation,
+  server replacement, and capability loss. Make the background-network test
+  distinguish delayed foreground arrival from a new background dispatch.
   Expand CI to all mobile library/API/store and rendered regression suites.
   Physical-device acceptance and complete desktop parity are not claimed;
   remaining differences are documented in the mobile parity audit.
