@@ -1,5 +1,31 @@
 # Mobile / Mac parity — 2026-09-15
 
+## Build 176: recipient picker accessibility
+
+Accepted release: **0.1.2 (176)**, active for internal TestFlight testing with
+automatic notifications enabled. Binary source `361ab5d` passed both CI jobs,
+all 112 library/API/store modules and 485 rendered/contract checks. Apple
+validation/upload/processing and signed archive/export, framework ABI, privacy,
+production-feature and matching-symbol checks passed. External beta review was
+not submitted; physical-device touch/pixel acceptance remains unverified.
+
+This focused change keeps both local-chat and Team Network recipient lists
+above the keyboard in native phone/tablet sheets. Search retains focus on open,
+with an explicit Hide keyboard action. Row selection remains a completed press,
+never a touch-down action that could select while scrolling.
+
+Unavailable local references now have a visible explanation and disabled rows.
+Captured handlers recheck live capabilities and connection scope, and rejected
+selections leave a retryable message. Chat-to-server switching still waits for
+native dismissal; exact draft spans and route-grant metadata are preserved.
+
+Committed desktop `6dba820` was inspected for the reference contract; its durable
+route capability gates remain consistent with mobile. This does not incorporate
+unrelated desktop changes or claim complete parity. Composer integration and
+keyboard-host assertions cover synthetic state/handler behavior, not native
+iPhone touch hit-testing. Physical-device acceptance remains unverified; the
+precise reported visible-control missed tap has not been reproduced natively.
+
 ## Build 175: active-goal steering and queue accessibility
 
 Accepted release: **0.1.2 (175)**, active for internal TestFlight testing with

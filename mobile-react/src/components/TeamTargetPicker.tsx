@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Modal, Platform, Pressable, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { Mail, Search } from 'lucide-react-native'
 import { client, useAppStore } from '../store/useAppStore'
 import { loadTeamMentionCandidates, teamAllServersAliasAvailable, teamBulletinAliasAvailable, teamMessagesAvailable, type TeamMentionCandidate } from '../lib/team-references'
@@ -31,6 +32,7 @@ export function TeamTargetPicker({ visible, width, query, sourceSessionId, refer
   const [candidates, setCandidates] = useState<TeamMentionCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectionError, setSelectionError] = useState('')
   const [retry, setRetry] = useState(0)
   const search = useRef<TextInput>(null)
   const selectionCurrent = useRef<(() => boolean) | null>(null)
@@ -51,6 +53,7 @@ export function TeamTargetPicker({ visible, width, query, sourceSessionId, refer
     currentCandidates.current = []
     setCandidates([])
     setError('')
+    setSelectionError('')
     setLoading(false)
     if (!visible) return
     if (!connected || connecting || switching || !client.isValidated) {
@@ -89,22 +92,39 @@ export function TeamTargetPicker({ visible, width, query, sourceSessionId, refer
   const needle = query.trim().toLocaleLowerCase()
   const targets = candidates.filter(candidate => !needle || [candidate.label, candidate.teamName, candidate.target.target_id, candidate.code ?? ''].some(value => value.toLocaleLowerCase().includes(needle)))
   const choose = (candidate: TeamMentionCandidate) => {
-    if (selected.current || loading || error || referenceLimitReached || !selectionCurrent.current?.()) return
-    if (!currentCandidates.current.includes(candidate)) return
-    selected.current = onSelect(candidate)
+    if (selected.current || loading || error || referenceLimitReached) return
+    if (!selectionCurrent.current?.() || !currentCandidates.current.includes(candidate)) {
+      setSelectionError('The recipient list changed. Refresh it and choose again.')
+      return
+    }
+    setSelectionError('')
+    try {
+      selected.current = onSelect(candidate)
+      if (!selected.current) setSelectionError('Could not add that recipient. Try again or choose another recipient.')
+    } catch {
+      selected.current = false
+      setSelectionError('Could not add that recipient. Try again or choose another recipient.')
+    }
+  }
+  const hideKeyboard = () => {
+    search.current?.blur()
+    dismissAppKeyboard()
   }
   return <Modal visible={visible} animationType="slide" presentationStyle={Platform.OS === 'ios' ? width >= 720 ? 'formSheet' : 'pageSheet' : 'fullScreen'} allowSwipeDismissal onShow={() => search.current?.focus()} onRequestClose={onClose} onDismiss={onDidDismiss}>
     {visible ? <SafeAreaView edges={Platform.OS === 'ios' ? ['bottom'] : ['top', 'bottom']} style={[styles.safe, { backgroundColor: colors.background }]} onAccessibilityEscape={onClose}>
+      <KeyboardAvoidingView testID="team-target-keyboard-safe" automaticOffset behavior="padding" style={styles.keyboardSafe}>
       <View style={[styles.header, { borderColor: colors.border }]}><View style={styles.heading}><Text style={[styles.title, { color: colors.text }]}>Team Network recipient</Text><Text style={[styles.subtitle, { color: colors.muted }]}>Choose a server inbox{bulletinAvailable || allServersAvailable ? ', Bulletin, or supported Team broadcast' : ''} for this agent to contact.</Text></View><SheetCloseButton onPress={onClose} label="Close Team Network recipient picker" testID="team-target-picker-close" /></View>
-      <View style={[styles.search, { backgroundColor: colors.surface, borderColor: colors.border }]}><Search size={17} color={colors.muted} /><TextInput ref={search} testID="team-target-search" accessibilityLabel="Search Team Network recipients" value={query} onChangeText={onQueryChange} placeholder="Search servers" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text }]} autoCorrect={false} returnKeyType="search" onSubmitEditing={dismissAppKeyboard} /></View>
+      <View style={[styles.search, { backgroundColor: colors.surface, borderColor: colors.border }]}><Search size={17} color={colors.muted} /><TextInput ref={search} testID="team-target-search" accessibilityLabel="Search Team Network recipients" value={query} onChangeText={onQueryChange} placeholder="Search servers" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.text }]} autoCorrect={false} returnKeyType="search" submitBehavior="blurAndSubmit" onSubmitEditing={hideKeyboard} /><Pressable testID="team-target-hide-keyboard" accessibilityRole="button" accessibilityLabel="Hide keyboard" onPress={hideKeyboard} style={styles.hideKeyboard}><Text style={[styles.hideKeyboardText, { color: colors.blue }]}>Hide keyboard</Text></Pressable></View>
       {loading ? <View style={styles.notice} testID="team-target-loading"><ActivityIndicator color={colors.blue} /><Text style={{ color: colors.muted }}>Loading recipients…</Text></View> : null}
       {error ? <View style={styles.notice} accessibilityRole="alert"><Text testID="team-target-error" style={{ color: colors.red }}>{error}</Text><Pressable accessibilityRole="button" testID="team-target-retry" onPress={() => { selectionCurrent.current = null; setCandidates([]); setRetry(value => value + 1) }} style={styles.retry}><Text style={{ color: colors.blue }}>Retry</Text></Pressable></View> : null}
       {referenceLimitReached ? <Text accessibilityRole="alert" style={[styles.notice, { color: colors.red }]}>Remove a recipient before adding another.</Text> : null}
-      <FlatList testID="team-target-list" data={loading || error ? [] : targets} keyExtractor={candidate => candidate.id} keyboardShouldPersistTaps="always" keyboardDismissMode="on-drag" onScrollBeginDrag={dismissAppKeyboard} contentContainerStyle={styles.list} ListEmptyComponent={!loading && !error ? <View style={{ gap: 8 }}><Text style={{ color: colors.muted }}>No matching recipients. Try another name or refresh Team Network.</Text><Pressable testID="team-target-refresh" accessibilityRole="button" accessibilityLabel="Refresh Team Network recipients" onPress={() => { selectionCurrent.current = null; setCandidates([]); setRetry(value => value + 1) }} style={styles.retry}><Text style={{ color: colors.blue }}>Refresh</Text></Pressable></View> : null} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`Reference ${item.label} in ${item.teamName}`} accessibilityState={{ disabled: referenceLimitReached }} disabled={referenceLimitReached} onPress={() => choose(item)} style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.raised : colors.surface, borderColor: colors.border, opacity: referenceLimitReached ? 0.45 : 1 }]}><Mail size={22} color={colors.blue} /><View style={styles.heading}><Text style={[styles.name, { color: colors.text }]}>{item.label}</Text><Text style={[styles.subtitle, { color: colors.muted }]}>{item.teamName} · {item.target.recipient_kind === 'all' ? 'Bulletin' : item.target.recipient_kind === 'all_servers' ? 'All server inboxes' : 'Server inbox'}</Text>{item.hint ? <Text style={[styles.subtitle, { color: colors.muted }]}>{item.hint}</Text> : null}{item.code ? <Text style={[styles.subtitle, { color: colors.blue }]}>{item.code}</Text> : null}</View></Pressable>} />
+      {selectionError ? <View style={styles.notice}><Text testID="team-target-selection-error" accessibilityRole="alert" style={{ color: colors.red }}>{selectionError}</Text><Pressable testID="team-target-selection-refresh" accessibilityRole="button" accessibilityLabel="Refresh Team Network recipients" onPress={() => { selectionCurrent.current = null; setCandidates([]); setRetry(value => value + 1) }} style={styles.retry}><Text style={{ color: colors.blue }}>Refresh</Text></Pressable></View> : null}
+      <FlatList testID="team-target-list" style={styles.listViewport} data={loading || error ? [] : targets} keyExtractor={candidate => candidate.id} keyboardShouldPersistTaps="always" keyboardDismissMode="on-drag" onScrollBeginDrag={hideKeyboard} contentContainerStyle={styles.list} ListEmptyComponent={!loading && !error ? <View style={{ gap: 8 }}><Text style={{ color: colors.muted }}>No matching recipients. Try another name or refresh Team Network.</Text><Pressable testID="team-target-refresh" accessibilityRole="button" accessibilityLabel="Refresh Team Network recipients" onPress={() => { selectionCurrent.current = null; setCandidates([]); setRetry(value => value + 1) }} style={styles.retry}><Text style={{ color: colors.blue }}>Refresh</Text></Pressable></View> : null} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`Reference ${item.label} in ${item.teamName}`} accessibilityState={{ disabled: referenceLimitReached }} disabled={referenceLimitReached} onPress={() => choose(item)} style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.raised : colors.surface, borderColor: colors.border, opacity: referenceLimitReached ? 0.45 : 1 }]}><Mail size={22} color={colors.blue} /><View style={styles.heading}><Text style={[styles.name, { color: colors.text }]}>{item.label}</Text><Text style={[styles.subtitle, { color: colors.muted }]}>{item.teamName} · {item.target.recipient_kind === 'all' ? 'Bulletin' : item.target.recipient_kind === 'all_servers' ? 'All server inboxes' : 'Server inbox'}</Text>{item.hint ? <Text style={[styles.subtitle, { color: colors.muted }]}>{item.hint}</Text> : null}{item.code ? <Text style={[styles.subtitle, { color: colors.blue }]}>{item.code}</Text> : null}</View></Pressable>} />
+      </KeyboardAvoidingView>
     </SafeAreaView> : null}
   </Modal>
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, paddingTop: 18 }, header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth }, heading: { flex: 1 }, title: { fontSize: 20, fontWeight: '700' }, subtitle: { fontSize: 12, marginTop: 4 }, search: { margin: 16, paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }, input: { flex: 1, minHeight: 44, fontSize: 16 }, notice: { padding: 16, gap: 10 }, retry: { minHeight: 44, justifyContent: 'center' }, list: { padding: 16, gap: 10 }, row: { minHeight: 66, padding: 14, gap: 12, flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: StyleSheet.hairlineWidth }, name: { fontSize: 16, fontWeight: '600' },
+  safe: { flex: 1, minHeight: 0, paddingTop: 18 }, keyboardSafe: { flex: 1, minHeight: 0 }, header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth }, heading: { flex: 1 }, title: { fontSize: 20, fontWeight: '700' }, subtitle: { fontSize: 12, marginTop: 4 }, search: { margin: 16, paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }, input: { flex: 1, minWidth: 0, minHeight: 44, fontSize: 16 }, hideKeyboard: { minWidth: 44, minHeight: 44, flexShrink: 0, justifyContent: 'center', paddingHorizontal: 4 }, hideKeyboardText: { fontSize: 12, fontWeight: '600' }, notice: { padding: 16, gap: 10 }, retry: { minHeight: 44, justifyContent: 'center' }, listViewport: { flex: 1, minHeight: 0 }, list: { padding: 16, gap: 10 }, row: { minHeight: 66, padding: 14, gap: 12, flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: StyleSheet.hairlineWidth }, name: { fontSize: 16, fontWeight: '600' },
 })
