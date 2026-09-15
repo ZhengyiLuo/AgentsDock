@@ -10,6 +10,16 @@
   border-radius: var(--radius-control);
 }
 .codex-status-button:hover { color: var(--text); background: var(--surface-3); }
+.agent-running-status,
+.agent-running-status:hover { color: var(--muted); background: var(--surface-2); cursor: default; }
+.agent-sync-status,
+.agent-sync-status:hover {
+  color: var(--amber);
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--amber), var(--border) 62%);
+  cursor: default;
+}
+.agent-sync-status > svg { flex: 0 0 auto; }
 .codex-status-button > span,
 .codex-attention-dot {
   width: 7px;
@@ -517,7 +527,12 @@
   box-shadow: 0 26px 90px #000c;
   transform: translate(-50%, -50%);
 }
-.codex-controls { max-height: calc(100vh - 48px); display: flex; flex-direction: column; }
+.codex-controls {
+  min-height: 0;
+  max-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 .codex-controls-header {
   min-height: 64px;
   flex: 0 0 auto;
@@ -546,7 +561,8 @@
 .codex-control-mark.active { color: var(--green); }
 .codex-control-mark.waiting { color: var(--amber); }
 .codex-control-mark.error { color: var(--danger); }
-.codex-controls-body { min-height: 0; overflow: auto; padding: 11px; }
+.codex-controls-scroll-region { min-width: 0; min-height: 0; overflow-y: auto; }
+.codex-controls-body { min-width: 0; min-height: 0; margin: 0; border: 0; padding: 11px; }
 .codex-control-section {
   margin-bottom: 9px;
   padding: 12px;

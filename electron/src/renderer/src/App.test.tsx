@@ -199,6 +199,7 @@ describe('App chat workspace identity', () => {
       uploadsBySession: {},
       uploadPathsBySession: {},
       error: null,
+      storageFull: false,
       modals: {
         settings: false,
         newChat: false,
@@ -944,7 +945,7 @@ describe('App chat workspace identity', () => {
     expect(window.agentsDock.native.closeWindow).not.toHaveBeenCalled()
   })
 
-  it('waits for every workspace persistence task before closing when one fails early', async () => {
+  it('waits for every workspace persistence task and keeps the window open when one fails', async () => {
     let finishPersistence!: () => void
     const persistence = new Promise<void>(resolve => { finishPersistence = resolve })
     const collect = (event: Event) => {
@@ -963,12 +964,8 @@ describe('App chat workspace identity', () => {
       await Promise.resolve()
       expect(window.agentsDock.native.closeWindow).not.toHaveBeenCalled()
       finishPersistence()
-      await waitFor(() => expect(window.agentsDock.native.closeWindow).toHaveBeenCalledTimes(1))
-      expect(window.agentsDock.native.log).toHaveBeenCalledWith(
-        'persistence',
-        'workspace flush before close failed',
-        { message: 'draft persistence failed' }
-      )
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('could not be saved'))
+      expect(window.agentsDock.native.closeWindow).not.toHaveBeenCalled()
     } finally {
       window.removeEventListener('agentsdock:flush-draft', collect)
     }
@@ -997,7 +994,7 @@ describe('App chat workspace identity', () => {
       expect(window.agentsDock.native.completeCloseFlush).not.toHaveBeenCalled()
 
       finishPersistence()
-      await waitFor(() => expect(window.agentsDock.native.completeCloseFlush).toHaveBeenCalledWith('native-close-1'))
+      await waitFor(() => expect(window.agentsDock.native.completeCloseFlush).toHaveBeenCalledWith('native-close-1', true))
       expect(window.agentsDock.native.closeWindow).not.toHaveBeenCalled()
     } finally {
       window.removeEventListener('agentsdock:flush-draft', collect)

@@ -21,6 +21,7 @@ import {
   parseTeamMessageDeleteInput,
   parseTeamMessageDeleteResponse,
   parseTeamMessagePage,
+  parseTeamMessageQuery,
   parseTeamMessageReceiptResponse,
   parseTeamMessageRevisionInput,
   parseTeamMessageResponse,
@@ -39,6 +40,36 @@ import {
   teamBulletinAliasAvailable,
   teamAllServersAliasAvailable
 } from './team-network'
+
+describe('Team Mail coverage metadata', () => {
+  const anchor = `tmsg_${'a'.repeat(32)}`
+  const query = { teamId: 'team-1', box: 'inbox', addressKind: 'server', addressId: 'node-1',
+    includeMailboxCoverage: true, afterSequence: 3, afterArrivalId: anchor }
+  const coverage = { version: 1, team_id: 'team-1', recipient_server_id: 'node-1', through_sequence: 3, arrival_id: anchor }
+  const page = { box: 'inbox', address: { kind: 'server', id: 'node-1' }, messages: [], next_after_sequence: 3,
+    has_more: false, mailbox_coverage: coverage }
+  it('accepts only unfiltered own-server-shaped queries with a complete immutable predecessor', () => {
+    expect(parseTeamMessageQuery(query)).toMatchObject(query)
+    expect(parseTeamMessageQuery({ ...query, afterSequence: 0, afterArrivalId: undefined })).toMatchObject({ afterSequence: 0 })
+    for (const invalid of [{ ...query, afterArrivalId: undefined }, { ...query, afterArrivalId: `${anchor}\n` },
+      { ...query, unread: true }, { ...query, addressKind: 'human' }, { ...query, since: '2026-09-10T00:00:00Z' },
+      { ...query, fromKind: 'server', fromId: 'sender' }, { ...query, includeMailboxCoverage: false }]) {
+      expect(() => parseTeamMessageQuery(invalid)).toThrow()
+    }
+  })
+  it('keeps legacy pages unchanged and rejects expanded or foreign coverage', () => {
+    expect(parseTeamMessagePage(page, 'team-1').mailbox_coverage).toEqual(coverage)
+    const { mailbox_coverage: _ignored, ...legacy } = page
+    expect(parseTeamMessagePage(legacy, 'team-1')).toEqual(legacy)
+    for (const invalid of [{ ...coverage, reset: false }, { ...coverage, team_id: 'foreign' },
+      { ...coverage, recipient_server_id: 'foreign' }, { ...coverage, through_sequence: 2 },
+      { ...coverage, body: 'private' }]) {
+      expect(() => parseTeamMessagePage({ ...page, mailbox_coverage: invalid }, 'team-1')).toThrow()
+    }
+    expect(() => parseTeamMessagePage({ ...page, has_more: true,
+      mailbox_coverage: { ...coverage, through_sequence: 4 } }, 'team-1')).toThrow()
+  })
+})
 
 const capability = {
   available: true,

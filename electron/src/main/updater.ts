@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import type { AppUpdateStatus, AppUpdateTrack } from '../shared/types'
 import { appLog } from './logger'
-import { newestBetaVersionFromAtom } from './updater-feed.mjs'
+import { newestCompatibleReleaseFromAtom, type CompatibleRelease } from './updater-feed.mjs'
 
 const STARTUP_CHECK_DELAY_MS = 15_000
 const PERIODIC_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000
@@ -12,7 +12,7 @@ const MAC_INSTALL_SETTLE_MS = 8_000
 const RELEASE_CHECK_TIMEOUT_MS = 15_000
 const BETA_FEED_MAX_BYTES = 512 * 1024
 const RELEASE_METADATA_MAX_BYTES = 64 * 1024
-const RELEASES_URL = 'https://github.com/ZhengyiLuo/AgentsDock-Releases/releases'
+const RELEASES_URL = 'https://github.com/ZhengyiLuo/AgentsDock/releases'
 const RELEASES_ATOM_URL = `${RELEASES_URL}.atom`
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const APP_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.([1-9]\d*))?$/
@@ -183,7 +183,7 @@ export class AppUpdateManager {
           // that a local checkout is outdated (or can self-update).
           state: 'idle',
           availableVersion: latestVersion,
-          message: `Latest published ${this.track === 'beta' ? 'Beta' : 'Stable'} release: ${latestVersion}. This local development build does not self-update; source freshness is determined by Git.`,
+          message: `Latest published release on the ${this.track === 'beta' ? 'Beta' : 'Stable'} channel: ${latestVersion}. This local development build does not self-update; source freshness is determined by Git.`,
           checkedAt: now()
         })
         this.manualCheck = false
@@ -365,7 +365,7 @@ export class AppUpdateManager {
       autoUpdater.setFeedURL({
         provider: 'github',
         owner: 'ZhengyiLuo',
-        repo: 'AgentsDock-Releases'
+        repo: 'AgentsDock'
       })
       this.betaFeedOverridden = false
     }
@@ -378,20 +378,26 @@ export class AppUpdateManager {
   }
 
   private async prepareBetaFeed(): Promise<void> {
-    const version = await this.resolveNewestBetaVersion()
+    const release = await this.resolveNewestBetaCompatibleRelease()
+    const channel = release.track === 'beta' ? 'beta' : 'latest'
 
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: `${RELEASES_URL}/download/v${version}`,
-      channel: 'beta'
+      url: `${RELEASES_URL}/download/v${release.version}`,
+      channel
     })
+    // GenericProvider gives this property precedence over the feed's channel.
+    // Its setter also enables downgrades, which an ordinary Beta check must
+    // never allow (including a stale/truncated feed after stable promotion).
+    autoUpdater.channel = channel
+    autoUpdater.allowDowngrade = false
     this.betaFeedOverridden = true
   }
 
   private async latestPublishedVersion(): Promise<string> {
-    const betaVersion = this.track === 'beta' ? await this.resolveNewestBetaVersion() : null
-    const metadataURL = betaVersion
-      ? `${RELEASES_URL}/download/v${betaVersion}/${updateMetadataName('beta')}`
+    const betaRelease = this.track === 'beta' ? await this.resolveNewestBetaCompatibleRelease() : null
+    const metadataURL = betaRelease
+      ? `${RELEASES_URL}/download/v${betaRelease.version}/${updateMetadataName(betaRelease.track)}`
       : `${RELEASES_URL}/latest/download/${updateMetadataName('stable')}`
     const metadata = await fetchBoundedReleaseText(
       metadataURL,
@@ -401,24 +407,24 @@ export class AppUpdateManager {
     )
     const version = versionFromUpdateMetadata(metadata)
     const validForTrack = this.track === 'beta'
-      ? Boolean(APP_VERSION_PATTERN.exec(version)?.[4])
+      ? APP_VERSION_PATTERN.test(version)
       : STABLE_VERSION_PATTERN.test(version)
-    if (!validForTrack || (betaVersion && version !== betaVersion)) {
+    if (!validForTrack || (betaRelease && version !== betaRelease.version)) {
       throw new Error(`GitHub returned invalid ${this.track === 'beta' ? 'Beta' : 'Stable'} update metadata.`)
     }
     return version
   }
 
-  private async resolveNewestBetaVersion(): Promise<string> {
+  private async resolveNewestBetaCompatibleRelease(): Promise<CompatibleRelease> {
     const feed = await fetchBoundedReleaseText(
       RELEASES_ATOM_URL,
       'application/atom+xml, application/xml, text/xml',
       'GitHub beta feed',
       BETA_FEED_MAX_BYTES
     )
-    const version = newestBetaVersionFromAtom(feed)
-    if (!version) throw new Error('No compatible AgentsDock beta was found in the public release feed.')
-    return version
+    const release = newestCompatibleReleaseFromAtom(feed)
+    if (!release) throw new Error('No compatible AgentsDock release was found in the public release feed.')
+    return release
   }
 
   private set(patch: Partial<AppUpdateStatus>): void {

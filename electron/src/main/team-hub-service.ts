@@ -59,6 +59,7 @@ import type {
   TeamMessageDeleteInput,
   TeamMessageDismissInput,
   TeamMessageQuery,
+  TeamMessageThreadQuery,
   TeamMessageReceiptInput,
   TeamMailboxStateInput,
   TeamMessageRevisionInput,
@@ -91,6 +92,7 @@ import {
   parseTeamMessageDeleteInput,
   parseTeamMessageDismissInput,
   parseTeamMessageQuery,
+  parseTeamMessageThreadQuery,
   parseTeamMessageReceiptInput,
   parseTeamMailboxStateInput,
   parseTeamMessageRevisionInput,
@@ -162,6 +164,7 @@ export interface TeamHubServiceOptions {
 }
 
 export interface TeamHubDiscoveryProvider {
+  currentMailHintScope?(expected: TeamHubServerScope): import('../shared/team-mail-hints').MailHintScope | null
   currentScope(): TeamHubServerScope
   /** Latest capability from the already-authenticated active AgentsServer health cache. */
   currentDiscovery(expected: TeamHubServerScope): TeamHubDiscovery | null
@@ -527,10 +530,15 @@ export class TeamHubService {
                 ...(typeof health.schema_version === 'number'
                   && Number.isSafeInteger(health.schema_version) && health.schema_version >= 17
                   ? { skill_announcement_deletion: true as const } : {}),
+                ...(health.capabilities.team_host_content_deletion_v1?.available === true
+                  && health.capabilities.team_host_content_deletion_v1.version === 1
+                  ? { host_content_deletion: true as const } : {}),
                 ...(health.capabilities.team_all_servers_alias_v1
                   ? { all_servers: health.capabilities.team_all_servers_alias_v1 } : {}),
                 ...(health.capabilities.team_mail_subjects_v1
                   ? { mail_subjects: health.capabilities.team_mail_subjects_v1 } : {}),
+                ...(health.capabilities.team_mail_threads_v1
+                  ? { mail_threads: health.capabilities.team_mail_threads_v1 } : {}),
                 ...(health.capabilities.team_mailbox_state_v1
                   ? { mailbox_state: health.capabilities.team_mailbox_state_v1 } : {}) }
             : null
@@ -1572,9 +1580,18 @@ export class TeamHubService {
     return clone(this.requireTeamMessagesCapability())
   }
 
-  async teamMessages(scope: TeamHubScope, rawQuery: TeamMessageQuery) {
+  async teamMessages(scope: TeamHubScope, rawQuery: TeamMessageQuery): Promise<import('../shared/team-network').TeamMessagePage> {
     const query = parseTeamMessageQuery(rawQuery)
     const teamId = this.requireTeamMessagesTeam(scope, query.teamId)
+    const coverageScope = () => {
+      if (!query.includeMailboxCoverage) return null
+      const hint = this.serverScope && this.discovery.currentMailHintScope?.(this.serverScope)
+      if (!hint || hint.profileId !== scope.profileId || hint.profileGeneration !== scope.profileGeneration
+        || hint.serverIdentity !== scope.serverIdentity || hint.hubId !== scope.hubIdentity
+        || hint.teamId !== teamId || hint.recipientServerId !== query.addressId) return null
+      return hint
+    }
+    const requestedCoverageScope = coverageScope()
     const limit = requireTeamNetworkPageLimit(
       query.limit,
       this.requireTeamMessagesCapability().max_page_items,
@@ -1589,6 +1606,7 @@ export class TeamHubService {
       ...(query.fromId ? { fromId: query.fromId } : {}),
       ...(query.since ? { since: query.since } : {}),
       afterSequence: query.afterSequence,
+      ...(requestedCoverageScope ? { includeMailboxCoverage: true, afterArrivalId: query.afterArrivalId } : {}),
       limit
     }), true)
     this.requireScope(scope)
@@ -1609,6 +1627,19 @@ export class TeamHubService {
     if (query.box === 'inbox' && result.messages.some(message => !message.recipients.some(recipient => (
       recipient.kind === query.addressKind && recipient.id === query.addressId
     )))) throw new Error('Team Hub returned messages for a different inbox.')
+    const appliedCoverageScope = coverageScope()
+    if (requestedCoverageScope && appliedCoverageScope?.streamId === requestedCoverageScope.streamId && result.mailbox_coverage) {
+      const coverage = result.mailbox_coverage
+      if (coverage.team_id !== teamId || coverage.recipient_server_id !== query.addressId
+        || coverage.through_sequence < query.afterSequence) throw new Error('Team Hub returned invalid Mail coverage.')
+      const anchor = result.messages.find(message => message.sequence === coverage.through_sequence)
+      if (anchor && anchor.id !== coverage.arrival_id) throw new Error('Team Hub returned a conflicting Mail arrival anchor.')
+    } else if (result.mailbox_coverage) {
+      // Passive notifications must never block a user-requested Inbox load.
+      // An offline/replaced stream simply cannot acknowledge this normal page.
+      const { mailbox_coverage: _unproven, ...ordinaryPage } = result
+      return clone(ordinaryPage)
+    }
     return clone(result)
   }
 
@@ -1625,6 +1656,21 @@ export class TeamHubService {
       throw new Error('Team Hub returned a mismatched Team Message.')
     }
     return clone(message)
+  }
+
+  async teamMessageThread(scope: TeamHubScope, rawQuery: TeamMessageThreadQuery) {
+    const input = parseTeamMessageThreadQuery(rawQuery)
+    this.requireTeamMessagesTeam(scope, input.teamId)
+    if (this.requireTeamMessagesCapability().mail_threads?.available !== true) {
+      throw new Error('This Team Network host does not support mail threads yet. Update the host and reconnect.')
+    }
+    const result = await this.withAuth(scope, token => this.requireClient().teamMessageThread(token, input), true)
+    this.requireScope(scope)
+    if (result.team_id !== input.teamId || result.anchor_message_id !== input.messageId
+      || result.messages.some(message => message.team_id !== input.teamId)) {
+      throw new Error('Team Hub returned a mismatched mail thread.')
+    }
+    return clone(result)
   }
 
   async createTeamMessage(scope: TeamHubScope, rawInput: TeamMessageCreateInput) {
@@ -2150,6 +2196,9 @@ export class TeamHubService {
     if (!this.discovery.configureTeamHubServerRole) throw teamHubHostControlUnavailable()
     if (input?.role !== 'host' && input?.role !== 'member') throw new Error('Select a Team Network server role.')
     const serverName = requireServerName(input.serverName)
+    if (input.renameOnly !== undefined && (input.renameOnly !== true || input.role !== 'host' || input.networkName !== undefined)) {
+      throw new Error('Rename must preserve the existing Host role and Team Network name.')
+    }
     const expected: SecurePeerProfileScope = {
       profileId: server.profileId,
       profileGeneration: server.profileGeneration,
@@ -2158,7 +2207,8 @@ export class TeamHubService {
     const discovered = await this.discovery.configureTeamHubServerRole(expected, {
       role: input.role,
       serverName,
-      ...(input.networkName === undefined ? {} : { networkName: requireServerName(input.networkName) })
+      ...(input.networkName === undefined ? {} : { networkName: requireServerName(input.networkName) }),
+      ...(input.renameOnly === true ? { renameOnly: true as const } : {})
     })
     this.requireSameServerScope(server)
     if (input.role === 'host') {

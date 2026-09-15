@@ -1,7 +1,8 @@
 import { getLocale, t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
+import { legacyOutgoingDeliveryStatus, outgoingDeliveryStatus } from '../lib/cross-chat-delivery-status'
 import { timelineCount, timelineEventLabel, timelineStatusLabel } from '../lib/timeline-labels'
-import { Fragment, memo, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronRight, Clock3, Code2, Copy, FileText, History, LoaderCircle, MessageSquareShare, Pin, Siren, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 import { compactToolOutputPreview } from '@shared/event-compaction'
 import { agentFileBelongsToSession } from '@shared/session-files'
@@ -9,7 +10,7 @@ import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey } from '@shared/semantic-timeline'
 import type { ChatReference, CrossChatExchange, Event, PinnedItem, QueuedTurn, WorkspaceProfileScope } from '@shared/types'
 import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, ProgressItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
-import { extractUnifiedDiff, isHandoffDigestEvent, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
+import { progressEventSequence, progressToolStartSequences, extractUnifiedDiff, isHandoffDigestEvent, isPublicCommentary, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { formatDuration, formatTime, titleCase } from '../lib/format'
 import { requirePinnedItemsScope } from '../lib/pinned-items'
@@ -17,6 +18,10 @@ import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
 import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
 import { MediaGrid } from './MediaGrid'
+import { ChatInboxGroup } from './ChatInboxGroup'
+import { CrossChatPeerLink } from './CrossChatPeerLink'
+import { chatMailboxAvailable } from '@shared/chat-inbox'
+import { isSharedChatCollaborator } from '@shared/chat-shares'
 
 export const TimelineRowView = memo(function TimelineRowView({ item, sessionId, profileScope, onFindFile, pinnedItemIds, codexLifecycleActive = false }: { item: RenderTimelineItem; sessionId: string; profileScope: WorkspaceProfileScope | null; onFindFile: (fileId: string) => void; pinnedItemIds: ReadonlySet<string>; codexLifecycleActive?: boolean }) {
   useLocale()
@@ -54,6 +59,8 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
       ))
     : []
   const primary = events[0] ?? event
+  const collaborator = role === 'user' && isSharedChatCollaborator(primary)
+    && events.every(part => isSharedChatCollaborator(part) && part.shared_chat_id === primary.shared_chat_id)
   const text = messageItemText(item)
   const [copied, setCopied] = useState(false)
   const pinId = `message:${primary.id}`
@@ -65,7 +72,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
     }
     const pinItem: PinnedItem = {
       id: pinId, sessionId, kind: 'message', eventId: primary.id,
-      title: role === 'user' ? 'You' : 'Assistant', body: text, subtitle: formatTime(event.ts), createdAt: Date.now()
+      title: role === 'user' ? collaborator ? 'Collaborator' : 'You' : 'Assistant', body: text, subtitle: formatTime(event.ts), createdAt: Date.now()
     }
     await window.agentsDock.pins.put(requirePinnedItemsScope(profileScope), pinItem)
     window.dispatchEvent(new CustomEvent('agentsdock:pins-changed', { detail: sessionId }))
@@ -79,7 +86,7 @@ function Message({ item, sessionId, profileScope, pinned }: { item: MessageItem;
     >
       <div className="message-surface">
         <header>
-          <span>{role === 'user' ? t('timeline.ui.you') : primary.purpose === 'handoff_digest' ? t('timeline.ui.digest') : t('timeline.ui.assistant')}</span>
+          <span>{role === 'user' ? t(collaborator ? 'chatShare.collaborator' : 'timeline.ui.you') : primary.purpose === 'handoff_digest' ? t('timeline.ui.digest') : t('timeline.ui.assistant')}</span>
           <time>{formatTime(event.ts)}</time>
           <button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinMessage') : t('timeline.ui.pinMessage')} onClick={() => runTimelineAction(togglePin())}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button>
           <button type="button" title={t('timeline.ui.copyFullMessage')} onClick={() => runTimelineAction(copy())}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
@@ -255,9 +262,9 @@ function buildTraceActivity(events: Event[]): TraceActivityEntry[] {
   const entries: TraceActivityEntry[] = []
   const toolsByIdentity = new Map<string, number>()
   for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
-    if (event.type === 'reasoning_summary') {
+    if (event.type === 'reasoning_summary' || isPublicCommentary(event)) {
       if (!traceReasoningText(event)) continue
-      if (event.phase === 'commentary') {
+      if (isPublicCommentary(event)) {
         entries.push({ kind: 'commentary', key: event.id, seq: event.seq, event })
         continue
       }
@@ -378,7 +385,8 @@ function TraceDisclosure({
     hasFinalResponse: activityHasFinalResponse
   })
   const [loadedEvents, setLoadedEvents] = useState<Event[] | null>(null)
-  const [nextAfter, setNextAfter] = useState(runActivity?.afterSeq ?? 0)
+  const detailStart = runActivity?.toolStartSequences ? 0 : runActivity?.afterSeq ?? 0
+  const [nextAfter, setNextAfter] = useState(detailStart)
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -400,14 +408,14 @@ function TraceDisclosure({
   useEffect(() => {
     loadGeneration.current++
     setLoadedEvents(null)
-    setNextAfter(runActivity?.afterSeq ?? 0)
+    setNextAfter(detailStart)
     setHasMore(true)
     setLoadingMore(false)
     setLoadError(null)
     return () => {
       loadGeneration.current++
     }
-  }, [resetKey, runActivity?.afterSeq, runId, sessionId])
+  }, [resetKey, runActivity?.afterSeq, detailStart, runId, sessionId])
   useEffect(() => {
     const previous = previousActivity.current
     previousActivity.current = {
@@ -432,13 +440,16 @@ function TraceDisclosure({
     const normalized = loadedEvents
       ? omitTerminalClaudeFinalCommentary(merged, runActivity?.finalEvents ?? merged)
       : merged
+    const ordering = runActivity?.toolStartSequences && loadedEvents
+      ? { ...runActivity, toolStartSequences: progressToolStartSequences(merged, runActivity.toolStartSequences) }
+      : runActivity
     return normalized.filter(event => (
       !promotedIds.has(event.id)
-      && (runActivity?.afterSeq == null || event.seq > runActivity.afterSeq)
-      && (runActivity?.throughSeq == null || event.seq <= runActivity.throughSeq)
-      && (includeCommentary || event.phase !== 'commentary')
+      && (runActivity?.afterSeq == null || progressEventSequence(event, ordering) > runActivity.afterSeq)
+      && (runActivity?.throughSeq == null || progressEventSequence(event, ordering) <= runActivity.throughSeq)
+      && (includeCommentary || !isPublicCommentary(event))
     ))
-  }, [events, includeCommentary, loadedEvents, promotedCommentaryIds, runActivity?.afterSeq, runActivity?.throughSeq, runActivity?.finalEvents, runActivity?.sourceEvents])
+  }, [events, includeCommentary, loadedEvents, promotedCommentaryIds, runActivity?.afterSeq, runActivity?.throughSeq, runActivity?.finalEvents, runActivity?.orderingFinalEvents, runActivity?.sourceEvents, runActivity?.toolStartSequences])
   const activity = useMemo(() => buildTraceActivity(displayEvents), [displayEvents])
   const activityParts = useMemo<TracePart[]>(() => [
     ...activity.map(entry => ({ kind: 'activity' as const, seq: entry.seq, entry })),
@@ -496,14 +507,16 @@ function TraceDisclosure({
       const page = await window.agentsDock.timeline.trace(sessionId, runId, traceAnchor, cursor)
       if (generation !== loadGeneration.current) return
       const nextCursor = page.next_after ?? cursor
-      const boundedEvents = page.events.filter(event => (
-        (runActivity?.afterSeq == null || event.seq > runActivity.afterSeq)
-        && (runActivity?.throughSeq == null || event.seq <= runActivity.throughSeq)
+      // An explicit details request must retain starts from earlier pages to
+      // pair tool results across this message. Rendering still stays bounded.
+      const boundedEvents = runActivity?.toolStartSequences ? page.events : page.events.filter(event => (
+        (runActivity?.afterSeq == null || progressEventSequence(event, runActivity) > runActivity.afterSeq)
+        && (runActivity?.throughSeq == null || progressEventSequence(event, runActivity) <= runActivity.throughSeq)
       ))
       setLoadedEvents(current => mergeTraceEvents(current ?? [], boundedEvents))
       setNextAfter(nextCursor)
       setHasMore(page.has_more && nextCursor > cursor
-        && (runActivity?.throughSeq == null || nextCursor < runActivity.throughSeq))
+        && (runActivity?.toolStartSequences != null || runActivity?.orderingFinalEvents != null || runActivity?.throughSeq == null || nextCursor < runActivity.throughSeq))
     } catch (error) {
       if (generation !== loadGeneration.current) return
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -514,7 +527,7 @@ function TraceDisclosure({
   const showLess = () => {
     loadGeneration.current++
     setLoadedEvents(null)
-    setNextAfter(runActivity?.afterSeq ?? 0)
+    setNextAfter(detailStart)
     setHasMore(true)
     setLoadingMore(false)
     setLoadError(null)
@@ -583,10 +596,11 @@ function RunActivityHeader({ item, events, open, detailsId, onToggle }: { item: 
     return () => window.clearInterval(timer)
   }, [live])
   const duration = activityDuration(item, events, now)
-  const title = stopped
+  const compacting = live && item.lifecycle?.some(marker => marker.event.type === 'codex_compaction_started')
+  const title = item.continues ? t('timeline.activity.progress') : stopped
     ? t('timeline.activity.stoppedAfter', { duration })
     : live
-      ? t('timeline.activity.workingFor', { duration })
+      ? compacting ? t('timeline.ui.compactingContext') : t('timeline.activity.workingFor', { duration })
       : t('timeline.activity.workedFor', { duration })
   if (live) {
     return <div className="run-activity-summary">
@@ -684,7 +698,7 @@ function summarizeTrace(events: Event[], sessionId: string, toolCount: number): 
   for (const event of events) {
     if (event.type === 'tool_started' || event.type === 'tool_finished') {
       lastTool = event
-    } else if (event.type === 'reasoning_summary' && traceReasoningText(event)) {
+    } else if ((event.type === 'reasoning_summary' || isPublicCommentary(event)) && traceReasoningText(event)) {
       summaryCount++
       lastThought = event
     }
@@ -729,13 +743,13 @@ function TraceReasoningEvent({ entry, sessionId }: { entry: TraceReasoningEntry;
   return <li className="trace-activity-item reasoning" data-event-seq={entry.seq}>
     <span className="trace-activity-marker" aria-hidden="true"><Sparkles size={12} /></span>
     <div className="trace-reasoning">
-      <button type="button" className="trace-reasoning-toggle" aria-label={`${updateLabel}. ${accessiblePreview}`} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(value => !value)}>
-        <span className="trace-reasoning-preview" aria-hidden="true">{preview}</span>
-        {entry.events.length > 1 && <small>{timelineCount('updates', entry.events.length)}</small>}
+      <button type="button" className="trace-reasoning-toggle" aria-label={open ? updateLabel : `${updateLabel}. ${accessiblePreview}`} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(value => !value)}>
+        <span className="trace-reasoning-preview" aria-hidden="true">{open ? updateLabel : preview}</span>
+        {!open && entry.events.length > 1 && <small>{timelineCount('updates', entry.events.length)}</small>}
         <ChevronRight size={12} aria-hidden="true" />
       </button>
       {open && <div id={detailsId} className="trace-reasoning-body">
-        {entry.events.map(event => <div className="trace-reasoning-update" key={event.id}><MarkdownContent text={traceReasoningText(event)} sessionId={sessionId} compact fold={false} /></div>)}
+        {entry.events.map(event => <div className="trace-reasoning-update" key={event.id}><MarkdownContent text={traceReasoningText(event)} sessionId={sessionId} fold={false} /></div>)}
       </div>}
     </div>
   </li>
@@ -798,18 +812,26 @@ function ToolEvent({ entry }: { entry: TraceToolEntry }) {
 function SystemView({ item, sessionId, profileScope, pinned, codexLifecycleActive }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null; pinned: boolean; codexLifecycleActive: boolean }) {
   useLocale()
   const event = item.event
+  const routeAudit = event.type === 'agent_handoff_route_created' ? 'created'
+    : event.type === 'agent_handoff_route_updated' ? 'updated'
+      : event.type === 'agent_handoff_route_deleted' ? 'deleted' : null
+  const routeTargetTitle = useAppStore(state => routeAudit && profileScope
+    && state.activeProfileId === profileScope.profileId
+    && state.profileGeneration === profileScope.profileGeneration
+    ? state.sessions.find(session => session.id === event.target_session_id)?.title : undefined)
   if (isImportedProviderInterruption(event)) return <article className="system-row" data-event-id={event.id}>
     <span className="system-icon"><History size={15} /></span>
     <div><header><strong>{t('timeline.providerInterruption.title')}</strong><time>{formatTime(event.provider_origin.timestamp)}</time></header>
       <p>{t(`timeline.providerInterruption.${event.provider_origin.cause}`)}</p>
     </div>
   </article>
-  if (item.importedDelivery) return <ImportedCrossChatDeliveryView item={item} sessionId={sessionId} />
+  if (item.importedDelivery) return <ImportedCrossChatDeliveryView item={item} sessionId={sessionId} profileScope={profileScope} />
+  if (item.mailboxMessages) return <ChatInboxGroup item={item} sessionId={sessionId} profileScope={profileScope} />
   if (item.crossChatMessage) return <CrossChatMessageView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (codexLifecycleSemanticKey(event)) return <CodexLifecycleView item={item} sessionId={sessionId} active={codexLifecycleActive} />
   if (item.key.startsWith('provider-interaction-audit:')) return <ProviderInteractionAuditView item={item} />
-  if (event.type.startsWith('cross_chat_exchange_') && event.exchange_id?.trim()) return <CrossChatExchangeView item={item} sessionId={sessionId} />
-  if (event.type.startsWith('cross_chat_')) return <CrossChatView item={item} sessionId={sessionId} />
+  if (event.type.startsWith('cross_chat_exchange_') && event.exchange_id?.trim()) return <CrossChatExchangeView item={item} sessionId={sessionId} profileScope={profileScope} />
+  if (event.type.startsWith('cross_chat_')) return <CrossChatView item={item} sessionId={sessionId} profileScope={profileScope} />
   if (event.type === 'team_message_sent') return <TeamMessageSentView event={event} profileScope={profileScope} />
   if (event.type === 'emergency_alert_raised') return <EmergencyAlertView event={event} sessionId={sessionId} />
   const error = isTimelineError(event)
@@ -817,15 +839,24 @@ function SystemView({ item, sessionId, profileScope, pinned, codexLifecycleActiv
   const providerBackgroundTask = event.type === 'provider_background_task_update'
   const generating = digest && !['handoff_digest_received', 'handoff_digest_sent', 'handoff_digest_error'].includes(event.type)
   const icon = error ? <AlertTriangle size={15} /> : generating ? <LoaderCircle className="spin" size={15} /> : digest ? <Sparkles size={15} /> : <TerminalSquare size={15} />
-  const title = providerBackgroundTask ? t('mergeTimeline.claudeBackgroundTask') : digest ? digestStatusTitle(event) : timelineEventLabel(event.type)
-  const text = digest ? digestStatusText(event) : messageText(event) || timelineEventLabel(event.type)
+  const title = routeAudit ? t(`timeline.route.${routeAudit}.title`)
+    : providerBackgroundTask ? t('mergeTimeline.claudeBackgroundTask') : digest ? digestStatusTitle(event) : timelineEventLabel(event.type)
+  // Route aliases are protocol handles, not chat names. Keep the receipt's
+  // original data intact and resolve its exact target only for presentation.
+  const text = routeAudit ? t(`timeline.route.${routeAudit}.message`, {
+    title: routeTargetTitle?.trim() ? routeTargetTitle : event.target_title?.trim() ? event.target_title : t('timeline.ui.anotherChat')
+  }) : digest ? digestStatusText(event) : messageText(event) || timelineEventLabel(event.type)
   const digestBody = event.type === 'handoff_digest_received' ? event.digest?.trim() : ''
-  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{title}</strong><time>{formatTime(event.ts)}</time><button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinItem') : t('timeline.ui.pinItem')} onClick={() => runTimelineAction(toggleSystemPin(event, sessionId, profileScope, pinned, title, digestBody || text))}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header><MarkdownContent text={text} sessionId={sessionId} compact />{digestBody && <details className="digest-body"><summary>{t('timeline.ui.viewDigest')}</summary><MarkdownContent text={digestBody} sessionId={sessionId} /></details>}</div></article>
+  return <article className={`system-row ${error ? 'error' : digest ? 'digest' : ''}`} data-event-id={event.id}><span className="system-icon">{icon}</span><div><header><strong>{title}</strong><time>{formatTime(event.ts)}</time><button type="button" className={`pin-button ${pinned ? 'active' : ''}`} aria-pressed={pinned} title={pinned ? t('timeline.ui.unpinItem') : t('timeline.ui.pinItem')} onClick={() => runTimelineAction(toggleSystemPin(event, sessionId, profileScope, pinned, title, digestBody || text))}><Pin size={12} fill={pinned ? 'currentColor' : 'none'} /></button></header>{routeAudit ? <p>{text}</p> : <MarkdownContent text={text} sessionId={sessionId} compact />}{digestBody && <details className="digest-body"><summary>{t('timeline.ui.viewDigest')}</summary><MarkdownContent text={digestBody} sessionId={sessionId} /></details>}</div></article>
 }
 
-function ImportedCrossChatDeliveryView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function ImportedCrossChatDeliveryView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
   const delivery = item.importedDelivery!
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => setExpanded(false), [item.key, sessionId])
+  const message = { body: delivery.body, preview: '', bodyChars: delivery.body.length, bodyTruncated: false }
+  const longBody = crossChatLegBodyIsLong(message)
   if (delivery.kind === 'status') return <article className="system-row" data-event-id={item.event.id}>
     <span className="system-icon"><MessageSquareShare size={14} /></span>
     <div>
@@ -833,34 +864,26 @@ function ImportedCrossChatDeliveryView({ item, sessionId }: { item: SystemItem; 
       <MarkdownContent text={delivery.body} sessionId={sessionId} compact />
     </div>
   </article>
-  return <article className="system-row cross-chat exchange-conversation" data-event-id={item.event.id}>
-    <span className="system-icon"><MessageSquareShare size={14} /></span>
-    <div className="cross-chat-exchange-content">
-      <header className="cross-chat-exchange-header">
-        <span className="cross-chat-exchange-eyebrow">{t('timeline.ui.agentConversation')}</span>
+  return <article className="cross-chat-message incoming" data-event-id={item.event.id}>
+    <div className="cross-chat-message-surface">
+      <header>
+        <MessageSquareShare size={13} aria-hidden="true" />
+        <CrossChatPeerLink peerId={item.event.source_session_id} sessionId={sessionId} profileScope={profileScope}>{delivery.sender}</CrossChatPeerLink>
         <time>{formatTime(item.event.ts)}</time>
       </header>
-      <div className="cross-chat-conversation" role="list" aria-label={t('timeline.exchange.importedMessageFrom', { sender: delivery.sender })}>
-        <div className="cross-chat-conversation-leg incoming left" role="listitem">
-          <header><strong className="cross-chat-leg-speaker">{delivery.sender}</strong></header>
-          <div className="cross-chat-leg-body">
-            <MarkdownContent text={delivery.body} sessionId={sessionId} compact />
-          </div>
-        </div>
-      </div>
-      {delivery.sourceRequest && <details className="cross-chat-exchange-details">
-        <summary>{t('timeline.exchange.sourceRequest')}</summary>
-        <MarkdownContent text={delivery.sourceRequest} sessionId={sessionId} compact />
-      </details>}
+      {delivery.editedByUser && <small>{t('timeline.handoff.editedByYou')}</small>}
+      <MarkdownContent text={expanded || !longBody ? delivery.body : crossChatLegCollapsedText(message)} sessionId={sessionId} fold={false} />
+      {longBody && <button type="button" className="cross-chat-message-expand" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? t('timeline.ui.showLess') : t('timeline.ui.viewMessage')}</button>}
     </div>
   </article>
 }
 
 function TeamMessageSentView({ event, profileScope }: { event: Event; profileScope: WorkspaceProfileScope | null }) {
+  useLocale()
   const recipients = event.recipients ?? []
   const messageTitle = event.title?.trim()
   const names = recipients.map(recipient => (
-    recipient.kind === 'all' ? 'Bulletin' : recipient.display_name
+    recipient.kind === 'all' ? t('teamNetwork.bulletin') : recipient.display_name
   )).filter(Boolean)
   const destination = names.length <= 3
     ? names.join(', ')
@@ -871,9 +894,12 @@ function TeamMessageSentView({ event, profileScope }: { event: Event; profileSco
   const subject = messageTitle
     ? `“${messageTitle}”`
     : isSkill
-      ? 'a team skill'
-      : 'a team message'
-  const label = `${isSkill ? 'Published' : bulletin ? 'Broadcast' : 'Sent'} ${subject}${bulletin ? ' to Bulletin' : allServers ? ' to all server inboxes' : destination ? ` to ${destination}` : ' through Team Network'}`
+      ? t('teamNetwork.timeline.skillSubject')
+      : t('teamNetwork.timeline.messageSubject')
+  const destinationText = bulletin ? t('teamNetwork.timeline.toBulletin')
+    : allServers ? t('teamNetwork.timeline.toAllInboxes')
+      : destination ? t('teamNetwork.timeline.toRecipient', { name: destination }) : t('teamNetwork.timeline.throughNetwork')
+  const label = t(isSkill ? 'teamNetwork.timeline.published' : bulletin ? 'teamNetwork.timeline.broadcast' : 'teamNetwork.timeline.sent', { subject, destination: destinationText })
   const open = () => window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', {
     detail: { section: bulletin ? 'feed' : 'mail',
       ...(event.team_id && event.message_id ? { teamId: event.team_id, messageId: event.message_id,
@@ -881,10 +907,10 @@ function TeamMessageSentView({ event, profileScope }: { event: Event; profileSco
         ...(profileScope ? { profileId: profileScope.profileId,
           ...(profileScope.serverIdentity ? { serverIdentity: profileScope.serverIdentity } : {}) } : {}) } : {}) }
   }))
-  return <button type="button" className="system-row team-message-sent" aria-label={`Open ${label}`} onClick={open} data-event-id={event.id} data-message-id={event.message_id || undefined}>
+  return <button type="button" className="system-row team-message-sent" aria-label={t('teamNetwork.timeline.openMessage', { label })} onClick={open} data-event-id={event.id} data-message-id={event.message_id || undefined}>
     <span className="system-icon"><MessageSquareShare size={15} /></span>
     <span className="team-message-sent-label">{label}</span>
-    <time>{formatTime(event.ts, 'en')}</time>
+    <time>{formatTime(event.ts)}</time>
     <ChevronRight size={14} />
   </button>
 }
@@ -1182,29 +1208,28 @@ function lifecycleConversationLegs(events: Event[]): CrossChatConversationLeg[] 
       errorCode: failedUpdate?.exchange_error_code?.trim() || '',
       error: failedUpdate?.message?.trim() || '',
       queuedId: latestExchangeString(ordered, event => event.queued_id),
-      ts: ordered[ordered.length - 1]?.ts || ''
+      ts: ordered[0]?.ts || ''
     }]
   }).sort((left, right) => left.ordinal - right.ordinal || left.ts.localeCompare(right.ts) || left.id.localeCompare(right.id))
 }
 
 function exchangeStateLabel(
   status: CrossChatExchange['status'] | null,
-  activeOwnerTitle = '',
-  activeOwnerIsCurrent = false,
-  activeLegStatus = ''
+  activeLegStatus = '',
+  expectsReply = true
 ): string {
   if (status === 'completed') return t('timeline.ui.completed')
   if (status === 'failed') return t('timeline.ui.couldnTComplete')
   if (status === 'cancelled') return t('timeline.ui.cancelledBeforeCompletion')
   if (status === 'expired') return t('timeline.ui.expiredBeforeCompletion')
   if (status === 'waiting_request') return t('timeline.ui.waitingToStart')
-  if (activeOwnerTitle) {
-    const owner = activeOwnerIsCurrent ? t('timeline.ui.thisChat') : activeOwnerTitle
-    if (['registered', 'submitting'].includes(activeLegStatus)) return t('timeline.exchange.sendingTo', { owner })
-    if (activeLegStatus === 'queued') return t('timeline.exchange.waitingFor', { owner })
-    return t('timeline.exchange.working', { owner })
+  if (expectsReply) {
+    if (['registered', 'submitting'].includes(activeLegStatus)) return t('timeline.exchange.replyPendingSending')
+    if (activeLegStatus === 'queued') return t('timeline.exchange.replyPendingQueued')
+    if (activeLegStatus === 'running') return t('timeline.exchange.replyPendingProcessing')
+    return t('timeline.exchange.replyPending')
   }
-  return t('timeline.ui.inProgress')
+  return activeLegStatus === 'queued' ? t('timeline.exchange.deliveryQueued') : t('timeline.exchange.deliveryInProgress')
 }
 
 function exchangeRecoveryNote(value: string): string {
@@ -1221,34 +1246,45 @@ function exchangeFailureMessageIsPlainLanguage(value: string): boolean {
 
 function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
+  const mailboxAvailable = useAppStore(state => chatMailboxAvailable(state.health))
   const events = item.events ?? [item.event]
   const envelopeId = item.event.cross_chat_envelope_id?.trim() || item.event.handoff_id?.trim() || item.event.message_id?.trim() || ''
   const conversationId = latestExchangeString(events, event => event.conversation_id)
   const sourceId = latestExchangeString(events, event => event.source_session_id)
   const targetId = latestExchangeString(events, event => event.target_session_id)
   const incoming = targetId === sessionId && sourceId !== sessionId
+  const editedByUser = incoming && latestExchangeBoolean(events, event => event.message_edited_by_user) === true
+  const messageRevision = editedByUser ? latestExchangeNumber(events, event => event.message_revision) : null
+  const bodyRevisionKey = `${editedByUser ? 'edited' : 'original'}:${messageRevision ?? ''}`
+  const bodyEvents = editedByUser ? events.filter(event => event.message_edited_by_user === true
+    && event.message_revision === messageRevision) : events
   const counterpartId = incoming ? sourceId : targetId
   const savedTitle = latestExchangeString(events, event => incoming ? event.source_title : event.target_title)
   const currentTitle = !savedTitle && counterpartId
     ? useAppStore.getState().sessions.find(session => session.id === counterpartId)?.title : undefined
   const counterpartTitle = savedTitle || currentTitle || t('timeline.ui.unknownAgent')
-  const [body, setBody] = useState<string | null>(null)
+  const [loadedBody, setLoadedBody] = useState<{ revisionKey: string; text: string } | null>(null)
+  const body = loadedBody?.revisionKey === bodyRevisionKey ? loadedBody.text : null
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelledLocally, setCancelledLocally] = useState(false)
   const requestGeneration = useRef(0)
   useEffect(() => {
     requestGeneration.current++
-    setBody(null)
+    setLoadedBody(null)
     setExpanded(false)
     setLoading(false)
     setLoadError('')
+    setCancelling(false)
+    setCancelledLocally(false)
     return () => { requestGeneration.current++ }
-  }, [item.key, sessionId, profileScope?.profileId, profileScope?.profileGeneration, profileScope?.serverIdentity])
+  }, [item.key, sessionId, bodyRevisionKey, profileScope?.profileId, profileScope?.profileGeneration, profileScope?.serverIdentity])
   const message: CrossChatMessageBody = {
-    preview: latestExchangeString(events, event => event.handoff_preview), body: '',
-    bodyChars: latestExchangeNumber(events, event => event.handoff_body_chars),
-    bodyTruncated: latestExchangeBoolean(events, event => event.handoff_body_truncated) === true
+    preview: latestExchangeString(bodyEvents, event => event.handoff_preview), body: '',
+    bodyChars: latestExchangeNumber(bodyEvents, event => event.handoff_body_chars),
+    bodyTruncated: latestExchangeBoolean(bodyEvents, event => event.handoff_body_truncated) === true
   }
   const moreBodyAvailable = crossChatLegMayHaveMoreBody(message)
   const longBody = crossChatLegBodyIsLong(message)
@@ -1273,7 +1309,16 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
         || (sourceId !== sessionId && targetId !== sessionId)) {
         throw new Error(t('timeline.ui.thisChatIsNotAParticipantInTheHandoff'))
       }
-      setBody(handoff.body)
+      let effectiveBody = handoff.body
+      if (editedByUser) {
+        if (messageRevision === null || !Number.isSafeInteger(messageRevision) || messageRevision < 1
+          || handoff.message_edited_by_user !== true || handoff.message_revision !== messageRevision
+          || typeof handoff.target_body !== 'string' || !handoff.target_body.trim()) {
+          throw new Error(t('timeline.handoff.editedBodyUnavailable'))
+        }
+        effectiveBody = handoff.target_body
+      }
+      setLoadedBody({ revisionKey: bodyRevisionKey, text: effectiveBody })
       setExpanded(true)
     } catch (error) {
       if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setLoadError(timelineActionError(error))
@@ -1283,7 +1328,21 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
   }
   const status = latestExchangeString(events, event => event.handoff_status)
   const failed = status === 'failed' || item.event.type === 'chat_conversation_message_failed'
-  const cancelled = status === 'cancelled' || item.event.type === 'chat_conversation_message_cancelled'
+  const cancelled = cancelledLocally || status === 'cancelled' || item.event.inbox_state === 'cancelled' || item.event.type === 'chat_conversation_message_cancelled'
+  const cancelMailbox = async () => {
+    if (cancelling) return
+    const scope = captureTimelineWorkspaceScope(sessionId), request = requestGeneration.current
+    setCancelling(true)
+    try {
+      const receipt = await window.agentsDock.handoffs.cancel(envelopeId)
+      if (request !== requestGeneration.current || !timelineWorkspaceScopeCurrent(scope)) return
+      if (receipt.id !== envelopeId || receipt.source_session_id !== sourceId || receipt.target_session_id !== targetId
+        || receipt.conversation_id !== conversationId || receipt.status !== 'cancelled') throw Error('Receipt mismatch')
+      setCancelledLocally(true)
+    } catch {
+      if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setLoadError(t('timeline.inbox.cancelError'))
+    } finally { if (request === requestGeneration.current && timelineWorkspaceScopeCurrent(scope)) setCancelling(false) }
+  }
   return <article
     className={`cross-chat-message ${incoming ? 'incoming' : 'outgoing'}${failed ? ' failed' : ''}`}
     data-event-id={item.event.id}
@@ -1292,9 +1351,12 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
     <div className="cross-chat-message-surface">
       <header>
         <MessageSquareShare size={13} aria-hidden="true" />
-        <strong>{incoming ? counterpartTitle : t('timeline.handoff.sent', { title: counterpartTitle })}</strong>
+        <CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>
+          {incoming ? counterpartTitle : t('timeline.handoff.to', { title: counterpartTitle })}
+        </CrossChatPeerLink>
         <time>{formatTime(item.anchorTs || item.event.ts)}</time>
       </header>
+      {editedByUser && <small>{t('timeline.handoff.editedByYou')}</small>}
       {text && <MarkdownContent text={text} sessionId={sessionId} fold={false} />}
       {!text && <small>{t('timeline.ui.messageBodyAvailableOnDemand')}</small>}
       {(moreBodyAvailable || longBody) && <button
@@ -1304,13 +1366,16 @@ function CrossChatMessageView({ item, sessionId, profileScope }: { item: SystemI
         onClick={() => expanded ? setExpanded(false) : void showFullMessage()}
       >{loading ? t('timeline.ui.loadingFullMessage') : expanded ? t('timeline.ui.showLess') : t('timeline.ui.viewMessage')}</button>}
       {failed && <small className="cross-chat-message-error">{latestExchangeString(events, event => event.message) || t('timeline.ui.couldnTComplete')}</small>}
-      {cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {incoming && cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {!incoming && <small className="cross-chat-exchange-state" role="status">{t(cancelledLocally ? 'timeline.inbox.cancelled' : outgoingDeliveryStatus(item.event, events))}</small>}
+      {!incoming && item.event.delivery_mode === 'mailbox' && item.event.inbox_state === 'unread' && !cancelled && mailboxAvailable
+        && <button className="quiet-button" disabled={cancelling} onClick={() => void cancelMailbox()}>{t('timeline.inbox.cancel')}</button>}
       {loadError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {loadError}</small>}
     </div>
   </article>
 }
 
-function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function CrossChatExchangeView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
   const event = item.event
   const exchangeId = event.exchange_id?.trim() || event.cross_chat_exchange_id?.trim() || ''
@@ -1348,7 +1413,7 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
             errorCode: (snapshotCurrent ? leg.error_code : observed?.errorCode || leg.error_code) || '',
             error: (snapshotCurrent ? leg.error : observed?.error || leg.error) || '',
             queuedId: leg.queued_id || observed?.queuedId || '',
-            ts: observed?.ts || leg.updated_at || leg.created_at
+            ts: observed?.ts || leg.created_at || leg.updated_at
           }
         }),
         ...lifecycleLegs.filter(leg => !exchange.legs.some(candidate => candidate.id === leg.id))
@@ -1386,8 +1451,6 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
     || fallback
     || t('timeline.ui.unknownAgent')
   )
-  const requesterTitle = participantTitle(requesterId, requesterId === sessionId ? t('timeline.ui.thisChat') : t('timeline.ui.requestingAgent'))
-  const responderTitle = participantTitle(responderId, responderId === sessionId ? t('timeline.ui.thisChat') : t('timeline.ui.respondingAgent'))
   const counterpartId = requesterId === sessionId
     ? responderId
     : responderId === sessionId
@@ -1402,19 +1465,14 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
   const [skipError, setSkipError] = useState('')
   const [skippedQueuedId, setSkippedQueuedId] = useState('')
   const [deliveryPromoted, setDeliveryPromoted] = useState(false)
-  const [showEarlierMessages, setShowEarlierMessages] = useState(false)
-  const [conversationExpanded, setConversationExpanded] = useState(false)
   const [messageExpansion, setMessageExpansion] = useState<Record<string, boolean>>({})
   const detailRequestGeneration = useRef(0)
   const cancelRequestGeneration = useRef(0)
   const skipRequestGeneration = useRef(0)
-  const lastDetailRequestSeq = useRef<number | null>(null)
-  const conversationId = useId()
   useEffect(() => {
     detailRequestGeneration.current += 1
     cancelRequestGeneration.current += 1
     skipRequestGeneration.current += 1
-    lastDetailRequestSeq.current = null
     setExchangeSnapshot(null)
     setLoading(false)
     setLoadError('')
@@ -1424,14 +1482,11 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
     setSkipError('')
     setSkippedQueuedId('')
     setDeliveryPromoted(false)
-    setShowEarlierMessages(false)
-    setConversationExpanded(false)
     setMessageExpansion({})
   }, [exchangeId, sessionId, workspaceRevision])
 
   const loadExchange = async () => {
     if (!exchangeId || (exchange && snapshotCurrent) || loading) return
-    lastDetailRequestSeq.current = event.seq
     const request = ++detailRequestGeneration.current
     const scope = captureTimelineWorkspaceScope(sessionId)
     setLoading(true)
@@ -1503,21 +1558,6 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
     || [...conversationLegs].reverse().find(leg => !['delivered', 'failed', 'cancelled', 'expired'].includes(leg.status))
     || conversationLegs[conversationLegs.length - 1]
     || null
-  const activeOwnerId = terminalStatus
-    ? ''
-    : actionLeg?.targetId || (exchangeStatus === 'waiting_request' ? requesterId : '')
-  const activeOwnerTitle = activeOwnerId
-    ? participantTitle(activeOwnerId, activeOwnerId === sessionId ? t('timeline.ui.thisChat') : t('timeline.ui.otherAgent'))
-    : ''
-  const maxLegs = latestExchangeNumber(lifecycleEvents, candidate => candidate.exchange_max_legs)
-    ?? exchange?.max_legs
-    ?? 6
-  const remainingLegs = latestExchangeNumber(lifecycleEvents, candidate => candidate.exchange_remaining_legs)
-    ?? exchange?.remaining_legs
-    ?? null
-  const usedLegs = latestExchangeNumber(lifecycleEvents, candidate => candidate.exchange_used_legs)
-    ?? exchange?.used_legs
-    ?? conversationLegs.length
   const participant = exchange
     ? exchangeParticipant(exchange, sessionId)
     : requesterId === sessionId
@@ -1527,12 +1567,6 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
     && Boolean(exchangeId)
     && (!queuedDelivery || !canSkipQueuedDelivery)
     && ['waiting_request', 'active'].includes(String(exchangeStatus || ''))
-  const summaryTitle = counterpartId ? t('timeline.exchange.with', { title: counterpartTitle }) : t('timeline.ui.agentConversation')
-  const authorizationKind = latestExchangeString(
-    lifecycleEvents,
-    candidate => candidate.exchange_authorization_kind
-  ) as Event['exchange_authorization_kind']
-  const authorizationLabel = crossChatAuthorizationLabel(authorizationKind)
   const errorEvent = [...lifecycleEvents].reverse().find(candidate => (
     candidate.exchange_status === 'failed'
     || candidate.exchange_leg_status === 'failed'
@@ -1553,79 +1587,17 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
       ? failureMessage
       : t('timeline.exchange.failed', { title: counterpartTitle })
     : ''
-  const technicalNotes = [...new Set([
-    ...(failed && failureMessage ? [exchangeRecoveryNote(failureMessage)] : []),
-    ...conversationLegs.flatMap(leg => (
-      leg.status === 'failed'
-        ? [exchangeRecoveryNote(leg.error || leg.errorCode || '')].filter(Boolean)
-        : []
-    )),
-    ...(failed
-      ? [exchange?.error_code, errorEvent?.exchange_error_code, ...conversationLegs.map(leg => leg.status === 'failed' ? leg.errorCode : '')]
-          .filter(Boolean)
-          .map(code => t('timeline.exchange.reason', { code: code || '' }))
-      : [])
-  ])]
   const stateLabel = exchangeStateLabel(
     exchangeStatus,
-    activeOwnerTitle,
-    activeOwnerId === sessionId,
-    actionLeg?.status || ''
+    actionLeg?.status || '',
+    actionLeg?.expectsReply ?? initialAction !== 'instruction'
   )
-  const conversationLabel = t('timeline.exchange.between', { requester: requesterTitle, responder: responderTitle })
-  const primaryLegIds = new Set<string>()
-  if (conversationLegs[0]) primaryLegIds.add(conversationLegs[0].id)
-  if (conversationLegs.at(-1)) primaryLegIds.add(conversationLegs.at(-1)!.id)
-  if (!terminalStatus && actionLeg) primaryLegIds.add(actionLeg.id)
-  const hiddenConversationLegs = conversationLegs.filter(leg => !primaryLegIds.has(leg.id))
-  const firstHiddenLegId = hiddenConversationLegs[0]?.id || ''
-  const allConversationLegsVisible = showEarlierMessages || conversationExpanded
-  const hasExpandableMessage = conversationLegs.some(leg => (
-    crossChatLegMayHaveMoreBody(leg) || crossChatLegBodyIsLong(leg)
-  ))
-  const showConversationControls = Boolean(exchangeId) && (
-    conversationExpanded
-    || !exchange
-    || !snapshotCurrent
-    || hiddenConversationLegs.length > 0
-    || hasExpandableMessage
-  )
-  const showConversationDetails = Boolean(
-    authorizationLabel
-    || initialAction
-    || maxLegs
-    || technicalNotes.length
-  )
-
-  const expandConversation = () => {
-    setConversationExpanded(true)
-    setShowEarlierMessages(true)
-    setMessageExpansion({})
-    if (!exchange || !snapshotCurrent || conversationLegs.some(crossChatLegMayHaveMoreBody)) {
-      void loadExchange()
-    }
-  }
-
-  const collapseConversation = () => {
-    setConversationExpanded(false)
-    setShowEarlierMessages(false)
-    setMessageExpansion({})
-  }
 
   const setLegBodyExpanded = (leg: CrossChatConversationLeg, expanded: boolean) => {
     setMessageExpansion(current => ({ ...current, [leg.id]: expanded }))
-    if (expanded && crossChatLegMayHaveMoreBody(leg)) void loadExchange()
+    if (expanded && (crossChatLegMayHaveMoreBody(leg) || !leg.body && !leg.preview)) void loadExchange()
   }
 
-  useEffect(() => {
-    if (
-      !conversationExpanded
-      || !exchangeId
-      || loading
-      || lastDetailRequestSeq.current === event.seq
-    ) return
-    void loadExchange()
-  }, [conversationExpanded, event.seq, exchangeId, loading, workspaceRevision])
 
   const skipQueuedDelivery = async () => {
     if (!queuedDelivery || !exchangeId || skippingDelivery) return
@@ -1671,158 +1643,76 @@ function CrossChatExchangeView({ item, sessionId }: { item: SystemItem; sessionI
   // Queueing is a leg state, not a replacement for the conversation history.
   const queuedActionLeg = !terminalStatus && actionLeg?.status === 'queued' ? actionLeg : null
 
-  return <article className={`system-row cross-chat exchange exchange-conversation${failed ? ' error' : ''}`} data-event-id={event.id} data-event-count={lifecycleEvents.length} data-exchange-id={exchangeId}>
-    <span className="system-icon">{failed ? <AlertTriangle size={14} /> : <MessageSquareShare size={14} />}</span>
-    <div className="cross-chat-exchange-content">
-      <header className="cross-chat-exchange-header">
-        <span className="cross-chat-exchange-eyebrow">{t('timeline.ui.agentConversation')}</span>
-        <time>{formatTime(event.ts)}</time>
-      </header>
-      <div className="cross-chat-exchange-heading">
-        <strong className="cross-chat-exchange-title">{summaryTitle}</strong>
-        <span className={`cross-chat-exchange-state ${exchangeStatus}${failed ? ' failed' : ''}`} role={queuedActionLeg ? undefined : 'status'}>
-          {failed && <AlertTriangle size={11} aria-hidden="true" />}
-          {queuedActionLeg && skippedQueuedId && skippedQueuedId === queuedActionLeg.queuedId ? t('timeline.exchange.queuedMessageRemoved') : queuedActionLeg && deliveryPromoted ? t('timeline.status.starting') : stateLabel}
-        </span>
-      </div>
-      <p className="cross-chat-participants" aria-label={conversationLabel}>
-        <span className={requesterId === sessionId ? 'current' : ''}>{requesterTitle}{requesterId === sessionId ? t('timeline.exchange.current') : ''}</span>
-        <span className="cross-chat-participant-bridge" aria-hidden="true">↔</span>
-        <span className={responderId === sessionId ? 'current' : ''}>{responderTitle}{responderId === sessionId ? t('timeline.exchange.current') : ''}</span>
-      </p>
-      {showConversationControls && <div className="cross-chat-conversation-controls">
-        <button
-          type="button"
-          aria-controls={conversationId}
-          aria-expanded={conversationExpanded}
-          onClick={conversationExpanded ? collapseConversation : expandConversation}
-        >{conversationExpanded ? t('timeline.ui.showLess') : t('timeline.ui.showFullConversation')}</button>
-        {loading && <small role="status">{t('timeline.ui.loadingMessages')}</small>}
-        {loadError && <button type="button" onClick={() => void loadExchange()}>{t('timeline.ui.retryLoading')}</button>}
-      </div>}
-      {loadError && <small className="cross-chat-body-error cross-chat-conversation-load-error" role="alert">{t('timeline.ui.couldNotLoadTheFullConversation')} {loadError}</small>}
-      <div id={conversationId} className="cross-chat-conversation" role="list" aria-label={conversationLabel}>
-        {conversationLegs.map((leg, legIndex) => {
-          const fromThisChat = leg.sourceId === sessionId
-          const sourceSide = leg.sourceId === requesterId || (!requesterId && fromThisChat)
-          const legDirection = sourceSide ? 'outgoing' : 'incoming'
-          const bubbleSide = sourceSide ? 'left' : 'right'
-          const sourceTitle = participantTitle(leg.sourceId, leg.sourceTitle || (fromThisChat ? t('timeline.ui.thisChat') : t('timeline.ui.otherAgent')))
-          const targetTitle = participantTitle(leg.targetId, leg.targetTitle || (fromThisChat ? t('timeline.ui.otherAgent') : t('timeline.ui.thisChat')))
-          const messageNumber = leg.ordinal > 0 ? leg.ordinal : legIndex + 1
-          const currentLeg = !terminalStatus && actionLeg?.id === leg.id
-          const queuedMessage = queuedActionLeg?.id === leg.id
-          const queuedMessageRemoved = queuedMessage && Boolean(skippedQueuedId) && leg.queuedId === skippedQueuedId
-          const queuedMessageStarting = queuedMessage && deliveryPromoted && !queuedMessageRemoved
-          const cancelQueuedMessage = queuedMessage && !queuedMessageRemoved
-            ? queuedDelivery?.id === leg.id && canSkipQueuedDelivery ? skipQueuedDelivery : canCancel ? cancelExchange : null
-            : null
-          const body = leg.body || leg.preview
-          const mayHaveMoreBody = crossChatLegMayHaveMoreBody(leg)
-          const longBody = crossChatLegBodyIsLong(leg)
-          const bodyExpanded = conversationExpanded
-            || (messageExpansion[leg.id] ?? !longBody)
-          const bodyCollapsed = longBody && !bodyExpanded
-          const collapsedBody = bodyCollapsed ? crossChatLegCollapsedText(leg) : ''
-          const showBodyToggle = !conversationExpanded && (mayHaveMoreBody || longBody)
-          const messageBodyId = `${conversationId}-message-${legIndex + 1}`
-          const foldControl = leg.id === firstHiddenLegId
-            ? <div className="cross-chat-conversation-fold" role="presentation">
-                <button
-                  type="button"
-                  aria-controls={conversationId}
-                  aria-expanded={allConversationLegsVisible}
-                  onClick={() => setShowEarlierMessages(current => !current)}
-                >{allConversationLegsVisible
-                    ? t('timeline.ui.hideEarlierMessages')
-                    : timelineCount('earlierMessages', hiddenConversationLegs.length)}</button>
-              </div>
-            : null
-          if (!allConversationLegsVisible && !primaryLegIds.has(leg.id)) {
-            return foldControl ? <Fragment key={`fold:${leg.id}`}>{foldControl}</Fragment> : null
-          }
-          return <Fragment key={leg.id}>
-            {foldControl}
-            <div
-              className={`cross-chat-conversation-leg ${legDirection} ${bubbleSide}${currentLeg ? ' current' : ''}${queuedMessage ? ' queued' : ''}${leg.status === 'failed' ? ' failed' : ''}`}
-              role="listitem"
-              aria-current={currentLeg ? 'step' : undefined}
-              aria-label={t('timeline.exchange.message', { number: messageNumber, source: sourceTitle, target: targetTitle, status: queuedMessageRemoved ? t('timeline.status.cancelled') : queuedMessageStarting ? t('timeline.status.starting') : timelineStatusLabel(leg.status) })}
-              data-exchange-leg-id={leg.id}
-              data-message-number={messageNumber}
-            >
-            <header>
-              <strong className="cross-chat-leg-speaker">{sourceTitle}</strong>
-              {queuedMessage && <span className="cross-chat-queued-recipient">{t('mergeTimeline.queuedRecipient', { title: targetTitle })}</span>}
-              {fromThisChat && <span className="sr-only">{t('timeline.ui.fromThisChat')}</span>}
-              {leg.ts && <time>{formatTime(leg.ts)}</time>}
-            </header>
-            {(body || mayHaveMoreBody) && <div id={messageBodyId} className={`cross-chat-leg-body${bodyCollapsed ? ' collapsed' : ''}`}>
-              {bodyCollapsed
-                ? collapsedBody
-                  ? <p className="cross-chat-leg-preview">{collapsedBody}</p>
-                  : <small className="cross-chat-leg-body-placeholder">{t('timeline.ui.messageBodyAvailableOnDemand')}</small>
-                : leg.body
-                ? <MarkdownContent text={leg.body} sessionId={sessionId} compact fold={false} />
-                : body
-                  ? <p className="cross-chat-leg-preview">{leg.preview}</p>
-                  : <small className="cross-chat-leg-body-placeholder">{t('timeline.ui.messageBodyAvailableOnDemand')}</small>}
-            </div>}
-            {showBodyToggle && <button
-              type="button"
-              className="cross-chat-leg-body-toggle"
-              aria-controls={messageBodyId}
-              aria-expanded={!mayHaveMoreBody && bodyExpanded}
-              disabled={mayHaveMoreBody && loading}
-              onClick={() => setLegBodyExpanded(leg, mayHaveMoreBody || !bodyExpanded)}
-            >{mayHaveMoreBody && loading ? t('timeline.ui.loading') : mayHaveMoreBody || !bodyExpanded ? t('timeline.ui.showMore') : t('timeline.ui.showLess')}</button>}
-            {queuedMessage && <footer className="cross-chat-queued-footer">
-              <span className={`cross-chat-queued-state${queuedMessageRemoved ? ' cancelled' : queuedMessageStarting ? ' starting' : ''}`} role="status">
-                {queuedMessageRemoved ? <Check size={11} aria-hidden="true" /> : queuedMessageStarting
-                  ? <LoaderCircle className="spin" size={11} aria-hidden="true" /> : <Clock3 size={11} aria-hidden="true" />}
-                {queuedMessageRemoved ? t('timeline.status.cancelled') : queuedMessageStarting ? t('timeline.status.starting') : t('timeline.status.queued')}
-              </span>
-              {cancelQueuedMessage && <button type="button" className="cross-chat-queued-cancel" aria-label={t('mergeTimeline.cancelQueuedMessage')}
-                disabled={skippingDelivery || cancelling} onClick={() => void cancelQueuedMessage()}
-              >{skippingDelivery || cancelling ? t('timeline.ui.cancelling') : t('mergeTimeline.cancel')}</button>}
-            </footer>}
-            </div>
-          </Fragment>
-        })}
-        {conversationLegs.length === 0 && <div className="cross-chat-conversation-empty" role="listitem">
-          <span>{t('timeline.ui.waitingForTheFirstAgentMessage')}</span>
-        </div>}
-      </div>
-      {failed && <p className="cross-chat-exchange-failure" role="alert">{failureSummary}</p>}
-      {showConversationDetails && <details className="cross-chat-exchange-details">
-        <summary>{t('timeline.ui.details')}</summary>
-        <div className="cross-chat-exchange-detail-lines">
-          {authorizationLabel && <p><strong>{t('timeline.ui.access')}</strong> {authorizationLabel}</p>}
-          {initialAction && <p><strong>{t('timeline.ui.startedAs')}</strong> {initialAction === 'instruction' ? t('timeline.ui.instruction') : t('timeline.ui.questionWithReplies')}</p>}
-          <p><strong>{t('timeline.ui.messages')}</strong> {t('timeline.exchange.messageCount', { used: usedLegs, max: maxLegs })}</p>
-          {!terminalStatus && remainingLegs != null && <p><strong>{t('timeline.ui.remaining')}</strong> {remainingLegs}</p>}
-          {technicalNotes.map(note => <p key={note} className="cross-chat-exchange-note"><strong>{t('timeline.ui.systemNote')}</strong> {note}</p>)}
+  const displayedLegs = item.crossChatLegId
+    ? conversationLegs.filter(leg => leg.id === item.crossChatLegId)
+    : conversationLegs
+
+  return <div className="cross-chat-legacy-messages" data-event-id={event.id} data-exchange-id={exchangeId}>
+    {displayedLegs.map((leg, index) => {
+      const incoming = leg.targetId === sessionId && leg.sourceId !== sessionId
+      const sourceTitle = participantTitle(leg.sourceId, leg.sourceTitle || t('timeline.ui.otherAgent'))
+      const targetTitle = participantTitle(leg.targetId, leg.targetTitle || t('timeline.ui.otherAgent'))
+      const actionMessage = actionLeg?.id === leg.id
+      const currentLeg = !terminalStatus && actionMessage
+      const queuedMessage = queuedActionLeg?.id === leg.id
+      const queuedMessageRemoved = queuedMessage && Boolean(skippedQueuedId) && skippedQueuedId === leg.queuedId
+      const queuedMessageStarting = queuedMessage && deliveryPromoted && !queuedMessageRemoved
+      const mayHaveMoreBody = crossChatLegMayHaveMoreBody(leg) || !leg.body && !leg.preview
+      const longBody = crossChatLegBodyIsLong(leg)
+      const expanded = messageExpansion[leg.id] ?? !longBody
+      const text = expanded ? leg.body || leg.preview : crossChatLegCollapsedText(leg)
+      const cancelQueuedMessage = queuedMessage && !queuedMessageRemoved
+        ? queuedDelivery?.id === leg.id && canSkipQueuedDelivery ? skipQueuedDelivery : canCancel ? cancelExchange : null
+        : null
+      return <article key={leg.id}
+        className={`cross-chat-message ${incoming ? 'incoming' : 'outgoing'}${leg.status === 'failed' ? ' failed' : ''}`}
+        data-exchange-leg-id={leg.id} data-message-number={leg.ordinal || index + 1}
+      >
+        <div className="cross-chat-message-surface">
+          <header>
+            <MessageSquareShare size={13} aria-hidden="true" />
+            <CrossChatPeerLink peerId={leg.sourceId === sessionId || leg.targetId === sessionId ? incoming ? leg.sourceId : leg.targetId : undefined} sessionId={sessionId} profileScope={profileScope}>
+              {incoming ? sourceTitle : t('timeline.handoff.to', { title: targetTitle })}
+            </CrossChatPeerLink>
+            {leg.ts && <time>{formatTime(item.anchorTs || leg.ts)}</time>}
+          </header>
+          {text ? <MarkdownContent text={text} sessionId={sessionId} fold={false} />
+            : <small>{t('timeline.ui.messageBodyAvailableOnDemand')}</small>}
+          {(mayHaveMoreBody || longBody) && <button type="button" className="cross-chat-message-expand"
+            aria-expanded={!mayHaveMoreBody && expanded} disabled={mayHaveMoreBody && loading}
+            onClick={() => setLegBodyExpanded(leg, mayHaveMoreBody || !expanded)}
+          >{mayHaveMoreBody && loading ? t('timeline.ui.loadingFullMessage') : mayHaveMoreBody || !expanded ? t('timeline.ui.viewMessage') : t('timeline.ui.showLess')}</button>}
+          {(leg.status === 'failed' || actionMessage && failed) && <small className="cross-chat-message-error" role="alert">{failureSummary}</small>}
+          {actionMessage && <small className="cross-chat-exchange-state" role="status"
+            title={!terminalStatus ? t('timeline.exchange.statusScope') : undefined} aria-description={!terminalStatus ? t('timeline.exchange.statusScope') : undefined}>
+            {queuedMessageRemoved ? t('timeline.exchange.queuedMessageRemoved') : queuedMessageStarting ? t('timeline.status.starting') : stateLabel}
+          </small>}
+          {cancelQueuedMessage && <button type="button" className="cross-chat-message-expand"
+            aria-label={t('mergeTimeline.cancelQueuedMessage')} disabled={skippingDelivery || cancelling}
+            onClick={() => void cancelQueuedMessage()}
+          >{skippingDelivery || cancelling ? t('timeline.ui.cancelling') : t('mergeTimeline.cancel')}</button>}
+          {currentLeg && !queuedActionLeg && canCancel && <button type="button" className="cross-chat-message-expand"
+            title={t('mergeTimeline.cancelQueuedAndRunning')} disabled={cancelling} onClick={() => void cancelExchange()}
+          >{cancelling ? t('timeline.ui.ending') : t('timeline.ui.endConversation')}</button>}
+          {loadError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {loadError}</small>}
+          {currentLeg && cancelError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotEndTheConversation')} {cancelError}</small>}
+          {currentLeg && skipError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotRemoveTheQueuedMessage')} {skipError}</small>}
         </div>
-      </details>}
-      {cancelError && <small className="cross-chat-body-error" role="alert">{t('timeline.ui.couldNotEndTheConversation')} {cancelError}</small>}
-      {skipError && <small className="cross-chat-body-error" role="alert">{t('timeline.ui.couldNotRemoveTheQueuedMessage')} {skipError}</small>}
-      {skippedQueuedId && !queuedActionLeg && <small className="cross-chat-delivery-skipped" role="status">{t('timeline.ui.queuedMessageRemoved')}</small>}
-      <div className="cross-chat-actions">
-        {counterpartId && <button type="button" className="cross-chat-link" onClick={() => runTimelineAction(useAppStore.getState().selectSession(counterpartId))}>{t('timeline.exchange.open', { title: counterpartTitle })}</button>}
-        {!queuedActionLeg && queuedDelivery && canSkipQueuedDelivery && <button type="button" className="cross-chat-cancel" disabled={skippingDelivery} onClick={() => void skipQueuedDelivery()}>{skippingDelivery ? t('timeline.ui.removing') : t('timeline.ui.removeQueuedMessage')}</button>}
-        {!queuedActionLeg && canCancel && <button
-          type="button"
-          className="cross-chat-cancel"
-          title={t('mergeTimeline.cancelQueuedAndRunning')}
-          disabled={cancelling}
-          onClick={() => void cancelExchange()}
-        >{cancelling ? t('timeline.ui.ending') : t('timeline.ui.endConversation')}</button>}
+      </article>
+    })}
+    {!displayedLegs.length && <div className="cross-chat-message outgoing">
+      <div className="cross-chat-message-surface">
+        <header><MessageSquareShare size={13} aria-hidden="true" /><CrossChatPeerLink peerId={requesterId === sessionId || responderId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>{counterpartTitle}</CrossChatPeerLink><time>{formatTime(event.ts)}</time></header>
+        <small>{stateLabel}</small>
+        <button type="button" className="cross-chat-message-expand" disabled={loading} onClick={() => void loadExchange()}>{loading ? t('timeline.ui.loadingMessages') : t('timeline.ui.viewMessage')}</button>
+        {canCancel && <button type="button" className="cross-chat-message-expand" disabled={cancelling} onClick={() => void cancelExchange()}>{t('timeline.ui.endConversation')}</button>}
+        {loadError && <small className="cross-chat-message-error" role="alert">{loadError}</small>}
       </div>
-    </div>
-  </article>
+    </div>}
+  </div>
 }
 
-function CrossChatView({ item, sessionId }: { item: SystemItem; sessionId: string }) {
+function CrossChatView({ item, sessionId, profileScope }: { item: SystemItem; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
   useLocale()
   const event = item.event
   const envelopeId = event.handoff_id?.trim() || event.correlation_id?.trim() || ''
@@ -1909,27 +1799,18 @@ function CrossChatView({ item, sessionId }: { item: SystemItem; sessionId: strin
     }
   }
   const canCancel = sourceId === sessionId && /queued|deferred/u.test(status) && Boolean(envelopeId)
-  const authorizationLabel = crossChatAuthorizationLabel(event.handoff_authorization_kind)
-  return <article className={`system-row cross-chat${failed ? ' error' : ''}`} data-event-id={event.id}>
-    <span className="system-icon">{failed ? <AlertTriangle size={14} /> : <MessageSquareShare size={14} />}</span>
-    <div>
-      <header><strong>{title}</strong><time>{formatTime(event.ts)}</time></header>
-      {authorizationLabel && <div className="cross-chat-exchange-meta"><span className="cross-chat-authorization">{authorizationLabel}</span></div>}
-      {detail && detail !== title && <p>{detail}</p>}
-      {preview && <details className="cross-chat-body" onToggle={toggleEvent => {
-        if (toggleEvent.currentTarget.open) void loadBody()
-      }}>
-        <summary>{t('timeline.ui.viewMessage')}{event.handoff_body_chars ? t('timeline.handoff.chars', { count: event.handoff_body_chars.toLocaleString(getLocale()) }) : ''}</summary>
-        <pre>{body || preview}</pre>
-        {bodyLoading && <small role="status">{t('timeline.ui.loadingFullMessage')}</small>}
-        {!bodyLoading && truncated && !body && !bodyError && <small>{t('timeline.ui.previewShownWhileTheFullMessageLoads')}</small>}
-        {bodyError && <small className="cross-chat-body-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {bodyError}</small>}
-      </details>}
-      {cancelError && <small className="cross-chat-body-error" role="alert">{t('timeline.ui.couldNotCancelHandoff')} {cancelError}</small>}
-      <div className="cross-chat-actions">
-        {counterpartId && <button type="button" className="cross-chat-link" onClick={() => runTimelineAction(useAppStore.getState().selectSession(counterpartId))}>{t('timeline.exchange.open', { title: counterpartTitle })}</button>}
-        {canCancel && <button type="button" className="cross-chat-cancel" disabled={cancelling} onClick={() => void cancelHandoff()}>{cancelling ? t('timeline.ui.cancelling') : t('timeline.ui.cancelHandoff')}</button>}
-      </div>
+  const incoming = targetId === sessionId && sourceId !== sessionId
+  return <article className={`cross-chat-message ${incoming ? 'incoming' : 'outgoing'}${failed ? ' failed' : ''}`} data-event-id={event.id}>
+    <div className="cross-chat-message-surface">
+      <header><MessageSquareShare size={13} aria-hidden="true" /><CrossChatPeerLink peerId={sourceId === sessionId || targetId === sessionId ? counterpartId : undefined} sessionId={sessionId} profileScope={profileScope}>{incoming ? counterpartTitle : t('timeline.handoff.to', { title: counterpartTitle })}</CrossChatPeerLink><time>{formatTime(item.anchorTs || event.ts)}</time></header>
+      {body || preview ? <MarkdownContent text={body || preview} sessionId={sessionId} fold={false} /> : <small>{detail || title}</small>}
+      {truncated && !body && <button type="button" className="cross-chat-message-expand" disabled={bodyLoading} onClick={() => void loadBody()}>{bodyLoading ? t('timeline.ui.loadingFullMessage') : t('timeline.ui.viewMessage')}</button>}
+      {failed && preview && <small className="cross-chat-message-error">{detail || title}</small>}
+      {incoming && cancelled && <small>{t('timeline.status.cancelled')}</small>}
+      {!incoming && <small className="cross-chat-exchange-state" role="status">{t(legacyOutgoingDeliveryStatus(status, displayEvent.type))}</small>}
+      {bodyError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotLoadFullMessage')} {bodyError}</small>}
+      {cancelError && <small className="cross-chat-message-error" role="alert">{t('timeline.ui.couldNotCancelHandoff')} {cancelError}</small>}
+      {canCancel && <button type="button" className="cross-chat-message-expand" disabled={cancelling} onClick={() => void cancelHandoff()}>{cancelling ? t('timeline.ui.cancelling') : t('timeline.ui.cancelHandoff')}</button>}
     </div>
   </article>
 }

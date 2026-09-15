@@ -1,6 +1,7 @@
 // Localized display strings use semantic catalog keys.
 import { t } from '@shared/i18n'
 import { useLocale } from './lib/i18n'
+import { saveLocalStorage, verifyLocalStorageWritable } from './lib/local-storage'
 import {
   useCallback,
   useEffect,
@@ -120,6 +121,7 @@ export function App() {
   const codexControlsCapability = codexControlsAvailable ? AVAILABLE_CODEX_CONTROLS : null
   const claudeControlsCapability = claudeControlsAvailable ? AVAILABLE_CLAUDE_CONTROLS : null
   const error = useAppStore(state => state.error)
+  const storageFull = useAppStore(state => state.storageFull)
   const activeProfileKey = rendererWorkspaceKey(activeProfileId, activeServerIdentity)
   const activeRenderKey = `${activeProfileKey}:generation:${profileGeneration}`
   const selectedWorkspaceKey = selectedSessionId ? profileSessionKey(activeProfileId, selectedSessionId, activeServerIdentity) : `${activeProfileKey}:empty`
@@ -141,6 +143,26 @@ export function App() {
   const splitWorkspaceOverlayRef = useRef<HTMLDivElement | null>(null)
   const [splitWorkspaceTarget, setSplitWorkspaceTarget] = useState<SplitWorkspaceTarget | null>(null)
   const [slowBoot, setSlowBoot] = useState(false)
+  const [retryingStorage, setRetryingStorage] = useState(false)
+  useEffect(() => {
+    const failed = () => { useAppStore.setState({ storageFull: true }) }
+    window.addEventListener('agentsdock:storage-full', failed)
+    return () => window.removeEventListener('agentsdock:storage-full', failed)
+  }, [])
+  const retryStorage = async (): Promise<void> => {
+    if (retryingStorage) return
+    setRetryingStorage(true)
+    try {
+      await window.agentsDock.native.retryStorage()
+      verifyLocalStorageWritable()
+      await flushActiveWorkspace()
+      useAppStore.setState({ storageFull: false, error: null })
+      const state = useAppStore.getState()
+      if (state.selectedSessionId) await state.selectSession(state.selectedSessionId, true)
+    } catch (error) {
+      useAppStore.setState({ storageFull: true, error: error instanceof Error ? error.message : t('storage.closeFailed') })
+    } finally { setRetryingStorage(false) }
+  }
   const [fileDropActive, setFileDropActive] = useState(false)
   const [teamspaceScopeKey, setTeamspaceScopeKey] = useState<string | null>(null)
   const [teamspaceInitialSection, setTeamspaceInitialSection] = useState<TeamNetworkSection>('mail')
@@ -176,7 +198,7 @@ export function App() {
     const scopedKey = profileSessionKey(activeProfileId, sessionId, activeServerIdentity)
     setTerminalOpenBySession(current => {
       const next = { ...current, [scopedKey]: open }
-      localStorage.setItem('agentsdock:terminal-open', JSON.stringify(next))
+      saveLocalStorage('agentsdock:terminal-open', JSON.stringify(next))
       return next
     })
   }, [activeProfileId, activeServerIdentity])
@@ -428,7 +450,7 @@ export function App() {
       if (Object.prototype.hasOwnProperty.call(current, scopedKey) || !Object.prototype.hasOwnProperty.call(current, selectedSessionId)) return current
       const next = { ...current, [scopedKey]: current[selectedSessionId] }
       delete next[selectedSessionId]
-      localStorage.setItem('agentsdock:terminal-open', JSON.stringify(next))
+      saveLocalStorage('agentsdock:terminal-open', JSON.stringify(next))
       return next
     })
   }, [activeProfileId, activeServerIdentity, selectedSessionId])
@@ -439,7 +461,7 @@ export function App() {
     setTerminalOpenBySession(current => {
       if (!current[scopedKey]) return current
       const next = { ...current, [scopedKey]: false }
-      localStorage.setItem('agentsdock:terminal-open', JSON.stringify(next))
+      saveLocalStorage('agentsdock:terminal-open', JSON.stringify(next))
       return next
     })
   }, [activeProfileId, activeServerIdentity, selectedSession?.id, selectedSession?.archived, terminalOpenBySession])
@@ -621,10 +643,8 @@ export function App() {
       if (closingWindowRef.current) return
       closingWindowRef.current = true
       void flushActiveWorkspace()
-        .catch(error => window.agentsDock.native.log('persistence', 'workspace flush before close failed', {
-          message: error instanceof Error ? error.message : String(error)
-        }))
         .then(() => window.agentsDock.native.closeWindow())
+        .catch(() => { useAppStore.getState().setError(t('storage.closeFailed')) })
         .finally(() => { closingWindowRef.current = false })
     }
     window.addEventListener('agentsdock:close-surface', closeSurface)
@@ -632,14 +652,17 @@ export function App() {
   }, [dismissSplitWorkspace, focusedChatPane, reviewTarget, selectedSessionId, setTerminalOpen, splitOpen, teamspaceOpen, terminalOpen])
   useEffect(() => window.agentsDock.events.on('native:close-request', ({ requestId }) => {
     void (async () => {
+      let saved = false
       try {
         await flushActiveWorkspace()
+        saved = true
       } catch (error) {
+        useAppStore.getState().setError(t('storage.closeFailed'))
         await window.agentsDock.native.log('persistence', 'workspace flush before native close failed', {
           message: error instanceof Error ? error.message : String(error)
         }).catch(() => undefined)
       } finally {
-        await window.agentsDock.native.completeCloseFlush(requestId).catch(error => (
+        await window.agentsDock.native.completeCloseFlush(requestId, saved).catch(error => (
           window.agentsDock.native.log('persistence', 'native close flush acknowledgement failed', {
             requestId,
             message: error instanceof Error ? error.message : String(error)
@@ -883,9 +906,13 @@ export function App() {
         session={selectedSession}
         onRequestClose={closeTerminal}
       />}
-      {error && <div className="error-toast" role="alert"><span>{error}</span><button type="button" aria-label={t("ui.App.App.dismiss_error_2db0466")} onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
+      {!storageFull && error && <div className="error-toast" role="alert"><span>{error}</span><button type="button" aria-label={t("ui.App.App.dismiss_error_2db0466")} onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
       <div className="top-right-notice-stack">
         <EmergencyNotice />
+        {storageFull && <div className="error-toast storage-full-notice" role="alert">
+          <span>{t('storage.fullWarning')}{error && <><br />{error}</>}</span>
+          <button type="button" disabled={retryingStorage} onClick={() => { void retryStorage() }}>{t('storage.retrySaving')}</button>
+        </div>}
         <UpdateNotice />
       </div>
       <Dialogs key={`dialogs:${activeRenderKey}`} />

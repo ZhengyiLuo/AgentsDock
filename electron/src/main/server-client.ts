@@ -5,6 +5,9 @@ import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
+import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
+import { chatShareCreateBody, chatShareId, chatShareMode, parseChatShareList, parseChatSharePreview, parseCreatedChatShare,
+  type ChatShareMode, type CreateChatShareInput } from '../shared/chat-shares'
 import { inferredFileContentType } from '../shared/file-content-type'
 import {
   LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT,
@@ -17,6 +20,7 @@ import type {
   AgentFile,
   AgentCrossChatRoute,
   AgentCrossChatRoutesSnapshot,
+  AgentTeamMailRoutesSnapshot,
   BulkImportSessionItem,
   BulkImportSessionResult,
   ChatReference,
@@ -37,6 +41,7 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -105,8 +110,17 @@ import { parseAgentTeamMessagesCapability, parseTeamBulletinAliasCapability, par
 import { PinRevisionConflictError } from './pin-sync'
 import { PORT_TUNNEL_SUBPROTOCOL } from './port-tunnel-manager'
 import { SecurePeerRequestAdmission } from './secure-peer-request-admission'
+import {
+  parseMailHintPacket, TEAM_MAIL_HINTS_MAX_PACKET_CHARS, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL,
+  type MailboxCoverage, type MailHintMailbox, type MailHintPacket
+} from '../shared/team-mail-hints'
+import { parseTeamActivityHintPacket, TEAM_ACTIVITY_HINTS_PROTOCOL, emptyBulletinCursor,
+  type BulletinChangeCursor, type TeamActivityHintPacket } from '../shared/team-bulletin-hints'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+// Snapshot scans have a server-side 30s deadline. Leave response/transport
+// headroom without extending unrelated requests or retrying a creation.
+const CHAT_SHARE_SNAPSHOT_TIMEOUT_MS = 40_000
 // The server gives its one-shot digest summarizer 180 seconds to finish.
 // Keep the client alive through that window plus response/network overhead.
 const DIGEST_PREVIEW_REQUEST_TIMEOUT_MS = 210_000
@@ -202,6 +216,7 @@ export interface TeamHubHostRoleRequest {
   confirmed: true
   server_name: string
   network_name?: string
+  require_existing_host?: true
 }
 
 export type TeamHubHostEnableRequest = TeamHubHostRoleRequest
@@ -403,6 +418,7 @@ export class AgentServerClient {
           expected_server_instance_id: input.expected_server_instance_id,
           confirmed: true,
           server_name: input.server_name,
+          ...(input.require_existing_host === true ? { require_existing_host: true } : {}),
           ...(input.network_name === undefined ? {} : { network_name: input.network_name })
         })
       },
@@ -684,6 +700,18 @@ export class AgentServerClient {
   }
   codexServerGoals(): Promise<CodexGoalsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/goals')
+  }
+  codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
+    return this.privilegedNativeRequest('/api/admin/codex/subagents')
+  }
+  setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
+    if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
+      throw new Error('Subagent limit must be a positive whole number or null for Codex default.')
+    }
+    return this.privilegedNativeRequest('/api/admin/codex/subagents', {
+      method: 'PUT',
+      body: JSON.stringify({ max_concurrent_threads_per_session: limit })
+    })
   }
   setCodexServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/goals', {
@@ -1178,19 +1206,30 @@ export class AgentServerClient {
     prompt: string,
     chatReferences?: ChatReference[],
     clientCapabilities?: string[],
-    teamReferences?: TeamReference[]
+    teamReferences?: TeamReference[],
+    expectedMessageRevision?: number
   ): Promise<boolean> {
     await this.patch(`/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}`, {
       prompt,
       ...(chatReferences ? { chat_references: chatReferences } : {}),
       ...(clientCapabilities ? { client_capabilities: clientCapabilities } : {}),
-      ...(teamReferences ? { team_references: teamReferences } : {})
+      ...(teamReferences ? { team_references: teamReferences } : {}),
+      ...(expectedMessageRevision !== undefined ? { expected_message_revision: expectedMessageRevision } : {})
     })
     return true
   }
 
   async agentHandoffRoutes(sessionId: string): Promise<AgentCrossChatRoutesSnapshot> {
-    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes`)
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-handoff-routes?unlimited_routes=true`)
+  }
+
+  agentTeamMailRoutes(sessionId: string): Promise<AgentTeamMailRoutesSnapshot> {
+    return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/agent-team-mail-routes`)
+  }
+
+  deleteAgentTeamMailRoute(sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResponse> {
+    const params = new URLSearchParams({ expected_revision: expectedRevision })
+    return this.delete(`/api/sessions/${encodeURIComponent(sessionId)}/agent-team-mail-routes/${encodeURIComponent(routeId)}?${params}`)
   }
 
   async searchAgentHandoffTargets(
@@ -1251,6 +1290,17 @@ export class AgentServerClient {
       {}
     )
     return response.handoff
+  }
+
+  async chatInbox(sessionId: string, cursor: string | null = null, limit = 25) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25 || cursor !== null && !/^\d+$/.test(cursor)) throw new Error('Invalid inbox page request.')
+    const query = new URLSearchParams({ limit: String(limit) })
+    if (cursor !== null) query.set('cursor', cursor)
+    return parseChatInboxPage(await this.get<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox?${query}`), sessionId, limit)
+  }
+
+  async deleteChatInboxMessage(sessionId: string, messageId: string) {
+    return parseChatInboxDelete(await this.delete<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/inbox/${encodeURIComponent(messageId)}`), sessionId, messageId)
   }
 
   async crossChatExchange(exchangeId: string): Promise<CrossChatExchange> {
@@ -2082,6 +2132,101 @@ export class AgentServerClient {
     return stop
   }
 
+  /** One metadata-only stream. Retries only follow transport failure, never idle polling. */
+  mailHintStream(
+    expectedServerIdentity: string,
+    mailbox: MailHintMailbox,
+    previousCursor: () => MailboxCoverage | null,
+    onPacket: (packet: TeamActivityHintPacket) => void,
+    onFatal: () => void,
+    onDisconnect: () => void = () => {},
+    activity?: { previousBulletin(): BulletinChangeCursor | null }
+  ): () => void {
+    const configuration = this.configuration
+    const protocol = activity ? TEAM_ACTIVITY_HINTS_PROTOCOL : TEAM_MAIL_HINTS_PROTOCOL
+    const endpoint = new URL(configurationURL(configuration, TEAM_MAIL_HINTS_PATH))
+    endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:'
+    let stopped = false
+    let socket: WebSocket | null = null
+    let retry: NodeJS.Timeout | null = null
+    let watchdog: NodeJS.Timeout | null = null
+    let delay = 500
+    const clearWatchdog = (): void => { if (watchdog) clearTimeout(watchdog); watchdog = null }
+    const stop = (): void => {
+      if (stopped) return
+      stopped = true
+      if (retry) clearTimeout(retry)
+      retry = null
+      clearWatchdog()
+      configuration.transports.delete(stop)
+      socket?.close()
+    }
+    const fatal = (): void => { stop(); onFatal() }
+    const connect = (): void => {
+      if (stopped) return
+      retry = null
+      const current = new WebSocket(endpoint, [protocol, ...agentTokenWebSocketProtocols(configuration.token)])
+      socket = current
+      let disconnected = false
+      let first: MailHintPacket | null = null
+      let offered: MailboxCoverage | null = null
+      const active = (): boolean => !stopped && !disconnected && socket === current
+      const disconnect = (): void => {
+        if (!active()) return
+        disconnected = true
+        clearWatchdog()
+        onDisconnect()
+        retry = setTimeout(connect, delay + Math.floor(Math.random() * Math.min(250, delay / 3)))
+        delay = Math.min(10_000, delay * 2)
+      }
+      // Includes the first authenticated snapshot, not merely TCP connection.
+      // Member bootstrap may wait 15s for its feed, 10s for exact retained-
+      // anchor proof and 5s for its first write; retain 5s scheduling margin.
+      // This bounds bootstrap only, never idle.
+      watchdog = setTimeout(() => { if (active()) { disconnect(); current.close() } }, 35_000)
+      current.addEventListener('open', () => {
+        if (!active()) return
+        try {
+          if (current.protocol !== protocol) throw new Error('Mail protocol was not negotiated')
+          offered = previousCursor()
+          const previous = activity && offered ? { version: 2,
+            mail: { ...offered, reset: false },
+            bulletin: { ...(activity.previousBulletin() ?? emptyBulletinCursor(mailbox.team_id)), reset: false }
+          } : offered
+          current.send(JSON.stringify({ version: activity ? 2 : 1, team_id: mailbox.team_id, previous_cursor: previous }))
+        } catch { fatal() }
+      })
+      current.addEventListener('message', message => {
+        if (!active()) return
+        try {
+          if (typeof message.data !== 'string' || message.data.length > TEAM_MAIL_HINTS_MAX_PACKET_CHARS) throw new Error('Invalid packet')
+          const packet = activity ? parseTeamActivityHintPacket(JSON.parse(message.data)) : parseMailHintPacket(JSON.parse(message.data))
+          if (packet.server_identity !== expectedServerIdentity || packet.hub_id !== mailbox.hub_id
+            || packet.cursor.team_id !== mailbox.team_id
+            || (mailbox.recipient_server_id !== null && packet.cursor.recipient_server_id !== mailbox.recipient_server_id)) throw new Error('Scope changed')
+          if (!first) {
+            if (packet.type !== 'snapshot' || (offered && offered.recipient_server_id !== packet.cursor.recipient_server_id && !packet.cursor.reset)) throw new Error('Invalid snapshot')
+            first = packet
+            delay = 500
+            clearWatchdog()
+          } else if (packet.type !== 'hint' || packet.stream_id !== first.stream_id
+            || packet.cursor.recipient_server_id !== first.cursor.recipient_server_id) throw new Error('Stream changed')
+          onPacket(packet)
+        } catch { fatal() }
+      })
+      current.addEventListener('close', event => {
+        if (!active()) return
+        if ([1008, 4401, 4403, 4406].includes(event.code)) fatal()
+        else disconnect()
+      })
+      current.addEventListener('error', () => { if (active()) { disconnect(); current.close() } })
+    }
+    configuration.transports.add(stop)
+    if (configuration.abortController.signal.aborted) stop()
+    else connect()
+    return stop
+  }
+
   private get<T>(path: string, configuration = this.configuration, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, maxResponseBytes?: number): Promise<T> {
     return this.request(path, { signal: AbortSignal.timeout(timeoutMs) }, configuration, maxResponseBytes)
   }
@@ -2147,13 +2292,14 @@ export class AgentServerClient {
     path: string,
     init: RequestInit = {},
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-    expectedStatus?: number
+    expectedStatus?: number,
+    maxResponseBytes?: number
   ): Promise<T> {
     const configuration = this.configuration
     const target = new URL(configurationURL(configuration, path))
     const server = new URL(configuration.baseURL)
     const serverPrefix = server.pathname === '/' ? '' : server.pathname
-    const method = securePeerMethod(init.method ?? 'GET', ['GET', 'POST', 'PUT'])
+    const method = securePeerMethod(init.method ?? 'GET', ['GET', 'POST', 'PUT', 'DELETE'])
     if (!isPrivilegedNativeControlTarget(target, server, serverPrefix, method)) {
       throw new Error('Privileged native control route is invalid.')
     }
@@ -2162,6 +2308,7 @@ export class AgentServerClient {
       method,
       headers: privilegedNativeTransportHeaders(configuration.token, body),
       body,
+      maxResponseBytes,
       signal: combineAbortSignals(
         configuration.abortController.signal,
         init.signal,
@@ -2202,6 +2349,40 @@ export class AgentServerClient {
       throw new ServerError(response.status, detail, rawDetail)
     }
     return response.text()
+  }
+
+  private chatSharePath(sessionId: string, mode: ChatShareMode): string {
+    return `/api/admin/${chatShareMode(mode) === 'snapshot' ? 'chat-shares' : 'interactive-chat-shares'}/${chatShareId(sessionId)}`
+  }
+
+  async previewChatShare(sessionId: string) {
+    return parseChatSharePreview(await this.privilegedNativeRequest(`${this.chatSharePath(sessionId, 'snapshot')}/preview`,
+      { method: 'POST', body: '{}' }, CHAT_SHARE_SNAPSHOT_TIMEOUT_MS, 200, 4 * 1024 * 1024))
+  }
+
+  async listChatShares(sessionId: string, mode: ChatShareMode) {
+    return parseChatShareList(await this.privilegedNativeRequest(this.chatSharePath(sessionId, mode), {}, DEFAULT_REQUEST_TIMEOUT_MS, 200, 256 * 1024), mode)
+  }
+
+  async createChatShare(sessionId: string, input: CreateChatShareInput) {
+    // The operator may choose another address for the browser link (e.g. LAN
+    // instead of VPN). It is body data only: management and native credentials
+    // stay on the existing authenticated connection, with no alias probing.
+    const requested = chatShareCreateBody(input)
+    const body = { ...requested, base_url: requested.base_url ?? new URL(this.configuration.baseURL).origin }
+    const created = parseCreatedChatShare(await this.privilegedNativeRequest(this.chatSharePath(sessionId, input.mode),
+      { method: 'POST', body: JSON.stringify(body) }, input.mode === 'snapshot' ? CHAT_SHARE_SNAPSHOT_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS, 201, 32 * 1024), input.mode)
+    if ((created.url === null && requested.base_url !== undefined)
+      || (created.url !== null && new URL(created.url).origin !== body.base_url)) {
+      throw new Error('The server did not confirm the selected share address. Check Existing shares before creating another link.')
+    }
+    return created
+  }
+
+  async revokeChatShare(sessionId: string, mode: ChatShareMode, shareId: string): Promise<void> {
+    const value = await this.privilegedNativeRequest<{ revoked?: boolean }>(`${this.chatSharePath(sessionId, mode)}/${chatShareId(shareId)}`,
+      { method: 'DELETE' }, DEFAULT_REQUEST_TIMEOUT_MS, 200, 8192)
+    if (value?.revoked !== true) throw new Error('Share revocation was not confirmed.')
   }
 
   private async request<T>(path: string, init: RequestInit = {}, configuration = this.configuration, maxResponseBytes?: number): Promise<T> {
@@ -2689,7 +2870,10 @@ function isPrivilegedNativeControlTarget(
     || !target.pathname.startsWith(`${serverPrefix}/api/admin/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
-  if (path === '/api/admin/codex/goals') {
+  const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
+  if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'
+    : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')
+  if (path === '/api/admin/codex/goals' || path === '/api/admin/codex/subagents') {
     return !target.search && (method === 'GET' || method === 'PUT')
   }
   if (path === '/api/admin/update') {

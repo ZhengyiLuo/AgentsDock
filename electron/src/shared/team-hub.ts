@@ -49,6 +49,8 @@ export interface TeamHubConfigureServerRoleInput {
   serverName: string
   /** Supplied only when explicitly creating a fresh server-owned network. */
   networkName?: string
+  /** Rename an existing Host only; never enable or change a server role. */
+  renameOnly?: true
 }
 
 export interface TeamHubDiscovery {

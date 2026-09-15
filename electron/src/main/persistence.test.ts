@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Event, Job, PinnedItem, Session } from '../shared/types'
 import { TOOL_OUTPUT_PREVIEW_CHARS } from '../shared/event-compaction'
 
@@ -38,6 +42,20 @@ function cacheDatabase(value: LocalCache): DatabaseSync {
   return (value as unknown as { db: DatabaseSync }).db
 }
 
+function assistantReplay(backend: 'claude' | 'codex', type: 'assistant_text' | 'reasoning_summary'): { legacy: Event; repaired: Event } {
+  const legacy: Event = { ...event('chat', 0, '✅ Synthetic scheduled report'), type, backend,
+    run_id: 'import_history', imported: true,
+    provider_origin: { provider: backend, kind: 'assistant', event_id: 'provider-item',
+      session_id: 'provider-thread', timestamp: '2026-07-13T12:00:00Z' } }
+  const repaired: Event = { ...legacy, text: '', metadata_only: true,
+    provider_history_repair: backend === 'codex' ? 'source_proven_native_replay' : 'source_proven_assistant_replay',
+    provider_origin: { ...legacy.provider_origin!, ...(backend === 'codex' ? {
+      turn_id: 'provider-turn', native_event_id: 'native-answer',
+      source_text_sha256: createHash('sha256').update(legacy.text!).digest('hex')
+    } : {}) } }
+  return { legacy, repaired }
+}
+
 afterEach(() => {
   while (openCaches.length) openCaches.pop()?.close()
 })
@@ -60,7 +78,130 @@ describe('prepared statement reuse', () => {
   })
 })
 
+describe('source-proven import repair persistence', () => {
+  it.each(['claude', 'codex'] as const)('retains %s assistant repairs after stale replay and reopening SQLite', backend => {
+    const folder = mkdtempSync(join(tmpdir(), 'agentsdock-repair-cache-'))
+    const path = join(folder, 'cache.sqlite3')
+    let value: LocalCache | null = new LocalCache(path)
+    try {
+      value.putSession('server', session('chat'))
+      const pairs = (['assistant_text', 'reasoning_summary'] as const).map((type, index) => {
+        const pair = assistantReplay(backend, type)
+        const position = { id: `imported-answer-${index}`, seq: index + 1 }
+        return { legacy: { ...pair.legacy, ...position }, repaired: { ...pair.repaired, ...position } }
+      })
+      value.putEvents('server', 'chat', pairs.map(pair => pair.legacy))
+      value.putEvents('server', 'chat', pairs.map(pair => pair.repaired))
+      value.putEvents('server', 'chat', pairs.map(pair => pair.legacy))
+      expect(value.snapshot('server', 'chat')?.events).toEqual(pairs.map(pair => pair.repaired))
+      value.close()
+      value = null
+      value = new LocalCache(path)
+      expect(value.snapshot('server', 'chat')?.events).toEqual(pairs.map(pair => pair.repaired))
+      expect(value.searchEvents('server', 'chat', 'scheduled')).toHaveLength(0)
+    } finally {
+      value?.close()
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps distinct assistant identities, server/chat scopes, changed bodies and authorship visible', () => {
+    const value = cache()
+    const { legacy, repaired } = assistantReplay('codex', 'assistant_text')
+    for (const serverId of ['server', 'other-server']) {
+      value.putSession(serverId, session('chat'))
+      value.putSession(serverId, session('other-chat'))
+    }
+    value.putEvents('server', 'chat', [repaired])
+    value.putEvents('other-server', 'chat', [legacy])
+    value.putEvents('server', 'other-chat', [{ ...legacy, session_id: 'other-chat' }])
+    value.putEvents('server', 'chat', [{ ...legacy, id: 'different-event', seq: 2 }])
+    expect(value.snapshot('other-server', 'chat')?.events).toEqual([legacy])
+    expect(value.snapshot('server', 'other-chat')?.events[0].text).toBe(legacy.text)
+    expect(value.snapshot('server', 'chat')?.events[1].text).toBe(legacy.text)
+    for (const change of [{ text: 'A different full report' }, { provider_user_authored: true },
+      { run_id: 'import_other' }, { ts: '2026-07-13T12:01:00Z' }]) {
+      value.putEvents('server', 'chat', [repaired])
+      value.putEvents('server', 'chat', [{ ...legacy, ...change }])
+      expect(value.snapshot('server', 'chat')?.events[0]).toEqual({ ...legacy, ...change })
+    }
+    const claude = assistantReplay('claude', 'assistant_text')
+    const changedOrigin: Event = { ...claude.legacy,
+      provider_origin: { ...claude.legacy.provider_origin!, event_id: 'different-source-item' } }
+    value.putEvents('server', 'chat', [claude.repaired])
+    value.putEvents('server', 'chat', [changedOrigin])
+    expect(value.snapshot('server', 'chat')?.events[0]).toEqual(changedOrigin)
+  })
+
+  it.each(['subagent_notification', 'turn_aborted', 'provider_notice'] as const)('keeps a complete Codex %s repair across stale long input and preserves a genuine quotation', kind => {
+    const value = cache()
+    value.putSession('server', session('chat'))
+    const prompt = `<${kind}>${JSON.stringify({ agent_path: 'synthetic-worker',
+      status: { completed: 'Synthetic result '.repeat(1500) } })}</${kind}>`
+    const legacy: Event = { ...event('chat', 0, ''), type: 'turn_started', backend: 'codex',
+      run_id: 'import_history', imported: true, prompt }
+    const repaired: Event = { ...legacy, prompt: '', metadata_only: true, provider_runtime_context: kind,
+      provider_origin: { provider: 'codex', kind, event_id: 'provider-item',
+        session_id: 'provider-thread', turn_id: 'provider-turn', timestamp: '2026-09-11T09:58:00.125Z',
+        source_text_sha256: createHash('sha256').update(prompt).digest('hex') } }
+    const manual: Event = { ...legacy, id: 'human-quote', seq: 2, provider_user_authored: true }
+    value.putEvents('server', 'chat', [legacy, manual])
+    value.putEvents('server', 'chat', [repaired])
+    value.putEvents('server', 'chat', [legacy])
+    const saved = value.snapshot('server', 'chat')?.events
+    expect(saved?.[0]).toEqual(repaired)
+    expect(saved?.[1]).toMatchObject({ id: 'human-quote', provider_user_authored: true, prompt })
+    value.putEvents('server', 'chat', [{ ...legacy, provider_user_authored: true }])
+    expect(value.snapshot('server', 'chat')?.events[0]).toMatchObject({ provider_user_authored: true, prompt })
+  })
+
+  it('keeps an exact repair through stale replay and cached snapshots without touching manual text', () => {
+    const value = cache()
+    value.putSession('server', session('chat'))
+    const prompt = 'scheduled monitor '.repeat(800)
+    const legacy: Event = { ...event('chat', 0, ''), type: 'turn_started', backend: 'claude',
+      run_id: 'import_history', imported: true, prompt }
+    const repaired: Event = { ...legacy, prompt: '', provider_history_repair: 'source_proven_import' }
+    const manual: Event = { ...event('chat', 1, ''), type: 'turn_started', backend: 'claude',
+      prompt: prompt + ' genuine manual tail' }
+    value.putEvents('server', 'chat', [legacy, manual])
+    value.putEvents('server', 'chat', [repaired])
+    value.putEvents('server', 'chat', [legacy])
+    expect(value.snapshot('server', 'chat')?.events).toEqual([repaired, manual])
+    expect(value.searchEvents('server', 'chat', 'scheduled')).toHaveLength(1)
+  })
+})
+
 describe('transaction error preservation', () => {
+  it('atomically invalidates only upgraded-server verification while preserving data and rollback', () => {
+    const value = cache()
+    const database = cacheDatabase(value)
+    for (const serverId of ['server', 'unrelated']) {
+      value.putSession(serverId, { ...session('chat'), last_read_agent_event_seq: 8 })
+      value.putEvents(serverId, 'chat', [event('chat', 0, 'Cached content remains available')])
+      value.putTimelineState(serverId, 'chat', false, 8, 1, null, true)
+      value.putPreference(serverId, 'draft:chat', 'Unsaved user draft')
+      value.recordServerVersion(serverId, '0.1.26-beta.60')
+    }
+    const before = value.snapshot('server', 'chat')
+    database.exec(`CREATE TRIGGER fail_version_write BEFORE UPDATE ON preferences
+      WHEN NEW.key = 'serverVersion:v1'
+      BEGIN SELECT RAISE(ABORT, 'SQLITE_FULL: injected version write'); END;`)
+    expect(() => value.recordServerVersion('server', '0.1.26-beta.61')).toThrow('SQLITE_FULL')
+    expect(value.preference('server', 'serverVersion:v1', '')).toBe('0.1.26-beta.60')
+    expect(value.timelineState('server', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+    expect(value.snapshot('server', 'chat')).toEqual(before)
+    database.exec('DROP TRIGGER fail_version_write')
+    expect(value.recordServerVersion('server', '0.1.26-beta.61')).toBe(true)
+    expect(value.timelineState('server', 'chat')?.pagingSchemaVersion).toBeNull()
+    expect(value.timelineState('unrelated', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+    expect(value.snapshot('server', 'chat')).toMatchObject({ events: before!.events, session: before!.session })
+    expect(value.preference('server', 'draft:chat', '')).toBe('Unsaved user draft')
+    value.putTimelineState('server', 'chat', false, 8, 1, null, true)
+    expect(value.recordServerVersion('server', '0.1.26-beta.61')).toBe(false)
+    expect(value.timelineState('server', 'chat')?.pagingSchemaVersion).toBe(TIMELINE_PAGING_SCHEMA_VERSION)
+  })
+
   it('keeps the primary write error when SQLite has already rolled back the transaction', () => {
     const value = cache()
     const database = cacheDatabase(value)

@@ -87,4 +87,19 @@ describe('native window close persistence handshake', () => {
     expect(target.nativeClose).toHaveBeenCalledOnce()
     expect(target.send).not.toHaveBeenCalled()
   })
+
+  it('cancels a known failed save and its timeout, then permits a later successful retry', () => {
+    const target = fakeWindow()
+    installWindowCloseFlush(target.window, { timeoutMs: 250 })
+    target.close()
+    const requestId = target.send.mock.calls[0][1].requestId as string
+    expect(acknowledgeWindowCloseFlush(target.window, requestId, false)).toBe(false)
+    vi.advanceTimersByTime(1_000)
+    expect(target.nativeClose).not.toHaveBeenCalled()
+    target.close()
+    const retriedId = target.send.mock.calls[1][1].requestId as string
+    expect(acknowledgeWindowCloseFlush(target.window, retriedId, true)).toBe(true)
+    vi.runOnlyPendingTimers()
+    expect(target.nativeClose).toHaveBeenCalledOnce()
+  })
 })

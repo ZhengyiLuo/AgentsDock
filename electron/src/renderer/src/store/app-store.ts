@@ -5,12 +5,15 @@ import type {
   ServerForceRestartConfirmation, TimelinePage, UpdateServerProfilePatch, WorkspaceProfileScope
 } from '@shared/types'
 import { updateQueuedTurns as reduceQueuedTurns } from '@shared/queue'
+import type { TeamHubScope } from '@shared/team-hub'
+import { mailHintPending, type MailArrivalCursor, type MailboxCoverage, type MailHintProjection, type MailHintScope } from '@shared/team-mail-hints'
+import { bulletinHintPending, type BulletinHintRefresh } from '@shared/team-bulletin-hints'
 import { runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
 import { isAsyncCrossChatMessage, isNativeGoalSteerEvent, isNativeSteerTransitionStop, timelineSemanticUnits } from '@shared/semantic-timeline'
 import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
 import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot } from '@shared/session-files'
-import { isImportedClaudeControlCompanion, isImportedCodexGoalContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
+import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
 import { trackEvent } from '../lib/analytics'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
@@ -56,6 +59,8 @@ const LEGACY_HISTORY_EVENT_LIMIT = 480
 const TIMELINE_CACHE_TIMEOUT_MS = 2_000
 const PROFILE_REFRESH_TIMEOUT_MS = 45_000
 const PROFILE_RECOVERY_TIMEOUT_MS = 3_000
+const MAX_BUFFERED_MAIL_HINT_SCOPES = 8
+const bufferedMailHints = new Map<string, MailHintProjection>()
 
 interface ModalState {
   settings: boolean
@@ -147,6 +152,7 @@ interface AppState {
   activeProfileId: string | null
   profileGeneration: number
   switchingProfileId: string | null
+  mailHints: MailHintProjection | null
   connected: boolean
   connectionGeneration: number
   connectionError: string | null
@@ -182,6 +188,7 @@ interface AppState {
   activeSessionIds: Set<string>
   turnAdmissionTokens: Record<string, string>
   stoppingSessionIds: Set<string>
+  storageFull: boolean
   error: string | null
   creatingChat: boolean
   modals: ModalState
@@ -358,6 +365,10 @@ const olderLoads = new Map<string, Promise<number>>()
 const prefetchLoads = new Map<string, Promise<void>>()
 const snapshotAccess = new Map<string, number>()
 const pendingLiveEvents = new Map<string, PendingLiveEventBatch>()
+interface LiveActivityHint { active: boolean; runId?: string | null }
+const liveEventActivityHints = new WeakMap<Event, LiveActivityHint>()
+const liveEventActivityEpochs = new WeakMap<Event, number>()
+let liveActivityAuthorityEpoch = 0
 const timelineDeferredEvents = new Map<string, DeferredTimelineEventBatch>()
 const queuedTurnsRequestLeases = new Map<string, number>()
 const readStateMutationLeases = new Map<string, number>()
@@ -425,6 +436,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeProfileId: null,
   profileGeneration: 0,
   switchingProfileId: null,
+  storageFull: false,
+  mailHints: null,
   connected: false,
   connectionGeneration: 0,
   connectionError: null,
@@ -481,6 +494,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     pendingLiveEvents.clear()
     queuedTurnsRequestLeases.clear()
     for (const unsubscribe of unsubscribers) unsubscribe()
+    bufferedMailHints.clear()
     // The main process starts its health refresh concurrently with this
     // cached bootstrap. A connection event can therefore arrive before the
     // bootstrap establishes the renderer's active profile, or after the
@@ -501,6 +515,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           : payload)
       }
       if (!profileEventMatches(payload, get())) return
+      // Explicit main-process Health already reconciles events that arrived
+      // during its request. Pending transcript batches must not apply their
+      // older activity hints afterward. Do not flush heavy rendering here.
+      if (payload.health) liveActivityAuthorityEpoch += 1
       const version = payload.health?.api_contract_version ?? MINIMUM_AGENT_API_CONTRACT
       const incompatible = version < MINIMUM_AGENT_API_CONTRACT
       const error = incompatible ? `Server upgrade required: this app needs agent API v${MINIMUM_AGENT_API_CONTRACT}, but the server reports v${version}.` : payload.error ?? null
@@ -525,7 +543,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const websocketUnavailable = health?.websocket_runtime === false
       const websocketError = websocketUnavailable ? WEBSOCKET_RUNTIME_ERROR : null
-      const incomingActiveSessionIds = healthActiveSessionIDs(health)
+      // A connection-only notice carries no new activity evidence. Reusing
+      // cached Health here used to erase a newer streamed turn_started.
+      const incomingActiveSessionIds = payload.health
+        ? healthActiveSessionIDs(health)
+        : current.activeSessionIds
       const syncStatus = websocketUnavailable && current.selectedSessionId
         ? 'error'
         : !connected && current.selectedSessionId
@@ -605,6 +627,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     unsubscribers = [
       installLatencySensitiveInteractionTracking(),
+      window.agentsDock.events.on('app:storage', payload => { if (payload.full) set({ storageFull: true }) }),
+      window.agentsDock.events.on('team:mail-hints', payload => {
+        const current = get()
+        if (bufferingBootstrapConnections || current.switchingProfileId
+          || !current.profiles.find(profile => profile.id === current.activeProfileId)?.serverIdentity) {
+          bufferMailHintProjection(payload)
+        }
+        if (current.switchingProfileId) return
+        const mailHints = mergeMailHintProjections(current, current.mailHints, payload)
+        if (mailHints !== current.mailHints) set({ mailHints })
+      }),
       window.agentsDock.events.on('server:connection', handleServerConnection),
       window.agentsDock.events.on('server:sync', payload => {
         const current = get()
@@ -776,7 +809,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (current.switchingProfileId || payload.activeProfileId !== current.activeProfileId || payload.profileGeneration < current.profileGeneration) return
         if (payload.profileGeneration !== current.profileGeneration) {
           clearProfileVolatileState()
-          set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, stoppingSessionIds: new Set() })
+          set({ profiles: payload.profiles, profileGeneration: payload.profileGeneration, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles, profileGeneration: payload.profileGeneration }, current.mailHints), forwardedPorts: [], forwardedPortsRevision: 0, loadingSessionIds: new Set(), loadingSessionId: null, syncBySession: {}, turnAdmissionTokens: {}, stoppingSessionIds: new Set() })
           queueMicrotask(() => void hydrateVisibleChatPanes(get))
         } else {
           const before = current.profiles.find(profile => profile.id === current.activeProfileId)
@@ -791,7 +824,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             })
             followWorkspaceRecovery(refreshProfileAfterBootstrap(current.activeProfileId!, current.profileGeneration, get, set, true))
           } else {
-            set({ profiles: payload.profiles })
+            set({ profiles: payload.profiles, mailHints: consumeBufferedMailHints({ ...current, profiles: payload.profiles }, current.mailHints) })
           }
         }
       }),
@@ -834,7 +867,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (discontinuity) scheduleTimelineRepair(sessionId, captureProfileScope(get()))
       }),
       window.agentsDock.events.on('server:event', payload => {
-        if (profileEventMatches(payload, get())) enqueueLiveEvent(payload.event)
+        if (profileEventMatches(payload, get())) enqueueLiveEvent(payload.event,
+          typeof payload.activeSession === 'boolean'
+            ? { active: payload.activeSession, runId: payload.activeRunId }
+            : undefined)
       }),
       window.agentsDock.events.on('native:notification', route => {
         void openProfileNotificationRoute(route, get).catch(error => get().setError(errorMessage(error)))
@@ -896,6 +932,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!force && current.activeProfileId === profileId && !current.switchingProfileId) return true
     const workspaceTransition = beginWorkspaceTransition()
     const intent = ++profileSwitchIntent
+    bufferedMailHints.clear()
     void window.agentsDock.native?.log?.('server-switch', 'switch requested', {
       fromProfileId: current.activeProfileId,
       toProfileId: profileId,
@@ -924,7 +961,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await flushActiveWorkspace()
     } catch (error) {
       if (intent !== profileSwitchIntent) return false
-      set({ switchingProfileId: null, error: errorMessage(error) })
+      set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
       throw error
     }
     if (intent !== profileSwitchIntent) return false
@@ -960,7 +997,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           profileId,
           error: errorMessage(error)
         })
-        set({ switchingProfileId: null, error: errorMessage(error) })
+        set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
         throw error
       }
       return false
@@ -988,6 +1025,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const profileId = current.activeProfileId
     const workspaceTransition = beginWorkspaceTransition()
     const intent = ++profileSwitchIntent
+    bufferedMailHints.clear()
     pendingNamespaceAdoption = null
     set(state => ({
       switchingProfileId: profileId,
@@ -1012,7 +1050,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       workspaceTransition.finish()
       if (intent !== profileSwitchIntent) return false
-      set({ switchingProfileId: null, error: errorMessage(error) })
+      set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
       throw error
     }
     if (intent !== profileSwitchIntent) {
@@ -1041,7 +1079,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return true
     } catch (error) {
       if (intent === profileSwitchIntent && requestEpoch === profileSwitchEpoch) {
-        set({ switchingProfileId: null, error: errorMessage(error) })
+        set({ switchingProfileId: null, mailHints: consumeBufferedMailHints({ ...get(), switchingProfileId: null }, get().mailHints), error: errorMessage(error) })
         throw error
       }
       return false
@@ -1543,7 +1581,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? [reference.session_id]
           : []
       )))
-      if (routeSnapshot.routes.length + pendingTargetIds.size > routeSnapshot.max_routes) {
+      if (routeSnapshot.max_routes !== null && routeSnapshot.routes.length + pendingTargetIds.size > routeSnapshot.max_routes) {
         set({ error: `This chat has reached its route access limit (${routeSnapshot.max_routes} ${routeSnapshot.max_routes === 1 ? 'route' : 'routes'} maximum). Revoke a granted route before adding another chat.` })
         return false
       }
@@ -2535,6 +2573,130 @@ async function openProfileNotificationRoute(route: ProfileNotificationRoute, get
     && after.selectedSessionId === route.sessionId
 }
 
+type MailHintBinding = Pick<AppState, 'activeProfileId' | 'profileGeneration' | 'profiles' | 'switchingProfileId'>
+
+function mailHintProjectionMatches(projection: MailHintProjection | null | undefined, binding: MailHintBinding): projection is MailHintProjection {
+  if (!projection || !Number.isSafeInteger(projection.revision) || projection.revision < 0
+    || !profileEventMatches(projection, binding)) return false
+  const scope = projection.state?.scope
+  return projection.state === null || Boolean(scope
+    && scope.profileId === projection.profileId && scope.profileGeneration === projection.profileGeneration
+    && scope.serverIdentity === binding.profiles.find(profile => profile.id === binding.activeProfileId)?.serverIdentity)
+}
+
+function mergeMailHintProjections(binding: MailHintBinding, ...projections: (MailHintProjection | null | undefined)[]): MailHintProjection | null {
+  let latest: MailHintProjection | null = null
+  for (const projection of projections) {
+    if (mailHintProjectionMatches(projection, binding) && (!latest || projection.revision > latest.revision)) latest = projection
+  }
+  return latest
+}
+
+function bufferMailHintProjection(projection: MailHintProjection): void {
+  if (!projection || typeof projection.profileId !== 'string' || projection.profileId.length > 240
+    || !Number.isSafeInteger(projection.profileGeneration) || projection.profileGeneration < 1
+    || !Number.isSafeInteger(projection.revision) || projection.revision < 0) return
+  const key = JSON.stringify([projection.profileId, projection.profileGeneration])
+  const previous = bufferedMailHints.get(key)
+  if (previous && previous.revision >= projection.revision) return
+  bufferedMailHints.delete(key)
+  bufferedMailHints.set(key, projection)
+  while (bufferedMailHints.size > MAX_BUFFERED_MAIL_HINT_SCOPES) bufferedMailHints.delete(bufferedMailHints.keys().next().value!)
+}
+
+function consumeBufferedMailHints(binding: MailHintBinding, ...projections: (MailHintProjection | null | undefined)[]): MailHintProjection | null {
+  const latest = mergeMailHintProjections(binding, ...projections, ...bufferedMailHints.values())
+  bufferedMailHints.clear()
+  return latest
+}
+
+function mailHintsFromBootstrap(payload: BootstrapPayload): MailHintProjection | null {
+  const binding: MailHintBinding = {
+    activeProfileId: payload.activeProfileId ?? null,
+    profileGeneration: payload.profileGeneration ?? 0,
+    profiles: payload.profiles ?? [],
+    switchingProfileId: null
+  }
+  return consumeBufferedMailHints(binding, useAppStore.getState().mailHints, payload.mailHints)
+}
+
+/** A scalar selector only: a hint never schedules a page, receipt, or refresh. */
+export function selectMailHintPending(state: MailHintBinding & Pick<AppState, 'mailHints'>): boolean {
+  return mailHintProjectionMatches(state.mailHints, state) && Boolean(state.mailHints.state && mailHintPending(state.mailHints.state))
+}
+
+export function selectBulletinHintPending(state: MailHintBinding & Pick<AppState, 'mailHints'>): boolean {
+  return mailHintProjectionMatches(state.mailHints, state) && Boolean(state.mailHints.bulletin && bulletinHintPending(state.mailHints.bulletin))
+}
+
+export function captureBulletinHintRefresh(hubScope: TeamHubScope, teamId: string): BulletinHintRefresh | null {
+  const current = useAppStore.getState()
+  const projection = current.mailHints
+  if (!mailHintProjectionMatches(projection, current) || !projection.bulletin || !projection.state
+    || !projection.state.initialized || projection.state.invalid) return null
+  const { scope, latest } = projection.bulletin
+  if (teamId !== scope.teamId || hubScope.hubIdentity !== scope.hubId
+    || hubScope.profileId !== scope.profileId || hubScope.profileGeneration !== scope.profileGeneration
+    || hubScope.serverIdentity !== scope.serverIdentity) return null
+  return { scope: { ...scope }, cursor: { ...latest } }
+}
+
+export async function acknowledgeBulletinHintRefresh(input: BulletinHintRefresh): Promise<void> {
+  const matches = (): boolean => {
+    const state = useAppStore.getState()
+    return mailHintProjectionMatches(state.mailHints, state) && Boolean(state.mailHints.bulletin
+      && sameMailHintScope(state.mailHints.bulletin.scope, input.scope))
+  }
+  if (!matches() || !window.agentsDock.mailHints?.acknowledgeBulletinRefresh) return
+  try {
+    const projection = await window.agentsDock.mailHints.acknowledgeBulletinRefresh(input)
+    if (!matches()) return
+    const current = useAppStore.getState()
+    const mailHints = mergeMailHintProjections(current, current.mailHints, projection)
+    if (mailHints !== current.mailHints) useAppStore.setState({ mailHints })
+  } catch { /* Optional local notification state must not fail a content refresh. */ }
+}
+
+export function sameMailHintScope(left: MailHintScope, right: MailHintScope): boolean {
+  return left.profileId === right.profileId && left.profileGeneration === right.profileGeneration
+    && left.serverIdentity === right.serverIdentity && left.streamId === right.streamId
+    && left.hubId === right.hubId && left.teamId === right.teamId && left.recipientServerId === right.recipientServerId
+}
+
+/** Capture at an existing user-request boundary, never subscribe a loader to hints. */
+export function captureMailHintScope(
+  hubScope: TeamHubScope,
+  query: { teamId: string; box: string; addressKind?: string; addressId?: string; unread?: boolean; fromKind?: string; fromId?: string; since?: string }
+): Readonly<MailHintScope> | null {
+  const current = useAppStore.getState()
+  const projection = current.mailHints
+  if (!mailHintProjectionMatches(projection, current) || !projection.state || projection.state.invalid) return null
+  const scope = projection.state.scope
+  if (query.unread || query.fromKind !== undefined || query.fromId !== undefined || query.since !== undefined
+    || query.box !== 'inbox' || query.addressKind !== 'server' || query.addressId !== scope.recipientServerId
+    || query.teamId !== scope.teamId || hubScope.hubIdentity !== scope.hubId
+    || hubScope.profileId !== scope.profileId || hubScope.profileGeneration !== scope.profileGeneration
+    || hubScope.serverIdentity !== scope.serverIdentity) return null
+  return Object.freeze({ ...scope })
+}
+
+/** Best-effort local seen metadata; failure must not fail an applied Mail page. */
+export async function acknowledgeMailHintPage(scope: MailHintScope, requestedAfter: MailArrivalCursor, coverage: MailboxCoverage): Promise<void> {
+  const matches = (): boolean => {
+    const current = useAppStore.getState()
+    return mailHintProjectionMatches(current.mailHints, current) && Boolean(current.mailHints.state
+      && !current.mailHints.state.invalid && sameMailHintScope(current.mailHints.state.scope, scope))
+  }
+  if (!matches() || !window.agentsDock.mailHints?.acknowledgePage) return
+  try {
+    const projection = await window.agentsDock.mailHints.acknowledgePage({ scope, requestedAfter, coverage })
+    if (!matches()) return
+    const current = useAppStore.getState()
+    const mailHints = mergeMailHintProjections(current, current.mailHints, projection)
+    if (mailHints !== current.mailHints) useAppStore.setState({ mailHints })
+  } catch { /* Reconnect/fresh page coverage can recover this passive hint. */ }
+}
+
 function workspaceStateFromBootstrap(
   payload: BootstrapPayload | ProfileBootstrapPayload,
   selectedSessionId: string | null,
@@ -2556,10 +2718,12 @@ function workspaceStateFromBootstrap(
   )
   return {
     initialized,
+    storageFull: Boolean(payload.storageFull || useAppStore.getState().storageFull),
     profiles: payload.profiles ?? [],
     activeProfileId: payload.activeProfileId ?? null,
     profileGeneration: payload.profileGeneration ?? 0,
     switchingProfileId: null,
+    mailHints: mailHintsFromBootstrap(payload),
     connected: Boolean(payload.health?.ok),
     connectionError: null,
     syncSessionId: focusedSessionId,
@@ -2748,6 +2912,7 @@ async function runProfileRefresh(
     pendingNamespaceAdoption = null
     set({
       profiles: payload.profiles,
+      mailHints: mergeMailHintProjections(current, current.mailHints, payload.mailHints),
       sessions: payload.sessions,
       jobs: payload.jobs,
       runtimeCatalog: payload.runtimeCatalog ?? null,
@@ -3584,6 +3749,24 @@ function mergeReadStateReceipt(
 }
 function stableArray<T>(previous: T[], next: T[]): T[] { return jsonEquivalent(previous, next) ? previous : next }
 function healthActiveSessionIDs(health?: Health | null): Set<string> { return new Set(health?.active ?? health?.active_sessions ?? []) }
+function healthWithLiveActivity(health: Health | null, sessionId: string, hint: LiveActivityHint): Health | null {
+  if (!health) return health
+  const ids = healthActiveSessionIDs(health)
+  if (hint.active) ids.add(sessionId)
+  else ids.delete(sessionId)
+  let runs = health.active_runs
+  if (runs || typeof hint.runId === 'string') {
+    runs = (runs ?? []).filter(row => row.session_id !== sessionId
+      || hint.active && (hint.runId === undefined || row.run_id === hint.runId))
+    if (hint.active && typeof hint.runId === 'string' && !runs.some(row => row.session_id === sessionId)) {
+      runs.push({ session_id: sessionId, run_id: hint.runId })
+    }
+  }
+  const next: Health = { ...health, active: [...ids],
+    ...(health.active_sessions ? { active_sessions: [...ids] } : {}),
+    ...(runs ? { active_runs: runs } : {}) }
+  return jsonEquivalent(health, next) ? health : next
+}
 function healthIsCompatible(health?: Health | null): boolean {
   return (health?.api_contract_version ?? MINIMUM_AGENT_API_CONTRACT) >= MINIMUM_AGENT_API_CONTRACT
 }
@@ -3646,6 +3829,10 @@ function subscribeToTimeline(sessionId: string, after: number, request: number, 
 }
 
 export function updateActiveSessions(current: Set<string>, event: Event): Set<string> {
+  return updateActiveSessionsWithHint(current, event)
+}
+
+function updateActiveSessionsWithHint(current: Set<string>, event: Event, activeHint?: boolean): Set<string> {
   if (isImportedProviderControlMetadata(event)) return current
   // Import batches describe historical turns, not live provider ownership.
   // Their synthetic terminal must not clear a different run that is working
@@ -3655,12 +3842,13 @@ export function updateActiveSessions(current: Set<string>, event: Event): Set<st
   // the provider turn alive, so treating this as a real stop makes the header
   // flash idle before the steered logical run is projected.
   if (isNativeSteerTransitionStop(event)) return current
-  const terminal = event.type === 'turn_finished' || event.type === 'turn_stopped' || event.type === 'error'
+  const terminal = event.type === 'turn_finished' || event.type === 'turn_stopped'
   if (event.type !== 'turn_started' && !terminal) return current
+  const desired = activeHint ?? event.type === 'turn_started'
   const active = current.has(event.session_id)
-  if (event.type === 'turn_started' ? active : !active) return current
+  if (desired === active) return current
   const next = new Set(current)
-  if (event.type === 'turn_started') next.add(event.session_id)
+  if (desired) next.add(event.session_id)
   else next.delete(event.session_id)
   return next
 }
@@ -3805,7 +3993,7 @@ function refreshCrossChatQueue(sessionId: string, scope: RendererProfileScope): 
   })()
 }
 
-function enqueueLiveEvent(event: Event): void {
+function enqueueLiveEvent(event: Event, activeHint?: LiveActivityHint): void {
   const scope = captureProfileScope()
   let pending = pendingLiveEvents.get(event.session_id)
   if (pending && !profileScopesEqual(pending.scope, scope)) {
@@ -3820,6 +4008,8 @@ function enqueueLiveEvent(event: Event): void {
   if (resident) event = mergeProviderInterruptionEvent(resident, event)
   const pendingIndex = pending?.eventIndexById.get(event.id)
   if (pending && pendingIndex !== undefined) event = mergeProviderInterruptionEvent(pending.events[pendingIndex], event)
+  if (activeHint) liveEventActivityHints.set(event, activeHint)
+  liveEventActivityEpochs.set(event, liveActivityAuthorityEpoch)
   const queueRefreshSessionId = crossChatQueueRefreshSessionId(event)
   if (eventAffectsQueuedTurns(event)) invalidateQueuedTurnsRequests(event.session_id)
   if (queueRefreshSessionId) invalidateQueuedTurnsRequests(queueRefreshSessionId)
@@ -3862,8 +4052,16 @@ function upsertPendingLiveEvent(batch: PendingLiveEventBatch, event: Event): boo
   const existingIndex = batch.eventIndexById.get(event.id)
   if (existingIndex !== undefined) {
     const previous = batch.events[existingIndex]
+    const activeHint = liveEventActivityHints.get(event)
+    const activityEpoch = liveEventActivityEpochs.get(event)
     event = mergeProviderInterruptionEvent(previous, event)
-    if (previous === event || jsonEquivalent(previous, event)) return false
+    if (previous === event || jsonEquivalent(previous, event)) {
+      if (activeHint) liveEventActivityHints.set(previous, activeHint)
+      if (activityEpoch !== undefined) liveEventActivityEpochs.set(previous, activityEpoch)
+      return false
+    }
+    if (activeHint) liveEventActivityHints.set(event, activeHint)
+    if (activityEpoch !== undefined) liveEventActivityEpochs.set(event, activityEpoch)
     batch.events[existingIndex] = event
     if (
       (existingIndex > 0 && batch.events[existingIndex - 1].seq > event.seq)
@@ -3963,6 +4161,7 @@ function flushLiveEvents(forceAll = false): void {
   }
   useAppStore.setState(state => {
     let activeSessionIds = state.activeSessionIds
+    let health = state.health
     let snapshots = state.snapshots
     let connected = state.connected
     let connectionError = state.connectionError
@@ -3975,7 +4174,12 @@ function flushLiveEvents(forceAll = false): void {
       const existingEvents = snapshot ? indexedEvents(snapshot.events) : undefined
       const events = batch.events.map(event => {
         const previous = existingEvents?.get(event.id)
-        return previous ? mergeProviderInterruptionEvent(previous, event) : event
+        const merged = previous ? mergeProviderInterruptionEvent(previous, event) : event
+        const hint = liveEventActivityHints.get(event)
+        if (hint) liveEventActivityHints.set(merged, hint)
+        const epoch = liveEventActivityEpochs.get(event)
+        if (epoch !== undefined) liveEventActivityEpochs.set(merged, epoch)
+        return merged
       })
       if (
         sessionId === state.selectedSessionId
@@ -3987,7 +4191,14 @@ function flushLiveEvents(forceAll = false): void {
         syncStatus = 'live'
         syncError = null
       }
-      for (const event of events) activeSessionIds = updateActiveSessions(activeSessionIds, event)
+      for (const event of events) {
+        if ((liveEventActivityEpochs.get(event) ?? liveActivityAuthorityEpoch) < liveActivityAuthorityEpoch) continue
+        const hint = liveEventActivityHints.get(event)
+        activeSessionIds = updateActiveSessionsWithHint(activeSessionIds, event, hint?.active)
+        if (hint && !isImportedHistoryRecord(event) && !isImportedProviderControlMetadata(event)) {
+          health = healthWithLiveActivity(health, event.session_id, hint)
+        }
+      }
       if (!snapshot) continue
       if (snapshot.historyDiscontinuity) {
         const deferred = timelineDeferredEvents.get(sessionId)
@@ -4045,6 +4256,7 @@ function flushLiveEvents(forceAll = false): void {
       : state.connectionGeneration
     if (
       activeSessionIds === state.activeSessionIds
+      && health === state.health
       && snapshots === state.snapshots
       && connected === state.connected
       && connectionGeneration === state.connectionGeneration
@@ -4054,6 +4266,7 @@ function flushLiveEvents(forceAll = false): void {
     ) return state
     return {
       activeSessionIds,
+      health,
       snapshots,
       connected,
       connectionGeneration,
@@ -4252,7 +4465,7 @@ export function snapshotNeedsAuthoritativeTail(snapshot: SessionSnapshot | undef
   if (snapshot.historyDiscontinuity) return true
   if (snapshot.events.some(eventMayRenderInTimeline)) return false
   if (snapshot.historyVerified && snapshot.events.length > 0 && snapshot.events.every(event =>
-    isImportedClaudeControlCompanion(event) || isImportedCodexGoalContext(event)
+    isImportedClaudeControlCompanion(event) || isImportedCodexRuntimeContext(event)
   )) return false
   if ((snapshot.eventsTotal ?? 0) > 0) return true
   if (snapshot.historyVerified) return false
@@ -4260,7 +4473,7 @@ export function snapshotNeedsAuthoritativeTail(snapshot: SessionSnapshot | undef
 }
 
 function eventMayRenderInTimeline(event: Event): boolean {
-  if (isImportedClaudeControlCompanion(event) || isImportedCodexGoalContext(event)) return false
+  if (isImportedClaudeControlCompanion(event) || isImportedCodexRuntimeContext(event)) return false
   if (isImportedProviderInterruption(event)) return true
   if (event.type === 'turn_started' || isNativeGoalSteerEvent(event)) return Boolean(event.prompt?.trim() || event.file_ids?.length)
   if (event.type === 'assistant_text') return Boolean(event.text?.trim())

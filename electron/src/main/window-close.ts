@@ -56,11 +56,14 @@ export function installWindowCloseFlush(
   window.on('closed', () => clearPending(window))
 }
 
-export function acknowledgeWindowCloseFlush(window: BrowserWindow | null, requestId: unknown): boolean {
+export function acknowledgeWindowCloseFlush(window: BrowserWindow | null, requestId: unknown, saved = true): boolean {
   if (!window || window.isDestroyed() || typeof requestId !== 'string') return false
   const pending = pendingByWindow.get(window)
   if (!pending || pending.requestId !== requestId) return false
   clearPending(window)
+  // A known failed save is not an unresponsive renderer: cancel the timeout
+  // too, so it cannot close the window and discard the unsaved draft later.
+  if (!saved) return false
   closeAfterFlush(window)
   return true
 }

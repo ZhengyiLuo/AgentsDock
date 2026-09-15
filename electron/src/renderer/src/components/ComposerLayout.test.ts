@@ -15,6 +15,13 @@ describe('composer queue layout', () => {
     expect(styles).toMatch(/\.inline-editor \{[^}]*max-width: 100%;[^}]*overflow: hidden;/s)
   })
 
+  it('keeps expanded agent rows at intrinsic height so the bounded queue can scroll to the full message', () => {
+    expect(styles).toMatch(/\.queue-list \{[^}]*max-height:[^;]+;[^}]*flex-direction: column;[^}]*overflow-y: auto;/s)
+    const queueRow = styles.match(/\.queue-list > \.queued-row \{[^}]*\}/)?.[0]
+    expect(queueRow).toContain('flex-shrink: 0;')
+    expect(styles).toMatch(/\.queued-row\.agent-message \.queue-prompt\.expanded \{[^}]*display: block;[^}]*-webkit-line-clamp: unset;/s)
+  })
+
   it('lets the native textarea paint plain drafts and enables the mirror only for inline references', () => {
     expect(styles).toMatch(/\.composer-editor > textarea \{[^}]*color: #f2f2f0;[^}]*-webkit-text-fill-color: currentColor;/s)
     expect(styles).toMatch(/\.composer-editor-mirror \{[^}]*color: transparent;/s)

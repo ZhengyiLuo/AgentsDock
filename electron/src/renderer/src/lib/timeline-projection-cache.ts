@@ -1,4 +1,6 @@
 import type { AgentFile, Event } from '@shared/types'
+import { crossChatSemanticKey } from '@shared/semantic-timeline'
+import { isChatMailboxEvent } from '@shared/chat-inbox'
 import {
   TimelineProjector,
   reconcileRenderTimelineItems,
@@ -104,6 +106,34 @@ function renderAppendedTimeline(
   appended: Event[]
 ): { rendered: RenderTimelineItem[]; renderedSemanticCount: number } {
   let renderStart = firstChangedSemanticIndex(cached.semantic, semantic)
+  // A new mailbox arrival may join the immediately preceding sender group.
+  // Include that one group, not the rest of the historical timeline.
+  if (appended.some(isChatMailboxEvent) && renderStart > 0) {
+    const previous = semantic[renderStart - 1]
+    if (previous?.kind === 'system' && isChatMailboxEvent(previous.event)) {
+      const grouped = cached.rendered.find(row => row.kind === 'system'
+        && row.mailboxMessages?.some(message => message.key === previous.key))
+      const first = grouped?.kind === 'system' ? grouped.mailboxMessages?.[0].key : previous.key
+      const index = semantic.findIndex(item => item.key === first)
+      if (index >= 0) renderStart = Math.min(renderStart, index)
+    }
+  }
+  // A newly sent message changes a system owner, not the sender's TurnItem.
+  // Re-render the overlapping turn too: it now has an activity boundary.
+  // This also preserves its final answer when an old receipt is updated.
+  if (appended.some(event => crossChatSemanticKey(event) !== null)) {
+    const anchors = renderTimelineItems(semantic.slice(renderStart).filter(item =>
+      item.kind === 'system' && crossChatSemanticKey(item.event) !== null))
+      .filter(row => row.kind === 'system').map(row => row.seq)
+    for (let index = 0; index < renderStart && anchors.length; index++) {
+      const item = semantic[index]
+      if (item.kind !== 'turn') continue
+      const end = item.finishedAt
+        ? item.terminalSeq ?? Math.max(item.seq, ...item.assistant.map(event => event.seq), ...item.trace.map(event => event.seq))
+        : Number.POSITIVE_INFINITY
+      if (anchors.some(seq => seq >= item.seq && seq <= end)) { renderStart = index; break }
+    }
+  }
   if (renderStart === semantic.length && semantic.length === cached.semantic.length) {
     return { rendered: cached.rendered, renderedSemanticCount: 0 }
   }
@@ -123,13 +153,29 @@ function renderAppendedTimeline(
     ? renderedCutForSemanticTail(cached.semantic, cached.rendered, renderStart)
     : cached.rendered.length
   const suffixSemantic = semantic.slice(renderStart)
+  const previousSuffix = cached.rendered.slice(cut)
+  // One earlier exchange can own both an early request and a later reply.
+  // Chronological placement may put that reply inside the changed turn's
+  // rendered suffix. Carry only those crossing system owners, not all the
+  // intervening historical turns, into the incremental render.
+  const crossingOwnerKeys = new Set(previousSuffix.flatMap(row =>
+    row.kind === 'system' && crossChatSemanticKey(row.event) !== null ? systemRowOwnerKeys(row) : []))
+  const crossingOwners = crossingOwnerKeys.size
+    ? cached.semantic.slice(0, renderStart).filter(item =>
+      item.kind === 'system' && crossingOwnerKeys.has(item.key))
+    : []
+  const carriedKeys = new Set(crossingOwners.map(item => item.key))
+  const previousSuffixKeys = new Set(previousSuffix.map(row => row.key))
+  const renderedSemantic = [...crossingOwners, ...suffixSemantic]
   const suffixRendered = reconcileRenderTimelineItems(
-    cached.rendered.slice(cut),
-    renderTimelineItems(suffixSemantic)
+    previousSuffix,
+    renderTimelineItems(renderedSemantic).filter(row =>
+      row.kind !== 'system' || !carriedKeys.has(systemRowOwnerKey(row))
+      || previousSuffixKeys.has(row.key))
   )
   return {
     rendered: [...cached.rendered.slice(0, cut), ...suffixRendered],
-    renderedSemanticCount: suffixSemantic.length
+    renderedSemanticCount: renderedSemantic.length
   }
 }
 
@@ -155,13 +201,26 @@ function renderedCutForSemanticTail(
 
 function renderedRowBelongsTo(item: TimelineItem, row: RenderTimelineItem): boolean {
   if (item.kind !== 'turn') return row.key === item.key
+    || row.kind === 'system' && systemRowOwnerKeys(row).includes(item.key)
   return row.key === `${item.key}:trace`
     || row.key === `${item.key}:activity`
     || row.key.startsWith(`${item.key}:activity:after:`)
     || row.key === `${item.key}:assistant`
     || row.key.startsWith(`${item.key}:assistant:after:`)
     || row.key === `${item.key}:media`
+    || row.key === `${item.key}:delivery-files`
+    || Boolean(item.user && row.kind === 'system' && row.importedDelivery
+      && row.key === `imported-cross-chat-delivery:${item.user.id}`)
     || row.key === `${item.key}:user:${item.user?.id ?? ''}`
+}
+
+function systemRowOwnerKey(row: Extract<RenderTimelineItem, { kind: 'system' }>): string {
+  const suffix = row.crossChatLegId ? `:message:${row.crossChatLegId}` : ''
+  return suffix && row.key.endsWith(suffix) ? row.key.slice(0, -suffix.length) : row.key
+}
+
+function systemRowOwnerKeys(row: Extract<RenderTimelineItem, { kind: 'system' }>): string[] {
+  return row.mailboxMessages?.map(systemRowOwnerKey) ?? [systemRowOwnerKey(row)]
 }
 
 function isCompactionEvent(event: Event): boolean {

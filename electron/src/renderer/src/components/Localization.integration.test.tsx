@@ -75,7 +75,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-it('switches sidebar labels and memoized sections without translating user titles, folders, or Team Network', async () => {
+it('switches sidebar and Team Network labels without translating user titles or folders', async () => {
   const { container } = render(<Sidebar />)
   const row = screen.getByText(rawTitle).closest('.session-row')
   const list = container.querySelector<HTMLDivElement>('.session-list')!
@@ -92,7 +92,8 @@ it('switches sidebar labels and memoized sections without translating user title
   expect(screen.getByText('已归档', { exact: true })).toBeInTheDocument()
   expect(screen.getByText(rawTitle).closest('.session-row')).toBe(row)
   expect(screen.getByText(rawFolder, { exact: true })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Open Team Network' })).toHaveTextContent('Team Network')
+  expect(screen.getByRole('button', { name: '打开团队网络' })).toHaveTextContent('团队网络 测试版')
+  expect(screen.getByRole('button', { name: '打开团队网络' })).toHaveAttribute('title', '打开团队网络（测试版）')
   expect(list.scrollTop).toBe(93)
   expect(useAppStore.getState().sessions[0]).toMatchObject({ title: rawTitle, folder: rawFolder, backend: 'codex' })
 
@@ -100,6 +101,7 @@ it('switches sidebar labels and memoized sections without translating user title
   expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument()
   expect(screen.getByText('Pinned', { exact: true })).toBeInTheDocument()
   expect(screen.getByText(rawTitle).closest('.session-row')).toBe(row)
+  expect(screen.getByRole('button', { name: 'Open Team Network' })).toHaveTextContent('Team Network Beta')
   expect(list.scrollTop).toBe(93)
 })
 
@@ -179,7 +181,7 @@ it('keeps secure-peer queue rows and interruption warnings in English in the Chi
   expect(skip).toHaveAttribute('title', 'Update AgentsServer to safely skip this delivery.')
 })
 
-it('localizes the new reference fallback but preserves English for Team references', async () => {
+it('localizes both reference controls while preserving authored @ and @@ text', async () => {
   const prefix = `${'checkpoint/'.repeat(30)}\n`
   const chatDraft = `${prefix}Ask @Training`
   const teamDraft = `${prefix}Ask @@Pat`
@@ -207,6 +209,6 @@ it('localizes the new reference fallback but preserves English for Team referenc
   expect(screen.getByRole('group', { name: '已选择的消息引用' })).toHaveTextContent('@Training')
   expect(screen.getByRole('textbox')).toHaveValue(chatDraft)
   rerender(<Composer sessionId="team-chat" />)
-  expect(screen.getByRole('group', { name: 'Selected message references' })).toHaveTextContent('@@Pat')
+  expect(screen.getByRole('group', { name: '已选择的消息引用' })).toHaveTextContent('@@Pat')
   expect(screen.getByRole('textbox')).toHaveValue(teamDraft)
 })

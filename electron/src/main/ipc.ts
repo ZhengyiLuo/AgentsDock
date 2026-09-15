@@ -7,6 +7,7 @@ import { acknowledgeWindowCloseFlush, closeWindowAfterRendererFlush } from './wi
 import type { LazyTeamHubService } from './team-hub-lazy-service'
 import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, parseBulkImportSessionItems } from '../shared/local-session-import'
 import type { LanguageSettings } from './language'
+import { reportStorageError } from './storage-health'
 
 export interface RegisterIpcOptions {
   language?: Pick<LanguageSettings, 'get' | 'set'>
@@ -26,7 +27,13 @@ export function registerIpc(
     ipcMain.removeHandler(channel)
     ipcMain.handle(channel, (event, ...args) => {
       requireTrustedSender(event, channel)
-      return listener(event, ...args)
+      try {
+        const result = listener(event, ...args)
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+          return Promise.resolve(result).catch(error => { reportStorageError(error); throw error })
+        }
+        return result
+      } catch (error) { reportStorageError(error); throw error }
     })
   }
   const handle = (channel: string, listener: (...args: any[]) => unknown): void => {
@@ -34,6 +41,13 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('chat-shares:preview', (scope, sessionId) => service.previewChatShare(scope, sessionId))
+  handle('chat-shares:list', (scope, sessionId, mode) => service.listChatShares(scope, sessionId, mode))
+  handle('chat-shares:create', (scope, sessionId, input) => service.createChatShare(scope, sessionId, input))
+  handle('chat-shares:revoke', (scope, sessionId, mode, shareId) => service.revokeChatShare(scope, sessionId, mode, shareId))
+  handle('native:retry-storage', () => service.retryLocalStorage())
+  handle('team:mail-hints:acknowledge-page', input => service.acknowledgeMailHintPage(input))
+  handle('team:mail-hints:acknowledge-bulletin', input => service.acknowledgeBulletinHintRefresh(input))
   if (options.language) {
     const language = options.language
     handle('language:get', () => language.get())
@@ -82,6 +96,7 @@ export function registerIpc(
     handle('team-hub:network:messages:capabilities', scope => teamHub.teamMessagesCapabilities(scope))
     handle('team-hub:network:messages:list', (scope, query) => teamHub.teamMessages(scope, query))
     handle('team-hub:network:message:get', (scope, teamId, messageId) => teamHub.teamMessage(scope, teamId, messageId))
+    handle('team-hub:network:message:thread', (scope, query) => teamHub.teamMessageThread(scope, query))
     handle('team-hub:network:message:create', (scope, input) => teamHub.createTeamMessage(scope, input))
     handle('team-hub:network:message:receipt', (scope, input) => teamHub.recordTeamMessageReceipt(scope, input))
     handle('team-hub:network:message:mailbox-state', (scope, input) => teamHub.setTeamMessageMailboxState(scope, input))
@@ -253,6 +268,8 @@ export function registerIpc(
 
   handle('codex:server-goals:get', () => service.codexServerGoals())
   handle('codex:server-goals:set', enabled => service.setCodexServerGoals(Boolean(enabled)))
+  handle('codex:server-subagents:get', scope => service.codexServerSubagents(scope))
+  handle('codex:server-subagents:set', (scope, limit) => service.setCodexServerSubagents(scope, limit))
   handle('codex:runtime', sessionId => service.codexRuntime(sessionId))
   handle('codex:thread:load', sessionId => service.loadCodexThread(sessionId))
   handle('codex:interaction:resolve', (sessionId, interactionId, response) => (
@@ -283,8 +300,9 @@ export function registerIpc(
   ))
 
   handle('queue:list', sessionId => service.queue(sessionId))
-  handle('queue:update', (sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences) => (
-    service.updateQueued(sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences)
+  handle('queue:update', (sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences, expectedMessageRevision) => (
+    service.updateQueued(sessionId, queuedId, prompt, chatReferences, clientCapabilities, teamReferences,
+      ...(expectedMessageRevision !== undefined ? [expectedMessageRevision] : []))
   ))
   handle('queue:remove', (sessionId, queuedId) => service.removeQueued(sessionId, queuedId))
   handle('queue:skip-cross-chat-delivery', (sessionId, queuedId, identity) => (
@@ -294,6 +312,8 @@ export function registerIpc(
   handle('queue:run-now', (sessionId, queuedId) => service.runQueuedNow(sessionId, queuedId))
 
   handle('agent-routes:list', (scope, sessionId) => service.agentHandoffRoutes(scope, sessionId))
+  handle('agent-team-mail-routes:list', (scope, sessionId) => service.agentTeamMailRoutes(scope, sessionId))
+  handle('agent-team-mail-routes:remove', (scope, sessionId, routeId, expectedRevision) => service.deleteAgentTeamMailRoute(scope, sessionId, routeId, expectedRevision))
   handle('agent-routes:search', (scope, query, excludeSessionId, limit) => service.searchAgentHandoffTargets(scope, query, excludeSessionId, limit))
   handle('agent-routes:create', (scope, sessionId, input) => service.createAgentHandoffRoute(scope, sessionId, input))
   handle('agent-routes:update', (scope, sessionId, routeId, input) => service.updateAgentHandoffRoute(scope, sessionId, routeId, input))
@@ -301,6 +321,8 @@ export function registerIpc(
 
   handle('handoffs:get', envelopeId => service.crossChatHandoff(envelopeId))
   handle('handoffs:cancel', envelopeId => service.cancelCrossChatHandoff(envelopeId))
+  handle('chat-inbox:list', (scope, sessionId, cursor, limit) => service.chatInbox(scope, sessionId, cursor, limit))
+  handle('chat-inbox:remove', (scope, sessionId, messageId) => service.deleteChatInboxMessage(scope, sessionId, messageId))
   handle('exchanges:get', exchangeId => service.crossChatExchange(exchangeId))
   handle('exchanges:cancel', exchangeId => service.cancelCrossChatExchange(exchangeId))
 
@@ -430,9 +452,9 @@ export function registerIpc(
     return closeWindowAfterRendererFlush(BrowserWindow.fromWebContents(event.sender))
   })
   ipcMain.removeHandler('native:close-flush-complete')
-  ipcMain.handle('native:close-flush-complete', (event, requestId) => {
+  ipcMain.handle('native:close-flush-complete', (event, requestId, saved) => {
     requireTrustedSender(event, 'native:close-flush-complete')
-    return acknowledgeWindowCloseFlush(BrowserWindow.fromWebContents(event.sender), requestId)
+    return acknowledgeWindowCloseFlush(BrowserWindow.fromWebContents(event.sender), requestId, saved !== false)
   })
   return serverSetup
 }

@@ -15,6 +15,8 @@ import { dirname, join } from 'node:path'
 import { execFile, execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { writeMacOSKeychainPassword } from './macos-keychain'
+import { reportStorageError } from './storage-health'
+import { t } from '../shared/i18n'
 import type {
   AddServerProfileInput as SharedAddServerProfileInput,
   PublicServerProfile,
@@ -111,6 +113,7 @@ export class SettingsStore {
   private readonly now: () => string
   private readonly useKeychain: boolean
   private value!: StoredSettingsV2
+  private startupStorageFailure: unknown = null
   private legacyKeychainCleanupPending = false
   private readonly connectionRevisions = new Map<string, number>()
   private readonly credentialReads = new Map<string, { revision: number; promise: Promise<string> }>()
@@ -123,7 +126,14 @@ export class SettingsStore {
     this.createProfileId = options.createProfileId ?? randomUUID
     this.now = options.now ?? (() => new Date().toISOString())
     this.useKeychain = !(options.isMacAppStoreBuild ?? isMacAppStoreBuild)()
-    this.value = this.read()
+    try { this.value = this.read() }
+    catch (error) {
+      if (!reportStorageError(error)) throw error
+      // An uncompleted legacy migration must neither reuse half-migrated
+      // credentials nor overwrite the saved file with an empty configuration.
+      this.startupStorageFailure = error
+      this.value = this.defaultSettings()
+    }
     if (process.env.AGENTSDOCK_MIGRATE_SAFE_STORAGE === '1') this.migrateLegacySafeStorageToken()
   }
 
@@ -136,6 +146,11 @@ export class SettingsStore {
       serverIdentity: profile.serverIdentity ?? null,
       serverSetupComplete: profile.serverSetupComplete
     }
+  }
+
+  retryStorageWrites(): void {
+    if (this.startupStorageFailure) throw new Error(t('storage.legacyRestart'))
+    this.persistValue(this.value)
   }
 
   listProfiles(runtime: Readonly<Record<string, ServerProfileRuntimeState>> | ((profile: PublicServerProfile) => ServerProfileRuntimeState) = {}): PublicServerProfile[] {
@@ -373,7 +388,12 @@ export class SettingsStore {
   private read(): StoredSettingsV2 {
     if (!existsSync(this.path)) {
       const value = this.defaultSettings()
-      this.writeAtomic(this.path, serializeSettings(value))
+      try { this.writeAtomic(this.path, serializeSettings(value)) }
+      catch (error) {
+        // No saved settings existed. The unbound default may be displayed,
+        // but later user changes still require a successful durable write.
+        if (!reportStorageError(error)) throw error
+      }
       return value
     }
     const raw = readFileSync(this.path, 'utf8')
@@ -494,7 +514,12 @@ export class SettingsStore {
   }
 
   private persistInitialNormalization(next: StoredSettingsV2): void {
-    this.persistValue(next)
+    try { this.persistValue(next) }
+    catch (error) {
+      // Schema-v2 data was already validated. A cosmetic normalization write
+      // must not stop startup or replace the intact saved settings.
+      if (!reportStorageError(error)) throw error
+    }
   }
 
   private persist(next: StoredSettingsV2): void {
@@ -503,6 +528,7 @@ export class SettingsStore {
   }
 
   private persistValue(next: StoredSettingsV2): void {
+    if (this.startupStorageFailure) throw this.startupStorageFailure
     validateSettings(next)
     const previous = existsSync(this.path) ? readFileSync(this.path, 'utf8') : null
     if (previous != null) this.writeAtomic(this.backupPath, previous)
@@ -512,7 +538,10 @@ export class SettingsStore {
       if (verified.kind !== 'v2') throw new Error('Settings validation did not produce schema v2.')
       this.cleanupLegacyKeychainCredential(next)
     } catch (error) {
-      if (previous != null) this.writeAtomic(this.path, previous)
+      reportStorageError(error)
+      try {
+        if (previous != null && readFileSync(this.path, 'utf8') !== previous) this.writeAtomic(this.path, previous)
+      } catch { /* Preserve the primary failure even if rollback/readback also fails. */ }
       throw error
     }
   }
@@ -549,7 +578,8 @@ export class SettingsStore {
       if (descriptor != null) {
         try { closeSync(descriptor) } catch { /* preserve the original write error */ }
       }
-      rmSync(temporary, { force: true })
+      try { rmSync(temporary, { force: true }) } catch { /* Preserve the primary write failure. */ }
+      reportStorageError(error)
       throw error
     }
   }

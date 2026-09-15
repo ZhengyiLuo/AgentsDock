@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
+import { setLocale } from '@shared/i18n'
+import { applyMailArrivalHint, beginMailHintStream, type MailHintScope } from '@shared/team-mail-hints'
 import type { SecurePeerControlStatus, SecurePeerPairing } from '@shared/secure-peer'
 import type { TeamHubStatus, TeamHubTeamDetails, TeamHubWorkspace } from '@shared/team-hub'
 import type {
@@ -300,6 +302,7 @@ function installAPI(options: APIOptions = {}) {
   const teamHub = {
     status: vi.fn().mockResolvedValue(statusValue),
     connect: vi.fn(),
+    configureServerRole: vi.fn(),
     disconnect: vi.fn(),
     forgetBinding: vi.fn(),
     bootstrap: vi.fn(),
@@ -400,10 +403,12 @@ const realSendPromptForSession = useAppStore.getState().sendPromptForSession
 const realSelectSession = useAppStore.getState().selectSession
 
 beforeEach(() => {
+  setLocale('en')
   resetTeamNetworkSnapshotCacheForTests()
   window.localStorage.clear()
   vi.stubGlobal('crypto', { randomUUID: vi.fn(() => '42e7bb2e-3b47-4be7-89fc-2cecd90f4434') })
   useAppStore.setState({
+    mailHints: null,
     sessions: [],
     selectedSessionId: null,
     loadingSessionIds: new Set(),
@@ -415,16 +420,148 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  setLocale('en')
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   useAppStore.setState({
+    mailHints: null,
     sessions: [],
     selectedSessionId: null,
     loadingSessionIds: new Set(),
     loadingSessionId: null,
     selectSession: realSelectSession,
     sendPromptForSession: realSendPromptForSession
+  })
+})
+
+describe('Team Network language', () => {
+  it('switches shell, leaf controls and an existing local notice without refetching or changing user content', async () => {
+    const api = installAPI()
+    render(<TeamNetwork onClose={vi.fn()} />)
+    await screen.findByText('Initial update')
+    const draft = 'User-owned draft '.repeat(600)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Bulletin post' }), { target: { value: draft } })
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }))
+    await screen.findByText('This post is too large for the network.')
+    const calls = Object.values(api).map(method => method.mock.calls.length)
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByRole('region', { name: '团队网络' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '返回会话' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '发布' })).toBeTruthy()
+    expect(screen.getByText('此内容超出了网络允许的大小。')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '公告内容' })).toHaveValue(draft)
+    expect(screen.getByText('Initial update')).toBeTruthy()
+    expect(screen.getAllByText('TargetApp').length).toBeGreaterThan(0)
+    await act(async () => { await Promise.resolve() })
+    expect(Object.values(api).map(method => method.mock.calls.length)).toEqual(calls)
+    act(() => setLocale('en'))
+    expect(screen.getByRole('button', { name: 'Back to chats' })).toBeTruthy()
+    expect(screen.getByText('This post is too large for the network.')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'Bulletin post' })).toHaveValue(draft)
+    expect(Object.values(api).map(method => method.mock.calls.length)).toEqual(calls)
+  })
+})
+
+describe('owned Host Rename', () => {
+  function prepare() {
+    const details = detailsFor(managedHostStatus)
+    details.team.role = 'automation'
+    useAppStore.setState({ activeProfileId: managedHostStatus.profileId,
+      profileGeneration: managedHostStatus.profileGeneration, switchingProfileId: null,
+      profiles: [{ id: managedHostStatus.profileId, name: 'Local profile label', serverUrl: 'https://example.test',
+        serverIdentity: managedHostStatus.serverIdentity, hasAccessToken: false, serverSetupComplete: true,
+        connectionState: 'online', cachedUnreadCount: 0 }] })
+    return installAPI({ statusValue: managedHostStatus, detailsValue: details })
+  }
+  async function open() {
+    render(<TeamNetwork onClose={vi.fn()} initialSection="directory" />)
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Manage TargetApp' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename…' }))
+    return screen.getByRole('form', { name: 'Rename host' })
+  }
+  it('saves only an exact existing-host rename and refreshes once without changing the team or profile label', async () => {
+    const api = prepare()
+    const next = { ...managedHostStatus, serverName: 'Renamed host' }
+    api.configureServerRole.mockImplementation(async () => {
+      api.network.mockResolvedValue({ ...projectionFor(next), servers: projectionFor(next).servers.map(server =>
+        server.is_host ? { ...server, display_name: 'Renamed host' } : server) })
+      return next
+    })
+    const form = await open()
+    expect(within(form).getByRole('textbox', { name: 'Server name' })).toHaveValue('TargetApp')
+    const before = api.network.mock.calls.length
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: '  Renamed host  ' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.configureServerRole).toHaveBeenCalledWith({ profileId: 'profile-host',
+      profileGeneration: 3, serverIdentity: 'identity-host' }, { role: 'host', serverName: 'Renamed host', renameOnly: true }))
+    expect(await screen.findByRole('button', { name: 'Manage Renamed host' })).toBeVisible()
+    await waitFor(() => expect(api.network).toHaveBeenCalledTimes(before + 1))
+    expect(screen.getByText('Host renamed to Renamed host. Team Network “Core team” and the Host role are unchanged.')).toBeVisible()
+    expect(useAppStore.getState().profiles[0].name).toBe('Local profile label')
+    expect(api.configureServerRole).toHaveBeenCalledTimes(1)
+  })
+  it('cancel does not write and a changed Host role fails before a rename request', async () => {
+    const api = prepare()
+    let form = await open()
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Manage TargetApp' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename…' }))
+    form = screen.getByRole('form', { name: 'Rename host' })
+    api.status.mockResolvedValue({ ...managedHostStatus, designatedHost: false })
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Unsafe rename' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('The Host changed. Refresh Team Network before renaming.')).toBeVisible()
+    expect(api.configureServerRole).not.toHaveBeenCalled()
+  })
+  it('does not offer Host Rename for a human login or a remote Host row', async () => {
+    for (const statusValue of [hostStatus, peerStatus]) {
+      const api = installAPI({ statusValue })
+      const view = render(<TeamNetwork onClose={vi.fn()} initialSection="directory" />)
+      expect(await screen.findByText('TargetApp', { selector: '.network-roster-server strong' })).toBeVisible()
+      expect(screen.queryByRole('button', { name: 'Manage TargetApp' })).toBeNull()
+      expect(api.configureServerRole).not.toHaveBeenCalled()
+      view.unmount()
+      resetTeamNetworkSnapshotCacheForTests()
+    }
+  })
+})
+
+describe('passive Mail navigation hint', () => {
+  it('updates only the quiet navigation dot without reloading any Team Network resource', async () => {
+    const teamHub = installAPI()
+    const acknowledgePage = vi.fn()
+    Object.assign(window.agentsDock, { mailHints: { acknowledgePage } })
+    useAppStore.setState({
+      activeProfileId: hostStatus.profileId, profileGeneration: hostStatus.profileGeneration, switchingProfileId: null,
+      profiles: [{ id: hostStatus.profileId, name: 'Host', serverUrl: 'https://example.test', serverIdentity: hostStatus.serverIdentity,
+        hasAccessToken: false, serverSetupComplete: true, connectionState: 'online', cachedUnreadCount: 0 }]
+    })
+    render(<TeamNetwork onClose={vi.fn()} />)
+    expect(await screen.findByText('Initial update')).toBeVisible()
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    const requests = Object.values(teamHub).filter(vi.isMockFunction).map(request => [request, request.mock.calls.length] as const)
+    const hintScope: MailHintScope = {
+      profileId: hostStatus.profileId, profileGeneration: hostStatus.profileGeneration, serverIdentity: hostStatus.serverIdentity!,
+      streamId: 'stream-1', hubId: hostStatus.hubIdentity!, teamId: 'team-1', recipientServerId: 'server-host'
+    }
+    const state = applyMailArrivalHint(beginMailHintStream(hintScope), hintScope, 'snapshot', {
+      version: 1, team_id: hintScope.teamId, recipient_server_id: hintScope.recipientServerId,
+      through_sequence: 99, arrival_id: `tmsg_${'99'.padStart(32, '0')}`, reset: false
+    })
+    await act(async () => useAppStore.setState({ mailHints: {
+      profileId: hintScope.profileId, profileGeneration: hintScope.profileGeneration, revision: 1, state
+    } }))
+    const mail = screen.getByRole('button', { name: 'Mail' })
+    expect(mail.querySelector('.status-dot')).toHaveAttribute('aria-hidden', 'true')
+    expect(mail).toHaveAccessibleDescription(expect.stringContaining('New Mail arrivals not yet reviewed on this desktop'))
+    expect(screen.getByRole('heading', { name: 'Bulletin' })).toBeVisible()
+    for (const [request, count] of requests) expect(request).toHaveBeenCalledTimes(count)
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    await act(async () => useAppStore.setState({ profileGeneration: hostStatus.profileGeneration + 1 }))
+    expect(mail.querySelector('.status-dot')).toBeNull()
+    for (const [request, count] of requests) expect(request).toHaveBeenCalledTimes(count)
   })
 })
 
@@ -1173,6 +1310,26 @@ describe('Team Network', () => {
     fireEvent.contextMenu(card)
     expect(await screen.findByRole('menuitem', { name: 'Open Bulletin item' })).toBeVisible()
     if (allowed) expect(screen.getByRole('menuitem', { name: 'Delete Bulletin item…' })).toBeVisible()
+    else expect(screen.queryByRole('menuitem', { name: 'Delete Bulletin item…' })).not.toBeInTheDocument()
+  })
+
+  it.each([false, true])('limits nonposter skill host deletion to the exact managed operator (managed=%s)', async managed => {
+    const statusValue = managed ? managedHostStatus : hostStatus
+    const details = detailsFor(statusValue)
+    if (managed) details.team.role = 'automation'
+    const skill: TeamMessageSummary = { ...feedMessage('nonposter-host-skill', 1, 'Orphaned skill'),
+      kind: 'skill', title: 'Other server skill', sender: { kind: 'server', id: 'removed-server', display_name: 'Old server' },
+      skill: { id: 'skill-orphan', slug: 'orphan', version: 1 } }
+    installAPI({ statusValue, detailsValue: details, overrides: {
+      teamMessagesCapabilities: vi.fn().mockResolvedValue({ ...teamMessagesCapability, host_content_deletion: true }),
+      teamMessages: vi.fn().mockResolvedValue({ box: 'feed', address: null, messages: [skill], next_after_sequence: 1, has_more: false }),
+      networkDeletions: vi.fn().mockResolvedValue({ supported: true, deletions: [], next_after_sequence: 0, has_more: false })
+    } })
+    render(<TeamNetwork onClose={vi.fn()} />)
+    fireEvent.contextMenu((await screen.findByText('Other server skill')).closest('.network-v2-bulletin-card')!)
+    expect(await screen.findByRole('menuitem', { name: 'Open Bulletin item' })).toBeVisible()
+    expect(screen.queryByRole('menuitem', { name: 'Edit Bulletin item…' })).not.toBeInTheDocument()
+    if (managed) expect(screen.getByRole('menuitem', { name: 'Delete Bulletin item…' })).toBeVisible()
     else expect(screen.queryByRole('menuitem', { name: 'Delete Bulletin item…' })).not.toBeInTheDocument()
   })
 

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { PublicServerProfile, Session } from '@shared/types'
+import { applyMailArrivalHint, beginMailHintStream, type MailHintScope } from '@shared/team-mail-hints'
 import { useAppStore } from '../store/app-store'
 import { Sidebar } from './Sidebar'
 
@@ -38,6 +39,7 @@ describe('sidebar split pane context', () => {
       activeProfileId: profile.id,
       profileGeneration: 1,
       switchingProfileId: null,
+      mailHints: null,
       connected: true,
       sessions,
       selectedSessionId: sessions[0].id,
@@ -87,6 +89,36 @@ describe('sidebar split pane context', () => {
 
     act(() => useAppStore.setState({ switchingProfileId: profile.id }))
     expect(within(actions).getByRole('button', { name: 'Open Team Network' })).toBeDisabled()
+    window.removeEventListener('agentsdock:open-teamspace', open)
+  })
+
+  it('shows a quiet new-arrival dot without opening Mail, fetching data, or acknowledging it', () => {
+    const open = vi.fn()
+    const teamMessages = vi.fn()
+    const acknowledgePage = vi.fn()
+    Object.assign(window.agentsDock, { teamHub: { teamMessages }, mailHints: { acknowledgePage } })
+    window.addEventListener('agentsdock:open-teamspace', open)
+    render(<Sidebar />)
+    const button = screen.getByRole('button', { name: 'Open Team Network' })
+    expect(button).toHaveClass('sidebar-team-network-action')
+    expect(button.querySelector('.status-dot')).toBeNull()
+    const hintScope: MailHintScope = {
+      profileId: profile.id, profileGeneration: 1, serverIdentity: profile.serverIdentity!, streamId: 'stream-1',
+      hubId: 'hub-1', teamId: 'team-1', recipientServerId: 'recipient-1'
+    }
+    const state = applyMailArrivalHint(beginMailHintStream(hintScope), hintScope, 'snapshot', {
+      version: 1, team_id: 'team-1', recipient_server_id: 'recipient-1', through_sequence: 7,
+      arrival_id: `tmsg_${'7'.padStart(32, '0')}`, reset: false
+    })
+    act(() => useAppStore.setState({ mailHints: { profileId: profile.id, profileGeneration: 1, revision: 1, state } }))
+    expect(button.querySelector('.status-dot')).toHaveAttribute('aria-hidden', 'true')
+    expect(button).toHaveAccessibleDescription('New Mail arrivals not yet reviewed on this desktop')
+    expect(screen.getByText('New Mail arrivals not yet reviewed on this desktop')).not.toHaveAttribute('aria-live')
+    expect(open).not.toHaveBeenCalled()
+    expect(teamMessages).not.toHaveBeenCalled()
+    expect(acknowledgePage).not.toHaveBeenCalled()
+    act(() => useAppStore.setState({ activeProfileId: 'another-profile' }))
+    expect(button.querySelector('.status-dot')).toBeNull()
     window.removeEventListener('agentsdock:open-teamspace', open)
   })
 

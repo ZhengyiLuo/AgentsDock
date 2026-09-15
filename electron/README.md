@@ -37,7 +37,10 @@ cd ..
 The installer, blockmap, and updater metadata are written to `dist/windows`.
 Local Windows packages are unsigned unless `CSC_LINK` and
 `CSC_KEY_PASSWORD` point to an Authenticode certificate. Stable publication
-fails closed when those signing credentials are absent.
+fails closed without signing credentials unless the release owner explicitly
+approves the unsigned Windows installer in both preparation and publication.
+That exception must be disclosed in the release notes; macOS signing and
+notarization requirements remain unchanged.
 
 ## Development
 

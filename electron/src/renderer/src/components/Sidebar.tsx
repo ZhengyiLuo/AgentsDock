@@ -9,7 +9,7 @@ import {
 } from '@dnd-kit/core'
 import {
   Archive, ArchiveRestore, ChevronDown, ChevronRight, Folder, FolderPlus, GripVertical, Inbox, MoreHorizontal,
-  Columns2, PanelLeftClose, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, Trash2, Undo2, UsersRound
+  Columns2, PanelLeftClose, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, Share2, Trash2, Undo2, UsersRound
 } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
@@ -20,7 +20,7 @@ import { backendLabel, runtimeLabel } from '../lib/format'
 import { openSessionHistoryResult } from '../lib/session-history-search'
 import { rankSessionsForSearch } from '../lib/sessions'
 import { getWorkspacePreference, setWorkspacePreference } from '../lib/workspace-preferences'
-import { handleMenuCommand, sessionUnread, useAppStore } from '../store/app-store'
+import { handleMenuCommand, selectMailHintPending, selectBulletinHintPending, sessionUnread, useAppStore } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ServerSelector } from './ServerSelector'
 import { ShortcutTooltip } from './ShortcutTooltip'
@@ -62,6 +62,8 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const switchingProfileId = useAppStore(state => state.switchingProfileId)
   const creatingChat = useAppStore(state => state.creatingChat)
   const connected = useAppStore(state => state.connected)
+  const newMailArrivals = useAppStore(selectMailHintPending)
+  const newBulletinUpdates = useAppStore(selectBulletinHintPending)
   const folderOrder = useAppStore(state => state.folderOrder)
   const collapsed = useAppStore(state => state.collapsedFolders)
   const archivedCollapsed = useAppStore(state => state.archivedCollapsed)
@@ -237,7 +239,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
       </div>
       <ServerSelector />
       <div className="sidebar-actions">
-        <button className="sidebar-action sidebar-action-labeled" title="Open Team Network (Beta)" aria-label="Open Team Network" disabled={Boolean(switchingProfileId)} onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', { detail: { section: 'mail' } }))}><UsersRound size={15} /><span>Team Network <small className="team-network-beta">Beta</small></span></button>
+        <button className="sidebar-action sidebar-action-labeled sidebar-team-network-action" title={t('teamNetwork.openBeta')} aria-label={t('teamNetwork.open')} aria-describedby={newMailArrivals || newBulletinUpdates ? 'sidebar-new-mail-arrivals' : undefined} disabled={Boolean(switchingProfileId)} onClick={() => window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', { detail: { section: newBulletinUpdates && !newMailArrivals ? 'feed' : 'mail' } }))}><UsersRound size={15} /><span>{t('teamNetwork.name')} <small className="team-network-beta">{t('teamNetwork.beta')}</small></span>{(newMailArrivals || newBulletinUpdates) && <><span className="status-dot" aria-hidden="true" /><span id="sidebar-new-mail-arrivals" className="sr-only">{t(newMailArrivals && newBulletinUpdates ? 'teamNetwork.newTeamActivity' : newMailArrivals ? 'teamNetwork.newMailArrivals' : 'teamNetwork.newBulletinUpdates')}</span></>}</button>
         <button className="sidebar-action sidebar-action-labeled" title={t("ui.Sidebar.Sidebar.resume_chat_790e1b9")} aria-label={t("ui.Sidebar.Sidebar.resume_chat_790e1b9")} disabled={Boolean(switchingProfileId)} onClick={() => {
           const store = useAppStore.getState()
           store.setModal(localSessionImportSupported(store.health) ? 'importChats' : 'resume', true)
@@ -405,6 +407,9 @@ const SessionRow = memo(function SessionRow({ session, selected, visiblePane, se
 
 function SessionContextMenu({ session, unread, folders }: { session: Session; unread: boolean; folders: string[] }) {
   useLocale()
+  const shareProfileId = useAppStore(state => state.activeProfileId)
+  const shareGeneration = useAppStore(state => state.profileGeneration)
+  const shareIdentity = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null)
   const update = (patch: Partial<Session>) => useAppStore.getState().updateSession(session.id, patch)
   const running = useAppStore(state => state.activeSessionIds.has(session.id))
   const admitting = useAppStore(state => Boolean(state.turnAdmissionTokens[session.id]))
@@ -416,6 +421,9 @@ function SessionContextMenu({ session, unread, folders }: { session: Session; un
         <MenuItem icon={unread ? Inbox : Inbox} label={unread ? t("ui.Sidebar.SessionContextMenu.mark_as_read_75c4ef2") : t("ui.Sidebar.SessionContextMenu.mark_as_unread_1a9220e")} onSelect={() => unread ? void useAppStore.getState().markRead(session.id, true) : void useAppStore.getState().markUnread(session.id)} />
         {!session.archived && <MenuItem icon={Columns2} label={t("ui.Sidebar.SessionContextMenu.open_in_split_view_fd78f06")} onSelect={() => void useAppStore.getState().openSessionInSplit(session.id)} />}
         <MenuItem icon={Pencil} label={t("ui.Sidebar.SessionContextMenu.rename_chat_a257dec")} onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:rename-chat', { detail: session }))} />
+        <MenuItem icon={Share2} label={t('chatShare.menu')} onSelect={() => window.dispatchEvent(new CustomEvent('agentsdock:share-chat', {
+          detail: { session, scope: { profileId: shareProfileId, profileGeneration: shareGeneration, serverIdentity: shareIdentity } }
+        }))} />
         <MenuItem icon={session.pinned ? PinOff : Pin} label={session.pinned ? t("ui.Sidebar.SessionContextMenu.unpin_chat_e260efa") : t("ui.Sidebar.SessionContextMenu.pin_chat_633b23e")} onSelect={() => void update({ pinned: !session.pinned })} />
         {!session.archived && <ContextMenu.Sub><ContextMenu.SubTrigger className="menu-item"><Folder size={14} />{t("ui.Sidebar.SessionContextMenu.move_to_folder_91d631e")}<ChevronRight size={13} className="submenu-arrow" /></ContextMenu.SubTrigger><ContextMenu.Portal><ContextMenu.SubContent className="menu-content" sideOffset={3}>{folders.map(folder => <ContextMenu.Item className="menu-item" key={folder} onSelect={() => void update(sidebarFolderAssignmentPatch(folder))}>{folder}</ContextMenu.Item>)}</ContextMenu.SubContent></ContextMenu.Portal></ContextMenu.Sub>}
         <MenuItem icon={session.archived ? ArchiveRestore : Archive} label={session.archived ? t("ui.Sidebar.SessionContextMenu.unarchive_chat_b4d36bb") : t("ui.Sidebar.SessionContextMenu.archive_chat_180f1c3")} onSelect={() => void update({ archived: !session.archived })} />

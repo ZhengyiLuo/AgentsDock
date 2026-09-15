@@ -1,6 +1,4 @@
-<h1 align="center">AgentsDock</h1>
-
-<p align="center"><strong>A dock for all your agents.</strong></p>
+<h1 align="center">AgentsDock: an IDE designed for agentic AI research</h1>
 
 <div align="center">
   <a href="https://agentsdock.net">
@@ -9,10 +7,10 @@
       alt="AgentsDock website"
     />
   </a>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v0.2.13-beta.33">
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0">
     <img
-      src="https://img.shields.io/badge/desktop-v0.2.13--beta.33-EA7233"
-      alt="Latest desktop beta"
+      src="https://img.shields.io/badge/desktop-v1.0.0-EA7233"
+      alt="Desktop 1.0.0 stable"
     />
   </a>
   <a href="https://discord.gg/ZGDrhEWqPt">
@@ -46,29 +44,27 @@
 </p>
 
 <div align="center">
-  <strong>Built for AI researchers.</strong>
-  <br />
-  <br />
   AgentsDock currently supports <strong>Claude Code</strong>,
   <strong>Codex</strong>, and <strong>Cursor</strong> in one desktop and mobile
   workspace. Use your agents for coding, research, and long-running work
-  without living in a terminal.
+  without living in a terminal. Easily review files and rich media.
   <br />
   <br />
-  Run agents on your own workstation or server, follow their progress, review
-  files and rich media, and continue from desktop or mobile.
+  <strong>Desktop stable 1.0.0:</strong>
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-mac-universal.dmg">macOS</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-x86_64.AppImage">Linux x86_64</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-linux-arm64.AppImage">Linux ARM64</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/download/v1.0.0/AgentsDock-1.0.0-win-x64.exe">Windows (unsigned installer)</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases">Release page</a>
+  ·
+  <a href="https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0">1.0.0 release notes</a>
   <br />
-  <br />
-  <strong>Download the latest version:</strong>
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-mac-universal.dmg">macOS</a>
-  ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-x86_64.AppImage">Linux x86_64</a>
-  ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-linux-arm64.AppImage">Linux ARM64</a>
-  ·
-  <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/v0.2.13-beta.33/AgentsDock-0.2.13-beta.33-win-x64.exe">Windows</a>
-  ·
-  <a href="https://testflight.apple.com/join/2JjWy2Z2">iPhone &amp; iPad</a>
+  <strong>Mobile:</strong>
+  <a href="https://apps.apple.com/us/app/agentsdock/id6769275751">iPhone &amp; iPad</a>
   ·
   <a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/download/android-v0.1.1-beta.8/AgentsDock-0.1.1-android-arm64-beta.8.apk">Android</a>
   <br />
@@ -109,7 +105,8 @@ model requests, and clients may cache content on your devices.
 ## Get started
 
 1. **Install the app.** Get a desktop build from
-   [GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases),
+   [public GitHub Releases](https://github.com/ZhengyiLuo/AgentsDock/releases)
+   ([current stable](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.0)),
    or find the current iPhone/iPad distribution link on
    [the website](https://agentsdock.net/#downloads).
 2. **Set up AgentsServer.** Direct macOS and Linux builds provide
@@ -219,5 +216,7 @@ are managed separately; see [release channels](docs/DIRECT_RELEASES.md).
 
 ## License
 
-This repository does not currently include a project-wide license. Third-party
-components retain their existing license and attribution notices.
+AgentsDock's original code is licensed under the [Apache License 2.0](LICENSE),
+except where a component explicitly states another license. See [NOTICE](NOTICE)
+for attribution and separately licensed components. Existing third-party
+copyrights, licenses, and notices remain in effect.

@@ -29,6 +29,7 @@ export function ClaudePermissionMenu({
 }) {
   useLocale()
   const { runtime, supported, mutating } = useClaudeRuntime()
+  const sharedDisconnected = useAppStore(state => window.agentsDock.sharedChat === true && !state.connected)
   const [internalOpen, setInternalOpen] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -43,7 +44,7 @@ export function ClaudePermissionMenu({
   const modeSupported = supportedModes.includes(mode)
   const available = supported && featureSupported && modesResolved && policyResolved && modeSupported
   const turnActive = running || runtime?.status?.type === 'active'
-  const controlsDisabled = mutating || saveState === 'saving'
+  const controlsDisabled = mutating || saveState === 'saving' || sharedDisconnected
   const label = CLAUDE_PERMISSION_MODE_LABELS[mode]
   const unavailableLabel = !supported
     ? t('ui.permission.unavailable')
@@ -60,7 +61,7 @@ export function ClaudePermissionMenu({
           ? 'Claude permissions loading'
           : `Claude permissions: ${label}`
   const open = controlledOpen ?? internalOpen
-  const effectiveOpen = open && available
+  const effectiveOpen = open && available && !sharedDisconnected
   const setOpen = (next: boolean) => {
     if (controlledOpen === undefined) setInternalOpen(next)
     onOpenChange?.(next)
@@ -127,7 +128,7 @@ export function ClaudePermissionMenu({
         className={`codex-permission-chip${available ? '' : ' unavailable'}`}
         aria-label={accessibleLabel}
         title={accessibleLabel}
-        disabled={!available}
+        disabled={!available || sharedDisconnected}
       >
         <Shield size={14} aria-hidden="true" />
         {available

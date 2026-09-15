@@ -50,7 +50,7 @@ describe('direct release contract', () => {
     expect(packageJSON.build.publish).toEqual([{
       provider: 'github',
       owner: 'ZhengyiLuo',
-      repo: 'AgentsDock-Releases',
+      repo: 'AgentsDock',
       channel: expectedChannel,
       releaseType: 'draft'
     }])
@@ -79,7 +79,7 @@ describe('direct release contract', () => {
     expect(linuxVerifyScript).toContain('AppImage and tarball application payloads differ')
     expect(linuxVerifyScript).toContain('AppImage and tarball updater configurations differ')
     expect(linuxVerifyScript).toContain('disable-auto-update')
-    expect(linuxVerifyScript).toContain('AgentsDock-Releases')
+    expect(linuxVerifyScript).toContain('AgentsDock')
     expect(linuxVerifyScript).toContain('desktop launcher must not force --no-sandbox')
     expect(linuxVerifyScript).not.toContain('AppRun\" --no-sandbox')
     expect(linuxVerifyScript).toContain('SMOKE_EXIT\" -ne 124')

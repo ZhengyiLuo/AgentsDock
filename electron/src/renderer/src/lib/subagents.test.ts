@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@shared/i18n'
 import type { Event } from '@shared/types'
-import { subagentDetailText, subagentDisplayName, subagentLogText, subagentsFromEvents } from './subagents'
+import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from './subagents'
 afterEach(() => setLocale('en'))
 
 const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => ({
@@ -15,6 +15,142 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
 })
 
 describe('subagentsFromEvents', () => {
+  it.each(['___', '---'])('keeps separator-only task labels visible (%s)', task => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-live', subagent_status: 'running',
+      subagent_task: task, subagent_nickname: 'Kuhn'
+    })])
+    expect(subagentDisplayName(agent)).toBe(task)
+  })
+
+  it.each([null, undefined])('uses a readable task path for untitled live provider records (%s)', title => {
+    const state = event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-live', subagent_status: 'running',
+      subagent_title: title, subagent_name: 'Kuhn', subagent_nickname: 'Kuhn',
+      subagent_path: '/root/prepare_release_notes'
+    })
+    const [agent] = subagentsFromEvents([state])
+    expect(subagentDisplayName(agent)).toBe('Prepare release notes')
+    expect(subagentDetailText(agent)).toBe('Kuhn')
+    expect(subagentLogText(agent)).toContain('/root/prepare_release_notes')
+    expect(agent).toMatchObject({ id: 'child-live', nickname: 'Kuhn', path: '/root/prepare_release_notes', status: 'running' })
+    expect(state.subagent_name).toBe('Kuhn')
+    setLocale('zh-CN')
+    expect(subagentDisplayName(agent)).toBe('Prepare release notes')
+  })
+
+  it('falls back to the task after a title clear without renaming or duplicating the child', () => {
+    const state = event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-live', subagent_status: 'running',
+      subagent_title: 'Release review', subagent_name: 'Kuhn', subagent_nickname: 'Kuhn',
+      subagent_path: '/root/prepare_release_notes'
+    })
+    expect(subagentDisplayName(subagentsFromEvents([state])[0])).toBe('Release review')
+    const after = subagentsFromEvents([state, { ...state, seq: 2, id: 'event-2', subagent_title: null }])
+    expect(after).toHaveLength(1)
+    expect(subagentDisplayName(after[0])).toBe('Prepare release notes')
+    expect(subagentDetailText(after[0])).toBe('Kuhn')
+    expect(after[0].title).toBeNull()
+  })
+
+  it('retains the nickname when no usable task or child path exists', () => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-live', subagent_status: 'running',
+      subagent_title: null, subagent_name: 'Kuhn', subagent_nickname: 'Kuhn', subagent_path: '/root'
+    })])
+    expect(subagentDisplayName(agent)).toBe('Kuhn')
+  })
+
+  it('uses the exact Codex display title and retains its nickname and path separately', () => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-1', subagent_status: 'running',
+      subagent_title: 'Public resources', subagent_nickname: 'Kepler the 2nd',
+      subagent_name: 'Kepler the 2nd', subagent_path: '/root/public_resources'
+    })])
+    expect(subagentDisplayName(agent)).toBe('Public resources')
+    expect(subagentDetailText(agent)).toBe('Kepler the 2nd')
+    expect(subagentLogText(agent)).toContain('Kepler the 2nd')
+    expect(subagentLogText(agent)).toContain('/root/public_resources')
+    setLocale('zh-CN')
+    expect(subagentDisplayName(agent)).toBe('Public resources')
+  })
+
+  it('keeps one child through rename, missing or malformed titles, and explicit clear', () => {
+    const state = (seq: number, extra: Partial<Event> = {}) => event(seq, 'subagent_state', {
+      backend: 'codex', subagent_id: 'child-1', subagent_status: 'completed',
+      subagent_started_at: '2026-07-12T09:00:00Z', ...extra
+    })
+    const events = [
+      state(1, { subagent_title: 'Initial audit', subagent_nickname: 'Kepler the 2nd' }),
+      state(2, { subagent_title: 'Review letters audit' }),
+      state(3), state(4, { subagent_title: { wrong: 'shape' } as unknown as string }),
+      state(5, { subagent_title: '[AgentsDock context] internal context' })
+    ]
+    const [agent] = subagentsFromEvents(events)
+    expect(subagentsFromEvents(events)).toHaveLength(1)
+    expect(subagentDisplayName(agent)).toBe('Review letters audit')
+    expect(agent).toMatchObject({ key: 'codex:subagent:child-1', status: 'completed',
+      startedAt: '2026-07-12T09:00:00Z' })
+    for (const cleared of [null, '', '  ']) {
+      const [after] = subagentsFromEvents([...events, state(6, { subagent_title: cleared }), state(7)])
+      expect(subagentDisplayName(after)).toBe('Kepler the 2nd')
+      expect(after.key).toBe(agent.key)
+      expect(isSubagentActive(after)).toBe(false)
+    }
+  })
+
+  it('does not turn a cleared title into a persistent fallback name', () => {
+    const [agent] = subagentsFromEvents([
+      event(1, 'subagent_state', { subagent_id: 'child-1', subagent_status: 'running',
+        subagent_title: 'Publications audit', subagent_name: 'Codex subagent' }),
+      event(2, 'subagent_state', { subagent_id: 'child-1', subagent_status: 'running', subagent_title: null })
+    ])
+    expect(subagentDisplayName(agent)).toBe('Codex subagent')
+  })
+
+  it('renames a completed child without changing its original lifecycle time or key', () => {
+    const completed = event(1, 'subagent_state', { backend: 'codex', subagent_id: 'child-1',
+      subagent_title: 'Initial audit', subagent_nickname: 'Kepler the 2nd', subagent_status: 'completed',
+      subagent_started_at: '2026-07-12T09:59:00Z', subagent_activity: 'Audit complete' })
+    // Identity snapshots carry a new sequence but the server retains lifecycle ts.
+    const renamed = { ...completed, seq: 2, id: 'event-2', subagent_title: 'Public resources' }
+    const [before] = subagentsFromEvents([completed])
+    const [after] = subagentsFromEvents([completed, renamed])
+    expect(subagentDisplayName(after)).toBe('Public resources')
+    expect(after).toMatchObject({ key: before.key, startedAt: before.startedAt,
+      updatedAt: before.updatedAt, status: 'completed', log: before.log })
+    expect(isSubagentActive(after)).toBe(false)
+  })
+
+  it('keeps exact-owner tracking loss inactive despite late raw or structured progress', () => {
+    const raw = (seq: number, subtype: string, run = 'run-1') => event(seq, 'raw_event', {
+      backend: 'claude', run_id: run,
+      raw: JSON.stringify({ type: 'system', subtype, task_id: 'same-task', task_type: 'local_agent', tool_use_id: 'tool-one', description: 'Late progress' })
+    })
+    const state = (seq: number, status: string) => event(seq, 'subagent_state', {
+      backend: 'claude', run_id: 'run-1', subagent_id: 'same-task', subagent_tool_id: 'tool-one',
+      subagent_status: status, subagent_activity: 'Completion is not confirmed'
+    })
+    const agents = subagentsFromEvents([
+      raw(1, 'task_started'), state(2, 'tracking_lost'), raw(3, 'task_progress'),
+      raw(4, 'task_started'), state(5, 'running'), raw(6, 'task_started', 'new-owner'), raw(7, 'task_progress')
+    ])
+    expect(agents).toHaveLength(2)
+    const lost = agents.find(agent => agent.runId === 'run-1')!
+    expect(lost.status).toBe('tracking_lost')
+    expect(lost.latestActivity).toBe('Completion is not confirmed')
+    expect(isSubagentActive(lost)).toBe(false)
+    expect(isSubagentActive(agents.find(agent => agent.runId === 'new-owner')!)).toBe(true)
+    setLocale('en')
+    expect(subagentStatusLabel(lost.status)).toBe('Tracking lost')
+    expect(subagentLogText(lost)).toContain('Tracking lost')
+  })
+
+  it('recognizes an explicitly observed killed task as inactive', () => {
+    const [agent] = subagentsFromEvents([event(1, 'subagent_state', { backend: 'claude', subagent_id: 'task', subagent_status: 'killed' })])
+    expect(agent.status).toBe('killed')
+    expect(isSubagentActive(agent)).toBe(false)
+  })
   it('localizes generated progress and logs without translating names, statuses, or provider output', () => {
     const events = [
       event(1, 'tool_started', { backend: 'claude', tool: { id: 'tool-a', name: 'Agent', input: { description: 'Review Prompt' } } }),
@@ -360,7 +496,7 @@ describe('subagentsFromEvents', () => {
       path: '/root/crash_log_correlation',
       status: 'completed'
     })
-    expect(subagentDisplayName(agents[0])).toBe('crash_log_correlation')
+    expect(subagentDisplayName(agents[0])).toBe('Crash log correlation')
     expect(subagentDetailText(agents[0])).toBe('/root/crash_log_correlation')
     expect(agents[0].name).not.toContain('[AgentsDock context]')
   })
@@ -389,7 +525,7 @@ describe('subagentsFromEvents', () => {
       task: 'readonly_round2',
       path: '/root/readonly_round2'
     })
-    expect(subagentDisplayName(agent)).toBe('readonly_round2')
+    expect(subagentDisplayName(agent)).toBe('Readonly round2')
     expect(subagentDetailText(agent)).toBe('/root/readonly_round2')
   })
 
@@ -411,7 +547,7 @@ describe('subagentsFromEvents', () => {
       task: 'child-thread-1',
       path: '/root/readonly_round2'
     })
-    expect(subagentDisplayName(agent)).toBe('readonly_round2')
+    expect(subagentDisplayName(agent)).toBe('Readonly round2')
     expect(subagentDetailText(agent)).toBe('/root/readonly_round2')
     expect(subagentLogText(agent)).not.toContain('Task: child-thread-1')
   })
@@ -445,7 +581,7 @@ describe('subagentsFromEvents', () => {
     expect(subagentDisplayName(agent)).toBe('Authoritative task description')
   })
 
-  it('prefers explicit authoritative nicknames while retaining path and task labels', () => {
+  it('prefers the explicit task while retaining the authoritative nickname and path', () => {
     const state = event(1, 'subagent_state', {
       backend: 'codex',
       subagent_id: 'child-1',
@@ -465,7 +601,7 @@ describe('subagentsFromEvents', () => {
       path: '/root/readonly_round2',
       task: 'Investigate read-only files'
     })
-    expect(subagentDisplayName(agent)).toBe('Leibniz the 2nd')
-    expect(subagentDetailText(agent)).toBe('/root/readonly_round2')
+    expect(subagentDisplayName(agent)).toBe('Investigate read-only files')
+    expect(subagentDetailText(agent)).toBe('Leibniz the 2nd')
   })
 })

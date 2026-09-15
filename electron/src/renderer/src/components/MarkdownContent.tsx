@@ -161,8 +161,8 @@ export const MarkdownContent = memo(function MarkdownContent({
         const insideMarkdownLink = className?.split(/\s+/).includes('inside-markdown-link') === true
         if (marker.kind === 'team') {
           const title = insideMarkdownLink
-            ? `${marker.displayText} · Team Network reference inside link text`
-            : teamReferenceTitle(marker.reference)
+            ? t('teamNetwork.reference.insideLink', { name: marker.displayText }, uiLocale)
+            : teamReferenceTitle(marker.reference, uiLocale)
           return <span className={className} title={title} aria-label={title}>{children}</span>
         }
         const remote = marker.reference.target_kind === 'secure_peer'
@@ -286,12 +286,12 @@ function teamReferencesEqual(previous: readonly TeamReference[], next: readonly 
   })
 }
 
-function teamReferenceTitle(reference: TeamReference): string {
-  if (reference.kind === 'skill') return `${teamReferenceText(reference)} · Team skill`
-  if (reference.recipient_kind === 'all_servers') return `${teamReferenceText(reference)} · Team Mail · All servers`
-  if (reference.recipient_kind === 'server') return `${teamReferenceText(reference)} · Server inbox`
-  if (reference.recipient_kind === 'human') return `${teamReferenceText(reference)} · Person`
-  return `${teamReferenceText(reference)} · Bulletin`
+function teamReferenceTitle(reference: TeamReference, locale: Locale): string {
+  const key = reference.kind === 'skill' ? 'teamNetwork.reference.skill'
+    : reference.recipient_kind === 'all_servers' ? 'teamNetwork.reference.allInboxes'
+      : reference.recipient_kind === 'server' ? 'teamNetwork.reference.serverInbox'
+        : reference.recipient_kind === 'human' ? 'teamNetwork.reference.person' : 'teamNetwork.bulletin'
+  return `${teamReferenceText(reference)} · ${t(key, undefined, locale)}`
 }
 
 type InlineChatReferenceMarker = {

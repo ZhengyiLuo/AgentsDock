@@ -23,7 +23,9 @@ import { useTransientClose } from '../lib/transient-close'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
+import { ChatShareDialog } from './ChatShareDialog'
 import { CodexServerSettings } from './CodexServerSettings'
+import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
 import { ServerManagement } from './ServerManagement'
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings'
@@ -443,6 +445,7 @@ export function Dialogs() {
     <DigestDialog />
     <JobDialog />
     <RenameChatDialog />
+    <ChatShareDialog />
     <ConfirmDeleteDialog />
   </>
 }
@@ -896,9 +899,9 @@ export function ServerOnboardingDialog() {
     && !/[\u0000-\u001f\u007f]/.test(teamNetworkServerName.trim())
   const numericPort = Number(port)
   const validServerPort = /^\d+$/.test(port) && Number.isInteger(numericPort) && numericPort >= 1024 && numericPort <= 65535
-  const dialogTitle = hostSetup ? 'Create Team Network on this server' : betaUpdate ? t('mergeDialogs.setup.betaTitle') : mode === 'add' ? t('mergeDialogs.setup.addTitle') : t('mergeDialogs.setup.title')
+  const dialogTitle = hostSetup ? t('teamNetwork.setup.title') : betaUpdate ? t('mergeDialogs.setup.betaTitle') : mode === 'add' ? t('mergeDialogs.setup.addTitle') : t('mergeDialogs.setup.title')
   const dialogDescription = hostSetup
-    ? 'Create a team and its host with this name. An existing team keeps its name and history.'
+    ? t('teamNetwork.setup.description')
     : betaUpdate
       ? t('mergeDialogs.setup.betaDescription')
       : mode === 'add'
@@ -912,27 +915,27 @@ export function ServerOnboardingDialog() {
           ? target === 'ssh' ? t('ui.Dialogs.ServerOnboardingDialog.update_over_ssh_66bafb0') : t('ui.Dialogs.ServerOnboardingDialog.update_this_computer_3f5f0b1')
           : target === 'ssh' ? t('ui.Dialogs.ServerOnboardingDialog.install_over_ssh_bc9dd1e') : t('ui.Dialogs.ServerOnboardingDialog.install_here_6066729')
 
-  if (hostSetup) return <Shell open={open} onOpenChange={value => { if (!installing) setOpen(value) }} title={dialogTitle} description={dialogDescription} className="server-onboarding-dialog" closeDisabled={installing} localizeChrome={false}>
+  if (hostSetup) return <Shell open={open} onOpenChange={value => { if (!installing) setOpen(value) }} title={dialogTitle} description={dialogDescription} className="server-onboarding-dialog" closeDisabled={installing}>
     <div className="server-setup-body">
       <div className="server-setup-flow">
         <section className="server-setup-intro">
-          <span><Server size={13} /> Selected AgentsServer</span>
-          <h3>{hostOrigin?.serverName || 'Server unavailable'}</h3>
-          <p>The role changes live on this exact server. Existing chats and running agents stay connected.</p>
+          <span><Server size={13} /> {t('teamNetwork.setup.selectedServer')}</span>
+          <h3>{hostOrigin?.serverName || t('teamNetwork.setup.unavailable')}</h3>
+          <p>{t('teamNetwork.setup.liveRole')}</p>
         </section>
         <div className="server-setup-fields server-role-fields">
-          <label><span>Server name</span><input autoFocus required value={teamNetworkServerName} disabled={installing} onChange={event => setTeamNetworkServerName(event.target.value)} aria-invalid={teamNetworkServerName.length > 0 && !validTeamNetworkServerName} /></label>
+          <label><span>{t('teamNetwork.setup.serverName')}</span><input autoFocus required value={teamNetworkServerName} disabled={installing} onChange={event => setTeamNetworkServerName(event.target.value)} aria-invalid={teamNetworkServerName.length > 0 && !validTeamNetworkServerName} /></label>
         </div>
-        <p className="server-setup-help">This server will host the Team Network and accept server connections. People and agents will see this server name.</p>
+        <p className="server-setup-help">{t('teamNetwork.setup.hostHint')}</p>
         {setupError && <div className="server-setup-error" role="alert">
           <CircleAlert size={17} />
-          <div><strong>Could not create network</strong><p>{setupError}</p></div>
+          <div><strong>{t('teamNetwork.setup.failed')}</strong><p>{setupError}</p></div>
         </div>}
         <footer>
-          <button type="button" className="quiet-button" disabled={installing} onClick={() => setOpen(false)}>Cancel</button>
+          <button type="button" className="quiet-button" disabled={installing} onClick={() => setOpen(false)}>{t('teamNetwork.cancel')}</button>
           <button type="button" className="primary-button" disabled={installing || !hostOrigin || !validTeamNetworkServerName} onClick={() => void configureTeamNetworkServer()}>
             {installing ? <LoaderCircle className="spin" size={14} /> : setupError ? <RefreshCw size={14} /> : <Server size={14} />}
-            {installing ? 'Creating…' : setupError ? 'Retry' : 'Create network'}
+            {installing ? t('teamNetwork.setup.creating') : setupError ? t('teamNetwork.retry') : t('teamNetwork.setup.create')}
           </button>
         </footer>
       </div>
@@ -975,7 +978,7 @@ export function ServerOnboardingDialog() {
           <label className="server-port-field"><span>{t("ui.Dialogs.ServerOnboardingDialog.agentsserver_port_93ea882")}</span><input name="agentsdock-server-http-port" autoComplete="off" inputMode="numeric" min={1024} max={65535} aria-invalid={port.length > 0 && !validServerPort} value={port} disabled={installing} onChange={event => setPort(event.target.value.replace(/\D/g, '').slice(0, 5))} /></label>
         </div>
         <p className="server-setup-help">{target === 'ssh' ? t("ui.Dialogs.ServerOnboardingDialog.ssh_host_key_and_connection_port_come_from_25c52e3") : t("ui.Dialogs.ServerOnboardingDialog.agentsserver_http_api_port_default_7850_po_9ba1d3d")}</p>
-        <label className="server-setup-team-hub"><input type="checkbox" checked={teamHubHost} disabled={installing} onChange={event => setTeamHubHost(event.target.checked)} /><span><strong>Start a Team Network on this server</strong><small>{betaUpdate ? 'Leave this off to preserve the server’s current Team Network role. Turn it on only to make this server the host.' : 'Creates the private Teamspace host used to add people and connect other servers.'}</small></span></label>
+        <label className="server-setup-team-hub"><input type="checkbox" checked={teamHubHost} disabled={installing} onChange={event => setTeamHubHost(event.target.checked)} /><span><strong>{t('teamNetwork.setup.start')}</strong><small>{betaUpdate ? t('teamNetwork.setup.preserveRole') : t('teamNetwork.setup.privateHost')}</small></span></label>
         {installStartedAt !== null && <div className={`server-setup-status ${setupError ? 'failed' : installing ? 'running' : 'stopped'}`} role="status" aria-live="polite">
           <span className="server-setup-status-icon">{setupError ? <CircleAlert size={15} /> : installing ? <LoaderCircle className="spin" size={15} /> : <Clock3 size={15} />}</span>
           <span><strong>{setupError ? t("ui.Dialogs.ServerOnboardingDialog.setup_needs_attention_39d845b") : installing ? setupPhaseLabel(currentProgress?.phase) : t("ui.Dialogs.ServerOnboardingDialog.setup_stopped_2b28514")}</strong><small>{currentProgress?.message || t("ui.Dialogs.ServerOnboardingDialog.preparing_setup_305121e")}</small></span>
@@ -2691,6 +2694,7 @@ export function SettingsDialog() {
       profileId={activeProfileId}
       profileGeneration={profileGeneration}
     />
+    <CodexSubagentSettings connected={connected} profileId={activeProfileId} profileGeneration={profileGeneration} />
     <footer><button type="button" className="primary-button" onClick={closeSettings}>{t("ui.Dialogs.SettingsDialog.done_11a6767")}</button></footer>
   </div>
   return <>
@@ -3924,6 +3928,7 @@ function JobPromptEditor({
     </div></label>
     {teamMention && <TeamMentionPalette
       id="job-team-mention-palette"
+      sourceSessionId={sourceSession.id}
       mention={teamMention}
       selectedIndex={teamMentionIndex}
       supported={teamSupported}
@@ -3957,8 +3962,8 @@ function JobPromptEditor({
         : t("ui.Dialogs.JobPromptEditor.update_agentsserver_to_add_scheduled_chat__01e862a")}
       {' '}
       {teamSupported
-        ? '@@ gives each run exact Team Network recipients or skills without sending anything when you save.'
-        : 'Update AgentsServer to add scheduled @@ Team Network hints.'}
+        ? t('teamNetwork.reference.scheduledHint')
+        : t('teamNetwork.reference.updateScheduled')}
     </small>
   </div>
 }
@@ -4005,10 +4010,10 @@ const JobPromptMirror = forwardRef<HTMLDivElement, {
 })
 
 function scheduledTeamReferenceLabel(reference: TeamReference): string {
-  if (reference.kind === 'skill') return 'Team skill'
-  if (reference.recipient_kind === 'all') return 'Bulletin'
-  if (reference.recipient_kind === 'all_servers') return 'Team Mail · All servers'
-  return reference.recipient_kind === 'server' ? 'Team server' : 'Team member'
+  if (reference.kind === 'skill') return t('teamNetwork.reference.skill')
+  if (reference.recipient_kind === 'all') return t('teamNetwork.bulletin')
+  if (reference.recipient_kind === 'all_servers') return t('teamNetwork.reference.allInboxes')
+  return t(reference.recipient_kind === 'server' ? 'teamNetwork.reference.server' : 'teamNetwork.reference.member')
 }
 
 function syncJobPromptEditorScroll(textarea: HTMLTextAreaElement | null, mirror: HTMLDivElement | null): void {

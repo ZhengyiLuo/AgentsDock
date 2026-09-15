@@ -1,5 +1,5 @@
 import type { Event } from './types'
-import { isImportedCodexGoalContext } from './provider-origin'
+import { isImportedCodexRuntimeContext } from './provider-origin'
 
 export const SEMANTIC_HIDDEN_EVENT_TYPES = [
   'turn_queued',
@@ -21,6 +21,8 @@ export const SEMANTIC_HIDDEN_EVENT_TYPES = [
   'codex_goal_cleared',
   // Usage is durable control/header state, not a transcript row.
   'codex_token_usage',
+  // Durable acknowledgement of an internal SDK context hook, not chat content.
+  'claude_background_task_reconciliation_consumed',
 ] as const
 
 export const SEMANTIC_JOB_EVENT_TYPES = [
@@ -53,7 +55,7 @@ export function isNativeGoalSteerEvent(event: Event): boolean {
 }
 
 export function timelineSemanticUnits(events: Event[]): TimelineSemanticUnit[] {
-  const ordered = events.filter(event => !isImportedCodexGoalContext(event)).sort((left, right) => left.seq - right.seq)
+  const ordered = events.filter(event => !isImportedCodexRuntimeContext(event)).sort((left, right) => left.seq - right.seq)
   const occurrenceByEvent = new Map<Event, Map<string, string>>()
   const currentOccurrenceByRun = new Map<string, { key: string; started: boolean }>()
   for (const event of ordered) {
@@ -189,7 +191,7 @@ export function timelineSemanticItemCount(events: Event[]): number {
 }
 
 export function incompleteLeadingRunId(events: Event[]): string | null {
-  const ordered = events.filter(event => !isImportedCodexGoalContext(event)).sort((left, right) => left.seq - right.seq)
+  const ordered = events.filter(event => !isImportedCodexRuntimeContext(event)).sort((left, right) => left.seq - right.seq)
   const runId = ordered
     .map(event => event.run_id?.trim() || '')
     .find(Boolean)
@@ -273,7 +275,8 @@ export function crossChatSemanticKey(event: Event): string | null {
 /** Only the negotiated one-way envelope protocol uses individual message cards. */
 export function isAsyncCrossChatMessage(event: Event): boolean {
   return event.conversation_mode === 'async_route_v1'
-    && /^chat_conversation_message_(registered|received|queued|started|delivered|cancelled|failed)$/.test(event.type)
+    && (/^chat_conversation_message_(registered|received|queued|started|delivered|cancelled|failed)$/.test(event.type)
+      || event.delivery_mode === 'mailbox' && /^chat_conversation_message_(mailbox_migrated|read|deleted)$/.test(event.type))
 }
 
 export function isNativeSteerTransitionStop(event: Event): boolean {

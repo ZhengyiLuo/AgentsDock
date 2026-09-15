@@ -1,5 +1,6 @@
 // Localized display strings use semantic catalog keys.
 import { t, getLocale } from '@shared/i18n'
+import { isSharedChatCollaborator } from '@shared/chat-shares'
 import { useLocale } from '../lib/i18n'
 import { forwardRef, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -9,7 +10,7 @@ import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSe
 import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronDown, Columns2, CornerDownRight, File, FolderOpen, Gauge, GitFork, Goal, GripVertical, Import, Info, ListOrdered, LoaderCircle, Mail, MessageSquarePlus, MessageSquareShare, MoreHorizontal, Network, Paperclip, Pencil, Plus, RadioTower, RotateCw, Send, Settings, Shield, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { effectiveFileContentType } from '@shared/file-content-type'
 import { localSessionImportSupported } from '@shared/local-session-import'
-import type { AgentCrossChatRoute, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
+import type { AgentCrossChatRoute, AgentTeamMailRoute, AgentTeamMailRoutesSnapshot, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
 import { teamAllServersAliasAvailable, teamBulletinAliasAvailable, type TeamNetworkServer } from '@shared/team-network'
 import { cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeDiagnosticFor, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
@@ -63,9 +64,11 @@ import {
 } from '../lib/chat-references'
 import {
   activeInboundDelivery as detectActiveInboundDelivery,
+  asyncQueuedMessageControlsAvailable,
   exactQueuedDeliveryReorderAvailable,
   firstBlockingCrossChatDelivery,
   isImmutableQueuedTurn,
+  isAsyncAgentQueuedTurn,
   isQueuedDeliveryBarrier,
   isReorderableQueuedTurn,
   isScheduledJobQueuedTurn,
@@ -126,7 +129,7 @@ const EMPTY_EVENTS: AgentEvent[] = []
 const EMPTY_CHAT_REFERENCES: ChatReference[] = []
 const EMPTY_TEAM_REFERENCES: TeamReference[] = []
 const EMPTY_AGENT_ROUTES: AgentCrossChatRoute[] = []
-const ALL_SERVERS_NATIVE_UPDATE_REQUIRED = '@@all inbox broadcasts require a newer AgentsServer. Update this server or remove the reference.'
+const allServersNativeUpdateRequired = () => t('teamNetwork.mention.allNativeUpdate')
 
 /**
  * Health snapshots also carry volatile activity/queue telemetry. Composer
@@ -234,7 +237,7 @@ function commitComposerSnapshot(
 
 type ChatMentionCandidate = { kind: 'local'; id: string; session: Session }
 
-const REMOTE_AGENT_ROUTE_UNAVAILABLE = 'Remote agent routes cannot be used from @Chat. Remove this reference and use @@ Team Network Inbox for cross-server messages.'
+const remoteAgentRouteUnavailable = () => t('teamNetwork.mention.remoteRouteUnavailable')
 
 function queuedTurnHasRemoteAgentRoute(turn: Pick<QueuedTurn, 'chat_references'>): boolean {
   return Boolean(turn.chat_references?.some(reference => reference.target_kind === 'secure_peer'))
@@ -252,6 +255,12 @@ export interface TeamMentionCandidate {
   hint?: string
   code: string
   target: TeamReferenceTarget
+  /** Authored display copy only; canonical labels and reference data stay unchanged. */
+  presentation?: { labelKey?: string; hintKey?: string; params?: { teamName: string } }
+}
+
+class TeamMentionUIError extends Error {
+  constructor(readonly localeKey: string) { super(t(localeKey)) }
 }
 
 interface ProviderComposerCommandDetails {
@@ -271,7 +280,7 @@ const COMPOSER_COMMANDS: readonly ComposerCommand[] = [
   { id: 'digest', get label() { return t("ui.Composer.copy.create_digest_8b04e01") }, get description() { return t("ui.Composer.copy.summarize_this_chat_for_a_handoff_eb96a08") }, keywords: ['handoff', 'summary'], category: 'agentsdock' },
   { id: 'feedback', get label() { return t("ui.Composer.copy.send_feedback_8235980") }, get description() { return t("ui.Composer.copy.open_the_public_agentsdock_issue_form_7cb3c3a") }, keywords: ['issue', 'bug'], category: 'agentsdock' },
   { id: 'goal', get label() { return t("ui.Composer.copy.goal_cdbf697") }, get description() { return t("ui.Composer.copy.set_or_manage_a_persistent_codex_goal_ea4f0b3") }, keywords: ['objective', 'long-running'], category: 'agentsdock' },
-  { id: 'mail', label: 'Send Team Network mail', description: 'Use /mail server <name> <message>', keywords: ['inbox', 'message', 'agent', 'server'], category: 'agentsdock' },
+  { id: 'mail', get label() { return t('teamNetwork.mention.mailCommand') }, get description() { return t('teamNetwork.mention.mailCommandHint') }, keywords: ['inbox', 'message', 'agent', 'server'], category: 'agentsdock' },
   { id: 'mcp', get label() { return t("ui.Composer.copy.mcp_servers_22a7559") }, get description() { return t("ui.Composer.copy.view_and_control_claude_mcp_connections_ed0b999") }, keywords: ['tools', 'connections', 'servers'], category: 'agentsdock' },
   { id: 'model', get label() { return t("ui.Composer.copy.model_5e2c614") }, get description() { return t("ui.Composer.copy.choose_the_model_for_this_chat_9edb622") }, keywords: ['runtime'], category: 'agentsdock' },
   { id: 'new', get label() { return t("ui.Composer.copy.new_chat_db18382") }, get description() { return t("ui.Composer.copy.create_another_chat_cbc42a6") }, keywords: ['create'], category: 'agentsdock' },
@@ -691,7 +700,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     )).map(reference => reference.session_id)),
     [grantedTargetIds, references]
   )
-  const remainingNewRouteCapacity = agentRouteSnapshot
+  const remainingNewRouteCapacity = agentRouteSnapshot && agentRouteSnapshot.max_routes !== null
     ? Math.max(0, agentRouteSnapshot.max_routes - grantedRoutes.length - pendingGrantTargetIds.size)
     : null
   const referenceTargetsRevision = useAppStore(state => references.map(reference => {
@@ -753,6 +762,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   )
   const commandAvailable = useCallback((command: ComposerCommand): boolean => {
     if (!session) return false
+    if (window.agentsDock.sharedChat && !['goal', 'permissions', 'reasoning', 'model', 'plan', 'schedule', 'attach'].includes(command.id)) return false
     if (command.provider) return command.provider.command.kind.length > 0
     if (command.id === 'chat') return crossChatSupported
     if (command.id === 'mail') return !teamMessagesAdvertised
@@ -1213,8 +1223,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       ) {
         useAppStore.getState().setError(
           capability?.available === true
-            ? 'Update AgentsServer to send deterministic Team Network mail from Chat.'
-            : capability?.message || 'Update AgentsServer to send Team Network mail from Chat.'
+            ? t('teamNetwork.mention.deterministicUpdate')
+            : capability?.message || t('teamNetwork.mention.mailUpdate')
         )
         return
       }
@@ -1228,7 +1238,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       return
     }
     if (consumeComposer && parsedOutgoingReferences.teamReferences.length !== teamReferencesRef.current.length) {
-      useAppStore.getState().setError('A Team Network reference was edited. Remove it and select the recipient again.')
+      useAppStore.getState().setError(t('teamNetwork.mention.referenceEdited'))
       return
     }
     if (outgoingReferences.some(reference => reference.target_kind !== 'secure_peer') && !crossChatSupported) {
@@ -1244,7 +1254,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       return
     }
     if (outgoingReferences.some(reference => reference.target_kind === 'secure_peer')) {
-      useAppStore.getState().setError(REMOTE_AGENT_ROUTE_UNAVAILABLE)
+      useAppStore.getState().setError(remoteAgentRouteUnavailable())
       return
     }
     if (!session) return
@@ -1447,11 +1457,12 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     try {
       const request = useAppStore.getState().beginQueuedTurnsRequest(selectedId)
       const result = await steerFirstQueuedTurn(steeringScope, turn => {
-        if (queuedTurnHasRemoteAgentRoute(turn)) return REMOTE_AGENT_ROUTE_UNAVAILABLE
+        if (queuedTurnHasRemoteAgentRoute(turn)) return remoteAgentRouteUnavailable()
         const state = useAppStore.getState()
         const source = state.sessions.find(candidate => candidate.id === selectedId) ?? session
         return queuedTurnRuntimeAdmissionError(turn, source, state.health, state.runtimeCatalog)
-      }, () => Boolean(confirmInboundDeliveryInterruption(selectedId, 'send_now', steerConsent)))
+      }, () => Boolean(confirmInboundDeliveryInterruption(selectedId, 'send_now', steerConsent)),
+      asyncQueuedMessageControlsAvailable(useAppStore.getState().health))
       if (profileIsActive(activeProfileId, profileGeneration)) {
         useAppStore.getState().applyQueuedTurnsResponse(selectedId, request, result.turns)
       }
@@ -1599,8 +1610,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       ) {
         useAppStore.getState().setError(
           capability?.available === true
-            ? 'Update AgentsServer to send deterministic Team Network mail from Chat.'
-            : capability?.message || 'Update AgentsServer to send Team Network mail from Chat.'
+            ? t('teamNetwork.mention.deterministicUpdate')
+            : capability?.message || t('teamNetwork.mention.mailUpdate')
         )
         return
       }
@@ -1614,7 +1625,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     } else if (command.id === 'digest') {
       useAppStore.getState().setModal('digest', true)
     } else if (command.id === 'feedback') {
-      void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new').catch(reportActionError)
+      void window.agentsDock.native.openExternal('https://github.com/ZhengyiLuo/AgentsDock/issues/new').catch(reportActionError)
     } else if (command.id === 'goal') {
       window.dispatchEvent(new CustomEvent('agentsdock:open-codex-controls', {
         detail: { sessionId: session.id, focus: 'goal' }
@@ -1747,9 +1758,9 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   if (!session) return <div className="composer disabled"><span>{t("ui.Composer.Composer.select_or_create_a_chat_to_begin_3a0c22a")}</span></div>
   return (
     <div className="composer-dock">
-      <div className="composer-context-row">
+      {!window.agentsDock.sharedChat && <div className="composer-context-row">
         <WorkingDirectoryPopover session={session} />
-      </div>
+      </div>}
       <CodexGoalBar />
       <div className={`composer ${dropActive ? 'drop-active' : ''}`}>
       <div className="composer-scroll-region">
@@ -2044,11 +2055,11 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         />}
         {!referencesSupported && <span className="chat-reference-warning">{!chatReferencesSupported
           ? hasRemoteAgentReference
-            ? REMOTE_AGENT_ROUTE_UNAVAILABLE
+            ? remoteAgentRouteUnavailable()
             : t("ui.Composer.Composer.one_or_more_legacy_chat_references_cannot__cb2ccfa")
           : unsupportedAllServersReference
-            ? ALL_SERVERS_NATIVE_UPDATE_REQUIRED
-            : 'One or more Team Network references cannot be used. Delete the highlighted reference and select it again.'}</span>}
+            ? allServersNativeUpdateRequired()
+            : t('teamNetwork.mention.referenceInvalid')}</span>}
       </div>
       {commandPaletteVisible && <ComposerCommandPalette
         id={commandPaletteId}
@@ -2064,6 +2075,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       />}
       {teamMention && <TeamMentionPalette
         id={teamMentionPaletteId}
+        sourceSessionId={selectedId}
         mention={teamMention}
         selectedIndex={teamMentionIndex}
         supported={teamMentionsSupported}
@@ -2107,7 +2119,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
               {[t("ui.Composer.Composer.status_report_b784026"), t("ui.Composer.Composer.keep_going_8fc6411"), t("ui.Composer.Composer.verify_the_result_carefully_b07a805")].map(phrase => <DropdownMenu.Item key={phrase} className="menu-item" onSelect={() => void send(false, phrase, false)}>{phrase}</DropdownMenu.Item>)}
             </DropdownMenu.Content></DropdownMenu.Portal>
           </DropdownMenu.Root>
-          <BackendMenu session={session} running={running} admitting={admitting} />
+          {!window.agentsDock.sharedChat && <BackendMenu session={session} running={running} admitting={admitting} />}
           <RuntimeMenu
             session={session}
             running={running}
@@ -2144,11 +2156,11 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       <div className="drop-overlay" role="status" aria-label={dropActive ? t("ui.Composer.Composer.drop_to_attach_34a7a63") : undefined} aria-live="polite" aria-atomic="true" aria-hidden={!dropActive}>
         <Paperclip size={15} aria-hidden="true" /> <span>{t("ui.Composer.Composer.drop_to_attach_34a7a63")}</span>
       </div>
-      <WorkingDirectoryCommandDialog
+      {!window.agentsDock.sharedChat && <WorkingDirectoryCommandDialog
         open={workingDirectoryOpen}
         session={session}
         onOpenChange={setWorkingDirectoryOpen}
-      />
+      />}
       <ClaudeMcpDialog
         open={mcpDialogOpen}
         session={session}
@@ -2225,7 +2237,7 @@ const ComposerEditorMirror = forwardRef<HTMLDivElement, {
     ref={ref}
     className="composer-editor-mirror"
     aria-hidden={messageLinks.length ? undefined : true}
-    aria-label={messageLinks.length ? 'Message preview' : undefined}
+    aria-label={messageLinks.length ? t('teamNetwork.mention.messagePreview') : undefined}
     onClick={onEdit}
   >{content}</div>
 })
@@ -2244,7 +2256,7 @@ function ComposerReferenceFallback({
   teamReferencesSupported: boolean
 }) {
   const locale = useLocale()
-  const uiLocale = teamReferences.length > 0 ? 'en' : locale
+  const uiLocale = locale
   const entries = [
     ...chatReferences.map(reference => ({ kind: 'chat' as const, reference })),
     ...teamReferences.map(reference => ({ kind: 'team' as const, reference }))
@@ -2308,6 +2320,7 @@ function currentMentionCandidates(
 
 export function TeamMentionPalette({
   id,
+  sourceSessionId,
   mention,
   selectedIndex,
   supported,
@@ -2319,6 +2332,7 @@ export function TeamMentionPalette({
   onSelect
 }: {
   id: string
+  sourceSessionId?: string | null
   mention: TeamMentionTrigger
   selectedIndex: number
   supported: boolean
@@ -2329,17 +2343,80 @@ export function TeamMentionPalette({
   onHighlight: (index: number) => void
   onSelect: (candidate: TeamMentionCandidate) => void
 }) {
+  const locale = useLocale()
   const bulletinAliasSupported = useAppStore(state => teamBulletinAliasAvailable(state.health))
   const allServersAliasSupported = useAppStore(state => teamAllServersAliasAvailable(state.health))
+  const mailRoutesSupported = useAppStore(state => state.health?.capabilities?.agent_team_mail_routes_v1?.available === true
+    && state.health.capabilities.agent_team_mail_routes_v1.version === 1)
   const expectedCacheKey = teamMentionExpectedCacheKey(profileId, profileGeneration, serverIdentity, bulletinAliasSupported, allServersAliasSupported)
   const expectedIdentity = profileId && serverIdentity
     ? { profileId, profileGeneration, serverIdentity }
     : null
   const [targets, setTargets] = useState<TeamMentionCandidate[]>(() => stagedTeamMentionCandidates(expectedCacheKey, bulletinAliasSupported, expectedIdentity))
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const targetRequestRef = useRef<{ key: string; request: Promise<TeamMentionCandidate[]> } | null>(null)
+  const [mailRoutes, setMailRoutes] = useState<AgentTeamMailRoute[]>([])
+  const [mailLoading, setMailLoading] = useState(false)
+  const [mailError, setMailError] = useState<unknown>(null)
+  const [revoking, setRevoking] = useState<ReadonlySet<string>>(new Set())
+  const mailScopeKey = JSON.stringify([profileId, profileGeneration, serverIdentity, sourceSessionId, supported, mailRoutesSupported])
+  const mailScopeRef = useRef(mailScopeKey)
+  mailScopeRef.current = mailScopeKey
+  const mailMountedRef = useRef(true)
+  useEffect(() => {
+    mailMountedRef.current = true
+    return () => { mailMountedRef.current = false }
+  }, [])
+  const mailRequestRef = useRef<{ key: string; request: Promise<AgentTeamMailRoutesSnapshot> } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setMailRoutes([])
+    setMailError(null)
+    setRevoking(new Set())
+    setMailLoading(false)
+    if (!supported || !mailRoutesSupported || !profileId || !serverIdentity || !sourceSessionId) return
+    setMailLoading(true)
+    // A fresh, source-scoped read only on explicit opening. StrictMode reuses
+    // this request; typing and ordinary background activity do not reload it.
+    if (mailRequestRef.current?.key !== mailScopeKey) mailRequestRef.current = {
+      key: mailScopeKey,
+      request: window.agentsDock.agentTeamMailRoutes.list({ profileId, profileGeneration, serverIdentity }, sourceSessionId)
+    }
+    void mailRequestRef.current.request.then(snapshot => {
+      if (!cancelled) setMailRoutes(snapshot.routes)
+    }).catch(cause => {
+      if (!cancelled) setMailError(cause ?? new TeamMentionUIError('teamNetwork.mention.loadGrantsFailed'))
+    }).finally(() => { if (!cancelled) setMailLoading(false) })
+    return () => { cancelled = true }
+  }, [mailScopeKey, mailRoutesSupported, profileGeneration, profileId, serverIdentity, sourceSessionId, supported])
+
+  const revokeMail = async (grant: AgentTeamMailRoute) => {
+    if (!profileId || !serverIdentity || !sourceSessionId || revoking.has(grant.route_id)) return
+    const key = mailScopeKey
+    const current = () => mailMountedRef.current && mailScopeRef.current === key && profileIsActive(profileId, profileGeneration)
+      && activeIdentity(useAppStore.getState()) === serverIdentity
+    if (!current()) return
+    const scope = { profileId, profileGeneration, serverIdentity }
+    setRevoking(previous => new Set(previous).add(grant.route_id))
+    setMailError(null)
+    try {
+      const result = await window.agentsDock.agentTeamMailRoutes.remove(scope, sourceSessionId, grant.route_id, grant.revision)
+      if (!current()) return
+      // Refresh once after the explicit action, including a revision conflict.
+      // Never retry a delete using a newer revision without another user click.
+      const snapshot = await window.agentsDock.agentTeamMailRoutes.list(scope, sourceSessionId)
+      if (!current()) return
+      setMailRoutes(snapshot.routes)
+      if (result.status === 'revision_conflict') setMailError(new TeamMentionUIError('teamNetwork.mention.grantChanged'))
+    } catch (cause) {
+      if (current()) setMailError(cause ?? new TeamMentionUIError('teamNetwork.mention.revokeFailed'))
+    } finally {
+      if (current()) setRevoking(previous => new Set([...previous].filter(id => id !== grant.route_id)))
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -2374,25 +2451,35 @@ export function TeamMentionPalette({
     }).catch(cause => {
       if (cancelled) return
       setLoading(false)
-      setError(cleanActionError(cause) || 'Could not load Team Network recipients.')
+      setError(cause ?? new TeamMentionUIError('teamNetwork.mention.loadRecipientsFailed'))
     })
     return () => { cancelled = true }
   }, [allServersAliasSupported, bulletinAliasSupported, expectedCacheKey, profileGeneration, profileId, serverIdentity, supported])
 
   const candidates = useMemo(
     () => filterTeamMentionTargets(targets, mention.query),
-    [mention.query, targets]
+    [locale, mention.query, targets]
   )
+  const mailGrantFor = (candidate: TeamMentionCandidate) => candidate.target.kind === 'recipient' && candidate.target.recipient_kind === 'server'
+    ? mailRoutes.find(route => route.team_id === candidate.target.team_id && route.target_id === candidate.target.target_id)
+    : undefined
+  const detachedMailGrants = mailRoutes.filter(route => !candidates.some(candidate => mailGrantFor(candidate)?.route_id === route.route_id)
+    && (!mention.query.trim() || route.display_name.toLocaleLowerCase().includes(mention.query.trim().toLocaleLowerCase())))
+  const revokeButton = (grant: AgentTeamMailRoute) => <button type="button" className="chat-mention-revoke"
+    aria-label={t('teamNetwork.mention.revokeMail', { name: grant.display_name })} disabled={revoking.has(grant.route_id)}
+    onMouseDown={event => { event.preventDefault(); event.stopPropagation() }}
+    onClick={event => { event.stopPropagation(); void revokeMail(grant) }}
+  >{revoking.has(grant.route_id) ? t('teamNetwork.mention.revoking') : t('teamNetwork.mention.revoke')}</button>
   useEffect(() => onCandidates(candidates), [candidates, onCandidates])
   useEffect(() => {
     optionRefs.current[selectedIndex]?.scrollIntoView?.({ block: 'nearest' })
   }, [selectedIndex])
 
-  return <div id={id} className="chat-mention-palette team-mention-palette" role="listbox" aria-label="Team Network destinations">
+  return <div id={id} className="chat-mention-palette team-mention-palette" role="listbox" aria-label={t('teamNetwork.mention.destinations')}>
     {!supported
-      ? <div className="chat-mention-empty"><AlertTriangle size={14} /><span><strong>Server update required</strong><small>Structured @@ Team Network hints are unavailable on this AgentsServer.</small></span></div>
+      ? <div className="chat-mention-empty"><AlertTriangle size={14} /><span><strong>{t('teamNetwork.mention.serverUpdate')}</strong><small>{t('teamNetwork.mention.structuredUnavailable')}</small></span></div>
       : <>
-        {candidates.map((candidate, index) => <button
+        {candidates.map((candidate, index) => <div className="chat-mention-option-row" key={candidate.id}><button
           ref={node => { optionRefs.current[index] = node }}
           id={`${id}-${candidate.id}`}
           key={candidate.id}
@@ -2408,12 +2495,21 @@ export function TeamMentionPalette({
           {candidate.target.kind === 'recipient' && candidate.target.recipient_kind === 'all'
             ? <RadioTower size={15} />
             : <Network size={15} />}
-          <span><strong>{candidate.label}</strong>{candidate.hint && <small>{candidate.hint}</small>}</span>
+          <span><strong>{teamMentionDisplayLabel(candidate)}</strong>{candidate.hint && <small>{teamMentionDisplayHint(candidate)}</small>}
+            {mailGrantFor(candidate) && <small>{t('teamNetwork.mention.mailGranted')}{mailGrantFor(candidate)?.available ? '' : ` · ${t('teamNetwork.mention.unavailable')}`}</small>}
+          </span>
           <code>{candidate.code}</code>
-        </button>)}
-        {loading && !targets.length && <div className="chat-mention-grant-status"><LoaderCircle className="spin" size={13} /> Loading Team Network…</div>}
-        {!loading && !error && !candidates.length && <div className="chat-mention-empty"><span><strong>No matching destination</strong><small>Type a server name, bulletin, or all.</small></span></div>}
-        {error && <div className="chat-mention-grant-status error"><AlertTriangle size={13} /> {error}</div>}
+        </button>{mailGrantFor(candidate) && revokeButton(mailGrantFor(candidate)!)}</div>)}
+        {detachedMailGrants.map(grant => <div className="chat-mention-grant-only" key={grant.route_id}>
+          <Mail size={15} /><span><strong>{grant.display_name}</strong><small>{t('teamNetwork.mention.mailGranted')} · {grant.available ? t('teamNetwork.mention.available') : t('teamNetwork.mention.unavailable')}</small></span>
+          {revokeButton(grant)}
+        </div>)}
+        {loading && !targets.length && <div className="chat-mention-grant-status"><LoaderCircle className="spin" size={13} />{' '}{t('teamNetwork.mention.loadingNetwork')}</div>}
+        {!loading && !error && !candidates.length && !detachedMailGrants.length && <div className="chat-mention-empty"><span><strong>{t('teamNetwork.mention.noDestination')}</strong><small>{t('teamNetwork.mention.searchHint')}</small></span></div>}
+        {error != null && <div className="chat-mention-grant-status error"><AlertTriangle size={13} /> {cleanActionError(error)}</div>}
+        {mailLoading && <div className="chat-mention-grant-status"><LoaderCircle className="spin" size={13} />{' '}{t('teamNetwork.mention.loadingGrants')}</div>}
+        {mailError != null && <div className="chat-mention-grant-status error"><AlertTriangle size={13} /> {cleanActionError(mailError)}</div>}
+        {mailRoutes.length > 0 && <div className="chat-mention-grant-note">{t('teamNetwork.mention.revokeHelp')}</div>}
       </>}
   </div>
 }
@@ -2430,22 +2526,22 @@ async function requireAllServersReferenceSupport(
 ): Promise<void> {
   if (!hasAllServersReference(references)) return
   if (!teamAllServersAliasAvailable(useAppStore.getState().health)) {
-    throw new Error(ALL_SERVERS_NATIVE_UPDATE_REQUIRED)
+    throw new Error(allServersNativeUpdateRequired())
   }
-  if (!profileId || !serverIdentity) throw new Error('Reconnect to the active AgentsServer before using @@all.')
+  if (!profileId || !serverIdentity) throw new Error(t('teamNetwork.mention.allReconnect'))
   const status = await window.agentsDock.teamHub.status()
   assertTeamNetworkExpectedIdentity(status, { profileId, profileGeneration, serverIdentity })
   if (!status.authenticated || status.connectionState !== 'authenticated') {
-    throw new Error(status.error || 'Connect to Team Network before using @@all.')
+    throw new Error(status.error || t('teamNetwork.mention.allConnectNetwork'))
   }
   if (!profileIsActive(profileId, profileGeneration) || activeIdentity(useAppStore.getState()) !== serverIdentity) {
-    throw new Error('The active AgentsServer changed while checking @@all support.')
+    throw new Error(t('teamNetwork.mention.allServerChanged'))
   }
   const capability = await window.agentsDock.teamHub.teamMessagesCapabilities(teamNetworkScope(status))
   if (capability.available !== true || capability.version !== 1 || capability.all_servers?.available !== true) {
-    throw new Error('This Team Network Hub cannot deliver @@all inbox broadcasts. Update the Hub or remove the reference.')
+    throw new Error(t('teamNetwork.mention.allHubUpdate'))
   }
-  if (!teamAllServersAliasAvailable(useAppStore.getState().health)) throw new Error(ALL_SERVERS_NATIVE_UPDATE_REQUIRED)
+  if (!teamAllServersAliasAvailable(useAppStore.getState().health)) throw new Error(allServersNativeUpdateRequired())
 }
 
 async function loadTeamMentionTargets(
@@ -2468,7 +2564,7 @@ async function loadTeamMentionTargets(
     assertTeamNetworkExpectedIdentity(status, { profileId, profileGeneration, serverIdentity })
   }
   if (!status.authenticated || status.connectionState !== 'authenticated') {
-    throw new Error(status.error || 'Connect to Team Network to choose a recipient.')
+    throw status.error ? new Error(status.error) : new TeamMentionUIError('teamNetwork.mention.connectChoose')
   }
   const scope = teamNetworkScope(status)
   const cacheRevision = teamNetworkCacheRevision()
@@ -2492,7 +2588,7 @@ async function loadTeamMentionTargets(
       loadTeamNetworkWorkspace(status, { force: Boolean(cachedWorkspace && !cachedWorkspace.teams.some(team => team.status === 'active')) })
     ])
     if (capability.available !== true || capability.version !== 1) {
-      throw new Error('This Team Network does not support structured messages yet.')
+      throw new TeamMentionUIError('teamNetwork.mention.structuredUnsupported')
     }
     const allServersSupported = allServersAliasSupported && capability.all_servers?.available === true
     const teams = workspace.teams.filter(team => team.status === 'active')
@@ -2516,7 +2612,7 @@ async function loadTeamMentionTargets(
         .map(server => teamServerMentionCandidate(team.id, server))
     ])
     if (teamNetworkCacheRevision() !== cacheRevision) {
-      throw new Error('Team Network recipients changed while they were loading.')
+      throw new TeamMentionUIError('teamNetwork.mention.recipientsChanged')
     }
     teamMentionTargetCache.set(cacheKey, { expiresAt: Date.now() + TEAM_MENTION_TARGET_CACHE_TTL_MS, candidates })
     while (teamMentionTargetCache.size > TEAM_MENTION_TARGET_CACHE_MAX_ENTRIES) {
@@ -2542,6 +2638,8 @@ function teamBulletinMentionCandidate(teamId: string, teamName: string, includeT
     id: `bulletin:${teamId}`,
     label,
     hint: includeTeam ? `Post to ${teamName} Bulletin` : 'Post to Bulletin',
+    presentation: { labelKey: includeTeam ? 'teamNetwork.mention.teamBulletin' : 'teamNetwork.mention.bulletin',
+      hintKey: includeTeam ? 'teamNetwork.mention.postTeamBulletin' : 'teamNetwork.mention.postBulletin', params: { teamName } },
     code: '@@bulletin',
     target: {
       kind: 'recipient',
@@ -2562,7 +2660,7 @@ function teamServerMentionCandidate(
     id: `server:${teamId}:${server.id}`,
     label: recipientName,
     code: `@@${recipientName}`,
-    ...(server.status === 'offline' ? { hint: 'Offline · inbox available' } : {}),
+    ...(server.status === 'offline' ? { hint: 'Offline · inbox available', presentation: { hintKey: 'teamNetwork.mention.offlineInbox' } } : {}),
     target: {
       kind: 'recipient',
       recipient_kind: 'server',
@@ -2584,6 +2682,8 @@ function teamAllServersMentionCandidate(teamId: string, teamName: string, includ
     id: `all_servers:${teamId}`,
     label: includeTeam ? `${teamName} — All servers` : 'All servers',
     hint: 'Team Mail to every active server, including offline servers',
+    presentation: { labelKey: includeTeam ? 'teamNetwork.mention.teamAllServers' : 'teamNetwork.mention.allServers',
+      hintKey: 'teamNetwork.mention.allServersHint', params: { teamName } },
     code: '@@all',
     target: {
       kind: 'recipient',
@@ -2595,17 +2695,25 @@ function teamAllServersMentionCandidate(teamId: string, teamName: string, includ
   }
 }
 
+function teamMentionDisplayLabel(candidate: TeamMentionCandidate): string {
+  return candidate.presentation?.labelKey ? t(candidate.presentation.labelKey, candidate.presentation.params) : candidate.label
+}
+
+function teamMentionDisplayHint(candidate: TeamMentionCandidate): string | undefined {
+  return candidate.presentation?.hintKey ? t(candidate.presentation.hintKey, candidate.presentation.params) : candidate.hint
+}
+
 function filterTeamMentionTargets(targets: readonly TeamMentionCandidate[], query: string): TeamMentionCandidate[] {
   const needle = query.trim().toLocaleLowerCase()
   return targets
-    .filter(candidate => !needle || [candidate.label, candidate.code,
+    .filter(candidate => !needle || [candidate.label, candidate.code, teamMentionDisplayLabel(candidate),
       ...(candidate.target.kind === 'recipient' && candidate.target.recipient_kind === 'all' ? [] : [candidate.target.target_id])]
       .some(value => value.toLocaleLowerCase().includes(needle)))
     .sort((left, right) => {
-      if (!needle) return left.label.localeCompare(right.label)
-      const leftStarts = left.label.toLocaleLowerCase().startsWith(needle) || left.code.toLocaleLowerCase().startsWith(`@@${needle}`)
-      const rightStarts = right.label.toLocaleLowerCase().startsWith(needle) || right.code.toLocaleLowerCase().startsWith(`@@${needle}`)
-      return Number(rightStarts) - Number(leftStarts) || left.label.localeCompare(right.label)
+      if (!needle) return teamMentionDisplayLabel(left).localeCompare(teamMentionDisplayLabel(right))
+      const leftStarts = teamMentionDisplayLabel(left).toLocaleLowerCase().startsWith(needle) || left.label.toLocaleLowerCase().startsWith(needle) || left.code.toLocaleLowerCase().startsWith(`@@${needle}`)
+      const rightStarts = teamMentionDisplayLabel(right).toLocaleLowerCase().startsWith(needle) || right.label.toLocaleLowerCase().startsWith(needle) || right.code.toLocaleLowerCase().startsWith(`@@${needle}`)
+      return Number(rightStarts) - Number(leftStarts) || teamMentionDisplayLabel(left).localeCompare(teamMentionDisplayLabel(right))
     })
 }
 
@@ -3005,10 +3113,10 @@ function agentRouteAllowsReference(
 }
 
 function teamReferenceLabel(reference: TeamReference): string {
-  if (reference.kind === 'skill') return 'Team skill'
-  if (reference.recipient_kind === 'all') return 'Bulletin'
-  if (reference.recipient_kind === 'all_servers') return 'Team Mail · All servers'
-  return reference.recipient_kind === 'server' ? 'Team server' : 'Team member'
+  if (reference.kind === 'skill') return t('teamNetwork.mention.teamSkill')
+  if (reference.recipient_kind === 'all') return t('teamNetwork.mention.bulletin')
+  if (reference.recipient_kind === 'all_servers') return t('teamNetwork.mention.allMail')
+  return reference.recipient_kind === 'server' ? t('teamNetwork.mention.teamServer') : t('teamNetwork.mention.teamMember')
 }
 
 function RuntimeMenu({
@@ -3103,7 +3211,7 @@ function RuntimeMenu({
             <DropdownMenu.Label className="menu-label">Reasoning</DropdownMenu.Label>
             {efforts.map(option => <DropdownMenu.CheckboxItem data-runtime-section="reasoning" key={option.value || 'default'} className="menu-item" checked={(session.effort ?? '') === option.value} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { effort: option.value || null })}>{option.label}</DropdownMenu.CheckboxItem>)}
           </>}
-          {session.backend !== 'cursor' && <>
+          {!window.agentsDock.sharedChat && session.backend !== 'cursor' && <>
             <DropdownMenu.Separator className="menu-separator" />
             <DropdownMenu.Label className="menu-label">{t("ui.Composer.RuntimeMenu.agent_process_4dc27ee")}</DropdownMenu.Label>
             <DropdownMenu.Item
@@ -3207,6 +3315,7 @@ const QueueShelf = memo(function QueueShelf({
     [profileGeneration, profileId, serverIdentity, sessionId]
   )
   const [editing, setEditing] = useState<QueuedTurn | null>(null)
+  const editingAgentMessage = Boolean(editing && isAsyncAgentQueuedTurn(editing))
   const [draft, setDraft] = useState('')
   const [editingReferences, setEditingReferences] = useState<ChatReference[]>([])
   const [editingTeamReferences, setEditingTeamReferences] = useState<TeamReference[]>([])
@@ -3232,13 +3341,14 @@ const QueueShelf = memo(function QueueShelf({
   const health = useMemo(() => useAppStore.getState().health, [healthRevision])
   const teamAllServersSupported = teamAllServersAliasAvailable(health)
   const mixedReorder = exactQueuedDeliveryReorderAvailable(health)
+  const asyncControls = asyncQueuedMessageControlsAvailable(health)
   const catalog = useAppStore(state => state.runtimeCatalog)
   const grantedRoutes = useAppStore(state => state.agentRoutesBySession[sessionId]?.routes ?? EMPTY_AGENT_ROUTES)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const pausedCount = turns.filter(turn => turn.paused === true).length
   const promotedCount = queueOrderTurns.filter(turn => turn.promoted === true).length
   const firstFencedTurn = queuedTurnsInPositionOrder(turns)
-    .find(turn => queuedTurnCrossChatFence(queueOrderTurns, turn.queued_id).runNow) ?? null
+    .find(turn => queuedTurnCrossChatFence(queueOrderTurns, turn.queued_id, mixedReorder, asyncControls).runNow) ?? null
   const blockingDelivery = firstFencedTurn
     ? firstBlockingCrossChatDelivery(queueOrderTurns, firstFencedTurn.queued_id)
     : null
@@ -3438,6 +3548,7 @@ const QueueShelf = memo(function QueueShelf({
     if (event.over && current && event.active.id !== event.over.id) void moveTo(String(event.active.id), String(event.over.id), current.placement)
   }
   const updateQueuedDraft = (next: string, caret: number) => {
+    if (editingAgentMessage) { setDraft(next); return }
     const reconciledChatReferences = reconcileChatReferences(draft, next, editingReferences)
     const reconciledTeamReferences = reconcileTeamReferences(draft, next, editingTeamReferences)
     const nextReferences = validComposerReferences(
@@ -3561,9 +3672,31 @@ const QueueShelf = memo(function QueueShelf({
         const currentSource = state.sessions.find(candidate => candidate.id === sessionId) ?? sourceSession
         const runtimeError = queuedTurnRuntimeAdmissionError(editing, currentSource, state.health, state.runtimeCatalog)
         if (runtimeError) throw new Error(runtimeError)
-        if (queuedTurnCrossChatFence(latestQueue, editing.queued_id).runNow) {
+        if (queuedTurnCrossChatFence(latestQueue, editing.queued_id, mixedReorder, asyncQueuedMessageControlsAvailable(state.health)).runNow) {
           throw new Error('An incoming cross-chat delivery must run before this queued message.')
         }
+      }
+      if (editingAgentMessage) {
+        if (!asyncQueuedMessageControlsAvailable(useAppStore.getState().health) || !Number.isInteger(editing.message_revision)) {
+          throw new Error(t('composer.agentQueue.updateRequired'))
+        }
+        await window.agentsDock.queue.update(sessionId, editing.queued_id, draft, undefined, undefined, undefined, editing.message_revision!)
+        if (!profileIsActive(profileId, profileGeneration)) return
+        const current = useAppStore.getState().snapshots[sessionId]?.queuedTurns ?? turns
+        useAppStore.getState().setQueued(sessionId, current.map(turn => turn.queued_id === editing.queued_id
+          && turn.cross_chat_envelope_id === editing.cross_chat_envelope_id
+          && (turn.message_revision ?? -1) <= editing.message_revision! ? {
+            ...turn, prompt: draft, display_prompt: draft, message_body: draft,
+            message_edited_by_user: true, message_revision: editing.message_revision! + 1
+          } : turn))
+        setEditing(null)
+        if (steer) {
+          const promotion = useAppStore.getState().beginQueuedTurnsRequest(sessionId)
+          const remaining = await steerQueuedTurn(steeringScope, editing.queued_id,
+            () => Boolean(confirmInboundDeliveryInterruption(sessionId, 'send_now', steerConsent)))
+          if (profileIsActive(profileId, profileGeneration)) useAppStore.getState().applyQueuedTurnsResponse(sessionId, promotion, remaining)
+        }
+        return
       }
       if (editingReferences.length > MAX_CHAT_REFERENCES) {
         throw new Error(`A queued message can reference at most ${MAX_CHAT_REFERENCES} chats. Remove a chat reference and try again.`)
@@ -3580,16 +3713,16 @@ const QueueShelf = memo(function QueueShelf({
         throw new Error('A queued chat reference was edited or is no longer valid. Remove it or select @Chat again.')
       }
       if (teamReferences.length !== editingTeamReferences.length) {
-        throw new Error('A queued Team Network reference was edited or is no longer valid. Remove it and select the recipient in a new message.')
+        throw new Error(t('teamNetwork.mention.queuedReferenceEdited'))
       }
       if (chatReferences.some(reference => reference.target_kind === 'secure_peer')) {
-        throw new Error(REMOTE_AGENT_ROUTE_UNAVAILABLE)
+        throw new Error(remoteAgentRouteUnavailable())
       }
       if (!chatReferences.every(referenceSupported)) {
         throw new Error('This server cannot deliver one or more queued cross-chat actions or targets. Change the action or update the server.')
       }
       if (teamReferences.length && !teamMentionsSupported) {
-        throw new Error('This server cannot deliver queued Team Network recipient hints. Update the server or remove the hint.')
+        throw new Error(t('teamNetwork.mention.queuedUnsupported'))
       }
       await requireAllServersReferenceSupport(teamReferences, profileId, profileGeneration, serverIdentity)
       if (!profileIsActive(profileId, profileGeneration) || activeIdentity(useAppStore.getState()) !== serverIdentity) return
@@ -3646,14 +3779,16 @@ const QueueShelf = memo(function QueueShelf({
   return <div className="queue-shelf"><div className="queue-header"><div className="queue-label"><ListOrdered size={13} /><span>{t("ui.Composer.QueueShelf.queued_turns_580e983")}</span><b>{turns.length}</b>{promotedCount > 0
     ? <small>{promotedCount === 1 ? t("ui.Composer.QueueShelf.1_starting_dc0a211") : t("ui.Composer.QueueShelf.starting_37f2a6b", { "count": String(promotedCount) })}</small>
     : pausedCount > 0 && <small>{pausedCount === turns.length ? t("ui.Composer.QueueShelf.paused_e159b06") : t("ui.Composer.QueueShelf.paused_c123acb", { "count": String(pausedCount) })}</small>}</div></div><DndContext sensors={sensors} onDragOver={onDragOver} onDragEnd={onDragEnd}>
-    <div className="queue-list">{queuedTurnsInPositionOrder(turns).map(turn => <QueuedRow key={turn.queued_id} profileId={profileId} profileGeneration={profileGeneration} steeringScope={steeringScope} turn={turn} sourceSessionTitle={turn.source_session_id && !turn.source_title?.trim() ? sessions.find(session => session.id === turn.source_session_id)?.title : undefined} sessionId={sessionId} running={running} activeCodexGoal={activeCodexGoal} drop={drop} steeringPending={steeringPending} promotionPending={promotedCount > 0} runtimeError={queuedTurnRuntimeAdmissionError(turn, sourceSession, health, catalog)} crossChatFence={queuedTurnCrossChatFence(queueOrderTurns, turn.queued_id, mixedReorder)} blockingDelivery={turn.queued_id === firstFencedTurn?.queued_id ? hiddenBlockingDelivery : null} canSkipExactDelivery={exactQueuedDeliverySkipAvailable(health)} canSkipExactPeerDelivery={exactQueuedPeerDeliverySkipAvailable(health)} reorderable={isReorderableQueuedTurn(turn, mixedReorder)} moving={moving} onMove={direction => {
+    <div className="queue-list">{queuedTurnsInPositionOrder(turns).map(turn => <QueuedRow key={turn.queued_id} profileId={profileId} profileGeneration={profileGeneration} steeringScope={steeringScope} turn={turn} sourceSessionTitle={turn.source_session_id && !turn.source_title?.trim() ? sessions.find(session => session.id === turn.source_session_id)?.title : undefined} sessionId={sessionId} running={running} activeCodexGoal={activeCodexGoal} drop={drop} steeringPending={steeringPending} promotionPending={promotedCount > 0} runtimeError={queuedTurnRuntimeAdmissionError(turn, sourceSession, health, catalog)} crossChatFence={queuedTurnCrossChatFence(queueOrderTurns, turn.queued_id, mixedReorder, asyncControls)} blockingDelivery={turn.queued_id === firstFencedTurn?.queued_id ? hiddenBlockingDelivery : null} canSkipExactDelivery={exactQueuedDeliverySkipAvailable(health)} canSkipExactPeerDelivery={exactQueuedPeerDeliverySkipAvailable(health)} asyncControls={asyncControls} reorderable={isReorderableQueuedTurn(turn, mixedReorder)} moving={moving} onMove={direction => {
       const latestQueue = queuedTurnsInPositionOrder(useAppStore.getState().snapshots[sessionId]?.queuedTurns ?? queueOrderTurns)
       const index = latestQueue.findIndex(candidate => candidate.queued_id === turn.queued_id)
       const adjacent = latestQueue[index + (direction === 'down' ? 1 : -1)]
       if (index >= 0 && adjacent) void moveTo(turn.queued_id, adjacent.queued_id, direction === 'down' ? 'after' : 'before')
-    }} onEdit={() => {
-      const text = turn.display_prompt || turn.prompt
-      const canonical = canonicalizeComposerReferences(
+    }} onEdit={body => {
+      const text = body ?? turn.display_prompt ?? turn.prompt
+      const canonical = isAsyncAgentQueuedTurn(turn)
+        ? { text, chatReferences: [], teamReferences: [] }
+        : canonicalizeComposerReferences(
         text,
         turn.chat_references ?? [],
         turn.team_references ?? [],
@@ -3670,7 +3805,13 @@ const QueueShelf = memo(function QueueShelf({
     }} />)}</div>
   </DndContext>
   {editing && <div className="inline-editor">
-    <div className={`composer-editor inline-queue-reference-editor${hasEditingInlineReferences ? ' has-inline-references' : ''}${hasEditingMessageLinks ? ' has-message-links' : ''}`}>
+    {editingAgentMessage ? <>
+      <small className="queue-agent-edit-note">{t('composer.agentQueue.editNote')}</small>
+      <textarea aria-label={t('composer.agentQueue.editMessage')} value={draft} onChange={event => setDraft(event.target.value)}
+        disabled={savingEdit} autoFocus onKeyDown={event => {
+          if (!event.nativeEvent.isComposing && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void saveEdit(true) }
+        }} />
+    </> : <div className={`composer-editor inline-queue-reference-editor${hasEditingInlineReferences ? ' has-inline-references' : ''}${hasEditingMessageLinks ? ' has-message-links' : ''}`}>
       {(hasEditingInlineReferences || hasEditingMessageLinks) && <ComposerEditorMirror
         ref={editorMirrorRef}
         text={editingMessageProjection.text}
@@ -3841,6 +3982,7 @@ const QueueShelf = memo(function QueueShelf({
         autoFocus
       />
     </div>
+    }
     {hasEditingReferenceFallback && <ComposerReferenceFallback
       text={draft}
       chatReferences={editingInlineReferences.chatReferences}
@@ -3850,6 +3992,7 @@ const QueueShelf = memo(function QueueShelf({
     />}
     {editTeamMention && <TeamMentionPalette
       id={queuedTeamMentionPaletteId}
+      sourceSessionId={sessionId}
       mention={editTeamMention}
       selectedIndex={editTeamMentionIndex}
       supported={teamMentionsSupported}
@@ -3878,19 +4021,19 @@ const QueueShelf = memo(function QueueShelf({
     </div>}
     {!editingReferencesSupported && <small className="chat-reference-warning">{!editingChatReferencesSupported
       ? editingHasRemoteAgentReference
-        ? REMOTE_AGENT_ROUTE_UNAVAILABLE
+        ? remoteAgentRouteUnavailable()
         : t("ui.Composer.QueueShelf.one_or_more_legacy_chat_references_cannot__4f81746")
       : editingUnsupportedAllServersReference
-        ? ALL_SERVERS_NATIVE_UPDATE_REQUIRED
-        : 'One or more Team Network references cannot be used on this server.'}</small>}
+        ? allServersNativeUpdateRequired()
+        : t('teamNetwork.mention.serverReferenceInvalid')}</small>}
     <div className="inline-editor-actions"><button type="button" disabled={savingEdit} onClick={() => setEditing(null)}>{t("ui.Composer.QueueShelf.cancel_19766ed")}</button><button type="button" className="primary-button" disabled={savingEdit || !editingReferencesSupported} onClick={() => void saveEdit()}>{savingEdit ? t("ui.Composer.QueueShelf.saving_23e3929") : t("ui.Composer.QueueShelf.save_1509f56")}</button></div>
   </div>}
   </div>
 })
 
-function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSessionTitle, sessionId, running, activeCodexGoal, drop, steeringPending, promotionPending, runtimeError, crossChatFence, blockingDelivery, canSkipExactDelivery, canSkipExactPeerDelivery, reorderable, moving, onMove, onEdit }: { profileId: string | null; profileGeneration: number; steeringScope: SteeringScope; turn: QueuedTurn; sourceSessionTitle?: string; sessionId: string; running: boolean; activeCodexGoal: boolean; drop: { id: string; placement: 'before' | 'after' } | null; steeringPending: boolean; promotionPending: boolean; runtimeError: string | null; crossChatFence: QueuedTurnCrossChatFence; blockingDelivery: QueuedTurn | null; canSkipExactDelivery: boolean; canSkipExactPeerDelivery: boolean; reorderable: boolean; moving: boolean; onMove: (direction: 'up' | 'down') => void; onEdit: () => void }) {
+function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSessionTitle, sessionId, running, activeCodexGoal, drop, steeringPending, promotionPending, runtimeError, crossChatFence, blockingDelivery, canSkipExactDelivery, canSkipExactPeerDelivery, asyncControls, reorderable, moving, onMove, onEdit }: { profileId: string | null; profileGeneration: number; steeringScope: SteeringScope; turn: QueuedTurn; sourceSessionTitle?: string; sessionId: string; running: boolean; activeCodexGoal: boolean; drop: { id: string; placement: 'before' | 'after' } | null; steeringPending: boolean; promotionPending: boolean; runtimeError: string | null; crossChatFence: QueuedTurnCrossChatFence; blockingDelivery: QueuedTurn | null; canSkipExactDelivery: boolean; canSkipExactPeerDelivery: boolean; asyncControls: boolean; reorderable: boolean; moving: boolean; onMove: (direction: 'up' | 'down') => void; onEdit: (body?: string) => void }) {
   useLocale()
-  const agentMessage = turn.purpose === 'cross_chat_handoff_delivery' && turn.conversation_mode === 'async_route_v1'
+  const agentMessage = isAsyncAgentQueuedTurn(turn)
   const senderTitle = agentMessage ? turn.source_title?.trim() || sourceSessionTitle?.trim() || t('timeline.ui.unknownAgent') : null
   const securePeerDelivery = isSecurePeerDeliveryQueuedTurn(turn)
   const deliveryBarrier = isQueuedDeliveryBarrier(turn)
@@ -3899,13 +4042,65 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
   const promoted = turn.promoted === true
   const remoteAgentRoute = queuedTurnHasRemoteAgentRoute(turn)
   const [skippingDelivery, setSkippingDelivery] = useState(false)
+  const bodyIdentity = `${profileId}\0${profileGeneration}\0${sessionId}\0${turn.queued_id}\0${turn.cross_chat_envelope_id}\0${turn.message_revision ?? ''}`
+  const bodyIdentityRef = useRef(bodyIdentity)
+  bodyIdentityRef.current = bodyIdentity
+  const bodyMounted = useRef(true)
+  useEffect(() => { bodyMounted.current = true; return () => { bodyMounted.current = false } }, [])
+  const [loadedBody, setLoadedBody] = useState<{ identity: string; body: string } | null>(null)
+  const [bodyLoading, setBodyLoading] = useState(false)
+  const [bodyError, setBodyError] = useState<string | null>(null)
+  const [expandedBody, setExpandedBody] = useState<string | null>(null)
+  useEffect(() => { setBodyLoading(false); setBodyError(null); setExpandedBody(null) }, [bodyIdentity])
+  const messageBody = agentMessage ? turn.message_body ?? (loadedBody?.identity === bodyIdentity ? loadedBody.body : null) : null
+  const canControlAgentMessage = agentMessage && asyncControls && Number.isInteger(turn.message_revision) && turn.message_revision! >= 0
   const drag = useDraggable({ id: turn.queued_id, disabled: !reorderable || moving })
   const target = useDroppable({ id: turn.queued_id, disabled: !reorderable || moving })
   const ref = (node: HTMLElement | null) => { drag.setNodeRef(node); target.setNodeRef(node) }
   const indicator = drop?.id === turn.queued_id ? `drop-${drop.placement}` : ''
-  const prompt = (turn.display_prompt || turn.prompt).trim()
+  const queuedPrompt = (turn.display_prompt || turn.prompt).trim()
+  const prompt = (messageBody ?? (agentMessage && queuedPrompt === 'Agent-authored same-server handoff'
+    ? t('composer.agentQueue.messageFrom', { sender: senderTitle ?? '' }) : queuedPrompt)).trim()
   const attachmentCount = turn.file_ids.length
   const label = prompt || `${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`
+  const bodyExpanded = expandedBody === bodyIdentity
+  const preview = agentMessage && !bodyExpanded && label.length > 320 ? `${label.slice(0, 320)}…` : label
+  const loadMessageBody = async (): Promise<string | null> => {
+    if (messageBody != null) return messageBody
+    if (!agentMessage || !turn.cross_chat_envelope_id || bodyLoading) return null
+    const expectedIdentity = bodyIdentity
+    const current = () => bodyMounted.current && bodyIdentityRef.current === expectedIdentity
+      && profileIsActive(profileId, profileGeneration) && activeIdentity(useAppStore.getState()) === steeringScope.serverIdentity
+    setBodyLoading(true); setBodyError(null)
+    try {
+      const handoff = await window.agentsDock.handoffs.get(turn.cross_chat_envelope_id)
+      if (!current()) return null
+      if (handoff.id !== turn.cross_chat_envelope_id || handoff.target_session_id !== sessionId
+        || handoff.source_session_id !== turn.source_session_id || handoff.conversation_mode !== 'async_route_v1'
+        || handoff.queued_id && handoff.queued_id !== turn.queued_id
+        || typeof handoff.body !== 'string') throw new Error(t('composer.agentQueue.messageChanged'))
+      if (Number.isInteger(turn.message_revision) && handoff.message_revision !== turn.message_revision
+        || (turn.message_edited_by_user || handoff.message_edited_by_user)
+          && (!handoff.message_edited_by_user || !Number.isInteger(turn.message_revision) || typeof handoff.target_body !== 'string')) {
+        throw new Error(t('composer.agentQueue.messageChanged'))
+      }
+      const body = handoff.message_edited_by_user ? handoff.target_body! : handoff.body
+      setLoadedBody({ identity: expectedIdentity, body })
+      return body
+    } catch (error) { if (current()) setBodyError(cleanActionError(error)); return null }
+    finally { if (current()) setBodyLoading(false) }
+  }
+  const editAgentMessage = async () => {
+    if (!canControlAgentMessage || promoted) return
+    const body = await loadMessageBody()
+    const current = useAppStore.getState().snapshots[sessionId]?.queuedTurns.find(row => row.queued_id === turn.queued_id)
+    if (body != null && current && !current.promoted && current.message_revision === turn.message_revision
+      && bodyMounted.current && profileIsActive(profileId, profileGeneration)) onEdit(body)
+  }
+  const viewMessageBody = async () => {
+    if (bodyExpanded) { setExpandedBody(null); return }
+    if (await loadMessageBody() != null) setExpandedBody(bodyIdentity)
+  }
   const pausedLabel = turn.paused !== true
     ? null
     : turn.pause_reason === 'delivery_uncertain'
@@ -3921,7 +4116,7 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
     : runtimeError
       ? runtimeError
     : remoteAgentRoute
-      ? REMOTE_AGENT_ROUTE_UNAVAILABLE
+      ? remoteAgentRouteUnavailable()
     : crossChatFence.runNow
       ? 'An incoming cross-chat delivery must run before this queued message'
     : activeCodexGoal && running
@@ -3969,8 +4164,8 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
     try {
       const latestQueue = useAppStore.getState().snapshots[sessionId]?.queuedTurns
       const latestTurn = latestQueue?.find(candidate => candidate.queued_id === turn.queued_id) ?? turn
-      if (queuedTurnHasRemoteAgentRoute(latestTurn)) throw new Error(REMOTE_AGENT_ROUTE_UNAVAILABLE)
-      const latestFence = latestQueue ? queuedTurnCrossChatFence(latestQueue, turn.queued_id) : crossChatFence
+      if (queuedTurnHasRemoteAgentRoute(latestTurn)) throw new Error(remoteAgentRouteUnavailable())
+      const latestFence = latestQueue ? queuedTurnCrossChatFence(latestQueue, turn.queued_id, false, asyncQueuedMessageControlsAvailable(useAppStore.getState().health)) : crossChatFence
       if (latestQueue?.some(candidate => candidate.promoted === true)) {
         throw new Error('A queued message is already starting. Wait for its provider handoff to finish.')
       }
@@ -4024,7 +4219,7 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
     }
   }
   const movementMenu = <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="queue-action" title={t('ui.Composer.QueuedRow.more_queue_actions_77a2245', undefined, securePeerDelivery ? 'en' : undefined)}><MoreHorizontal size={13} /></button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="end">
-    {!immutable && <DropdownMenu.Item className="menu-item" onSelect={onEdit}><Pencil size={13} />{' '}{t('ui.Composer.QueuedRow.edit_message_9757ccd')}</DropdownMenu.Item>}
+    {!immutable && <DropdownMenu.Item className="menu-item" onSelect={() => onEdit()}><Pencil size={13} />{' '}{t('ui.Composer.QueuedRow.edit_message_9757ccd')}</DropdownMenu.Item>}
     <DropdownMenu.Item className="menu-item" disabled={!reorderable || moving || crossChatFence.moveEarlier} title={crossChatFence.moveEarlier ? t('ui.Composer.QueuedRow.incoming_cross_chat_deliveries_keep_their__59975a6', undefined, securePeerDelivery ? 'en' : undefined) : undefined} onSelect={() => onMove('up')}><ArrowUp size={13} />{' '}{t('ui.Composer.QueuedRow.move_earlier_736612d', undefined, securePeerDelivery ? 'en' : undefined)}</DropdownMenu.Item>
     <DropdownMenu.Item className="menu-item" disabled={!reorderable || moving || crossChatFence.moveLater} title={crossChatFence.moveLater ? t('ui.Composer.QueuedRow.incoming_cross_chat_deliveries_keep_their__59975a6', undefined, securePeerDelivery ? 'en' : undefined) : undefined} onSelect={() => onMove('down')}><ArrowDown size={13} />{' '}{t('ui.Composer.QueuedRow.move_later_d6e8560', undefined, securePeerDelivery ? 'en' : undefined)}</DropdownMenu.Item>
   </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
@@ -4052,9 +4247,14 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
       ? <span className="queue-job-icon" title={t('timeline.minimap.scheduledJob')}><CalendarClock size={14} /></span>
       : null}
     <span className="queue-copy">
+      {isSharedChatCollaborator(turn) && <small className="queue-agent-sender">{t('chatShare.collaborator')}</small>}
       {senderTitle && <small className="queue-agent-sender" title={senderTitle}>{senderTitle}</small>}
       {scheduledJob && <small>{turn.job_title || t('timeline.minimap.scheduledJob')}</small>}
-      <span className="queue-prompt" title={label}>{label}</span>
+      <span className={`queue-prompt${bodyExpanded ? ' expanded' : ''}`} title={preview}>{preview}</span>
+      {agentMessage && turn.message_edited_by_user && <small className="queue-agent-edited">{t('composer.agentQueue.editedByYou')}</small>}
+      {agentMessage && !promoted && (messageBody == null || label.length > 160 || label.includes('\n')) && <button type="button" className="queue-body-toggle" disabled={bodyLoading}
+        onClick={() => void viewMessageBody()}>{bodyLoading ? t('composer.agentQueue.loading') : bodyExpanded ? t('composer.agentQueue.showLess') : t('composer.agentQueue.viewMessage')}</button>}
+      {bodyError && <small role="alert">{bodyError}</small>}
       {promoted
         ? <small>{securePeerDelivery ? 'Starting… · handed to the provider' : t("ui.Composer.QueuedRow.starting_handed_to_the_provider_6aa0965")}</small>
         : deliveryBarrier && !agentMessage
@@ -4076,6 +4276,12 @@ function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSe
         ><Trash2 size={13} /></button>{reorderable && movementMenu}</div>
       : agentMessage
       ? <div className="queue-actions"><button
+          type="button" className="steer-action" disabled={!canControlAgentMessage || steeringPending || promotionPending || Boolean(runtimeError) || crossChatFence.runNow}
+          title={!canControlAgentMessage ? t('composer.agentQueue.updateRequired') : running ? t('composer.agentQueue.sendNowRunning') : actionTitle} onClick={() => void steer()}
+        ><CornerDownRight size={13} /><b>{t('composer.agentQueue.sendNow')}</b></button>
+        <button type="button" className="steer-action" disabled={!canControlAgentMessage || bodyLoading || steeringPending}
+          title={!canControlAgentMessage ? t('composer.agentQueue.updateRequired') : t('composer.agentQueue.editMessage')} onClick={() => void editAgentMessage()}
+        ><Pencil size={13} /><b>{t('composer.agentQueue.edit')}</b></button><button
           type="button"
           className="queue-action"
           aria-label={t('ui.Composer.QueuedRow.remove_from_queue_c0b9d9e')}
@@ -4154,6 +4360,7 @@ function reportActionError(error: unknown): void {
 }
 
 function cleanActionError(error: unknown): string {
+  if (error instanceof TeamMentionUIError) return t(error.localeKey)
   return (error instanceof Error ? error.message : String(error))
     .replace(/^Error invoking remote method '[^']+':\s*/i, '')
     .replace(/^Error:\s*/i, '')

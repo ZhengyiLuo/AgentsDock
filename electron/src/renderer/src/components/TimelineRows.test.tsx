@@ -85,6 +85,29 @@ describe('timeline pin state', () => {
     })
   })
 
+  it.each([
+    ['registered', undefined, 'unread', 'Delivery unconfirmed'],
+    ['registered', 'stored', 'unread', 'In inbox · unread by agent'],
+    ['read', 'read', 'read', 'Read by agent'],
+    ['cancelled', 'cancelled', 'cancelled', 'Cancelled'],
+    ['failed', 'failed', 'unread', 'Delivery failed']
+  ] as const)('labels the outgoing %s receipt honestly (%s)', (phase, status, inboxState, expected) => {
+    const event: Event = {
+      id: 'mailbox-receipt', seq: 1, session_id: 'chat-1', ts: '2026-09-12T00:00:00Z',
+      type: `chat_conversation_message_${phase}`, conversation_mode: 'async_route_v1',
+      delivery_mode: 'mailbox', conversation_id: 'pair-one', message_id: 'message-one',
+      source_session_id: 'chat-1', target_session_id: 'chat-2', target_title: 'Training',
+      handoff_status: status, inbox_state: inboxState, received_at: '2026-09-12T00:00:00Z',
+      handoff_preview: 'The exact original message.'
+    }
+    render(<TimelineRowView item={{ kind: 'system', id: 'mailbox-one', key: 'mailbox-one', seq: 1,
+      event, events: [event], crossChatMessage: true }} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByRole('button', { name: 'To Training' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(expected)
+    expect(screen.queryByText('Sent to Training')).not.toBeInTheDocument()
+    expect(loadHandoff).not.toHaveBeenCalled()
+  })
+
   it('updates memoized message controls when language changes and preserves authored text', () => {
     const event: Event = {
       id: 'locale-message', session_id: 'chat-1', seq: 1, type: 'assistant_text',
@@ -104,9 +127,8 @@ describe('timeline pin state', () => {
     expect(screen.getByTitle('Copy full message')).toBeInTheDocument()
   })
 
-  it('keeps Team Network generated copy in English in Chinese mode', () => {
+  it('localizes Team Network generated copy while preserving the authored title', () => {
     const timestamp = new Date().toISOString()
-    const englishTime = formatTime(timestamp)
     setLocale('zh-CN')
     const event: Event = {
       id: 'team-locale', session_id: 'chat-1', seq: 1, type: 'team_message_sent',
@@ -115,8 +137,10 @@ describe('timeline pin state', () => {
     }
     const item: SystemItem = { kind: 'system', id: 'team-locale', key: 'team-locale', seq: 1, event }
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByText('已广播“Team release”至公告栏')).toBeInTheDocument()
+    expect(screen.getByText(formatTime(timestamp), { selector: 'time' })).toBeInTheDocument()
+    act(() => setLocale('en'))
     expect(screen.getByText('Broadcast “Team release” to Bulletin')).toBeInTheDocument()
-    expect(screen.getByText(englishTime, { selector: 'time' })).toBeInTheDocument()
   })
 
   it('shows a filled unpin action for a pinned message', () => {
@@ -656,7 +680,7 @@ describe('timeline pin state', () => {
     })).toBeDisabled()
   })
 
-  it.each(['codex', 'claude'] as const)('renders an imported %s reply on the left without transport wrappers or actionable routes', backend => {
+  it.each(['codex', 'claude'] as const)('renders an imported %s reply as an incoming bubble without transport wrappers or actionable routes', backend => {
     const prompt = '[AgentsDock delivery kind=reply leg=2/2 origin=route from=DEMO-A Submitter]\n'
       + '[Source user instruction — verbatim, user-authored]\nInspect the results.\n[End source user instruction]\n'
       + '[Agent-prepared reply/result]\nThe inspection is ready.\n[End agent-prepared reply/result]\n'
@@ -667,11 +691,12 @@ describe('timeline pin state', () => {
     }], []))
     const view = render(<>{rows.map(item => <TimelineRowView key={item.key} item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)}</>)
 
-    expect(screen.getByText('Agent conversation')).toBeVisible()
+    expect(screen.queryByText('Agent conversation')).not.toBeInTheDocument()
     expect(screen.getByText('DEMO-A Submitter')).toBeVisible()
     expect(screen.getByText('The inspection is ready.')).toBeVisible()
-    expect(screen.getByRole('listitem')).toHaveClass('incoming', 'left')
-    expect(view.container.querySelector('.exchange-conversation')).not.toBeNull()
+    expect(view.container.querySelectorAll('.cross-chat-message')).toHaveLength(1)
+    expect(view.container.querySelector('.cross-chat-message')).toHaveClass('incoming')
+    expect(view.container.querySelector('.exchange-conversation')).toBeNull()
     expect(view.container.querySelector('.message-row.user')).toBeNull()
     expect(screen.queryByText('You')).not.toBeInTheDocument()
     expect(view.container.textContent).not.toContain('AgentsDock delivery')
@@ -681,12 +706,79 @@ describe('timeline pin state', () => {
     expect(loadExchange).not.toHaveBeenCalled()
     expect(loadHandoff).not.toHaveBeenCalled()
     expect(listQueue).not.toHaveBeenCalled()
-    expect(screen.getByText('Source request').closest('details')).not.toHaveAttribute('open')
-    fireEvent.click(screen.getByText('Source request'))
-    expect(screen.getByText('Inspect the results.')).toBeVisible()
+    expect(screen.queryByText('Source request')).not.toBeInTheDocument()
+    expect(screen.queryByText('Inspect the results.')).not.toBeInTheDocument()
   })
 
-  it('renders the latest cross-chat lifecycle with a stable target link', async () => {
+  it.each([false, true])('preserves an explicitly user-authored same-wrapper message (imported=%s) beside an unproven delivery', imported => {
+    const prompt = '[AgentsDock delivery kind=reply leg=2/2 origin=route from=Reviewer]\n'
+      + '[Source user instruction — verbatim, user-authored]\nReview the output.\n[End source user instruction]\n'
+      + '[Agent-prepared reply/result]\nThe same public reply.\n[End agent-prepared reply/result]\n[End delivery]'
+    const events: Event[] = [
+      { id: 'unproven-import', session_id: 'chat-1', seq: 12, type: 'turn_started',
+        ts: '2026-09-10T21:13:30Z', backend: 'claude', imported: true, run_id: 'import_unproven', prompt },
+      { id: 'human-quotation', session_id: 'chat-1', seq: 13, type: 'turn_started',
+        ts: '2026-09-10T21:14:30Z', backend: 'claude', imported, provider_user_authored: true,
+        run_id: imported ? 'import_human_quote' : 'human-quote', prompt }
+    ]
+    const rows = renderTimelineItems(projectTimeline(events, []))
+    const view = render(<>{rows.map(item => <TimelineRowView key={item.key} item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)}</>)
+    expect(view.container.querySelectorAll('.cross-chat-message')).toHaveLength(1)
+    expect(view.container.querySelector('.cross-chat-message')).toHaveClass('incoming')
+    expect(view.container.querySelector('.cross-chat-message')).toHaveTextContent('The same public reply.')
+    expect(view.container.querySelectorAll('.message-row.user')).toHaveLength(1)
+    expect(view.container.querySelector('.message-row.user')).toHaveTextContent('The same public reply.')
+    expect(view.container.querySelector('.message-row.user')).toHaveTextContent('AgentsDock delivery')
+    expect(loadExchange).not.toHaveBeenCalled()
+    expect(cancelExchange).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['created', 'Created'], ['updated', 'Updated'], ['deleted', 'Removed']
+  ])('renders the %s route receipt with the exact chat name instead of its protocol alias', (action, verb) => {
+    const targetTitle = 'Robot *Lab* [notes]'
+    useAppStore.setState({ sessions: [{ id: 'chat-2', title: targetTitle, backend: 'claude' }] })
+    const event: Event & { route_id: string; alias: string } = {
+      id: `route-${action}`, session_id: 'chat-1', seq: 12,
+      type: `agent_handoff_route_${action}`, ts: '2026-07-10T14:31:00Z',
+      target_session_id: 'chat-2', target_title: 'Saved target title',
+      route_id: 'route-protocol-id', alias: 'chat1',
+      message: `${verb} approved agent handoff route @chat1.`
+    }
+    const original = structuredClone(event)
+    const item = renderTimelineItems(projectTimeline([event], []))[0]
+    const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByText(`${verb} approved chat route to ${targetTitle}.`)).toBeInTheDocument()
+    expect(view.container.textContent).not.toContain('@chat1')
+    expect(view.container.querySelector('em, a')).toBeNull()
+    act(() => useAppStore.setState({ sessions: [{ id: 'chat-2', title: 'Renamed target', backend: 'claude' }] }))
+    expect(screen.getByText(`${verb} approved chat route to Renamed target.`)).toBeInTheDocument()
+    expect(event).toEqual(original)
+    expect(loadHandoff).not.toHaveBeenCalled()
+    expect(loadExchange).not.toHaveBeenCalled()
+    expect(listQueue).not.toHaveBeenCalled()
+  })
+
+  it('uses a saved route target name or a neutral fallback without leaking the alias across locales or workspaces', () => {
+    useAppStore.setState({ sessions: [{ id: 'chat-2', title: 'Wrong workspace name', backend: 'claude' }], profileGeneration: 1 })
+    const event: Event = {
+      id: 'route-created', session_id: 'chat-1', seq: 12,
+      type: 'agent_handoff_route_created', ts: '2026-07-10T14:31:00Z',
+      target_session_id: 'chat-2', target_title: 'Saved target',
+      message: 'Created approved agent handoff route @chat1.'
+    }
+    const item: SystemItem = { kind: 'system', id: event.id, key: event.id, seq: event.seq, event }
+    const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByText('Created approved chat route to Saved target.')).toBeInTheDocument()
+    act(() => setLocale('zh-CN'))
+    expect(screen.getByText('已创建通往 Saved target 的授权会话访问。')).toBeInTheDocument()
+    view.rerender(<TimelineRowView item={{ ...item, event: { ...event, target_title: null } }} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(screen.getByText('已创建通往 其他会话 的授权会话访问。')).toBeInTheDocument()
+    expect(view.container.textContent).not.toContain('@chat1')
+    expect(view.container.textContent).not.toContain('Wrong workspace name')
+  })
+
+  it('renders the current target name and preserves exact handoff cancellation', async () => {
     const selectSession = vi.fn().mockResolvedValue(undefined)
     useAppStore.setState({
       selectSession,
@@ -708,12 +800,12 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
     expect(screen.getByText('Queued in Current target title')).toBeInTheDocument()
-    expect(screen.getByText('User-addressed')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Open Current target title' }))
-    await waitFor(() => expect(selectSession).toHaveBeenCalledWith('chat-2'))
+    expect(screen.queryByText('User-addressed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Current target title' })).not.toBeInTheDocument()
+    expect(selectSession).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel handoff' }))
     await waitFor(() => expect(cancelHandoff).toHaveBeenCalledWith('handoff-1'))
-    expect(screen.getByText('Handoff to Current target title cancelled')).toBeInTheDocument()
+    expect(screen.getByText('Cancelled')).toBeInTheDocument()
   })
 
   it('uses source-aware labels for an incoming final-result handoff', () => {
@@ -740,7 +832,7 @@ describe('timeline pin state', () => {
     expect(screen.getByText('Working on result from Research')).toBeInTheDocument()
   })
 
-  it('labels configured-route handoffs as agent-authored without exposing the route ID', () => {
+  it('keeps configured-route authority labels and identifiers out of the message bubble', () => {
     useAppStore.setState({
       sessions: [{ id: 'chat-2', title: 'AgentsDock Mobile', backend: 'codex' }]
     })
@@ -759,7 +851,7 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText('Agent-authored same-server access')).toBeInTheDocument()
+    expect(screen.queryByText('Agent-authored same-server access')).not.toBeInTheDocument()
     expect(screen.queryByText(routeId)).not.toBeInTheDocument()
   })
 
@@ -793,9 +885,7 @@ describe('timeline pin state', () => {
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
     expect(loadHandoff).not.toHaveBeenCalled()
-    const details = screen.getByText('View message · 25 chars').closest('details')!
-    details.open = true
-    fireEvent(details, new Event('toggle'))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
     await waitFor(() => expect(loadHandoff).toHaveBeenCalledWith('handoff-long'))
     expect(await screen.findByText('Complete instruction body')).toBeInTheDocument()
@@ -830,9 +920,7 @@ describe('timeline pin state', () => {
       key: 'cross-chat:handoff:handoff-stale', seq: 7, event
     }
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const details = screen.getByText('View message · 24 chars').closest('details')!
-    details.open = true
-    fireEvent(details, new Event('toggle'))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
     await waitFor(() => expect(loadHandoff).toHaveBeenCalledWith('handoff-stale'))
 
     act(() => useAppStore.setState(boundaryPatch))
@@ -870,9 +958,7 @@ describe('timeline pin state', () => {
       key: 'cross-chat:handoff:handoff-foreign', seq: 8, event
     }
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const details = screen.getByText('View message · 20 chars').closest('details')!
-    details.open = true
-    fireEvent(details, new Event('toggle'))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('not a participant in the handoff')
     expect(screen.queryByText('Foreign private body')).not.toBeInTheDocument()
@@ -915,7 +1001,7 @@ describe('timeline pin state', () => {
     expect(screen.queryByText('Handoff to Target cancelled')).not.toBeInTheDocument()
   })
 
-  it('renders a v2 request inside a purple exchange conversation and lazily loads its exact message', async () => {
+  it('renders a v2 request as a bubble and lazily loads its exact message', async () => {
     const exchange = exchangeFixture()
     loadExchange.mockResolvedValue(exchange)
     cancelExchange.mockResolvedValue({ ...exchange, status: 'cancelled' })
@@ -946,10 +1032,11 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText('Conversation with Training')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Training is working')
-    const accessDetail = screen.getByText('Agent-authored same-server access').closest('details')
-    expect(accessDetail).not.toHaveAttribute('open')
+    expect(screen.getByText(/^(?:To )?Training$/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Reply pending · Recipient processing')
+    expect(screen.getByRole('status')).toHaveAttribute('title', 'Tracks message delivery and replies, not this chat’s run status.')
+    expect(screen.queryByText('Agent-authored same-server access')).not.toBeInTheDocument()
+    expect(document.querySelector('.exchange-conversation')).not.toBeInTheDocument()
     expect(screen.queryByText(routeId)).not.toBeInTheDocument()
     expect(screen.queryByText('Reply expected')).not.toBeInTheDocument()
     expect(screen.queryByText(/Round 1|Message 1/)).not.toBeInTheDocument()
@@ -959,7 +1046,7 @@ describe('timeline pin state', () => {
     expect(loadExchange).not.toHaveBeenCalled()
 
     expect(screen.queryByText(/View full conversation/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
     await waitFor(() => expect(loadExchange).toHaveBeenCalledWith('exchange-1'))
     expect(await screen.findByText('Inspect the renderer carefully.')).toBeInTheDocument()
@@ -968,7 +1055,7 @@ describe('timeline pin state', () => {
     await waitFor(() => expect(cancelExchange).toHaveBeenCalledWith('exchange-1'))
   })
 
-  it('offers only a safe read-only retry when full conversation loading fails', async () => {
+  it('retries only the read when an individual message cannot be loaded', async () => {
     loadExchange
       .mockRejectedValueOnce(new Error('temporarily unavailable'))
       .mockResolvedValueOnce(exchangeFixture())
@@ -983,7 +1070,7 @@ describe('timeline pin state', () => {
       exchange_id: 'exchange-1', exchange_leg_id: 'leg-1', exchange_status: 'active',
       exchange_leg_status: 'running', exchange_leg_kind: 'request', exchange_direction: 'outgoing',
       exchange_expects_reply: true, exchange_ordinal: 1, source_session_id: 'chat-1', target_session_id: 'chat-2',
-      handoff_preview: 'Short preview'
+      handoff_preview: 'Short preview', handoff_body_truncated: true
     }
     const item: SystemItem = {
       kind: 'system', id: 'cross-chat-exchange:exchange-1', key: 'cross-chat-exchange:exchange-1',
@@ -991,10 +1078,10 @@ describe('timeline pin state', () => {
     }
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show full conversation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the full conversation: temporarily unavailable')
-    fireEvent.click(screen.getByRole('button', { name: 'Retry loading' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('temporarily unavailable')
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
     expect(await screen.findByText('Inspect the renderer carefully.')).toBeInTheDocument()
     expect(loadExchange).toHaveBeenCalledTimes(2)
@@ -1032,24 +1119,24 @@ describe('timeline pin state', () => {
     }
 
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const boundary = view.container.querySelector('.exchange-conversation') as HTMLElement
-    fireEvent.click(within(boundary).getByRole('button', { name: 'Show more' }))
+    const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
+    fireEvent.click(within(boundary).getByRole('button', { name: 'View message' }))
 
     await waitFor(() => expect(loadExchange).toHaveBeenCalledWith('exchange-1'))
     expect(await within(boundary).findByText(longBody)).toBeInTheDocument()
-    expect(boundary.querySelectorAll('.cross-chat-conversation')).toHaveLength(1)
-    const body = boundary.querySelector('.cross-chat-leg-body') as HTMLElement
-    expect(body).not.toHaveClass('collapsed')
+    expect(boundary.querySelectorAll('.cross-chat-message')).toHaveLength(1)
+    expect(view.container.querySelector('.exchange-conversation')).not.toBeInTheDocument()
 
     fireEvent.click(within(boundary).getByRole('button', { name: 'Show less' }))
-    expect(body).toHaveClass('collapsed')
-    const showMore = within(boundary).getByRole('button', { name: 'Show more' })
+    expect(within(boundary).queryByText(longBody)).not.toBeInTheDocument()
+    const showMore = within(boundary).getByRole('button', { name: 'View message' })
     expect(showMore).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(showMore)
-    expect(body).not.toHaveClass('collapsed')
+    expect(within(boundary).getByText(longBody)).toBeInTheDocument()
+    expect(loadExchange).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the conversation frame around the first outgoing queued message', () => {
+  it('keeps the first outgoing queued message in its own bubble', () => {
     useAppStore.setState({
       activeProfileId: 'profile-a', profileGeneration: 4, selectedSessionId: 'chat-1',
       profiles: [profileFixture('profile-a', 'server-a')],
@@ -1076,10 +1163,11 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(document.querySelector('.cross-chat-conversation-leg.queued')).toHaveClass('left')
-    expect(screen.getByText('Agent conversation')).toBeVisible()
+    expect(document.querySelector('.cross-chat-message')).toHaveClass('outgoing')
+    expect(screen.queryByText('Agent conversation')).not.toBeInTheDocument()
     expect(screen.getByText('Check the latest training checkpoint.')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Queued')
+    expect(screen.getByRole('status')).toHaveTextContent('Reply pending · Queued')
+    expect(screen.queryByText('Queued message removed')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel queued message' })).toBeEnabled()
   })
 
@@ -1122,11 +1210,10 @@ describe('timeline pin state', () => {
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
     expect(screen.queryByRole('button', { name: 'End conversation' })).not.toBeInTheDocument()
-    expect(screen.getByText('Agent conversation')).toBeVisible()
-    expect(screen.getByText('Conversation with Source')).toBeVisible()
-    expect(document.querySelector('.cross-chat-conversation-leg.queued')).toHaveClass('left')
+    expect(screen.queryByText('Agent conversation')).not.toBeInTheDocument()
+    expect(screen.getByText('Source')).toBeVisible()
+    expect(document.querySelector('.cross-chat-message')).toHaveClass('incoming')
     expect(screen.getAllByText('Source')).not.toHaveLength(0)
-    expect(screen.getByText('to Training')).toBeInTheDocument()
     expect(screen.getByText('Check the latest training checkpoint.')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Queued')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
@@ -1136,7 +1223,7 @@ describe('timeline pin state', () => {
       cross_chat_exchange_leg_id: 'leg-1'
     }))
     expect(cancelExchange).not.toHaveBeenCalled()
-    expect(await screen.findByRole('status')).toHaveTextContent('Cancelled')
+    expect(await screen.findByRole('status')).toHaveTextContent('Queued message removed')
     expect(listQueue).toHaveBeenCalledWith('chat-2')
     expect(screen.queryByRole('button', { name: 'Cancel queued message' })).not.toBeInTheDocument()
   })
@@ -1285,7 +1372,7 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText('Agent conversation')).toBeVisible()
+    expect(screen.queryByText('Agent conversation')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Queued')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
 
@@ -1311,18 +1398,19 @@ describe('timeline pin state', () => {
     const item: SystemItem = { kind: 'system', id: 'cross-chat-exchange:exchange-1', key: 'cross-chat-exchange:exchange-1',
       seq: 20, event: reply, events: [first, reply] }
     const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    expect(container.querySelector('.exchange-conversation')).toBeVisible()
+    expect(container.querySelector('.exchange-conversation')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.cross-chat-message')).toHaveLength(2)
     expect(screen.getByText(first.handoff_preview!)).toBeVisible()
     expect(screen.getByText(reply.handoff_preview!)).toBeVisible()
-    expect(container.querySelector('[data-exchange-leg-id="leg-1"]')).toHaveClass('left')
+    expect(container.querySelector('[data-exchange-leg-id="leg-1"]')).toHaveClass('outgoing')
     const queued = container.querySelector('[data-exchange-leg-id="leg-2"]') as HTMLElement
-    expect(queued).toHaveClass('right', 'queued')
+    expect(queued).toHaveClass('incoming')
     expect(within(queued).getByRole('button', { name: 'Cancel queued message' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Show full conversation' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Show full conversation' })).not.toBeInTheDocument()
     expect(loadExchange).not.toHaveBeenCalled()
   })
 
-  it('renders both exchange directions as ordered legs inside one conversation boundary', () => {
+  it('renders each exchange leg once with direction relative to the displayed chat', () => {
     useAppStore.setState({
       activeProfileId: 'profile-a', profileGeneration: 4, selectedSessionId: 'chat-1',
       profiles: [profileFixture('profile-a', 'server-a')],
@@ -1364,32 +1452,31 @@ describe('timeline pin state', () => {
     }
 
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const boundary = view.container.querySelector('.exchange-conversation')
+    const boundary = view.container.querySelector('.cross-chat-legacy-messages')
     expect(boundary).toBeInTheDocument()
     expect(boundary).toHaveAttribute('data-exchange-id', 'exchange-1')
-    expect(boundary).toHaveAttribute('data-event-count', '3')
-    expect(boundary?.querySelector('.cross-chat-participants')?.textContent).toContain('Source (this chat)↔Training')
-    expect(within(boundary as HTMLElement).getByText('Conversation with Training')).toBeInTheDocument()
+    expect(view.container.querySelector('.exchange-conversation')).not.toBeInTheDocument()
+    expect(boundary?.querySelector('.cross-chat-participants')).not.toBeInTheDocument()
     expect(within(boundary as HTMLElement).getByRole('status')).toHaveTextContent('Completed')
 
-    const legs = boundary?.querySelectorAll('.cross-chat-conversation-leg') ?? []
+    const legs = boundary?.querySelectorAll('.cross-chat-message') ?? []
     expect(legs).toHaveLength(2)
-    expect(legs[0]).toHaveClass('outgoing', 'left')
-    expect(legs[0].querySelector('.cross-chat-leg-speaker')).toHaveTextContent('Source')
+    expect(legs[0]).toHaveClass('outgoing')
+    expect(within(legs[0] as HTMLElement).getByRole('button', { name: 'To Training' })).toBeVisible()
     expect(legs[0]).toHaveTextContent('Can you verify the updater state?')
-    expect(legs[1]).toHaveClass('incoming', 'right')
-    expect(legs[1].querySelector('.cross-chat-leg-speaker')).toHaveTextContent('Training')
+    expect(legs[1]).toHaveClass('incoming')
+    expect(within(legs[1] as HTMLElement).getByRole('button', { name: 'Training' })).toBeVisible()
     expect(legs[1]).toHaveTextContent('Verified: the updater is idle.')
     expect(boundary?.querySelector('.cross-chat-leg-meta')).not.toBeInTheDocument()
     expect(boundary?.querySelector('.cross-chat-exchange-footer')).not.toBeInTheDocument()
 
     view.rerender(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const responderViewLegs = view.container.querySelectorAll('.cross-chat-conversation-leg')
-    expect(responderViewLegs[0]).toHaveClass('outgoing', 'left')
-    expect(responderViewLegs[1]).toHaveClass('incoming', 'right')
+    const responderViewLegs = view.container.querySelectorAll('.cross-chat-message')
+    expect(responderViewLegs[0]).toHaveClass('incoming')
+    expect(responderViewLegs[1]).toHaveClass('outgoing')
   })
 
-  it('keeps a completed multi-turn exchange conversation-first while folding only its middle messages', async () => {
+  it('keeps every completed exchange leg visible and expands only a requested message', async () => {
     loadExchange.mockResolvedValue(multiTurnExchangeFixture())
     useAppStore.setState({
       activeProfileId: 'profile-a', profileGeneration: 4, selectedSessionId: 'chat-1',
@@ -1400,42 +1487,36 @@ describe('timeline pin state', () => {
       ]
     })
     const events = multiTurnLifecycleEvents('completed')
+    events.find(event => event.exchange_leg_id === 'multi-leg-2')!.handoff_body_truncated = true
     const item: SystemItem = {
       kind: 'system', id: 'cross-chat-exchange:exchange-multi', key: 'cross-chat-exchange:exchange-multi',
       seq: events.at(-1)!.seq, event: events.at(-1)!, events
     }
 
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const boundary = view.container.querySelector('.exchange-conversation') as HTMLElement
-    const visibleLegs = () => [...boundary.querySelectorAll<HTMLElement>('.cross-chat-conversation-leg')]
+    const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
+    const visibleLegs = () => [...boundary.querySelectorAll<HTMLElement>('.cross-chat-message')]
 
-    expect(visibleLegs().map(leg => leg.dataset.exchangeLegId)).toEqual(['multi-leg-1', 'multi-leg-4'])
+    expect(visibleLegs().map(leg => leg.dataset.exchangeLegId)).toEqual(['multi-leg-1', 'multi-leg-2', 'multi-leg-3', 'multi-leg-4'])
     expect(within(boundary).getByText('Opening question preview')).toBeInTheDocument()
     expect(within(boundary).getByText('Final answer preview')).toBeInTheDocument()
-    expect(within(boundary).queryByText('First follow-up preview')).not.toBeInTheDocument()
+    expect(within(boundary).getByText('First follow-up preview')).toBeInTheDocument()
     expect(within(boundary).queryByText(/Round \d|Message \d/)).not.toBeInTheDocument()
     expect(loadExchange).not.toHaveBeenCalled()
 
-    const earlier = within(boundary).getByRole('button', { name: 'Show 2 earlier messages' })
-    expect(earlier).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(earlier)
-    expect(visibleLegs().map(leg => leg.dataset.exchangeLegId)).toEqual([
-      'multi-leg-1', 'multi-leg-2', 'multi-leg-3', 'multi-leg-4'
-    ])
-    expect(loadExchange).not.toHaveBeenCalled()
-
-    fireEvent.click(within(boundary).getByRole('button', { name: 'Show full conversation' }))
+    expect(screen.queryByRole('button', { name: /Show .*earlier messages|Show full conversation/ })).not.toBeInTheDocument()
+    const followup = boundary.querySelector('[data-exchange-leg-id="multi-leg-2"]') as HTMLElement
+    fireEvent.click(within(followup).getByRole('button', { name: 'View message' }))
     await waitFor(() => expect(loadExchange).toHaveBeenCalledWith('exchange-multi'))
     expect(await within(boundary).findByText('Complete first follow-up body.')).toBeInTheDocument()
     expect(visibleLegs()).toHaveLength(4)
     expect(within(boundary).queryByText(/View full conversation/)).not.toBeInTheDocument()
 
-    fireEvent.click(within(boundary).getByRole('button', { name: 'Show less' }))
-    expect(visibleLegs().map(leg => leg.dataset.exchangeLegId)).toEqual(['multi-leg-1', 'multi-leg-4'])
-    expect(within(boundary).getByRole('button', { name: 'Show 2 earlier messages' })).toHaveAttribute('aria-expanded', 'false')
+    expect(visibleLegs().map(leg => leg.dataset.exchangeLegId)).toEqual(['multi-leg-1', 'multi-leg-2', 'multi-leg-3', 'multi-leg-4'])
+    expect(view.container.querySelector('.exchange-conversation')).not.toBeInTheDocument()
   })
 
-  it('marks the newest active message as the current baton step', () => {
+  it('scopes active conversation controls to the newest message bubble', () => {
     useAppStore.setState({
       activeProfileId: 'profile-a', profileGeneration: 4, selectedSessionId: 'chat-1',
       profiles: [profileFixture('profile-a', 'server-a')],
@@ -1451,14 +1532,15 @@ describe('timeline pin state', () => {
     }
 
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const boundary = view.container.querySelector('.exchange-conversation') as HTMLElement
-    const visibleLegs = boundary.querySelectorAll<HTMLElement>('.cross-chat-conversation-leg')
+    const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
+    const visibleLegs = boundary.querySelectorAll<HTMLElement>('.cross-chat-message')
 
-    expect(visibleLegs).toHaveLength(2)
-    expect(visibleLegs[1]).toHaveAttribute('data-exchange-leg-id', 'multi-leg-4')
-    expect(visibleLegs[1]).toHaveAttribute('aria-current', 'step')
-    expect(visibleLegs[1]).toHaveTextContent('Final answer preview')
-    expect(within(boundary).getByRole('status')).toHaveTextContent('This chat is working')
+    expect(visibleLegs).toHaveLength(4)
+    expect(visibleLegs[3]).toHaveAttribute('data-exchange-leg-id', 'multi-leg-4')
+    expect(visibleLegs[3]).toHaveTextContent('Final answer preview')
+    expect(within(visibleLegs[3]).getByRole('button', { name: 'End conversation' })).toBeEnabled()
+    for (const prior of [...visibleLegs].slice(0, 3)) expect(within(prior).queryByRole('button', { name: 'End conversation' })).not.toBeInTheDocument()
+    expect(within(boundary).getByRole('status')).toHaveTextContent('Reply pending · Recipient processing')
   })
 
   it('shows terminal exchange failure without expiry metadata in the conversation UI', () => {
@@ -1493,9 +1575,9 @@ describe('timeline pin state', () => {
     }
 
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const boundary = view.container.querySelector('.exchange-conversation') as HTMLElement
-    expect(boundary).toHaveClass('error')
-    expect(within(boundary).getByText('Conversation with Training')).toBeInTheDocument()
+    const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
+    expect(boundary.querySelector('.cross-chat-message')).toHaveClass('failed')
+    expect(within(boundary).getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(within(boundary).getByRole('status')).toHaveTextContent("Couldn't complete")
     expect(within(boundary).getByRole('alert')).toHaveTextContent('Training could not start the requested work.')
     expect(within(boundary).queryByText(/Expires/)).not.toBeInTheDocument()
@@ -1534,9 +1616,9 @@ describe('timeline pin state', () => {
     }
 
     const view = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    const boundary = view.container.querySelector('.exchange-conversation') as HTMLElement
-    expect(boundary).not.toHaveClass('error')
-    expect(within(boundary).getByText('Conversation with Training')).toBeInTheDocument()
+    const boundary = view.container.querySelector('.cross-chat-legacy-messages') as HTMLElement
+    expect(boundary.querySelector('.cross-chat-message')).not.toHaveClass('failed')
+    expect(within(boundary).getByText(/^(?:To )?Training$/)).toBeInTheDocument()
     expect(within(boundary).getByRole('status')).toHaveTextContent('Cancelled before completion')
     expect(within(boundary).queryByRole('alert')).not.toBeInTheDocument()
     expect(within(boundary).queryByText(recoveryMessage)).not.toBeInTheDocument()
@@ -1550,12 +1632,12 @@ describe('timeline pin state', () => {
     {
       direction: 'outgoing' as const,
       sessionId: 'chat-1',
-      title: 'Conversation with Training'
+      title: 'To Training'
     },
     {
       direction: 'incoming' as const,
       sessionId: 'chat-2',
-      title: 'Conversation with Source'
+      title: 'Source'
     }
   ])('renders an $direction instruction exchange as an instruction with a scoped reply available', ({ direction, sessionId, title }) => {
     useAppStore.setState({
@@ -1583,9 +1665,9 @@ describe('timeline pin state', () => {
     render(<TimelineRowView item={item} sessionId={sessionId} onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
     expect(screen.getByText(title)).toBeInTheDocument()
-    const details = document.querySelector('.cross-chat-exchange-detail-lines')
-    expect(details).toHaveTextContent('Started as: Instruction')
-    expect(details?.closest('details')).not.toHaveAttribute('open')
+    expect(document.querySelector('.cross-chat-exchange-detail-lines')).not.toBeInTheDocument()
+    expect(document.querySelector('.cross-chat-message')).toHaveClass(direction)
+    expect(screen.getByRole('status')).toHaveTextContent('Delivery in progress')
     expect(screen.queryByText('Reply expected')).not.toBeInTheDocument()
     expect(screen.queryByText('No reply expected')).not.toBeInTheDocument()
     expect(screen.queryByText('Reply available')).not.toBeInTheDocument()
@@ -1614,8 +1696,9 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText('Conversation with Training')).toBeInTheDocument()
-    expect(document.querySelector('.cross-chat-exchange-detail-lines')).toHaveTextContent('Started as: Instruction')
+    expect(screen.getByText(/^(?:To )?Training$/)).toBeInTheDocument()
+    expect(document.querySelector('.cross-chat-exchange-detail-lines')).not.toBeInTheDocument()
+    expect(screen.getByText('Delivery in progress')).toBeInTheDocument()
     expect(screen.queryByText('Reply expected from Training')).not.toBeInTheDocument()
     expect(screen.queryByText('Reply expected')).not.toBeInTheDocument()
   })
@@ -1644,9 +1727,10 @@ describe('timeline pin state', () => {
     }
 
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show full conversation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
-    expect(await screen.findByRole('button', { name: 'Open Research' })).toBeInTheDocument()
+    expect(await screen.findByText('Research')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Research' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'End conversation' })).toHaveAttribute(
       'title', 'Cancels queued work and stops a running target on supported servers.'
     )
@@ -1676,10 +1760,11 @@ describe('timeline pin state', () => {
 
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
-    expect(screen.getByText('Conversation with Training')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Waiting to start')
+    expect(screen.getByText(/^(?:To )?Training$/)).toBeInTheDocument()
+    expect(screen.getByText('Waiting to start')).toBeInTheDocument()
     expect(screen.queryByText('Reply expected')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Training' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View message' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Training' })).not.toBeInTheDocument()
     expect(loadExchange).not.toHaveBeenCalled()
   })
 
@@ -1704,7 +1789,7 @@ describe('timeline pin state', () => {
     }
     const props = { sessionId: 'chat-1', onFindFile: () => {}, pinnedItemIds: new Set<string>() }
     const view = render(<TimelineRowView item={item} {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show full conversation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
     await waitFor(() => expect(loadExchange).toHaveBeenCalledWith('exchange-1'))
     expect(screen.getByRole('button', { name: 'End conversation' })).toBeInTheDocument()
 
@@ -1723,7 +1808,7 @@ describe('timeline pin state', () => {
     { ordinal: 4, kind: 'reply' as const, expectsReply: false, used: 4, remaining: 2 },
     { ordinal: 5, kind: 'request' as const, expectsReply: true, used: 5, remaining: 1 },
     { ordinal: 6, kind: 'reply' as const, expectsReply: false, used: 6, remaining: 0 }
-  ])('keeps leg $ordinal $kind limits in details instead of transcript pills', ({ ordinal, kind, expectsReply, used, remaining }) => {
+  ])('keeps leg $ordinal $kind metadata out of bubbles while preserving scoped controls', ({ ordinal, kind, expectsReply, used, remaining }) => {
     useAppStore.setState({
       activeProfileId: 'profile-a', profileGeneration: 4, selectedSessionId: 'chat-2',
       profiles: [profileFixture('profile-a', 'server-a')],
@@ -1746,10 +1831,10 @@ describe('timeline pin state', () => {
     render(<TimelineRowView item={item} sessionId="chat-2" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
     expect(screen.queryByText(/Reply expected|No reply expected|Round \d/)).not.toBeInTheDocument()
-    const detail = document.querySelector('.cross-chat-exchange-detail-lines')
-    expect(detail).toHaveTextContent(`Messages: ${used} of 6`)
-    if (expectsReply) expect(detail).toHaveTextContent(`Remaining: ${remaining}`)
-    else expect(detail).not.toHaveTextContent('Remaining:')
+    expect(document.querySelector('.cross-chat-exchange-detail-lines')).not.toBeInTheDocument()
+    expect(document.querySelectorAll('.cross-chat-message')).toHaveLength(1)
+    expect(document.querySelector('.cross-chat-message')).toHaveClass('incoming')
+    expect(screen.queryByText(/Messages:|Remaining:/)).not.toBeInTheDocument()
     if (expectsReply) expect(screen.getByRole('button', { name: 'End conversation' })).toBeInTheDocument()
     else expect(screen.queryByRole('button', { name: 'End conversation' })).not.toBeInTheDocument()
   })
@@ -1774,7 +1859,7 @@ describe('timeline pin state', () => {
       key: 'cross-chat-exchange:exchange-1:leg-1', seq: 22, event
     }
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show full conversation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
     await waitFor(() => expect(loadExchange).toHaveBeenCalled())
 
     useAppStore.setState({
@@ -1807,7 +1892,7 @@ describe('timeline pin state', () => {
       key: 'cross-chat-exchange:exchange-1:leg-1', seq: 23, event
     }
     render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show full conversation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View message' }))
 
     await waitFor(() => expect(loadExchange).toHaveBeenCalledWith('exchange-1'))
     expect(await screen.findByRole('alert')).toHaveTextContent('not a participant in the exchange')
@@ -1868,6 +1953,44 @@ describe('timeline pin state', () => {
 
     expect(screen.getByText('Compacting context…')).toBeInTheDocument()
     expect(container.querySelector('.system-icon .spin')).toBeInTheDocument()
+  })
+
+  it('keeps an owned run visibly live through compaction until its actual finish', () => {
+    const progress: Event = {
+      id: 'working', session_id: 'chat-1', seq: 10, type: 'reasoning_summary',
+      phase: 'commentary', ts: '2026-07-10T14:30:00Z', text: 'Checking the incoming message.'
+    }
+    const compacting: Event = {
+      id: 'compact-start', session_id: 'chat-1', seq: 11, type: 'codex_compaction_started',
+      ts: '2026-07-10T14:30:14Z', compaction_id: 'compact-live'
+    }
+    const item: ProgressItem = {
+      kind: 'progress', id: 'progress-live', key: 'progress-live', seq: 11,
+      active: true, startedAt: progress.ts, events: [progress],
+      lifecycle: [{
+        kind: 'system', id: 'compact-live', key: 'codex:compaction:compact-live',
+        seq: 11, event: compacting, anchorTs: compacting.ts
+      }]
+    }
+    const row = (value: ProgressItem) => <TimelineRowView item={value} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
+    const { container, rerender } = render(row(item))
+    expect(container.querySelector('.run-activity-summary')).toHaveTextContent('Compacting context…')
+    expect(container.querySelector('.run-activity-summary .activity-ring')).not.toBeNull()
+    expect(screen.queryByText('Worked for 14s')).not.toBeInTheDocument()
+
+    const completed: ProgressItem = {
+      ...item,
+      lifecycle: item.lifecycle!.map(marker => ({
+        ...marker, event: { ...marker.event, type: 'codex_compaction_completed', ts: '2026-07-10T14:32:00Z' }
+      }))
+    }
+    rerender(row(completed))
+    expect(container.querySelector('.run-activity-summary')).toHaveTextContent('Working for')
+    expect(container.querySelector('.run-activity-summary .activity-ring')).not.toBeNull()
+
+    rerender(row({ ...completed, active: false, finishedAt: '2026-07-10T14:33:00Z' }))
+    expect(container.querySelector('.run-activity-summary')).toHaveTextContent('Worked for 3m')
+    expect(container.querySelector('.run-activity-summary .activity-ring')).toBeNull()
   })
 
   it('renders an in-turn compaction between live updates in one progress surface', () => {
@@ -1955,7 +2078,7 @@ describe('timeline pin state', () => {
     expect(within(container).queryByText(/Progress updates/)).not.toBeInTheDocument()
     expect(parts[1]).toHaveClass('run-activity-support')
     fireEvent.click(within(parts[1] as HTMLElement).getByRole('button', { name: '1 status update' }))
-    expect(parts[1].querySelector('.system-row.cross-chat')).toHaveAttribute('data-event-id', 'handoff-started')
+    expect(parts[1].querySelector('.cross-chat-message')).toHaveAttribute('data-event-id', 'handoff-started')
   })
 
   it('renders a live emergency lifecycle card inline between commentary updates', () => {
@@ -2337,7 +2460,7 @@ describe('timeline pin state', () => {
     expect(within(rendered.container).getByTitle('Copy full message')).toBeInTheDocument()
   })
 
-  it('keeps one Claude final answer after loading full activity', async () => {
+  it.each(['reasoning_summary', 'assistant_text'])('keeps one Claude final answer after loading phased %s activity', async commentaryType => {
     const event = (seq: number, type: string, fields: Partial<Event> = {}): Event => ({
       id: `claude-full-${seq}`, session_id: 'chat-1', run_id: 'claude-full', backend: 'claude',
       seq, type, ts: `2026-07-10T14:29:0${seq}Z`, ...fields
@@ -2345,10 +2468,10 @@ describe('timeline pin state', () => {
     const finalText = 'The final answer is separate and appears once.'
     const source = [
       event(1, 'turn_started', { prompt: 'Inspect the UI.' }),
-      event(2, 'reasoning_summary', { phase: 'commentary', text: 'I am checking the requested UI behavior.' }),
+      event(2, commentaryType, { phase: 'commentary', text: 'I am checking the requested UI behavior.' }),
       event(3, 'tool_started', { tool: { id: 'read-1', name: 'Read', input: { file_path: 'fixture.txt' } } }),
       event(4, 'tool_finished', { tool_id: 'read-1', output: 'Fixture inspected.' }),
-      event(5, 'reasoning_summary', { phase: 'commentary', text: finalText }),
+      event(5, commentaryType, { phase: 'commentary', text: finalText }),
       event(6, 'code_diff', { files_changed: 1, diff_files: [{ path: 'file.ts', additions: 1, deletions: 0 }] }),
       event(7, 'turn_finished', { result_text: finalText })
     ]
@@ -2368,6 +2491,39 @@ describe('timeline pin state', () => {
     expect(within(container).getByText('I am checking the requested UI behavior.')).toBeInTheDocument()
     expect(container.querySelector('.run-activity')).toHaveTextContent('1 tool call')
     expect(within(container).getByRole('button', { name: /Edited 1 file.*Review/ })).toBeInTheDocument()
+  })
+
+  it('keeps delayed commentary above the answer when opening and paging a split goal trace', async () => {
+    const event = (seq: number, type: string, ts: string, fields: Partial<Event> = {}): Event => ({
+      id: `delayed-${seq}`, session_id: 'chat-1', run_id: 'delayed-goal', backend: 'codex',
+      seq, type, ts: `2026-07-10T14:29:${ts}Z`, ...fields
+    })
+    const source = [
+      event(1, 'turn_started', '00', { prompt: 'Continue' }),
+      event(2, 'reasoning_summary', '10', { phase: 'commentary', text: 'Initial progress.' }),
+      event(3, 'assistant_text', '30', { text: 'Earlier answer.' }),
+      event(4, 'reasoning_summary', '40', { phase: 'commentary', text: 'True continuation.' }),
+      event(5, 'reasoning_summary', '20', { phase: 'commentary', text: 'Delayed earlier progress.' })
+    ]
+    loadTrace.mockResolvedValueOnce({
+      events: [event(6, 'reasoning_summary', '25', { phase: 'commentary', text: 'Another earlier update from full history.' })],
+      has_more: true, next_after: 6
+    })
+    const rows = renderTimelineItems(projectTimeline(source, []))
+    const { container } = render(<>{rows.map(item =>
+      <TimelineRowView key={item.key} item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
+    )}</>)
+    const activities = container.querySelectorAll<HTMLElement>('.run-activity')
+    fireEvent.click(within(activities[0]).getByRole('button', { name: 'Worked for 30s' }))
+    expect(activities[0]).toHaveTextContent('Delayed earlier progress.')
+    expect(activities[0]).not.toHaveTextContent('True continuation.')
+    expect(activities[1]).toHaveTextContent('True continuation.')
+    expect(activities[1]).not.toHaveTextContent('Delayed earlier progress.')
+    fireEvent.click(within(activities[0]).getByRole('button', { name: 'Load available activity' }))
+    await within(activities[0]).findByText('Another earlier update from full history.')
+    expect(within(activities[0]).getByRole('button', { name: 'Load more activity' })).toBeInTheDocument()
+    expect(activities[1]).not.toHaveTextContent('Another earlier update from full history.')
+    expect(within(container).getAllByText('Earlier answer.')).toHaveLength(1)
   })
 
   it('collapses a live run when stop and a real final arrive together', () => {
@@ -2683,11 +2839,12 @@ describe('timeline pin state', () => {
     expect(container.querySelector('.tool-event')).toHaveTextContent('legacy_execSuccess')
   })
 
-  it('bounds collapsed reasoning text and mounts the complete summary only on demand', () => {
-    const fullText = `Inspecting ${'a'.repeat(1_400)}`
+  it.each(['codex', 'claude'] as const)('opens the complete %s summary as readable Markdown without repeating the clipped preview', backend => {
+    const summaryText = `Inspecting ${'a'.repeat(1_400)}`
+    const fullText = `**Renderer check**\n\n${summaryText}\n\n- Event order\n- Disclosure state`
     const event: Event = {
       id: 'long-thought', session_id: 'chat-1', seq: 1, type: 'reasoning_summary',
-      ts: '2026-07-10T14:29:00Z', run_id: 'run-1', text: fullText
+      ts: '2026-07-10T14:29:00Z', run_id: 'run-1', backend, text: fullText
     }
     const item: TraceItem = {
       kind: 'trace', id: 'trace-1', key: 'trace-1', seq: 1,
@@ -2707,7 +2864,17 @@ describe('timeline pin state', () => {
     expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
 
     fireEvent.click(reasoningToggle!)
-    expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent(fullText)
+    expect(reasoningToggle).toHaveAccessibleName('Thinking summary')
+    expect(reasoningToggle).toHaveTextContent('Thinking summary')
+    expect(reasoningToggle).not.toHaveTextContent('Renderer check')
+    const body = container.querySelector('.trace-reasoning-body')!
+    expect(body).toHaveTextContent(summaryText)
+    expect(body.querySelector('strong')).toHaveTextContent('Renderer check')
+    expect(within(body as HTMLElement).getAllByRole('listitem')).toHaveLength(2)
+    expect(body.querySelector('.markdown')).not.toHaveClass('compact')
+    fireEvent.click(reasoningToggle!)
+    expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
+    expect(reasoningToggle).toHaveTextContent('Renderer check')
   })
 
   it('loads every completed trace page on demand and can fold back to the sampled trace', async () => {

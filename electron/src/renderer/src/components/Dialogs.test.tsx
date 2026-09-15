@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import { setLocale } from '@shared/i18n'
+import { setLocale, t } from '@shared/i18n'
 import type { AppUpdateStatus, AppUpdateTrack, ChatReference, CrossChatHandoffsCapability, Health, ProfileBootstrapPayload, PublicServerProfile, RuntimeCatalog, Session, TeamReference, TimelineSearchResult } from '@shared/types'
 import { clearSessionHistorySearchCache } from '../lib/session-history-search'
 import { useAppStore } from '../store/app-store'
@@ -426,7 +426,7 @@ describe('ServerOnboardingDialog', () => {
     }))
   })
 
-  it.each(['en', 'zh-CN'] as const)('creates the Team Network and host together on the originating server with English hosting controls in %s', async locale => {
+  it.each(['en', 'zh-CN'] as const)('creates the Team Network and host on the originating server with localized controls in %s', async locale => {
     setLocale(locale)
     const run = vi.fn()
     const configureServerRole = vi.fn().mockResolvedValue({
@@ -479,22 +479,22 @@ describe('ServerOnboardingDialog', () => {
       }))
     })
 
-    expect(await screen.findByRole('heading', { name: 'Create Team Network on this server' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Close Create Team Network on this server' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: t('teamNetwork.setup.title') })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: t('ui.Dialogs.Shell.close_31a8910', { name: t('teamNetwork.setup.title') }) })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Studio' })).toBeInTheDocument()
-    expect(screen.getByText(/Existing chats and running agents stay connected/)).toBeInTheDocument()
+    expect(screen.getByText(t('teamNetwork.setup.liveRole'))).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Role' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Member' })).not.toBeInTheDocument()
-    expect(screen.getByText(/This server will host the Team Network/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Server name')).toHaveValue('Studio')
+    expect(screen.getByText(t('teamNetwork.setup.hostHint'))).toBeInTheDocument()
+    expect(screen.getByLabelText(t('teamNetwork.setup.serverName'))).toHaveValue('Studio')
     expect(screen.queryByRole('button', { name: /Remote machine|This computer/ })).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText('user@server or SSH alias')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('AgentsServer port')).not.toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
 
-    await user.clear(screen.getByLabelText('Server name'))
-    await user.type(screen.getByLabelText('Server name'), 'Mac Studio')
-    await user.click(screen.getByRole('button', { name: 'Create network' }))
+    await user.clear(screen.getByLabelText(t('teamNetwork.setup.serverName')))
+    await user.type(screen.getByLabelText(t('teamNetwork.setup.serverName')), 'Mac Studio')
+    await user.click(screen.getByRole('button', { name: t('teamNetwork.setup.create') }))
 
     await waitFor(() => expect(configureServerRole).toHaveBeenCalledWith(
       { profileId: 'studio', profileGeneration: 2, serverIdentity: 'server-studio' },
@@ -502,7 +502,7 @@ describe('ServerOnboardingDialog', () => {
     ))
     expect(run).not.toHaveBeenCalled()
     await waitFor(() => expect(opened).toHaveBeenCalledOnce())
-    expect(screen.queryByRole('heading', { name: 'Create Team Network on this server' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: t('teamNetwork.setup.title') })).not.toBeInTheDocument()
   })
 
   it('keeps an unsupported create action host-only instead of exposing the unrelated member role', async () => {

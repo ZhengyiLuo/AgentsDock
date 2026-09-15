@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import { registerIpc } from './ipc'
 import { appLog } from './logger'
+import { reportStorageError } from './storage-health'
 import { AppService } from './service'
 import { createEditMenu } from './edit-menu'
 import { LanguageSettings } from './language'
@@ -27,8 +28,8 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'agentsdock-media', privileges: { standard: true, secure: true, stream: true } }
 ])
 
-process.on('uncaughtException', error => appLog('fatal', 'uncaught exception', errorDetails(error)))
-process.on('unhandledRejection', reason => appLog('fatal', 'unhandled rejection', errorDetails(reason)))
+process.on('uncaughtException', error => { reportStorageError(error); appLog('fatal', 'uncaught exception', errorDetails(error)) })
+process.on('unhandledRejection', reason => { reportStorageError(reason); appLog('fatal', 'unhandled rejection', errorDetails(reason)) })
 
 // Keep the preview app's cache, drafts, and encrypted settings when the
 // production bundle replaces it as the canonical AgentsDock binary.
@@ -100,6 +101,7 @@ if (!app.requestSingleInstanceLock()) {
       teamHub = new LazyTeamHubService(() => new TeamHubService({
         discovery: {
           currentScope: () => appService.teamHubServerScope(),
+          currentMailHintScope: expected => appService.currentMailHintScope(expected),
           currentDiscovery: expected => appService.currentTeamHubDiscovery(expected),
           discover: expected => appService.discoverTeamHub(expected),
           configureTeamHubServerRole: (expected, input) => appService.configureTeamHubServerRole(expected, input),

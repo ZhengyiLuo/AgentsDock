@@ -3,6 +3,7 @@ import type {
   AgentCrossChatRoute,
   AgentCrossChatRouteUpdateResult,
   AgentCrossChatRoutesSnapshot,
+  AgentTeamMailRoutesSnapshot,
   AgentTextFile,
   AppUpdateStatus,
   AppUpdateTrack,
@@ -20,6 +21,8 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
+  CodexServerSettingsScope,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -29,6 +32,8 @@ import type {
   CodexRuntimeSnapshot,
   CodexShellInput,
   ChatReference,
+  ChatInboxPage,
+  ChatInboxDeleteReceipt,
   TeamReference,
   ChatSearchSnapshot,
   CreateAgentCrossChatRouteInput,
@@ -202,6 +207,18 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  /** Restricted browser renderer. It has no native, filesystem, or other-chat authority. */
+  readonly sharedChat?: true
+  chatShares: {
+    preview(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./chat-shares').ChatSharePreview>
+    list(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode): Promise<import('./chat-shares').ChatShareRecord[]>
+    create(scope: WorkspaceProfileScope, sessionId: string, input: import('./chat-shares').CreateChatShareInput): Promise<import('./chat-shares').CreatedChatShare>
+    revoke(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode, shareId: string): Promise<void>
+  }
+  mailHints?: {
+    acknowledgePage(input: import('./team-mail-hints').MailHintPageAcknowledgment): Promise<import('./team-mail-hints').MailHintProjection | null>
+    acknowledgeBulletinRefresh?(input: import('./team-bulletin-hints').BulletinHintRefresh): Promise<import('./team-mail-hints').MailHintProjection | null>
+  }
   bootstrap(): Promise<BootstrapPayload>
   language: {
     get(): Promise<LanguageSettingsSnapshot>
@@ -250,6 +267,7 @@ export interface AgentsDockAPI {
     teamMessagesCapabilities(scope: TeamHubScope): Promise<TeamMessagesCapability>
     teamMessages(scope: TeamHubScope, query: TeamMessageQuery): Promise<TeamMessagePage>
     teamMessage(scope: TeamHubScope, teamId: string, messageId: string): Promise<TeamMessage>
+    teamMessageThread(scope: TeamHubScope, query: import('./team-network').TeamMessageThreadQuery): Promise<import('./team-network').TeamMessageThreadPage>
     createTeamMessage(scope: TeamHubScope, input: TeamMessageCreateInput): Promise<TeamMessage>
     recordTeamMessageReceipt(scope: TeamHubScope, input: TeamMessageReceiptInput): Promise<TeamMessageReceiptResult>
     setTeamMessageMailboxState(scope: TeamHubScope, input: TeamMailboxStateInput): Promise<TeamMailboxStateResult>
@@ -371,6 +389,8 @@ export interface AgentsDockAPI {
   codex: {
     serverGoals(): Promise<CodexGoalsConfiguration>
     setServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration>
+    serverSubagents(scope: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration>
+    setServerSubagents(scope: CodexServerSettingsScope, limit: number | null): Promise<CodexSubagentsConfiguration>
     runtime(sessionId: string): Promise<CodexRuntimeSnapshot>
     loadThread(sessionId: string): Promise<CodexRuntimeSnapshot>
     resolveInteraction(
@@ -415,7 +435,8 @@ export interface AgentsDockAPI {
       prompt: string,
       chatReferences?: ChatReference[],
       clientCapabilities?: string[],
-      teamReferences?: TeamReference[]
+      teamReferences?: TeamReference[],
+      expectedMessageRevision?: number
     ): Promise<boolean>
     remove(sessionId: string, queuedId: string): Promise<boolean>
     skipCrossChatDelivery(sessionId: string, queuedId: string, identity: QueuedCrossChatDeliveryIdentity): Promise<boolean>
@@ -429,9 +450,17 @@ export interface AgentsDockAPI {
     update(scope: WorkspaceProfileScope, sessionId: string, routeId: string, input: UpdateAgentCrossChatRouteInput): Promise<AgentCrossChatRouteUpdateResult>
     remove(scope: WorkspaceProfileScope, sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResult>
   }
+  agentTeamMailRoutes: {
+    list(scope: WorkspaceProfileScope, sessionId: string): Promise<AgentTeamMailRoutesSnapshot>
+    remove(scope: WorkspaceProfileScope, sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResult>
+  }
   handoffs: {
     get(envelopeId: string): Promise<CrossChatHandoff>
     cancel(envelopeId: string): Promise<CrossChatHandoffSummary>
+  }
+  chatInbox: {
+    list(scope: WorkspaceProfileScope, sessionId: string, cursor?: string | null, limit?: number): Promise<ChatInboxPage>
+    remove(scope: WorkspaceProfileScope, sessionId: string, messageId: string): Promise<ChatInboxDeleteReceipt>
   }
   exchanges: {
     get(exchangeId: string): Promise<CrossChatExchange>
@@ -552,7 +581,8 @@ export interface AgentsDockAPI {
     readyForNotifications(): Promise<boolean>
     readyForSecurePeerInvite(): Promise<boolean>
     closeWindow(): Promise<void>
-    completeCloseFlush(requestId: string): Promise<boolean>
+    completeCloseFlush(requestId: string, saved?: boolean): Promise<boolean>
+    retryStorage(): Promise<void>
   }
   events: {
     on<K extends keyof import('./types').AppEventMap>(name: K, listener: (payload: import('./types').AppEventMap[K]) => void): () => void

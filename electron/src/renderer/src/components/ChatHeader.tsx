@@ -3,7 +3,7 @@ import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { backendLabel, shortId } from '../lib/format'
@@ -11,6 +11,7 @@ import { useTransientClose } from '../lib/transient-close'
 import { useAppStore } from '../store/app-store'
 import { ShortcutTooltip } from './ShortcutTooltip'
 import { CodexStatusButton } from './CodexControls'
+import { useCodexRuntime } from './CodexRuntimeContext'
 import { ScheduledJobsPopover } from './ScheduledJobsPopover'
 
 export function ChatHeader({
@@ -43,6 +44,7 @@ export function ChatHeader({
   const chatPanes = useAppStore(state => state.chatPanes)
   const running = useAppStore(state => (session ? state.activeSessionIds.has(session.id) : false))
   const admitting = useAppStore(state => (session ? Boolean(state.turnAdmissionTokens[session.id]) : false))
+  const codexControlsSupported = useCodexRuntime().supported
   const liveForkSupported = useAppStore(state => completedPrefixForkAvailable(state.health, session?.backend))
   const forkBlocked = (running || admitting) && !liveForkSupported
   const currentFolder = session?.folder?.trim() || 'General'
@@ -172,9 +174,39 @@ export function ChatHeader({
           onClick={onTerminalToggle}
         ><SquareTerminal size={16} /></button></ShortcutTooltip>}
         <CodexStatusButton />
+        {(running || admitting) && (
+          session.backend === 'claude'
+          || (session.backend === 'codex' && !codexControlsSupported)
+        ) && <AgentRunningStatus backend={session.backend} />}
+        <ChatSyncStatus sessionId={session.id} />
         {focused && <ShortcutTooltip shortcut="toggleInspector" label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`}><button className="icon-button inspector-toggle" aria-label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button></ShortcutTooltip>}
         {onClosePane && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.close_this_chat_pane_4926598")} aria-label={t("ui.ChatHeader.ChatHeader.close_pane_fe2672f", { "title": String(session.title) })} onClick={onClosePane}><X size={15} /></button>}
       </div>
     </header>
   )
+}
+
+function AgentRunningStatus({ backend }: { backend: 'claude' | 'codex' }) {
+  const provider = backendLabel(backend)
+  const status = t('timeline.status.running')
+  return <span className="codex-status-button active agent-running-status" role="status" aria-label={`${provider} ${status}`} title={`${provider} ${status}`}>
+    <span aria-hidden="true" />
+    <b>{provider}</b>
+    <small>{status}</small>
+  </span>
+}
+
+function ChatSyncStatus({ sessionId }: { sessionId: string }) {
+  const syncing = useAppStore(state => {
+    if (!state.connected) return false
+    const status = state.syncBySession[sessionId]?.status
+      ?? (state.syncSessionId === sessionId ? state.syncStatus : 'cached')
+    return status === 'syncing'
+  })
+  if (!syncing) return null
+  const label = t('ui.ChatHeader.ChatHeader.syncing_8eeb25e')
+  return <span className="codex-status-button agent-sync-status" role="status" aria-label={label} title={label}>
+    <LoaderCircle className="spin" size={11} aria-hidden="true" />
+    <b>{label}</b>
+  </span>
 }

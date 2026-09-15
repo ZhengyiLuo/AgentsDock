@@ -1,5 +1,6 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { ClaudeRuntimeSnapshot, CodexRuntimeSnapshot, CursorPermissionMode, Session } from '@shared/types'
@@ -148,6 +149,23 @@ describe('controlled permission menus', () => {
     expect(screen.queryByRole('heading', { name: 'Claude permissions' })).not.toBeInTheDocument()
   })
 
+  it('loads Claude permissions when effects are replayed by StrictMode', async () => {
+    const runtime = vi.fn().mockResolvedValue(claudeRuntime)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        claude: { runtime },
+        events: { on: vi.fn().mockReturnValue(() => undefined) }
+      } as unknown as AgentsDockAPI
+    })
+
+    render(<StrictMode>{claudeMenu(false, vi.fn())}</StrictMode>)
+
+    expect(await screen.findByRole('button', { name: 'Claude permissions: Ask for access' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Claude permissions loading' })).not.toBeInTheDocument()
+    expect(runtime).toHaveBeenCalledWith('claude-chat')
+  })
+
   it('honors the controlled Cursor open state and reports explicit close changes', async () => {
     const onOpenChange = vi.fn()
     Object.defineProperty(window, 'agentsDock', {
@@ -178,6 +196,21 @@ describe('controlled permission menus', () => {
     const trigger = screen.getByRole('button', { name: 'Cursor permissions: Cursor defaults' })
     expect(trigger).toBeDisabled()
     expect(trigger).toHaveAttribute('title', expect.stringContaining('Cursor is unavailable'))
+  })
+
+  for (const backend of ['codex', 'claude'] as const) it(`closes the open shared ${backend} permission menu when access is lost`, async () => {
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sharedChat: true,
+      codex: { runtime: vi.fn().mockResolvedValue(codexRuntime), permissionProfiles: vi.fn().mockResolvedValue([]) },
+      claude: { runtime: vi.fn().mockResolvedValue(claudeRuntime) },
+      events: { on: vi.fn().mockReturnValue(() => undefined) }
+    } as unknown as AgentsDockAPI })
+    render(backend === 'codex' ? codexMenu(true, vi.fn()) : claudeMenu(true, vi.fn()))
+    const title = backend === 'codex' ? 'Codex permissions' : 'Claude permissions'
+    expect(await screen.findByRole('heading', { name: title })).toBeVisible()
+    act(() => { useAppStore.setState({ connected: false }) })
+    expect(screen.queryByRole('heading', { name: title })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: new RegExp(`^${title}:`) })).toBeDisabled()
   })
 
   it('keeps the Claude permissions close button available during an active turn', async () => {

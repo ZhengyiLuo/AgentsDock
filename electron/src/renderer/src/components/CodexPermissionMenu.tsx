@@ -48,6 +48,7 @@ export function CodexPermissionMenu({
 }) {
   useLocale()
   const { runtime, supported } = useCodexRuntime()
+  const sharedDisconnected = useAppStore(state => window.agentsDock.sharedChat === true && !state.connected)
   const [internalOpen, setInternalOpen] = useState(false)
   const [discoveredProfiles, setDiscoveredProfiles] = useState<CodexPermissionProfile[]>([])
   const [profilesError, setProfilesError] = useState<string | null>(null)
@@ -81,7 +82,7 @@ export function CodexPermissionMenu({
         `reviewer: ${CODEX_APPROVAL_REVIEWER_LABELS[reviewer]}`
       ].join('; ')
   const open = controlledOpen ?? internalOpen
-  const effectiveOpen = open && editable
+  const effectiveOpen = open && editable && !sharedDisconnected
   const setOpen = (next: boolean) => {
     if (controlledOpen === undefined) setInternalOpen(next)
     onOpenChange?.(next)
@@ -153,7 +154,7 @@ export function CodexPermissionMenu({
   }, [saveState])
 
   const apply = (change: Partial<PermissionDraft>) => {
-    if (!editable) return
+    if (!editable || sharedDisconnected) return
     const next = { ...draftRef.current, ...change }
     draftRef.current = next
     setDraft(next)
@@ -183,7 +184,7 @@ export function CodexPermissionMenu({
         className={`codex-permission-chip${editable ? '' : ' unavailable'}`}
         aria-label={accessibleLabel}
         title={accessibleLabel}
-        disabled={!editable}
+        disabled={!editable || sharedDisconnected}
       >
         <Shield size={14} aria-hidden="true" />
         {editable

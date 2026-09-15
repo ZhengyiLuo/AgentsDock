@@ -5,7 +5,12 @@ import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
-import { isImportedProviderControlMetadata } from '../shared/provider-origin'
+import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from '../shared/provider-origin'
+import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
+import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
+import { TeamMailHintController } from './team-mail-hint-controller'
+import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
+import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   localSessionImportBatchLimit,
   localSessionImportListLimit,
@@ -18,6 +23,7 @@ import type {
   AgentCrossChatRoute,
   AgentCrossChatRouteUpdateResult,
   AgentCrossChatRoutesSnapshot,
+  AgentTeamMailRoutesSnapshot,
   AgentTextFile,
   AppEventMap,
   BulkImportSessionItem,
@@ -40,6 +46,8 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
+  CodexServerSettingsScope,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -141,6 +149,7 @@ import { PORT_TUNNEL_MAX_BRIDGES_PER_TUNNEL, PortTunnelManager } from './port-tu
 import { FileUploadGrantRegistry } from './file-upload-grants'
 import { SettingsStore, type ServerProfileRuntimeState } from './settings'
 import { appLog } from './logger'
+import { clearStorageError, localStorageWasFull, observeStorageErrors, reportStorageError } from './storage-health'
 import { SubagentEventProjector } from './subagent-projection'
 import { mergeTimelineSearchResults } from './search'
 import type { TeamHubConfigureServerRoleInput, TeamHubDiscovery, TeamHubScope, TeamHubServerScope } from '../shared/team-hub'
@@ -311,6 +320,8 @@ interface SemanticTimelineCapability {
 }
 
 export interface AppServiceOptions {
+  /** Test seam only. Production remains disabled until full-path acceptance. */
+  mailHintsEnabled?: boolean
   settings?: SettingsStore
   cache?: LocalCache
   clientFactory?: (serverUrl: string, accessToken: string) => AgentServerClient
@@ -378,6 +389,9 @@ export class AppService {
   private timelineReconcileInFlight = new Set<string>()
   private subagentSnapshotInFlight = new Map<string, Promise<SubagentSnapshot | null>>()
   private healthFailureCount = 0
+  private readonly activityHealth = new ActivityHealthProjection()
+  private readonly healthActivityRequests = new WeakMap<Health, ActivityHealthRequest>()
+  private readonly adoptedHealthSnapshots = new WeakMap<Health, Health>()
   private pendingEventCache = new Map<string, PendingEventBatch>()
   private eventCacheTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
@@ -420,6 +434,7 @@ export class AppService {
   private readonly clipboardTempRoot: string
   private subagentProjector = new SubagentEventProjector()
   private readonly pinSync: PinSyncCoordinator
+  private readonly mailHints: TeamMailHintController
   private running = false
   private clientAvailable = true
   private profileTransitionWarning: string | null = null
@@ -435,6 +450,8 @@ export class AppService {
     appLog('startup', 'settings loaded')
     appLog('startup', 'opening local cache')
     this.cache = options.cache ?? new LocalCache()
+    this.mailHints = new TeamMailHintController(options.mailHintsEnabled ?? TEAM_MAIL_HINTS_ENABLED, this.cache,
+      projection => this.emit('team:mail-hints', projection))
     this.pinSync = new PinSyncCoordinator(this.cache)
     this.portTunnels = options.portTunnelManager ?? new PortTunnelManager()
     this.removeTeamHubProfile = options.removeTeamHubProfile ?? (async () => undefined)
@@ -484,6 +501,9 @@ export class AppService {
 
   addWindow(window: BrowserWindow): void {
     this.windows.add(window)
+    const stopStorageObserver = observeStorageErrors(() => {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('app:storage', { full: true })
+    })
     const rendererId = window.webContents.id
     if (Number.isSafeInteger(rendererId) && rendererId > 0) {
       this.rendererGrantEpochs.set(rendererId, (this.rendererGrantEpochs.get(rendererId) ?? 0) + 1)
@@ -506,10 +526,17 @@ export class AppService {
       window.webContents.on('destroyed', () => this.invalidateRendererFileGrants(rendererId, true))
     }
     window.on('closed', () => {
+      stopStorageObserver()
       this.windows.delete(window)
       this.rendererReadyWindows.delete(window)
       this.invalidateRendererFileGrants(rendererId, true)
     })
+  }
+
+  retryLocalStorage(): void {
+    this.settings.retryStorageWrites()
+    this.cache.retryStorageWrites()
+    clearStorageError()
   }
 
   rendererReadyForNotificationRoutes(window: BrowserWindow | null): boolean {
@@ -590,6 +617,7 @@ export class AppService {
     this.searchBackfillTimer = null
     cleanup(() => this.closeAllTimelineSubscriptions())
     cleanup(() => this.stopEmergencyStream())
+    cleanup(() => this.mailHints.retire())
     this.pendingNotificationRoutes = []
     this.rendererReadyWindows = new WeakSet<BrowserWindow>()
     cleanup(() => this.abortAllRendererFileOperations())
@@ -654,7 +682,7 @@ export class AppService {
     try { this.settings.update(value) }
     catch (error) { nextClient.dispose(); throw error }
     const scope = this.activateProfile(profileId, false, true, nextClient)
-    const health = await scope.client.health()
+    const health = await this.readActivityHealth(scope, () => scope.client.health())
     if (!this.isCurrentScope(scope)) throw staleProfileError()
     if (health.ok !== true) {
       const error = new Error('Server health check reported unavailable.')
@@ -701,6 +729,23 @@ export class AppService {
         ? teamHubServerName(this.health.server_name)
         : profile.name
     }
+  }
+
+  /** Current authenticated hint realm, without discovery or credential reads. */
+  currentMailHintScope(expected: TeamHubServerScope): MailHintScope | null {
+    if (!sameTeamHubServerScope(this.teamHubServerScope(), expected)) return null
+    return this.mailHints.currentScope()
+  }
+
+  acknowledgeMailHintPage(input: MailHintPageAcknowledgment) {
+    let checked: MailHintPageAcknowledgment
+    try { checked = parseMailHintPageAcknowledgment(input) } catch { return null }
+    return this.mailHints.acknowledgePage(checked)
+  }
+
+  acknowledgeBulletinHintRefresh(input: unknown) {
+    try { return this.mailHints.acknowledgeBulletinRefresh(parseBulletinHintRefresh(input)) }
+    catch { return null }
   }
 
   /**
@@ -755,6 +800,15 @@ export class AppService {
       this.health?.capabilities?.team_hub_host_control_v1
     )
     const networkName = input.networkName === undefined ? undefined : teamHubServerName(input.networkName)
+    if (input.renameOnly !== undefined) {
+      if (input.renameOnly !== true || input.role !== 'host' || networkName !== undefined) {
+        throw new Error('Rename must preserve the existing Host role and Team Network name.')
+      }
+      if (initialCapability.rename_existing_host !== true) {
+        throw new Error('Update this AgentsServer to support safe Host renaming, then reconnect. No server settings were changed.')
+      }
+      if (initialCapability.enabled !== true) throw new Error('This server is no longer the Team Network Host. Refresh before renaming.')
+    }
     if (networkName !== undefined && (input.role !== 'host' || initialCapability.server_bootstrap !== true)) {
       throw new Error('Update this AgentsServer to create a Team Network with its server identity.')
     }
@@ -772,6 +826,7 @@ export class AppService {
       expected_server_instance_id: context.serverInstanceId,
       confirmed: true as const,
       server_name: serverName,
+      ...(input.renameOnly === true ? { require_existing_host: true as const } : {}),
       ...(networkName === undefined ? {} : { network_name: networkName })
     }
     const receipt = input.role === 'host'
@@ -785,8 +840,11 @@ export class AppService {
       serverName,
       role: input.role
     })
+    if (input.renameOnly === true && !['rename', 'already_host'].includes(receipt.operation)) {
+      throw new Error('AgentsServer did not confirm an existing Host rename.')
+    }
 
-    const health = await context.scope.client.health()
+    const health = await this.readActivityHealth(context.scope, () => context.scope.client.health())
     this.assertCurrentScope(context.scope)
     const current = this.teamHubServerScope()
     if (
@@ -1064,6 +1122,7 @@ export class AppService {
         : false)) {
       throw new Error('The approved secure connection changed before it could be adopted.')
     }
+    if (completed) this.mailHints.retire()
     return { ...status, automaticPairingCompletionAvailable: true,
       ...(terminalState ? { pairingCompletion: { pairingId, transcriptHash: pairing.transcriptHash, state: terminalState } } : {}) }
   }
@@ -1143,6 +1202,7 @@ export class AppService {
       confirmed: true
     })
     this.requireSecurePeerControlContext(context)
+    this.mailHints.retire()
     return parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
   }
 
@@ -1163,6 +1223,7 @@ export class AppService {
       confirmed: true
     })
     this.requireSecurePeerControlContext(context)
+    this.mailHints.retire()
     return parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
   }
 
@@ -1185,6 +1246,7 @@ export class AppService {
       confirmed: true
     })
     this.requireSecurePeerControlContext(context)
+    this.mailHints.retire()
     return parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
   }
 
@@ -1619,6 +1681,41 @@ export class AppService {
     finally { client.dispose() }
   }
 
+  async previewChatShare(expected: WorkspaceProfileScope, sessionId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.previewChatShare(sessionId)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async listChatShares(expected: WorkspaceProfileScope, sessionId: string, mode: ChatShareMode) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.listChatShares(sessionId, mode)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async createChatShare(expected: WorkspaceProfileScope, sessionId: string, input: CreateChatShareInput) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.createChatShare(sessionId, input)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async revokeChatShare(expected: WorkspaceProfileScope, sessionId: string, mode: ChatShareMode, shareId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    await scope.client.revokeChatShare(sessionId, mode, shareId)
+    this.assertCurrentScope(scope)
+  }
+
   async serverRestartStatus(expected: WorkspaceProfileScope): Promise<ServerRestartStatus> {
     const scope = this.requireWorkspaceScope(expected)
     await this.ensureValidatedScope(scope)
@@ -1777,10 +1874,10 @@ export class AppService {
         if (probeBudgetMs <= 0) break
         let nextHealth: Health | null = null
         try {
-          nextHealth = await reconnectClient.health(
+          nextHealth = await this.readActivityHealth(scope, () => reconnectClient.health(
             Math.max(1, Math.min(this.serverRestartHealthTimeoutMs, probeBudgetMs)),
             'error'
-          )
+          ))
         } catch { /* A disconnect is expected while the managed service restarts. */ }
         assertRestartScope()
 
@@ -1947,6 +2044,24 @@ export class AppService {
         throw error
       }
     })
+  }
+
+  async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.codexServerSubagents()
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async setCodexServerSubagents(expected: CodexServerSettingsScope, limit: number | null): Promise<CodexSubagentsConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.setCodexServerSubagents(limit)
+    this.assertCurrentScope(scope)
+    return result
   }
 
   async setCodexServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration> {
@@ -3128,7 +3243,8 @@ export class AppService {
     prompt: string,
     chatReferences?: ChatReference[],
     clientCapabilities?: string[],
-    teamReferences?: TeamReference[]
+    teamReferences?: TeamReference[],
+    expectedMessageRevision?: number
   ): Promise<boolean> {
     assertLocalAgentChatReferences(chatReferences)
     const scope = this.captureScope()
@@ -3139,7 +3255,8 @@ export class AppService {
       prompt,
       chatReferences,
       clientCapabilities,
-      teamReferences
+      teamReferences,
+      ...(expectedMessageRevision !== undefined ? [expectedMessageRevision] : [])
     )
     this.assertCurrentScope(scope)
     // PATCH is the durable commit point. Do not turn a successful edit into a
@@ -3149,12 +3266,19 @@ export class AppService {
     try {
       const turns = this.cache.queuedTurns(scope.namespace, sessionId)
       if (turns.some(turn => turn.queued_id === queuedId)) {
-        this.cache.putQueuedTurns(scope.namespace, sessionId, turns.map(turn => turn.queued_id === queuedId ? {
+        this.cache.putQueuedTurns(scope.namespace, sessionId, turns.map(turn => turn.queued_id === queuedId
+          && !(expectedMessageRevision !== undefined && (turn.message_revision ?? 0) > expectedMessageRevision + 1) ? {
           ...turn,
           // Reference offsets use JavaScript UTF-16 indices into this exact
           // string. Do not normalize whitespace independently of the refs.
           prompt,
           display_prompt: prompt,
+          ...(expectedMessageRevision !== undefined && turn.purpose === 'cross_chat_handoff_delivery'
+            && turn.conversation_mode === 'async_route_v1' ? {
+              message_body: prompt,
+              message_edited_by_user: true,
+              message_revision: expectedMessageRevision + 1
+            } : {}),
           ...(chatReferences !== undefined ? { chat_references: chatReferences } : {}),
           ...(teamReferences !== undefined ? { team_references: teamReferences } : {})
         } : turn))
@@ -3175,6 +3299,28 @@ export class AppService {
     const snapshot = await scope.client.agentHandoffRoutes(sessionId)
     this.assertCurrentScope(scope)
     return snapshot
+  }
+
+  async agentTeamMailRoutes(expected: WorkspaceProfileScope, sessionId: string): Promise<AgentTeamMailRoutesSnapshot> {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    const snapshot = await scope.client.agentTeamMailRoutes(sessionId)
+    this.assertCurrentScope(scope)
+    return snapshot
+  }
+
+  async deleteAgentTeamMailRoute(expected: WorkspaceProfileScope, sessionId: string, routeId: string, expectedRevision: string): Promise<DeleteAgentCrossChatRouteResult> {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    try {
+      const result = await scope.client.deleteAgentTeamMailRoute(sessionId, routeId, expectedRevision)
+      this.assertCurrentScope(scope)
+      return { status: 'deleted', deleted: result.deleted, route_id: result.route_id }
+    } catch (error) {
+      this.assertCurrentScope(scope)
+      if (isAgentRouteRevisionConflict(error)) return { status: 'revision_conflict' }
+      throw error
+    }
   }
 
   async searchAgentHandoffTargets(
@@ -3246,6 +3392,22 @@ export class AppService {
     const handoff = await scope.client.crossChatHandoff(envelopeId)
     this.assertCurrentScope(scope)
     return handoff
+  }
+
+  async chatInbox(expected: WorkspaceProfileScope, sessionId: string, cursor: string | null = null, limit = 25) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    const page = await scope.client.chatInbox(sessionId, cursor, limit)
+    this.assertCurrentScope(scope)
+    return page
+  }
+
+  async deleteChatInboxMessage(expected: WorkspaceProfileScope, sessionId: string, messageId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    const receipt = await scope.client.deleteChatInboxMessage(sessionId, messageId)
+    this.assertCurrentScope(scope)
+    return receipt
   }
 
   async cancelCrossChatHandoff(envelopeId: string): Promise<CrossChatHandoffSummary> {
@@ -4448,7 +4610,7 @@ export class AppService {
   ): Promise<void> {
     const started = Date.now()
     const [health, sessions, jobs] = await Promise.allSettled([
-      scope.client.health(),
+      this.readActivityHealth(scope, () => scope.client.health()),
       scope.client.sessions(),
       includeJobs ? scope.client.jobs() : Promise.resolve(this.jobs)
     ])
@@ -4479,6 +4641,7 @@ export class AppService {
         this.validatedGeneration = null
         this.suspendTimelineSubscriptions()
         this.stopEmergencyStream()
+        this.mailHints.suspend()
         announcedError = error
         const message = errorText(error)
         this.setProfileRuntime(scope.profileId, {
@@ -4500,6 +4663,7 @@ export class AppService {
       this.validatedGeneration = null
       this.suspendTimelineSubscriptions()
       this.stopEmergencyStream()
+      this.mailHints.suspend()
       this.healthFailureCount += 1
       const message = errorText(health.reason)
       announcedError = health.reason
@@ -4685,7 +4849,6 @@ export class AppService {
 
   private adoptHealth(scope: ConnectionScope, health: Health): ConnectionScope {
     this.assertCurrentScope(scope)
-    this.noteServerInstanceForRuntime(health)
     if (this.profileResetIsPending(scope)) {
       throw new Error('This server profile is waiting for its prior identity reset to finish.')
     }
@@ -4700,6 +4863,10 @@ export class AppService {
       const duplicate = this.settings.listProfiles().find(candidate => candidate.id !== scope.profileId && candidate.serverIdentity === identity)
       if (duplicate) throw new Error(`Server identity ${identity} already belongs to “${duplicate.name}”.`)
     }
+    const originalHealth = health
+    health = this.activityHealth.accept(this.activityScope(scope), health, this.healthActivityRequests.get(health))
+    this.adoptedHealthSnapshots.set(originalHealth, health)
+    this.noteServerInstanceForRuntime(health)
     if (identity && identity !== scope.namespace) {
       this.flushEventCache()
       this.settings.setProfileServerIdentity(scope.profileId, identity)
@@ -4717,13 +4884,41 @@ export class AppService {
     this.settings.markProfileServerSetupComplete(scope.profileId, identity)
     const serverVersion = health.server_version?.trim() || null
     if (serverVersion) {
-      this.cache.putPreference(scope.namespace, SERVER_VERSION_CACHE_KEY, serverVersion)
+      // Revalidate lazily on the next opened chat; never clear cached content
+      // or fan a server upgrade out into requests for every saved transcript.
+      this.cache.recordServerVersion(scope.namespace, serverVersion)
       this.setProfileRuntime(scope.profileId, { serverVersion })
     }
     this.health = health
     this.validatedGeneration = scope.generation
+    if (identity) {
+      const verifiedScope = scope
+      try {
+        this.mailHints.ensure({ profileId: scope.profileId, profileGeneration: scope.generation,
+          serverIdentity: identity, namespace: scope.namespace, client: scope.client,
+          authorityKey: JSON.stringify([health.server_instance_id, health.capabilities?.team_hub_v1?.designated_host,
+            health.capabilities?.team_hub_v1?.hub_id, health.capabilities?.team_hub_v1?.host_server_identity,
+            health.capabilities?.team_hub_v1?.routes?.map(route => [route.transport, route.base_path, route.hub_url,
+              route.connection_id, route.hub_id, route.host_server_identity])]),
+          isCurrent: () => this.isCurrentScope(verifiedScope) && this.isValidatedScope(verifiedScope)
+        }, health.capabilities?.team_mail_hints_v1, health.capabilities?.team_mail_hints_v2)
+      } catch { this.mailHints.retire() }
+    } else this.mailHints.retire()
     if (!portForwardingCapabilityAvailable(health)) this.portTunnels.disposeAll()
     return scope
+  }
+
+  private activityScope(scope: ConnectionScope): string {
+    return JSON.stringify([scope.profileId, scope.generation])
+  }
+
+  private async readActivityHealth(scope: ConnectionScope, read: () => Promise<Health>): Promise<Health> {
+    // Capture BEFORE dispatch, not after health/sessions/jobs have all settled.
+    this.assertCurrentScope(scope)
+    const request = this.activityHealth.capture(this.activityScope(scope))
+    const health = await read()
+    this.healthActivityRequests.set(health, request)
+    return health
   }
 
   private async reconcileTimelineAndStream(scope: ConnectionScope, sessionId: string, cachedLast: number, lease: number): Promise<void> {
@@ -4796,7 +4991,7 @@ export class AppService {
       this.cache.putSession(scope.namespace, page.session)
       this.rememberSessionDetail(scope, page.session)
       if (mode === 'replace') this.cache.replaceEvents(scope.namespace, sessionId, page.events)
-      else this.cache.putEvents(scope.namespace, sessionId, page.events)
+      else this.cache.putEvents(scope.namespace, sessionId, page.events, cachedLast)
       this.cache.putQueuedTurns(scope.namespace, sessionId, page.queued_turns ?? [])
       const hasMoreEvents = mode === 'replace'
         ? Boolean(page.has_more)
@@ -4864,6 +5059,7 @@ export class AppService {
       this.scheduleSubagentSnapshotRefresh(scope, sessionId, lease)
       queueMicrotask(() => void this.refreshTimelineFiles(scope, sessionId))
     } catch (error) {
+      reportStorageError(error)
       appLog('timeline', 'tail refresh failed; keeping cached transcript', { sessionId, error: errorText(error) })
       if (this.isCurrentTimeline(scope, sessionId, lease)) this.activateTimelineStream(scope, sessionId, cachedLast, lease)
     } finally {
@@ -5083,6 +5279,7 @@ export class AppService {
         this.cache.putEvents(scope.namespace, sessionId, events)
         this.applyEventsToCaches(scope, sessionId, events)
       } catch (error) {
+        reportStorageError(error)
         appLog('cache', 'failed to persist streamed events', {
           profileId: scope.profileId, generation: scope.generation, sessionId, count: events.length, error: errorText(error)
         })
@@ -5388,6 +5585,7 @@ export class AppService {
     retire(() => this.flushEventCache())
     retire(() => this.closeAllTimelineSubscriptions())
     retire(() => this.stopEmergencyStream())
+    retire(() => this.mailHints.retire())
     this.focusedSessionId = null
     retire(() => this.disconnectAllTerminals())
     this.terminalLeases.clear()
@@ -5616,7 +5814,9 @@ export class AppService {
     this.profileTransitionWarning = null
     return {
       settings: this.settings.publicSettings(),
+      storageFull: localStorageWasFull(),
       health: this.health,
+      mailHints: this.mailHints.projection(scope.profileId, scope.generation),
       sessions: this.sessions,
       jobs: this.jobs,
       runtimeCatalog: this.runtimeCatalog,
@@ -5913,6 +6113,7 @@ export class AppService {
 
   private emitConnection(scope: ConnectionScope, connected: boolean, health?: Health, error?: string): void {
     if (!this.isCurrentScope(scope)) return
+    if (health) health = this.adoptedHealthSnapshots.get(health) ?? health
     const connectionState: ServerConnectionState = connected
       ? health ? connectionStateForHealth(health) : this.profileRuntime.get(scope.profileId)?.connectionState ?? 'online'
       : this.profileRuntime.get(scope.profileId)?.connectionState ?? 'offline'
@@ -6063,9 +6264,24 @@ export class AppService {
 
   private emitAgentEvent(scope: ConnectionScope, event: Event): void {
     if (!this.isCurrentScope(scope)) return
+    const previousHealth = this.health
+    const projectedHealth = this.activityHealth.observe(this.activityScope(scope), event)
+    // Activity cannot re-establish authority after a failed identity/health
+    // check cleared the service's validated capabilities.
+    if (this.health) this.health = projectedHealth ?? this.health
+    if (this.health !== previousHealth) {
+      // A fresh idle sample must still be published after a streamed start,
+      // even if it equals the last pre-start connection payload byte-for-byte.
+      this.lastConnectionPayload = ''
+    }
     this.emit('server:event', {
       profileId: scope.profileId,
       profileGeneration: scope.generation,
+      ...(this.health && event.run_id?.trim() && Number.isSafeInteger(event.seq)
+        && ['turn_started', 'turn_finished', 'turn_stopped', 'error'].includes(event.type)
+        ? { activeSession: (this.health.active ?? this.health.active_sessions ?? []).includes(event.session_id),
+          activeRunId: this.activityHealth.runId(event.session_id) }
+        : {}),
       event
     })
   }
@@ -6937,7 +7153,11 @@ export function reconcileEmergencySnapshot(previous: Session[], incoming: Sessio
 
 function mergeEventsBySequence(...pages: Event[][]): Event[] {
   const byId = new Map<string, Event>()
-  for (const event of pages.flat()) byId.set(event.id || `seq:${event.seq}`, event)
+  for (const event of pages.flat()) {
+    const key = event.id || `seq:${event.seq}`
+    const previous = byId.get(key)
+    byId.set(key, previous ? mergeProviderInterruptionEvent(previous, event) : event)
+  }
   return [...byId.values()].sort((left, right) => left.seq - right.seq)
 }
 

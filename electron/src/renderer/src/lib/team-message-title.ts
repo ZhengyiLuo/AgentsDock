@@ -1,4 +1,5 @@
 import type { TeamMessageBase } from '@shared/team-network'
+import { t } from '@shared/i18n'
 
 type TitledMail = Pick<TeamMessageBase, 'title' | 'sender'> & { body?: string; preview?: string }
 
@@ -24,7 +25,7 @@ export function teamMailDisplayTitle(message: TitledMail): string {
     const heading = readableLine(line)
     if (/[\p{L}\p{N}\p{Extended_Pictographic}]/u.test(heading)) return boundHeading(heading)
   }
-  return boundHeading(`Message from ${message.sender.display_name}`)
+  return boundHeading(t('teamNetwork.messageFrom', { name: message.sender.display_name }))
 }
 
 function readableLine(line: string): string {

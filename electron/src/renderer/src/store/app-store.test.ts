@@ -5,6 +5,7 @@ import type {
 } from '@shared/types'
 import type { AgentsDockAPI } from '@shared/ipc'
 import { RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
+import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { CHAT_FONT_SIZES } from '../lib/chat-font'
 import { cancelPendingSteering, isSteeringPending, steerQueuedTurn, type SteeringScope } from '../lib/queue-actions'
 import { boundedDeferredTimelineEvents, cacheSnapshot, compactSnapshotEvents, crossChatQueueRefreshSessionId, handleMenuCommand, interactiveClientCapabilities, mergeEvents, mergeSnapshots, reconcileSessions, replaceSnapshot, snapshotNeedsAuthoritativeTail, syncSnapshotSessions, timelineReplacementIsDiscontinuous, updateActiveSessions, updateQueuedTurns, useAppStore } from './app-store'
@@ -230,7 +231,7 @@ describe('live run state', () => {
     expect(empty.size).toBe(0)
     expect(updateActiveSessions(running, event('turn_finished')).size).toBe(0)
     expect(updateActiveSessions(running, event('turn_stopped')).size).toBe(0)
-    expect(updateActiveSessions(running, event('error')).size).toBe(0)
+    expect(updateActiveSessions(running, event('error'))).toBe(running)
     expect(updateActiveSessions(running, event('tool_finished'))).toBe(running)
     expect(updateActiveSessions(running, event('turn_started'))).toBe(running)
   })
@@ -252,6 +253,7 @@ describe('live run state', () => {
 
   it.each(['steer', 'stop', 'unknown'] as const)('does not change live run state for an imported %s interruption', cause => {
     const control = providerInterruption()
+    if (!isImportedProviderInterruption(control)) throw new Error('Invalid interruption fixture')
     control.provider_origin = { ...control.provider_origin!, cause }
     const idle = new Set<string>()
     const running = new Set(['chat-1'])
@@ -1479,6 +1481,31 @@ describe('send rollback', () => {
     expect(useAppStore.getState().error).toMatch(/route access limit/i)
   })
 
+  it('admits a new pending grant beyond sixteen stored routes when max_routes is null', async () => {
+    const routes: AgentCrossChatRoute[] = Array.from({ length: 20 }, (_, index) => ({
+      route_id: `route-${index}`, revision: `rev_${'a'.repeat(32)}`, alias: `Existing ${index}`,
+      target_session_id: `chat-existing-${index}`, actions: ['instruction'],
+      created_at: '2026-09-05T00:00:00Z', updated_at: '2026-09-05T00:00:00Z',
+      target: { title: `Existing ${index}`, folder: null, backend: 'codex', available: true, unavailable_reason: null }
+    }))
+    const snapshot = { routes, max_routes: null }
+    const send = vi.fn().mockResolvedValue({ session: sessionFor('chat-a'), queued: false })
+    const list = vi.fn().mockResolvedValue(snapshot)
+    Object.defineProperty(window, 'agentsDock', { configurable: true,
+      value: { turns: { send }, agentRoutes: { list } } as unknown as AgentsDockAPI })
+    const reference: ChatReference = { session_id: 'chat-new', display_title_snapshot: 'New',
+      source_text_start: 4, source_text_end: 8, action: 'route', grant_intent: true }
+    useAppStore.setState({ activeProfileId: 'profile-a', profileGeneration: 7, switchingProfileId: null,
+      profiles: [{ id: 'profile-a', name: 'Server', serverIdentity: 'server-a' } as PublicServerProfile],
+      selectedSessionId: 'chat-a', chatPanes: { primary: 'chat-a', secondary: null },
+      sessions: [sessionFor('chat-a'), { ...sessionFor('chat-new'), title: 'New' }], snapshots: {},
+      health: durableRouteHealth(), drafts: { 'chat-a': 'Ask @New' }, chatReferencesBySession: { 'chat-a': [reference] },
+      uploadsBySession: {}, uploadPathsBySession: {}, agentRoutesBySession: { 'chat-a': snapshot }, error: null })
+    await expect(useAppStore.getState().sendPromptForSession('chat-a')).resolves.toBe(true)
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ chatReferences: [reference] }))
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('persists a pending @ grant only after ordinary turn admission succeeds, then refreshes the scoped grant list', async () => {
     const pendingSend = deferred<{ session: Session; queued: boolean }>()
     const send = vi.fn(() => pendingSend.promise)
@@ -2168,6 +2195,27 @@ describe('older timeline paging', () => {
 })
 
 describe('provider history refresh', () => {
+  it('replaces a proven import repair while preserving a same-prefix manual message', async () => {
+    const prompt = 'scheduled monitor '.repeat(800)
+    const legacy = eventFor('chat-a', 2, { type: 'turn_started', backend: 'claude',
+      imported: true, run_id: 'import_history', prompt })
+    const corrected: Event = { ...legacy, prompt: '', provider_history_repair: 'source_proven_import' }
+    const manual = eventFor('chat-a', 3, { type: 'turn_started', backend: 'claude', prompt: prompt + ' manual tail' })
+    const importHistory = vi.fn().mockResolvedValue({
+      session: sessionFor('chat-a'), events: [corrected], has_more: false
+    } satisfies TimelinePage)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true, value: { sessions: { importHistory } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      sessions: [sessionFor('chat-a')], snapshots: { 'chat-a': snapshot('chat-a', [legacy, manual]) }
+    })
+    await useAppStore.getState().importHistory('chat-a')
+    expect(useAppStore.getState().snapshots['chat-a'].events).toEqual([corrected, manual])
+    expect(mergeEvents([corrected, manual], [legacy])).toEqual([corrected, manual])
+  })
+
   it('accepts a proven same-ID correction without losing live history or remounting the timeline', async () => {
     const corrected = providerInterruption({ id: 'chat-a-2', session_id: 'chat-a', seq: 2 })
     const legacy = { ...corrected, type: 'turn_started', provider_origin: undefined, prompt: '[Request interrupted by user]' }
@@ -2361,6 +2409,102 @@ describe('selected live timeline', () => {
       await vi.advanceTimersByTimeAsync(40)
       expect(changed).not.toHaveBeenCalled()
       unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not replace streamed activity with cached health on a connection-only notice', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const idleHealth: Health = { ok: true, api_contract_version: 8, websocket_runtime: true, active: [] }
+      useAppStore.setState({ connected: true, health: idleHealth, activeSessionIds: new Set() })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0, event: {
+        ...eventFor('chat-a', 2), type: 'turn_started', run_id: 'wake-run', purpose: 'chat_mailbox_wake', prompt: ''
+      } })
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+      handlers.get('server:connection')?.({ profileId: null, profileGeneration: 0, connected: true })
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+      // An explicit fresh health result still has authority to settle a run
+      // whose terminal was missed. Main fences older in-flight responses.
+      handlers.get('server:connection')?.({ profileId: null, profileGeneration: 0, connected: true, health: idleHealth })
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['turn_started', 'turn_finished'])('does not let pending %s activity override a newer explicit health result', async type => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      const wasStart = type === 'turn_started'
+      useAppStore.setState({ connected: true, health: { ok: true, active: wasStart ? [] : ['chat-a'] },
+        activeSessionIds: new Set(wasStart ? [] : ['chat-a']) })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        activeSession: wasStart, activeRunId: wasStart ? 'older-run' : null,
+        event: { ...eventFor('chat-a', 2), type, run_id: 'older-run' }
+      })
+      // No timer advance: Health arrives while the lifecycle event is still
+      // waiting for its normal transcript batch, possibly during typing.
+      const freshHealth: Health = { ok: true, active: wasStart ? [] : ['chat-a'],
+        active_runs: wasStart ? [] : [{ session_id: 'chat-a', run_id: 'newer-run' }] }
+      handlers.get('server:connection')?.({ profileId: null, profileGeneration: 0, connected: true, health: freshHealth })
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(!wasStart)
+      expect(useAppStore.getState().health).toBe(freshHealth)
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let another profile health supersede pending activity', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      useAppStore.setState({ activeSessionIds: new Set() })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        activeSession: true, activeRunId: 'current-run',
+        event: { ...eventFor('chat-a', 2), type: 'turn_started', run_id: 'current-run' }
+      })
+      handlers.get('server:connection')?.({ profileId: 'other', profileGeneration: 1, connected: true, health: { ok: true, active: [] } })
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps main-process run ownership for a delayed terminal and then accepts the current completion', async () => {
+    vi.useFakeTimers()
+    try {
+      const handlers = await initializeLiveEventHandlers()
+      useAppStore.setState({ activeSessionIds: new Set(['chat-a']), health: {
+        ok: true, active: ['chat-a'], active_runs: [{ session_id: 'chat-a', run_id: 'previous-run' }]
+      } })
+      handlers.get('server:event')?.({ profileId: null, profileGeneration: 0,
+        activeSession: true, activeRunId: 'current-run',
+        event: { ...eventFor('chat-a', 2), type: 'turn_started', run_id: 'current-run' }
+      })
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().health?.active_runs).toEqual([{ session_id: 'chat-a', run_id: 'current-run' }])
+      const publish = (seq: number, run: string, activeSession: boolean) => handlers.get('server:event')?.({
+        profileId: null, profileGeneration: 0, activeSession, activeRunId: activeSession ? 'current-run' : null,
+        event: { ...eventFor('chat-a', seq), type: 'turn_finished', run_id: run }
+      })
+      publish(3, 'previous-run', true)
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(true)
+      expect(useAppStore.getState().health?.active_runs).toEqual([{ session_id: 'chat-a', run_id: 'current-run' }])
+      publish(4, 'current-run', false)
+      await vi.advanceTimersByTimeAsync(40)
+      expect(useAppStore.getState().activeSessionIds.has('chat-a')).toBe(false)
+      expect(useAppStore.getState().health?.active_runs).toEqual([])
+      expect(useAppStore.getState().snapshots['chat-a'].events).toHaveLength(4)
     } finally {
       vi.useRealTimers()
     }

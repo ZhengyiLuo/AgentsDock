@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentsDockAPI } from '@shared/ipc'
-import type { Health, RuntimeCatalog, Session } from '@shared/types'
+import type { Event, Health, RuntimeCatalog, Session } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { Inspector } from './Inspector'
 
@@ -486,7 +486,8 @@ describe('Inspector', () => {
       expect(findEvent).toHaveBeenCalledOnce()
       expect((findEvent.mock.calls[0][0] as CustomEvent).detail).toEqual({
         sessionId: 'chat-1',
-        eventId: 'event-1'
+        eventId: 'event-1',
+        query: 'Keep this deployment command for later.'
       })
     } finally {
       window.removeEventListener('agentsdock:find-event', findEvent)
@@ -616,6 +617,183 @@ describe('Inspector', () => {
     expect(screen.getByText('Stopped audit')).toBeInTheDocument()
   })
 
+  it('uses task labels for 16 untitled live Codex children while preserving nickname, output identity and row order', () => {
+    const session: Session = { id: 'chat-1', title: 'Synthetic release preparation', backend: 'codex' }
+    const children = [
+      ['prepare_release_notes', 'Prepare release notes', 'Kuhn'],
+      ['check_package_manifest', 'Check package manifest', 'Hopper'],
+      ['verify_archive_hashes', 'Verify archive hashes', 'Noether'],
+      ['review_release_links', 'Review release links', 'Turing'],
+      ['inspect_update_policy', 'Inspect update policy', 'Lovelace'],
+      ['validate_install_steps', 'Validate install steps', 'Shannon'],
+      ['audit_public_assets', 'Audit public assets', 'Boole'],
+      ['check_signed_manifest', 'Check signed manifest', 'Dijkstra'],
+      ['review_migration_notes', 'Review migration notes', 'Franklin'],
+      ['verify_platform_matrix', 'Verify platform matrix', 'McClintock'],
+      ['summarize_test_results', 'Summarize test results', 'Goodall'],
+      ['inspect_license_notices', 'Inspect license notices', 'Herschel'],
+      ['check_version_metadata', 'Check version metadata', 'Pascal'],
+      ['validate_download_links', 'Validate download links', 'Kepler'],
+      ['review_rollback_steps', 'Review rollback steps', 'Euclid'],
+      ['prepare_acceptance_report', 'Prepare acceptance report', 'Sagan']
+    ] as const
+    const events: Event[] = children.map(([task, , nickname], index) => ({
+      id: `synthetic-child-start-${index}`, seq: index + 1, session_id: session.id,
+      run_id: 'synthetic-parent-run', type: 'subagent_state', backend: 'codex',
+      ts: `2026-09-01T12:00:${String(index).padStart(2, '0')}Z`,
+      subagent_id: `synthetic-codex-child-${index}`,
+      subagent_provider_ref: `synthetic-codex-child-${index}`,
+      subagent_title: null, subagent_name: nickname, subagent_nickname: nickname,
+      subagent_path: `/root/${task}`, subagent_status: 'running',
+      subagent_activity: `Synthetic output for ${task}.`
+    }))
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events, queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    const rows = Array.from(container.querySelectorAll('.subagent-active-group .subagent-list > button'))
+    const orderedChildren = [...children].reverse()
+    expect(rows).toHaveLength(16)
+    rows.forEach((row, index) => {
+      const [, taskLabel, nickname] = orderedChildren[index]
+      expect(row.querySelector('strong')?.textContent).toBe(taskLabel)
+      expect(row.querySelector('code')).toHaveTextContent(nickname)
+      expect(row.querySelector('.subagent-state.running')).toBeInTheDocument()
+    })
+    const selectedRow = rows.at(-1)!
+    fireEvent.click(selectedRow)
+    const panel = container.querySelector('.output-panel')!
+    expect(panel.querySelector('header > strong')?.textContent).toBe('Prepare release notes')
+    expect(panel).toHaveTextContent('Provider: synthetic-codex-child-0')
+    expect(panel).toHaveTextContent('Synthetic output for prepare_release_notes.')
+    expect(panel).not.toHaveTextContent('Synthetic output for prepare_acceptance_report.')
+
+    const append = (patch: Partial<Event>) => act(() => useAppStore.setState(state => {
+      const previous = state.snapshots[session.id]
+      const seq = previous.events.length + 1
+      return { snapshots: { ...state.snapshots, [session.id]: { ...previous, events: [...previous.events, {
+        id: `synthetic-child-update-${seq}`, seq, session_id: session.id,
+        run_id: 'synthetic-parent-run', type: 'subagent_state', backend: 'codex',
+        ts: `2026-09-01T12:01:${String(seq).padStart(2, '0')}Z`,
+        subagent_id: 'synthetic-codex-child-0', subagent_status: 'running', ...patch
+      }] } } }
+    }))
+    const assertStable = () => {
+      const currentRows = container.querySelectorAll('.subagent-active-group .subagent-list > button')
+      expect(currentRows).toHaveLength(16)
+      rows.forEach((row, index) => expect(currentRows[index]).toBe(row))
+      expect(screen.getByRole('button', { name: /Subagents 16 active/i })).toHaveAttribute('aria-expanded', 'true')
+      expect(container.querySelector('.output-panel')).toBe(panel)
+      expect(panel).toHaveTextContent('Provider: synthetic-codex-child-0')
+      expect(panel).toHaveTextContent('Synthetic output for prepare_release_notes.')
+      expect(selectedRow.querySelector('.subagent-state.running')).toBeInTheDocument()
+    }
+    append({ subagent_activity: 'Later release-note progress.' })
+    assertStable()
+    expect(selectedRow.querySelector('strong')?.textContent).toBe('Prepare release notes')
+    expect(panel).toHaveTextContent('Later release-note progress.')
+    append({ subagent_name: 'Gauss', subagent_nickname: 'Gauss' })
+    assertStable()
+    expect(selectedRow.querySelector('strong')?.textContent).toBe('Prepare release notes')
+    expect(selectedRow.querySelector('code')).toHaveTextContent('Gauss')
+    expect(panel.querySelector('header > strong')?.textContent).toBe('Prepare release notes')
+    append({ subagent_title: 'Release readiness review' })
+    append({ subagent_activity: 'Progress after the explicit rename.' })
+    assertStable()
+    expect(selectedRow.querySelector('strong')?.textContent).toBe('Release readiness review')
+    expect(selectedRow.querySelector('code')).toHaveTextContent('Gauss')
+    expect(panel.querySelector('header > strong')?.textContent).toBe('Release readiness review')
+    expect(screen.getByRole('button', { name: 'Close Release readiness review' })).toBeInTheDocument()
+    expect(panel).toHaveTextContent('Progress after the explicit rename.')
+  })
+
+  it('renames a live Codex row and its open output panel in place without changing activity or count', () => {
+    const session: Session = { id: 'chat-1', title: 'Named children', backend: 'codex' }
+    const original: Event = {
+      id: 'child-start', seq: 1, session_id: session.id, run_id: 'parent-run',
+      type: 'subagent_state', ts: '2026-09-13T12:00:00Z', backend: 'codex',
+      subagent_id: 'child-1', subagent_title: 'Timeline reviewer', subagent_nickname: 'Curie',
+      subagent_task: 'Check source provenance', subagent_path: '/root/review', subagent_status: 'running',
+      subagent_activity: 'Original output stays visible'
+    }
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events: [original], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    const row = container.querySelector('.subagent-list > button')!
+    expect(row.querySelector('strong')).toHaveTextContent('Timeline reviewer')
+    expect(row.querySelector('code')).toHaveTextContent('Curie')
+    fireEvent.click(row)
+    const panel = container.querySelector('.output-panel')!
+    const append = (patch: Partial<Event>) => act(() => useAppStore.setState(state => {
+      const previous = state.snapshots[session.id]
+      const seq = previous.events.length + 1
+      return { snapshots: { ...state.snapshots, [session.id]: { ...previous, events: [...previous.events, {
+        id: `child-update-${seq}`, seq, type: 'subagent_state', session_id: session.id,
+        run_id: 'parent-run', ts: `2026-09-13T12:00:0${seq}Z`, backend: 'codex',
+        subagent_id: 'child-1', subagent_status: 'running', ...patch
+      }] } } }
+    }))
+    const assertStable = () => {
+      expect(container.querySelectorAll('.subagent-list > button')).toHaveLength(1)
+      expect(container.querySelector('.subagent-list > button')).toBe(row)
+      expect(container.querySelector('.output-panel')).toBe(panel)
+      expect(row.querySelector('.subagent-state.running')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Subagents 1 active/i })).toHaveAttribute('aria-expanded', 'true')
+      expect(panel).toHaveTextContent('Original output stays visible')
+    }
+    append({ subagent_title: 'Renamed timeline reviewer' })
+    assertStable()
+    expect(row.querySelector('strong')).toHaveTextContent('Renamed timeline reviewer')
+    expect(panel.querySelector('header > strong')).toHaveTextContent('Renamed timeline reviewer')
+    expect(screen.getByRole('button', { name: 'Copy Renamed timeline reviewer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close Renamed timeline reviewer' })).toBeInTheDocument()
+    append({ subagent_activity: 'Later output does not erase the title' })
+    append({ subagent_title: { invalid: true } } as unknown as Partial<Event>)
+    assertStable()
+    expect(panel.querySelector('header > strong')).toHaveTextContent('Renamed timeline reviewer')
+    expect(panel).toHaveTextContent('Later output does not erase the title')
+  })
+
+  it.each([
+    { clear: null, nickname: 'Curie', task: 'Review provenance', expected: 'Review provenance' },
+    { clear: '', nickname: 'Curie', task: 'Review provenance', expected: 'Review provenance' },
+    { clear: null, nickname: undefined, task: 'Review provenance', expected: 'Review provenance' },
+    { clear: '', nickname: undefined, task: undefined, expected: 'Review' }
+  ])('clears a Codex title to $expected without closing its output panel ($clear)', ({ clear, nickname, task, expected }) => {
+    const session: Session = { id: 'chat-1', title: 'Named child', backend: 'codex' }
+    const original: Event = {
+      id: 'named-child', seq: 1, session_id: session.id, run_id: 'parent-run',
+      type: 'subagent_state', ts: '2026-09-13T12:00:00Z', backend: 'codex',
+      subagent_id: 'child-1', subagent_title: 'Temporary title', subagent_nickname: nickname,
+      subagent_task: task, subagent_path: '/root/review', subagent_status: 'running',
+      subagent_activity: 'Retained output'
+    }
+    useAppStore.setState({ sessions: [session], snapshots: { [session.id]: {
+      session, events: [original], queuedTurns: [], files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    const row = container.querySelector('.subagent-list > button')!
+    fireEvent.click(row)
+    const panel = container.querySelector('.output-panel')!
+    act(() => useAppStore.setState(state => ({ snapshots: { ...state.snapshots, [session.id]: {
+      ...state.snapshots[session.id], events: [original, {
+        id: 'title-cleared', seq: 2, session_id: session.id, run_id: 'parent-run', type: 'subagent_state',
+        ts: '2026-09-13T12:00:01Z', backend: 'codex', subagent_id: 'child-1',
+        subagent_title: clear, subagent_status: 'running'
+      }]
+    } } })))
+    expect(container.querySelector('.subagent-list > button')).toBe(row)
+    expect(container.querySelector('.output-panel')).toBe(panel)
+    expect(row.querySelector('strong')?.textContent).toBe(expected)
+    if (nickname) expect(row.querySelector('code')).toHaveTextContent(nickname)
+    expect(panel.querySelector('header > strong')?.textContent).toBe(expected)
+    expect(row.querySelector('.subagent-state.running')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Subagents 1 active/i })).toBeInTheDocument()
+    expect(panel).toHaveTextContent('Retained output')
+    expect(panel).not.toHaveTextContent('Temporary title')
+  })
+
   it('labels a history-only section as zero active and leaves its history closed by default', async () => {
     const session = { id: 'chat-1', title: 'Performance check', backend: 'codex' as const }
     useAppStore.setState({
@@ -650,6 +828,25 @@ describe('Inspector', () => {
 
     await user.click(history)
     expect(screen.getByText('Past audit')).toBeInTheDocument()
+  })
+
+  it('shows Tracking lost as inactive history without claiming the task stopped', async () => {
+    const session = { id: 'chat-1', title: 'Lost tracking', backend: 'claude' as const }
+    useAppStore.setState({ sessions: [session], snapshots: { 'chat-1': {
+      session, events: [{ id: 'lost', seq: 1, session_id: session.id, run_id: 'old-owner',
+        type: 'subagent_state', ts: '2026-09-10T12:00:00Z', backend: 'claude',
+        subagent_id: 'task-1', subagent_name: 'Interrupted audit', subagent_status: 'tracking_lost',
+        subagent_activity: 'Completion is not confirmed' }], queuedTurns: [], files: [],
+      hasMoreEvents: false, filesTotal: 0, cachedAt: 1
+    } } })
+    const { container } = render(<Inspector />)
+    fireEvent.click(screen.getByRole('button', { name: /Subagents 0 active/i }))
+    expect(screen.getByText('No active subagents.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /History 1 records/i }))
+    expect(screen.getByText(/Claude · Tracking lost/)).toBeInTheDocument()
+    expect(container.querySelector('.subagent-state.tracking_lost')).toBeInTheDocument()
+    expect(container.querySelector('.subagent-state.running')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Claude · stopped/)).not.toBeInTheDocument()
   })
 
   it('does not show Codex coordination waits as subagents', () => {

@@ -1366,6 +1366,7 @@ function truncateJobPreview(value: string, limit = JOB_PREVIEW_CHARACTER_LIMIT):
 
 export function isTimelineError(event: Event): boolean {
   if (traces.has(event.type)) return false
+  if (event.type === 'turn_finished' && event.stopped !== true && typeof event.exit_code === 'number' && event.exit_code !== 0) return true
   return event.type === 'error' || event.type.endsWith('_error') || event.is_error === true || event.error != null
 }
 
@@ -1515,7 +1516,9 @@ function isDigestDeliveryTurn(event: Event): boolean {
 }
 
 function isInternalDeliveryTurn(event: Event): boolean {
-  return isDigestDeliveryTurn(event) || event.purpose === 'cross_chat_handoff_delivery'
+  return isDigestDeliveryTurn(event)
+    || event.purpose === 'cross_chat_handoff_delivery'
+    || event.purpose === 'chat_mailbox_wake'
 }
 
 /** Match the server/Mac semantic identity for cross-chat lifecycle packets. */

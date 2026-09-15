@@ -614,6 +614,18 @@ describe('turn capability IPC registration', () => {
     expect(sendTurn).toHaveBeenCalledWith(input)
   })
 
+  it('passes the exact async message revision through queued edit IPC', async () => {
+    const updateQueued = vi.fn().mockResolvedValue(true)
+    const service = new Proxy({ updateQueued }, {
+      get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn()
+    }) as unknown as AppService
+    registerIpc(service, {} as AppUpdateManager)
+    await harness.handlers.get('queue:update')?.(
+      trustedEvent, 'chat-1', 'queued-agent', 'Revised body', undefined, undefined, undefined, 0
+    )
+    expect(updateQueued).toHaveBeenCalledWith('chat-1', 'queued-agent', 'Revised body', undefined, undefined, undefined, 0)
+  })
+
   it('passes refreshed capabilities through a queued-turn edit unchanged', async () => {
     const updateQueued = vi.fn().mockResolvedValue(true)
     const service = new Proxy({ updateQueued }, {

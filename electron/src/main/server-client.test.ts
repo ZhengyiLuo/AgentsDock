@@ -13,6 +13,8 @@ import {
   uploadRequestTimeoutMs
 } from './server-client'
 import { PinRevisionConflictError } from './pin-sync'
+import { TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailboxCoverage } from '../shared/team-mail-hints'
+import { emptyBulletinCursor, TEAM_ACTIVITY_HINTS_PROTOCOL, type BulletinChangeCursor } from '../shared/team-bulletin-hints'
 
 async function withLocalHTTPServer(
   handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>,
@@ -56,8 +58,12 @@ class FakeWebSocket {
   closed = false
   readyState = 1
   binaryType = ''
+  protocol: string
 
-  constructor(readonly url: URL, readonly protocols?: string | string[]) { FakeWebSocket.instances.push(this) }
+  constructor(readonly url: URL, readonly protocols?: string | string[]) {
+    this.protocol = typeof protocols === 'string' ? protocols : protocols?.[0] ?? ''
+    FakeWebSocket.instances.push(this)
+  }
   addEventListener(name: string, listener: (event: { data?: unknown; code?: number; reason?: string }) => void): void {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener])
   }
@@ -67,6 +73,152 @@ class FakeWebSocket {
     for (const listener of this.listeners.get(name) ?? []) listener({ data, ...event })
   }
 }
+
+describe('Team Mail metadata websocket', () => {
+  const mailbox = { hub_id: 'hub-a', team_id: 'team-a', recipient_server_id: null }
+  const cursor = { version: 1 as const, team_id: 'team-a', recipient_server_id: 'node-a',
+    through_sequence: 3, arrival_id: `tmsg_${'a'.repeat(32)}` }
+  const snapshot = { type: 'snapshot', server_identity: 'server-a', hub_id: 'hub-a', stream_id: 'a'.repeat(32),
+    cursor: { ...cursor, reset: false } }
+  afterEach(() => { FakeWebSocket.instances = []; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+  function connect(previous: () => MailboxCoverage | null = () => null, activity?: { previousBulletin(): BulletinChangeCursor | null }) {
+    vi.useFakeTimers()
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('https://example.test:7850', 'private-token')
+    const packet = vi.fn(), fatal = vi.fn(), disconnected = vi.fn()
+    const stop = client.mailHintStream('server-a', mailbox, previous, packet, fatal, disconnected, activity)
+    return { client, packet, fatal, disconnected, stop, fetchMock, socket: FakeWebSocket.instances.at(-1)! }
+  }
+  it('uses only bounded metadata and subprotocol credentials, with no idle requests or timers', () => {
+    const test = connect(() => cursor)
+    expect(test.socket.url.pathname).toBe(TEAM_MAIL_HINTS_PATH)
+    expect(test.socket.url.search).toBe('')
+    expect(test.socket.protocols).toEqual([TEAM_MAIL_HINTS_PROTOCOL, `agentsdock-token.${Buffer.from('private-token').toString('base64url')}`])
+    test.socket.emit('open')
+    expect(JSON.parse(String(test.socket.sent[0]))).toEqual({ version: 1, team_id: 'team-a', previous_cursor: cursor })
+    test.socket.emit('message', JSON.stringify(snapshot))
+    test.socket.emit('message', JSON.stringify({ ...snapshot, type: 'hint' }))
+    vi.advanceTimersByTime(300_000)
+    expect(test.packet).toHaveBeenCalledTimes(2)
+    expect(test.fetchMock).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    test.stop()
+  })
+  it.each([
+    { ...snapshot, type: 'hint' },
+    { ...snapshot, server_identity: 'foreign' },
+    { ...snapshot, hub_id: 'foreign' },
+    { ...snapshot, cursor: { ...snapshot.cursor, team_id: 'foreign' } },
+    { ...snapshot, body: 'not metadata' },
+    { ...snapshot, stream_id: `${'a'.repeat(32)}\n` },
+    { ...snapshot, cursor: { ...snapshot.cursor, arrival_id: `${cursor.arrival_id}\n` } }
+  ])('fails closed on a malformed or wrong-scope first frame', invalid => {
+    const test = connect()
+    test.socket.emit('message', JSON.stringify(invalid))
+    vi.advanceTimersByTime(30_000)
+    expect(test.packet).not.toHaveBeenCalled()
+    expect(test.fatal).toHaveBeenCalledOnce()
+    expect(test.socket.closed).toBe(true)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+  it('requires reset proof for a foreign retained recipient and never permits a midstream switch', () => {
+    const test = connect(() => ({ ...cursor, recipient_server_id: 'old-node' }))
+    test.socket.emit('open')
+    test.socket.emit('message', JSON.stringify({ ...snapshot, cursor: { ...snapshot.cursor, reset: true } }))
+    expect(test.packet).toHaveBeenCalledOnce()
+    test.socket.emit('message', JSON.stringify({ ...snapshot, type: 'hint', cursor: { ...snapshot.cursor, recipient_server_id: 'other-node' } }))
+    expect(test.packet).toHaveBeenCalledOnce()
+    expect(test.fatal).toHaveBeenCalledOnce()
+  })
+  it('rejects an unreset retained-recipient replacement before projecting it', () => {
+    const test = connect(() => ({ ...cursor, recipient_server_id: 'old-node' }))
+    test.socket.emit('open')
+    test.socket.emit('message', JSON.stringify(snapshot))
+    expect(test.packet).not.toHaveBeenCalled()
+    expect(test.fatal).toHaveBeenCalledOnce()
+  })
+  it.each([1008, 4401, 4403, 4406])('does not retry fatal close %i', code => {
+    const test = connect()
+    test.socket.emit('close', undefined, { code, reason: 'must not expose raw reason' })
+    vi.advanceTimersByTime(30_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(test.fatal).toHaveBeenCalledWith()
+    expect(test.disconnected).not.toHaveBeenCalled()
+  })
+  it.each([1012, 1013, 1006])('reconnects transport failure %i and fences old socket packets', code => {
+    let retained: MailboxCoverage | null = null
+    const test = connect(() => retained)
+    test.socket.emit('open')
+    test.socket.emit('message', JSON.stringify(snapshot))
+    test.socket.emit('close', undefined, { code })
+    expect(test.disconnected).toHaveBeenCalledOnce()
+    retained = cursor
+    vi.advanceTimersByTime(500)
+    const next = FakeWebSocket.instances[1]
+    next.emit('open')
+    expect(JSON.parse(String(next.sent[0])).previous_cursor).toEqual(cursor)
+    test.socket.emit('message', JSON.stringify({ ...snapshot, type: 'hint' }))
+    expect(test.packet).toHaveBeenCalledOnce()
+    next.emit('message', JSON.stringify({ ...snapshot, stream_id: 'b'.repeat(32) }))
+    expect(test.packet).toHaveBeenCalledTimes(2)
+    test.client.dispose()
+    next.emit('message', JSON.stringify({ ...snapshot, type: 'hint' }))
+    vi.advanceTimersByTime(30_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(next.closed).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('bounds the initial snapshot wait even after a socket opens', () => {
+    const test = connect()
+    test.socket.emit('open')
+    vi.advanceTimersByTime(30_000)
+    expect(test.socket.closed).toBe(false)
+    expect(test.disconnected).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(5_000)
+    expect(test.socket.closed).toBe(true)
+    expect(test.disconnected).toHaveBeenCalledOnce()
+    test.stop()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('does not send a retained cursor when the server fails to negotiate the exact protocol', () => {
+    const test = connect(() => cursor)
+    test.socket.protocol = ''
+    test.socket.emit('open')
+    expect(test.socket.sent).toEqual([])
+    expect(test.fatal).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('negotiates one v2 stream with independent retained heads and no idle content requests', () => {
+    const bulletin = emptyBulletinCursor('team-a')
+    const test = connect(() => cursor, { previousBulletin: () => bulletin })
+    expect(test.socket.protocol).toBe(TEAM_ACTIVITY_HINTS_PROTOCOL)
+    test.socket.emit('open')
+    expect(JSON.parse(String(test.socket.sent[0]))).toEqual({ version: 2, team_id: 'team-a',
+      previous_cursor: { version: 2, mail: { ...cursor, reset: false }, bulletin: { ...bulletin, reset: false } } })
+    test.socket.emit('message', JSON.stringify({ ...snapshot,
+      cursor: { version: 2, mail: snapshot.cursor, bulletin: { ...bulletin, reset: false } } }))
+    expect(test.packet).toHaveBeenCalledWith({ ...snapshot, bulletin: { ...bulletin, reset: false } })
+    vi.advanceTimersByTime(600_000)
+    expect(test.fetchMock).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    test.stop()
+  })
+  it('rejects foreign Bulletin metadata without retry loops or silently mixing protocol versions', () => {
+    const test = connect(() => null, { previousBulletin: () => null })
+    test.socket.emit('message', JSON.stringify({ ...snapshot,
+      cursor: { version: 2, mail: snapshot.cursor, bulletin: { ...emptyBulletinCursor('foreign'), reset: false } } }))
+    expect(test.fatal).toHaveBeenCalledOnce()
+    expect(test.packet).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(600_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(test.fetchMock).not.toHaveBeenCalled()
+  })
+})
 
 describe('AgentServerClient Claude session policy', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -1155,6 +1307,78 @@ describe('AgentServerClient server-wide Codex goals', () => {
       expect(call.headers['sec-fetch-mode']).toBeUndefined()
       expect(call.headers.authorization).toBeUndefined()
     }
+  })
+})
+
+describe('AgentServerClient server-wide Codex subagents', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('uses only the exact prefixed native admin GET/PUT route and preserves null reset', async () => {
+    const calls: Array<{ method: string; url: string; headers: IncomingMessage['headers']; body: string }> = []
+    const fetchMock = vi.fn(() => { throw new Error('Privileged settings must use native transport') })
+    vi.stubGlobal('fetch', fetchMock)
+    await withLocalHTTPServer(async (request, response) => {
+      const body = await incomingBody(request)
+      calls.push({ method: request.method ?? '', url: request.url ?? '', headers: request.headers, body })
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ configurable: true, scope: 'server',
+        max_concurrent_threads_per_session: request.method === 'PUT'
+          ? JSON.parse(body).max_concurrent_threads_per_session : 4,
+        applies_to: 'new_or_reloaded_threads', message: 'Synthetic acknowledged setting.' }))
+    }, async baseURL => {
+      const client = new AgentServerClient(`${baseURL}/mounted`, 'synthetic-admin-token')
+      try {
+        await expect(client.codexServerSubagents()).resolves.toMatchObject({
+          configurable: true, max_concurrent_threads_per_session: 4,
+          applies_to: 'new_or_reloaded_threads'
+        })
+        await expect(client.setCodexServerSubagents(32)).resolves.toMatchObject({ max_concurrent_threads_per_session: 32 })
+        await expect(client.setCodexServerSubagents(null)).resolves.toMatchObject({ max_concurrent_threads_per_session: null })
+      } finally { client.dispose() }
+    })
+    expect(calls.map(call => [call.method, call.url])).toEqual([
+      ['GET', '/mounted/api/admin/codex/subagents'],
+      ['PUT', '/mounted/api/admin/codex/subagents'],
+      ['PUT', '/mounted/api/admin/codex/subagents']
+    ])
+    expect(calls[0].body).toBe('')
+    expect(JSON.parse(calls[1].body)).toEqual({ max_concurrent_threads_per_session: 32 })
+    expect(JSON.parse(calls[2].body)).toEqual({ max_concurrent_threads_per_session: null })
+    for (const call of calls) {
+      expect(call.headers['x-agentsdock-token']).toBe('synthetic-admin-token')
+      expect(call.headers.origin).toBeUndefined()
+      expect(call.headers.cookie).toBeUndefined()
+      expect(call.headers['sec-fetch-mode']).toBeUndefined()
+      expect(call.headers.authorization).toBeUndefined()
+      if (call.method === 'PUT') expect(call.headers['content-length']).toBe(String(Buffer.byteLength(call.body)))
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '4', undefined])(
+    'rejects invalid subagent limit %s before transport', invalid => {
+      const client = new AgentServerClient('http://127.0.0.1:1', 'synthetic-token')
+      try {
+        expect(() => client.setCodexServerSubagents(invalid as number)).toThrow('positive whole number')
+      } finally { client.dispose() }
+    }
+  )
+
+  it.each([401, 403, 404, 405, 501])('preserves authenticated HTTP %s errors without fallback or retry', async status => {
+    let requests = 0
+    await withLocalHTTPServer((_request, response) => {
+      requests += 1
+      response.statusCode = status
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ detail: 'Synthetic unsupported or unauthorized setting.' }))
+    }, async baseURL => {
+      const client = new AgentServerClient(baseURL, 'synthetic-token')
+      try {
+        await expect(client.codexServerSubagents()).rejects.toMatchObject({ status })
+        await expect(client.setCodexServerSubagents(8)).rejects.toMatchObject({ status })
+      } finally { client.dispose() }
+    })
+    expect(requests).toBe(2)
   })
 })
 
@@ -2973,6 +3197,17 @@ describe('AgentServerClient live stream', () => {
     })
   })
 
+  it('edits an exact queued agent message with its expected revision and no route grants', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await client.updateQueued('chat', 'queued-agent', 'Revised reply with literal @name', undefined, undefined, undefined, 3)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(String(url)).toContain('/api/sessions/chat/queue/queued-agent')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ prompt: 'Revised reply with literal @name', expected_message_revision: 3 })
+  })
+
   it('forwards the additive v2 client capability with request-reply authority', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       session: { id: 'chat', title: 'Chat', backend: 'codex' }
@@ -3108,6 +3343,22 @@ function crossChatExchangeFixture() {
 describe('AgentServerClient persistent agent handoff routes', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+  it('lists and revision-deletes individual Mail routes with encoded source and route IDs', async () => {
+    const fetchMock = vi.fn(async (_url: unknown, init: RequestInit = {}) => new Response(JSON.stringify(init.method === 'DELETE'
+      ? { ok: true, deleted: true, route_id: 'mailgrant /?' }
+      : { routes: [], max_routes: 16 }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await expect(client.agentTeamMailRoutes('source /?')).resolves.toEqual({ routes: [], max_routes: 16 })
+    await expect(client.deleteAgentTeamMailRoute('source /?', 'mailgrant /?', 'rev /?')).resolves.toMatchObject({ deleted: true })
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      'http://example.test:7850/api/sessions/source%20%2F%3F/agent-team-mail-routes',
+      'http://example.test:7850/api/sessions/source%20%2F%3F/agent-team-mail-routes/mailgrant%20%2F%3F?expected_revision=rev+%2F%3F'
+    ])
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('DELETE')
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('X-AgentsDock-Token')).toBe('secret')
+  })
+
   it('uses the authenticated v3 admin routes with encoded source and route IDs', async () => {
     const route = {
       route_id: 'route /?', revision: `rev_${'a'.repeat(32)}`, alias: 'agentsdock-mobile', target_session_id: 'target /?',
@@ -3141,7 +3392,7 @@ describe('AgentServerClient persistent agent handoff routes', () => {
     })
 
     expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([
-      'http://example.test:7850/api/sessions/source%20%2F%3F/agent-handoff-routes',
+      'http://example.test:7850/api/sessions/source%20%2F%3F/agent-handoff-routes?unlimited_routes=true',
       'http://example.test:7850/api/chats/search?q=Mobile&limit=12&exclude_session_id=source+%2F%3F',
       'http://example.test:7850/api/sessions/source%20%2F%3F/agent-handoff-routes',
       'http://example.test:7850/api/sessions/source%20%2F%3F/agent-handoff-routes/route%20%2F%3F',
@@ -3156,6 +3407,22 @@ describe('AgentServerClient persistent agent handoff routes', () => {
     expect(JSON.parse(String((fetchMock.mock.calls[3][1] as RequestInit).body))).toEqual({
       expected_revision: `rev_${'a'.repeat(32)}`, alias: 'mobile', actions: ['request_reply']
     })
+  })
+
+  it('opts into an unlimited route snapshot without replacing its null limit', async () => {
+    const snapshot = { routes: Array.from({ length: 20 }, (_, index) => ({
+      route_id: `route-${index}`, revision: `rev_${'a'.repeat(32)}`, alias: `target-${index}`, target_session_id: `chat-${index}`,
+      actions: ['instruction'], created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z',
+      target: { title: `Target ${index}`, folder: null, backend: 'codex', available: true, unavailable_reason: null }
+    })), max_routes: null }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(snapshot), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new AgentServerClient('http://example.test:7850', 'secret')
+    await expect(client.agentHandoffRoutes('source /?')).resolves.toEqual(snapshot)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('http://example.test:7850/api/sessions/source%20%2F%3F/agent-handoff-routes?unlimited_routes=true')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('preserves structured server error detail for revision-conflict handling', async () => {

@@ -142,7 +142,7 @@ try {
   $UpdateText = Get-Content -LiteralPath $UpdateConfig -Raw
   Assert-Condition ((Read-TopLevelYamlScalar $UpdateText 'provider') -eq 'github') 'Packaged updater provider is not GitHub'
   Assert-Condition ((Read-TopLevelYamlScalar $UpdateText 'owner') -eq 'ZhengyiLuo') 'Packaged updater owner is not ZhengyiLuo'
-  Assert-Condition ((Read-TopLevelYamlScalar $UpdateText 'repo') -eq 'AgentsDock-Releases') 'Packaged updater repository is not AgentsDock-Releases'
+  Assert-Condition ((Read-TopLevelYamlScalar $UpdateText 'repo') -eq 'AgentsDock') 'Packaged updater repository is not AgentsDock'
   $ExpectedChannel = if ($ExpectedTrack -eq 'beta') { 'beta' } else { 'latest' }
   Assert-Condition ((Read-TopLevelYamlScalar $UpdateText 'channel') -eq $ExpectedChannel) "Packaged updater channel is not $ExpectedChannel"
 
@@ -154,6 +154,10 @@ try {
   $PackageJson = Get-Content -LiteralPath (Join-Path $AsarExtract 'package.json') -Raw | ConvertFrom-Json
   Assert-Condition ($PackageJson.name -eq 'agentsdock-electron') 'ASAR package identity is not AgentsDock'
   Assert-Condition ($PackageJson.version -eq $ExpectedVersion) "ASAR package version does not match $ExpectedVersion"
+  if ($env:AGENTSDOCK_EXPECTED_BUILD_NUMBER) {
+    Assert-Condition ($null -ne $PackageJson.PSObject.Properties['releaseBuildNumber']) 'ASAR package is missing releaseBuildNumber'
+    Assert-Condition ([string]$PackageJson.releaseBuildNumber -eq $env:AGENTSDOCK_EXPECTED_BUILD_NUMBER) "ASAR package build does not match $env:AGENTSDOCK_EXPECTED_BUILD_NUMBER"
+  }
   $MainEntry = [string]$PackageJson.main
   Assert-Condition ($MainEntry -eq './out/main/index.js') 'ASAR package declares an unsupported Electron main entry'
   $MainEntryPath = Join-Path $AsarExtract $MainEntry

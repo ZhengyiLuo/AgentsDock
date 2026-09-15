@@ -34,6 +34,7 @@ import type {
   TeamMessageDeleteInput,
   TeamMessageDismissInput,
   TeamMessageQuery,
+  TeamMessageThreadQuery,
   TeamMessageReceiptInput,
   TeamMailboxStateInput,
   TeamMessageRevisionInput,
@@ -130,6 +131,7 @@ export class LazyTeamHubService {
   teamMessagesCapabilities(scope: TeamHubScope) { return this.requireService().teamMessagesCapabilities(scope) }
   teamMessages(scope: TeamHubScope, query: TeamMessageQuery) { return this.requireService().teamMessages(scope, query) }
   teamMessage(scope: TeamHubScope, teamId: string, messageId: string) { return this.requireService().teamMessage(scope, teamId, messageId) }
+  teamMessageThread(scope: TeamHubScope, query: TeamMessageThreadQuery) { return this.requireService().teamMessageThread(scope, query) }
   createTeamMessage(scope: TeamHubScope, input: TeamMessageCreateInput) { return this.requireService().createTeamMessage(scope, input) }
   recordTeamMessageReceipt(scope: TeamHubScope, input: TeamMessageReceiptInput) { return this.requireService().recordTeamMessageReceipt(scope, input) }
   setTeamMessageMailboxState(scope: TeamHubScope, input: TeamMailboxStateInput) { return this.requireService().setTeamMessageMailboxState(scope, input) }

@@ -11,7 +11,80 @@ const event = (seq: number, type: string, patch: Partial<Event> = {}): Event => 
   ...patch
 })
 
+const exchangeLeg = (seq: number, leg: 'request' | 'reply', patch: Partial<Event> = {}): Event =>
+  event(seq, 'cross_chat_exchange_leg_registered', {
+    exchange_id: 'exchange-one', exchange_leg_id: `${leg}-leg`, exchange_leg_kind: leg,
+    exchange_ordinal: leg === 'request' ? 1 : 2, exchange_max_legs: 2,
+    source_session_id: leg === 'request' ? 'chat-1' : 'peer',
+    target_session_id: leg === 'request' ? 'peer' : 'chat-1',
+    handoff_preview: `${leg} body`, ...patch
+  })
+
 describe('timeline projection cache', () => {
+  it('replaces split exchange-leg rows exactly once when a leg receives a live update', () => {
+    clearTimelineProjectionCache()
+    const events = [exchangeLeg(1, 'request'), exchangeLeg(2, 'reply')]
+    const first = cachedTimelineProjection('split-legs-live', events, [])
+    expect(first.rendered.filter(row => row.kind === 'system' && row.crossChatLegId)).toHaveLength(2)
+    const updated = [...events, exchangeLeg(3, 'reply', {
+      type: 'cross_chat_exchange_leg_delivered', exchange_leg_status: 'delivered', exchange_status: 'completed'
+    })]
+    const next = cachedTimelineProjection('split-legs-live', updated, [])
+    expect(next.strategy).toBe('append')
+    expect(next.rendered.filter(row => row.kind === 'system' && row.crossChatLegId)).toHaveLength(2)
+    expect(new Set(next.rendered.map(row => row.key)).size).toBe(next.rendered.length)
+    expect(next.rendered).toEqual(cachedTimelineProjection('split-legs-cold', updated, []).rendered)
+  })
+
+  it('retains one unresolved imported-delivery card and its files when its answer arrives, preserving a human quotation', () => {
+    clearTimelineProjectionCache()
+    const prompt = '[AgentsDock delivery kind=reply leg=2/2 origin=route from=Peer]\n'
+      + '[Source user instruction — verbatim, user-authored]\nReview the renderer.\n[End source user instruction]\n'
+      + '[Agent-prepared reply/result]\nThe exact reply body.\n[End agent-prepared reply/result]\n'
+      + 'reply: use the respond command in the provider-authority block only if a reply or follow-up is needed.\n[End delivery]'
+    const files: AgentFile[] = [{ id: 'delivery-file', session_id: 'chat-1', filename: 'result.txt', content_type: 'text/plain' }]
+    const events = [
+      event(1, 'turn_started', { run_id: 'human-run', prompt }),
+      event(2, 'turn_finished', { run_id: 'human-run', result_text: 'Human quotation retained.' }),
+      event(3, 'turn_started', { run_id: 'import_unresolved', imported: true, backend: 'claude', prompt, file_ids: ['delivery-file'] })
+    ]
+    cachedTimelineProjection('unresolved-delivery-live', events, files)
+    const updated = [...events, event(4, 'assistant_text', {
+      run_id: 'import_unresolved', imported: true, backend: 'claude', text: 'The imported answer.'
+    })]
+    const next = cachedTimelineProjection('unresolved-delivery-live', updated, files)
+    expect(next.strategy).toBe('append')
+    expect(next.rendered.filter(row => row.kind === 'system' && row.importedDelivery)).toHaveLength(1)
+    expect(next.rendered.filter(row => row.key.endsWith(':delivery-files'))).toHaveLength(1)
+    expect(next.rendered.filter(row => row.kind === 'message' && row.role === 'user'))
+      .toMatchObject([{ event: { id: events[0].id, prompt } }])
+    expect(next.rendered).toEqual(cachedTimelineProjection('unresolved-delivery-cold', updated, files).rendered)
+  })
+
+  it('carries an unchanged exchange reply across an updated turn without rerendering intervening history', () => {
+    clearTimelineProjectionCache()
+    const events = [exchangeLeg(1, 'request')]
+    for (let turn = 0; turn < 200; turn++) {
+      events.push(
+        event(turn * 2 + 2, 'turn_started', { run_id: `past-${turn}`, prompt: 'Earlier question' }),
+        event(turn * 2 + 3, 'turn_finished', { run_id: `past-${turn}`, result_text: 'Earlier answer' })
+      )
+    }
+    events.push(
+      event(402, 'turn_started', { run_id: 'current-turn', prompt: 'Current question' }),
+      event(403, 'assistant_text', { run_id: 'current-turn', text: 'First output.' }),
+      exchangeLeg(404, 'reply')
+    )
+    const first = cachedTimelineProjection('crossing-reply-live', events, [])
+    const updated = [...events, event(405, 'assistant_text', { run_id: 'current-turn', text: 'More output.' })]
+    const next = cachedTimelineProjection('crossing-reply-live', updated, [])
+    expect(next.strategy).toBe('append')
+    expect(next.renderedSemanticCount).toBe(2)
+    expect(next.rendered[0]).toBe(first.rendered[0])
+    expect(next.rendered.filter(row => row.kind === 'system' && row.crossChatLegId)).toHaveLength(2)
+    expect(next.rendered).toEqual(cachedTimelineProjection('crossing-reply-cold', updated, []).rendered)
+  })
+
   it('reuses the exact rendered projection when reopening an unchanged chat', () => {
     clearTimelineProjectionCache()
     const events = [

@@ -126,7 +126,7 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
       const observed = await bridge.runtime(sessionId)
       if (epoch !== requestEpoch.current || sessionIdRef.current !== sessionId) return null
       let next = observed
-      if (focusedRef.current && shouldLoadPersistedThread(session, observed)) {
+      if (!window.agentsDock.sharedChat && focusedRef.current && shouldLoadPersistedThread(session, observed)) {
         try {
           // A short selection settle window prevents fast chat-list browsing
           // from launching expensive, uncancellable app-server resumes for
@@ -186,6 +186,13 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
     connectedRef.current = connected
     if (reconnected && supported) void refresh()
   }, [connected, refresh, supported])
+
+  useEffect(() => {
+    // Shared snapshots replace Session during the same commit that emits a
+    // runtime signal. Refresh after commit: the event effect's cleanup can
+    // otherwise cancel its queued refresh. This bridge read is memory-only.
+    if (window.agentsDock.sharedChat && supported) void refresh()
+  }, [refresh, session, supported])
 
   useEffect(() => {
     if (!supported) return
@@ -267,7 +274,8 @@ export function CodexRuntimeProvider({ session, capability, focused = true, chil
     const sessionId = session?.id
     const bridge = codexBridge()
     if (
-      !supported
+      window.agentsDock.sharedChat
+      || !supported
       || !connected
       || !sessionId
       || !bridge
