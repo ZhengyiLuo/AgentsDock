@@ -17,6 +17,7 @@ import {
   type TextInputSelectionChangeEventData,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { KeyboardAvoidingView as KeyboardSafeView } from 'react-native-keyboard-controller'
 import { Image } from 'expo-image'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
@@ -1084,12 +1085,17 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
   const profileId = useAppStore(state => state.activeProfileId)
   const generation = useAppStore(state => state.profileGeneration)
   const connected = useAppStore(state => state.connected && !state.connecting && !state.switchingProfileId && !state.workspaceAdopting)
+  const referencesAvailable = useAppStore(state => routeHintMentionsAvailable(state.health)
+    && supportedCrossChatActions(state.health).includes('route')
+    && supportedCrossChatTargetBackends(state.health).length > 0)
+  const [selectionError, setSelectionError] = useState('')
   const revokedInFlight = useRef(new Map<string, symbol>())
   const selected = useRef(false)
   const validationRevision = client.validationRevision
   const actionScopeKey = useAppStore(state => composerActionScopeKey(state, sourceSessionId))
   useEffect(() => {
     selected.current = false
+    setSelectionError('')
     revokedInFlight.current.clear()
     if (visible && connected && client.isValidated) void useAppStore.getState().refreshAgentRoutes(sourceSessionId, generation)
     return () => { revokedInFlight.current.clear() }
@@ -1127,6 +1133,13 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
     const disabled = busy || !connected || !client.isValidated
     return <Pressable testID={`chat-route-revoke-${route.route_id}`} accessibilityRole="button" accessibilityLabel={`Revoke access to ${route.target.title || route.alias || 'chat'}`} accessibilityState={{ disabled, busy }} disabled={disabled} onPress={() => void revoke(route)} style={({ pressed }) => [styles.routeRevoke, { opacity: disabled || pressed ? 0.5 : 1 }]}>{busy ? <ActivityIndicator size="small" color={colors.red} /> : <Text style={{ color: colors.red, fontSize: 12, fontWeight: '700' }}>Revoke</Text>}</Pressable>
   }
+  const hideKeyboard = () => {
+    searchInputRef.current?.blur()
+    dismissAppKeyboard()
+  }
+  const unavailableMessage = !connected || !client.isValidated
+    ? 'Reconnect to this server to choose a chat.'
+    : !referencesAvailable ? 'Chat references are unavailable on this server. Reconnect or update the server, then reopen this picker.' : ''
   return <Modal
     visible={visible}
     animationType="slide"
@@ -1137,6 +1150,7 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
     onDismiss={onDidDismiss}
   >
     {visible ? <SafeAreaView edges={Platform.OS === 'ios' ? ['bottom'] : ['top', 'bottom']} onAccessibilityEscape={onClose} style={[styles.targetPickerSafe, { backgroundColor: colors.background }]}>
+      <KeyboardSafeView testID="chat-target-keyboard-safe" automaticOffset behavior="padding" style={styles.targetPickerSafe}>
       <View style={styles.targetPickerGrabber} />
       <View style={[styles.targetPickerPanel, tablet && styles.targetPickerPanelTablet]}>
         <View style={[styles.targetPickerHeader, { borderColor: colors.border }]}>
@@ -1156,14 +1170,17 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
             onChangeText={onQueryChange}
             returnKeyType="search"
             submitBehavior="blurAndSubmit"
-            onSubmitEditing={dismissAppKeyboard}
+            onSubmitEditing={hideKeyboard}
             clearButtonMode="while-editing"
             placeholder="Search chats"
             placeholderTextColor={colors.muted}
             style={[styles.targetSearchInput, { color: colors.text }]}
           />
+          <Pressable testID="chat-target-hide-keyboard" accessibilityRole="button" accessibilityLabel="Hide keyboard" onPress={hideKeyboard} style={styles.targetHideKeyboard}><Text style={[styles.targetHideKeyboardText, { color: colors.blue }]}>Hide keyboard</Text></Pressable>
         </View>
         {referenceLimitReached ? <View accessibilityRole="alert" testID="chat-target-reference-limit" style={[styles.referenceWarning, styles.targetLimitWarning]}><AlertCircle size={14} color={colors.red} /><Text style={[styles.referenceWarningText, { color: colors.red }]}>Maximum {MAX_CHAT_REFERENCES} chat references reached. Remove one before adding another.</Text></View> : null}
+        {unavailableMessage ? <Text testID="chat-target-unavailable" accessibilityRole="alert" style={[styles.targetSelectionNotice, { color: colors.red }]}>{unavailableMessage}</Text> : null}
+        {selectionError && !unavailableMessage ? <Text testID="chat-target-selection-error" accessibilityRole="alert" style={[styles.targetSelectionNotice, { color: colors.red }]}>{selectionError}</Text> : null}
         {loading ? <View testID="chat-routes-loading" style={styles.routeNotice}><ActivityIndicator size="small" color={colors.blue} /><Text style={{ color: colors.muted }}>Refreshing granted access…</Text></View> : null}
         {error ? <View testID="chat-routes-error" accessibilityRole="alert" style={styles.routeNotice}><Text style={{ color: colors.red, flex: 1 }}>{error}</Text><Pressable testID="chat-routes-retry" accessibilityRole="button" accessibilityLabel="Retry loading granted chat access" disabled={!connected || loading} onPress={() => { if (remoteComposerScopeIsCurrent(profileId, generation, sourceSessionId)) void useAppStore.getState().refreshAgentRoutes(sourceSessionId, generation) }} style={styles.routeRevoke}><Text style={{ color: colors.blue }}>Retry</Text></Pressable></View> : null}
         <Pressable testID="chat-target-team-network" accessibilityRole="button" accessibilityLabel="Reference a server inbox with @@" onPress={onTeamNetwork} style={[styles.targetRow, { marginHorizontal: 16, backgroundColor: colors.surface, borderColor: colors.border }]}><Mail size={20} color={colors.blue} /><Text style={{ color: colors.blue }}>Servers (@@) · Team Network inbox</Text></Pressable>
@@ -1171,9 +1188,10 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
           testID="chat-target-list"
           data={targets}
           keyExtractor={target => target.id}
+          style={styles.targetListViewport}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="on-drag"
-          onScrollBeginDrag={dismissAppKeyboard}
+          onScrollBeginDrag={hideKeyboard}
           contentContainerStyle={[styles.targetList, !targets.length && styles.targetListEmpty]}
           ListEmptyComponent={<View style={styles.targetEmpty}><MessageSquareShare size={28} color={colors.muted} /><Text style={[styles.targetEmptyTitle, { color: colors.text }]}>No matching chats</Text><Text style={[styles.targetEmptyBody, { color: colors.muted }]}>Try another title, folder, backend, or chat ID.</Text></View>}
           ListFooterComponent={<View style={{ gap: 8 }}>
@@ -1187,17 +1205,33 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
             const meta = [item.folder?.trim(), backendLabel(item.backend), tablet ? item.id.slice(0, 8) : null].filter(Boolean).join(' · ')
             const grant = grantByTarget.get(item.id)
             const capacityReached = Boolean(routeSnapshot && routeCapacityReached(routes, routeSnapshot.max_routes, references, item.id))
-            const disabled = referenceLimitReached || capacityReached || !connected || !client.isValidated || Boolean(grant && revoking.has(`${sourceSessionId}:${grant.route_id}`))
+            const disabled = referenceLimitReached || capacityReached || !referencesAvailable || !connected || !client.isValidated || Boolean(grant && revoking.has(`${sourceSessionId}:${grant.route_id}`))
             return <View style={[styles.routeRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><Pressable
               testID={`chat-target-${item.id}`}
               accessibilityRole="button"
               accessibilityLabel={`Reference ${item.title}. ${grant ? 'Granted' : 'Will grant when sent'}. ${status}`}
-              accessibilityHint={capacityReached ? 'Revoke an existing route to grant another chat.' : undefined}
+              accessibilityHint={unavailableMessage || (capacityReached ? 'Revoke an existing route to grant another chat.' : undefined)}
               accessibilityState={{ disabled }}
               disabled={disabled}
               onPress={() => {
-                if (selected.current || disabled || !remoteComposerScopeIsCurrent(profileId, generation, sourceSessionId) || composerActionScopeKey(useAppStore.getState(), sourceSessionId) !== actionScopeKey) return
-                selected.current = onSelect(item)
+                if (selected.current || disabled) return
+                const currentState = useAppStore.getState()
+                if (!routeHintMentionsAvailable(currentState.health) || !supportedCrossChatActions(currentState.health).includes('route') || !supportedCrossChatTargetBackends(currentState.health).includes(item.backend)) {
+                  setSelectionError('Chat references changed. Reopen this picker and choose an available chat.')
+                  return
+                }
+                if (!remoteComposerScopeIsCurrent(profileId, generation, sourceSessionId) || composerActionScopeKey(currentState, sourceSessionId) !== actionScopeKey) {
+                  setSelectionError('The connection changed. Try again when connected or reopen this picker.')
+                  return
+                }
+                setSelectionError('')
+                try {
+                  selected.current = onSelect(item)
+                  if (!selected.current) setSelectionError('Could not add that chat. Try again or choose another chat.')
+                } catch {
+                  selected.current = false
+                  setSelectionError('Could not add that chat. Try again or choose another chat.')
+                }
               }}
               style={({ pressed }) => [styles.targetRow, styles.routeTarget, tablet && styles.targetRowTablet, { backgroundColor: pressed ? colors.raised : colors.surface, opacity: disabled ? 0.45 : 1 }]}
             >
@@ -1207,6 +1241,7 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
           }}
         />
       </View>
+      </KeyboardSafeView>
     </SafeAreaView> : null}
   </Modal>
 }
@@ -1956,13 +1991,15 @@ const styles = StyleSheet.create({
   runtimeMenu: { minWidth: 0, flexShrink: 1 }, runtimeMenuCompact: { width: COMPOSER_COMPACT_BACKEND_SLOT_WIDTH, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0 }, runtimeMenuDense: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, alignItems: 'center', justifyContent: 'center' }, runtime: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }, runtimeCompact: { width: COMPOSER_COMPACT_BACKEND_SLOT_WIDTH, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, justifyContent: 'center', gap: 0 }, runtimeDense: { width: COMPOSER_DENSE_BACKEND_SLOT_WIDTH }, backend: { fontSize: 12, fontWeight: '700' }, toolbarSpacer: { flex: 1, minWidth: 0 },
   uploadRail: { flexGrow: 0, minHeight: 64, maxHeight: 64 }, uploads: { flexDirection: 'row', gap: 7, paddingRight: 2 }, upload: { width: 216, height: 64, flexShrink: 0, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingLeft: 7, flexDirection: 'row', alignItems: 'center' }, uploadIdentity: { minWidth: 0, flex: 1, height: 62, flexDirection: 'row', alignItems: 'center', gap: 8 }, fileIconWell: { width: 48, height: 48, minWidth: 48, flexShrink: 0, borderRadius: 6, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, uploadText: { minWidth: 0, flex: 1, gap: 2 }, uploadName: { fontSize: 12, fontWeight: '700' }, uploadMeta: { fontSize: 10.5 }, uploadActionSpacer: { width: 44, height: 44, flexShrink: 0 }, uploadBusy: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000066' }, uploadError: { position: 'absolute', right: 3, bottom: 3, width: 19, height: 19, borderRadius: 10, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
   previewModal: { flex: 1 }, previewHeader: { minHeight: FULLSCREEN_HEADER_MIN_HEIGHT, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: FULLSCREEN_HEADER_GUTTER, flexDirection: 'row', alignItems: 'center', gap: 8 }, previewTitle: { minWidth: 0, flex: 1, fontSize: 14, fontWeight: '700' }, previewImage: { flex: 1, margin: 12 },
-  targetPickerSafe: { flex: 1 },
+  targetPickerSafe: { flex: 1, minHeight: 0 },
   targetPickerGrabber: { width: 38, height: 5, marginTop: 8, marginBottom: 3, borderRadius: 3, backgroundColor: '#8e8e9380', alignSelf: 'center' },
-  targetPickerPanel: { flex: 1, width: '100%', alignSelf: 'center' }, targetPickerPanelTablet: { maxWidth: 760 },
+  targetPickerPanel: { flex: 1, minHeight: 0, width: '100%', alignSelf: 'center' }, targetPickerPanelTablet: { maxWidth: 760 },
   targetPickerHeader: { minHeight: 70, paddingLeft: 16, paddingRight: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 10 },
   targetPickerHeading: { minWidth: 0, flex: 1, gap: 3 }, targetPickerTitle: { fontSize: 18, fontWeight: '800' }, targetPickerSubtitle: { fontSize: 12.5 },
   targetSearch: { height: 46, marginHorizontal: 12, marginTop: 12, marginBottom: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
   targetSearchInput: { minWidth: 0, flex: 1, height: 44, paddingVertical: 0, fontSize: 15 },
+  targetHideKeyboard: { minWidth: 44, minHeight: 44, flexShrink: 0, justifyContent: 'center', paddingHorizontal: 4 }, targetHideKeyboardText: { fontSize: 12, fontWeight: '600' },
+  targetSelectionNotice: { marginHorizontal: 12, marginBottom: 8, fontSize: 12 }, targetListViewport: { flex: 1, minHeight: 0 },
   targetLimitWarning: { minHeight: 40, marginHorizontal: 12, marginBottom: 8, paddingVertical: 6 },
   targetList: { paddingHorizontal: 12, paddingBottom: 20, gap: 7 }, targetListEmpty: { flexGrow: 1 },
   targetRow: { minHeight: 66, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 9 }, targetRowTablet: { minHeight: 74, paddingHorizontal: 14 },

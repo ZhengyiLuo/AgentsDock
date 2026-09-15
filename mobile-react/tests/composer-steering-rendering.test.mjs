@@ -26,6 +26,7 @@ const mocks = {
     export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:fixture.height,scale:3,fontScale:1.6});
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
+  'react-native-keyboard-controller': `export const KeyboardAvoidingView='KeyboardSafeView';`,
   'expo-image': `export const Image='Image';`,
   'expo-clipboard': `export async function setStringAsync(value){const f=globalThis.__steeringComposerFixture;if(f.clipboardFailure)throw new Error('Clipboard unavailable');f.copied=value}`,
   'expo-document-picker': `export async function getDocumentAsync(){return {canceled:true}}`,

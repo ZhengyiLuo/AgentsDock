@@ -26,6 +26,7 @@ const mocks = {
     export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:fixture.height,scale:3,fontScale:1});
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
+  'react-native-keyboard-controller': `export const KeyboardAvoidingView='KeyboardSafeView';`,
   'expo-image': `export const Image='Image';`,
   'expo-clipboard': `export async function setStringAsync(){}`,
   'expo-document-picker': `export async function getDocumentAsync(){return {canceled:true}}`,
@@ -34,7 +35,7 @@ const mocks = {
   'lucide-react-native': `export const AlertCircle='AlertCircle', ArrowDown='ArrowDown', ArrowUp='ArrowUp', Check='Check', ChevronDown='ChevronDown', ChevronRight='ChevronRight', CornerDownRight='CornerDownRight', File='File', Goal='Goal', Pause='Pause', Pencil='Pencil', Play='Play', Mail='Mail', MessageCircleMore='MessageCircleMore', MessageSquareShare='MessageSquareShare', Paperclip='Paperclip', Search='Search', Send='Send', Square='Square', Trash2='Trash2', X='X', Server='Server', RefreshCw='RefreshCw';`,
   '../store/useAppStore': `export const useAppStore=globalThis.__teamComposerFixture.store; export const client=globalThis.__teamComposerFixture.client;`,
   '../lib/analytics': `export function trackEvent(){}`,
-  '../lib/app-keyboard': `export async function dismissAppKeyboard(){}`,
+  '../lib/app-keyboard': `export function dismissAppKeyboard(){globalThis.__teamComposerFixture.keyboardDismissals++}`,
   './AppText': `import {forwardRef,createElement} from 'react'; export const Text='Text'; export const TextInput=forwardRef((props,ref)=>createElement('TextInput',{...props,ref}));`,
   './BackendMark': `export const BackendMark='BackendMark';`,
   './CodexPermissionMenu': `export const CodexPermissionMenu=()=>null;`,
@@ -66,7 +67,7 @@ function reset(patch = {}) {
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
   fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.height=844;fixture.scheme='dark'
   fixture.codexRuntime={supported:false,goalsSupported:false,goalsEnabled:false,runtime:null,session:null,mutating:false,error:null,scopeKey:'profile:1:chat',refresh:async()=>null,updateGoal:async()=>null,clearGoal:async()=>null}
-  fixture.focusedInput=null;fixture.blurredInputs=[]
+  fixture.focusedInput=null;fixture.blurredInputs=[];fixture.keyboardDismissals=0;fixture.nativeSelections=[]
   fixture.client.crossChatHandoff=async()=>{throw new Error('Unexpected message body read')}
   fixture.client.teamNetworkGet = async (base, endpoint) => {
     fixture.reads.push([base,endpoint])
@@ -95,7 +96,7 @@ function reset(patch = {}) {
 }
 async function render({expandQueue=true,...overrides}={}) {
   let renderer
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...overrides}),{createNodeMock:element=>({focus(){fixture.focusedInput=element.props.testID},isFocused(){return fixture.focusedInput===element.props.testID},blur(){fixture.blurredInputs.push(element.props.testID);fixture.focusedInput=null},clear(){},setNativeProps(){}})})})
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...overrides}),{createNodeMock:element=>({focus(){fixture.focusedInput=element.props.testID},isFocused(){return fixture.focusedInput===element.props.testID},blur(){fixture.blurredInputs.push(element.props.testID);fixture.focusedInput=null},clear(){},setNativeProps(props){fixture.nativeSelections.push([element.props.testID,props.selection])}})})})
   if(expandQueue && byID(renderer,'queued-section-toggle').length)await click(renderer,'queued-section-toggle')
   return renderer
 }
@@ -315,12 +316,19 @@ for(const entry of ['button','second @'])test(`local chat picker switches to ser
     await type(renderer,'@')
     await act(async()=>new Promise(resolve=>setTimeout(resolve,280)))
     assert.equal(byID(renderer,'chat-target-search').length,1)
-    const dismiss=renderer.root.findByType('Modal').props.onDismiss
+    const localSheet=renderer.root.findByType('Modal')
+    await act(async()=>localSheet.props.onShow())
+    assert.equal(fixture.focusedInput,'chat-target-search')
+    const dismiss=localSheet.props.onDismiss
     if(entry==='button')await click(renderer,'chat-target-team-network')
     else await act(async()=>byID(renderer,'chat-target-search')[0].props.onChangeText('@Mac'))
     assert.equal(renderer.root.findAllByType('Modal').length,0,'Two native sheets must not compete')
     await act(async()=>dismiss())
     assert.equal(byID(renderer,'team-target-search').length,1)
+    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    assert.equal(store.getState().drafts.chat,'@','Switching pickers must not replace the draft before selection')
+    await act(async()=>renderer.root.findByType('Modal').props.onShow())
+    assert.equal(fixture.focusedInput,'team-target-search')
     assert.ok(recipient(renderer))
     await act(async()=>recipient(renderer).props.onPress())
     assert.equal(store.getState().drafts.chat,'@@Mac Studio ')
@@ -346,6 +354,157 @@ test('Add menu exposes a direct server recipient picker without requiring typed 
 const targetSession=(id='target')=>({id,title:`Chat ${id}`,backend:'codex',folder:'Work',status:'idle'})
 const route=(id='route',target='target')=>({route_id:id,revision:`opaque-${id}-revision`,alias:`Chat ${target}`,target_session_id:target,actions:['instruction','request_reply'],created_at:'2026-09-01T00:00:00Z',updated_at:'2026-09-01T00:00:00Z',target:{title:`Chat ${target}`,folder:'Work',backend:'codex',available:true,unavailable_reason:null}})
 function resetRoutes(patch={}){reset({health:withLocalChats(),sessions:[{id:'chat',title:'Mobile',backend:'codex'},targetSession(),targetSession('new')],agentRoutesBySession:{chat:{routes:[route()],max_routes:2}},...patch})}
+
+async function openLocalPickerFromMenu(renderer){
+  await click(renderer,'chat-attach')
+  const index=fixture.actionSheet.options.options.indexOf('Reference another chat')
+  assert.ok(index>=0)
+  await act(async()=>fixture.actionSheet.callback(index))
+}
+
+async function finishNativePickerDismissal(dismiss){
+  await act(async()=>{
+    dismiss()
+    await new Promise(resolve=>setTimeout(resolve,0))
+  })
+}
+
+for(const entry of ['typed mention','Add menu'])test(`real Composer selects a local chat from ${entry} and sends its exact grant`,async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    if(entry==='typed mention'){
+      await type(renderer,'Please ask @')
+      await act(async()=>new Promise(resolve=>setTimeout(resolve,280)))
+    }else{
+      await type(renderer,'Please ask ')
+      await openLocalPickerFromMenu(renderer)
+    }
+    const sheet=renderer.root.findByType('Modal')
+    const dismiss=sheet.props.onDismiss
+    await act(async()=>sheet.props.onShow())
+    assert.equal(fixture.focusedInput,'chat-target-search')
+    await act(async()=>byID(renderer,'chat-target-search')[0].props.onChangeText('target'))
+    const row=byID(renderer,'chat-target-target')[0]
+    assert.equal(row.props.disabled,false)
+    await act(async()=>{const choose=row.props.onPress;choose();choose()})
+    const references=[{session_id:'target',display_title_snapshot:'Chat target',source_text_start:11,source_text_end:23,action:'route',grant_intent:true}]
+    assert.equal(store.getState().drafts.chat,'Please ask @Chat target ')
+    assert.deepEqual(store.getState().chatReferencesBySession.chat,references)
+    assert.deepEqual(store.getState().teamReferencesBySession.chat,[])
+    assert.equal(byID(renderer,'composer-chat-references').length,1)
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    await finishNativePickerDismissal(dismiss)
+    assert.equal(fixture.focusedInput,'chat-composer-input')
+    assert.deepEqual(fixture.nativeSelections.at(-1),['chat-composer-input',{start:24,end:24}])
+    await type(renderer,'Please ask @Chat target to check this.')
+    await click(renderer,'chat-send')
+    assert.equal(fixture.sends.length,1)
+    assert.deepEqual(fixture.sends[0][3].chatReferences,references)
+    assert.equal(fixture.sends[0][3].admittedDraft,'Please ask @Chat target to check this.')
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('real Composer closes, reopens, and selects again after each native dismissal',async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    await type(renderer,'Keep this draft. ')
+    await openLocalPickerFromMenu(renderer)
+    let dismiss=renderer.root.findByType('Modal').props.onDismiss
+    await click(renderer,'chat-target-picker-close')
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(store.getState().drafts.chat,'Keep this draft. ')
+    assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
+    await finishNativePickerDismissal(dismiss)
+    assert.equal(fixture.focusedInput,'chat-composer-input')
+    await openLocalPickerFromMenu(renderer)
+    dismiss=renderer.root.findByType('Modal').props.onDismiss
+    await click(renderer,'chat-target-target')
+    await finishNativePickerDismissal(dismiss)
+    await openLocalPickerFromMenu(renderer)
+    await click(renderer,'chat-target-new')
+    assert.equal(store.getState().drafts.chat,'Keep this draft. @Chat target @Chat new ')
+    assert.deepEqual(store.getState().chatReferencesBySession.chat.map(reference=>reference.session_id),['target','new'])
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+for(const kind of ['chat','team'])test(`${kind} picker keeps keyboard-open taps available and scroll or Hide keyboard does not select`,async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    if(kind==='chat')await openLocalPickerFromMenu(renderer)
+    else await type(renderer,'@@')
+    const sheet=renderer.root.findByType('Modal')
+    await act(async()=>sheet.props.onShow())
+    assert.equal(fixture.focusedInput,`${kind}-target-search`)
+    const keyboardSafe=byID(renderer,`${kind}-target-keyboard-safe`)[0]
+    assert.equal(keyboardSafe.props.behavior,'padding')
+    assert.equal(keyboardSafe.props.automaticOffset,true)
+    const list=byID(renderer,`${kind}-target-list`)[0]
+    assert.equal(list.props.keyboardShouldPersistTaps,'always')
+    assert.equal(list.props.keyboardDismissMode,'on-drag')
+    const draft=store.getState().drafts.chat
+    const dismissals=fixture.keyboardDismissals
+    await act(async()=>list.props.onScrollBeginDrag())
+    assert.equal(fixture.keyboardDismissals,dismissals+1)
+    await click(renderer,`${kind}-target-hide-keyboard`)
+    assert.equal(fixture.keyboardDismissals,dismissals+2)
+    assert.ok(fixture.blurredInputs.includes(`${kind}-target-search`))
+    assert.equal(fixture.focusedInput,null)
+    assert.equal(store.getState().drafts.chat,draft)
+    assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
+    assert.deepEqual(store.getState().teamReferencesBySession.chat??[],[])
+    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    await act(async()=>sheet.props.onShow())
+    if(kind==='chat')await click(renderer,'chat-target-target')
+    else await act(async()=>recipient(renderer).props.onPress())
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(kind==='chat'?store.getState().chatReferencesBySession.chat.length:store.getState().teamReferencesBySession.chat.length,1)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('an open local picker explains capability loss, rejects captured taps, and recovers when support returns',async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    await openLocalPickerFromMenu(renderer)
+    const staleSelection=byID(renderer,'chat-target-target')[0].props.onPress
+    const unavailable=withLocalChats()
+    unavailable.capabilities.cross_chat_handoffs_v1.features.durable_route_grants=false
+    await act(async()=>store.setState({health:unavailable}))
+    assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,true)
+    assert.equal(byID(renderer,'chat-target-unavailable').length,1)
+    await act(async()=>staleSelection())
+    assert.equal(store.getState().drafts.chat,'')
+    assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
+    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    await act(async()=>store.setState({health:withLocalChats()}))
+    assert.equal(byID(renderer,'chat-target-unavailable').length,0)
+    assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,false)
+    await click(renderer,'chat-target-target')
+    assert.equal(store.getState().drafts.chat,'@Chat target ')
+    assert.equal(store.getState().chatReferencesBySession.chat.length,1)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('real Composer reports an unreferenceable title and still accepts another target',async()=>{
+  resetRoutes({sessions:[{id:'chat',title:'Mobile',backend:'codex'},targetSession(),{...targetSession('bad'),title:'@Needs rename'}]})
+  const renderer=await render()
+  try{
+    await openLocalPickerFromMenu(renderer)
+    await click(renderer,'chat-target-bad')
+    assert.equal(byID(renderer,'chat-target-selection-error').length,1)
+    assert.equal(store.getState().drafts.chat,'')
+    assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
+    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    await click(renderer,'chat-target-target')
+    assert.equal(store.getState().drafts.chat,'@Chat target ')
+    assert.equal(store.getState().chatReferencesBySession.chat.length,1)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
 async function renderChatPicker(overrides={}){
   let renderer
   const props={visible:true,width:fixture.width,query:'',sourceSessionId:'chat',supportedTargetBackends:['codex','claude'],references:[],requestReplySupported:true,referenceLimitReached:false,onQueryChange(){},onTeamNetwork(){},onSelect(value){fixture.selected=value;return true},onClose(){},onDidDismiss(){},...overrides}
@@ -448,6 +607,7 @@ test('rejected target selections do not lock the picker, and captured handlers c
   try{
     const select=byID(renderer,'chat-target-new')[0].props.onPress
     await act(async()=>{select();select()});assert.equal(selections,2)
+    assert.equal(byID(renderer,'chat-target-selection-error').length,1)
     await act(async()=>store.setState({profileGeneration:2}))
     await act(async()=>select());assert.equal(selections,2)
     await click(renderer,'chat-target-new');assert.equal(selections,3)
