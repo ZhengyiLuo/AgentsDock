@@ -1,5 +1,22 @@
 # Development and release log
 
+## 2026-09-15 — 1.0.1-beta.1 publication verified (UTC)
+
+- Published source: `ce5a245546cbc8d4b55c16a05afc31a25104e6fa`.
+- [Release workflow](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/34938118639)
+  passed its full gate: 4,098 tests, two skipped. Packaging and Ed25519
+  manifest signing succeeded. Publication completed at 06:59:23 UTC.
+- Fresh public downloads passed signature verification, all three GitHub
+  asset digests, Beta/API 28 metadata, and byte-for-byte comparison of all 78
+  packaged source files with the release commit. Archive SHA-256:
+  `8d4b6ff0d08b96df8cda5b418f988a243068eee672a6f866aca6ae3abde0af2d`.
+- [Public beta](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.1-beta.1)
+  is available; the latest stable remains 1.0.0. The exact committed source
+  also passed 43 guarded local mail/lifecycle/package checks, independently
+  of unrelated uncommitted work in the development tree.
+- Publication did not install or restart Supersonic, Studio or any member
+  server; it did not send/retry mail or approve pending joining servers.
+
 ## 2026-09-14 — 1.0.1-beta.1 member mail gateway correction
 
 - Preserve the recipient's `mail_route_lifecycle_id` in the secure-peer mail
