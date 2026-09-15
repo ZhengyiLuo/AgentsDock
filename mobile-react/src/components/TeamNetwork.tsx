@@ -14,6 +14,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { AgentServerClient } from '../api/AgentServerClient'
 import { teamNetworkIdempotencyKey, teamNetworkProxyRoute, type TeamNetworkProxyRoute } from '../lib/team-network'
 import { TeamNetworkRequests, type TeamNetworkRequest } from '../lib/team-network-requests'
+import { parseTeamDismissal, parseTeamMessage, parseTeamMessageCapabilities, parseTeamMessagePage, parseTeamReadReceipt, teamMailReplyAvailable, teamMessageUnread, type TeamMessage, type TeamMessageSummary, type TeamMessageCapabilities } from '../lib/team-messages'
 import { client, useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import { Text, TextInput } from './AppText'
@@ -67,25 +68,6 @@ interface TeamMember {
   email?: string | null
 }
 
-interface TeamMessageSummary {
-  id: string
-  sequence: number
-  kind: 'message' | 'skill' | string
-  title: string | null
-  preview: string
-  body_format: 'plain' | 'markdown'
-  sender: { kind: string; id: string; display_name: string }
-  recipients: Array<{ kind: string; id?: string | null; display_name: string; state: string }>
-  delivery?: { kind: string; id?: string | null; display_name: string; state: string } | null
-  attachments?: Array<{ id: string; file_name: string; media_type: string; byte_size: number }>
-  created_at: string
-}
-
-interface TeamMessage extends Omit<TeamMessageSummary, 'preview'> {
-  body: string
-  preview?: string
-}
-
 interface TeamNetworkScope {
   connection: AgentServerClient
   profileId: string | null
@@ -113,6 +95,7 @@ function scopeCurrent(scope: TeamNetworkScope): boolean {
   const state = useAppStore.getState()
   const currentRoute = teamNetworkProxyRoute(state.health)
   return client === scope.connection
+    && state.connected && !state.connecting
     && scope.connection.validationRevision === scope.validationRevision
     && !scope.connection.isDisposed
     && scope.connection.isValidated
@@ -124,6 +107,10 @@ function scopeCurrent(scope: TeamNetworkScope): boolean {
     && currentRoute.sessionPath === scope.route.sessionPath
     && !state.switchingProfileId
     && !state.workspaceAdopting
+}
+
+function contentScopeKey(scope: TeamNetworkScope): string {
+  return JSON.stringify([scope.profileId, scope.profileGeneration, scope.serverIdentity, scope.serverInstanceId, scope.validationRevision, scope.route.basePath, scope.route.sessionPath])
 }
 
 function cleanError(error: unknown): string {
@@ -152,10 +139,23 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
   const [section, setSection] = useState<TeamSection>('mail')
   const [teams, setTeams] = useState<Team[]>([])
   const [teamId, setTeamId] = useState('')
-  const [projection, setProjection] = useState<NetworkProjection | null>(null)
+  const [storedProjection, setProjection] = useState<NetworkProjection | null>(null)
+  const [loadedScope, setLoadedScope] = useState('')
+  const loadedConnection = useRef<AgentServerClient | null>(null)
+  const projection = route && loadedScope === contentScopeKey(captureScope(route)) ? storedProjection : null
+  const messageScopeCurrent = (scope: TeamNetworkScope) => scopeCurrent(scope)
+    && scope.connection === loadedConnection.current && contentScopeKey(scope) === loadedScope
   const [members, setMembers] = useState<TeamMember[]>([])
   const [feed, setFeed] = useState<TeamMessageSummary[]>([])
   const [mail, setMail] = useState<TeamMessageSummary[]>([])
+  const [messageCapabilities, setMessageCapabilities] = useState<TeamMessageCapabilities>({ messages: false, mailboxState: false, mailSubjects: false, threads: false })
+  const [mailPage, setMailPage] = useState({ cursor: 0, hasMore: false })
+  const [mailAction, setMailAction] = useState<string | null>(null)
+  const mailPageFlight = useRef<symbol | null>(null)
+  const mailActionRef = useRef<symbol | null>(null)
+  const mailAttempts = useRef(new Map<string, { key: string; unread: boolean; version: number }>())
+  const [routeIntent, setRouteIntent] = useState<'read' | 'reply' | null>(null)
+  const localChats = useAppStore(state => state.sessions)
   const [mailBox, setMailBox] = useState<MailBox>('inbox')
   const [selectedMessage, setSelectedMessage] = useState<TeamMessage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -176,9 +176,14 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
   const agentFingerprint = useRef('')
 
   const selectedTeam = teams.find(team => team.id === teamId) ?? null
+  const uiKey = JSON.stringify([route ? contentScopeKey(captureScope(route)) : null, teamId, section, mailBox, visible])
+  const uiKeyRef = useRef(uiKey)
+  uiKeyRef.current = uiKey
+  const selectedMessageRef = useRef(selectedMessage?.id)
+  selectedMessageRef.current = selectedMessage?.id
   const ownedServer = projection?.servers.find(server => server.owned_by_caller && server.status === 'active') ?? null
   const canWrite = Boolean(selectedTeam && selectedTeam.status === 'active' && selectedTeam.role !== 'guest')
-  const unread = useMemo(() => mail.filter(message => message.delivery?.state !== 'read').length, [mail])
+  const unread = useMemo(() => ownedServer ? mail.filter(message => teamMessageUnread(message, ownedServer.id)).length : 0, [mail, ownedServer])
   const serverName = activeProfile?.name?.trim() || 'Active AgentsServer'
   const networkStatus = route && connected ? 'Team Network connected' : connecting ? 'Connecting to server' : connected ? 'Team Network not connected' : 'Server unavailable'
   const networkStatusColor = route && connected && !loading ? colors.green : connected || connecting ? colors.orange : colors.muted
@@ -188,7 +193,12 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
     setMembers([])
     setFeed([])
     setMail([])
+    setMailPage({ cursor: 0, hasMore: false })
+    setMailAction(null)
+    mailActionRef.current = null
+    mailAttempts.current.clear()
     setSelectedMessage(null)
+    setRouteIntent(null)
     setDraft(draftsByTeam.current.get(nextTeamId) ?? '')
     setAgentForm(false)
     setAgentId('')
@@ -205,21 +215,28 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
   const cancelMessageLoad = () => {
     requests.current.cancel('detail')
     setSelectedMessage(null)
+    setRouteIntent(null)
+    setMailAction(null)
     setDetailLoading(false)
   }
 
-  const loadMail = async (scope: TeamNetworkScope, currentTeamId: string, box: MailBox, server: NetworkServer | null, expectedRequest: TeamNetworkRequest) => {
+  const loadMail = async (scope: TeamNetworkScope, currentTeamId: string, box: MailBox, server: NetworkServer | null, expectedRequest: TeamNetworkRequest, capability = messageCapabilities, after = 0) => {
     if (box === 'inbox' && !server) {
       if (requests.current.isCurrent(expectedRequest) && scopeCurrent(scope)) setMail([])
       return
     }
-    const query = new URLSearchParams({ box, limit: '50' })
+    const query = new URLSearchParams({ box, limit: '25', after_sequence: String(after) })
+    if (capability.mailboxState && box === 'inbox') query.set('include_mailbox_state', 'true')
+    if (capability.mailSubjects) query.set('include_mail_subject', 'true')
     if (box === 'inbox' && server) {
       query.set('address_kind', 'server')
       query.set('address_id', server.id)
     }
-    const page = await scopeClient(scope).teamNetworkGet<unknown>(scope.route.basePath, `/v1/teams/${encodeURIComponent(currentTeamId)}/network/messages?${query}`)
-    if (requests.current.isCurrent(expectedRequest) && scopeCurrent(scope)) setMail(rows<TeamMessageSummary>(page, 'messages'))
+    const page = parseTeamMessagePage(await scopeClient(scope).teamNetworkGet<unknown>(scope.route.basePath, `/v1/teams/${encodeURIComponent(currentTeamId)}/network/messages?${query}`), box, box === 'inbox' ? server?.id ?? null : null, after)
+    if (requests.current.isCurrent(expectedRequest) && scopeCurrent(scope)) {
+      setMail(current => after ? [...new Map([...current, ...page.messages].map(message => [message.id, message])).values()] : page.messages)
+      setMailPage({ cursor: page.next_after_sequence, hasMore: page.has_more })
+    }
   }
 
   const loadWorkspace = async (preferredTeamId?: string) => {
@@ -242,8 +259,14 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
     setError('')
     setSelectedMessage(null)
     try {
-      const session = await scopeClient(scope).teamNetworkGet<TeamSessionResponse>(currentRoute.basePath, currentRoute.sessionPath)
+      const [session, hub] = await Promise.all([
+        scopeClient(scope).teamNetworkGet<TeamSessionResponse>(currentRoute.basePath, currentRoute.sessionPath),
+        scopeClient(scope).teamNetworkGet<unknown>(currentRoute.basePath, '/v1/health'),
+      ])
       if (!requests.current.isCurrent(expectedRequest) || !scopeCurrent(scope)) return
+      const capability = parseTeamMessageCapabilities(hub, useAppStore.getState().health?.capabilities?.team_hub_v1?.hub_id)
+      if (!capability.messages || !['service', 'node'].includes(session.principal?.kind ?? '')) throw new Error('This server does not expose an authenticated server Mail workspace.')
+      setMessageCapabilities(capability)
       const nextTeams = Array.isArray(session.teams) ? session.teams.filter(team => team?.id && team.status === 'active') : []
       const nextTeam = nextTeams.find(team => team.id === (preferredTeamId || teamId)) ?? nextTeams[0]
       setTeams(nextTeams)
@@ -257,7 +280,7 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
       const teamPath = `/v1/teams/${encodeURIComponent(nextTeam.id)}`
       const [projectionValue, feedValue, memberValue] = await Promise.all([
         scopeClient(scope).teamNetworkGet<NetworkProjection>(currentRoute.basePath, `${teamPath}/network?limit=100`),
-        scopeClient(scope).teamNetworkGet<unknown>(currentRoute.basePath, `${teamPath}/network/messages?box=feed&limit=50`),
+        scopeClient(scope).teamNetworkGet<unknown>(currentRoute.basePath, `${teamPath}/network/messages?box=feed&limit=25`),
         scopeClient(scope).teamNetworkGet<unknown>(currentRoute.basePath, `${teamPath}/members`),
       ])
       if (!requests.current.isCurrent(expectedRequest) || !scopeCurrent(scope)) return
@@ -268,9 +291,11 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
         agents: Array.isArray(projectionValue.agents) ? projectionValue.agents : [],
       }
       setProjection(nextProjection)
-      setFeed(rows<TeamMessageSummary>(feedValue, 'messages'))
+      loadedConnection.current = scope.connection
+      setLoadedScope(contentScopeKey(scope))
+      setFeed(parseTeamMessagePage(feedValue, 'feed', null).messages)
       setMembers(rows<TeamMember>(memberValue, 'members'))
-      await loadMail(scope, nextTeam.id, mailBox, nextProjection.servers.find(server => server.owned_by_caller && server.status === 'active') ?? null, expectedRequest)
+      await loadMail(scope, nextTeam.id, mailBox, nextProjection.servers.find(server => server.owned_by_caller && server.status === 'active') ?? null, expectedRequest, capability)
     } catch (cause) {
       if (requests.current.isCurrent(expectedRequest) && scopeCurrent(scope)) setError(cleanError(cause))
     } finally {
@@ -315,33 +340,105 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
   }
 
   const openMessage = async (summary: TeamMessageSummary) => {
-    if (!route || !teamId || loading || detailLoading) return
+    if (!route || !teamId || loading || detailLoading || uiKeyRef.current !== uiKey) return
     const scope = captureScope(route)
+    if (!messageScopeCurrent(scope)) return
     const expectedRequest = requests.current.begin('detail')
     setDetailLoading(true)
     setError('')
     try {
-      const response = await scopeClient(scope).teamNetworkGet<{ message: TeamMessage }>(route.basePath, `/v1/teams/${encodeURIComponent(teamId)}/network/messages/${encodeURIComponent(summary.id)}`)
+      const query = new URLSearchParams()
+      if (messageCapabilities.mailboxState) query.set('include_mailbox_state', 'true')
+      if (messageCapabilities.mailSubjects) query.set('include_mail_subject', 'true')
+      const response = await scopeClient(scope).teamNetworkGet<{ message: unknown }>(route.basePath, `/v1/teams/${encodeURIComponent(teamId)}/network/messages/${encodeURIComponent(summary.id)}${query.size ? `?${query}` : ''}`)
       if (!requests.current.isCurrent(expectedRequest) || !scopeCurrent(scope)) return
-      if (!response.message || response.message.id !== summary.id) throw new Error('Teamspace returned the wrong message.')
-      setSelectedMessage(response.message)
-      if (section === 'mail' && mailBox === 'inbox' && summary.delivery?.state !== 'read') {
-        const receipt = await scopeClient(scope).teamNetworkPost<{ recipients?: TeamMessageSummary['recipients'] }>(route.basePath, `/v1/teams/${encodeURIComponent(teamId)}/network/messages/${encodeURIComponent(summary.id)}/receipts`, {
-          state: 'read',
-          idempotency_key: teamNetworkIdempotencyKey(),
-        })
-        if (!requests.current.isCurrent(expectedRequest) || !scopeCurrent(scope)) return
-        setMail(current => current.map(message => message.id === summary.id ? {
-          ...message,
-          recipients: Array.isArray(receipt.recipients) ? receipt.recipients : message.recipients,
-          delivery: message.delivery ? { ...message.delivery, state: 'read' } : message.delivery,
-        } : message))
+      const message = parseTeamMessage(response.message, summary.id, true)
+      if (section === 'mail' && mailBox === 'inbox' && (!ownedServer || !message.recipients.some(value => value.kind === 'server' && value.id === ownedServer.id))) throw new Error('This message does not belong to the selected server mailbox.')
+      setSelectedMessage(message)
+      // Match desktop: only an explicit, successfully authenticated detail open
+      // marks its own delivery read. List refreshes never acknowledge messages.
+      if (section === 'mail' && mailBox === 'inbox' && ownedServer && teamMessageUnread(message, ownedServer.id)) {
+        await changeMailState(message, false, { scope, request: expectedRequest })
       }
     } catch (cause) {
       if (requests.current.isCurrent(expectedRequest) && scopeCurrent(scope)) setError(cleanError(cause))
     } finally {
       if (requests.current.isCurrent(expectedRequest)) setDetailLoading(false)
     }
+  }
+
+  const changeMailState = async (message: TeamMessage, operation: boolean | 'remove', opened?: { scope: TeamNetworkScope; request: TeamNetworkRequest }) => {
+    if (!route || !ownedServer || section !== 'mail' || mailBox !== 'inbox' || uiKeyRef.current !== uiKey || !opened && selectedMessageRef.current !== message.id || mailActionRef.current || !visible) return
+    const scope = opened?.scope ?? captureScope(route), request = opened?.request ?? requests.current.begin('detail'), token = Symbol()
+    if (!requests.current.isCurrent(request) || !messageScopeCurrent(scope)) return
+    if (!message.recipients.some(value => value.kind === 'server' && value.id === ownedServer.id)) return
+    mailActionRef.current = token
+    setMailAction(operation === 'remove' ? 'Removing…' : operation ? 'Marking unread…' : 'Marking read…')
+    setError('')
+    const current = () => requests.current.isCurrent(request) && scopeCurrent(scope) && uiKeyRef.current === uiKey
+    try {
+      const path = `/v1/teams/${encodeURIComponent(teamId)}/network/messages/${encodeURIComponent(message.id)}`
+      if (operation === 'remove') {
+        const receipt = await scopeClient(scope).teamNetworkPost<unknown>(route.basePath, `${path}/dismissals`, { address_kind: 'server', address_id: ownedServer.id, idempotency_key: teamNetworkIdempotencyKey() })
+        if (!current()) return
+        parseTeamDismissal(receipt, message.id, ownedServer.id)
+        setMail(values => values.filter(value => value.id !== message.id))
+        setSelectedMessage(null)
+      } else {
+        const state = message.mailbox_state
+        if (operation && !messageCapabilities.mailboxState) throw new Error('This Hub does not support marking Mail unread.')
+        if (messageCapabilities.mailboxState && (!state || state.address_id !== ownedServer.id)) throw new Error('Refresh the message before changing its read status.')
+        const attemptKey = JSON.stringify([uiKey, message.id, ownedServer.id])
+        const saved = mailAttempts.current.get(attemptKey)
+        const attempt = saved?.unread === operation && saved.version === (state?.version ?? 0) ? saved : { key: teamNetworkIdempotencyKey(), unread: operation, version: state?.version ?? 0 }
+        mailAttempts.current.set(attemptKey, attempt)
+        const receipt = await scopeClient(scope).teamNetworkPost<unknown>(route.basePath, `${path}/${messageCapabilities.mailboxState ? 'mailbox-state' : 'receipts'}`, messageCapabilities.mailboxState
+          ? { address_kind: 'server', address_id: ownedServer.id, unread: operation, expected_version: attempt.version, idempotency_key: attempt.key }
+          : { state: 'read', address_kind: 'server', address_id: ownedServer.id, idempotency_key: attempt.key })
+        if (!current()) return
+        const parsed = parseTeamReadReceipt(receipt, message.id, ownedServer.id, messageCapabilities.mailboxState ? { unread: operation, version: attempt.version } : undefined)
+        const update = <T extends TeamMessageSummary>(value: T): T => {
+          if (value.id !== message.id || (value.mailbox_state?.version ?? -1) > (parsed.mailbox_state?.version ?? -1)) return value
+          return { ...value, ...(parsed.mailbox_state ? { mailbox_state: parsed.mailbox_state } : {}),
+            recipients: value.recipients.map(recipient => parsed.recipients.find(next => next.kind === recipient.kind && next.id === recipient.id) ?? recipient),
+            delivery: parsed.recipients.find(value => value.kind === 'server' && value.id === ownedServer.id) }
+        }
+        mailAttempts.current.delete(attemptKey)
+        setMail(values => values.map(update))
+        setSelectedMessage(value => value ? update(value) : value)
+      }
+    } catch (cause) { if (current()) setError(cleanError(cause)) }
+    finally { if (mailActionRef.current === token) mailActionRef.current = null; if (current()) setMailAction(null) }
+  }
+
+  const loadMoreMail = async () => {
+    if (!route || !teamId || loading || mailPageFlight.current || !mailPage.hasMore || uiKeyRef.current !== uiKey) return
+    const scope = captureScope(route), request = requests.current.begin('mail'), token = Symbol()
+    if (!messageScopeCurrent(scope)) return
+    mailPageFlight.current = token
+    setLoading(true)
+    try { await loadMail(scope, teamId, mailBox, ownedServer, request, messageCapabilities, mailPage.cursor) }
+    catch (cause) { if (requests.current.isCurrent(request) && scopeCurrent(scope)) setError(cleanError(cause)) }
+    finally { if (mailPageFlight.current === token) mailPageFlight.current = null; if (requests.current.isCurrent(request)) setLoading(false) }
+  }
+
+  const routeToChat = async (sessionId: string) => {
+    if (!route || !selectedMessage || selectedMessageRef.current !== selectedMessage.id || !routeIntent || selectedMessage.sender.kind !== 'server' || mailActionRef.current || uiKeyRef.current !== uiKey) return
+    if (routeIntent === 'reply' && (!ownedServer || !teamMailReplyAvailable(selectedMessage, ownedServer.id))) return
+    const scope = captureScope(route), state = useAppStore.getState(), request = requests.current.begin('detail'), token = Symbol()
+    if (!messageScopeCurrent(scope)) return
+    mailActionRef.current = token; setMailAction('Opening chat…'); setError('')
+    try {
+      const accepted = await state.stageTeamMailDraft({ sessionId, expectedSelectedSessionId: state.selectedSessionId,
+        expectedProfileId: scope.profileId, expectedProfileGeneration: scope.profileGeneration, expectedServerIdentity: scope.serverIdentity,
+        expectedServerInstanceId: scope.serverInstanceId, expectedValidationRevision: scope.validationRevision, intent: routeIntent,
+        message: { teamId, messageId: selectedMessage.id, senderId: selectedMessage.sender.id, senderName: selectedMessage.sender.display_name,
+          senderKind: 'server', title: selectedMessage.title || selectedMessage.preview, section: section === 'feed' ? 'feed' : 'mail', mailboxBox: mailBox } })
+      if (!requests.current.isCurrent(request) || !scopeCurrent(scope)) return
+      if (accepted) onClose()
+      else setError('The chat or draft changed. Your existing draft was kept; choose the chat again.')
+    } catch (cause) { if (requests.current.isCurrent(request) && scopeCurrent(scope)) setError(cleanError(cause)) }
+    finally { if (mailActionRef.current === token) mailActionRef.current = null; if (requests.current.isCurrent(request)) setMailAction(null) }
   }
 
   const postFeed = async () => {
@@ -461,10 +558,22 @@ export function TeamNetwork({ visible, onClose }: { visible: boolean; onClose: (
       {!route ? <UnavailableState loading={loading} onRetry={() => void refreshWorkspace()} />
         : loading && !projection ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /><Text style={{ color: colors.muted }}>Loading Teamspace…</Text></View>
           : !selectedTeam || !projection ? <UnavailableState title="Teamspace could not be loaded" body={error || 'Set up or join a Teamspace from the desktop app, then retry here.'} loading={loading} onRetry={() => void refreshWorkspace()} />
-            : selectedMessage ? <MessageDetail message={selectedMessage} />
+            : selectedMessage ? <View style={styles.fill}>
+                <View style={styles.mailToolbar}>
+                  {section === 'mail' && mailBox === 'inbox' && ownedServer ? <>
+                    {teamMessageUnread(selectedMessage, ownedServer.id) || messageCapabilities.mailboxState ? <ActionButton icon={Inbox} label={teamMessageUnread(selectedMessage, ownedServer.id) ? 'Mark read' : 'Mark unread'} disabled={Boolean(mailAction)} onPress={() => void changeMailState(selectedMessage, !teamMessageUnread(selectedMessage, ownedServer.id))} /> : null}
+                    <ActionButton icon={X} label="Remove from my inbox" disabled={Boolean(mailAction)} onPress={() => void changeMailState(selectedMessage, 'remove')} />
+                  </> : null}
+                  {selectedMessage.sender.kind === 'server' ? <ActionButton icon={Send} label="Route to chat" disabled={Boolean(mailAction)} onPress={() => setRouteIntent('read')} /> : null}
+                  {ownedServer && teamMailReplyAvailable(selectedMessage, ownedServer.id) ? <ActionButton icon={Send} label="Reply through agent" disabled={Boolean(mailAction)} onPress={() => setRouteIntent('reply')} /> : null}
+                </View>
+                {mailAction ? <Text accessibilityRole="text" style={{ color: colors.muted }}>{mailAction}</Text> : null}
+                {routeIntent ? <ScrollView style={{ maxHeight: 180, flexGrow: 0 }} keyboardShouldPersistTaps="handled"><Text style={{ color: colors.muted }}>Choose a chat. This stages a draft; nothing is sent.</Text>{localChats.filter(session => !session.archived).map(session => <ActionButton key={session.id} icon={Send} label={`${session.title || 'Untitled chat'} · ${session.id}`} disabled={Boolean(mailAction)} onPress={() => void routeToChat(session.id)} />)}<ActionButton icon={X} label="Cancel chat selection" disabled={Boolean(mailAction)} onPress={() => setRouteIntent(null)} /></ScrollView> : null}
+                <MessageDetail message={selectedMessage} />
+              </View>
               : <View style={styles.fill}>
                   {section === 'feed' ? <Bulletin messages={feed} onOpen={openMessage} /> : null}
-                  {section === 'mail' ? <Mail messages={mail} box={mailBox} hasAddress={Boolean(ownedServer)} loading={loading} onBox={box => void changeMailbox(box)} onOpen={openMessage} /> : null}
+                  {section === 'mail' ? <><Mail messages={mail} box={mailBox} hasAddress={Boolean(ownedServer)} addressId={ownedServer?.id ?? ''} loading={loading} onBox={box => void changeMailbox(box)} onOpen={openMessage} />{mailPage.hasMore ? <ActionButton icon={RefreshCw} label="Load more Mail" disabled={loading} onPress={() => void loadMoreMail()} /> : null}</> : null}
                   {section === 'directory' ? <Directory projection={projection} members={members} canRegister={Boolean(ownedServer) && canWrite} form={agentForm} agentId={agentId} agentName={agentName} backend={agentBackend} busy={agentBusy || loading} onToggleForm={() => setAgentForm(value => !value)} onAgentId={setAgentId} onAgentName={setAgentName} onBackend={setAgentBackend} onRegister={() => void registerAgent()} /> : null}
                   {section === 'feed' && canWrite ? <View style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}><TextInput testID="team-feed-composer" accessibilityLabel="Share with the team" value={draft} onChangeText={updateDraft} multiline maxLength={49_152} editable={!posting && !loading} placeholder="Share an update with everyone…" placeholderTextColor={colors.muted} style={[styles.composerInput, { color: colors.text, backgroundColor: colors.raised, borderColor: colors.border }]} /><Pressable testID="team-feed-send" accessibilityRole="button" accessibilityLabel={posting ? 'Posting update' : 'Post update'} accessibilityState={{ disabled: posting || loading || !draft.trim() }} disabled={posting || loading || !draft.trim()} onPress={() => void postFeed()} style={({ pressed }) => [styles.send, { backgroundColor: colors.blue, opacity: posting || loading || !draft.trim() ? 0.35 : pressed ? 0.68 : 1 }]}>{posting ? <ActivityIndicator color="white" /> : <Send size={18} color="white" />}</Pressable></View> : null}
                 </View>}
@@ -491,9 +600,9 @@ function Bulletin({ messages, onOpen }: { messages: TeamMessageSummary[]; onOpen
   return <CardList emptyTitle="Nothing shared yet" emptyBody="Messages and skills shared with everyone will collect here.">{messages.map(message => <MessageCard key={message.id} message={message} onOpen={() => onOpen(message)} />)}</CardList>
 }
 
-function Mail({ messages, box, hasAddress, loading, onBox, onOpen }: { messages: TeamMessageSummary[]; box: MailBox; hasAddress: boolean; loading: boolean; onBox: (box: MailBox) => void; onOpen: (message: TeamMessageSummary) => void }) {
+function Mail({ messages, box, hasAddress, addressId, loading, onBox, onOpen }: { messages: TeamMessageSummary[]; box: MailBox; hasAddress: boolean; addressId: string; loading: boolean; onBox: (box: MailBox) => void; onOpen: (message: TeamMessageSummary) => void }) {
   const colors = usePalette()
-  return <View style={styles.fill}><View style={styles.mailToolbar}><TabButton label="Inbox" selected={box === 'inbox'} disabled={loading} onPress={() => onBox('inbox')} /><TabButton label="Sent" selected={box === 'sent'} disabled={loading} onPress={() => onBox('sent')} /></View>{box === 'inbox' && !hasAddress ? <EmptyState title="No mailbox on this server" body="Connect this server to the Teamspace to receive passive team mail." /> : <CardList emptyTitle={box === 'inbox' ? 'Inbox is empty' : 'Nothing sent yet'} emptyBody={box === 'inbox' ? 'Agent mail waits here without waking or steering an agent.' : 'Messages sent by this server will appear here.'}>{messages.map(message => <MessageCard key={message.id} message={message} unread={box === 'inbox' && message.delivery?.state !== 'read'} onOpen={() => onOpen(message)} />)}</CardList>}<Text style={[styles.passiveNote, { color: colors.muted }]}>Mail is passive: opening it here never wakes or steers an agent.</Text></View>
+  return <View style={styles.fill}><View style={styles.mailToolbar}><TabButton label="Inbox" selected={box === 'inbox'} disabled={loading} onPress={() => onBox('inbox')} /><TabButton label="Sent" selected={box === 'sent'} disabled={loading} onPress={() => onBox('sent')} /></View>{box === 'inbox' && !hasAddress ? <EmptyState title="No mailbox on this server" body="Connect this server to the Teamspace to receive passive team mail." /> : <CardList emptyTitle={box === 'inbox' ? 'Inbox is empty' : 'Nothing sent yet'} emptyBody={box === 'inbox' ? 'Agent mail waits here without waking or steering an agent.' : 'Messages sent by this server will appear here.'}>{messages.map(message => <MessageCard key={message.id} message={message} unread={box === 'inbox' && teamMessageUnread(message, addressId)} onOpen={() => onOpen(message)} />)}</CardList>}<Text style={[styles.passiveNote, { color: colors.muted }]}>Mail is passive: opening it here never wakes or steers an agent.</Text></View>
 }
 
 function CardList({ emptyTitle, emptyBody, children }: { emptyTitle: string; emptyBody: string; children: React.ReactNode }) {

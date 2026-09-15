@@ -3,6 +3,12 @@ import { messageText } from './format'
 import { foldMarkdownSource } from './math'
 import { importedCrossChatDelivery, type ImportedCrossChatDelivery } from './imported-cross-chat-delivery'
 import { isChatMailboxEvent } from './chat-mailbox'
+import { isVerifiedSilentHistory } from './history'
+import {
+  hasProviderUserProvenance, isImportedHistoryRecord, isImportedClaudeControlCompanion,
+  isImportedCodexRuntimeContext, isImportedProviderControlMetadata, isImportedProviderInterruption,
+  isImportedSourceProvenRepair, isImportedSourceProvenAssistantReplay, isImportedSourceProvenNativeReplay,
+} from './provider-origin'
 
 export type TimelineRow = MessageRow | TraceRow | ProgressRow | MediaRow | SystemRow | JobRow
 export interface MessageRow { kind: 'message'; key: string; seq: number; role: 'user' | 'assistant'; events: Event[]; files: AgentFile[] }
@@ -52,6 +58,7 @@ interface Turn {
   finishedSeq?: number
   failedAt?: string
   stoppedAt?: string
+  historical?: boolean
 }
 
 // A terminal exchange summary must override stale "active" leg packets, but
@@ -64,6 +71,7 @@ const terminalNormalizedCrossChatEvents = new WeakMap<
 >()
 const importedDeliveryPresentationEvents = new WeakMap<Event, Event>()
 const mailboxStateEvents = new WeakMap<Event, Map<NonNullable<Event['inbox_state']>, Event>>()
+const interruptionPresentationEvents = new WeakMap<Event, Event>()
 
 const hidden = new Set([
   'turn_queued',
@@ -77,6 +85,7 @@ const hidden = new Set([
   'turn_queue_reordered',
   'turn_queue_paused',
   'turn_queue_delivery_fenced',
+  'history_imported',
   'subagent_state',
   'job_updated',
   'job_deleted',
@@ -123,7 +132,7 @@ interface JobProjectionAssignment {
  * IDs/occurrence identities route late or recycled-run packets precisely.
  */
 function jobProjectionAssignments(events: readonly Event[]): Map<Event, JobProjectionAssignment> {
-  const ordered = [...events].sort((left, right) => left.seq - right.seq)
+  const ordered = events.filter(event => !isImportedProviderControlMetadata(event)).sort((left, right) => left.seq - right.seq)
   const occurrenceByEvent = new Map<Event, Map<string, string>>()
   const currentOccurrenceByRun = new Map<string, { key: string; started: boolean }>()
   for (const event of ordered) {
@@ -270,6 +279,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
       trace: [],
       promotedCommentaryIds: [],
       files: [],
+      historical: isImportedHistoryRecord(event),
     }
     items.push(turn)
     return turn
@@ -384,6 +394,36 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
   }
 
   for (const event of events) {
+    if (isImportedClaudeControlCompanion(event) || isImportedSourceProvenAssistantReplay(event)
+      || isImportedSourceProvenNativeReplay(event) && event.type !== 'turn_started') continue
+    if (isImportedSourceProvenRepair(event) || isImportedSourceProvenNativeReplay(event)) {
+      // One import can contain many logical inputs. Hide only the proven copy,
+      // keeping an empty boundary so an unmatched answer remains independent.
+      const previous = event.run_id ? turns.get(event.run_id) : undefined
+      if (previous) { previous.finishedAt ||= event.ts; previous.finishedSeq ||= event.seq }
+      active = startTurn(event)
+      continue
+    }
+    if (isImportedCodexRuntimeContext(event)) continue
+    if (isImportedProviderInterruption(event)) {
+      const key = `provider-interruption:${event.session_id}:${event.provider_origin.event_id.toLowerCase()}`
+      const existing = stopRows.get(key)
+      if (existing) {
+        existing.representedEventIds = [...existing.representedEventIds ?? [existing.event.id], event.id]
+        existing.representedEventSeqs = [...existing.representedEventSeqs ?? [existing.event.seq], event.seq]
+      } else {
+        let presentation = interruptionPresentationEvents.get(event)
+        if (!presentation) {
+          presentation = { ...event, ts: event.provider_origin.timestamp, prompt: null, text: null, result_text: null }
+          interruptionPresentationEvents.set(event, presentation)
+        }
+        const row: SystemRow = { kind: 'system', key, seq: event.seq,
+          event: presentation }
+        stopRows.set(key, row)
+        items.push(row)
+      }
+      continue
+    }
     const deliveredDigest = digestBody(event)
     if (deliveredDigest) {
       appendDigestEvent({
@@ -681,7 +721,7 @@ export function projectTimeline(events: Event[], knownFiles: AgentFile[]): Timel
         })
       }
     }
-    const traceActive = !item.finishedAt && item.assistant.length === 0
+    const traceActive = !item.historical && !item.finishedAt && item.assistant.length === 0
     // Commentary is public assistant progress while a turn is active. Private
     // reasoning stays in the trace, and commentary returns to the settled
     // trace after completion unless it was promoted into durable output.
@@ -945,7 +985,7 @@ function promoteInterruptedCommentary(turn: Turn): void {
 /** Empty transport-only history must never replace a displayable live tail. */
 export function projectPresentableHistory(events: Event[], knownFiles: AgentFile[]): TimelineRow[] | null {
   const rows = projectTimeline(events, knownFiles)
-  return rows.length ? rows : null
+  return rows.length || isVerifiedSilentHistory(events) ? rows : null
 }
 
 export const ACTIVE_TRACE_PROGRESS_CHARACTER_LIMIT = 1_200
@@ -1516,9 +1556,11 @@ function isDigestDeliveryTurn(event: Event): boolean {
 }
 
 function isInternalDeliveryTurn(event: Event): boolean {
+  if (hasProviderUserProvenance(event)) return false
   return isDigestDeliveryTurn(event)
     || event.purpose === 'cross_chat_handoff_delivery'
-    || event.purpose === 'chat_mailbox_wake'
+    || event.purpose === 'chat_mailbox_wake' && event.imported !== true
+      && !event.run_id?.startsWith('import_') && !hasProviderUserProvenance(event)
 }
 
 /** Match the server/Mac semantic identity for cross-chat lifecycle packets. */

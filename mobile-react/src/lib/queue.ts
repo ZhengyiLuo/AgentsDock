@@ -1,6 +1,7 @@
 import type { Event, Health, QueuedCrossChatDeliveryIdentity, QueuedTurn } from '../types'
 import { crossChatCapabilityVersion, crossChatHandoffsAvailable, exactQueuedDeliverySkipAvailable } from './chat-references'
 import { isAsyncCrossChatMessage } from './timeline'
+import { isImportedHistoryRecord, isImportedProviderControlMetadata } from './provider-origin'
 
 export function isUserQueuedTurn(turn: QueuedTurn): boolean {
   return turn.purpose !== 'handoff_digest'
@@ -62,6 +63,7 @@ export function queuedDeliverySkipIdentity(turn: QueuedTurn, health: Health | nu
 
 /** Public lifecycle events trigger an authoritative queue read only in the target chat. */
 export function crossChatQueueRefreshSessionId(event: Event): string | null {
+  if (isImportedHistoryRecord(event) || isImportedProviderControlMetadata(event)) return null
   if (!event.queued_id || event.session_id !== event.target_session_id) return null
   return event.type.startsWith('cross_chat_handoff_') || event.type.startsWith('cross_chat_exchange_leg_') || isAsyncCrossChatMessage(event)
     ? event.session_id : null
@@ -112,6 +114,8 @@ export function queuedMoveCrossesDeliveryBarrier(
 }
 
 export function updateQueuedTurns(current: QueuedTurn[], event: Event): QueuedTurn[] {
+  // Imported lifecycle packets describe past ownership, never today's queue.
+  if (isImportedHistoryRecord(event) || isImportedProviderControlMetadata(event)) return current
   if ((event.type === 'turn_queued' || event.type === 'turn_queue_delivery_fenced') && event.queued_id) {
     const previous = current.find(turn => turn.queued_id === event.queued_id)
     const prompt = event.display_prompt ?? event.prompt ?? event.request_prompt ?? ''

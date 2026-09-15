@@ -2,20 +2,25 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AccessibilityInfo, ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useShallow } from 'zustand/react/shallow'
-import { Archive, Check, ChevronDown, Copy, FileText, GitFork, Pause, Pencil, Pin, Play, Plus, RefreshCw, Search, SquareTerminal, Trash2, X } from 'lucide-react-native'
+import { Archive, Bot, Check, ChevronDown, Copy, FileText, FolderOpen, GitFork, Pause, Pencil, Pin, Play, Plus, RefreshCw, Search, Square, SquareTerminal, Trash2, X } from 'lucide-react-native'
 import { describeJobSchedule, effectiveScheduleKind } from '../lib/job-schedule'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { filesNewestFirst } from '../lib/format'
 import { mobileFileViewerKind } from '../lib/file-viewer'
 import { runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError } from '../lib/runtime-catalog'
 import { PROVIDER_JOBS_ACCESS_MODES, providerJobsAccessDescription, providerJobsAccessLabel, providerJobsAccessState } from '../lib/provider-jobs-access'
-import { useAppStore } from '../store/useAppStore'
+import { client, useAppStore } from '../store/useAppStore'
+import { activeScheduledJobId, activeSessionRunId, currentRunningJobIds, scheduledJobRuntimeError } from '../lib/scheduled-job-activity'
+import { isSubagentActive, subagentDetailText, subagentDisplayName, subagentLogText, subagentStatusLabel, subagentsFromEvents } from '../lib/subagents'
 import { usePalette } from '../theme'
-import type { ProviderJobsAccess, RuntimeOption } from '../types'
+import type { Event, ProviderJobsAccess, RuntimeOption } from '../types'
 import { Text, TextInput } from './AppText'
 import { MediaGrid } from './MediaGrid'
 import { IconButton, SectionHeader } from './ui'
 import { useFileViewer } from './file-viewer/FileViewerContext'
+import { WorkingDirectoryPicker, workingDirectoryConnected, workingDirectoryScopeKey } from './WorkingDirectoryPicker'
+
+const EMPTY_EVENTS: Event[] = []
 
 type JobRunFeedback = {
   phase: 'requesting' | 'deferred' | 'started' | 'failed'
@@ -29,6 +34,8 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const workspaceAdopting = useAppStore(state => state.workspaceAdopting)
   const connected = useAppStore(state => state.connected)
+  const connection = client
+  const actionScopeKey = useAppStore(state => workingDirectoryScopeKey(state, sessionId))
   const running = useAppStore(state => state.activeSessionIds.has(sessionId))
   const stopping = useAppStore(state => state.stoppingSessionIds.has(sessionId))
   const admitting = useAppStore(state => Boolean(state.turnAdmissionTokens[sessionId]) || state.sendingSessionIds.has(sessionId)
@@ -54,10 +61,14 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
     } : undefined
   }))
   const snapshotFiles = useAppStore(state => state.snapshots[sessionId]?.files)
+  const events = useAppStore(state => state.snapshots[sessionId]?.events ?? EMPTY_EVENTS)
   const filesTotal = useAppStore(state => state.snapshots[sessionId]?.filesTotal ?? state.snapshots[sessionId]?.files.length ?? 0)
   const filePaging = useAppStore(state => state.filePaging[sessionId])
   const runtime = useAppStore(state => state.runtime)
   const health = useAppStore(state => state.health)
+  const activeRunId = activeSessionRunId(health, sessionId)
+  const runningJobIds = useMemo(() => currentRunningJobIds(events, running, activeRunId), [events, running, activeRunId])
+  const stoppableJobId = running ? activeScheduledJobId(events, activeRunId) : null
   const allJobs = useAppStore(state => state.jobs)
   const pendingJobRunIds = useAppStore(state => state.pendingJobRunIds)
   const allPins = useAppStore(state => state.pins)
@@ -71,6 +82,7 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   const remove = useAppStore(state => state.deleteSession)
   const removePin = useAppStore(state => state.removePin)
   const runJob = useAppStore(state => state.runJob)
+  const stopTurn = useAppStore(state => state.stopTurn)
   const updateJob = useAppStore(state => state.updateJob)
   const refreshJobs = useAppStore(state => state.refreshJobs)
   const deleteJob = useAppStore(state => state.deleteJob)
@@ -78,12 +90,16 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   const [title, setTitle] = useState(session?.title ?? '')
   const [folder, setFolder] = useState(session?.folder ?? 'General')
   const [cwd, setCwd] = useState(session?.cwd ?? '')
+  const [directoryOpen, setDirectoryOpen] = useState(false)
+  const directoryOpenRef = useRef(false)
   const [systemPrompt, setSystemPrompt] = useState(session?.system_prompt ?? '')
   const [mediaOpen, setMediaOpen] = useState(false)
   const [pinPreviewId, setPinPreviewId] = useState<string | null>(null)
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
   const [jobRunFeedback, setJobRunFeedback] = useState<Record<string, JobRunFeedback>>({})
-  const jobRunsInFlight = useRef(new Set<string>())
+  const jobRunsInFlight = useRef(new Map<string, symbol>())
+  const [jobAction, setJobAction] = useState<string | null>(null)
+  const jobActionRef = useRef<symbol | null>(null)
   const jobRunFeedbackTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const scopeIsCurrent = () => {
     const state = useAppStore.getState()
@@ -92,6 +108,14 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       && state.selectedSessionId === sessionId
       && !state.workspaceAdopting
   }
+  const networkScopeCurrent = () => scopeIsCurrent() && client === connection && workingDirectoryConnected(sessionId)
+    && workingDirectoryScopeKey(useAppStore.getState(), sessionId) === actionScopeKey
+  useEffect(() => {
+    jobRunsInFlight.current.clear(); jobActionRef.current = null
+    setJobAction(null); setJobRunFeedback({}); directoryOpenRef.current = false; setDirectoryOpen(false)
+    for (const timer of jobRunFeedbackTimers.current.values()) clearTimeout(timer)
+    jobRunFeedbackTimers.current.clear()
+  }, [actionScopeKey])
   const providerSessionId = session?.session_id?.trim() || session?.codex_thread_id?.trim() || session?.claude_session_id?.trim() || session?.cursor_session_id?.trim() || ''
   const forkDisabled = !connected || running || stopping || admitting
   const copySessionId = async () => {
@@ -138,12 +162,18 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
     }
   }
   const runScheduledJob = async (jobId: string) => {
-    if (!scopeIsCurrent() || jobRunsInFlight.current.has(jobId)) return
-    jobRunsInFlight.current.add(jobId)
+    const state = useAppStore.getState(), currentJob = state.jobs.find(value => value.id === jobId && value.session_id === sessionId)
+    const currentSession = state.sessions.find(value => value.id === sessionId)
+    const currentRun = activeSessionRunId(state.health, sessionId)
+    if (!networkScopeCurrent() || jobActionRef.current || jobRunsInFlight.current.has(jobId) || state.pendingJobRunIds.has(jobId)
+      || !currentJob || !currentSession || currentJob.manual_run_pending
+      || currentRunningJobIds(state.snapshots[sessionId]?.events ?? [], state.activeSessionIds.has(sessionId), currentRun).has(jobId)
+      || scheduledJobRuntimeError(currentJob, currentSession, state.health, state.runtime)) return
+    const token = Symbol(); jobRunsInFlight.current.set(jobId, token)
     showJobRunFeedback(jobId, { phase: 'requesting', message: 'Requesting run…' })
     try {
       const result = await runJob(jobId, profileGeneration)
-      if (!scopeIsCurrent()) return
+      if (!networkScopeCurrent() || jobRunsInFlight.current.get(jobId) !== token) return
       if (!result) {
         showJobRunFeedback(jobId, { phase: 'failed', message: 'The active server changed before the run was accepted.' }, 8_000)
         return
@@ -160,7 +190,25 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
           : 'Started now. Output will appear in this chat.'),
       }, deferred ? 0 : 6_000)
     } finally {
-      jobRunsInFlight.current.delete(jobId)
+      if (jobRunsInFlight.current.get(jobId) === token) jobRunsInFlight.current.delete(jobId)
+    }
+  }
+  const performJobAction = async (jobId: string, action: 'stop' | 'toggle') => {
+    const state = useAppStore.getState(), currentJob = state.jobs.find(value => value.id === jobId && value.session_id === sessionId)
+    const currentSession = state.sessions.find(value => value.id === sessionId)
+    if (!networkScopeCurrent() || jobActionRef.current || jobRunsInFlight.current.size || !currentJob || !currentSession) return
+    if (action === 'stop') {
+      const currentRun = activeSessionRunId(state.health, sessionId)
+      if (!activeRunId || currentRun !== activeRunId || state.stoppingSessionIds.has(sessionId) || !state.activeSessionIds.has(sessionId)
+        || activeScheduledJobId(state.snapshots[sessionId]?.events ?? [], currentRun) !== jobId) return
+    } else if (currentJob.manual_run_pending || state.pendingJobRunIds.has(jobId)
+      || currentJob.enabled === false && scheduledJobRuntimeError(currentJob, currentSession, state.health, state.runtime)) return
+    const token = Symbol(); jobActionRef.current = token; setJobAction(`${jobId}:${action}`)
+    try {
+      if (action === 'stop') await stopTurn(profileGeneration, sessionId)
+      else await updateJob(jobId, { enabled: currentJob.enabled === false }, profileGeneration)
+    } finally {
+      if (jobActionRef.current === token) { jobActionRef.current = null; if (networkScopeCurrent()) setJobAction(null) }
     }
   }
   useEffect(() => {
@@ -171,14 +219,14 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
   }, [session?.cwd, session?.folder, session?.system_prompt, session?.title])
   useEffect(() => {
     for (const job of jobs) {
-      if (jobRunFeedback[job.id]?.phase === 'deferred' && job.manual_run_pending === false) {
+      if (jobRunFeedback[job.id]?.phase === 'deferred' && job.manual_run_pending === false && runningJobIds.has(job.id)) {
         showJobRunFeedback(job.id, {
           phase: 'started',
           message: 'The deferred run started. Output will appear in this chat.',
         }, 6_000)
       }
     }
-  }, [jobRunFeedback, jobs])
+  }, [jobRunFeedback, jobs, runningJobIds])
   useEffect(() => () => {
     for (const timer of jobRunFeedbackTimers.current.values()) clearTimeout(timer)
     jobRunFeedbackTimers.current.clear()
@@ -201,8 +249,10 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
       <Text style={[styles.hint, { color: colors.muted }]}>{jobsAccess.available ? `${providerJobsAccessLabel(jobsAccess.effective)}${jobsAccess.inheritedDefault ? ' (server default)' : ''}. ${providerJobsAccessDescription(jobsAccess.effective)}` : 'Update AgentsServer to set Read-only or Blocked. Human job controls remain available.'}</Text>
       <Field label="System prompt"><TextInput value={systemPrompt} onChangeText={setSystemPrompt} onBlur={() => { const clean = systemPrompt.trim(); if (scopeIsCurrent() && clean !== (session.system_prompt ?? '')) void update(sessionId, { system_prompt: clean || null }, profileGeneration) }} multiline maxLength={12_000} placeholder="Optional per-chat instructions" placeholderTextColor={colors.muted} style={[styles.multilineInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
       <Field label="Folder"><TextInput value={folder} onChangeText={setFolder} onBlur={() => { if (scopeIsCurrent()) void update(sessionId, { folder: folder.trim() || 'General' }, profileGeneration) }} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
-      <Field label="Working directory"><TextInput value={cwd} onChangeText={setCwd} onBlur={() => { if (scopeIsCurrent()) void update(sessionId, { cwd: cwd.trim() }, profileGeneration) }} autoCapitalize="none" autoCorrect={false} style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /></Field>
+      <Field label="Working directory"><View style={styles.cwdRow}><TextInput value={cwd} onChangeText={setCwd} onBlur={() => { if (networkScopeCurrent() && !directoryOpenRef.current) void update(sessionId, { cwd: cwd.trim() }, profileGeneration) }} autoCapitalize="none" autoCorrect={false} style={[styles.input, { flex: 1, minWidth: 0, color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} /><IconButton testID="inspector-browse-directory" icon={FolderOpen} size={18} disabled={!workingDirectoryConnected(sessionId)} label="Browse working directory" onPress={() => { if (networkScopeCurrent()) { directoryOpenRef.current = true; setDirectoryOpen(true); void dismissAppKeyboard() } }} /></View></Field>
     </View>
+
+    <SubagentsSection key={`${activeProfileId}:${profileGeneration}:${sessionId}`} sessionId={sessionId} backend={session.backend === 'claude' ? 'claude' : 'codex'} events={events} />
 
     <View style={styles.commandGrid}>
       <Command icon={GitFork} label="Fork" testID="inspector-fork-chat" disabled={forkDisabled} hint={stopping ? 'Wait for the current turn to stop before forking this chat.' : running ? 'Wait for the active turn to finish before forking this chat.' : admitting ? 'Wait for the pending message to be accepted before forking this chat.' : !connected ? 'Connect to the server to fork this chat.' : undefined} onPress={() => { if (!forkDisabled && scopeIsCurrent()) void fork(sessionId, profileGeneration) }} />
@@ -240,25 +290,58 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
         const feedback = jobRunFeedback[job.id]
         const requestingRun = feedback?.phase === 'requesting' || pendingJobRunIds.has(job.id)
         const pendingOnServer = job.manual_run_pending === true
-        const actionLocked = requestingRun || pendingOnServer
+        const jobRunning = runningJobIds.has(job.id)
+        const runtimeError = scheduledJobRuntimeError(job, session, health, runtime)
+        const actionLocked = requestingRun || pendingOnServer || Boolean(jobAction) || !workingDirectoryConnected(sessionId)
+        const runDisabled = actionLocked || jobRunning || Boolean(runtimeError)
         const status = pendingOnServer ? {
           phase: 'deferred' as const,
           message: 'Waiting for this chat to become idle, then the job will run automatically.',
         } : feedback ?? null
         return <View key={job.id} style={[styles.jobBlock, { opacity: job.enabled === false && !pendingOnServer ? 0.62 : 1 }]}>
           <View style={styles.jobRow}>
-            <Pressable testID={`scheduled-job-card-${job.id}`} accessibilityRole="button" accessibilityLabel={`Edit scheduled job ${job.title}`} accessibilityState={{ disabled: actionLocked }} disabled={actionLocked} onPress={() => { if (scopeIsCurrent()) onJob(job.id) }} style={styles.jobContent}><Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>{job.title}</Text><Text style={{ color: colors.muted, fontSize: 10 }} numberOfLines={2}>{describeJobSchedule(job)} · {job.max_runs == null ? (effectiveScheduleKind(job) === 'interval' ? 'loops' : 'no extra run limit') : `${job.max_runs} total run${job.max_runs === 1 ? '' : 's'}`} · {job.run_count ?? 0} completed{job.enabled === false ? ' · inactive' : nextRunLabel(job.next_run_at_iso)}</Text></Pressable>
+            <Pressable testID={`scheduled-job-card-${job.id}`} accessibilityRole="button" accessibilityLabel={`Edit scheduled job ${job.title}`} accessibilityState={{ disabled: actionLocked }} disabled={actionLocked} onPress={() => { if (scopeIsCurrent()) onJob(job.id) }} style={styles.jobContent}><Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>{job.title}</Text><Text testID={`scheduled-job-state-${job.id}`} accessibilityLiveRegion="polite" style={{ color: jobRunning ? colors.blue : colors.muted, fontSize: 11 }}>{jobRunning ? 'Running' : job.enabled === false ? 'Paused' : 'Scheduled'}</Text><Text style={{ color: colors.muted, fontSize: 10 }} numberOfLines={2}>{describeJobSchedule(job)} · {job.max_runs == null ? (effectiveScheduleKind(job) === 'interval' ? 'loops' : 'no extra run limit') : `${job.max_runs} total run${job.max_runs === 1 ? '' : 's'}`} · {job.run_count ?? 0} completed{job.enabled === false ? ' · inactive' : nextRunLabel(job.next_run_at_iso)}</Text></Pressable>
             <IconButton icon={Pencil} size={14} disabled={actionLocked} onPress={() => { if (scopeIsCurrent()) onJob(job.id) }} label="Edit job" />
-            <IconButton icon={job.enabled === false ? Play : Pause} size={14} disabled={actionLocked} onPress={() => { if (scopeIsCurrent()) void updateJob(job.id, { enabled: job.enabled === false }, profileGeneration) }} label={job.enabled === false ? 'Enable job' : 'Pause job'} />
-            <Pressable testID={`run-scheduled-job-${job.id}`} accessibilityRole="button" accessibilityLabel={pendingOnServer ? `Scheduled job ${job.title} is waiting to run` : `Run scheduled job ${job.title} now`} accessibilityState={{ busy: requestingRun || pendingOnServer, disabled: actionLocked }} disabled={actionLocked} onPress={() => void runScheduledJob(job.id)} style={({ pressed }) => [styles.runJobButton, { opacity: actionLocked ? 0.5 : pressed ? 0.65 : 1 }]}>{requestingRun || pendingOnServer ? <ActivityIndicator size="small" color={colors.blue} /> : <Play size={14} color={colors.muted} />}</Pressable>
+            <IconButton icon={job.enabled === false ? Play : Pause} size={14} disabled={actionLocked || job.enabled === false && Boolean(runtimeError)} onPress={() => void performJobAction(job.id, 'toggle')} label={job.enabled === false ? 'Enable job' : 'Pause job'} />
+            {stoppableJobId === job.id ? <Pressable testID={`stop-scheduled-job-${job.id}`} accessibilityRole="button" accessibilityLabel={`Stop current run of ${job.title}`} disabled={Boolean(jobAction) || stopping || !workingDirectoryConnected(sessionId)} onPress={() => void performJobAction(job.id, 'stop')} style={styles.runJobButton}>{stopping ? <ActivityIndicator size="small" color={colors.red} /> : <Square size={16} color={colors.red} />}</Pressable> : null}
+            <Pressable testID={`run-scheduled-job-${job.id}`} accessibilityRole="button" accessibilityLabel={pendingOnServer ? `Scheduled job ${job.title} is waiting to run` : `Run scheduled job ${job.title} now`} accessibilityHint={runtimeError || undefined} accessibilityState={{ busy: requestingRun || pendingOnServer, disabled: runDisabled }} disabled={runDisabled} onPress={() => void runScheduledJob(job.id)} style={({ pressed }) => [styles.runJobButton, { opacity: runDisabled ? 0.5 : pressed ? 0.65 : 1 }]}>{requestingRun || pendingOnServer ? <ActivityIndicator size="small" color={colors.blue} /> : <Play size={14} color={colors.muted} />}</Pressable>
             <IconButton icon={Trash2} size={14} disabled={actionLocked} onPress={() => { if (!scopeIsCurrent()) return; Alert.alert('Delete job?', `“${job.title}” will stop running.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => { if (scopeIsCurrent()) void deleteJob(job.id, profileGeneration) } }]) }} label="Delete job" />
           </View>
+          {runtimeError ? <Text accessibilityRole="alert" style={[styles.hint, { color: colors.orange }]}>{runtimeError}</Text> : null}
           {status ? <Text testID={`run-scheduled-job-status-${job.id}`} accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.jobRunStatus, { color: status.phase === 'failed' ? colors.red : status.phase === 'started' ? colors.green : colors.blue }]}>{status.message}</Text> : null}
         </View>
       })}
     </View>
+    <WorkingDirectoryPicker visible={directoryOpen} sessionId={sessionId} initialPath={session.cwd || health?.default_cwd || ''} onClose={() => { directoryOpenRef.current = false; setDirectoryOpen(false) }} onChoose={async path => {
+      if (!networkScopeCurrent()) return false
+      const saved = await update(sessionId, { cwd: path }, profileGeneration)
+      if (saved && networkScopeCurrent()) setCwd(path)
+      return saved && networkScopeCurrent()
+    }} />
     <Modal visible={pinPreviewId != null} transparent animationType="fade" onRequestClose={() => setPinPreviewId(null)}><View style={styles.modalBackdrop}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss pinned item" style={StyleSheet.absoluteFill} onPress={() => setPinPreviewId(null)} /><View style={[styles.pinPreview, { backgroundColor: colors.surface, borderColor: colors.border }]}>{(() => { const pin = pins.find(value => value.id === pinPreviewId); const file = pin?.fileId ? snapshotFiles?.find(value => value.id === pin.fileId) : null; return <><View style={styles.pinPreviewHeader}><Text style={[styles.pinPreviewTitle, { color: colors.text }]} numberOfLines={2}>{pin?.title ?? 'Pinned item'}</Text>{pin?.body ? <IconButton icon={Copy} size={15} onPress={() => void Clipboard.setStringAsync(pin.body ?? '')} label="Copy full text" /> : null}<IconButton icon={X} size={15} onPress={() => setPinPreviewId(null)} label="Close" /></View>{pin?.body ? <ScrollView style={{ maxHeight: 480 }}><Text selectable style={{ color: colors.text, fontSize: 14, lineHeight: 20 }}>{pin.body}</Text></ScrollView> : file ? <MediaGrid files={[file]} sessionId={sessionId} onViewerRequested={() => { setPinPreviewId(null); onFileViewerRequested?.() }} /> : <Text style={{ color: colors.muted }}>This file is not in the loaded media page yet.</Text>}</> })()}</View></View></Modal>
   </ScrollView>
+}
+
+function SubagentsSection({ sessionId, backend, events }: { sessionId: string; backend: 'claude' | 'codex'; events: Event[] }) {
+  const colors = usePalette()
+  const agents = useMemo(() => subagentsFromEvents(events, backend), [events, backend])
+  const active = agents.filter(isSubagentActive), history = agents.filter(value => !isSubagentActive(value))
+  const [open, setOpen] = useState(false), [historyOpen, setHistoryOpen] = useState(false)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const selected = agents.find(value => value.key === selectedKey)
+  if (!agents.length) return null
+  const row = (agent: (typeof agents)[number]) => <Pressable key={agent.key} testID={`subagent-${agent.key}`} accessibilityRole="button" accessibilityLabel={`${subagentDisplayName(agent)}, ${subagentStatusLabel(agent.status)}. View activity`} onPress={() => { if (useAppStore.getState().selectedSessionId === sessionId) setSelectedKey(agent.key) }} style={[styles.subagentRow, { borderColor: colors.border }]}>
+    <View style={[styles.agentDot, { backgroundColor: isSubagentActive(agent) ? colors.blue : ['failed', 'killed', 'tracking_lost'].includes(agent.status) ? colors.orange : colors.green }]} />
+    <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={2} style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{subagentDisplayName(agent)}</Text><Text style={{ color: colors.muted, fontSize: 11 }}>{agent.backend === 'claude' ? 'Claude' : 'Codex'} · {subagentStatusLabel(agent.status)}</Text><Text numberOfLines={2} style={{ color: colors.muted, fontSize: 11 }}>{subagentDetailText(agent)}</Text></View>
+  </Pressable>
+  return <View testID="inspector-subagents" style={[styles.card, { backgroundColor: colors.raised }]}>
+    <Pressable testID="subagents-toggle" accessibilityRole="button" accessibilityLabel={`Subagents, ${active.length} active, ${history.length} historical`} accessibilityState={{ expanded: open }} onPress={() => setOpen(value => !value)} style={styles.disclosure}><Bot size={17} color={colors.muted} /><Text style={{ flex: 1, color: colors.text, paddingHorizontal: 8 }}>Subagents · {active.length} active</Text><ChevronDown size={16} color={colors.muted} style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }} /></Pressable>
+    {open ? <ScrollView testID="subagents-body" style={styles.subagentBody} nestedScrollEnabled keyboardShouldPersistTaps="always">
+      {active.length ? active.map(row) : <Text style={[styles.hint, { color: colors.muted }]}>No active subagents.</Text>}
+      {history.length ? <><Pressable testID="subagents-history-toggle" accessibilityRole="button" accessibilityLabel={`Subagent history, ${history.length} records`} accessibilityState={{ expanded: historyOpen }} onPress={() => setHistoryOpen(value => !value)} style={styles.disclosure}><Text style={{ flex: 1, color: colors.muted }}>History · {history.length}</Text><ChevronDown size={16} color={colors.muted} style={{ transform: [{ rotate: historyOpen ? '0deg' : '-90deg' }] }} /></Pressable>{historyOpen ? history.map(row) : null}</> : null}
+    </ScrollView> : null}
+    <Modal visible={Boolean(selected)} transparent animationType="fade" onRequestClose={() => setSelectedKey(null)}><View style={styles.modalBackdrop}><View style={[styles.pinPreview, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={styles.pinPreviewHeader}><Text numberOfLines={2} style={[styles.pinPreviewTitle, { color: colors.text }]}>{selected ? subagentDisplayName(selected) : 'Subagent activity'}</Text><IconButton icon={X} label="Close subagent activity" onPress={() => setSelectedKey(null)} /></View><ScrollView testID="subagent-output" style={{ maxHeight: 420 }}><Text selectable style={{ color: colors.text, fontSize: 13, lineHeight: 19 }}>{selected ? subagentLogText(selected) : ''}</Text></ScrollView></View></View></Modal>
+  </View>
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { const colors = usePalette(); return <View style={styles.field}><Text style={[styles.label, { color: colors.muted }]}>{label}</Text><View style={{ flex: 1 }}>{children}</View></View> }
@@ -274,13 +357,15 @@ const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 290, borderLeftWidth: StyleSheet.hairlineWidth }, content: { padding: 10, gap: 8, paddingBottom: 30 },
   card: { borderRadius: 7, padding: 8, gap: 7 }, field: { flexDirection: 'row', gap: 8, alignItems: 'center' }, label: { width: 70, fontSize: 10, fontWeight: '700' },
   input: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 5, paddingHorizontal: 8, paddingVertical: 8, fontSize: 12 }, multilineInput: { minHeight: 78, maxHeight: 150, borderWidth: StyleSheet.hairlineWidth, borderRadius: 5, paddingHorizontal: 8, paddingVertical: 8, fontSize: 12, textAlignVertical: 'top' },
+  cwdRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  subagentBody: { maxHeight: 240, flexGrow: 0 }, subagentRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth }, agentDot: { width: 7, height: 7, borderRadius: 4 },
   choice: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 5, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center' },
   commandGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 }, command: { minWidth: '30%', minHeight: 44, borderRadius: 6, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 6 },
   hint: { fontSize: 10, paddingHorizontal: 5, paddingBottom: 5 }, pinRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 5 }, pinIdentity: { flex: 1, minHeight: 44, justifyContent: 'center' },
   disclosure: { minHeight: 44, flexDirection: 'row', alignItems: 'center' }, loadMore: { minHeight: 44, borderRadius: 5, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
   filePageStatus: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, filePageError: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 5, paddingLeft: 9, flexDirection: 'row', alignItems: 'center', gap: 8 }, filePageRetry: { minWidth: 64, minHeight: 44, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 5 }, filePageHint: { minHeight: 36, paddingHorizontal: 5, textAlign: 'center', textAlignVertical: 'center', fontSize: 10 },
-  jobBlock: { minHeight: 45 }, jobRow: { minHeight: 45, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 4 },
-  jobContent: { minHeight: 44, flex: 1, minWidth: 0, justifyContent: 'center' },
+  jobBlock: { minHeight: 45 }, jobRow: { minHeight: 45, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3, paddingHorizontal: 4 },
+  jobContent: { minHeight: 44, width: '100%', minWidth: 0, justifyContent: 'center' },
   runJobButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }, jobRunStatus: { minHeight: 20, paddingHorizontal: 6, paddingBottom: 4, fontSize: 10, fontWeight: '700' },
   headerActions: { flexDirection: 'row', alignItems: 'center' }, scheduleJob: { minHeight: 44, borderRadius: 5, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
   modalBackdrop: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 30 }, choiceMenu: { width: '100%', maxWidth: 380, maxHeight: '70%', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, padding: 6 }, choiceOption: { minHeight: 44, borderRadius: 5, paddingHorizontal: 12, justifyContent: 'center' },

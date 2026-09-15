@@ -11,12 +11,13 @@ import {
   CROSS_CHAT_CONVERSATION_DARK,
   CROSS_CHAT_CONVERSATION_LIGHT,
   CrossChatConversationSurface,
+  CrossChatPeerHeading,
 } from './CrossChatTimelineCards'
 
 const PREVIEW_CHARACTERS = 3_200
 const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 
-/** Historical presentation only: sender names never become routes or controls. */
+/** Sender labels never grant routes; only an authenticated participant ID can navigate. */
 export function ImportedCrossChatDeliveryCard({ row, fontScale }: { row: SystemRow; fontScale: number }) {
   const colors = usePalette()
   const light = useColorScheme() === 'light'
@@ -54,7 +55,7 @@ export function ImportedCrossChatDeliveryCard({ row, fontScale }: { row: SystemR
         shadowRadius: light ? 9 : 10,
       },
     ]}>
-      <Text testID={`${identity}-sender`} style={[styles.speaker, { color: palette.speaker }]}>{delivery.sender}</Text>
+      <CrossChatPeerHeading peerId={row.event.source_session_id} sessionId={row.event.session_id}><Text testID={`${identity}-sender`} style={[styles.speaker, { color: palette.speaker }]}>{delivery.sender}</Text></CrossChatPeerHeading>
       <DeliveryMarkdown identity={`${identity}-body`} value={delivery.body} fontScale={fontScale} color={palette.body} controlColor={palette.toggle} />
     </View>
     {delivery.sourceRequest ? <View style={styles.source}>

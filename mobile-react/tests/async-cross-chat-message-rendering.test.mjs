@@ -13,7 +13,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const require = createRequire(import.meta.url)
 const listeners = new Set()
 const calls = []
-const client = { validationRevision: 1 }
+const client = { validationRevision: 1, isValidated: true }
 const fixture = {
   state: null, theme: 'dark', client, links: [],
   subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
@@ -84,6 +84,7 @@ function reset() {
     profiles: [{ id: 'profile-a', serverIdentity: 'server-a' }],
     sessions: [{ id: 'sender', title: 'Renamed agent' }, { id: 'recipient', title: 'Renamed mobile' }],
     switchingProfileId: null, workspaceAdopting: false, pins: [], snapshots: {},
+    selectSession: async id => { calls.push(['navigate', id]); publish({ selectedSessionId: id }) },
   }
   client.crossChatHandoff = async id => { calls.push(['handoff', id]); return handoff() }
   client.crossChatExchange = async () => { throw new Error('Async messages must not load exchanges') }
@@ -93,6 +94,75 @@ function publish(patch = {}) {
   fixture.state = { ...fixture.state, ...patch }
   for (const listener of listeners) listener()
 }
+
+const outgoingMailbox = (patch = {}) => event({ session_id: 'sender', delivery_mode: 'mailbox', type: 'chat_conversation_message_registered', handoff_status: 'stored', inbox_state: 'unread', ...patch })
+function enableMailbox() {
+  fixture.state.selectedSessionId = 'sender'
+  fixture.state.health.capabilities = { cross_chat_handoffs_v1: { available: true, features: { chat_mailbox_v1: true } } }
+}
+test('outgoing mailbox labels and confirmed cancellation are receipt-based and duplicate-safe', async () => {
+  reset(); enableMailbox()
+  const pending = deferred()
+  client.cancelCrossChatHandoff = async id => { calls.push(['cancel', id]); return pending.promise }
+  const renderer = await render(outgoingMailbox())
+  try {
+    assert.match(visible(renderer), /Inbox · unread/)
+    const button = byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.onPress
+    await act(async () => { button(); button() })
+    assert.deepEqual(calls, [['cancel', 'message-a']])
+    assert.doesNotMatch(visible(renderer), /Cancelled/)
+    await act(async () => pending.resolve(handoff({ status: 'cancelled' })))
+    assert.match(visible(renderer), /Cancelled/)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 0)
+    await act(async () => button())
+    assert.equal(calls.length, 1)
+  } finally { await act(async () => renderer.unmount()) }
+})
+for (const patch of [{ id: 'wrong' }, { source_session_id: 'wrong' }, { target_session_id: 'wrong' }, { conversation_id: 'wrong' }, { status: 'stored' }]) test(`mailbox cancellation rejects mismatched ${Object.keys(patch)[0]} and permits explicit retry`, async () => {
+  reset(); enableMailbox()
+  client.cancelCrossChatHandoff = async id => { calls.push(['cancel', id]); return handoff({ status: 'cancelled', ...patch }) }
+  const renderer = await render(outgoingMailbox())
+  try {
+    await act(async () => byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.onPress())
+    assert.match(visible(renderer), /did not confirm cancellation/)
+    assert.match(visible(renderer), /Inbox · unread/)
+    assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 1)
+  } finally { await act(async () => renderer.unmount()) }
+})
+for (const patch of [{ profileGeneration: 2 }, { selectedSessionId: 'elsewhere' }, { workspaceAdopting: true }, { health: { server_instance_id: 'other' } }]) test(`late mailbox cancellation cannot affect changed ${Object.keys(patch)[0]}`, async () => {
+  reset(); enableMailbox()
+  const pending = deferred(); client.cancelCrossChatHandoff = async () => pending.promise
+  const renderer = await render(outgoingMailbox())
+  try {
+    const callback = byID(renderer, 'cross-chat-async-message-message-a-cancel')[0].props.onPress
+    await act(async () => callback())
+    await act(async () => publish(patch))
+    await act(async () => pending.resolve(handoff({ status: 'cancelled' })))
+    assert.doesNotMatch(visible(renderer), /Cancelled/)
+  } finally { await act(async () => renderer.unmount()) }
+})
+for (const patch of [{ inbox_state: 'read' }, { handoff_status: 'registered' }, { type: 'chat_conversation_message_deleted' }]) test(`mailbox ${JSON.stringify(patch)} never offers cancellation`, async () => {
+  reset(); enableMailbox(); const renderer = await render(outgoingMailbox(patch))
+  try { assert.equal(byID(renderer, 'cross-chat-async-message-message-a-cancel').length, 0) }
+  finally { await act(async () => renderer.unmount()) }
+})
+test('peer heading navigates exact authenticated local identity once without reading mailbox or sending', async () => {
+  reset(); const renderer = await render(event({ source_title: 'Untrusted different label' }))
+  try {
+    const callback = byID(renderer, 'cross-chat-peer-sender')[0].props.onPress
+    await act(async () => { callback(); callback() })
+    assert.deepEqual(calls, [['navigate', 'sender']])
+  } finally { await act(async () => renderer.unmount()) }
+})
+test('old peer heading cannot navigate after selection/identity changes', async () => {
+  reset(); const renderer = await render()
+  try {
+    const callback = byID(renderer, 'cross-chat-peer-sender')[0].props.onPress
+    await act(async () => publish({ selectedSessionId: 'other' }))
+    await act(async () => callback())
+    assert.deepEqual(calls, [])
+  } finally { await act(async () => renderer.unmount()) }
+})
 function deferred() {
   let resolve, reject
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
@@ -146,7 +216,7 @@ for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${t
   try {
     assert.match(visible(renderer), /Research agent/)
     assert.doesNotMatch(visible(renderer), /Renamed agent|Agent conversation|Reply expected|End conversation|Source request|Provider authority/)
-    assert.equal(renderer.root.findAllByType('Pressable').length, 0, 'A complete short message has no exchange or routing actions')
+    assert.equal(renderer.root.findAllByType('Pressable').length, 1, 'The only action is local peer navigation, not sending or granting a route')
     const surface = flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style)
     assert.equal(surface.alignSelf, 'flex-end')
     assert.equal(surface.width, width > 720 ? '82%' : '94%')
@@ -160,7 +230,7 @@ for (const theme of ['dark', 'light']) for (const width of [320, 834]) test(`${t
     await act(async () => renderer.root.findAll(node => node.type === 'SelectableText' && node.props.onPress)[0].props.onPress())
     assert.deepEqual(fixture.links, ['https://example.com/review'])
     await act(async () => renderer.update(React.createElement(TimelineRowView, props(row(event({ session_id: 'sender', type: 'chat_conversation_message_registered' })), width))))
-    assert.match(visible(renderer), /Sent to Mobile agent/)
+    assert.match(visible(renderer), /To Mobile agent/)
     assert.equal(flatten(byID(renderer, 'cross-chat-async-message-message-a-surface')[0].props.style).alignSelf, 'flex-start')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
@@ -334,7 +404,8 @@ test('message body and sender labels cannot create chat routes or reply controls
     assert.match(visible(renderer), /@Different chat/)
     assert.match(visible(renderer), /@Research agent/)
     assert.equal(renderer.root.findAll(node => node.type === 'SelectableText' && node.props.onPress).length, 0)
-    assert.equal(renderer.root.findAllByType('Pressable').length, 0)
+    assert.equal(renderer.root.findAllByType('Pressable').length, 1)
+    assert.equal(byID(renderer, 'cross-chat-peer-sender').length, 1, 'Peer ID comes from the event, never sender label or body')
     assert.deepEqual(calls, [])
   } finally { await act(async () => renderer.unmount()) }
 })

@@ -234,6 +234,17 @@ export interface CodexGoalsConfiguration {
   message: string
 }
 
+/** Server override, not the provider's currently running or resolved limit. */
+export interface CodexSubagentsConfiguration {
+  configurable: boolean
+  reason?: 'unsupported_transport' | null
+  max_concurrent_threads_per_session: number | null
+  message: string
+  scope?: 'server'
+  provider_config_key?: string
+  applies_to?: 'new_or_reloaded_threads'
+}
+
 export type CodexReviewTarget =
   | { type: 'uncommittedChanges' }
   | { type: 'baseBranch'; branch: string }
@@ -831,6 +842,32 @@ export interface CodeDiffFileSummary {
   binary?: boolean | null
 }
 
+/** Source identity for a server-verified synthetic provider interruption. */
+export interface ProviderInterruptionOrigin {
+  provider: 'claude'
+  kind: 'interruption'
+  event_id: string
+  session_id: string
+  timestamp: string
+  cause: 'steer' | 'stop' | 'unknown'
+  parent_event_id?: string | null
+  prompt_id?: string | null
+}
+
+export interface ProviderHistoryOrigin {
+  provider: 'claude' | 'codex'
+  kind?: 'assistant' | 'user' | 'subagent_notification' | 'turn_aborted' | 'provider_notice'
+  event_id?: string
+  session_id?: string
+  timestamp?: string
+  parent_event_id?: string | null
+  prompt_id?: string | null
+  turn_id?: string
+  native_event_id?: string
+  source_text_sha256?: string
+  cause?: never
+}
+
 export interface Event {
   seq: number
   id: string
@@ -842,6 +879,17 @@ export interface Event {
   imported?: boolean | null
   /** The provider-import source already removed generated-only prompt wrappers. */
   provider_history_sanitized?: boolean | null
+  metadata_only?: boolean | null
+  provider_runtime_context?: 'goal' | 'subagent_notification' | 'turn_aborted' | 'provider_notice' | null
+  provider_history_repair?: 'source_proven_import' | 'source_proven_assistant_replay' | 'source_proven_native_replay' | null
+  provider_origin?: ProviderInterruptionOrigin | ProviderHistoryOrigin | null
+  provider_message_id?: string | null
+  provider_thread_id?: string | null
+  provider_turn_id?: string | null
+  mailbox_wake_id?: string | null
+  mailbox_wake_through_seq?: number | null
+  provider_generated?: boolean | null
+  provider_input_sha256?: string | null
   queued_id?: string | null
   promoted?: boolean | null
   secure_peer_envelope_id?: string | null
@@ -937,6 +985,7 @@ export interface Event {
   subagent_id?: string | null
   subagent_tool_id?: string | null
   subagent_name?: string | null
+  subagent_title?: string | null
   subagent_kind?: string | null
   subagent_status?: string | null
   subagent_activity?: string | null
@@ -1231,6 +1280,7 @@ export interface AgentTeamMailCapability extends ServerCapability {
 }
 
 export interface HealthCapabilities {
+  local_session_import_v1?: LocalSessionImportCapability
   scheduled_jobs?: ScheduledJobsCapability
   agent_emergency_alerts_v1?: AgentEmergencyAlertsCapability
   provider_jobs_access_control_v1?: ProviderJobsAccessControlCapability
@@ -1248,7 +1298,35 @@ export interface HealthCapabilities {
   team_hub_v1?: TeamHubV1Capability
   server_updates?: ServerUpdatesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
-  [key: string]: JsonValue | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
+  [key: string]: JsonValue | LocalSessionImportCapability | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
+}
+
+export interface LocalSessionImportCapability extends ServerCapability {
+  version: 1
+  max_batch_items: number
+  max_list_items: number
+}
+export interface LocalSessionCandidate {
+  provider_session_id: string
+  backend: Backend
+  label: string
+  updated_at: string
+  cwd: string | null
+}
+export interface BulkImportSessionItem {
+  provider_session_id: string
+  backend: Backend
+  cwd?: string | null
+  title?: string | null
+}
+export interface BulkImportSessionResult {
+  provider_session_id: string
+  backend: Backend
+  session_id: string | null
+  ok: boolean
+  imported: number
+  code?: string
+  error?: string
 }
 
 export interface Health {
@@ -1259,6 +1337,7 @@ export interface Health {
   api_contract_version?: number
   active?: string[]
   active_sessions?: string[]
+  active_runs?: Array<Record<string, JsonValue>>
   max_active_agent_runs?: number
   default_cwd?: string | null
   queued?: Record<string, number>
@@ -1343,6 +1422,8 @@ export interface FilesPage { files: AgentFile[]; total: number; offset: number; 
 
 export interface Snapshot {
   cacheVersion?: number
+  /** Server build which last verified the full tail; absent legacy caches revalidate lazily. */
+  verifiedServerVersion?: string | null
   session: Session
   events: Event[]
   queuedTurns: QueuedTurn[]

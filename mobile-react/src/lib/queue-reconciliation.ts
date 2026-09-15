@@ -1,5 +1,6 @@
 import type { Event } from '../types'
 import { crossChatQueueRefreshSessionId, isNativeGoalSteerEvent } from './queue'
+import { isImportedHistoryRecord, isImportedProviderControlMetadata } from './provider-origin'
 
 /**
  * One session's queue observations within one validated connection/server scope.
@@ -37,6 +38,7 @@ export class QueueReconciliationState {
 }
 
 function eventAffectsQueueObservation(event: Event): boolean {
+  if (isImportedHistoryRecord(event) || isImportedProviderControlMetadata(event)) return false
   // Empty membership still asks the store to reconcile a possibly stale queue.
   if (event.type === 'queue_snapshot' && Array.isArray(event.positions)) return true
   if (event.positions?.length) return true

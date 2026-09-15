@@ -9,6 +9,10 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexSubagentsConfiguration,
+  BulkImportSessionItem,
+  BulkImportSessionResult,
+  LocalSessionCandidate,
   CodexOperationAccepted,
   CodexPendingInteraction,
   CodexPermissionProfile,
@@ -68,6 +72,8 @@ import { normalizeServerURL } from '../lib/format'
 import { createUploadFormData } from '../lib/upload-form'
 import { teamNetworkRequestPath } from '../lib/team-network'
 import { parseChatInboxDelete, parseChatInboxPage } from '../lib/chat-mailbox'
+import { LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT, LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT, parseLocalSessionCandidatesResponse,
+  parseBulkImportSessionItems, parseBulkImportSessionResultsResponse } from '../lib/local-session-import'
 
 interface SessionResponse {
   session: Session
@@ -256,6 +262,17 @@ export class AgentServerClient {
       method: 'PUT', body: JSON.stringify({ enabled }),
     }, 30_000, false, 'native-control')
   }
+  codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
+    return this.request('/api/admin/codex/subagents', {}, 30_000, false, 'native-control')
+  }
+  setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
+    if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
+      throw new Error('Subagent limit must be a positive whole number or null for Codex default.')
+    }
+    return this.request('/api/admin/codex/subagents', {
+      method: 'PUT', body: JSON.stringify({ max_concurrent_threads_per_session: limit }),
+    }, 30_000, false, 'native-control')
+  }
   serverUpdateStatus(): Promise<ServerUpdateStatus> { return this.get('/api/admin/update') }
   cancelServerUpdate(scheduleId: string): Promise<ServerUpdateStatus> {
     return this.post('/api/admin/update/cancel', { schedule_id: scheduleId })
@@ -320,6 +337,21 @@ export class AgentServerClient {
     return this.delete(`/api/sessions/${encodeURIComponent(sessionId)}/workspace/entry?${query}`)
   }
 
+  async listLocalSessions(limit = LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT): Promise<LocalSessionCandidate[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > LOCAL_SESSION_IMPORT_HARD_LIST_LIMIT) {
+      throw new Error('Import Chat local session limit is invalid.')
+    }
+    return parseLocalSessionCandidatesResponse(await this.get<unknown>(`/api/local-sessions?limit=${limit}`), limit)
+  }
+
+  async bulkImportSessions(items: BulkImportSessionItem[]): Promise<BulkImportSessionResult[]> {
+    const normalized = parseBulkImportSessionItems(items, LOCAL_SESSION_IMPORT_HARD_BATCH_LIMIT)
+    const response = await this.request<unknown>('/api/sessions/bulk-import', {
+      method: 'POST', body: JSON.stringify({ items: normalized }),
+    }, 120_000)
+    return parseBulkImportSessionResultsResponse(response, normalized)
+  }
+
   async createSession(input: CreateSessionInput): Promise<Session> {
     return (await this.post<{ session: Session }>('/api/sessions', {
       title: input.title,
@@ -337,7 +369,7 @@ export class AgentServerClient {
       cursor_permission_mode: input.cursor_permission_mode ?? null,
       provider_jobs_access: input.provider_jobs_access ?? null,
       provider_session_id: input.providerId || null,
-      import_history: Boolean(input.providerId),
+      import_history: Boolean(input.providerId) && input.backend !== 'cursor',
     })).session
   }
 

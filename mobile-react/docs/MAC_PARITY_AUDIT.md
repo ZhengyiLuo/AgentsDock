@@ -1,4 +1,47 @@
-# Mobile / Mac parity — 2026-09-11
+# Mobile / Mac parity — 2026-09-14
+
+## Desktop catch-up for build 174
+
+Reference: committed desktop `2ce43b9` (1.0.0), merged into the mobile release
+branch before implementation. Uncommitted desktop work is not part of this
+snapshot. Release acceptance is recorded separately after Apple processing.
+
+| Surface | Implemented behavior | Verification |
+| --- | --- | --- |
+| Imported history | Exact provider-origin contracts hide proven runtime/replay bookkeeping; same-ID repairs survive full-body hashing before truncation, overlap, and cache restoration | Positive/negative provenance, long-body, partial-page, native notification and real store-ingress regressions |
+| Running and unread state | Imported history never changes live ownership, unread state, or the queue; per-chat run IDs and ordered health requests reject stale terminals and polls | Health/start/stop, reconnect/boot, uncertain queue admission and delayed acknowledgement races |
+| Server upgrades | Opened caches revalidate once per observed server version; unopened content stays cached without a request fan-out | Missing-version, upgrade, repeated-delta, and mid-request version-change tests |
+| Cross-chat cards | Exact receipt-based status, unread mailbox cancellation, and scoped peer-heading navigation across inbox, async, legacy and imported rows | Rendered navigation, cancellation, mismatch, duplicate-tap, and stale-scope tests |
+| Native subagents | Inspector exposes bounded current/history state and task-heading fallback; Settings adds explicit concurrency Save and reset to Codex default | Pure projections, rendered disclosures and server-setting request/response races |
+| Working directory | Server-backed folder browser, confirmed existing paths, parent navigation, loading/errors and Retry | Rendered selection, invalid/missing directory, retry and stale-callback tests |
+| Scheduled jobs | Running/disabled/scheduled status, runtime-error guards, and Stop only for the exact active job/run owner | Pure lifecycle tests and rendered Run/Edit/Pause/Stop interaction tests |
+| Provider chat import | Capability-gated server transcript browsing; exact existing-chat matches open without reimport; explicit import receipt and separate Open action | Bounded parsers, route/receipt validation and rendered import lifecycle tests |
+| Team Mail | Typed 25-item pages, revisioned read/unread, address-specific Remove, and draft-only Route/Reply to a chosen local chat | Synthetic Hub responses, mailbox receipts and scope/draft-preservation tests |
+
+Goal and queue panels remain collapsed by default with shared bounded expanded
+space. Existing file-download progress, destination selection, retry/cancel and
+single attachment ownership remain covered by the regression suite.
+
+### Remaining differences after this pass
+
+This is a substantial catch-up, not complete desktop parity. Still separate:
+the full slash workflow/provider-command inventory, bulk import/manual resume
+UI, private Mail thread presentation and grants, quiet Mail/Bulletin hint
+streams, Team attachment transport, sharing/collaborator attribution, and
+desktop-style disk-exhaustion draft recovery. Desktop's complete-context native
+delivery alias inference (receipt hashes plus exact provider/run/peer evidence)
+is also not ported; unproven candidates remain visible instead of being hidden
+by text matching. Explicit server-proven repairs are supported.
+
+Human account/invitation administration needs separately scoped human authority;
+mobile's AgentsServer proxy does not grant it. Current desktop Reply stages a
+chat draft rather than directly composing/sending private Mail, and mobile now
+follows that distinction. The larger navigation redesign remains deferred.
+
+Automated native-host tests exercise React handlers/state and synthetic
+transports, not physical-device pixels or touch acceptance. The existing
+external-volume CoreSimulator privacy denial still prevents native runtime QA;
+the installed Mac app and live server/chats were not used as test fixtures.
 
 ## Build 173: compact goals, queues, and current cross-chat behavior
 
@@ -36,7 +79,7 @@ runtime QA. No installed Mac app, live chat, goal, or server was modified to tes
 this release. Signed archive and TestFlight acceptance are recorded separately
 in the public development log after verification.
 
-## Remaining Mac differences
+## Remaining Mac differences recorded at build 173
 
 This is not a claim of complete Mac parity. New desktop workflow commands,
 provider-session resume browsing, working-directory browsing, private Team Mail
@@ -91,7 +134,7 @@ Existing Ultra selection, provider-envelope filtering, single attachment ownersh
 Mac-style purple conversation layout and authenticated Team Network actions are
 retained from the latest baseline and covered by the regression suite.
 
-## Scope and remaining differences
+## Scope and remaining differences recorded at build 171
 
 This pass does not claim complete desktop feature parity or physical-device
 coverage of every button. Tests execute React state/effects and control handlers

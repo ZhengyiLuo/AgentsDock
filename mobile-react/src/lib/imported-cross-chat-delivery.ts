@@ -1,11 +1,14 @@
 import type { Event } from '../types'
 import { stripInjectedProviderAuthority } from './format'
+import { hasProviderUserProvenance } from './provider-origin'
 
 export interface ImportedCrossChatDelivery {
   sender: string
   kind: 'instruction' | 'request' | 'reply' | 'final_result' | 'status' | 'message'
   body: string
   sourceRequest: string
+  mode?: 'async_route_v1'
+  editedByUser?: boolean
 }
 
 interface ParsedDelivery {
@@ -76,14 +79,18 @@ function parseDelivery(event: Event): ParsedDelivery | null {
   if (event.type !== 'turn_started' || event.imported !== true
     || !event.run_id?.startsWith('import_')
     || (event.backend !== 'codex' && event.backend !== 'claude')
+    || hasProviderUserProvenance(event)
     || typeof event.prompt !== 'string' || event.prompt.length > 262_144) return null
   const text = stripInjectedProviderAuthority(event.prompt.replace(/\r\n/gu, '\n')).trim()
-  const header = /^\[AgentsDock delivery kind=(instruction|request|reply|final_result|status|message) leg=(0|[1-9]\d{0,5})\/([1-9]\d{0,5}) origin=(?:user|route|auto)(?: from=([^\[\]\r\n]{1,240}))?\]\n/u.exec(text)
+  const header = /^\[AgentsDock delivery kind=(instruction|request|reply|final_result|status|message) leg=(0|[1-9]\d{0,5})\/([1-9]\d{0,5}) origin=(?:user|route|auto)(?: mode=(async_route_v1))?(?: from=([^\[\]\r\n]{1,240}))?\]\n/u.exec(text)
   if (!header || Number(header[2]) > Number(header[3]) || !text.endsWith('\n[End delivery]')) return null
   const kind = header[1] as ImportedCrossChatDelivery['kind']
   if (header[2] === '0' && kind !== 'status') return null
   let remainder = text.slice(header[0].length, -'\n[End delivery]'.length)
   let offset = header[0].length
+  const editedMarker = '[Server provenance: the recipient user edited this queued message; sender identity and routing permissions are unchanged.]\n'
+  const editedByUser = header[4] === 'async_route_v1' && remainder.startsWith(editedMarker)
+  if (editedByUser) { remainder = remainder.slice(editedMarker.length); offset += editedMarker.length }
   let sourceStart = offset
   let sourceEnd = offset
   let sourceIsExcerpt = false
@@ -118,7 +125,10 @@ function parseDelivery(event: Event): ParsedDelivery | null {
   const body = remainder.slice(preparedOpen.length, end).trim()
   if (!body) return null
   return {
-    delivery: { sender: header[4]?.trim() || 'Other agent', kind, body, sourceRequest: text.slice(sourceStart, sourceEnd).trim() },
+    delivery: { sender: header[5]?.trim() || 'Other agent', kind, body, sourceRequest: text.slice(sourceStart, sourceEnd).trim(),
+      ...(header[4] === 'async_route_v1' ? { mode: 'async_route_v1' as const } : {}),
+      ...(editedByUser ? { editedByUser: true } : {}),
+    },
     text, sourceStart, sourceEnd, sourceIsExcerpt,
     bodyStart: offset + preparedOpen.length,
     bodyEnd: offset + end,

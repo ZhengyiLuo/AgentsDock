@@ -66,38 +66,21 @@ jobs:
         working-directory: mobile-react
       - run: node scripts/run-history-tests.mjs src/lib/team-references.test.ts
         working-directory: mobile-react
-      - name: Verify cross-chat protocol, projection, and store races
+      - name: Verify mobile protocol, projection, and store regressions
         run: |
-          node scripts/run-history-tests.mjs src/lib/cross-chat-protocol.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/timeline-async-messages.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/chat-mailbox.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/chat-message-body.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/timeline-mailbox.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/timeline-crosschat-chronology.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/timeline-row-reuse.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/timeline-memory.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/scheduled-job-timeline-regression.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/queue.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/lib/queue-reconciliation.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/store/useAppStore.cross-chat-routes.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/store/useAppStore.queue-reconciliation.test.ts --native-mocks
-          node scripts/run-history-tests.mjs src/store/useAppStore.queued-agent-controls.test.ts --native-mocks
+          for source in src/lib/*.test.ts src/api/*.test.ts src/store/*.test.ts; do
+            node scripts/run-history-tests.mjs "$source" --native-mocks
+          done
         working-directory: mobile-react
-      - name: Verify cross-chat rendering and control interactions
-        run: >-
-          node --test
-          tests/async-cross-chat-message-rendering.test.mjs
-          tests/chat-inbox-rendering.test.mjs
-          tests/ios-modal-composer-contract.test.mjs
-          tests/team-mention-composer.test.mjs
-          tests/cross-chat-card-interactions.test.mjs
-          tests/imported-cross-chat-rendering.test.mjs
-          tests/cross-chat-composer-ui-contract.test.mjs
-          tests/cross-chat-store-contract.test.mjs
-          tests/cross-chat-timeline-ui-contract.test.mjs
+      - name: Verify mobile rendering and control interactions
+        run: node --test tests/*.test.mjs
         working-directory: mobile-react
-      - name: Verify collapsible native goal controls
-        run: node scripts/run-component-tests.mjs tests/codex-goals-ui.test.tsx
+      - name: Verify native goal and server-setting controls
+        run: |
+          for source in tests/codex-goals-ui.test.tsx tests/codex-server-settings.test.tsx tests/codex-subagent-settings.test.tsx tests/component-harness.test.tsx; do
+            node scripts/run-component-tests.mjs "$source"
+          done
+          node scripts/run-file-transfer-tests.mjs
         working-directory: mobile-react
       - run: node --test tests/ios-release-metadata.test.mjs
         working-directory: mobile-react

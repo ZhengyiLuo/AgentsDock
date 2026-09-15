@@ -70,6 +70,8 @@ const nestedExample = 'Keep this example intact:\n```text\n[AgentsDock delivery 
 assert.equal(importedCrossChatDelivery(event(1, 'turn_started', { prompt: prompt('reply', nestedExample) }))?.body, nestedExample)
 
 const ordinaryUserInputs: Partial<Event>[] = [
+  { provider_user_authored: true },
+  { provider_origin: { provider: 'codex', kind: 'user', event_id: 'human-source' } },
   { imported: false }, { imported: undefined }, { run_id: 'native_user_turn' }, { backend: 'cursor' },
   { type: 'turn_queued' }, { prompt: `Here is an example:\n${prompt()}` },
   { prompt: `\`\`\`text\n${prompt()}\n\`\`\`` }, { prompt: prompt().split('\n').map(line => `> ${line}`).join('\n') },
@@ -158,5 +160,19 @@ for (const patch of [
 }
 const digestTagged = event(1, 'turn_started', { purpose: 'handoff_digest_delivery' })
 assert.equal(projectTimeline([digestTagged], []).length, 0, 'the historical cross-chat exception must not change digest suppression')
+
+const asyncPrompt = prompt('message', 'An independent message.').replace('leg=2/2 origin=route', 'leg=1/1 origin=route mode=async_route_v1')
+const asyncEvent = event(1, 'turn_started', { prompt: asyncPrompt })
+assert.equal(importedCrossChatDelivery(asyncEvent)?.mode, 'async_route_v1')
+assert.equal(importedCrossChatDelivery(asyncEvent)?.body, 'An independent message.')
+const editedMarker = '[Server provenance: the recipient user edited this queued message; sender identity and routing permissions are unchanged.]\n'
+const editedEvent = { ...asyncEvent, prompt: asyncPrompt.replace(sourceSection, editedMarker + sourceSection) }
+assert.equal(importedCrossChatDelivery(editedEvent)?.editedByUser, true)
+assert.equal(importedCrossChatDelivery(editedEvent)?.body, 'An independent message.')
+assert.equal(importedCrossChatDelivery({ ...editedEvent, provider_user_authored: true }), null)
+assert.equal(importedCrossChatDelivery({ ...asyncEvent, prompt: asyncPrompt.replace('async_route_v1', 'async_route_v2') }), null)
+assert.equal(importedCrossChatDelivery({ ...editedEvent, prompt: editedEvent.prompt?.replace(' mode=async_route_v1', '') }), null)
+const quotedInternal = { ...asyncEvent, provider_user_authored: true, purpose: 'cross_chat_handoff_delivery' }
+assert.deepEqual(projectTimeline([quotedInternal], []).map(row => row.kind), ['message'], 'positive user provenance always preserves a genuine quoted delivery')
 
 console.log('imported cross-chat delivery regressions passed')

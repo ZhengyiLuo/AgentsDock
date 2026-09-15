@@ -3,6 +3,7 @@ import { mergeEvents, mergeFiles, stripInjectedProviderAuthority } from './forma
 import { boundImportedCrossChatDeliveryPrompt } from './imported-cross-chat-delivery'
 import { crossChatSemanticKey, isAsyncCrossChatMessage } from './timeline'
 import { isChatMailboxEvent } from './chat-mailbox'
+import { isImportedCodexGoalContext, isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from './provider-origin'
 
 export const LIVE_TIMELINE_EVENT_LIMIT = 720
 export const HISTORY_WINDOW_EVENT_LIMIT = 2_400
@@ -98,6 +99,9 @@ export function historicalTimelineEvents(events: Event[], contextEvents: readonl
   }
 
   return events.filter(event => {
+    // Tiny source-proof records must survive compaction: a stale overlapping
+    // page cannot resurrect an assistant replay or synthetic import terminal.
+    if (isImportedProviderControlMetadata(event)) return true
     if (!historicalTraceTypes.has(event.type)) return true
     const runId = event.run_id?.trim()
     // Server semantic pages classify reviewable diffs as essential output.
@@ -143,7 +147,10 @@ export function sanitizeTimelineEvent(event: Event): Event {
     // Remove launch-only provider authority while the complete suffix and its
     // end marker are still available. Truncating first could retain a partial
     // internal block that the display-level defense can no longer verify.
-    prompt: boundImportedCrossChatDeliveryPrompt(event, MESSAGE_FIELD_LIMIT, TRUNCATION_SUFFIX) ?? sanitizePromptText(event.prompt),
+    // Validate the complete goal envelope first. Its proven metadata boundary
+    // remains valid after bounding even when the objective exceeds the limit.
+    prompt: isImportedCodexGoalContext(event) ? ''
+      : boundImportedCrossChatDeliveryPrompt(event, MESSAGE_FIELD_LIMIT, TRUNCATION_SUFFIX) ?? sanitizePromptText(event.prompt),
     request_prompt: sanitizePromptText(event.request_prompt),
     display_prompt: sanitizePromptText(event.display_prompt),
     text: truncateText(event.text, MESSAGE_FIELD_LIMIT),
@@ -179,6 +186,19 @@ export function sanitizeTimelineEvent(event: Event): Event {
     } : event.job,
   }
   return next
+}
+
+/** Compare full source bytes before stripping authority suffixes or clipping text. */
+export function mergeAndSanitizeIncomingEvents(existing: readonly Event[], incoming: readonly Event[]): Event[] {
+  const key = (event: Event) => JSON.stringify([event.session_id, event.id])
+  const byId = new Map(existing.map(event => [key(event), event]))
+  return incoming.map(event => {
+    const previous = byId.get(key(event))
+    const merged = previous ? mergeProviderInterruptionEvent(previous, event) : event
+    const sanitized = merged === previous ? previous! : sanitizeTimelineEvent(merged)
+    byId.set(key(event), sanitized)
+    return sanitized
+  })
 }
 
 export function boundLiveTimelineEvents(events: Event[]): Event[] {

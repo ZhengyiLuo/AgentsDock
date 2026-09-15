@@ -1,5 +1,23 @@
 # Public development log
 
+## Mobile desktop catch-up — build 174 source
+
+- Merge committed desktop `2ce43b9` and bring source-proven history repairs,
+  run-owned activity reconciliation, and lazy server-version revalidation to
+  mobile. Imported bookkeeping cannot create unread/running/queued state.
+- Use exact delivery receipts in cross-chat status labels; add scoped peer
+  heading navigation and confirmed unread-mailbox cancellation.
+- Add native subagent history/details and server concurrency settings, a
+  working-directory browser, and exact-owner scheduled-job Stop controls.
+- Add capability-gated provider chat import with existing-chat matching,
+  explicit success receipts, and separate navigation after import.
+- Bring Team Mail paging, revisioned read/unread, address-specific removal,
+  and draft-only Route/Reply into the server-proxy mobile workflow.
+- Preserve folded goals/queues and file-transfer progress/retry controls.
+  Expand CI to all mobile library/API/store and rendered regression suites.
+  Physical-device acceptance and complete desktop parity are not claimed;
+  remaining differences are documented in the mobile parity audit.
+
 ## Mobile compact panels and cross-chat catch-up — 0.1.2 (173)
 
 - Apple validation and processing completed successfully; build 173 is active

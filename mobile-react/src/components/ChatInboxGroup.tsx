@@ -9,7 +9,7 @@ import type { ChatInboxState, Event } from '../types'
 import { useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import { Text } from './AppText'
-import { captureTimelineWorkspaceScope, timelineWorkspaceScopeCurrent, useTimelineWorkspaceRevision } from './CrossChatTimelineCards'
+import { captureTimelineWorkspaceScope, CrossChatPeerHeading, timelineWorkspaceScopeCurrent, useTimelineWorkspaceRevision } from './CrossChatTimelineCards'
 import { MarkdownContent } from './MarkdownContent'
 
 const BATCH = 25
@@ -208,21 +208,19 @@ export function ChatInboxGroup({ row, sessionId, fontScale, layoutWidth }: {
     {open && canRequest ? <Pressable testID="chat-inbox-retry" accessibilityRole="button" disabled={loading} onPress={() => void loadPage(page.loaded ? page.cursor : null)} style={styles.control}><Text style={{ color: colors.blue }}>Retry inbox</Text></Pressable> : null}
   </View> : null
   return <View testID="chat-inbox" style={[styles.card, { width: layoutWidth > 720 ? '82%' : '94%', backgroundColor: colors.surface, borderColor: colors.border }]}>
-    <Pressable testID="chat-inbox-toggle" accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${sender} inbox. ${countLabel}. ${open ? 'Hide' : 'Show'} messages`} onPress={() => {
+    <View style={styles.heading}>
+      <MessageSquareShare size={16} color={colors.blue} />
+      <CrossChatPeerHeading peerId={row.event.source_session_id} sessionId={sessionId}><Text style={[styles.title, styles.grow, { color: colors.text }]} numberOfLines={1}>{sender}</Text></CrossChatPeerHeading>
+      <Pressable testID="chat-inbox-toggle" accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${sender} inbox. ${countLabel}. ${open ? 'Hide' : 'Show'} messages`} onPress={() => {
       if (!localCurrent()) return
       setOpen(value => !value)
       if (!open && !page.loaded) void loadPage(null)
     }} style={styles.heading}>
-      <MessageSquareShare size={16} color={colors.blue} />
-      <View style={styles.grow}>
-        <View style={styles.titleRow}>
-          <Text style={[styles.title, styles.grow, { color: colors.text }]} numberOfLines={1}>{sender}</Text>
           <Text testID="chat-inbox-count" style={[styles.title, { color: colors.text }]}>· {countLabel}</Text>
-        </View>
-        {!open ? <Text testID="chat-inbox-preview" style={{ color: colors.muted }} numberOfLines={1} ellipsizeMode="tail">{preview.slice(0, 240) || 'Open to load the current message.'}</Text> : null}
-      </View>
       <ChevronDown size={16} color={colors.muted} style={{ transform: [{ rotate: open ? '0deg' : '-90deg' }] }} />
     </Pressable>
+    </View>
+    {!open ? <Text testID="chat-inbox-preview" style={{ color: colors.muted }} numberOfLines={1} ellipsizeMode="tail">{preview.slice(0, 240) || 'Open to load the current message.'}</Text> : null}
     {open ? <ScrollView testID="chat-inbox-list" style={styles.list} contentContainerStyle={styles.listContent} nestedScrollEnabled keyboardShouldPersistTaps="always">
       {visible.slice(0, visibleLimit).map(child => {
         const event = child.event, id = chatInboxMessageId(event), key = bodyKey(event)

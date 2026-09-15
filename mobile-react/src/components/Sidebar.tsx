@@ -3,7 +3,7 @@ import { ActionSheetIOS, Alert, FlatList, Image, Platform, Pressable, StyleSheet
 import { MenuView, type MenuAction, type MenuComponentRef } from '@expo/ui/community/menu'
 import { ChevronDown, ChevronRight, FolderPlus, MoreHorizontal, Network, Plus, RefreshCw, Search, Server, Settings } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useAppStore } from '../store/useAppStore'
+import { client, useAppStore } from '../store/useAppStore'
 import { usePalette } from '../theme'
 import type { Session, TimelineSearchResult } from '../types'
 import { formatChatDateTime, isUnread, runtimeSummary } from '../lib/format'
@@ -19,6 +19,7 @@ import { BackendMark } from './BackendMark'
 import { useTextPrompt, type TextPromptOptions } from './TextPromptDialog'
 import { IconButton } from './ui'
 import { ServerProfileSelector, type ServerProfileListItem } from './ServerProfiles'
+import { localSessionImportSupported } from '../lib/local-session-import'
 
 type Row = { kind: 'header'; key: string; title: string; folder: string; count: number } | { kind: 'session'; key: string; session: Session; searchResult?: TimelineSearchResult }
 
@@ -42,6 +43,11 @@ function profileScopeCanNavigate(scope: ProfileScope): boolean {
     && state.switchingProfileId === null
 }
 
+function sidebarImportAvailable(state: ReturnType<typeof useAppStore.getState>): boolean {
+  return Boolean(state.connected && !state.connecting && !state.switchingProfileId && !state.workspaceAdopting
+    && client.isValidated && localSessionImportSupported(state.health))
+}
+
 function sessionScopeIsCurrent(scope: ProfileScope, sessionId: string): boolean {
   const state = useAppStore.getState()
   return state.activeProfileId === scope.activeProfileId
@@ -51,7 +57,7 @@ function sessionScopeIsCurrent(scope: ProfileScope, sessionId: string): boolean 
     && state.sessions.some(session => session.id === sessionId)
 }
 
-export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitchServer, onAddServer, onManageServers, onSettings, onTeamNetwork, onNewChat, onOpenChat }: {
+export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitchServer, onAddServer, onManageServers, onSettings, onTeamNetwork, onNewChat, onOpenChat, onImportChat }: {
   profiles: readonly ServerProfileListItem[]
   activeProfileId: string | null
   switchingProfileId?: string | null
@@ -62,6 +68,7 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
   onTeamNetwork: () => void
   onNewChat: () => void
   onOpenChat?: () => void
+  onImportChat?: () => void
 }) {
   const colors = usePalette()
   const insets = useSafeAreaInsets()
@@ -73,6 +80,7 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
   const collapsedFolders = useAppStore(state => state.collapsedFolders)
   const profileGeneration = useAppStore(state => state.profileGeneration)
   const workspaceAdopting = useAppStore(state => state.workspaceAdopting)
+  const importAvailable = useAppStore(sidebarImportAvailable)
   const searchResults = useAppStore(state => state.searchResults)
   const searchBusy = useAppStore(state => state.searchBusy)
   const searchError = useAppStore(state => state.searchError)
@@ -281,6 +289,7 @@ export function Sidebar({ profiles, activeProfileId, switchingProfileId, onSwitc
         <IconButton icon={RefreshCw} disabled={workspaceAdopting || needsServerSetup} onPress={() => { dismissSearchKeyboard(); if (profileScopeIsCurrent(profileScope)) void refreshSessions(profileScope.profileGeneration) }} label="Refresh chats" />
         <IconButton icon={FolderPlus} disabled={workspaceAdopting || needsServerSetup} onPress={createFolder} label="New folder" />
         <IconButton icon={Plus} disabled={workspaceAdopting || needsServerSetup} onPress={onNewChat} label="New chat" testID="sidebar-new-chat" />
+        {onImportChat && importAvailable ? <Pressable testID="sidebar-import-chat" accessibilityRole="button" accessibilityLabel="Import chat from provider history" onPress={() => { dismissSearchKeyboard(); if (profileScopeIsCurrent(profileScope) && sidebarImportAvailable(useAppStore.getState())) onImportChat() }} style={styles.importButton}><Text style={{ color: colors.blue, fontSize: 12 }}>Import</Text></Pressable> : null}
         <IconButton icon={Settings} disabled={workspaceAdopting} onPress={() => { if (profileScopeIsCurrent(profileScope)) onSettings() }} label="Settings" testID="sidebar-settings" />
       </View>
       <View style={styles.serverSelector}><ServerProfileSelector
@@ -665,7 +674,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 250, borderRightWidth: StyleSheet.hairlineWidth },
   titleRow: { minHeight: 48, paddingHorizontal: 12, paddingTop: 4, flexDirection: 'row', alignItems: 'center' },
   title: { fontSize: 15, fontWeight: '800' },
-  actions: { minHeight: 44, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 2 },
+  actions: { minHeight: 44, paddingHorizontal: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 2 },
+  importButton: { minHeight: 44, minWidth: 44, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   serverSelector: { marginHorizontal: 10, marginBottom: 8 },
   teamNetworkButton: { minHeight: 44, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, marginHorizontal: 10, marginBottom: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }, teamNetworkButtonText: { flex: 1, fontSize: 12.5, fontWeight: '800' },
   setupBanner: { minHeight: 40, borderRadius: 7, marginHorizontal: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },

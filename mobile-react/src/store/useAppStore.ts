@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { appendTeamMailDraft, type StageTeamMailDraftInput } from '../lib/team-mail-draft'
 import { AppState as NativeAppState } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import type {
@@ -41,9 +42,12 @@ import type {
 } from '../types'
 import { AgentServerClient, AgentServerClientDisposedError, AgentServerClientUnvalidatedError, ServerError, WebSocketConnectionError } from '../api/AgentServerClient'
 import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../lib/format'
-import { reconcileHealthActiveSessions } from '../lib/active-sessions'
+import { healthActiveSessions } from '../lib/active-sessions'
+import { ActivityHealthProjection } from '../lib/activity-health'
+import { isImportedHistoryRecord, isImportedProviderControlMetadata } from '../lib/provider-origin'
 import { shouldAutoConnectServer } from '../lib/first-launch'
 import { SNAPSHOT_CACHE_VERSION, shouldReplaceCachedTimeline, snapshotLatestSeq } from '../lib/history'
+import { historyNeedsServerRevalidation } from '../lib/history-server-version'
 import { asyncQueuedMessageControlsAvailable, crossChatQueueRefreshSessionId, isAsyncQueuedChatMessage, isNativeGoalSteerEvent, isUserQueuedTurn, queueSnapshotRequiresRefresh, queuedDeliverySkipIdentity, queuedMoveCrossesDeliveryBarrier, queuedTurnHasEarlierDeliveryBarrier, resolveNewQueuedTurn, updateQueuedTurns } from '../lib/queue'
 import { QueueReconciliationState } from '../lib/queue-reconciliation'
 import { isAgentActivityEvent } from '../lib/codex-controls'
@@ -79,6 +83,7 @@ import {
   boundLiveTimelineEvents,
   historicalTimelineEvents,
   liveTimelineEventsWereTrimmed,
+  mergeAndSanitizeIncomingEvents,
   sanitizeTimelineEvent,
   sanitizeTimelineFile,
   snapshotMapWith,
@@ -148,7 +153,7 @@ let readReceiptTimer: ReturnType<typeof setTimeout> | null = null
 let pinSaveQueue: Promise<void> = Promise.resolve()
 const notifiedEvents = new Set<string>()
 let foregroundRepairInFlight: Promise<void> | null = null
-let activeSessionRevision = 0
+const activityHealth = new ActivityHealthProjection()
 let profileSwitchIntent = 0
 let initializePromise: Promise<void> | null = null
 let profileMutationQueue: Promise<void> = Promise.resolve()
@@ -183,13 +188,13 @@ const TIMELINE_INTERNAL_EVENT_TYPES = new Set([
   'turn_queue_paused',
   'turn_queue_delivery_fenced',
   'queue_snapshot',
-  'subagent_state',
   'job_updated',
   'job_deleted',
   'claude_subagents_stopped',
 ])
 const SESSION_METADATA_PASSIVE_EVENT_TYPES = new Set([
   ...TIMELINE_INTERNAL_EVENT_TYPES,
+  'subagent_state',
   'raw_event',
   'reasoning_summary',
   'tool_started',
@@ -295,6 +300,7 @@ function queueReconciliationState(scope: ConnectionScope, sessionId: string, get
 }
 
 function captureConnection(): ConnectionScope { return activeConnection }
+function activityScope(scope: ConnectionScope): string { return JSON.stringify([scope.generation, scope.client.validationRevision]) }
 function connectionIsCurrent(scope: ConnectionScope): boolean { return activeConnection === scope }
 function markJobsMutated(scope: ConnectionScope): void {
   scope.jobsMutationRevision += 1
@@ -531,6 +537,7 @@ interface AppState {
   setSessionDraft(sessionId: string, text: string, expectedGeneration?: number): void
   setChatReferencesForSession(sessionId: string, references: ChatReference[], expectedGeneration?: number): void
   setTeamReferencesForSession(sessionId: string, references: TeamReference[], expectedGeneration?: number): void
+  stageTeamMailDraft(input: StageTeamMailDraftInput): Promise<boolean>
   refreshAgentRoutes(sessionId: string, expectedGeneration?: number): Promise<AgentCrossChatRoutesSnapshot | null>
   revokeAgentRoute(sessionId: string, routeId: string, expectedRevision: string, expectedGeneration?: number): Promise<boolean>
   beginTurnAdmission(sessionId: string): string | null
@@ -867,7 +874,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         : state.syncStatus,
       syncError: null,
     }))
-    const activeRevisionAtRequest = activeSessionRevision
+    const activityRequest = activityHealth.capture(activityScope(scope))
     const healthValidationRevision = scope.client.validationRevision
     let health: Health
     try {
@@ -891,6 +898,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (pauseReconnectForInactiveApp(scope, set)) return
     if (!validatedRevisionIsCurrent(scope, acceptedValidationRevision)) return
     healthFailureCount = 0
+    health = activityHealth.accept(activityScope(scope), health, activityRequest)
     set(state => ({
       connected: true,
       // Identity and credentials are authoritative once health validation
@@ -899,7 +907,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       connecting: false,
       serverConfigured: true,
       health,
-      activeSessionIds: reconcileHealthActiveSessions(health, state.activeSessionIds, activeRevisionAtRequest, activeSessionRevision),
+      activeSessionIds: healthActiveSessions(health),
       profiles: updateProfileRuntime(state.profiles, scope.profileId, {
         connectionState: 'online',
         lastConnectionError: null,
@@ -937,6 +945,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     let sessions = incomingSessions
     set(state => {
+      health = activityHealth.accept(activityScope(scope), health, activityRequest)
       sessions = sessionsResult.status === 'fulfilled'
         ? mergeSessionState(incomingSessions, state.sessions, sessionRead)
         : state.sessions
@@ -952,7 +961,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastConnectionCheckedAt: Date.now(),
           serverVersion: healthVersion(health),
         }),
-        activeSessionIds: reconcileHealthActiveSessions(health, state.activeSessionIds, activeRevisionAtRequest, activeSessionRevision),
+        activeSessionIds: healthActiveSessions(health),
         selectedSessionId: selected,
         error: sessionsResult.status === 'rejected' ? errorMessage(sessionsResult.reason) : null,
       }
@@ -1071,20 +1080,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refreshRuntime() {
     if (NativeAppState.currentState !== 'active' || !get().connected) return
     const scope = captureConnection()
-    const activeRevisionAtRequest = activeSessionRevision
+    const activityRequest = activityHealth.capture(activityScope(scope))
     const healthValidationRevision = scope.client.validationRevision
     try {
-      const health = await scope.client.health()
+      let health = await scope.client.health()
       if (NativeAppState.currentState !== 'active' || !connectionIsCurrent(scope)) return
       await acceptHealthIdentity(scope, health, healthValidationRevision, set, get)
       if (NativeAppState.currentState !== 'active' || !connectionIsCurrent(scope)) return
       const acceptedValidationRevision = scope.client.validationRevision
       const runtime = await scope.client.runtimeCatalog(true)
       if (NativeAppState.currentState !== 'active' || !validatedRevisionIsCurrent(scope, acceptedValidationRevision)) return
+      health = activityHealth.accept(activityScope(scope), health, activityRequest)
       set(state => ({
         runtime,
         health,
-        activeSessionIds: reconcileHealthActiveSessions(health, state.activeSessionIds, activeRevisionAtRequest, activeSessionRevision),
+        activeSessionIds: healthActiveSessions(health),
         error: null,
       }))
     } catch (error) {
@@ -1105,7 +1115,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (expectedGeneration !== undefined && expectedGeneration !== scope.generation) return
     if (refreshSessionsInFlight?.scope === scope) return refreshSessionsInFlight.promise
     const operation = (async () => {
-      const activeRevisionAtRequest = activeSessionRevision
+      const activityRequest = activityHealth.capture(activityScope(scope))
       const healthValidationRevision = scope.client.validationRevision
       let health: Health
       try {
@@ -1159,6 +1169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           return
         }
         if (!validatedRevisionIsCurrent(scope, acceptedValidationRevision)) return
+        health = activityHealth.accept(activityScope(scope), health, activityRequest)
         set(state => ({
           connected: true,
           health,
@@ -1169,11 +1180,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             lastConnectionCheckedAt: Date.now(),
             serverVersion: healthVersion(health),
           }),
-          activeSessionIds: reconcileHealthActiveSessions(health, state.activeSessionIds, activeRevisionAtRequest, activeSessionRevision),
+          activeSessionIds: healthActiveSessions(health),
         }))
         return
       }
       if (NativeAppState.currentState !== 'active' || !validatedRevisionIsCurrent(scope, acceptedValidationRevision)) return
+      health = activityHealth.accept(activityScope(scope), health, activityRequest)
       let mergedSessions = sessions
       let sessionsChanged = false
       set(state => {
@@ -1185,7 +1197,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           sessions: merged,
           health,
           profiles: updateProfileRuntime(state.profiles, scope.profileId, { connectionState: 'online', cachedUnreadCount: unreadCount(merged), lastConnectionError: null, lastConnectionCheckedAt: Date.now(), serverVersion: healthVersion(health) }),
-          activeSessionIds: reconcileHealthActiveSessions(health, state.activeSessionIds, activeRevisionAtRequest, activeSessionRevision),
+          activeSessionIds: healthActiveSessions(health),
         }
       })
       if (sessionsChanged) {
@@ -1267,10 +1279,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const queueRevision = queueState.revision
       const sessionRead = sessionMutations.captureRead()
       const existingAtStart = get().snapshots[sessionId]
+      const verifiedServerVersion = get().health ? healthVersion(get().health!) : null
+      const revalidateServerVersion = historyNeedsServerRevalidation(existingAtStart, verifiedServerVersion)
       const eventIdsAtStart = new Set(existingAtStart?.events.map(event => event.id) ?? [])
       // Trusted cached snapshots can reconcile through the server's fast
       // append-only delta path. Full tails are reserved for cold/manual loads.
-      const fullTail = reason === 'manual' || !existingAtStart
+      const fullTail = reason === 'manual' || !existingAtStart || revalidateServerVersion
       const supportsSemanticPaging = (get().health?.api_contract_version ?? 0) >= SEMANTIC_PAGING_API_CONTRACT
       const streamIsLive = get().liveConnected && hasSelectedStream(sessionId)
       const exposeProgress = !streamIsLive && (fullTail || get().syncStatus !== 'live')
@@ -1315,16 +1329,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           fetchedFullTail = true
         }
         if (NativeAppState.currentState !== 'active' || !currentScope() || epoch !== selectionEpoch || get().selectedSessionId !== sessionId) return
+        if (verifiedServerVersion !== (get().health ? healthVersion(get().health!) : null)) return
 
         const current = get().snapshots[sessionId]
         const queueChanged = queueState.revision !== queueRevision
           || current?.queuedTurns !== existingAtStart?.queuedTurns
         const queuedTurns = queueChanged ? current?.queuedTurns ?? [] : page.queued_turns
         if (!queueChanged) queueState.commitSnapshot(page.latest_seq)
-        const incomingEvents = page.events
-          .filter(event => event.session_id === sessionId && Number.isFinite(event.seq))
-          .map(sanitizeTimelineEvent)
-        const replaceEvents = (fetchedFullTail && fullTailSemanticPaging === true)
+        const incomingEvents = mergeAndSanitizeIncomingEvents(current?.events ?? [], page.events
+          .filter(event => event.session_id === sessionId && Number.isFinite(event.seq)))
+        const replaceEvents = (fetchedFullTail && (fullTailSemanticPaging === true || revalidateServerVersion))
           || shouldReplaceCachedTimeline(current, incomingEvents, page.latest_seq, page.has_more, fetchedFullTail)
         const now = Date.now()
         // If the live stream appended while a full-tail request was pending,
@@ -1348,6 +1362,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const reconciledSession = sessionMutations.reconcileIncoming(currentSession, page.session, sessionRead)
         const next: Snapshot = {
           cacheVersion: SNAPSHOT_CACHE_VERSION,
+          verifiedServerVersion: fetchedFullTail ? verifiedServerVersion : current?.verifiedServerVersion,
           session: reconciledSession,
           events: mergedEvents,
           queuedTurns,
@@ -1531,9 +1546,12 @@ export const useAppStore = create<AppState>((set, get) => ({
               // sequence numbers at or beyond the anchor, so only legacy raw
               // pages may be constrained by the numeric cursor.
               || (!semanticPaging && rawEvent.seq >= cursor)
-              || loadedIds.has(rawEvent.id)
             ) continue
-            const event = sanitizeTimelineEvent(rawEvent)
+            const resident = fetchedEvents.findLast(event => event.id === rawEvent.id)
+              ?? get().snapshots[sessionId]?.events.find(event => event.id === rawEvent.id)
+              ?? initialSnapshot.events.find(event => event.id === rawEvent.id)
+            const event = mergeAndSanitizeIncomingEvents(resident ? [resident] : [], [rawEvent])[0]!
+            if (loadedIds.has(event.id) && event === resident) continue
             loadedIds.add(event.id)
             fetchedEvents.push(event)
           }
@@ -1565,7 +1583,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const baseEvents = detachedHistory
           ? baseSnapshot.events
           : mergeEvents(baseSnapshot.events, currentLiveSnapshot?.events ?? [])
-        const merged = boundHistoricalTimelineEvents(mergeEvents(collected, baseEvents))
+        const merged = boundHistoricalTimelineEvents(mergeEvents(baseEvents, collected))
         const retainedIds = new Set(merged.map(event => event.id))
         const retainedCollected = collected.filter(event => retainedIds.has(event.id))
         // The history window deliberately retains its newest edge. Once its
@@ -1685,9 +1703,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       ) return false
 
       const events = boundHistoricalTimelineEvents(
-        mergeEvents(older.events, newer.events)
-          .filter(event => event.session_id === result.session_id && Number.isFinite(event.seq))
-          .map(sanitizeTimelineEvent),
+        mergeAndSanitizeIncomingEvents(get().snapshots[result.session_id]?.events ?? [],
+          mergeEvents(older.events, newer.events)
+            .filter(event => event.session_id === result.session_id && Number.isFinite(event.seq))),
       )
       const files = mergeFiles([], filesFromEvents(events))
       const projected = projectPresentableHistory(events, files)
@@ -1896,7 +1914,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return {
         ...page,
-        events: page.events.map(sanitizeTimelineEvent),
+        events: mergeAndSanitizeIncomingEvents(get().snapshots[sessionId]?.events ?? [], page.events),
       }
     } catch (error) {
       if (
@@ -1924,7 +1942,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!connectionIsCurrent(scope)) throw new AgentServerClientUnvalidatedError()
       return {
         ...page,
-        runs: page.runs.map(sanitizeTimelineEvent),
+        runs: mergeAndSanitizeIncomingEvents(get().snapshots[sessionId]?.events ?? [], page.runs),
       }
     } catch (error) {
       if (!connectionIsCurrent(scope)) throw error
@@ -1972,6 +1990,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (expectedGeneration !== undefined && expectedGeneration !== get().profileGeneration) return
     set(state => ({ teamReferencesBySession: { ...state.teamReferencesBySession, [sessionId]: references.map(reference => ({ ...reference })) } }))
     scheduleCurrentWorkspaceSave(get)
+  },
+
+  async stageTeamMailDraft(input) {
+    try {
+      const scope = captureValidatedConnection(get, input.expectedProfileGeneration)
+      const initial = get()
+      const identity = initial.profiles.find(profile => profile.id === initial.activeProfileId)?.serverIdentity ?? null
+      if (scope.namespaceAdopting || initial.workspaceAdopting || initial.activeProfileId !== input.expectedProfileId
+        || identity !== input.expectedServerIdentity || (initial.health?.server_instance_id ?? null) !== input.expectedServerInstanceId
+        || scope.client.validationRevision !== input.expectedValidationRevision || initial.selectedSessionId !== input.expectedSelectedSessionId
+        || !initial.sessions.some(session => session.id === input.sessionId && !session.archived)) return false
+      const current = captureAgentRouteGuard(scope, get)
+      const draft = initial.drafts[input.sessionId] ?? ''
+      const references = initial.teamReferencesBySession[input.sessionId] ?? []
+      const chats = initial.chatReferencesBySession[input.sessionId] ?? []
+      const draftFingerprint = JSON.stringify([draft, references, chats])
+      const next = appendTeamMailDraft(draft, references, input)
+      if (next.references.some(reference => !teamReferenceContractSupported(initial.health, reference))) return false
+      const beforeSelection = selectionEpoch
+      await get().selectSession(input.sessionId, input.expectedProfileGeneration)
+      const selected = get()
+      if (!current() || scope.namespaceAdopting || selectionEpoch !== beforeSelection + 1 || selected.selectedSessionId !== input.sessionId
+        || (selected.profiles.find(profile => profile.id === selected.activeProfileId)?.serverIdentity ?? null) !== input.expectedServerIdentity
+        || next.references.some(reference => !teamReferenceContractSupported(selected.health, reference))
+        || !selected.sessions.some(session => session.id === input.sessionId && !session.archived)
+        || JSON.stringify([selected.drafts[input.sessionId] ?? '', selected.teamReferencesBySession[input.sessionId] ?? [], selected.chatReferencesBySession[input.sessionId] ?? []]) !== draftFingerprint) return false
+      set(state => ({ drafts: { ...state.drafts, [input.sessionId]: next.text },
+        teamReferencesBySession: { ...state.teamReferencesBySession, [input.sessionId]: next.references } }))
+      scheduleCurrentWorkspaceSave(get)
+      return true
+    } catch { return false }
   },
 
   async refreshAgentRoutes(sessionId, expectedGeneration) {
@@ -2358,6 +2407,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!scope) return
     const inFlightKey = `${scope.generation}:${id}`
     if (stopTurnInFlight.has(inFlightKey)) return
+    const currentScope = captureAgentRouteGuard(scope, get)
+    activityHealth.initialize(activityScope(scope), get().health)
+    const activityRequest = activityHealth.capture(activityScope(scope))
+    const stoppedOwner = activityHealth.runId(id)
     stopTurnInFlight.add(inFlightKey)
     set(state => {
       const stoppingSessionIds = new Set(state.stoppingSessionIds)
@@ -2366,7 +2419,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     try {
       const result = await scope.client.stopTurn(id)
-      if (!connectionIsCurrent(scope)) return
+      if (!currentScope()) return
       if (!result.stopped) {
         const message = result.message?.trim()
           || (result.pending || result.deferred
@@ -2375,8 +2428,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ error: message })
         return
       }
-      activeSessionRevision += 1
-      set(state => { const active = new Set(state.activeSessionIds); active.delete(id); return { activeSessionIds: active } })
+      if (activityHealth.confirmStopped(activityScope(scope), id, activityRequest, stoppedOwner)) {
+        set(state => {
+          const active = new Set(state.activeSessionIds)
+          active.delete(id)
+          return { activeSessionIds: active, health: state.health ? {
+            ...state.health, active: [...active], active_sessions: [...active],
+            ...(state.health.active_runs ? { active_runs: state.health.active_runs.filter(row => row.session_id !== id) } : {}),
+          } : null }
+        })
+      }
     } catch (error) { if (!isStaleConnectionError(error, scope)) set({ error: errorMessage(error) }) }
     finally {
       stopTurnInFlight.delete(inFlightKey)
@@ -3650,7 +3711,6 @@ async function prepareServerProfileActivation(
     if (readReceiptTimer) clearTimeout(readReceiptTimer)
     readReceiptTimer = null
     healthFailureCount = 0
-    activeSessionRevision += 1
     const scope = installConnection(profileId, profile.serverURL, token, namespace, set)
     const previousUnread = unreadCount(get().sessions)
     set(state => ({
@@ -4336,34 +4396,29 @@ function installAppLifecycle(
 
 function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void, get: () => AppState): void {
   if (!connectionIsCurrent(scope)) return
-  event = sanitizeTimelineEvent(event)
+  event = mergeAndSanitizeIncomingEvents(get().snapshots[event.session_id]?.events ?? [], [event])[0]!
   const sessionId = event.session_id
-  const acceptQueueEvent = queueReconciliationState(scope, sessionId, get).observe(event)
+  const silentImport = isImportedHistoryRecord(event) || isImportedProviderControlMetadata(event)
+  const acceptQueueEvent = !silentImport && queueReconciliationState(scope, sessionId, get).observe(event)
   const timelineInternal = TIMELINE_INTERNAL_EVENT_TYPES.has(event.type)
   const nativeSteerSupersession = isNativeSteerSupersession(event)
-  const terminalEvent = ['turn_finished', 'turn_stopped', 'error'].includes(event.type) && !nativeSteerSupersession
-  if (event.type === 'turn_started' || event.type === 'process_started' || terminalEvent) {
-    activeSessionRevision += 1
-  }
+  const terminalEvent = !silentImport && ['turn_finished', 'turn_stopped'].includes(event.type) && !nativeSteerSupersession
+  activityHealth.initialize(activityScope(scope), get().health)
+  const health = activityHealth.observe(activityScope(scope), event)
   set(state => {
     const snapshot = state.snapshots[sessionId]
-    const agentActivity = isAgentActivityEvent(event)
-    let active = state.activeSessionIds
-    if ((event.type === 'turn_started' || event.type === 'process_started') && !active.has(sessionId)) {
-      active = new Set(active)
-      active.add(sessionId)
-    } else if (terminalEvent && active.has(sessionId)) {
-      active = new Set(active)
-      active.delete(sessionId)
-    }
-    const updateSessionMetadata = !SESSION_METADATA_PASSIVE_EVENT_TYPES.has(event.type)
+    const agentActivity = !silentImport && isAgentActivityEvent(event)
+    const projectedActive = health ? healthActiveSessions(health) : state.activeSessionIds
+    const active = projectedActive.size === state.activeSessionIds.size
+      && [...projectedActive].every(id => state.activeSessionIds.has(id)) ? state.activeSessionIds : projectedActive
+    const healthState = health ? { health } : {}
+    const updateSessionMetadata = !silentImport && !SESSION_METADATA_PASSIVE_EVENT_TYPES.has(event.type)
     const sessions = updateSessionMetadata
       ? state.sessions.map(session => session.id === sessionId ? {
           ...session,
           latest_event_seq: Math.max(session.latest_event_seq ?? 0, event.seq),
-          latest_event_at: event.ts,
-          latest_event_type: event.type,
-          ...(agentActivity ? {
+          ...(event.seq >= (session.latest_event_seq ?? 0) ? { latest_event_at: event.ts, latest_event_type: event.type } : {}),
+          ...(agentActivity && event.seq >= (session.latest_agent_event_seq ?? 0) ? {
             latest_agent_event_seq: Math.max(session.latest_agent_event_seq ?? 0, event.seq),
             latest_agent_event_at: event.ts,
             latest_agent_event_type: event.type,
@@ -4380,9 +4435,9 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
       liveConnected: true,
       lastTimelineSyncAt: Date.now(),
     } : {}
-    if (!snapshot) return { activeSessionIds: active, sessions, profiles, ...selectedSync }
+    if (!snapshot) return { ...healthState, activeSessionIds: active, sessions, profiles, ...selectedSync }
     const queuedTurns = acceptQueueEvent ? updateQueuedTurns(snapshot.queuedTurns, event) : snapshot.queuedTurns
-    const queuedRunStatus = acceptQueueEvent || event.type === 'turn_started' || isNativeGoalSteerEvent(event)
+    const queuedRunStatus = !silentImport && (acceptQueueEvent || event.type === 'turn_started' || isNativeGoalSteerEvent(event))
       ? queuedRunStatusForEvent(state.queuedRunStatus, sessionId, queuedTurns, event)
       : state.queuedRunStatus
     // Queue, job and subagent bookkeeping must still update their dedicated
@@ -4390,7 +4445,7 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
     // every long-chat row and makes live scrolling stutter. If an internal
     // event did not alter the queue, keep the snapshot reference stable.
     if (timelineInternal && queuedTurns === snapshot.queuedTurns) {
-      return { queuedRunStatus, activeSessionIds: active, sessions, profiles, ...selectedSync }
+      return { ...healthState, queuedRunStatus, activeSessionIds: active, sessions, profiles, ...selectedSync }
     }
     const mergedEvents = timelineInternal ? snapshot.events : mergeEvents(snapshot.events, [event])
     const boundedEvents = boundLiveTimelineEvents(mergedEvents)
@@ -4409,6 +4464,7 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
       terminalEvent,
     )
     return {
+      ...healthState,
       snapshots: snapshotMapWith(state.snapshots, sessionId, next),
       queuedRunStatus,
       activeSessionIds: active,
@@ -4417,6 +4473,7 @@ function applyLiveEvent(scope: ConnectionScope, event: Event, set: (value: Parti
       ...selectedSync,
     }
   })
+  if (silentImport) return
   if ([
     'turn_finished',
     'artifact_created',
@@ -4594,11 +4651,13 @@ function markQueuedRunAccepted(
   get: () => AppState,
 ): void {
   if (!connectionIsCurrent(scope)) return
-  activeSessionRevision += 1
+  activityHealth.initialize(activityScope(scope), get().health)
+  const health = activityHealth.admit(activityScope(scope), sessionId)
   set(state => {
     const active = new Set(state.activeSessionIds)
     active.add(sessionId)
     return {
+      ...(health ? { health } : {}),
       activeSessionIds: active,
       queuedRunStatus: queuedRunStatusMap(state.queuedRunStatus, sessionId),
     }

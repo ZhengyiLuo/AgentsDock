@@ -28,7 +28,7 @@ function page(turns = publicQueue, latest = seq): TimelinePage {
 }
 function event(type: string, patch: Partial<Event> = {}): Event {
   seq += 1
-  return { id: `event-${seq}`, session_id: session.id, seq, type, ts: '2026-09-11T00:00:00Z', ...patch }
+  return { id: `event-${seq}`, session_id: session.id, run_id: 'queue-test-run', seq, type, ts: '2026-09-11T00:00:00Z', ...patch }
 }
 function queuedIds() { return useAppStore.getState().snapshots[session.id].queuedTurns.map(turn => turn.queued_id) }
 async function flush() { for (let i = 0; i < 30; i += 1) await Promise.resolve() }
