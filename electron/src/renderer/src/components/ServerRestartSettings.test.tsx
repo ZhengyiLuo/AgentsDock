@@ -203,6 +203,61 @@ function installBridge(
   })
 }
 
+const atomicForceUpdateReservation: ServerUpdateStatus = {
+  phase: 'pending',
+  current_version: '1.0.0-beta.8',
+  target_version: '1.0.0',
+  latest_version: '1.0.0',
+  track: 'stable',
+  schedule_id: '5'.repeat(32),
+  server_identity: 'server-a',
+  server_instance_id: 'boot-old',
+  when_idle: true,
+  cancelable: true,
+  message: 'AgentsServer is waiting for current work to finish.'
+}
+
+async function refuseAtomicForceUpdate(
+  recovery: () => Promise<ServerUpdateStatus>,
+  refusal = 'server_force_update_changed: The queued update started before restart admission.'
+) {
+  const pending = atomicForceUpdateReservation
+  const updateStatus = vi.fn()
+    .mockResolvedValueOnce(pending)
+    .mockResolvedValueOnce(pending)
+    .mockImplementation(recovery)
+  const snapshot = blockerSnapshot({ provider_background_count: 1, force_restart_available: true })
+  installBridge(updateStatus, vi.fn().mockResolvedValue(restartStatus(snapshot)))
+  showSettings(restartHealth({
+    managed_updates: true,
+    capabilities: {
+      server_restart: { ...serverRestartCapability, blocker_snapshot: snapshot },
+      server_updates: { ...durableQueueCapability, version: 11 }
+    }
+  }))
+  const restartServer = vi.fn().mockRejectedValue(new Error(refusal))
+  useAppStore.setState({ restartServer })
+  render(<SettingsDialog />)
+  openAppUpdates()
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Interrupt work and update now' }))
+  await waitFor(() => expect(restartServer).toHaveBeenCalledTimes(1))
+  expect(restartServer).toHaveBeenCalledWith('boot-old', {
+    force: true,
+    forceConfirmed: true,
+    expectedBlockerRevision: revisionA,
+    expectedUpdateScheduleId: pending.schedule_id
+  })
+  return { updateStatus, restartServer }
+}
+
+function expectNoForceUpdateRetry(restartServer: ReturnType<typeof vi.fn>) {
+  expect(restartServer).toHaveBeenCalledTimes(1)
+  expect(window.agentsDock.serverUpdates.start).not.toHaveBeenCalled()
+  expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
+}
+
 describe('SettingsDialog managed server restart', () => {
   afterEach(() => {
     cleanup()
@@ -889,43 +944,298 @@ describe('SettingsDialog managed server restart', () => {
   })
 
   it('does not retry an atomic force-update refusal and gives a safe recovery path', async () => {
-    const pending: ServerUpdateStatus = {
-      phase: 'pending',
-      current_version: '0.1.26-beta.40',
-      target_version: '0.1.26-beta.41',
-      track: 'beta',
-      schedule_id: '5'.repeat(32),
-      when_idle: true,
-      cancelable: true,
-      message: 'AgentsServer is waiting for current work to finish.'
-    }
-    const snapshot = blockerSnapshot({ provider_background_count: 1, force_restart_available: true })
-    installBridge(
-      vi.fn().mockResolvedValue(pending),
-      vi.fn().mockResolvedValue(restartStatus(snapshot))
-    )
-    showSettings(restartHealth({
-      managed_updates: true,
-      capabilities: {
-        server_restart: { ...serverRestartCapability, blocker_snapshot: snapshot },
-        server_updates: { ...durableQueueCapability, version: 11 }
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => atomicForceUpdateReservation)
+    const alerts = await screen.findAllByRole('alert')
+    expect(alerts.some(alert => /confirm|retry/i.test(alert.textContent || ''))).toBe(true)
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expect(screen.queryByRole('dialog', { name: 'Update AgentsServer now?' })).not.toBeInTheDocument()
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it.each(['starting', 'installing', 'restarting'] as const)(
+    'follows the exact approved update now %s after stale force confirmation without restarting again',
+    async phase => {
+      const fresh: ServerUpdateStatus = {
+        ...atomicForceUpdateReservation,
+        phase,
+        cancelable: false,
+        update_id: '6'.repeat(32),
+        message: `The approved release is now ${phase}.`
       }
-    }))
-    const restartServer = vi.fn().mockRejectedValue(new Error(
-      'server_force_update_changed: The queued update started before restart admission.'
-    ))
+      const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => fresh)
+
+      expect(await screen.findByText(fresh.message!)).toBeInTheDocument()
+      expect(screen.queryAllByRole('alert')).toHaveLength(0)
+      expect(screen.queryByRole('dialog', { name: 'Update AgentsServer now?' })).not.toBeInTheDocument()
+      expect(updateStatus).toHaveBeenCalledTimes(3)
+      expectNoForceUpdateRetry(restartServer)
+    }
+  )
+
+  it.each(['complete', 'current'] as const)(
+    'shows the exact approved installed release after force refusal when its status is %s',
+    async phase => {
+      const fresh: ServerUpdateStatus = {
+        ...atomicForceUpdateReservation,
+        phase,
+        current_version: '1.0.0',
+        installed_version: '1.0.0',
+        update_available: false,
+        cancelable: false,
+        message: 'AgentsServer 1.0.0 is installed and healthy.'
+      }
+      const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => fresh)
+
+      expect(await screen.findByText(phase === 'current' ? 'This is the latest one.' : fresh.message!)).toBeInTheDocument()
+      expect(updatesSurface().getByText('1.0.0')).toBeInTheDocument()
+      expect(screen.queryAllByRole('alert')).toHaveLength(0)
+      expect(updateStatus).toHaveBeenCalledTimes(3)
+      expectNoForceUpdateRetry(restartServer)
+    }
+  )
+
+  it('recovers the exact legacy refusal prose when the IPC error omitted its server code', async () => {
+    const fresh: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      phase: 'installing',
+      cancelable: false,
+      message: 'The approved release is installing after the confirmation race.'
+    }
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(
+      async () => fresh,
+      'The scheduled server update changed before force update confirmation. AgentsServer was not restarted. Refresh update status and confirm the force update again.'
+    )
+
+    expect(await screen.findByText(fresh.message!)).toBeInTheDocument()
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it.each([
+    ['schedule', { schedule_id: '7'.repeat(32) }],
+    ['target', { target_version: '1.1.0' }],
+    ['track', { track: 'beta' }]
+  ] as const)('does not adopt an update with a changed %s after force refusal', async (_field, change) => {
+    const fresh: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      phase: 'installing',
+      cancelable: false,
+      ...change,
+      message: 'A different update is installing; review its reservation.'
+    }
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => fresh)
+
+    expect((await screen.findAllByRole('alert')).some(alert => /changed|confirm/i.test(alert.textContent || ''))).toBe(true)
+    expect(updatesSurface().getByRole('button', { name: fresh.track === 'beta' ? 'Beta' : 'Stable' })).toHaveClass('active')
+    expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeDisabled()
+    expect(screen.queryByText(/following its install|already updating/i)).not.toBeInTheDocument()
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it.each(['failed', 'available'] as const)('shows the actual preflight failure when the waiter cleared the reservation to %s before force admission', async phase => {
+    const fresh: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      phase,
+      schedule_id: undefined,
+      target_version: undefined,
+      cancelable: undefined,
+      message: 'Installer preflight requires an isolated tmux server.',
+      error_code: 'unsafe_tmux_service_cgroup',
+      error_action: 'Repair the tmux service isolation before scheduling again.'
+    }
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => fresh)
+
+    expect((await screen.findAllByRole('alert')).some(alert => alert.textContent?.includes(fresh.message!))).toBe(true)
+    expect(screen.getAllByRole('alert').some(alert => alert.textContent?.includes(fresh.error_action!))).toBe(true)
+    expect(screen.queryByText(/remains reserved|still queued|did not cancel the queued update/i)).not.toBeInTheDocument()
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled()
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it('keeps force-update outcome unconfirmed after a failed recovery read until an explicit status check succeeds', async () => {
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => {
+      throw new Error('Status endpoint is temporarily unreachable.')
+    })
+
+    const alerts = await screen.findAllByRole('alert')
+    expect(alerts.some(alert => /unconfirmed|could not.*(?:confirm|verify)|unable.*(?:confirm|verify)/i.test(alert.textContent || ''))).toBe(true)
+    expect(screen.queryByText(/remains reserved|still queued|did not cancel the queued update/i)).not.toBeInTheDocument()
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled()
+    expectNoForceUpdateRetry(restartServer)
+
+    const checked: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      phase: 'available',
+      schedule_id: undefined,
+      when_idle: false,
+      cancelable: false,
+      message: 'Fresh verified status: AgentsServer 1.0.0 is available.'
+    }
+    vi.mocked(window.agentsDock.serverUpdates.check).mockResolvedValue(checked)
+    fireEvent.click(updatesSurface().getByRole('button', { name: 'Check server' }))
+
+    expect(await screen.findByText(checked.message!)).toBeInTheDocument()
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    expect(window.agentsDock.serverUpdates.check).toHaveBeenCalledExactlyOnceWith('stable')
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it('preserves an unrelated restart failure notice when an explicit update check succeeds', async () => {
+    installBridge(vi.fn().mockResolvedValue(currentServerUpdate))
+    showSettings(recoveryHealth())
+    const restartServer = vi.fn(async () => false)
     useAppStore.setState({ restartServer })
     render(<SettingsDialog />)
     openAppUpdates()
+    fireEvent.click(await updatesSurface().findByRole('button', { name: 'Force restart server' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Force restart AgentsServer?' })).getByRole('button', { name: 'Force Restart' }))
+    expect(await updatesSurface().findByRole('alert')).toHaveTextContent('The force restart request could not be confirmed.')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Interrupt work and update now' }))
+    const checked: ServerUpdateStatus = {
+      ...currentServerUpdate,
+      current_version: '1.0.0-beta.8',
+      latest_version: '1.0.0-beta.9',
+      phase: 'available',
+      message: 'Update availability was checked; the earlier restart remains unconfirmed.'
+    }
+    const checksBeforeExplicitRefresh = vi.mocked(window.agentsDock.serverUpdates.check).mock.calls.length
+    vi.mocked(window.agentsDock.serverUpdates.check).mockResolvedValue(checked)
+    fireEvent.click(updatesSurface().getByRole('button', { name: 'Check server' }))
 
-    const recovery = await screen.findByText(/AgentsDock did not cancel the queued update\. Check server update status before retrying/)
-    expect(recovery).toHaveAttribute('role', 'alert')
-    expect(screen.queryByRole('dialog', { name: 'Update AgentsServer now?' })).not.toBeInTheDocument()
-    expect(restartServer).toHaveBeenCalledTimes(1)
-    expect(window.agentsDock.serverUpdates.cancel).not.toHaveBeenCalled()
+    expect(await updatesSurface().findByText('1.0.0-beta.8')).toBeInTheDocument()
+    expect(updatesSurface().getByRole('alert')).toHaveTextContent('The force restart request could not be confirmed.')
+    expect(window.agentsDock.serverUpdates.check).toHaveBeenCalledTimes(checksBeforeExplicitRefresh + 1)
+    expect(window.agentsDock.serverUpdates.check).toHaveBeenLastCalledWith('beta')
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it('does not publish the old server recovery result after the active server scope changes', async () => {
+    let finishRecovery!: (status: ServerUpdateStatus) => void
+    const recovery = new Promise<ServerUpdateStatus>(resolve => { finishRecovery = resolve })
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(() => recovery)
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledTimes(3))
+    const serverB: ServerUpdateStatus = {
+      ...currentServerUpdate,
+      phase: 'available',
+      server_identity: 'server-b',
+      server_instance_id: 'boot-b',
+      message: 'Server B is current; no update requested.'
+    }
+    updateStatus.mockResolvedValue(serverB)
+    act(() => useAppStore.setState(state => ({
+      activeProfileId: 'profile-2',
+      profileGeneration: 8,
+      profiles: [...state.profiles, {
+        ...state.profiles[0]!,
+        id: 'profile-2',
+        name: 'Server B',
+        serverIdentity: 'server-b',
+        serverUrl: 'https://other.example.test:7850'
+      }],
+      health: restartHealth({ managed_updates: true, server_identity: 'server-b', server_instance_id: 'boot-b' })
+    })))
+    expect(await screen.findByText(serverB.message!)).toBeInTheDocument()
+    await act(async () => finishRecovery({
+      ...atomicForceUpdateReservation,
+      phase: 'installing',
+      cancelable: false,
+      message: 'OLD SERVER A UPDATE RESULT MUST NOT APPEAR'
+    }))
+
+    expect(screen.getByText(serverB.message!)).toBeInTheDocument()
+    expect(screen.queryByText('OLD SERVER A UPDATE RESULT MUST NOT APPEAR')).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it.each([
+    ['identity', { server_identity: 'foreign-server' }],
+    ['instance', { server_instance_id: 'foreign-boot' }]
+  ] as const)('does not adopt recovery status carrying a foreign server %s even when the app scope did not change', async (_field, change) => {
+    const foreign: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      ...change,
+      phase: 'installing',
+      current_version: '9.9.9',
+      message: 'FOREIGN SERVER STATUS MUST NOT APPEAR'
+    }
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(async () => foreign)
+
+    expect((await screen.findAllByRole('alert')).some(alert => /could not verify the current update state/i.test(alert.textContent || ''))).toBe(true)
+    expect(screen.queryByText(foreign.message!)).not.toBeInTheDocument()
+    expect(screen.queryByText('9.9.9')).not.toBeInTheDocument()
+    expect(updatesSurface().getByRole('button', { name: 'Check server' })).toBeEnabled()
+    expect(useAppStore.getState().health?.server_identity).toBe('server-a')
+    expect(useAppStore.getState().health?.server_instance_id).toBe('boot-old')
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it('preserves a newer unrelated global error while recovering the refused force update', async () => {
+    let finishRecovery!: (status: ServerUpdateStatus) => void
+    const recovery = new Promise<ServerUpdateStatus>(resolve => { finishRecovery = resolve })
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(() => recovery)
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledTimes(3))
+    act(() => useAppStore.setState({ error: 'A separate file request was denied.' }))
+    const fresh: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      phase: 'installing',
+      cancelable: false,
+      message: 'The exact update is installing; unrelated errors remain independent.'
+    }
+    await act(async () => finishRecovery(fresh))
+
+    expect(await screen.findByText(fresh.message!)).toBeInTheDocument()
+    expect(useAppStore.getState().error).toBe('A separate file request was denied.')
+    expect(updateStatus).toHaveBeenCalledTimes(3)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it('clears the old recovery notice after the same server reconnects with a new boot', async () => {
+    let finishRecovery!: (status: ServerUpdateStatus) => void
+    const recovery = new Promise<ServerUpdateStatus>(resolve => { finishRecovery = resolve })
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(() => recovery)
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledTimes(3))
+    const reconnected: ServerUpdateStatus = {
+      ...atomicForceUpdateReservation,
+      phase: 'available',
+      schedule_id: undefined,
+      server_instance_id: 'boot-new',
+      message: 'The newly connected server has fresh update status.'
+    }
+    updateStatus.mockResolvedValue(reconnected)
+    act(() => useAppStore.setState(state => ({
+      profileGeneration: 8,
+      health: { ...state.health!, server_instance_id: 'boot-new' }
+    })))
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledTimes(4))
+    await act(async () => finishRecovery({
+      ...atomicForceUpdateReservation,
+      phase: 'installing',
+      message: 'STALE PREVIOUS BOOT RESULT'
+    }))
+
+    expect(await screen.findByText(reconnected.message!)).toBeInTheDocument()
+    expect(screen.queryByText(/Checking the current update state/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('STALE PREVIOUS BOOT RESULT')).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    expectNoForceUpdateRetry(restartServer)
+  })
+
+  it('does not recover or retry unrelated force-restart errors', async () => {
+    const { updateStatus, restartServer } = await refuseAtomicForceUpdate(
+      async () => atomicForceUpdateReservation,
+      'Authentication was denied by the server.'
+    )
+
+    expect((await screen.findAllByRole('alert')).some(alert => /Authentication was denied/i.test(alert.textContent || ''))).toBe(true)
+    expect(updateStatus).toHaveBeenCalledTimes(2)
+    expectNoForceUpdateRetry(restartServer)
   })
 
   it('cancels an exact pending reservation before restarting now', async () => {

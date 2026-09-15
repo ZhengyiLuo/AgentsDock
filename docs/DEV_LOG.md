@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-14 — Force-update status recovery (unreleased)
+
+- Recover from a force-update confirmation refused because the queued update
+  changed while the confirmation was open. Read status once; never retry a
+  restart or update automatically. Follow an already-started update only when
+  its schedule, target and track match the approved reservation.
+- Show actual installer/preflight failures instead of a stale confirmation
+  error. If status cannot be verified, re-enable Check server. Clear only the
+  handled recovery notice after a successful check or server-scope change;
+  preserve unrelated failures and ignore responses from an old server/boot.
+- Support the existing beta.8 response, including bridges that preserve only
+  its error prose. No server contract change or background polling is added.
+- Validate focused confirmation-race and recovery regressions, the full desktop
+  suite, type checks, production compilation and compile/license guards. Inspect
+  the actual Settings dialog in isolated offscreen Electron in both themes,
+  covering install progress, preflight failure and manual-check recovery.
+- Source fix only: no new package, publication, installation or live restart.
+
 ## 2026-09-14 — Desktop 1.0.0 replacement accepted
 
 - Published desktop `1.0.0`, build `1167`, from committed source

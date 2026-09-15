@@ -153,6 +153,18 @@ function serverUpdateHasStarted(status: ServerUpdateStatus | null | undefined): 
   return Boolean(status && status.phase !== 'pending' && serverUpdateIsActive(status))
 }
 
+function matchesPendingUpdateReservation(status: ServerUpdateStatus, reservation: PendingServerUpdateReservation): boolean {
+  return status.schedule_id?.trim() === reservation.scheduleId
+    && status.target_version?.trim() === reservation.targetVersion
+    && status.track === reservation.track
+}
+
+function forceUpdateReservationChanged(error: unknown): boolean {
+  // Older native bridges preserve the server's message/action, but not its
+  // structured error code. Either form permits a status READ, never a retry.
+  return /\bserver_force_update_changed\b|scheduled server update changed before force update confirmation/i.test(message(error))
+}
+
 function serverTrackForStatus(status: ServerUpdateStatus): ServerUpdateTrack {
   if (status.track) return status.track
   return status.current_version.split('+', 1)[0].includes('-') ? 'beta' : 'stable'
@@ -1162,7 +1174,10 @@ export function SettingsDialog() {
   const [updateNowDialogError, setUpdateNowDialogError] = useState<string | null>(null)
   const [updateNowInspectionBusy, setUpdateNowInspectionBusy] = useState(false)
   const [restartingServer, setRestartingServer] = useState(false)
-  const [restartNotice, setRestartNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [restartNotice, setRestartNotice] = useState<{ kind: 'success' | 'error'; message: string; source?: 'force-update-recovery' } | null>(null)
+  const clearForceUpdateRecoveryNotice = () => setRestartNotice(current => (
+    current?.source === 'force-update-recovery' ? null : current
+  ))
   const [restartAfterUpdateTarget, setRestartAfterUpdateTarget] = useState<RestartAfterUpdateTarget | null>(null)
   const [restartAfterUpdateRetry, setRestartAfterUpdateRetry] = useState(0)
   const [deferredServerUpdates, setDeferredServerUpdates] = useState<DeferredServerUpdates>(readDeferredServerUpdates)
@@ -1502,6 +1517,7 @@ export function SettingsDialog() {
   useEffect(() => {
     restartInspectionRef.current += 1
     updateNowInspectionRef.current += 1
+    clearForceUpdateRecoveryNotice()
     setRestartConfirmationOpen(false)
     setRestartConfirmationMode('safe')
     setRestartTarget(null)
@@ -1858,6 +1874,7 @@ export function SettingsDialog() {
         if (cancelled || !serverPollIsCurrent(requestId)) return
         setServerUpdate(next)
         setServerUpdateTrack(serverTrackForStatus(next))
+        if (next.phase !== 'pending') clearForceUpdateRecoveryNotice()
         if (serverUpdateIsActive(next)) timer = window.setTimeout(() => void poll(), 1_500)
       } catch {
         if (cancelled || !serverPollIsCurrent(requestId)) return
@@ -1888,6 +1905,7 @@ export function SettingsDialog() {
     return true
   }
   const applyCheckedServerUpdate = (next: ServerUpdateStatus, track: ServerUpdateTrack) => {
+    clearForceUpdateRecoveryNotice()
     setServerUpdateWarning(null)
     setServerUpdate(next)
     const legacyStableCurrent = (
@@ -2351,6 +2369,7 @@ export function SettingsDialog() {
     const target = updateNowTarget
     const reservation = updateNowReservation
     const snapshot = updateNowBlockerSnapshot
+    const inspectionId = updateNowInspectionRef.current
     if (
       !target
       || !reservation
@@ -2373,20 +2392,17 @@ export function SettingsDialog() {
       }
 
       const reconciled = await window.agentsDock.serverUpdates.status()
-      setServerUpdate(reconciled)
-      setServerUpdateTrack(serverTrackForStatus(reconciled))
       if (!restartTargetIsCurrent(target)) {
         throw new Error('The active AgentsServer changed while the queued update was being verified.')
       }
+      setServerUpdate(reconciled)
+      setServerUpdateTrack(serverTrackForStatus(reconciled))
       if (
         serverUpdateHasStarted(reconciled)
-        && reconciled.target_version?.trim() === reservation.targetVersion
+        && matchesPendingUpdateReservation(reconciled, reservation)
       ) {
         closeUpdateNowConfirmation()
-        setRestartNotice({
-          kind: 'success',
-          message: `${reservation.targetVersion} started before the restart was sent. AgentsDock is following its install and reconnect progress.`
-        })
+        setRestartNotice(null)
         return
       }
       const reconciledScheduleId = reconciled.phase === 'pending'
@@ -2438,7 +2454,51 @@ export function SettingsDialog() {
       })
     } catch (error) {
       const detail = message(error)
-      if (restartAttempted || !restartTargetIsCurrent(target)) {
+      if (!restartTargetIsCurrent(target) || updateNowInspectionRef.current !== inspectionId) return
+      if (restartAttempted && forceUpdateReservationChanged(error)) {
+        // The idle waiter can advance the SAME reservation between the read
+        // above and restart admission. A refusal proves no restart occurred;
+        // it does not prove that installing the approved update failed.
+        // Do not leave a sticky transient notice: the server may legitimately
+        // reboot during this read and invalidate the old response entirely.
+        setRestartNotice(null)
+        // The store also reports restart errors globally. This refusal is
+        // handled here; do not leave its obsolete message outside the dialog.
+        const state = useAppStore.getState()
+        if (state.error && message(state.error) === detail) state.setError(null)
+        try {
+          const latest = await window.agentsDock.serverUpdates.status()
+          if (!restartTargetIsCurrent(target) || updateNowInspectionRef.current !== inspectionId) return
+          if (!latest
+            || (latest.server_identity && latest.server_identity !== target.serverIdentity)
+            || (latest.server_instance_id && latest.server_instance_id !== target.serverInstanceId)) {
+            throw new Error('Mismatched update status')
+          }
+          setServerUpdate(latest)
+          setServerUpdateTrack(serverTrackForStatus(latest))
+          setServerUpdateWarning(null)
+          closeUpdateNowConfirmation()
+          const exactReservation = matchesPendingUpdateReservation(latest, reservation)
+          const installed = (latest.phase === 'complete' || latest.phase === 'current')
+            && latest.current_version === reservation.targetVersion
+          if (exactReservation && (serverUpdateHasStarted(latest) || installed)) {
+            // Let the live update status remain visible; a sticky restart
+            // notice would mask subsequent progress, completion or failure.
+            setRestartNotice(null)
+          } else if (latest.phase === 'failed' || latest.error_code) {
+            setRestartNotice({ kind: 'error', source: 'force-update-recovery', message: [latest.message || t('serverUpdate.failed'), latest.error_action].filter(Boolean).join(' ') })
+          } else {
+            setRestartNotice({ kind: 'error', source: 'force-update-recovery', message: t('serverUpdate.forceChangedReview') })
+          }
+        } catch {
+          if (!restartTargetIsCurrent(target) || updateNowInspectionRef.current !== inspectionId) return
+          closeUpdateNowConfirmation()
+          // Do not keep a stale pending state/spinner disabling Check server
+          // after the server explicitly rejected that reservation.
+          setServerUpdate(null)
+          setRestartNotice({ kind: 'error', source: 'force-update-recovery', message: t('serverUpdate.forceStateUnknown') })
+        }
+      } else if (restartAttempted) {
         closeUpdateNowConfirmation()
         setRestartNotice({
           kind: 'error',
