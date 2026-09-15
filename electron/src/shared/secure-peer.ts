@@ -89,6 +89,7 @@ export interface SecurePeerPairing {
   certificateExpiresAt: string | null
   certificateFingerprint: string | null
   lastSeenAt: string | null
+  /** Null for a negotiated durable request; observation timeouts do not expire it. */
   expiresAt: string | null
   error: string | null
 }

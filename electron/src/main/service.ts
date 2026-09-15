@@ -1084,16 +1084,37 @@ export class AppService {
     }
     const pairingId = securePeerV4ID(input?.pairingId, 'pairing')
     if (!/^[0-9a-f]{64}$/.test(input?.expectedTranscriptHash ?? '')) throw new Error('Secure pairing transcript is invalid.')
-    const raw = await context.scope.client.securePeerPairingCompletion(pairingId, {
-      expected_server_identity: context.expected.serverIdentity,
-      expected_server_instance_id: context.serverInstanceId,
-      expected_transcript_hash: input.expectedTranscriptHash
-    }, signal)
-    signal.throwIfAborted()
-    this.requireSecurePeerControlContext(context)
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid secure pairing completion response.')
-    const receipt = raw as Record<string, unknown>
-    if (receipt.version !== 1) throw new Error('Invalid secure pairing completion response.')
+    let receipt: Record<string, unknown>
+    for (;;) {
+      signal.throwIfAborted()
+      this.requireSecurePeerControlContext(context)
+      const observationStarted = performance.now()
+      const raw = await context.scope.client.securePeerPairingCompletion(pairingId, {
+        expected_server_identity: context.expected.serverIdentity,
+        expected_server_instance_id: context.serverInstanceId,
+        expected_transcript_hash: input.expectedTranscriptHash
+      }, signal)
+      signal.throwIfAborted()
+      this.requireSecurePeerControlContext(context)
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid secure pairing completion response.')
+      receipt = raw as Record<string, unknown>
+      if (receipt.version !== 1) throw new Error('Invalid secure pairing completion response.')
+      if (receipt.completion_state !== 'unavailable' || receipt.reason !== 'observation_window_elapsed') break
+      const pending = parseSecurePeerPairing(receipt.pairing, true)
+      const awaitingApproval = pending.trustState === 'pending' && ['requesting', 'pending_approval'].includes(pending.status)
+      const awaitingActivation = pending.trustState === 'approved' && ['approved', 'connected'].includes(pending.status)
+        && Boolean(pending.connectionId && pending.hubIdentity)
+      // A durable Join outlives an HTTP observation window. Renew only the
+      // same held read, never the Join or its consent. Requiring a real long
+      // hold prevents an early/unrecognized response from becoming a hot poll.
+      // Allow small clock/scheduler differences, but never an eager retry.
+      if (performance.now() - observationStarted < 590_000
+        || pending.id !== pairingId || pending.transcriptHash !== input.expectedTranscriptHash
+        || pending.direction !== 'outgoing' || (!awaitingApproval && !awaitingActivation) || pending.error
+        || !pending.completeOnApproval || (receipt.pairing as Record<string, unknown>).expires_at !== null) {
+        throw new Error('Automatic pairing completion stopped. Check the current pairing status before trying again.')
+      }
+    }
     const completed = receipt.completion_state === 'completed'
     const terminalState = receipt.completion_state === 'expired' || receipt.completion_state === 'cancelled'
       ? receipt.completion_state : null

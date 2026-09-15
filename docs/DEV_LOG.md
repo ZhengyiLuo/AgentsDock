@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-15 — Durable team join waiting (unreleased)
+
+- Keep one automatic-join observer attached across long HTTP observation
+  windows when the server confirms a durable pending approval or activation.
+  Renew only the same held read, with unchanged request, transcript, server and
+  cancellation fences. Reject early responses instead of creating a hot retry
+  loop; do not add inbox polling, repeated Join requests or UI refresh timers.
+- Make legacy expired incoming requests discoverable in a collapsed section,
+  separate from pending approvals and without approval controls. A replacement
+  request hides the stale attempt. New non-expiring joins require the matching
+  standalone server change on both host and joining server.
+- Accepted locally: 600 focused desktop checks, type checks, production
+  compilation and compile-output verification. Inspect the real host panel
+  offscreen at narrow width in light and dark themes, including expired and
+  replacement requests; no overflow, new network calls or approval mutations.
+  No package, installation, publication or live server restart performed.
+
 ## 2026-09-14 — Force-update status recovery (unreleased)
 
 - Recover from a force-update confirmation refused because the queued update

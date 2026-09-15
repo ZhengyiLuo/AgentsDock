@@ -99,6 +99,9 @@ export function SecurePeerPanel({
   const pending = useMemo(() => visiblePairings.filter(pairing => (
     pairing.direction === 'incoming' && pairing.status === 'pending_approval'
   )), [visiblePairings])
+  const expired = useMemo(() => visiblePairings.filter(pairing => (
+    pairing.direction === 'incoming' && pairing.status === 'expired'
+  )), [visiblePairings])
   const outgoing = useMemo(() => visiblePairings.filter(pairing => pairing.direction === 'outgoing'), [visiblePairings])
   const activePairing = outgoing.find(pairing => (
     Boolean(pairing.connectionId) && control?.activeConnectionId === pairing.connectionId
@@ -738,6 +741,7 @@ export function SecurePeerPanel({
       status={status}
       control={control}
       pending={pending}
+      expired={expired}
       managedPeers={visibleManagedPeers}
       canManage={canManage}
       busy={Boolean(busy)}
@@ -814,10 +818,11 @@ function sameSecurePeerPairings(
   return current === incoming || JSON.stringify(current) === JSON.stringify(incoming)
 }
 
-function HostConnectionView({ status, control, pending, managedPeers, canManage, busy, copied, hostAddress, confirmedSas, confirmingDisableHost, onCopy, onHostAddressChange, onConfirmSas, onApprove, onReject, onRevoke, onRequestDisableHost, onCancelDisableHost, onDisableHost }: {
+function HostConnectionView({ status, control, pending, expired, managedPeers, canManage, busy, copied, hostAddress, confirmedSas, confirmingDisableHost, onCopy, onHostAddressChange, onConfirmSas, onApprove, onReject, onRevoke, onRequestDisableHost, onCancelDisableHost, onDisableHost }: {
   status: TeamHubStatus
   control: SecurePeerControlStatus
   pending: SecurePeerPairing[]
+  expired: SecurePeerPairing[]
   managedPeers: SecurePeerPairing[]
   canManage: boolean
   busy: boolean
@@ -882,6 +887,15 @@ function HostConnectionView({ status, control, pending, managedPeers, canManage,
         </article>
       })}
     </section>
+
+    {expired.length > 0 && <details className="network-more network-approval-list">
+      <summary>{t('teamNetwork.peer.expiredRequests', { count: expired.length })}</summary>
+      <p>{t('teamNetwork.peer.expiredRequestHelp')}</p>
+      {expired.map(pairing => <article className="secure-peer-pairing-card" key={pairing.id}>
+        <Server size={18} />
+        <div><strong>{pairing.peerDisplayName}</strong><span>{t('teamNetwork.peer.expiredRequestStatus')}</span></div>
+      </article>)}
+    </details>}
 
     {livePeers.length > 0 && <section className="network-approval-list" aria-label={t('teamNetwork.peer.serverConnections')}>
       <header><h3>{t('teamNetwork.peer.serverConnections')}</h3></header>

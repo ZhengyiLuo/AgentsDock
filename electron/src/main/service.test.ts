@@ -976,6 +976,135 @@ describe('secure peer control fencing', () => {
     expect(test.client.securePeerStatus).not.toHaveBeenCalled()
   })
 
+  function observationWindowReceipt(test: ReturnType<typeof completionHarness>) {
+    return {
+      version: 1, completion_state: 'unavailable', reason: 'observation_window_elapsed',
+      pairing: { ...test.pairing, status: 'pending_approval', trust_state: 'pending', transport_state: 'disconnected',
+        connection_id: null, local_proxy_base_path: null, certificate_fingerprint: null, certificate_expires_at: null,
+        granted_scopes: [], expires_at: null }
+    }
+  }
+
+  it('re-arms only the same held observer across multiple windows, then verifies completion once', async () => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const waiting = observationWindowReceipt(test)
+    test.client.securePeerPairingCompletion
+      .mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      .mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      .mockResolvedValueOnce(test.receipt)
+    await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal))
+      .resolves.toMatchObject({ activeConnectionId: test.pairing.connection_id })
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(3)
+    for (const call of test.client.securePeerPairingCompletion.mock.calls) {
+      expect(call).toEqual([test.pairing.id, {
+        expected_server_identity: 'server-a', expected_server_instance_id: 'instance-a', expected_transcript_hash: 'c'.repeat(64)
+      }, test.controller.signal])
+    }
+    expect(test.client.securePeerStatus).toHaveBeenCalledExactlyOnceWith(test.controller.signal)
+    expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).toHaveBeenCalledOnce()
+  })
+
+  it.each(['early', 'other-reason', 'missing-reason', 'legacy-expiry', 'missing-expiry', 'wrong-pairing',
+    'wrong-transcript', 'incoming', 'no-consent', 'rejected', 'pairing-error', 'malformed'] as const)(
+    'does not re-arm an %s observer response or refresh/recreate the Join', async fault => {
+      const test = completionHarness()
+      let elapsed = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+      const waiting = observationWindowReceipt(test) as Record<string, any>
+      if (fault === 'other-reason') waiting.reason = 'unavailable'
+      if (fault === 'missing-reason') delete waiting.reason
+      if (fault === 'legacy-expiry') waiting.pairing.expires_at = '2026-09-15T12:00:00Z'
+      if (fault === 'missing-expiry') delete waiting.pairing.expires_at
+      if (fault === 'wrong-pairing') waiting.pairing.id = '29d7bb2e-3b47-4be7-89fc-2cecd90f4434'
+      if (fault === 'wrong-transcript') waiting.pairing.transcript_hash = 'e'.repeat(64)
+      if (fault === 'incoming') waiting.pairing.direction = 'incoming'
+      if (fault === 'no-consent') waiting.pairing.complete_on_approval = false
+      if (fault === 'rejected') Object.assign(waiting.pairing, { status: 'rejected', trust_state: 'rejected' })
+      if (fault === 'pairing-error') waiting.pairing.error = 'Host unavailable'
+      if (fault === 'malformed') waiting.pairing = null
+      test.client.securePeerPairingCompletion.mockImplementationOnce(async () => {
+        elapsed += fault === 'early' ? 1 : 600_000
+        return waiting
+      })
+      await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+      expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(1)
+      expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+      expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+      expect(test.retireMailHints).not.toHaveBeenCalled()
+    }
+  )
+
+  it('requires a fresh long hold on every observer window instead of reusing elapsed time', async () => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const waiting = observationWindowReceipt(test)
+    test.client.securePeerPairingCompletion
+      .mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      .mockResolvedValueOnce(waiting)
+    await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(2)
+    expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+    expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
+  it.each(['disconnected', 'offline', 'reconnecting'] as const)(
+    'retains approved but %s automatic activation across a held window', async transportState => {
+      const test = completionHarness()
+      let elapsed = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+      const waiting = { ...observationWindowReceipt(test), pairing: {
+        ...test.pairing, status: 'approved', transport_state: transportState
+      } }
+      test.client.securePeerPairingCompletion.mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+      await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal))
+        .resolves.toMatchObject({ activeConnectionId: test.pairing.connection_id })
+      expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(2)
+      expect(test.client.securePeerStatus).toHaveBeenCalledTimes(1)
+      expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+      expect(test.retireMailHints).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each(['abort', 'scope', 'transport'] as const)('stops the held observer on %s loss without re-arming', async fault => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    test.client.securePeerPairingCompletion.mockImplementationOnce(async () => {
+      elapsed += 600_000
+      if (fault === 'abort') test.controller.abort()
+      if (fault === 'scope') vi.mocked(test.service['requireSecurePeerControlContext']).mockImplementation(() => { throw new Error('Stale server scope') })
+      if (fault === 'transport') throw new Error('Lost connection')
+      return observationWindowReceipt(test)
+    })
+    await expect(test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)).rejects.toThrow()
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(1)
+    expect(test.client.securePeerStatus).not.toHaveBeenCalled()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
+  it('returns cancellation after a held observer window without ending consent early', async () => {
+    const test = completionHarness()
+    let elapsed = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
+    const waiting = observationWindowReceipt(test)
+    test.client.securePeerPairingCompletion.mockImplementationOnce(async () => { elapsed += 600_000; return waiting })
+    test.receipt.completion_state = 'cancelled'
+    test.pairing.status = 'approved'
+    test.pairing.transport_state = 'disconnected'
+    test.pairing.complete_on_approval = false
+    test.status.active_connection_id = null
+    const result = await test.service.waitForSecurePeerPairingCompletion(test.expected, test.input, test.controller.signal)
+    expect(result.pairingCompletion?.state).toBe('cancelled')
+    expect(test.client.securePeerPairingCompletion).toHaveBeenCalledTimes(2)
+    expect(test.client.securePeerStatus).toHaveBeenCalledTimes(1)
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
   it('sends automatic consent only when explicitly requested and exactly advertised', async () => {
     const test = completionHarness()
     const input = { host: '100.64.0.1', displayName: 'Guest', requestedScopes: ['teamspace.read'] as ['teamspace.read'] }
