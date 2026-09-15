@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-15 — Member self-rename, desktop 1.0.1 candidate
+
+- Committed member self-rename in `ee277b162b34a341d2d771e92bea2697342bcc3e`.
+  The owned member's directory menu now offers Rename. Saving changes its Team
+  Network display and recipient names in place, without changing its host role,
+  peer identity, connection or local profile label. Other members remain
+  protected; stale identities and mismatched receipts are rejected.
+- Verified the real paired-service principal, whose identity is distinct from
+  its directory node, along with legacy node-shaped sessions. The existing
+  published server API passes isolated self-rename, read-only, reprovision,
+  current-mention and new-mail-label checks; no server changes were required.
+- A clean archive of the committed source passes TypeScript, 4,218 desktop
+  tests (10 platform/intentional skips), eight compile/license guards and
+  production compilation. The actual renderer passes isolated offscreen
+  dark/light and narrow-layout checks for Save, Cancel and editable failures;
+  saving preserves row identity and adds no polling or role-switch operation.
+- Release notes are prepared in [RELEASE_1.0.1.md](RELEASE_1.0.1.md). Native
+  release packaging and publication remain pending per-release Windows signing
+  approval. This is not yet an accepted or published application package.
+  No installed app or live server was changed.
+
 ## 2026-09-15 — Durable team join waiting (unreleased)
 
 - Keep one automatic-join observer attached across long HTTP observation
