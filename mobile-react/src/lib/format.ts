@@ -1,5 +1,7 @@
 import type { AgentFile, Backend, Event, Session } from '../types'
 import { hasProviderUserProvenance, mergeProviderInterruptionEvent } from './provider-origin'
+import { isNativeGoalSteerEvent } from './native-goal-steering'
+import { retainNativeGoalAcknowledgementFiles } from './native-goal-file-association'
 
 const fullDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -35,7 +37,7 @@ export function normalizeServerURL(value: string): string {
 }
 
 export function messageText(event: Event): string {
-  const inputEvent = event.type === 'turn_started' || event.type === 'turn_queued' || event.type === 'turn_queue_run_now'
+  const inputEvent = event.type === 'turn_started' || event.type === 'turn_queued' || event.type === 'turn_queue_run_now' || isNativeGoalSteerEvent(event)
   const raw = inputEvent && event.display_prompt != null
     ? event.display_prompt
     : event.result_text ?? event.text ?? event.prompt ?? event.message ?? event.error ?? event.output ?? ''
@@ -170,7 +172,7 @@ export function mergeEvents(current: Event[], incoming: Event[]): Event[] {
   const byId = new Map(current.map(event => [event.id, event]))
   for (const event of incoming) {
     const previous = byId.get(event.id)
-    byId.set(event.id, previous ? mergeProviderInterruptionEvent(previous, event) : event)
+    byId.set(event.id, previous ? retainNativeGoalAcknowledgementFiles(previous, mergeProviderInterruptionEvent(previous, event)) : event)
   }
   const merged = [...byId.values()].sort((a, b) => a.seq - b.seq)
   return merged.length === current.length && merged.every((event, index) => event === current[index])

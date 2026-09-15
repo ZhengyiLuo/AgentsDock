@@ -84,7 +84,7 @@ try {
     assert.match(requests[0].url, /\/api\/sessions\/team-reference-chat\/turns$/u)
     assert.deepEqual(requests[0].body, {
       prompt: draft.trim(), file_ids: ['attached-file'], model: 'test-model', effort: 'high',
-      client_capabilities: ['codex_interactive_v1'], team_references: [reference(draft.trim())],
+      client_capabilities: ['codex_interactive_v1', 'codex_goal_steer_v1'], team_references: [reference(draft.trim())],
     })
     assert.equal(useAppStore.getState().drafts[SESSION], '')
     assert.deepEqual(useAppStore.getState().teamReferencesBySession[SESSION], [])
@@ -213,7 +213,7 @@ try {
     assert.equal(requests.length, 1)
     assert.equal(requests[0].method, 'PATCH')
     assert.deepEqual(requests[0].body, {
-      prompt: revised.trim(), chat_references: [], client_capabilities: ['codex_interactive_v1'],
+      prompt: revised.trim(), chat_references: [], client_capabilities: ['codex_interactive_v1', 'codex_goal_steer_v1'],
       team_references: [reference(revised.trim())],
     })
     assert.deepEqual(useAppStore.getState().snapshots[SESSION].queuedTurns[0].file_ids, ['queued-file'])
@@ -233,7 +233,7 @@ try {
     assert.equal(await send(), true)
     assert.deepEqual(requests[0].body.chat_references, [local])
     assert.deepEqual(requests[0].body.team_references, [reference(prompt)])
-    assert.deepEqual(requests[0].body.client_capabilities, ['codex_interactive_v1', 'cross_chat_handoffs_v1', 'cross_chat_handoffs_v2', 'agent_cross_chat_routes_v2'])
+    assert.deepEqual(requests[0].body.client_capabilities, ['codex_interactive_v1', 'codex_goal_steer_v1', 'cross_chat_handoffs_v1', 'cross_chat_handoffs_v2', 'agent_cross_chat_routes_v2'])
     reset(prompt)
     configureMixed()
     setQueue(prompt, [reference(prompt)], { chat_references: [local] })

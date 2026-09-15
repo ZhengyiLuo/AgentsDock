@@ -666,6 +666,17 @@ export class AgentServerClient {
       ...(expectedMessageRevision !== undefined ? { expected_message_revision: expectedMessageRevision } : {}),
     })
   }
+  /** Explicit Save for unchanged queued input; never an automatic retry. */
+  async updateQueuedCapabilities(sessionId: string, queuedId: string, clientCapabilities: readonly string[]): Promise<void> {
+    if (clientCapabilities.length > 16 || clientCapabilities.some(value => typeof value !== 'string' || !value.trim())) {
+      throw new Error('Invalid queued client capabilities.')
+    }
+    // This replaces the capability list; it is not an additive server CAS.
+    // Omit every content/grant field so the existing input remains untouched.
+    await this.patch(`/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queuedId)}`, {
+      client_capabilities: [...clientCapabilities],
+    })
+  }
   async crossChatHandoff(envelopeId: string): Promise<CrossChatHandoff> {
     return (await this.get<{ handoff: CrossChatHandoff }>(
       `/api/cross-chat/handoffs/${encodeURIComponent(envelopeId)}`,

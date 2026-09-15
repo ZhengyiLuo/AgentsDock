@@ -28,9 +28,9 @@ for (const width of [320, 375, 393, 430, 440, 599]) {
 assert(!isCompactComposerToolbar(600), '600pt must retain the labeled tablet toolbar')
 assert(isDenseComposerToolbar(300), 'a 320pt viewport must use the dense fallback')
 assert(!isDenseComposerToolbar(355), 'standard phones must keep equal-width backend spacing')
-assert(compactComposerToolbarRequiredWidth(worstPhoneState, true) === 296, 'the dense worst case must stay deterministic')
-assert(compactComposerToolbarRequiredWidth({ backend: 'codex', active: false, hasReadyContent: false }, true) === 224, 'the idle dense provider action must reserve a 44pt target')
-assert(compactComposerToolbarRequiredWidth(worstPhoneState, false) === 330, 'the regular phone worst case must count every gap')
+assert(compactComposerToolbarRequiredWidth(worstPhoneState, true) === 208, 'the active tools leave labeled turn actions in their own row')
+assert(compactComposerToolbarRequiredWidth({ backend: 'codex', active: false, hasReadyContent: false }, true) === 262, 'the idle dense provider action and labeled Send must fit')
+assert(compactComposerToolbarRequiredWidth(worstPhoneState, false) === 238, 'the regular phone tool row must count every gap')
 assert(COMPOSER_COMPACT_TOOLBAR_GAP > 0, 'standard phones must retain visible control rhythm')
 for (const composerWidth of [445, 492, 512]) {
   assert(isCompactComposerToolbar(composerWidth), `${composerWidth}pt split chat panes must stay compact`)

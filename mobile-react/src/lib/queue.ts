@@ -2,6 +2,8 @@ import type { Event, Health, QueuedCrossChatDeliveryIdentity, QueuedTurn } from 
 import { crossChatCapabilityVersion, crossChatHandoffsAvailable, exactQueuedDeliverySkipAvailable } from './chat-references'
 import { isAsyncCrossChatMessage } from './timeline'
 import { isImportedHistoryRecord, isImportedProviderControlMetadata } from './provider-origin'
+import { isNativeGoalSteerEvent } from './native-goal-steering'
+export { isNativeGoalSteerEvent } from './native-goal-steering'
 
 export function isUserQueuedTurn(turn: QueuedTurn): boolean {
   return turn.purpose !== 'handoff_digest'
@@ -67,17 +69,6 @@ export function crossChatQueueRefreshSessionId(event: Event): string | null {
   if (!event.queued_id || event.session_id !== event.target_session_id) return null
   return event.type.startsWith('cross_chat_handoff_') || event.type.startsWith('cross_chat_exchange_leg_') || isAsyncCrossChatMessage(event)
     ? event.session_id : null
-}
-
-/** A server-confirmed user message delivered within the current native goal run. */
-export function isNativeGoalSteerEvent(event: Event): boolean {
-  return event.type === 'turn_steered'
-    && event.native_goal_steer === true
-    && event.native_steer === true
-    && event.backend === 'codex'
-    && event.purpose === 'codex_goal_resume'
-    && event.provider_user_authored === true
-    && Boolean(event.run_id?.trim())
 }
 
 /** Positions cannot prove removal: a membership gap requests a full public queue read. */

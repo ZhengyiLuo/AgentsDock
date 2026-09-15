@@ -44,7 +44,10 @@ test('queued edits refresh capability authority, preserve valid spans, and fence
   assert.match(queued, /validatedConnectionOrReport\(get, set, expectedGeneration\)/)
   assert.match(queued, /reconcileChatReferences\(/)
   assert.match(queued, /validChatReferences\(normalizedPrompt, requestedReferences, sessionId\)/)
-  assert.match(queued, /interactiveClientCapabilities\(source, state\.health\)/)
+  assert.match(queued, /const dispatch = get\(\)[\s\S]*?interactiveClientCapabilities\(dispatch\.sessions\.find\([\s\S]*?dispatch\.health\)/)
+  assert.ok(queued.indexOf('await requireTeamReferenceSupport') < queued.indexOf('const dispatch = get()'),
+    'capabilities must be negotiated from current state after awaited Team validation')
+  assert.match(queued, /capabilityOnly \? scope\.client\.updateQueuedCapabilities\(sessionId, queuedId, capabilities\)/)
   assert.match(queued, /scope\.client\.updateQueued\([\s\S]*?validReferences/)
   const action = section(store, 'async function queueAction(', '\nasync function refreshSnapshotQueue(')
   assert.match(action, /const current = captureAgentRouteGuard\(scope, get\)/)

@@ -1,5 +1,44 @@
 # Public development log
 
+## Mobile goal steering and accessible queue controls — 0.1.2 (175)
+
+- Apple validation, upload and processing completed successfully. Build 175
+  is active for internal TestFlight testing with automatic notifications
+  enabled. External beta review was not submitted. Binary source: `d328087`.
+- Both CI jobs passed for that exact source commit. Local verification passed
+  all 112 library/API/store modules and 478 rendered/contract checks, plus
+  focused goal/settings/file-transfer interactions. Focused suites overlap;
+  these counts are not a unique combined total or physical-device acceptance.
+- Signed archive and exported IPA passed version, distribution-signature,
+  framework ABI, privacy, production-feature and fixture-exclusion checks,
+  with matching app/debug symbols. Build artifacts and release logs remain
+  on the external development volume.
+
+- Negotiate the native Codex goal-steering capability on supported Codex
+  connections. Preserve the goal and active owner when explicitly steering a
+  follow-up; ordinary Send remains queue admission while work is running.
+- Render exact native-goal follow-ups as chronological user-message segments,
+  including attachments, display text, history reloads and bounded lazy traces.
+  Do not merge separate human messages by equal text.
+- Preserve exact visible file ownership across live queue removal and native
+  acknowledgements with empty file lists. Keep queue bookkeeping hidden and
+  fence the bounded file-only association to its validated server scope.
+- Keep labeled Stop, Steer and Queue controls visible in active chats. Rebalance
+  the keyboard layout for the complete collapsed goal/queue headers and expose
+  a queue review sheet with full errors and touch-sized message actions.
+  Short portrait keyboards collapse secondary tools while retaining folded
+  panels, primary actions and keyboard dismissal.
+- Offer explicit Edit/Save recovery for messages queued by an older client,
+  retaining their queue IDs. Saving is separate from steering and never
+  automatically resends a prompt or changes a goal. An unchanged Save refreshes
+  only client capabilities, preserving content, attachments and route metadata.
+- Retain unsaved queue edits when the original message leaves the queue. Offer
+  Copy and confirmed Discard while releasing the remaining message controls.
+- Reconcile accepted-send responses that cross a same-server reconnect through
+  fresh reads, preserving newer drafts instead of replaying the request.
+- Physical-device acceptance and release acceptance are separate gates; neither
+  is implied by synthetic protocol, store, layout or rendered-control tests.
+
 ## Mobile desktop catch-up — 0.1.2 (174)
 
 - Apple validation, upload, and processing completed successfully; build 174

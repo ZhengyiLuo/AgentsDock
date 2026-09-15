@@ -806,6 +806,19 @@ try {
       && queuedEditBody.client_capabilities.includes('cross_chat_handoffs_v2'),
     'Queued edits should preserve structured references with refreshed v2 capability authority',
   )
+  await codex.updateQueuedCapabilities('session /?', 'queued /?', ['codex_interactive_v1', 'codex_goal_steer_v1'])
+  const capabilitySave = fetchRecords.at(-1)
+  assert(capabilitySave?.method === 'PATCH'
+    && capabilitySave.url === 'https://codex.example/api/sessions/session%20%2F%3F/queue/queued%20%2F%3F',
+  'Explicit attachment-only Save must update the exact encoded queued ID')
+  assert(capabilitySave.body === JSON.stringify({ client_capabilities: ['codex_interactive_v1', 'codex_goal_steer_v1'] }),
+    'Capability Save must omit prompt, files, references and all grant fields, without starting a turn')
+  const capabilitySaveCount = fetchRecords.length
+  await assertRejects(codex.updateQueuedCapabilities('session', 'queued', ['']), error => error instanceof Error,
+    'Empty capability values must fail before transport')
+  await assertRejects(codex.updateQueuedCapabilities('session', 'queued', Array(17).fill('extra')), error => error instanceof Error,
+    'Oversized capability lists must fail before transport')
+  assert(fetchRecords.length === capabilitySaveCount, 'Invalid capability edits must never reach the server')
   assert((await codex.crossChatHandoff('handoff /?')).body === 'Check this', 'Handoff details should unwrap the authenticated response')
   assert((await codex.cancelCrossChatHandoff('handoff /?')).status === 'cancelled', 'Handoff cancellation should unwrap the summary')
   assert((await codex.crossChatExchange('exchange /?')).status === 'active', 'Exchange details should unwrap the authenticated response')

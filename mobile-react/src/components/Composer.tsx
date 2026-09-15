@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
+import * as Clipboard from 'expo-clipboard'
 import { useShallow } from 'zustand/react/shallow'
 import { MenuView, type MenuAction } from '@expo/ui/community/menu'
 import { AlertCircle, ArrowDown, ArrowUp, Check, ChevronDown, CornerDownRight, File as FileIcon, Mail, MessageCircleMore, MessageSquareShare, Paperclip, Search, Send, Square, Trash2, X } from 'lucide-react-native'
@@ -27,6 +29,7 @@ import {
   COMPOSER_INPUT_MAX_HEIGHT,
   COMPOSER_INPUT_MIN_HEIGHT,
   composerInputHeight,
+  composerKeyboardToolsCollapsed,
   composerViewportLimits,
   measuredComposerInputHeight,
 } from '../lib/composer-input-size'
@@ -70,9 +73,7 @@ import {
   COMPOSER_DENSE_TOOLBAR_GAP,
   COMPOSER_DENSE_TOOLBAR_PADDING,
   COMPOSER_EMPTY_CARD_MIN_HEIGHT,
-  COMPOSER_SEND_FACE_SIZE,
   COMPOSER_SHELL_PADDING,
-  COMPOSER_STOP_FACE_SIZE,
   COMPOSER_TOOLBAR_TOUCH_SIZE,
   isCompactComposerToolbar,
   isDenseComposerToolbar,
@@ -174,6 +175,9 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const [pickerQuery, setPickerQuery] = useState('')
   const [inputHeight, setInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT)
   const [composerWidth, setComposerWidth] = useState(0)
+  const [queueReviewRequest, setQueueReviewRequest] = useState(0)
+  const [queueHasEdit, setQueueHasEdit] = useState(false)
+  const [primaryActionsHeight, setPrimaryActionsHeight] = useState(48)
   const inputRef = useRef<TextInput>(null)
   const draftRef = useRef(draft)
   const referencesRef = useRef<ChatReference[]>(references)
@@ -222,6 +226,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   const switching = Boolean(switchingProfileId) || workspaceAdopting
   const networkDisabled = !connected || connecting || switching || !client.isValidated
   const hasReadyContent = Boolean(draft.trim()) || (!welcome && uploads.length > 0)
+  const steerReviewsQueue = !hasReadyContent && (queued.length > 0 || Boolean(queuedRunStatus) || queueHasEdit)
   const mcpCommand = !welcome && isClaudeMcpCommand(draft)
   const mailCommandSuggested = !welcome && isTeamMailCommandCandidate(draft)
   const mcpCommandLabel = backend === 'claude' ? 'Open Claude MCP servers' : 'Run /mcp command'
@@ -235,17 +240,19 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
   // change. Once the agent starts (backend_locked or a provider session id) or a
   // turn is in flight, the backend is fixed and only reload remains.
   const backendSwitchable = Boolean(backend) && !networkDisabled && !active && !admitting && !sending && !stopping && !providerReloading && !(sourceSession && isBackendLocked(sourceSession))
-  // An active Codex draft renders every toolbar action at once. Keep the
-  // entire phone-width row icon-only so the trailing Send target cannot clip.
+  // Provider tools stay compact; primary turn actions get their own labeled
+  // row while active so Queue and Steer remain distinct on a narrow phone.
   // Window width is not the usable composer width when the sidebar or
   // inspector is beside the chat. Measure the card itself before choosing
   // labeled controls; the first render stays compact to avoid a clipped flash.
   const compactToolbar = composerWidth === 0 || isCompactComposerToolbar(composerWidth)
   const denseToolbar = compactToolbar && (composerWidth === 0 ? width < 352 : isDenseComposerToolbar(composerWidth))
   const viewportLimits = composerViewportLimits(width, height, keyboardVisible)
-  const displayedInputHeight = Math.min(composerInputHeight(draft, inputHeight), viewportLimits.inputMaxHeight)
+  const constrainedKeyboard = composerKeyboardToolsCollapsed(width, height, keyboardVisible)
+  const primaryInputBudget = active && !constrainedKeyboard ? Math.max(COMPOSER_INPUT_MIN_HEIGHT, COMPOSER_CARD_MAX_HEIGHT - primaryActionsHeight - 50) : COMPOSER_INPUT_MAX_HEIGHT
+  const displayedInputHeight = Math.min(composerInputHeight(draft, inputHeight), viewportLimits.inputMaxHeight, primaryInputBudget)
   const hasGoalPanel = !welcome && backend === 'codex'
-  const hasAuxiliaryContent = mailCommandSuggested || references.length > 0 || teamReferences.length > 0 || queued.length > 0 || Boolean(queuedRunStatus) || uploads.length > 0 || pending.length > 0 || failed.length > 0 || hasGoalPanel
+  const hasAuxiliaryContent = mailCommandSuggested || references.length > 0 || teamReferences.length > 0 || queued.length > 0 || Boolean(queuedRunStatus) || queueHasEdit || uploads.length > 0 || pending.length > 0 || failed.length > 0 || hasGoalPanel
   const validationRevision = client.validationRevision
   useEffect(() => {
     if (welcome || networkDisabled || !routeHintsSupported) return
@@ -839,13 +846,27 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     {runtimeTrigger}
   </MenuView>
 
+  const sendControl = <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={mcpCommand ? mcpCommandLabel : active ? 'Queue message' : 'Send message'}
+    accessibilityHint={active ? 'Wait until the current turn finishes. To change the current turn, use Steer.' : undefined}
+    accessibilityState={{ disabled: effectiveSendDisabled || !hasReadyContent, busy: effectiveSendBusy }}
+    testID="chat-send"
+    disabled={effectiveSendDisabled || !hasReadyContent}
+    onPress={() => void send(false)}
+    style={({ pressed }) => [styles.primaryButton, !active && !constrainedKeyboard && styles.idleSend, { backgroundColor: !effectiveSendDisabled && hasReadyContent ? colors.blue : colors.raised, opacity: effectiveSendDisabled || !hasReadyContent || pressed ? 0.6 : 1 }]}
+  >
+    {effectiveSendBusy ? <ActivityIndicator size="small" color={colors.text} /> : <Send size={16} color={!effectiveSendDisabled && hasReadyContent ? 'white' : colors.muted} />}
+    <Text maxFontSizeMultiplier={constrainedKeyboard ? 1.3 : undefined} numberOfLines={constrainedKeyboard ? 1 : undefined} adjustsFontSizeToFit={constrainedKeyboard} minimumFontScale={0.8} style={[styles.primaryButtonText, { color: !effectiveSendDisabled && hasReadyContent ? 'white' : colors.muted }]}>{mcpCommand ? 'Open MCP' : active ? 'Queue' : 'Send'}</Text>
+  </Pressable>
+
   return (
-    <View testID="chat-composer" style={[styles.shell, { backgroundColor: colors.background }]}>
+    <View testID="chat-composer" style={[styles.shell, constrainedKeyboard && styles.shellConstrained, { backgroundColor: colors.background }]}>
       {hasAuxiliaryContent ? <ScrollView
         testID="composer-auxiliary-scroll"
         style={[styles.auxiliaryScroll, { maxHeight: viewportLimits.auxiliaryMaxHeight }]}
         contentContainerStyle={styles.auxiliaryContent}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         accessibilityElementsHidden={viewportLimits.auxiliaryMaxHeight === 0}
         importantForAccessibility={viewportLimits.auxiliaryMaxHeight === 0 ? 'no-hide-descendants' : 'auto'}
         pointerEvents={viewportLimits.auxiliaryMaxHeight === 0 ? 'none' : 'auto'}
@@ -882,7 +903,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           </View>)}
           {!teamReferencesSupported ? <Text accessibilityRole="alert" style={{ color: colors.red }}>Reconnect this server to Team Network or remove the recipient reference.</Text> : null}
         </View> : null}
-        {queued.length || queuedRunStatus ? <QueueShelf key={`${activeProfileId}:${profileGeneration}:${sessionId}`} sessionId={sessionId} profileId={activeProfileId} profileGeneration={profileGeneration} networkDisabled={networkDisabled} auxiliaryHidden={viewportLimits.auxiliaryMaxHeight === 0} onSent={onSent} /> : null}
+        {queued.length || queuedRunStatus || queueHasEdit ? <QueueShelf key={`${activeProfileId}:${profileGeneration}:${sessionId}`} sessionId={sessionId} profileId={activeProfileId} profileGeneration={profileGeneration} networkDisabled={networkDisabled} auxiliaryHidden={viewportLimits.auxiliaryMaxHeight === 0} reviewRequest={queueReviewRequest} onEditingChange={setQueueHasEdit} onSent={onSent} /> : null}
         {(uploads.length || pending.length || failed.length) ? <AttachmentShelf
           sessionId={sessionId}
           uploads={uploads}
@@ -919,9 +940,9 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           textAlignVertical="top"
           scrollEnabled
           autoCorrect
-          style={[styles.input, { color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
+          style={[styles.input, constrainedKeyboard && styles.inputConstrained, { color: colors.text, height: displayedInputHeight, maxHeight: viewportLimits.inputMaxHeight }]}
         />
-        <View style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
+        {!constrainedKeyboard ? <View style={[styles.toolbar, compactToolbar && styles.toolbarCompact, denseToolbar && styles.toolbarDense]}>
           {!welcome ? <IconButton icon={Paperclip} disabled={attachmentDisabled} onPress={chooseAttachment} label="Add files, photos, or another chat" testID="chat-attach" /> : null}
           {runtimeControl}
           {!welcome ? quickMessageControl : null}
@@ -929,6 +950,10 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
           {!welcome && backend === 'claude' ? <ClaudePermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           {!welcome && backend === 'cursor' ? <CursorPermissionMenu sessionId={sessionId} compact={compactToolbar} /> : null}
           <View style={styles.toolbarSpacer} />
+          {active && keyboardVisible ? <Pressable testID="chat-hide-keyboard" accessibilityRole="button" accessibilityLabel="Hide keyboard to review goal and queue" onPress={dismissAppKeyboard} style={styles.keyboardDismiss}><ChevronDown size={20} color={colors.muted} /></Pressable> : null}
+          {!active ? sendControl : null}
+        </View> : null}
+        {active || constrainedKeyboard ? <View testID="chat-primary-actions" onLayout={event => { const measured = Math.ceil(event.nativeEvent.layout.height); if (Number.isFinite(measured) && measured >= 44) setPrimaryActionsHeight(measured) }} style={[styles.primaryActions, constrainedKeyboard && styles.primaryActionsConstrained]}>
           {active ? <Pressable
             accessibilityRole="button"
             accessibilityLabel={stopping ? 'Stopping agent' : 'Stop agent'}
@@ -936,29 +961,22 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
             testID="chat-stop"
             disabled={networkDisabled || stopping}
             onPress={() => { if (remoteComposerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) void stopTurn(profileGeneration, sessionId) }}
-            style={({ pressed }) => [styles.stop, !compactToolbar && styles.stopWide, { backgroundColor: compactToolbar ? 'transparent' : colors.red, opacity: networkDisabled || stopping ? 0.35 : pressed ? 0.65 : 1 }]}
-          >{compactToolbar ? <View style={[styles.compactStopFace, { backgroundColor: `${colors.red}18`, borderColor: `${colors.red}55` }]}>{stopping ? <ActivityIndicator size="small" color={colors.red} /> : <Square size={14} color={colors.red} fill={colors.red} strokeWidth={2} />}</View> : <>{stopping ? <ActivityIndicator size="small" color="white" /> : <Square size={17} color="white" fill="white" strokeWidth={2.2} />}<Text style={styles.stopLabel}>{stopping ? 'Stopping' : 'Stop'}</Text></>}</Pressable> : null}
-          {active && hasReadyContent && !mcpCommand ? <Pressable
+            style={({ pressed }) => [styles.primaryButton, { backgroundColor: `${colors.red}18`, opacity: networkDisabled || stopping || pressed ? 0.45 : 1 }]}
+          >{stopping ? <ActivityIndicator size="small" color={colors.red} /> : <Square size={14} color={colors.red} fill={colors.red} />}<Text maxFontSizeMultiplier={constrainedKeyboard ? 1.3 : undefined} numberOfLines={constrainedKeyboard ? 1 : undefined} adjustsFontSizeToFit={constrainedKeyboard} minimumFontScale={0.8} style={[styles.primaryButtonText, { color: colors.red }]}>{stopping ? 'Stopping' : 'Stop'}</Text></Pressable> : null}
+          {active && !mcpCommand ? <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Steer current turn"
-            accessibilityState={{ disabled: sendDisabled, busy: sending || admitting }}
+            accessibilityLabel={steerReviewsQueue ? 'Review queued messages to steer' : 'Steer current turn'}
+            accessibilityHint={steerReviewsQueue ? 'Open the existing queued message and full error. Nothing is sent until you explicitly choose Steer in Review.' : hasReadyContent ? 'Send this draft into the current turn instead of waiting in the queue.' : 'Write a draft to steer the current turn.'}
+            accessibilityState={{ disabled: !steerReviewsQueue && (sendDisabled || !hasReadyContent), busy: !steerReviewsQueue && (sending || admitting) }}
             testID="chat-send-now"
-            disabled={sendDisabled}
-            onPress={() => void send(true)}
-            style={({ pressed }) => [styles.steer, compactToolbar && styles.steerCompact, { opacity: sendDisabled || pressed ? 0.45 : 1 }]}
-          >{sending || admitting ? <ActivityIndicator size="small" color={colors.blue} /> : <CornerDownRight size={compactToolbar ? 17 : 13} color={colors.blue} />}{!compactToolbar ? <Text style={{ color: colors.blue, fontSize: 11, fontWeight: '700' }}>Steer</Text> : null}</Pressable> : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={mcpCommand ? mcpCommandLabel : active ? 'Queue message' : 'Send message'}
-            accessibilityState={{ disabled: effectiveSendDisabled || !hasReadyContent, busy: effectiveSendBusy }}
-            testID="chat-send"
-            disabled={effectiveSendDisabled || !hasReadyContent}
-            onPress={() => void send(false)}
-            style={({ pressed }) => [styles.send, { opacity: effectiveSendDisabled || pressed ? 0.6 : 1 }]}
-          >
-            <View style={[styles.sendFace, { backgroundColor: !effectiveSendDisabled && hasReadyContent ? colors.blue : colors.raised }]}>{effectiveSendBusy ? <ActivityIndicator size="small" color={!effectiveSendDisabled && hasReadyContent ? 'white' : colors.muted} /> : <Send size={17} color={!effectiveSendDisabled && hasReadyContent ? 'white' : colors.muted} />}</View>
-          </Pressable>
-        </View>
+            disabled={!steerReviewsQueue && (sendDisabled || !hasReadyContent)}
+            onPress={() => { if (steerReviewsQueue) { if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) setQueueReviewRequest(value => value + 1) } else void send(true) }}
+            style={({ pressed }) => [styles.primaryButton, { backgroundColor: `${colors.blue}14`, opacity: !steerReviewsQueue && (sendDisabled || !hasReadyContent) || pressed ? 0.45 : 1 }]}
+          >{sending || admitting ? <ActivityIndicator size="small" color={colors.blue} /> : <CornerDownRight size={16} color={colors.blue} />}<Text maxFontSizeMultiplier={constrainedKeyboard ? 1.3 : undefined} numberOfLines={constrainedKeyboard ? 1 : undefined} adjustsFontSizeToFit={constrainedKeyboard} minimumFontScale={0.8} style={[styles.primaryButtonText, { color: colors.blue }]}>Steer</Text></Pressable> : null}
+          {sendControl}
+          {constrainedKeyboard && (queued.length > 0 || queuedRunStatus || queueHasEdit) ? <Pressable testID="chat-review-queue" accessibilityRole="button" accessibilityLabel="Review queued messages and full error" onPress={() => { if (composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) setQueueReviewRequest(value => value + 1) }} style={styles.queueReviewButton}><Text maxFontSizeMultiplier={1.3} numberOfLines={1} style={[styles.primaryButtonText, { color: colors.blue }]}>Review</Text></Pressable> : null}
+          {constrainedKeyboard ? <Pressable testID="chat-hide-keyboard" accessibilityRole="button" accessibilityLabel="Hide keyboard to show chat tools and panels" onPress={dismissAppKeyboard} style={styles.keyboardDismiss}><ChevronDown size={20} color={colors.muted} /></Pressable> : null}
+        </View> : null}
       </View>
       <Modal visible={preview != null} animationType="fade" presentationStyle="fullScreen" onRequestClose={closePreview}>
         {preview ? <View onAccessibilityEscape={closePreview} style={[styles.previewModal, { backgroundColor: colors.background }, fullscreenModalPadding(insets, Platform.OS)]}>
@@ -1349,7 +1367,7 @@ function AttachmentShelf({ sessionId, uploads, pending, failed, connectionReady,
   </ScrollView>
 }
 
-export function QueueShelf({ sessionId, profileId, profileGeneration, networkDisabled, auxiliaryHidden = false, onSent }: { sessionId: string; profileId: string | null; profileGeneration: number; networkDisabled: boolean; auxiliaryHidden?: boolean; onSent: () => void }) {
+export function QueueShelf({ sessionId, profileId, profileGeneration, networkDisabled, auxiliaryHidden = false, reviewRequest = 0, onEditingChange, onSent }: { sessionId: string; profileId: string | null; profileGeneration: number; networkDisabled: boolean; auxiliaryHidden?: boolean; reviewRequest?: number; onEditingChange?: (editing: boolean) => void; onSent: () => void }) {
   const colors = usePalette()
   const agentPalette = useColorScheme() === 'light'
     ? { background: '#f4effb', accent: '#8566bd', sender: '#7050aa' }
@@ -1360,6 +1378,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   const turns = useMemo(() => allTurns.filter(isVisibleQueuedTurn), [allTurns])
   const health = useAppStore(state => state.health)
   const sourceBackend = useAppStore(state => state.sessions.find(session => session.id === sessionId)?.backend)
+  const active = useAppStore(state => state.activeSessionIds.has(sessionId))
   const queuedTargetIds = useMemo(() => new Set(turns.flatMap(turn => (turn.chat_references ?? []).map(reference => reference.session_id))), [turns])
   useAppStore(state => queuedTargetIds.size ? [...queuedTargetIds].map(targetId => {
     const target = state.sessions.find(candidate => candidate.id === targetId)
@@ -1382,9 +1401,13 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   const clearRunStatus = useAppStore(state => state.clearQueuedRunStatus)
   const [expanded, setExpanded] = useState(false)
   const expandedRef = useRef(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const reviewOpenRef = useRef(false)
   const [panelError, setPanelError] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
+  useEffect(() => { onEditingChange?.(Boolean(editing)) }, [editing, onEditingChange])
   const [editText, setEditText] = useState('')
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const [editReferences, setEditReferences] = useState<ChatReference[]>([])
   const [editTeamReferences, setEditTeamReferences] = useState<TeamReference[]>([])
   const editTextRef = useRef('')
@@ -1392,17 +1415,20 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   const editTeamReferencesRef = useRef<TeamReference[]>([])
   const editingQueuedIdRef = useRef<string | null>(null)
   const editingAgentRef = useRef<QueuedTurn | null>(null)
+  const editingUserRef = useRef<QueuedTurn | null>(null)
   const queueInputRef = useRef<TextInput>(null)
   const auxiliaryHiddenRef = useRef(auxiliaryHidden)
   auxiliaryHiddenRef.current = auxiliaryHidden
   useEffect(() => {
     // Keep the draft mounted across viewport changes, but never leave typing
     // focused in an invisible queue editor. Do not disturb main-composer focus.
-    if (auxiliaryHidden && queueInputRef.current?.isFocused()) queueInputRef.current.blur()
-  }, [auxiliaryHidden])
+    if (auxiliaryHidden && !reviewOpen && queueInputRef.current?.isFocused()) queueInputRef.current.blur()
+  }, [auxiliaryHidden, reviewOpen])
+  const queueControlsVisible = () => reviewOpenRef.current || (!auxiliaryHiddenRef.current && expandedRef.current)
   const [busyTurn, setBusyTurn] = useState<string | null>(null)
   const actionInFlight = useRef<symbol | null>(null)
   const actionScopeKey = useAppStore(state => composerActionScopeKey(state, sessionId))
+  useEffect(() => { setCopyNotice(null) }, [editing, actionScopeKey])
   useEffect(() => {
     actionInFlight.current = null
     setBusyTurn(null)
@@ -1411,8 +1437,11 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   useEffect(() => {
     expandedRef.current = false
     setExpanded(false)
+    reviewOpenRef.current = false
+    setReviewOpen(false)
     setPanelError(null)
     editingAgentRef.current = null
+    editingUserRef.current = null
     editingQueuedIdRef.current = null
     editTextRef.current = ''
     editReferencesRef.current = []
@@ -1424,6 +1453,23 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   }, [profileId, profileGeneration, sessionId])
   const actionScopeCurrent = () => remoteComposerScopeIsCurrent(profileId, profileGeneration, sessionId)
     && composerActionScopeKey(useAppStore.getState(), sessionId) === actionScopeKey
+  const closeReview = () => {
+    reviewOpenRef.current = false
+    setReviewOpen(false)
+    requestAnimationFrame(dismissAppKeyboard)
+  }
+  const openReview = () => {
+    if (!composerScopeIsCurrent(profileId, profileGeneration, sessionId)) return
+    reviewOpenRef.current = true
+    setReviewOpen(true)
+    requestAnimationFrame(dismissAppKeyboard)
+  }
+  const lastReviewRequest = useRef(reviewRequest)
+  useEffect(() => {
+    if (lastReviewRequest.current === reviewRequest) return
+    lastReviewRequest.current = reviewRequest
+    openReview()
+  }, [reviewRequest])
   const referenceSupported = useCallback((reference: ChatReference): boolean => {
     const target = useAppStore.getState().sessions.find(candidate => candidate.id === reference.session_id)
     return Boolean(
@@ -1435,8 +1481,15 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
     )
   }, [health, requestReplySupportedForSource, supportedTargetBackends])
   const beginEdit = (turn: QueuedTurn, references?: ChatReference[]) => {
-    if (auxiliaryHiddenRef.current || !expandedRef.current || !isUserQueuedTurn(turn) || actionInFlight.current || !actionScopeCurrent()) return
+    if (!queueControlsVisible() || !isUserQueuedTurn(turn) || actionInFlight.current || !actionScopeCurrent()) return
+    const currentTurn = useAppStore.getState().snapshots[sessionId]?.queuedTurns.find(value => value.queued_id === turn.queued_id)
+    if (!currentTurn || queuedUserEditIdentity(currentTurn) !== queuedUserEditIdentity(turn)) return
+    if (editingQueuedIdRef.current && editingQueuedIdRef.current !== turn.queued_id) {
+      Alert.alert('Keep your unsaved edit', 'Copy or discard the existing edit before editing another queued message.')
+      return
+    }
     editingAgentRef.current = null
+    editingUserRef.current = currentTurn
     const text = turn.display_prompt || turn.prompt
     const nextReferences = references ?? parseStoredChatReferences(turn.chat_references, text, sessionId)
     const nextTeamReferences = validTeamReferences(text, turn.team_references ?? [])
@@ -1455,6 +1508,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   }
   const cancelEdit = () => {
     editingAgentRef.current = null
+    editingUserRef.current = null
     editingQueuedIdRef.current = null
     editTextRef.current = ''
     editReferencesRef.current = []
@@ -1465,7 +1519,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
     setEditReferences([])
   }
   const commitEdit = async (turn: QueuedTurn) => {
-    if (auxiliaryHiddenRef.current || !expandedRef.current || networkDisabled || actionInFlight.current || editingQueuedIdRef.current !== turn.queued_id || !actionScopeCurrent()) return
+    if (!queueControlsVisible() || networkDisabled || actionInFlight.current || editingQueuedIdRef.current !== turn.queued_id || !actionScopeCurrent()) return
     const agentSnapshot = editingAgentRef.current
     if (agentSnapshot) {
       const currentTurn = useAppStore.getState().snapshots[sessionId]?.queuedTurns.find(value => value.queued_id === agentSnapshot.queued_id)
@@ -1484,6 +1538,11 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
       }, true)
       return
     }
+    const currentTurn = useAppStore.getState().snapshots[sessionId]?.queuedTurns.find(value => value.queued_id === turn.queued_id)
+    if (!currentTurn || !editingUserRef.current || queuedUserEditIdentity(currentTurn) !== queuedUserEditIdentity(editingUserRef.current)) {
+      setPanelError('Queued message changed. Your unsaved draft is preserved; reopen the current message before saving.')
+      return
+    }
     const currentText = editTextRef.current
     const currentReferences = editReferencesRef.current
     const currentTeamReferences = editTeamReferencesRef.current
@@ -1494,7 +1553,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
       source_text_start: reference.source_text_start - leadingWhitespace,
       source_text_end: reference.source_text_end - leadingWhitespace,
     }))
-    if (!prompt) {
+    if (!prompt && !canPreserveQueuedAttachments(currentTurn)) {
       Alert.alert('Queued message is empty', 'Enter a message or cancel editing.')
       return
     }
@@ -1513,12 +1572,13 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
     }
     await act(turn.queued_id, async () => {
       const updated = await update(sessionId, turn.queued_id, prompt, references, profileGeneration, teamReferences)
-      if (updated && actionScopeCurrent()) cancelEdit()
+      if (updated && actionScopeCurrent()) { setPanelError(null); cancelEdit() }
+      else if (actionScopeCurrent()) setPanelError(useAppStore.getState().error || 'This queued message could not be saved. Your draft is preserved.')
       return updated
     }, true)
   }
   const chooseQueuedAction = (turn: QueuedTurn, reference: ChatReference, currentReferences: ChatReference[]) => {
-    if (auxiliaryHiddenRef.current || !expandedRef.current || !actionScopeCurrent()) return
+    if (!queueControlsVisible() || !actionScopeCurrent()) return
     if (editing && editing !== turn.queued_id) {
       Alert.alert('Finish the current edit', 'Save or cancel the queued message you are editing first.')
       return
@@ -1528,7 +1588,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
       reference,
       actions: availableChatReferenceActions(supportedChatActions, requestReplySupportedForSource),
       onSelect: action => {
-        if (auxiliaryHiddenRef.current || !expandedRef.current || !actionScopeCurrent()) return
+        if (!queueControlsVisible() || !actionScopeCurrent()) return
         const availableReferences = editing === turn.queued_id ? editReferencesRef.current : currentReferences
         const selected = availableReferences.find(candidate => sameChatReference(candidate, reference))
         if (!selected) return
@@ -1546,7 +1606,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
     })
   }
   const act = async (queuedId: string, action: () => Promise<boolean>, savingEdit = false) => {
-    if (auxiliaryHiddenRef.current || !expandedRef.current || actionInFlight.current || (!savingEdit && editingQueuedIdRef.current) || pendingQueuedRunIds.has(queuedId) || networkDisabled || !actionScopeCurrent()) return false
+    if (!queueControlsVisible() || actionInFlight.current || (!savingEdit && editingQueuedIdRef.current && useAppStore.getState().snapshots[sessionId]?.queuedTurns.some(turn => turn.queued_id === editingQueuedIdRef.current)) || pendingQueuedRunIds.has(queuedId) || networkDisabled || !actionScopeCurrent()) return false
     const token = Symbol()
     actionInFlight.current = token
     setBusyTurn(queuedId)
@@ -1564,10 +1624,11 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
   }
   const beginAgentEdit = (turn: QueuedTurn, body: string) => {
     const currentTurn = useAppStore.getState().snapshots[sessionId]?.queuedTurns.find(value => value.queued_id === turn.queued_id)
-    if (auxiliaryHiddenRef.current || !expandedRef.current || actionInFlight.current || editingQueuedIdRef.current || !actionScopeCurrent()
+    if (!queueControlsVisible() || actionInFlight.current || editingQueuedIdRef.current || !actionScopeCurrent()
       || !currentTurn || !canEditQueuedAgentMessage(currentTurn, sessionId, useAppStore.getState().health)
       || queuedMessageIdentity(currentTurn) !== queuedMessageIdentity(turn)) return
     editingAgentRef.current = turn
+    editingUserRef.current = null
     setPanelError(null)
     editingQueuedIdRef.current = turn.queued_id
     editTextRef.current = body
@@ -1578,31 +1639,45 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
     setEditing(turn.queued_id)
     setEditText(body)
   }
-  const queueBusy = Boolean(busyTurn) || Boolean(editing) || turns.some(value => pendingQueuedRunIds.has(value.queued_id) || skippingDeliveryIds.has(`${sessionId}:${value.queued_id}`))
+  const orphanedEdit = Boolean(editing) && !turns.some(turn => turn.queued_id === editing)
+  const queueBusy = Boolean(busyTurn) || Boolean(editing && !orphanedEdit) || turns.some(value => pendingQueuedRunIds.has(value.queued_id) || skippingDeliveryIds.has(`${sessionId}:${value.queued_id}`))
   const paused = turns.some(turn => turn.paused)
   const deliveryUncertain = turns.some(turn => turn.paused === true && turn.pause_reason === 'delivery_uncertain')
   const summaryError = Boolean(panelError || runStatus?.tone === 'error')
   const summary = panelError || (runStatus?.tone === 'error' ? runStatus.message : null)
     || (deliveryUncertain ? 'Delivery unconfirmed — review before retrying' : null)
     || runStatus?.message || (editing ? 'Unsaved edit' : queueBusy ? 'Updating…' : paused ? 'Paused' : 'Waiting')
-  return <View testID="queued-shelf" style={styles.queue}>
-    <Pressable testID="queued-section-toggle" accessibilityRole="button" accessibilityLabel={`${expanded ? 'Hide' : 'Show'} queued messages (${turns.length}). ${summary}`} accessibilityState={{ expanded }}
-      onPress={() => {
-        if (auxiliaryHiddenRef.current || !composerScopeIsCurrent(profileId, profileGeneration, sessionId)) return
-        expandedRef.current = !expandedRef.current
-        setExpanded(expandedRef.current)
-      }} style={({ pressed }) => [styles.queueHeader, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}>
-      <AlertCircle size={16} color={summaryError ? colors.red : deliveryUncertain ? colors.orange : colors.yellow} />
-      <Text style={[styles.queueHeading, { color: colors.text }]}>Queued {turns.length}</Text>
-      <Text testID="queued-section-summary" accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.queueSummary, { color: summaryError ? colors.red : deliveryUncertain ? colors.orange : colors.muted }]}>{summary}</Text>
-      <ChevronDown size={16} color={colors.muted} style={{ transform: [{ rotate: expanded ? '0deg' : '-90deg' }] }} />
-    </Pressable>
-    {expanded ? <ScrollView testID="queued-section-body" style={styles.queueScroll} contentContainerStyle={styles.queueList} nestedScrollEnabled keyboardShouldPersistTaps="always">
+  const rejectedTurn = runStatus?.goal_steer_rejected ? turns.find(turn => turn.queued_id === runStatus.queued_id && isUserQueuedTurn(turn)) : null
+  const queueBody = <ScrollView testID="queued-section-body" style={[styles.queueScroll, reviewOpen && styles.queueReviewScroll]} contentContainerStyle={styles.queueList} nestedScrollEnabled keyboardShouldPersistTaps="always" keyboardDismissMode="on-drag">
+    {orphanedEdit ? <View testID="queued-orphaned-edit" style={styles.queueRecovery}>
+      <Text accessibilityRole="alert" style={[styles.queueText, { color: colors.orange }]}>This message is no longer queued. Your unsaved edit is kept below; copy it before discarding. It has not been resent.</Text>
+      <ScrollView style={styles.queueMessageScroll} nestedScrollEnabled keyboardShouldPersistTaps="always"><Text testID="queued-recovered-draft" selectable style={[styles.queueText, { color: colors.text }]}>{editText}</Text></ScrollView>
+      <View style={styles.queuePreviewActions}>
+        <Pressable testID="queued-recovered-copy" accessibilityRole="button" onPress={() => {
+          if (!queueControlsVisible() || !composerScopeIsCurrent(profileId, profileGeneration, sessionId)) return
+          const text = editTextRef.current
+          const queuedId = editingQueuedIdRef.current
+          const current = () => composerScopeIsCurrent(profileId, profileGeneration, sessionId) && composerActionScopeKey(useAppStore.getState(), sessionId) === actionScopeKey && editingQueuedIdRef.current === queuedId && editTextRef.current === text
+          void Clipboard.setStringAsync(text).then(() => { if (current()) setCopyNotice('Draft copied.') }).catch(() => { if (current()) setCopyNotice('Copy failed. Select the text above to copy it manually.') })
+        }} style={styles.runNow}><Text style={{ color: colors.blue }}>Copy draft</Text></Pressable>
+        <Pressable testID="queued-recovered-discard" accessibilityRole="button" onPress={() => {
+          if (!queueControlsVisible() || !composerScopeIsCurrent(profileId, profileGeneration, sessionId)) return
+          const text = editTextRef.current
+          const queuedId = editingQueuedIdRef.current
+          Alert.alert('Discard recovered draft?', 'This unsaved edit will be removed from this device.', [{ text: 'Keep', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: () => { if (queueControlsVisible() && composerScopeIsCurrent(profileId, profileGeneration, sessionId) && composerActionScopeKey(useAppStore.getState(), sessionId) === actionScopeKey && editingQueuedIdRef.current === queuedId && editTextRef.current === text) cancelEdit() } }])
+        }} style={styles.runNow}><Text style={{ color: colors.red }}>Discard draft</Text></Pressable>
+      </View>
+      {copyNotice ? <Text testID="queued-recovered-copy-status" accessibilityLiveRegion="polite" style={[styles.queueText, { color: colors.text }]}>{copyNotice}</Text> : null}
+    </View> : null}
     {panelError ? <Text testID="queued-message-error" accessibilityRole="alert" style={[styles.queueStatusText, { color: colors.red }]}>{panelError}</Text> : null}
     {runStatus ? <View testID="queued-run-status" accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.queueStatus, { backgroundColor: runStatus.tone === 'error' ? `${colors.red}14` : `${colors.yellow}14`, borderColor: runStatus.tone === 'error' ? colors.red : colors.yellow }]}>
       <AlertCircle size={14} color={runStatus.tone === 'error' ? colors.red : colors.yellow} />
-      <Text style={[styles.queueStatusText, { color: colors.text }]}>{runStatus.message}</Text>
+      <ScrollView testID="queued-run-error-scroll" style={styles.queueMessageScroll} nestedScrollEnabled keyboardShouldPersistTaps="always"><Text testID="queued-run-error-full" selectable style={[styles.queueStatusText, { color: colors.text }]}>{runStatus.message}</Text></ScrollView>
       <IconButton icon={X} size={13} onPress={() => { if (composerScopeIsCurrent(profileId, profileGeneration, sessionId)) clearRunStatus(sessionId, profileGeneration) }} label="Dismiss queue status" />
+    </View> : null}
+    {rejectedTurn ? <View testID="queued-goal-steer-recovery" style={styles.queueRecovery}>
+      <Text style={[styles.queueText, { color: colors.text }]}>If queued before this app update: Edit, then Save this same message, then Steer. Saving does not send it or create a duplicate.</Text>
+      <Pressable testID="queued-recovery-edit" accessibilityRole="button" accessibilityLabel="Edit this existing queued message before retrying Steer" disabled={networkDisabled || queueBusy} onPress={() => beginEdit(rejectedTurn)} style={[styles.queueEditButton, { backgroundColor: colors.raised, opacity: networkDisabled || queueBusy ? 0.45 : 1 }]}><Text style={[styles.queueEditButtonText, { color: colors.blue }]}>Edit this message</Text></Pressable>
     </View> : null}
       {turns.map((turn, index) => {
         const busy = busyTurn === turn.queued_id || pendingQueuedRunIds.has(turn.queued_id) || skippingDeliveryIds.has(`${sessionId}:${turn.queued_id}`)
@@ -1626,15 +1701,17 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
           || (validChatReferences(editText, editReferences, sessionId).length === editReferences.length && editReferences.every(referenceSupported)
             && validTeamReferences(editText, editTeamReferences, editReferences).length === editTeamReferences.length
             && editTeamReferences.every(reference => teamReferenceContractSupported(health, reference)))
+        const editHasContent = Boolean(editText.trim()) || canPreserveQueuedAttachments(turn)
         return <View key={turn.queued_id} testID={`queued-row-${turn.queued_id}`} style={[styles.queueRow, { backgroundColor: agentMessage ? agentPalette.background : colors.queued, borderColor: agentMessage ? agentPalette.accent : colors.yellow, borderLeftWidth: agentMessage ? 2 : StyleSheet.hairlineWidth }]}>
+          {!agentMessage && turn.file_ids.length > 0 ? <Text testID={`queued-attachments-${turn.queued_id}`} style={[styles.queueText, { color: colors.muted }]}>{turn.file_ids.length} attached {turn.file_ids.length === 1 ? 'file' : 'files'} · kept with this queued message</Text> : null}
           {editing === turn.queued_id ? <TextInput
             ref={queueInputRef}
             testID={`queued-editor-${turn.queued_id}`}
             autoFocus
-            editable={!auxiliaryHidden && !networkDisabled && !busy}
+            editable={(!auxiliaryHidden || reviewOpen) && !networkDisabled && !busy}
             value={editText}
             onChangeText={next => {
-              if (auxiliaryHiddenRef.current) return
+              if (!queueControlsVisible()) return
               const nextReferences = reconcileChatReferences(editTextRef.current, next, editReferencesRef.current)
               const nextTeamReferences = reconcileTeamReferences(editTextRef.current, next, editTeamReferencesRef.current)
               editTeamReferencesRef.current = nextTeamReferences
@@ -1655,7 +1732,7 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
             referenceSupported={referenceSupported}
             onChangeAction={reference => chooseQueuedAction(turn, reference, rowReferences)}
             onRemove={reference => {
-              if (auxiliaryHiddenRef.current || !expandedRef.current || !actionScopeCurrent()) return
+              if (!queueControlsVisible() || !actionScopeCurrent()) return
               if (editing && editing !== turn.queued_id) {
                 Alert.alert('Finish the current edit', 'Save or cancel the queued message you are editing first.')
                 return
@@ -1678,13 +1755,13 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
             }} style={({ pressed }) => [styles.runNow, { opacity: networkDisabled || queueBusy || blockedByEarlierDelivery || pressed ? 0.45 : 1 }]}>{busy ? <ActivityIndicator size="small" color={colors.yellow} /> : <CornerDownRight size={14} color={colors.yellow} />}<Text style={{ color: colors.yellow }}>Run now</Text></Pressable> : null}
             <View style={styles.toolbarSpacer} /><Pressable testID={`queued-skip-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel={`Remove queued message from ${sender}`} accessibilityHint={!canSkip ? 'Update AgentsServer to safely remove this delivery.' : undefined} accessibilityState={{ disabled: networkDisabled || queueBusy || !canSkip, busy }} disabled={networkDisabled || queueBusy || !canSkip} onPress={() => void act(turn.queued_id, () => skipDelivery(sessionId, turn.queued_id, profileGeneration))} style={({ pressed }) => [styles.routeRevoke, { opacity: networkDisabled || queueBusy || !canSkip || pressed ? 0.45 : 1 }]}>{busy ? <ActivityIndicator size="small" color={colors.red} /> : <Trash2 size={16} color={colors.red} />}</Pressable></View> : editing === turn.queued_id ? <View style={styles.queueEditActions}>
             <Pressable accessibilityRole="button" accessibilityLabel="Cancel queued message edit" disabled={Boolean(busyTurn)} onPress={() => {
-              if (!auxiliaryHiddenRef.current && expandedRef.current && !actionInFlight.current && editingQueuedIdRef.current === turn.queued_id && composerScopeIsCurrent(profileId, profileGeneration, sessionId)) cancelEdit()
+              if (queueControlsVisible() && !actionInFlight.current && editingQueuedIdRef.current === turn.queued_id && composerScopeIsCurrent(profileId, profileGeneration, sessionId)) cancelEdit()
             }} style={({ pressed }) => [styles.queueEditButton, { backgroundColor: colors.raised, opacity: busyTurn || pressed ? 0.5 : 1 }]}><Text style={[styles.queueEditButtonText, { color: colors.text }]}>Cancel</Text></Pressable>
-            <Pressable testID={`queued-save-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel="Save queued message" accessibilityState={{ disabled: networkDisabled || busy || !editText.trim() || !validEditReferences, busy }} disabled={networkDisabled || busy || !editText.trim() || !validEditReferences} onPress={() => void commitEdit(turn)} style={({ pressed }) => [styles.queueEditButton, { backgroundColor: colors.blue, opacity: networkDisabled || busy || !editText.trim() || !validEditReferences || pressed ? 0.45 : 1 }]}>{busy ? <ActivityIndicator size="small" color="white" /> : <><Check size={14} color="white" /><Text style={[styles.queueEditButtonText, { color: 'white' }]}>Save</Text></>}</Pressable>
+            <Pressable testID={`queued-save-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel="Save queued message" accessibilityState={{ disabled: networkDisabled || busy || !editHasContent || !validEditReferences, busy }} disabled={networkDisabled || busy || !editHasContent || !validEditReferences} onPress={() => void commitEdit(turn)} style={({ pressed }) => [styles.queueEditButton, { backgroundColor: colors.blue, opacity: networkDisabled || busy || !editHasContent || !validEditReferences || pressed ? 0.45 : 1 }]}>{busy ? <ActivityIndicator size="small" color="white" /> : <><Check size={14} color="white" /><Text style={[styles.queueEditButtonText, { color: 'white' }]}>Save</Text></>}</Pressable>
           </View> : <View style={styles.queueActions}>
-            <Pressable testID={`queued-send-now-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel="Run queued message now" accessibilityHint={blockedByEarlierDelivery ? 'Wait for the earlier delivery barrier to finish.' : undefined} accessibilityState={{ disabled: networkDisabled || queueBusy || blockedByEarlierDelivery, busy }} disabled={networkDisabled || queueBusy || blockedByEarlierDelivery} onPress={() => void act(turn.queued_id, () => runNow(sessionId, turn.queued_id, profileGeneration)).then(sent => { if (sent && remoteComposerScopeIsCurrent(profileId, profileGeneration, sessionId)) onSent() })} style={({ pressed }) => [styles.runNow, { opacity: networkDisabled || blockedByEarlierDelivery || pressed || queueBusy && !busy ? 0.45 : 1 }]}>
+            <Pressable testID={`queued-send-now-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel={active ? "Steer with queued message" : "Run queued message now"} accessibilityHint={blockedByEarlierDelivery ? 'Wait for the earlier delivery barrier to finish.' : undefined} accessibilityState={{ disabled: networkDisabled || queueBusy || blockedByEarlierDelivery, busy }} disabled={networkDisabled || queueBusy || blockedByEarlierDelivery} onPress={() => void act(turn.queued_id, () => runNow(sessionId, turn.queued_id, profileGeneration)).then(sent => { if (sent && remoteComposerScopeIsCurrent(profileId, profileGeneration, sessionId)) onSent() })} style={({ pressed }) => [styles.runNow, { opacity: networkDisabled || blockedByEarlierDelivery || pressed || queueBusy && !busy ? 0.45 : 1 }]}>
               {busy ? <ActivityIndicator size="small" color={colors.yellow} /> : <CornerDownRight size={14} color={colors.yellow} />}
-              <Text style={{ color: colors.yellow, fontSize: 11, fontWeight: '800' }}>Run now</Text>
+              <Text style={{ color: colors.yellow, fontSize: 11, fontWeight: '800' }}>{active ? 'Steer' : 'Run now'}</Text>
             </Pressable>
             <View style={styles.toolbarSpacer} />
             <IconButton icon={ArrowUp} size={13} disabled={networkDisabled || index === 0 || queueBusy || queuedMoveCrossesDeliveryBarrier(allTurns, turn.queued_id, 'up')} onPress={() => void act(turn.queued_id, () => move(sessionId, turn.queued_id, 'up', profileGeneration))} label="Move up" />
@@ -1693,13 +1770,48 @@ export function QueueShelf({ sessionId, profileId, profileGeneration, networkDis
           </View>}
         </View>
       })}
-    </ScrollView> : null}
+    </ScrollView>
+  return <View testID="queued-shelf" style={styles.queue}>
+    <View style={styles.queueHeaderRow}><Pressable testID="queued-section-toggle" accessibilityRole="button" accessibilityLabel={`${expanded ? 'Hide' : 'Show'} queued messages (${turns.length}). ${summary}`} accessibilityState={{ expanded }}
+      onPress={() => {
+        if (auxiliaryHiddenRef.current || !composerScopeIsCurrent(profileId, profileGeneration, sessionId)) return
+        expandedRef.current = !expandedRef.current
+        setExpanded(expandedRef.current)
+      }} style={({ pressed }) => [styles.queueHeader, styles.queueHeaderToggle, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}>
+      <AlertCircle size={16} color={summaryError ? colors.red : deliveryUncertain ? colors.orange : colors.yellow} />
+      <Text style={[styles.queueHeading, { color: colors.text }]}>Queued {turns.length}</Text>
+      <Text testID="queued-section-summary" accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.queueSummary, { color: summaryError ? colors.red : deliveryUncertain ? colors.orange : colors.muted }]}>{summary}</Text>
+      <ChevronDown size={16} color={colors.muted} style={{ transform: [{ rotate: expanded ? '0deg' : '-90deg' }] }} />
+    </Pressable>
+      <Pressable testID="queued-review-open" accessibilityRole="button" accessibilityLabel="Review queued messages and full error" accessibilityHint="Open full messages, errors, Edit, Save, and Steer controls." onPress={openReview} style={[styles.queueReviewButton, { borderColor: colors.border, backgroundColor: colors.surface }]}><Text style={[styles.primaryButtonText, { color: colors.blue }]}>Review</Text></Pressable>
+    </View>
+    {expanded && !reviewOpen ? queueBody : null}
+    <Modal visible={reviewOpen && composerScopeIsCurrent(profileId, profileGeneration, sessionId)} animationType="slide" presentationStyle="fullScreen" onRequestClose={closeReview}>
+      {reviewOpen ? <SafeAreaView testID="queued-review-sheet" style={[styles.queueReviewSafe, { backgroundColor: colors.background }]} onAccessibilityEscape={closeReview}>
+        <View style={[styles.queueReviewHeader, { borderColor: colors.border }]}>
+          <Text accessibilityRole="header" style={[styles.queueReviewTitle, { color: colors.text }]}>Queued messages ({turns.length})</Text>
+          <SheetCloseButton testID="queued-review-close" label="Close queued message review" onPress={closeReview} />
+        </View>
+        <KeyboardAvoidingView style={styles.queueReviewSafe} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          {queueBody}
+        </KeyboardAvoidingView>
+      </SafeAreaView> : null}
+    </Modal>
   </View>
 }
 
 function queuedMessageIdentity(turn: QueuedTurn): string {
   return JSON.stringify([turn.queued_id, turn.cross_chat_envelope_id, turn.source_session_id, turn.target_session_id,
     turn.conversation_mode, turn.delivery_mode, turn.message_revision, turn.message_edited_by_user, turn.promoted])
+}
+
+function queuedUserEditIdentity(turn: QueuedTurn): string {
+  return JSON.stringify([turn.queued_id, turn.prompt, turn.display_prompt, turn.file_ids, turn.chat_references, turn.team_references])
+}
+
+function canPreserveQueuedAttachments(turn: QueuedTurn): boolean {
+  return isUserQueuedTurn(turn) && !turn.prompt.trim() && !(turn.display_prompt ?? '').trim() && turn.file_ids.length > 0
+    && !(turn.chat_references?.length) && !(turn.team_references?.length)
 }
 
 function canEditQueuedAgentMessage(turn: QueuedTurn, sessionId: string, health: Health | null): boolean {
@@ -1776,10 +1888,10 @@ function QueuedMessagePreview({ turn, sender, sessionId, profileId, profileGener
     {agent ? <Text numberOfLines={1} style={{ color: senderColor, fontSize: 11 }}>{sender}{turn.message_edited_by_user ? ' · Edited by you' : ''}</Text> : null}
     {expanded ? <ScrollView testID={`queued-message-body-${turn.queued_id}`} style={styles.queueMessageScroll} nestedScrollEnabled keyboardShouldPersistTaps="always"><Text selectable style={[styles.queueText, { color: colors.text }]}>{body}</Text></ScrollView>
       : <Pressable accessibilityRole={agent ? undefined : 'button'} accessibilityLabel={agent ? `${sender}: ${preview}` : 'Edit queued message'} disabled={agent || disabled} onPress={onEdit} style={styles.queuePrompt}><Text numberOfLines={3} style={[styles.queueText, { color: colors.text }]}>{preview}</Text></Pressable>}
-    {agent || preview.length > 320 || preview.split('\n').length > 3 ? <View style={styles.queuePreviewActions}>
+    <View style={styles.queuePreviewActions}>
       <Pressable testID={`queued-message-view-${turn.queued_id}`} accessibilityRole="button" accessibilityState={{ expanded, busy: loading }} disabled={loading} onPress={() => void showBody()} style={styles.runNow}><Text style={{ color: colors.blue }}>{loading ? 'Loading…' : expanded ? 'Show less' : 'View full message'}</Text></Pressable>
-      {canEditAgent ? <Pressable testID={`queued-message-edit-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel="Edit queued agent message" disabled={disabled || loading} onPress={() => void editAgent()} style={styles.runNow}><Text style={{ color: disabled || loading ? colors.muted : colors.blue }}>Edit</Text></Pressable> : null}
-    </View> : null}
+      {canEditAgent || !agent && isUserQueuedTurn(turn) ? <Pressable testID={`queued-message-edit-${turn.queued_id}`} accessibilityRole="button" accessibilityLabel={agent ? 'Edit queued agent message' : 'Edit existing queued message'} disabled={disabled || loading} onPress={() => { if (agent) void editAgent(); else if (!disabled && current()) onEdit() }} style={styles.runNow}><Text style={{ color: disabled || loading ? colors.muted : colors.blue }}>Edit</Text></Pressable> : null}
+    </View>
   </View>
 }
 
@@ -1816,6 +1928,7 @@ const styles = StyleSheet.create({
   routeTarget: { flex: 1, minWidth: 0, borderWidth: 0 },
   routeRevoke: { minWidth: 64, minHeight: 44, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
   shell: { padding: COMPOSER_SHELL_PADDING, gap: 7 },
+  shellConstrained: { paddingVertical: 0, gap: 0 },
   auxiliaryScroll: { flexGrow: 0 }, auxiliaryContent: { gap: 7 },
   commandSuggestion: { minHeight: 54, borderWidth: StyleSheet.hairlineWidth, borderRadius: 9, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }, commandSuggestionText: { minWidth: 0, flex: 1, gap: 2 }, commandSuggestionTitle: { fontSize: 12.5, fontWeight: '800' }, commandSuggestionSyntax: { fontSize: 10.5, fontFamily: 'Menlo' },
   referenceShelfWrap: { minWidth: 0, gap: 3 },
@@ -1829,12 +1942,18 @@ const styles = StyleSheet.create({
   referenceWarningText: { minWidth: 0, flex: 1, fontSize: 10.5, lineHeight: 14, fontWeight: '600' },
   composer: { maxHeight: COMPOSER_CARD_MAX_HEIGHT, minHeight: COMPOSER_EMPTY_CARD_MIN_HEIGHT, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   input: { minHeight: COMPOSER_INPUT_MIN_HEIGHT, maxHeight: COMPOSER_INPUT_MAX_HEIGHT, paddingHorizontal: 14, paddingTop: 10, fontSize: 15.5, lineHeight: 21 },
+  inputConstrained: { minHeight: 44 },
   toolbar: { minHeight: 48, flexShrink: 0, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 4 },
   toolbarCompact: { minHeight: COMPOSER_COMPACT_TOOLBAR_HEIGHT, paddingHorizontal: COMPOSER_COMPACT_TOOLBAR_PADDING, gap: COMPOSER_COMPACT_TOOLBAR_GAP },
   toolbarDense: { paddingHorizontal: COMPOSER_DENSE_TOOLBAR_PADDING, gap: COMPOSER_DENSE_TOOLBAR_GAP },
+  primaryActions: { minHeight: 48, flexShrink: 0, paddingHorizontal: 6, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  primaryActionsConstrained: { minHeight: 44, paddingBottom: 0 },
+  primaryButton: { flex: 1, minWidth: 44, minHeight: 44, paddingHorizontal: 6, paddingVertical: 6, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  primaryButtonText: { fontSize: 12.5, fontWeight: '700', flexShrink: 1 },
+  idleSend: { flex: 0, minWidth: 82, marginVertical: 2 },
+  keyboardDismiss: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   quickMessagesMenu: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0 }, quickMessages: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   runtimeMenu: { minWidth: 0, flexShrink: 1 }, runtimeMenuCompact: { width: COMPOSER_COMPACT_BACKEND_SLOT_WIDTH, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0 }, runtimeMenuDense: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, alignItems: 'center', justifyContent: 'center' }, runtime: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }, runtimeCompact: { width: COMPOSER_COMPACT_BACKEND_SLOT_WIDTH, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, justifyContent: 'center', gap: 0 }, runtimeDense: { width: COMPOSER_DENSE_BACKEND_SLOT_WIDTH }, backend: { fontSize: 12, fontWeight: '700' }, toolbarSpacer: { flex: 1, minWidth: 0 },
-  stop: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }, stopWide: { width: 76 }, compactStopFace: { width: COMPOSER_STOP_FACE_SIZE, height: COMPOSER_STOP_FACE_SIZE, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, stopLabel: { color: 'white', fontSize: 11, fontWeight: '800' }, send: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, height: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }, sendFace: { width: COMPOSER_SEND_FACE_SIZE, height: COMPOSER_SEND_FACE_SIZE, borderRadius: COMPOSER_SEND_FACE_SIZE / 2, alignItems: 'center', justifyContent: 'center' }, steer: { minHeight: COMPOSER_TOOLBAR_TOUCH_SIZE, flexShrink: 0, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 }, steerCompact: { width: COMPOSER_TOOLBAR_TOUCH_SIZE, paddingHorizontal: 0 },
   uploadRail: { flexGrow: 0, minHeight: 64, maxHeight: 64 }, uploads: { flexDirection: 'row', gap: 7, paddingRight: 2 }, upload: { width: 216, height: 64, flexShrink: 0, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingLeft: 7, flexDirection: 'row', alignItems: 'center' }, uploadIdentity: { minWidth: 0, flex: 1, height: 62, flexDirection: 'row', alignItems: 'center', gap: 8 }, fileIconWell: { width: 48, height: 48, minWidth: 48, flexShrink: 0, borderRadius: 6, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, uploadText: { minWidth: 0, flex: 1, gap: 2 }, uploadName: { fontSize: 12, fontWeight: '700' }, uploadMeta: { fontSize: 10.5 }, uploadActionSpacer: { width: 44, height: 44, flexShrink: 0 }, uploadBusy: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000066' }, uploadError: { position: 'absolute', right: 3, bottom: 3, width: 19, height: 19, borderRadius: 10, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
   previewModal: { flex: 1 }, previewHeader: { minHeight: FULLSCREEN_HEADER_MIN_HEIGHT, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: FULLSCREEN_HEADER_GUTTER, flexDirection: 'row', alignItems: 'center', gap: 8 }, previewTitle: { minWidth: 0, flex: 1, fontSize: 14, fontWeight: '700' }, previewImage: { flex: 1, margin: 12 },
   targetPickerSafe: { flex: 1 },
@@ -1852,6 +1971,12 @@ const styles = StyleSheet.create({
   targetStatus: { minHeight: 25, maxWidth: 104, borderRadius: 7, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' }, targetStatusText: { fontSize: 10.5, fontWeight: '700' },
   targetEmpty: { flex: 1, minHeight: 200, alignItems: 'center', justifyContent: 'center', gap: 7, padding: 24 }, targetEmptyTitle: { fontSize: 17, fontWeight: '700' }, targetEmptyBody: { maxWidth: 300, fontSize: 12.5, lineHeight: 18, textAlign: 'center' },
   queue: { minWidth: 0, gap: 5 }, queueHeader: { minHeight: 44, minWidth: 0, paddingHorizontal: 10, gap: 7, flexDirection: 'row', alignItems: 'center', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
+  queueHeaderRow: { minWidth: 0, flexDirection: 'row', alignItems: 'stretch', gap: 5 }, queueHeaderToggle: { flex: 1 },
+  queueReviewButton: { minWidth: 64, minHeight: 44, paddingHorizontal: 8, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+  queueReviewSafe: { flex: 1, minHeight: 0 }, queueReviewHeader: { minHeight: 56, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  queueReviewTitle: { flex: 1, minWidth: 0, fontSize: 17, fontWeight: '700' },
+  queueReviewScroll: { flex: 1, flexGrow: 1, maxHeight: undefined, paddingHorizontal: 12 },
+  queueRecovery: { gap: 6, paddingVertical: 8, alignItems: 'flex-start' },
   queueHeading: { fontSize: 13, fontWeight: '600', flexShrink: 0 }, queueSummary: { flex: 1, minWidth: 0, fontSize: 12 },
   queueScroll: { flexGrow: 0, maxHeight: 180 }, queuePreview: { minWidth: 0 }, queuePreviewActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   queueMessageScroll: { flexGrow: 0, maxHeight: 144 },

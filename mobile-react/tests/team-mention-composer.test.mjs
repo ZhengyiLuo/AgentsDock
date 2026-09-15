@@ -16,7 +16,7 @@ const fixture = { store, alerts: [], reads: [], sends: [], routeReads: [], revok
 globalThis.__teamComposerFixture = fixture
 const mocks = {
   'react-native': `import { createElement } from 'react'; const fixture=globalThis.__teamComposerFixture;
-    export const View='View', Text='Text', ScrollView='ScrollView', ActivityIndicator='ActivityIndicator';
+    export const View='View', Text='Text', ScrollView='ScrollView', ActivityIndicator='ActivityIndicator', KeyboardAvoidingView='KeyboardAvoidingView';
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({pressed:false}) : props.children);
     export const Modal = ({visible=true,...props}) => visible ? createElement('Modal',props) : null;
     export const FlatList = ({data=[],renderItem,ListEmptyComponent,ListFooterComponent,...props}) => createElement('FlatList',props,data.length ? data.map((item,index) => createElement('ListItem',{key:item.id||index},renderItem({item,index}))) : typeof ListEmptyComponent === 'function' ? createElement(ListEmptyComponent) : ListEmptyComponent, ListFooterComponent);
@@ -27,6 +27,7 @@ const mocks = {
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
   'expo-image': `export const Image='Image';`,
+  'expo-clipboard': `export async function setStringAsync(){}`,
   'expo-document-picker': `export async function getDocumentAsync(){return {canceled:true}}`,
   'expo-image-picker': `export async function launchImageLibraryAsync(){return {canceled:true}}`,
   '@expo/ui/community/menu': `export const MenuView='MenuView';`,
@@ -562,7 +563,7 @@ test('goal-only and queued auxiliary content share one viewport budget without l
   try{
     const rail=byID(renderer,'composer-auxiliary-scroll')[0]
     assert.equal(rail.findAll(node=>typeof node.type==='string'&&node.props.testID==='codex-goal-bar').length,1,'actual goal-only case remains inside the bounded rail')
-    assert.equal(styleOf(rail.props.style).maxHeight,72)
+    assert.equal(styleOf(rail.props.style).maxHeight,116)
     await act(async()=>store.setState({snapshots:{chat:{queuedTurns:[userQueueTurn('draft')]}}}))
     await click(renderer,'queued-section-toggle')
     await act(async()=>renderer.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel==='Edit queued message').props.onPress())
@@ -580,7 +581,7 @@ test('goal-only and queued auxiliary content share one viewport budget without l
     assert.equal(byID(renderer,'queued-editor-draft')[0].props.editable,false)
     await act(async()=>{oldSave();oldCancel();byID(renderer,'queued-editor-draft')[0].props.onChangeText('Invisible keystroke')})
     assert.equal(byID(renderer,'queued-editor-draft')[0].props.value,'Landscape draft')
-    assert.equal(styleOf(byID(renderer,'chat-composer-input')[0].props.style).maxHeight,46)
+    assert.equal(styleOf(byID(renderer,'chat-composer-input')[0].props.style).maxHeight,44)
     await act(async()=>{fixture.width=390;fixture.height=844;store.setState({health:queueHealth()})})
     assert.equal(byID(renderer,'queued-editor-draft')[0].props.value,'Landscape draft')
     assert.equal(queueOpen(renderer),true)

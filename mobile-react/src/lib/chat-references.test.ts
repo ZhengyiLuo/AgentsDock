@@ -86,6 +86,7 @@ assert.equal(defaultCrossChatAction(health(2), 'codex'), 'instruction')
 assert.deepEqual(supportedCrossChatTargetBackends(health(2)), ['codex', 'claude'])
 assert.deepEqual(interactiveClientCapabilities({ backend: 'codex' }, health(2)), [
   'codex_interactive_v1',
+  'codex_goal_steer_v1',
   'cross_chat_handoffs_v1',
   'cross_chat_handoffs_v2',
 ])
@@ -95,7 +96,20 @@ assert.deepEqual(interactiveClientCapabilities({ backend: 'claude' }, health(1))
 ])
 assert.deepEqual(interactiveClientCapabilities({ backend: 'codex' }, health(2, false)), [
   'codex_interactive_v1',
+  'codex_goal_steer_v1',
 ])
+for (const unsupported of [null, { ok: true }, ...[
+  { available: false, version: 2, interactive_client_capability: 'codex_interactive_v1' },
+  { available: true, version: 0, interactive_client_capability: 'codex_interactive_v1' },
+  { available: true, version: 2, interactive_client_capability: 'codex_interactive_v2' },
+].map(codex_controls => ({ ok: true, capabilities: { codex_controls } }))]) {
+  assert.equal(interactiveClientCapabilities({ backend: 'codex' }, unsupported).includes('codex_goal_steer_v1'), false,
+    'native goal steering must not opt in without supported Codex interaction controls')
+}
+for (const session of [null, { backend: 'claude' as const }, { backend: 'cursor' as const }]) {
+  assert.equal(interactiveClientCapabilities(session, health(2)).includes('codex_goal_steer_v1'), false,
+    'the Codex native-goal capability must not leak into another backend')
+}
 assert.equal(routeHintMentionsAvailable(hardenedV7), true)
 assert.equal(exactQueuedDeliverySkipAvailable({ ok: true, capabilities: { cross_chat_handoffs_v1: {
   available: true,

@@ -1,13 +1,24 @@
 export const COMPOSER_INPUT_MIN_HEIGHT = 46
+export const COMPOSER_INPUT_LANDSCAPE_HEIGHT = 44
 export const COMPOSER_INPUT_MAX_HEIGHT = 178
-export const COMPOSER_INPUT_COMPACT_KEYBOARD_MAX_HEIGHT = 126
+export const COMPOSER_INPUT_COMPACT_KEYBOARD_MAX_HEIGHT = 78
 export const COMPOSER_AUXILIARY_REGULAR_MAX_HEIGHT = 236
 export const COMPOSER_AUXILIARY_COMPACT_MAX_HEIGHT = 144
-export const COMPOSER_AUXILIARY_COMPACT_KEYBOARD_MAX_HEIGHT = 72
+// Goal: 44pt header + 10pt padding + 1pt borders + 7pt margin. Queue: 44pt
+// header, plus the shared 7pt gap. Round the 113pt minimum up for hairlines.
+// Reserve this space by capping draft growth, not clipping either header.
+export const COMPOSER_FOLDED_PANELS_MIN_HEIGHT = 116
+export const COMPOSER_AUXILIARY_COMPACT_KEYBOARD_MAX_HEIGHT = COMPOSER_FOLDED_PANELS_MIN_HEIGHT
 
 export interface ComposerViewportLimits {
   inputMaxHeight: number
   auxiliaryMaxHeight: number
+}
+
+export function composerKeyboardToolsCollapsed(width: number, height: number, keyboardVisible: boolean): boolean {
+  // Keep one primary row on short phones. Portrait retains its folded panels;
+  // only the much tighter landscape layout hides the auxiliary rail.
+  return keyboardVisible && (height < 500 || (width < 720 && height < 700))
 }
 
 export function composerViewportLimits(width: number, height: number, keyboardVisible: boolean): ComposerViewportLimits {
@@ -29,7 +40,7 @@ export function composerViewportLimits(width: number, height: number, keyboardVi
   // keyboard is dismissed instead of allowing it to push Send off-screen.
   if (height < 500) {
     return {
-      inputMaxHeight: COMPOSER_INPUT_MIN_HEIGHT,
+      inputMaxHeight: COMPOSER_INPUT_LANDSCAPE_HEIGHT,
       auxiliaryMaxHeight: 0,
     }
   }

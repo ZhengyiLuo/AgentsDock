@@ -4,6 +4,7 @@ import { boundImportedCrossChatDeliveryPrompt } from './imported-cross-chat-deli
 import { crossChatSemanticKey, isAsyncCrossChatMessage } from './timeline'
 import { isChatMailboxEvent } from './chat-mailbox'
 import { isImportedCodexGoalContext, isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from './provider-origin'
+import { retainNativeGoalAcknowledgementFiles } from './native-goal-file-association'
 
 export const LIVE_TIMELINE_EVENT_LIMIT = 720
 export const HISTORY_WINDOW_EVENT_LIMIT = 2_400
@@ -195,7 +196,8 @@ export function mergeAndSanitizeIncomingEvents(existing: readonly Event[], incom
   return incoming.map(event => {
     const previous = byId.get(key(event))
     const merged = previous ? mergeProviderInterruptionEvent(previous, event) : event
-    const sanitized = merged === previous ? previous! : sanitizeTimelineEvent(merged)
+    const clean = merged === previous ? previous! : sanitizeTimelineEvent(merged)
+    const sanitized = previous ? retainNativeGoalAcknowledgementFiles(previous, clean) : clean
     byId.set(key(event), sanitized)
     return sanitized
   })
