@@ -1015,7 +1015,12 @@ button.tool-event-toggle:hover { background: #242424; }
 .tool-event pre { max-height: 300px; margin: 0; padding: 7px 11px 10px; overflow: auto; color: #aaa; font: 11px/1.5 "SFMono-Regular", monospace; white-space: pre-wrap; user-select: text; }
 .changes-card { width: min(620px, 100%); display: flex; align-items: center; gap: 11px; margin: 8px 0 0; padding: 10px 12px; color: #ddd; background: #212121; border: 1px solid #303030; border-radius: 7px; text-align: left; }
 .changes-card:hover { background: #292929; }
-.changes-card > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.changes-card > span:nth-child(2) { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.changes-card > svg, .changes-card > .review-label { flex-shrink: 0; }
+.changes-file-list { display: flex; gap: var(--space-2); color: var(--muted); font-size: var(--text-size-meta); }
+.changes-file-name { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes-file-name + .changes-file-name::before { content: '·'; margin-right: var(--space-2); }
+.changes-file-remaining { flex-shrink: 0; }
 .changes-card small b, .diff-stat b, .review-files small b, .diff-file-header small b { color: #3bd27d; }
 .changes-card small i, .diff-stat i, .review-files small i, .diff-file-header small i { margin-left: 6px; color: #ff625d; font-style: normal; }
 .review-label { padding: 4px 9px; background: #333; border-radius: 6px; font-size: var(--text-size-meta); }

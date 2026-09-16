@@ -8,7 +8,7 @@ import { compactToolOutputPreview } from '@shared/event-compaction'
 import { agentFileBelongsToSession } from '@shared/session-files'
 import { isImportedProviderInterruption } from '@shared/provider-origin'
 import { codexLifecycleSemanticKey } from '@shared/semantic-timeline'
-import type { ChatReference, CrossChatExchange, Event, PinnedItem, QueuedTurn, WorkspaceProfileScope } from '@shared/types'
+import type { ChatReference, CodeDiffFileSummary, CrossChatExchange, Event, PinnedItem, QueuedTurn, WorkspaceProfileScope } from '@shared/types'
 import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, ProgressItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
 import { progressEventSequence, progressToolStartSequences, extractUnifiedDiff, isHandoffDigestEvent, isPublicCommentary, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
@@ -351,15 +351,18 @@ function RunActivity({ item, sessionId, profileScope }: { item: ProgressItem; se
   />
 }
 
+const EMPTY_COMMENTARY_IDS: string[] = []
+
 function TraceDisclosure({
   events,
   sessionId,
   anchorSeq,
   resetKey,
-  promotedCommentaryIds = [],
+  promotedCommentaryIds = EMPTY_COMMENTARY_IDS,
   includeCommentary = false,
   runActivity,
-  profileScope = null
+  profileScope = null,
+  showCodeChanges = true
 }: {
   events: Event[]
   sessionId: string
@@ -369,6 +372,7 @@ function TraceDisclosure({
   includeCommentary?: boolean
   runActivity?: ProgressItem
   profileScope?: WorkspaceProfileScope | null
+  showCodeChanges?: boolean
 }) {
   useLocale()
   const runActivityMode = Boolean(runActivity)
@@ -396,6 +400,12 @@ function TraceDisclosure({
     () => events.find(event => event.run_id?.trim())?.run_id?.trim() || null,
     [events]
   )
+  const diffScope = JSON.stringify([sessionId, runId, resetKey, runActivity?.key])
+  const [expandedDiffScope, setExpandedDiffScope] = useState<string | null>(() => open ? diffScope : null)
+  const toggleDetails = () => {
+    setExpandedDiffScope(diffScope)
+    setOpen(value => !value)
+  }
   const traceAnchor = useMemo(
     // Anchor with the newest sampled event so a timeline index cached earlier
     // in the same turn cannot silently truncate the on-demand detail range.
@@ -425,15 +435,21 @@ function TraceDisclosure({
       hasFinalResponse: activityHasFinalResponse
     }
     if (!runActivityMode) return
-    if (previous.key !== runActivity?.key) setOpen(activityLive)
+    if (previous.key !== runActivity?.key) {
+      setOpen(activityLive)
+      if (activityLive) setExpandedDiffScope(diffScope)
+    }
     else if (
       !activityLive
       && activityHasFinalResponse
       && (previous.live || !previous.hasFinalResponse)
     ) setOpen(false)
-    else if (activityLive || (previous.live && activityStopped)) setOpen(true)
+    else if (activityLive || (previous.live && activityStopped)) {
+      setExpandedDiffScope(diffScope)
+      setOpen(true)
+    }
     else if (previous.live || (previous.stopped && !activityStopped)) setOpen(false)
-  }, [activityHasFinalResponse, activityLive, activityStopped, runActivityMode, runActivity?.key])
+  }, [activityHasFinalResponse, activityLive, activityStopped, diffScope, runActivityMode, runActivity?.key])
   const displayEvents = useMemo(() => {
     const promotedIds = new Set(promotedCommentaryIds)
     const merged = loadedEvents ? mergeTraceEvents(runActivity?.sourceEvents ?? events, loadedEvents) : events
@@ -474,23 +490,27 @@ function TraceDisclosure({
     () => summary.canonicalDiff ? null : summarizeStructuredToolDiff(displayEvents),
     [displayEvents, summary.canonicalDiff]
   )
-  const expanded = useMemo(() => {
-    if (!open) return null
-    const diff = summary.canonicalDiff ? '' : extractUnifiedDiff(displayEvents)
+  // Discover legacy changes only after an explicit expansion. Keep their
+  // memoized summary when details close, including the live-to-finished collapse.
+  const inspectLegacyDiff = !summary.canonicalDiff && !structuredDiffSummary && (open || expandedDiffScope === diffScope)
+  const legacyDiff = useMemo(() => {
+    if (!inspectLegacyDiff) return null
+    const diff = extractUnifiedDiff(displayEvents)
     return {
       diff,
-      legacyFiles: summary.canonicalDiff ? [] : parseReviewableDiff(diff)
+      files: parseReviewableDiff(diff)
     }
-  }, [displayEvents, open, summary.canonicalDiff])
-  const diffFileCount = summary.canonicalDiff?.files_changed ?? expanded?.legacyFiles.length ?? structuredDiffSummary?.filesChanged ?? 0
-  const additions = summary.canonicalDiff?.additions ?? expanded?.legacyFiles.reduce((sum, file) => sum + file.additions, 0) ?? structuredDiffSummary?.additions ?? 0
-  const deletions = summary.canonicalDiff?.deletions ?? expanded?.legacyFiles.reduce((sum, file) => sum + file.deletions, 0) ?? structuredDiffSummary?.deletions ?? 0
+  }, [displayEvents, inspectLegacyDiff])
+  const diffFiles = summary.canonicalDiff?.diff_files ?? structuredDiffSummary?.files ?? legacyDiff?.files
+  const diffFileCount = summary.canonicalDiff?.files_changed ?? diffFiles?.length ?? 0
+  const additions = summary.canonicalDiff?.additions ?? structuredDiffSummary?.additions ?? diffFiles?.reduce((sum, file) => sum + (file.additions ?? 0), 0) ?? 0
+  const deletions = summary.canonicalDiff?.deletions ?? structuredDiffSummary?.deletions ?? diffFiles?.reduce((sum, file) => sum + (file.deletions ?? 0), 0) ?? 0
   const openReview = () => {
     const target: CodeReviewTarget = {
       sessionId,
       runId: summary.canonicalDiff?.run_id,
-      source: summary.canonicalDiff ? null : expanded?.diff ?? extractUnifiedDiff(displayEvents),
-      files: summary.canonicalDiff?.diff_files ?? structuredDiffSummary?.files,
+      source: summary.canonicalDiff ? null : legacyDiff?.diff ?? extractUnifiedDiff(displayEvents),
+      files: diffFiles,
       additions,
       deletions,
       repositoryRoot: summary.canonicalDiff?.repository_root
@@ -545,7 +565,7 @@ function TraceDisclosure({
     ? hasMore ? t('timeline.ui.loadMoreActivity') : t('timeline.ui.checkForNewerActivity')
     : t('timeline.ui.loadAvailableActivity')
   const activityHeader = runActivity
-    ? <RunActivityHeader item={runActivity} events={events} open={open} detailsId={detailsId} onToggle={() => setOpen(value => !value)} />
+    ? <RunActivityHeader item={runActivity} events={events} open={open} detailsId={detailsId} onToggle={toggleDetails} />
     : null
   return (
     <div className={`trace${runActivity ? ' run-activity' : ''} ${open ? 'open' : ''}`}>
@@ -555,7 +575,7 @@ function TraceDisclosure({
         aria-expanded={open}
         aria-controls={detailsId}
         aria-label={`${traceTitle}. ${metadata || t('timeline.ui.activityDetails')}. ${toggleLabel}.`}
-        onClick={() => setOpen(value => !value)}
+        onClick={toggleDetails}
       >
         <ChevronRight size={14} />
         <Code2 size={14} />
@@ -563,7 +583,7 @@ function TraceDisclosure({
         <span className="trace-summary-action">{toggleLabel}</span>
         {!open && summary.preview && <span className="trace-summary-preview" aria-hidden="true">{summary.preview}</span>}
       </button>}
-      {(expanded || hasVisibleTerminalCommentary) && <div id={detailsId} className="trace-details" role="region" aria-label={t('timeline.ui.reasoningAndToolDetails')} aria-busy={loadingMore} tabIndex={0}>
+      {(open || hasVisibleTerminalCommentary) && <div id={detailsId} className="trace-details" role="region" aria-label={t('timeline.ui.reasoningAndToolDetails')} aria-busy={loadingMore} tabIndex={0}>
         <ol className="trace-activity" aria-label={t('timeline.ui.chronologicalTraceActivity')}>
           {runActivity
             ? runActivitySegments.map(segment => segment.kind === 'commentary'
@@ -573,13 +593,13 @@ function TraceDisclosure({
                   : null)
             : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} />)}
         </ol>
-        {expanded && runId && <div className="trace-detail-actions">
+        {open && runId && <div className="trace-detail-actions">
           {loadLabel && <button type="button" disabled={loadingMore} onClick={() => void showMore()}>{loadingMore && <LoaderCircle className="spin" size={12} />}{loadLabel}</button>}
           {loadedEvents && <button type="button" disabled={loadingMore} onClick={showLess}>{t('timeline.ui.useCompactTrace')}</button>}
           {loadError && <span role="alert">{loadError}</span>}
         </div>}
       </div>}
-      {diffFileCount > 0 && (!runActivity || open) && <CodeChangesCard fileCount={diffFileCount} additions={additions} deletions={deletions} onOpen={openReview} />}
+      {showCodeChanges && diffFileCount > 0 && <CodeChangesCard fileCount={diffFileCount} files={diffFiles} additions={additions} deletions={deletions} onOpen={openReview} />}
     </div>
   )
 }
@@ -2044,6 +2064,7 @@ function JobView({ item, sessionId, profileScope, pinnedItemIds }: { item: JobIt
       && event.run_id === latestSource.run_id
     ))
     : undefined
+  const codeDiffFileCount = codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0
   const files = deduplicateFiles(item.events
     .filter(event => latestSource.run_id
       ? event.run_id === latestSource.run_id
@@ -2124,8 +2145,8 @@ function JobView({ item, sessionId, profileScope, pinnedItemIds }: { item: JobIt
         {showStructuredDetail && <pre id={structuredDetailId} className="job-structured-detail">{presentation.detail}</pre>}
       </> : <MarkdownContent text={presentation.detail} files={files} sessionId={sessionId} fold={false} />}
       {files.length > 0 && <MediaGrid files={files} sessionId={sessionId} profileScope={profileScope} compact pinnedItemIds={pinnedItemIds} />}
-      {(codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0) > 0 ? <CodeChangesCard fileCount={codeDiff?.files_changed ?? codeDiff?.diff_files?.length ?? 0} additions={codeDiff?.additions ?? 0} deletions={codeDiff?.deletions ?? 0} onOpen={openReview} /> : null}
-      {traceRunId && <div className="job-run-trace"><TraceDisclosure events={latestRunTrace} sessionId={sessionId} anchorSeq={latestRunTraceAnchor} resetKey={latestRunTraceResetKey} includeCommentary /></div>}
+      {codeDiffFileCount > 0 ? <CodeChangesCard fileCount={codeDiffFileCount} files={codeDiff?.diff_files} additions={codeDiff?.additions ?? 0} deletions={codeDiff?.deletions ?? 0} onOpen={openReview} /> : null}
+      {traceRunId && <div className="job-run-trace"><TraceDisclosure events={latestRunTrace} sessionId={sessionId} anchorSeq={latestRunTraceAnchor} resetKey={latestRunTraceResetKey} includeCommentary showCodeChanges={codeDiffFileCount === 0 || codeDiff?.run_id !== traceRunId} /></div>}
     </div>
     {previousRunCount > 0 && <div className="job-history">
       <button type="button" className="job-history-toggle" aria-label={t('timeline.job.previousRuns', { count: previousRunCount })} aria-expanded={showHistory} onClick={toggleHistory}>
@@ -2226,9 +2247,18 @@ function jobRunStatus(event: Event, presentation?: ReturnType<typeof jobResultPr
   return { label: t('timeline.ui.updated'), tone: 'updated' }
 }
 
-function CodeChangesCard({ fileCount, additions, deletions, onOpen }: { fileCount: number; additions: number; deletions: number; onOpen: () => void }) {
+function CodeChangesCard({ fileCount, files, additions, deletions, onOpen }: { fileCount: number; files?: CodeDiffFileSummary[] | null; additions: number; deletions: number; onOpen: () => void }) {
   useLocale()
-  return <button className="changes-card" onClick={onOpen}><FileText size={17} /><span><strong>{timelineCount('editedFiles', fileCount)}</strong><small><b>+{additions}</b> <i>-{deletions}</i></small></span><span className="review-label">{t('timeline.ui.review')}</span></button>
+  const visibleFiles = files?.slice(0, 3) ?? []
+  const remainingFiles = Math.max(0, fileCount - visibleFiles.length)
+  return <button type="button" className="changes-card" onClick={onOpen}><FileText size={17} /><span>
+    <strong>{timelineCount('editedFiles', fileCount)}</strong>
+    {visibleFiles.length > 0 && <small className="changes-file-list">
+      {visibleFiles.map((file, index) => <span className="changes-file-name" key={`${file.path}:${index}`} title={file.path}>{file.path.split(/[\\/]/).pop() || file.path}</span>)}
+      {remainingFiles > 0 && <span className="changes-file-remaining">+{remainingFiles}</span>}
+    </small>}
+    <small><b>+{additions}</b> <i>-{deletions}</i></small>
+  </span><span className="review-label">{t('timeline.ui.review')}</span></button>
 }
 
 function deduplicateFiles<T extends { id: string }>(files: T[]): T[] {

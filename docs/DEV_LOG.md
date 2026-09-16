@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-15 — Keep file changes visible outside collapsed progress (unreleased)
+
+- Keep known changed-file summaries and Review accessible when a turn's progress
+  is collapsed. Show a compact filename list with aggregate line counts while
+  leaving full diffs and tool activity behind their existing disclosures.
+- Reuse recorded diff metadata without fetching activity or parsing arbitrary
+  tool output on chat open. Keep scheduled-job summaries single-rendered.
+- Validate completed and live-to-completed turns, collapse/expand, exact Review
+  targets and scheduled-run identity. Check actual renderer layouts in light
+  and dark themes at wide and narrow sizes with network access disabled.
+  Type checks, desktop regressions and production compilation pass.
+- Desktop-only presentation change; no polling, provider runs, server update,
+  publication or running-app replacement.
+
 ## 2026-09-15 — Local desktop 1.0.1 build 1169 accepted
 
 - Package committed source `9ca56af` as an Apple Silicon local desktop build,

@@ -3048,7 +3048,7 @@ describe('timeline pin state', () => {
     await waitFor(() => expect(within(container).queryByRole('alert')).not.toBeInTheDocument())
   })
 
-  it('defers legacy diff extraction until the trace is expanded', () => {
+  it.each(['trace', 'progress'] as const)('defers legacy diff extraction until %s is expanded and retains the discovered summary after collapse', kind => {
     const toolResult: Event = {
       id: 'tool-result', session_id: 'chat-1', seq: 1, type: 'tool_finished',
       ts: '2026-07-10T14:29:00Z', tool: { name: 'exec' }
@@ -3061,21 +3061,28 @@ describe('timeline pin state', () => {
         return 'diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new'
       }
     })
-    const item: TraceItem = {
-      kind: 'trace', id: 'trace-1', key: 'trace-1', seq: 1, events: [toolResult], promotedCommentaryIds: [], active: false
+    const item: TraceItem | ProgressItem = {
+      kind, id: 'trace-1', key: 'trace-1', seq: 1, events: [toolResult], promotedCommentaryIds: [], active: false
     }
     const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
     expect(outputReads).toBe(0)
     expect(within(container).queryByRole('button', { name: /Edited 1 file/ })).not.toBeInTheDocument()
 
-    fireEvent.click(within(container).getByRole('button', { name: /1 tool/ }))
+    const toggle = container.querySelector<HTMLButtonElement>('.trace-summary, .run-activity-summary')!
+    fireEvent.click(toggle)
 
     expect(outputReads).toBeGreaterThan(0)
     expect(within(container).getByRole('button', { name: /Edited 1 file/ })).toBeInTheDocument()
+    const expandedReads = outputReads
+    fireEvent.click(toggle)
+    expect(outputReads).toBe(expandedReads)
+    expect(within(container).getAllByRole('button', { name: /Edited 1 file/ })).toHaveLength(1)
+    expect(container.querySelector('.changes-file-name')).toHaveTextContent('app.ts')
+    expect(container.querySelector('.trace-details')).not.toBeInTheDocument()
   })
 
-  it('shows structured Codex changes while collapsed and opens their review without reading legacy output', () => {
+  it.each(['trace', 'progress'] as const)('shows structured Codex changes in collapsed %s and opens their review without reading legacy output', kind => {
     const toolResult: Event = {
       id: 'tool-result', session_id: 'chat-1', seq: 1, type: 'tool_finished',
       ts: '2026-07-10T14:29:00Z', tool_id: 'patch-1',
@@ -3097,8 +3104,8 @@ describe('timeline pin state', () => {
         return 'unrelated output'
       }
     })
-    const item: TraceItem = {
-      kind: 'trace', id: 'trace-1', key: 'trace-1', seq: 1, events: [toolResult], promotedCommentaryIds: [], active: false
+    const item: TraceItem | ProgressItem = {
+      kind, id: 'trace-1', key: 'trace-1', seq: 1, events: [toolResult], promotedCommentaryIds: [], active: false
     }
     const onReview = vi.fn()
     const listener: EventListener = event => onReview((event as CustomEvent).detail)
@@ -3109,6 +3116,8 @@ describe('timeline pin state', () => {
       const reviewButton = within(container).getByRole('button', { name: /Edited 1 file/ })
       expect(reviewButton).toHaveTextContent('+2')
       expect(reviewButton).toHaveTextContent('-1')
+      expect(reviewButton).toHaveTextContent('app.ts')
+      expect(container.querySelector('.trace-details')).not.toBeInTheDocument()
       expect(outputReads).toBe(0)
 
       fireEvent.click(reviewButton)
@@ -3158,6 +3167,129 @@ describe('timeline pin state', () => {
     fireEvent.click(within(container).getByRole('button', { name: /1 tool/ }))
 
     expect(outputReads).toBe(1)
+  })
+
+  it('keeps one bounded canonical change summary outside completed progress and opens Review while collapsed', () => {
+    const output = vi.fn(() => 'unrelated legacy output')
+    const tool: Event = {
+      id: 'tool', session_id: 'chat-1', seq: 1, type: 'tool_finished',
+      ts: '2026-07-10T14:29:00Z', run_id: 'run-1', tool: { name: 'exec' }
+    }
+    Object.defineProperty(tool, 'output', { get: output })
+    const canonicalDiff: Event = {
+      id: 'diff', session_id: 'chat-1', seq: 2, type: 'code_diff',
+      ts: '2026-07-10T14:30:00Z', run_id: 'run-1', files_changed: 5,
+      additions: 12, deletions: 4, repository_root: '/workspace',
+      diff_files: Array.from({ length: 5 }, (_, index) => ({ path: `src/file-${index}.ts`, additions: 1, deletions: 0 }))
+    }
+    const item: ProgressItem = {
+      kind: 'progress', id: 'activity', key: 'activity', seq: 1, events: [tool, canonicalDiff],
+      active: false, hasFinalResponse: true, startedAt: tool.ts, finishedAt: canonicalDiff.ts
+    }
+    const review = vi.fn()
+    const listener: EventListener = event => review((event as CustomEvent).detail)
+    window.addEventListener('agentsdock:review-diff', listener)
+    try {
+      const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+      const toggle = within(container).getByRole('button', { name: 'Worked for 1m 0s' })
+      const card = within(container).getByRole('button', { name: /Edited 5 files.*Review/ })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(container.querySelector('.trace-details')).not.toBeInTheDocument()
+      expect(card).toHaveTextContent('+12')
+      expect(card).toHaveTextContent('-4')
+      expect(card.querySelectorAll('.changes-file-name')).toHaveLength(3)
+      expect(card.querySelector('.changes-file-remaining')).toHaveTextContent('+2')
+      expect(within(card).getByText('file-0.ts')).toHaveAttribute('title', 'src/file-0.ts')
+      fireEvent.click(card)
+      expect(output).not.toHaveBeenCalled()
+      expect(review).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'chat-1', runId: 'run-1', files: canonicalDiff.diff_files,
+        additions: 12, deletions: 4, repositoryRoot: '/workspace'
+      }))
+      fireEvent.click(toggle)
+      expect(container.querySelector('.trace-details')).not.toContainElement(card)
+      expect(container.querySelectorAll('.changes-card')).toHaveLength(1)
+      fireEvent.click(toggle)
+      expect(card).toBeVisible()
+      expect(container.querySelectorAll('.changes-card')).toHaveLength(1)
+    } finally {
+      window.removeEventListener('agentsdock:review-diff', listener)
+    }
+  })
+
+  it('retains known filenames and counts when live activity automatically collapses on completion', () => {
+    const readDiff = vi.fn(() => '@@ -1 +1,2 @@\n-old\n+new\n+extra')
+    const change = { path: 'src/app.ts', kind: 'update' }
+    Object.defineProperty(change, 'diff', { get: readDiff })
+    const tool: Event = {
+      id: 'patch', session_id: 'chat-1', seq: 1, type: 'tool_finished',
+      ts: '2026-07-10T14:29:00Z', run_id: 'run-1', tool: { name: 'apply_patch', input: { changes: [change] } }
+    }
+    const live: ProgressItem = {
+      kind: 'progress', id: 'activity', key: 'activity', seq: 1, events: [tool], active: true, startedAt: tool.ts
+    }
+    const row = (item: ProgressItem) => <TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
+    const { container, rerender } = render(row(live))
+    const reads = readDiff.mock.calls.length
+    expect(reads).toBeGreaterThan(0)
+    rerender(row({ ...live, active: false, hasFinalResponse: true, finishedAt: '2026-07-10T14:30:00Z' }))
+    expect(within(container).getByRole('button', { name: 'Worked for 1m 0s' })).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelector('.trace-details')).not.toBeInTheDocument()
+    const card = within(container).getByRole('button', { name: /Edited 1 file.*Review/ })
+    expect(card).toHaveTextContent('app.ts')
+    expect(card).toHaveTextContent('+2')
+    expect(card).toHaveTextContent('-1')
+    expect(readDiff).toHaveBeenCalledTimes(reads)
+  })
+
+  it('shows a scheduled run change summary once when its nested trace opens', () => {
+    const diff: Event = {
+      id: 'job-diff', session_id: 'chat-1', seq: 1, type: 'code_diff',
+      ts: '2026-07-10T14:29:00Z', run_id: 'job-run', job_id: 'job-1',
+      files_changed: 1, additions: 2, deletions: 1,
+      diff_files: [{ path: 'src/job.ts', additions: 2, deletions: 1 }]
+    }
+    const latest: Event = {
+      id: 'job-finished', session_id: 'chat-1', seq: 2, type: 'turn_finished',
+      ts: '2026-07-10T14:30:00Z', run_id: 'job-run', job_id: 'job-1', result_text: 'Updated the scheduled check.'
+    }
+    const item: JobItem = {
+      kind: 'job', id: 'job:job-1', key: 'job:job-1', seq: 2, title: 'Scheduled check',
+      events: [diff, latest], latest, eventCount: 2, runCount: 1, startSeq: 1, endSeq: 2
+    }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(within(container).getAllByRole('button', { name: /Edited 1 file.*Review/ })).toHaveLength(1)
+    expect(container.querySelector('.changes-card')).toHaveTextContent('job.ts')
+    fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
+    expect(within(container).getAllByRole('button', { name: /Edited 1 file.*Review/ })).toHaveLength(1)
+  })
+
+  it('keeps current job changes visible beside a retained previous-run result', () => {
+    const previousDiff: Event = {
+      id: 'old-diff', session_id: 'chat-1', seq: 1, type: 'code_diff',
+      ts: '2026-07-10T14:29:00Z', run_id: 'old-run', job_id: 'job-1',
+      files_changed: 1, diff_files: [{ path: 'previous.ts', additions: 1, deletions: 0 }]
+    }
+    const latest: Event = {
+      id: 'old-finished', session_id: 'chat-1', seq: 2, type: 'turn_finished',
+      ts: '2026-07-10T14:30:00Z', run_id: 'old-run', job_id: 'job-1', result_text: 'Previous result.'
+    }
+    const running: Event = {
+      ...latest, id: 'current-start', seq: 3, type: 'turn_started', run_id: 'current-run', result_text: undefined
+    }
+    const currentDiff: Event = {
+      ...previousDiff, id: 'current-diff', seq: 4, run_id: 'current-run', diff_files: [{ path: 'current.ts', additions: 2, deletions: 1 }]
+    }
+    const summary: Event = { ...latest, id: 'job-summary', seq: 5, type: 'job_summary', job_status: 'running' }
+    const item: JobItem = {
+      kind: 'job', id: 'job:job-1', key: 'job:job-1', seq: 5, title: 'Scheduled check',
+      events: [previousDiff, latest, running, currentDiff, summary], latest: summary, latestStatus: running,
+      eventCount: 5, runCount: 2, startSeq: 1, endSeq: 5
+    }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(within(container).getAllByRole('button', { name: /Edited 1 file.*Review/ })).toHaveLength(2)
+    expect(container.querySelector('.job-run-trace .changes-card')).toHaveTextContent('current.ts')
+    expect(within(container).getByRole('button', { name: /Edited 1 file.*previous.ts/ })).toBeVisible()
   })
 
   it('labels retained output as history when the scheduled job no longer exists', () => {
