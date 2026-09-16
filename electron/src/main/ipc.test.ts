@@ -41,6 +41,20 @@ const trustedEvent = {
 describe('Team Hub IPC registration', () => {
   beforeEach(() => harness.handlers.clear())
 
+  it('routes side questions and exact cancellation only from trusted app renderers', async () => {
+    const askSideQuestion = vi.fn().mockResolvedValue({ answer: 'Separate answer' })
+    const cancelSideQuestion = vi.fn().mockResolvedValue({ status: 'cancelled' })
+    registerIpc({ askSideQuestion, cancelSideQuestion } as unknown as AppService, {} as AppUpdateManager)
+    const scope = { profileId: 'server-a', profileGeneration: 7 }
+    const input = { request_id: 'question-a', question: 'Why?' }
+    await harness.handlers.get('side-questions:ask')?.(trustedEvent, scope, 'chat-a', input)
+    await harness.handlers.get('side-questions:cancel')?.(trustedEvent, scope, 'chat-a', input.request_id)
+    expect(askSideQuestion).toHaveBeenCalledExactlyOnceWith(scope, 'chat-a', input)
+    expect(cancelSideQuestion).toHaveBeenCalledExactlyOnceWith(scope, 'chat-a', input.request_id)
+    expect(() => harness.handlers.get('side-questions:ask')?.({ sender: { id: 2, getURL: () => 'https://shared.example.test/chat' },
+      senderFrame: { url: 'https://shared.example.test/chat', parent: null } }, scope, 'chat-a', input)).toThrow('untrusted renderer')
+  })
+
   it('routes member rename through exact scoped IPC and blocks untrusted frames', async () => {
     const result = { id: 'node-1', server_identity: 'server-1', display_name: 'New name' }
     const renameNetworkServer = vi.fn().mockResolvedValue(result)

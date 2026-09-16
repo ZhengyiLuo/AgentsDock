@@ -211,6 +211,10 @@ import type {
 export interface AgentsDockAPI {
   /** Restricted browser renderer. It has no native, filesystem, or other-chat authority. */
   readonly sharedChat?: true
+  sideQuestions?: {
+    ask(scope: import('./side-questions').SideQuestionScope, sessionId: string, input: import('./side-questions').SideQuestionInput): Promise<import('./side-questions').SideQuestionAnswer>
+    cancel(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string): Promise<import('./side-questions').SideQuestionCancellation>
+  }
   chatShares: {
     preview(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./chat-shares').ChatSharePreview>
     list(scope: WorkspaceProfileScope, sessionId: string, mode: import('./chat-shares').ChatShareMode): Promise<import('./chat-shares').ChatShareRecord[]>

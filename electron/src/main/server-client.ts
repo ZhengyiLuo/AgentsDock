@@ -5,6 +5,7 @@ import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
+import { parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
 import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
 import { chatShareCreateBody, chatShareId, chatShareMode, parseChatShareList, parseChatSharePreview, parseCreatedChatShare,
   type ChatShareMode, type CreateChatShareInput } from '../shared/chat-shares'
@@ -326,6 +327,27 @@ export class AgentServerClient {
 
   url(path: string): string {
     return configurationURL(this.configuration, path)
+  }
+
+  async askSideQuestion(sessionId: string, input: SideQuestionInput, signal?: AbortSignal): Promise<SideQuestionAnswer> {
+    const body = validateSideQuestionInput(input)
+    // Independent one-shot provider calls have a 150-second server deadline.
+    // Keep transport headroom and never retry or turn this into a chat turn.
+    const response = await this.request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
+      method: 'POST', body: JSON.stringify(body),
+      signal: combineAbortSignals(signal, this.timeoutSignal(210_000))
+    }, this.configuration, 2 * 1024 * 1024)
+    return parseSideQuestionAnswer(response, sessionId, body.request_id)
+  }
+
+  async cancelSideQuestion(sessionId: string, requestId: string): Promise<SideQuestionCancellation> {
+    const response = await this.delete<SideQuestionCancellation>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-questions/${encodeURIComponent(requestId)}`
+    )
+    if (response?.request_id !== requestId || !['cancelled', 'not_found'].includes(response.status)) {
+      throw new Error('side_question_invalid_response')
+    }
+    return response
   }
 
   async health(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, redirect: 'follow' | 'error' = 'error'): Promise<Health> {

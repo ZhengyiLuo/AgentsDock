@@ -41,6 +41,8 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('side-questions:ask', (scope, sessionId, input) => service.askSideQuestion(scope, sessionId, input))
+  handle('side-questions:cancel', (scope, sessionId, requestId) => service.cancelSideQuestion(scope, sessionId, requestId))
   handle('chat-shares:preview', (scope, sessionId) => service.previewChatShare(scope, sessionId))
   handle('chat-shares:list', (scope, sessionId, mode) => service.listChatShares(scope, sessionId, mode))
   handle('chat-shares:create', (scope, sessionId, input) => service.createChatShare(scope, sessionId, input))

@@ -4,6 +4,10 @@ import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
 
 const api: AgentsDockAPI = {
+  sideQuestions: {
+    ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
+    cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId)
+  },
   chatShares: {
     preview: (scope, sessionId) => ipcRenderer.invoke('chat-shares:preview', scope, sessionId),
     list: (scope, sessionId, mode) => ipcRenderer.invoke('chat-shares:list', scope, sessionId, mode),

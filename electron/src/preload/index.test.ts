@@ -27,6 +27,17 @@ import './index'
 describe('preload session IPC bridge', () => {
   beforeEach(() => electronHarness.invoke.mockReset())
 
+  it('keeps side-question IPC separate from turn submission and binds cancellation to its original scope', async () => {
+    const scope = { profileId: 'server-a', profileGeneration: 7 }
+    const input = { request_id: 'question-a', question: 'Why?' }
+    await electronHarness.exposed?.sideQuestions?.ask(scope, 'chat-a', input)
+    await electronHarness.exposed?.sideQuestions?.cancel(scope, 'chat-a', input.request_id)
+    expect(electronHarness.invoke.mock.calls).toEqual([
+      ['side-questions:ask', scope, 'chat-a', input],
+      ['side-questions:cancel', scope, 'chat-a', input.request_id]
+    ])
+  })
+
   it('exposes app language selection and change events independently of server settings', async () => {
     const snapshot = { preference: 'zh-CN', systemLocale: 'en-US' }
     electronHarness.invoke.mockResolvedValue(snapshot)

@@ -3,7 +3,7 @@ import { t } from '@shared/i18n'
 import { useLocale } from '../lib/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronRight, Columns2, Copy, Folder, GitFork, LoaderCircle, MessageCircleQuestion, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, Pin, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react'
 import type { Session } from '@shared/types'
 import { completedPrefixForkAvailable } from '@shared/session-fork'
 import { backendLabel, shortId } from '../lib/format'
@@ -13,6 +13,7 @@ import { ShortcutTooltip } from './ShortcutTooltip'
 import { CodexStatusButton } from './CodexControls'
 import { useCodexRuntime } from './CodexRuntimeContext'
 import { ScheduledJobsPopover } from './ScheduledJobsPopover'
+import { SideQuestionPanel } from './SideQuestionPanel'
 
 export function ChatHeader({
   session: sessionProp,
@@ -39,6 +40,8 @@ export function ChatHeader({
   const selectedSession = useAppStore(state => state.sessions.find(candidate => candidate.id === state.selectedSessionId) ?? null)
   const session = sessionProp === undefined ? selectedSession : sessionProp
   const inspector = useAppStore(state => state.inspectorVisible)
+  const profileId = useAppStore(state => state.activeProfileId)
+  const profileGeneration = useAppStore(state => state.profileGeneration)
   const sessions = useAppStore(state => state.sessions)
   const folderOrder = useAppStore(state => state.folderOrder)
   const chatPanes = useAppStore(state => state.chatPanes)
@@ -69,16 +72,18 @@ export function ChatHeader({
   const [sessionIdCopied, setSessionIdCopied] = useState(false)
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false)
   const [splitMenuRequested, setSplitMenuRequested] = useState(false)
+  const [sideQuestionOpen, setSideQuestionOpen] = useState(false)
   useTransientClose(actionsMenuOpen, () => {
     setActionsMenuOpen(false)
     setSplitMenuRequested(false)
   })
   useEffect(() => setTitle(session?.title ?? ''), [session?.id, session?.title])
   useEffect(() => {
+    setSideQuestionOpen(false)
     setActionsMenuOpen(false)
     setSplitMenuRequested(false)
     setSessionIdCopied(false)
-  }, [session?.id])
+  }, [session?.id, profileId, profileGeneration])
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string }>).detail
@@ -166,6 +171,9 @@ export function ChatHeader({
         </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
         {sidebarButton}
         <ScheduledJobsPopover session={session} />
+        {!window.agentsDock.sharedChat && (session.backend === 'codex' || session.backend === 'claude') && <button type="button"
+          className={`icon-button${sideQuestionOpen ? ' active' : ''}`} title={t('sideQuestion.title')} aria-label={t('sideQuestion.title')}
+          onClick={() => setSideQuestionOpen(true)}><MessageCircleQuestion size={16} /></button>}
         {onSwapPanes && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} aria-label={t("ui.ChatHeader.ChatHeader.swap_chat_panes_7129f59")} onClick={onSwapPanes}><ArrowLeftRight size={15} /></button>}
         {focused && onTerminalToggle && <ShortcutTooltip shortcut="toggleTerminal" label={terminalOpen ? t("ui.ChatHeader.ChatHeader.close_terminal_panel_48e963f") : t("ui.ChatHeader.ChatHeader.open_terminal_panel_3284242")}><button
           className={`icon-button terminal-toggle${terminalOpen ? ' active' : ''}`}
@@ -182,6 +190,7 @@ export function ChatHeader({
         {focused && <ShortcutTooltip shortcut="toggleInspector" label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`}><button className="icon-button inspector-toggle" aria-label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button></ShortcutTooltip>}
         {onClosePane && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.close_this_chat_pane_4926598")} aria-label={t("ui.ChatHeader.ChatHeader.close_pane_fe2672f", { "title": String(session.title) })} onClick={onClosePane}><X size={15} /></button>}
       </div>
+      {sideQuestionOpen && <SideQuestionPanel session={session} onClose={() => setSideQuestionOpen(false)} />}
     </header>
   )
 }

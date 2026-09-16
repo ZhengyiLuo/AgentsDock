@@ -99,6 +99,26 @@ describe('ChatHeader', () => {
     expect(screen.getByRole('button', { name: 'Show chat list' })).toBeInTheDocument()
   })
 
+  it('opens an isolated side-question panel with a read-only explanation for an older server', async () => {
+    const session = { id: 'chat', title: 'Chat', backend: 'codex' as const }
+    useAppStore.setState({ sessions: [session], selectedSessionId: session.id })
+    render(<ChatHeader />)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Side question' }))
+    expect(screen.getByRole('dialog', { name: 'Side question' })).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Side questions are unavailable')
+    expect(screen.queryByRole('button', { name: 'Ask' })).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Close side question' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it.each(['cursor', 'shared-guest'] as const)('omits the side-question entry for %s', kind => {
+    const session = { id: 'chat', title: 'Chat', backend: kind === 'cursor' ? 'cursor' as const : 'claude' as const }
+    if (kind === 'shared-guest') Object.defineProperty(window.agentsDock, 'sharedChat', { value: true })
+    useAppStore.setState({ sessions: [session], selectedSessionId: session.id })
+    render(<ChatHeader />)
+    expect(screen.queryByRole('button', { name: 'Side question' })).not.toBeInTheDocument()
+  })
+
   it.each(['running', 'admitting'] as const)('forks a %s chat through its completed prefix on a capable server', async state => {
     const forkSession = vi.fn().mockResolvedValue(undefined)
     const session = { id: 'chat', title: 'Chat', backend: 'claude' as const }

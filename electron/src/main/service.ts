@@ -10,6 +10,8 @@ import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
+import { SideQuestionRequests } from './side-question-requests'
+import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   localSessionImportBatchLimit,
@@ -353,6 +355,7 @@ export class AppService {
   private shutdownEpoch = 0
   private validatedGeneration: number | null = null
   private scope: ConnectionScope
+  private readonly sideQuestions = new SideQuestionRequests()
   private readonly clientFactory: (serverUrl: string, accessToken: string) => AgentServerClient
   private readonly serverRestartReconnectTimeoutMs: number
   private readonly serverRestartPollDelayMs: number
@@ -582,6 +585,7 @@ export class AppService {
   }
 
   stop(): void {
+    this.sideQuestions.cancelAll()
     this.profileSelectionIntent += 1
     this.shutdownEpoch += 1
     this.running = false
@@ -3076,6 +3080,31 @@ export class AppService {
 
   viewState(expected: WorkspaceProfileScope, sessionId: string): ViewState | null { return this.cache.viewState(this.requireWorkspaceScope(expected).namespace, sessionId) }
   saveViewState(expected: WorkspaceProfileScope, state: ViewState): void { this.cache.putViewState(this.requireWorkspaceScope(expected).namespace, state) }
+
+  async askSideQuestion(expected: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SideQuestionAnswer> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
+    return this.sideQuestions.ask(expected, sessionId, question, async () => {
+      await this.ensureValidatedScope(scope)
+      this.assertCurrentScope(scope)
+      const session = this.sessions.find(candidate => candidate.id === sessionId)
+      if (!session || !sideQuestionsAvailable(this.health, session.backend)) throw new Error('side_question_unsupported')
+      validateSideQuestionInput(question, sideQuestionLimit(this.health))
+      // A dedicated transport preserves exact cancellation ownership after the
+      // selected profile changes. It is disposed with this one request.
+      return this.clientFactory(scope.serverUrl, this.settings.accessToken(scope.profileId))
+    }, () => this.isCurrentScope(scope)).catch(error => {
+      if (error instanceof ServerError) throw new Error(`side_question_http_${error.status}: ${error.message}`)
+      if (error instanceof Error && error.name === 'TimeoutError') throw new Error('side_question_timeout')
+      throw error
+    })
+  }
+
+  cancelSideQuestion(expected: SideQuestionScope, sessionId: string, requestId: string): Promise<SideQuestionCancellation> {
+    // An old scope can cancel only its already-owned request, never a request
+    // on the newly selected server or the main conversation turn.
+    return this.sideQuestions.cancel(expected, sessionId, requestId)
+  }
 
   async sendTurn(input: SendTurnInput): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }> {
     assertLocalAgentChatReferences(input.chatReferences)
@@ -5603,6 +5632,7 @@ export class AppService {
     // The generation fence is already active. From here onward every old
     // resource is retired independently so one hostile/buggy close callback
     // cannot prevent a coherent replacement scope from being installed.
+    retire(() => this.sideQuestions.cancelAll())
     retire(() => this.flushEventCache())
     retire(() => this.closeAllTimelineSubscriptions())
     retire(() => this.stopEmergencyStream())

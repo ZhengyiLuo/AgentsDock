@@ -1,5 +1,6 @@
 import type { LanguagePreference } from './i18n'
 import type { SharedChatAttribution } from './chat-shares'
+import type { SideQuestionsCapability } from './side-questions'
 import type { MailHintProjection, TeamMailHintsCapability } from './team-mail-hints'
 import type { TeamActivityHintsCapability } from './team-bulletin-hints'
 
@@ -1578,6 +1579,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
@@ -1603,7 +1605,7 @@ export interface HealthCapabilities {
   pinned_items?: PinnedItemsCapability
   port_forwarding_v1?: PortForwardingCapability
   websocket_auth_v1?: ServerCapability
-  [key: string]: ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
+  [key: string]: SideQuestionsCapability | ServerCapability | ServerRestartCapability | TeamHubV1Capability | TeamHubHostControlCapability | LocalSessionImportCapability | SessionForkCompletedPrefixCapability | AgentEmergencyAlertsCapability | TeamMailHintsCapability | TeamActivityHintsCapability | AgentTeamMailCapability | AgentTeamMessagesCapability | TeamBulletinAliasCapability | TeamAllServersAliasCapability | PinnedItemsCapability | JsonValue | undefined
 }
 
 export interface Health {

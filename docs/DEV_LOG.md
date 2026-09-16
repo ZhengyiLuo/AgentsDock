@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-15 — Independent side questions (unreleased)
+
+- Add a localized Side question entry for Codex and Claude chats. Questions and
+  answers stay in a temporary panel, with independent cancellation and explicit
+  context limits; they never become a normal prompt, queued turn or goal steer.
+- Use one request per question, with no polling or event subscriptions. Fence
+  answers and cancellation by server profile, generation, chat and request ID;
+  discard stale replies when a panel closes or the user changes chats/servers.
+- Require the additive standalone server capability. Older servers explain the
+  missing support instead of silently forwarding a question to the main agent.
+- Validate request/cancellation races and the actual renderer in light/dark,
+  wide/narrow, keyboard focus, pending, answer, error and localized states.
+  No installed application replacement, server restart or publication.
+- Guard cross-chat Markdown whitespace and preserve the exact sent body. The
+  standalone sender guidance discourages joining words and technical values;
+  historical text is not rewritten by speculative spacing corrections.
+
 ## 2026-09-15 — Keep file changes visible outside collapsed progress (unreleased)
 
 - Keep known changed-file summaries and Review accessible when a turn's progress
