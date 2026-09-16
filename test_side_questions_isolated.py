@@ -25,6 +25,24 @@ def side_history(question="Previous question", answer="Previous answer"):
     return [{"role": "user", "text": question}, {"role": "assistant", "text": answer}]
 
 
+class ShutdownBudgetTests(unittest.TestCase):
+    def test_side_question_cleanup_is_included_in_cooperative_restart_budget(self):
+        tree = ast.parse(Path(__file__).with_name("agent_server.py").read_text())
+        lifespan = next(node for node in tree.body
+                        if isinstance(node, ast.AsyncFunctionDef) and node.name == "lifespan")
+        phases = [node.value for node in ast.walk(lifespan)
+                  if isinstance(node, ast.Await) and isinstance(node.value, ast.Call)
+                  and isinstance(node.value.func, ast.Name)
+                  and node.value.func.id == "bounded_shutdown_phase"]
+        declared = next(ast.literal_eval(node.value) for node in tree.body
+                        if isinstance(node, ast.Assign)
+                        and any(isinstance(target, ast.Name)
+                                and target.id == "SERVER_SHUTDOWN_PHASE_COUNT"
+                                for target in node.targets))
+        self.assertIn("side-questions", [ast.literal_eval(call.args[0]) for call in phases])
+        self.assertEqual(declared, len(phases))
+
+
 class HistoryTests(unittest.TestCase):
     def test_capability_is_additive_and_prompts_keep_history_separate_from_parent(self):
         capability = side.capability()
