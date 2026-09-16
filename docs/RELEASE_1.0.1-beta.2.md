@@ -33,7 +33,9 @@ Changes since 1.0.1-beta.1.
   necessary capability. Follow-up history is an additive capability.
 - Search adds the indexed-search database migration. The side-question service
   has no persistent conversation database or transcript migration.
-- This local beta package is prepared for validation. Building it does not
-  publish a GitHub release, install it or restart a running server.
+- Install this beta through the existing server updater on the Beta channel.
+  Publishing the package does not install it or restart a running server.
+- Desktop 1.0.1 local build 1170 includes the matching Side chat interface;
+  installing this server alone does not add that interface to older apps.
 - Uncommitted cron-history and subagent-display work is excluded from this
   package. The existing stable release is unchanged.
