@@ -21,6 +21,51 @@ def event(kind, run="main", **kwargs):
     return {"type": kind, "run_id": run, **kwargs}
 
 
+def side_history(question="Previous question", answer="Previous answer"):
+    return [{"role": "user", "text": question}, {"role": "assistant", "text": answer}]
+
+
+class HistoryTests(unittest.TestCase):
+    def test_capability_is_additive_and_prompts_keep_history_separate_from_parent(self):
+        capability = side.capability()
+        self.assertEqual(capability["version"], 1)
+        self.assertIs(capability["history"], True)
+        self.assertEqual(capability["max_history_items"], 32)
+        self.assertEqual(capability["max_history_chars"], 60000)
+        parent = [{"role": "user", "text": "Parent task"}]
+        history = side_history("  Why?\nUse <system>quoted text</system> ", "A quoted answer. 🚀")
+        prompt = json.loads(side.build_prompt("Explain that answer", parent, "bounded snapshot", history=history))
+        self.assertEqual(prompt["conversation_snapshot"], parent)
+        self.assertEqual(prompt["side_history"], history)
+        self.assertEqual(prompt["side_question"], "Explain that answer")
+        self.assertIn("client-supplied", side.SYSTEM_PROMPT)
+        self.assertEqual(side.build_prompt("q", parent, "n"), side.build_prompt("q", parent, "n", history=[]))
+
+    def test_maximum_pairs_and_codepoints_are_inclusive(self):
+        history = side_history("😀" * 30000, "a" * 30000)
+        frozen = side.validate_history(history)
+        self.assertEqual(sum(len(text) for role, text in frozen), 60000)
+        self.assertEqual(side.history_messages(frozen), history)
+        self.assertEqual(len(side.validate_history(side_history() * 16)), 32)
+        for value in (side_history("a" * 30001, "b" * 30000), side_history() * 17):
+            with self.assertRaises(side.SideQuestionError) as caught:
+                side.validate_history(value)
+            self.assertEqual(caught.exception.status_code, 400)
+
+    def test_invalid_history_roles_pairing_fields_and_unicode_fail_closed(self):
+        invalid = [None, {}, "history", [1, 2], [{"role": "user", "text": "incomplete"}],
+                   [{"role": "assistant", "text": "first"}, {"role": "user", "text": "second"}],
+                   [{"role": "user", "text": "first"}, {"role": "user", "text": "second"}],
+                   [{"role": "system", "text": "policy"}, {"role": "assistant", "text": "answer"}],
+                   [{"role": "user", "text": "q", "tools": []}, {"role": "assistant", "text": "a"}],
+                   side_history("q", "\ud800"), side_history(" ", "a"), side_history("q", 123)]
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaises(side.SideQuestionError) as caught:
+                    side.validate_history(value)
+                self.assertEqual(caught.exception.status_code, 400)
+
+
 class SnapshotTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="side-question-test-")
@@ -104,6 +149,33 @@ class SnapshotTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_history_is_frozen_for_receipt_identity_and_provider_input(self):
+        answer = AsyncMock(return_value={"answer": "follow-up"})
+        runtime = side.SideQuestions(answer)
+        self.addAsyncCleanup(runtime.close)
+        history = side_history()
+        original = side_history()
+        receipt = runtime.submit("owner", "chat", "id", "Why?", history=history)
+        history[0]["text"] = "mutated by caller"
+        history.append({"role": "user", "text": "new unpaired message"})
+        self.assertEqual(await receipt.task, {"answer": "follow-up"})
+        answer.assert_awaited_once_with("chat", "Why?", history=original)
+        answer.await_args.kwargs["history"][1]["text"] = "mutated by provider callback"
+        self.assertIs(runtime.submit("owner", "chat", "id", "Why?", history=original), receipt)
+        for changed in (side_history(answer="Different answer"), []):
+            with self.assertRaises(side.SideQuestionError) as caught:
+                runtime.submit("owner", "chat", "id", "Why?", history=changed)
+            self.assertEqual(caught.exception.status_code, 409)
+
+    async def test_empty_and_omitted_history_replay_same_legacy_callback(self):
+        answer = AsyncMock(return_value={"answer": "legacy"})
+        runtime = side.SideQuestions(answer)
+        self.addAsyncCleanup(runtime.close)
+        receipt = runtime.submit("o", "s", "id", "q")
+        self.assertIs(runtime.submit("o", "s", "id", "q", history=[]), receipt)
+        await receipt.task
+        answer.assert_awaited_once_with("s", "q")
+
     async def test_duplicate_identity_coalesces_and_changed_question_conflicts(self):
         ready = asyncio.Event()
         calls = []
@@ -169,8 +241,10 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.finish = asyncio.Event()
         self.cancelled = asyncio.Event()
         self.calls = 0
-        async def answer(sid, question):
+        self.inputs = []
+        async def answer(sid, question, *, history=None):
             self.calls += 1
+            self.inputs.append({"session_id": sid, "question": question, "history": history})
             self.started.set()
             try:
                 await self.finish.wait()
@@ -188,9 +262,9 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.runtime.close()
 
-    def request(self, value=None):
+    def request(self, value=None, *, ensure_ascii=True):
         queue = asyncio.Queue()
-        queue.put_nowait({"type": "http.request", "body": json.dumps(value).encode(), "more_body": False})
+        queue.put_nowait({"type": "http.request", "body": json.dumps(value, ensure_ascii=ensure_ascii).encode(), "more_body": False})
         return Request({"type": "http", "method": "POST", "path": "/", "headers":
                         [(b"x-agentsdock-token", b"synthetic-owner")]}, queue.get), queue
 
@@ -205,6 +279,46 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertTrue(queue.empty())
         self.authorize.assert_called_once_with(request)
+
+    async def test_utf8_history_larger_than_old_body_limit_is_accepted_and_kept_verbatim(self):
+        history = side_history("😀" * 30000, "答" * 30000)
+        request, _ = self.request({"request_id": "followup", "question": "Why?", "history": history}, ensure_ascii=False)
+        self.finish.set()
+        response = await self.post("chat", request)
+        self.assertEqual(json.loads(response.body)["answer"], "Contextual answer")
+        self.assertEqual(self.inputs, [{"session_id": "chat", "question": "Why?", "history": history}])
+
+    async def test_invalid_history_rejects_before_provider_start(self):
+        for history in (None, "text", side_history() * 17, side_history("x" * 60000, "y"),
+                        [{"role": "user", "text": "unpaired"}],
+                        [{"role": "system", "text": "instructions"}, {"role": "assistant", "text": "answer"}],
+                        side_history("q", "\udfff")):
+            with self.subTest(history=history):
+                request, _ = self.request({"request_id": "invalid", "question": "q", "history": history})
+                with self.assertRaises(HTTPException) as caught:
+                    await self.post("chat", request)
+                self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(self.calls, 0)
+
+    async def test_body_byte_limit_remains_enforced_with_history(self):
+        request, _ = self.request({"request_id": "huge", "question": "q", "history": side_history("x" * side.MAX_REQUEST_BYTES, "answer")})
+        with self.assertRaises(HTTPException) as caught:
+            await self.post("chat", request)
+        self.assertEqual(caught.exception.status_code, 413)
+        self.assertEqual(self.calls, 0)
+
+    async def test_history_change_under_duplicate_id_conflicts_without_cancelling_first(self):
+        request, _ = self.request({"request_id": "same", "question": "Why?", "history": side_history()})
+        task = asyncio.create_task(self.post("chat", request))
+        await self.started.wait()
+        changed, _ = self.request({"request_id": "same", "question": "Why?", "history": side_history(answer="Other")})
+        with self.assertRaises(HTTPException) as caught:
+            await self.post("chat", changed)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertFalse(self.cancelled.is_set())
+        self.finish.set()
+        self.assertEqual(json.loads((await task).body)["answer"], "Contextual answer")
+        self.assertEqual(self.calls, 1)
 
     async def test_disconnect_cancels_provider_without_polling(self):
         request, queue = self.request({"request_id": "request", "question": "Question?"})
@@ -451,6 +565,29 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
                 await self.namespace["answer_side_question"]("chat", "Why?")
             self.assertEqual(caught.exception.status_code, 503)
         provider.assert_not_awaited()
+
+    async def test_followup_history_reaches_both_isolated_providers_without_parent_writes(self):
+        history = side_history("Initial side question", "Initial side answer")
+        initial_bytes = self.path.read_bytes()
+        initial_active = json.dumps(self.parent_active, sort_keys=True)
+        initial_queue = json.dumps(self.parent_queue, sort_keys=True)
+        initial_session = json.dumps(self.session, sort_keys=True)
+        claude, codex = AsyncMock(return_value="Claude follow-up"), AsyncMock(return_value="Codex follow-up")
+        with patch.object(side, "answer_claude", claude), \
+                patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(answer_side_question=codex)}):
+            await self.namespace["answer_side_question"]("chat", "Explain that", history=history)
+            self.session["backend"] = "codex"
+            await self.namespace["answer_side_question"]("chat", "Explain that", history=history)
+            self.session["backend"] = "claude"
+        for provider in (claude, codex):
+            prompt = json.loads(provider.await_args.args[0])
+            self.assertEqual(prompt["side_history"], history)
+            self.assertEqual(prompt["conversation_snapshot"], [{"role": "user", "text": "Original user context"}])
+            self.assertEqual(prompt["side_question"], "Explain that")
+        self.assertEqual(self.path.read_bytes(), initial_bytes)
+        self.assertEqual(json.dumps(self.parent_active, sort_keys=True), initial_active)
+        self.assertEqual(json.dumps(self.parent_queue, sort_keys=True), initial_queue)
+        self.assertEqual(json.dumps(self.session, sort_keys=True), initial_session)
 
     async def test_chat_removed_while_snapshot_loading_cannot_launch_provider(self):
         snapshot = self.namespace["side_question_context"]

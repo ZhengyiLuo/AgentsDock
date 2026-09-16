@@ -77592,7 +77592,7 @@ def side_question_context(session_id: str) -> tuple[list[dict], str]:
         raise side_questions.SideQuestionError(409, "Conversation context is unavailable") from None
 
 
-async def answer_side_question(session_id: str, question: str) -> dict[str, Any]:
+async def answer_side_question(session_id: str, question: str, history: list[dict] | None = None) -> dict[str, Any]:
     if SERVER_SHUTTING_DOWN:
         raise side_questions.SideQuestionError(503, "Server is shutting down")
     if not public_chat_share_session_exists(session_id):
@@ -77607,7 +77607,7 @@ async def answer_side_question(session_id: str, question: str) -> dict[str, Any]
     messages, note = await asyncio.to_thread(side_question_context, session_id)
     if not public_chat_share_session_exists(session_id):
         raise side_questions.SideQuestionError(404, "Chat not found")
-    prompt = side_questions.build_prompt(question, messages, note)
+    prompt = side_questions.build_prompt(question, messages, note, history=history)
     env = side_questions.isolated_environment(runner_env())
     if backend == BACKEND_CLAUDE:
         answer = await side_questions.answer_claude(prompt, executable=CLAUDE_BIN, model=model, env=env)

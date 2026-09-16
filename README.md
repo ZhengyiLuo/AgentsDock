@@ -804,8 +804,8 @@ background configuration refresh is added.
 
 Native clients can ask Codex or Claude a temporary side question about recent
 visible conversation text without changing the main turn, queue, goals or chat
-history. Capability-gated POST/DELETE endpoints provide independent answers and
-cancellation. The response describes the bounded text snapshot; tool results,
+history. Capability-gated POST/DELETE endpoints provide independent answers,
+bounded follow-up side-conversation history, and cancellation. The response describes the bounded text snapshot; tool results,
 attachments and hidden provider context are not included. See
 [Side questions](docs/SIDE_QUESTIONS.md) for the API, provider isolation and
 context limitations.
