@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-16 — Local desktop 1.0.1 build 1170 accepted
+
+- Package committed source `7f116b2` as an Apple Silicon local desktop build
+  with the Details / Side chat inspector layout, independent follow-ups and
+  retained drafts. Exclude unrelated unfinished worktree changes.
+- Validate full desktop tests, type checks, production compilation and package
+  guards. Confirm all 86 compiled files match the packaged archive and the
+  Developer ID signature verifies; keep local auto-updates disabled.
+- Exercise the actual isolated Electron panel in light/dark and wide/narrow
+  layouts, including follow-ups, hide/reopen, cancellation and stale replies.
+  Provider responses are mocked in these UI checks, not live model runs.
+- Prepare the matching standalone server `1.0.1-beta.2` package. Side chat needs
+  that server capability installed; neither server deployment, publication nor
+  replacement of the running desktop application is part of this local build.
+
 ## 2026-09-16 — Side chat in the inspector dock
 
 - Replace the temporary question dialog with a full-height Side chat tab next
