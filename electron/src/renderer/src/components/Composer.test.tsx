@@ -1547,10 +1547,71 @@ describe('Composer', () => {
     confirm.mockRestore()
   })
 
+  it.each(['idle', 'cached', 'syncing', 'reconnecting', 'offline', 'error'] as const)(
+    'shows only a neutral sync status for an unknown active origin while chat sync is %s', status => {
+      useAppStore.setState({
+        activeSessionIds: new Set(['chat-1']),
+        syncBySession: { 'chat-1': { status, error: null } }
+      })
+      render(<Composer />)
+      const notice = screen.getByText('Syncing…')
+      expect(notice).toHaveAttribute('role', 'status')
+      expect(notice).toHaveClass('composer-sync-status')
+      expect(notice).not.toHaveClass('chat-reference-warning')
+      expect(screen.queryByText(/An active turn is running while chat sync is not live/)).not.toBeInTheDocument()
+
+      act(() => useAppStore.setState({ syncBySession: { 'chat-1': { status: 'live', error: null } } }))
+      expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
+      expect(useAppStore.getState().activeSessionIds).toContain('chat-1')
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    }
+  )
+
+  it('localizes the neutral unknown-origin sync status without inventing activity for an idle chat', () => {
+    setLocale('zh-CN')
+    useAppStore.setState({ syncBySession: { 'chat-1': { status: 'syncing', error: null } } })
+    render(<Composer />)
+    expect(screen.queryByText('同步中…')).not.toBeInTheDocument()
+    act(() => useAppStore.setState({ activeSessionIds: new Set(['chat-1']) }))
+    expect(screen.getByText('同步中…')).toHaveClass('composer-sync-status')
+    act(() => useAppStore.setState({ activeSessionIds: new Set() }))
+    expect(screen.queryByText('同步中…')).not.toBeInTheDocument()
+  })
+
+  it('keeps explicit Stop and Send now confirmations for an unknown origin despite its neutral status', async () => {
+    const stop = vi.fn()
+    const runNow = vi.fn()
+    window.agentsDock.turns = { stop } as unknown as AgentsDockAPI['turns']
+    window.agentsDock.queue = { runNow } as unknown as AgentsDockAPI['queue']
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      syncBySession: { 'chat-1': { status: 'cached', error: null } },
+      snapshots: { 'chat-1': {
+        session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, events: [],
+        queuedTurns: [{ queued_id: 'queued-user', session_id: 'chat-1', prompt: 'User follow-up', file_ids: [], position: 1 }],
+        files: [], hasMoreEvents: false, filesTotal: 0, cachedAt: 0
+      } }
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      render(<Composer />)
+      expect(screen.getByText('Syncing…')).toHaveClass('composer-sync-status')
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Send now' }))
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(confirm.mock.calls[0]?.[0]).toMatch(/chat sync is not live.*Stop anyway\?/)
+      expect(confirm.mock.calls[1]?.[0]).toMatch(/chat sync is not live.*Send now anyway\?/)
+      expect(stop).not.toHaveBeenCalled()
+      expect(runNow).not.toHaveBeenCalled()
+    } finally { confirm.mockRestore() }
+  })
+
   it.each([
-    ['cross_chat_handoff_delivery', 'chat-to-chat'],
-    ['secure_peer_handoff_delivery', 'encrypted peer']
-  ])('warns and confirms before Stop or Send now interrupts an active %s run', async (purpose, label) => {
+    ['cross_chat_handoff_delivery', 'chat-to-chat', 'live'],
+    ['secure_peer_handoff_delivery', 'encrypted peer', 'live'],
+    ['cross_chat_handoff_delivery', 'chat-to-chat', 'reconnecting'],
+    ['secure_peer_handoff_delivery', 'encrypted peer', 'reconnecting']
+  ] as const)('warns and confirms before Stop or Send now interrupts an active %s (%s) run while sync is %s', async (purpose, label, syncStatus) => {
     const stop = vi.fn().mockResolvedValue({ stopped: true, pending: false, message: '' })
     const runNow = vi.fn().mockResolvedValue(true)
     const list = vi.fn().mockResolvedValue([])
@@ -1565,6 +1626,7 @@ describe('Composer', () => {
     useAppStore.setState({
       activeSessionIds: new Set(['chat-1']),
       stoppingSessionIds: new Set(),
+      syncBySession: { 'chat-1': { status: syncStatus, error: null } },
       snapshots: {
         'chat-1': {
           session: { id: 'chat-1', title: 'Chat', backend: 'codex' },
@@ -1587,7 +1649,8 @@ describe('Composer', () => {
     try {
       const user = userEvent.setup()
       render(<Composer />)
-      expect(screen.getByText(new RegExp(`incoming ${label} delivery is running`, 'i'))).toBeInTheDocument()
+      expect(screen.getByText(new RegExp(`incoming ${label} delivery is running`, 'i'))).toHaveClass('chat-reference-warning')
+      expect(screen.queryByText('Syncing…')).not.toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Stop' }))
       expect(stop).not.toHaveBeenCalled()

@@ -1494,6 +1494,7 @@ button.tool-event-toggle:hover { background: #242424; }
 .composer-command-footer kbd { min-width: 17px; padding: 1px 4px; color: #aaaead; background: #292b2d; border: 1px solid #3b3d40; border-radius: 4px; box-shadow: inset 0 -1px #0007; font: 8px "SFMono-Regular", Menlo, monospace; text-align: center; }
 .chat-split-view.stacked .composer-command-palette { max-height: min(180px, 16vh); }
 .chat-reference-warning { flex: 0 0 auto; color: #d8b85f; font-size: var(--text-size-meta); }
+.composer-sync-status { flex: 0 0 auto; color: var(--muted); font-size: var(--text-size-meta); }
 .job-prompt-editor { position: relative; display: grid; gap: 6px; }
 .job-reference-editor { min-width: 0; position: relative; }
 .dialog-form .job-reference-editor > textarea,

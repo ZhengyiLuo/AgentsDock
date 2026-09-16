@@ -1783,7 +1783,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
       <RuntimeHealthNotice backend={session.backend} sessionId={session.id} />
       {selectedRuntimeError && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
-      {activeInboundDeliveryKind && <span className="chat-reference-warning" role="status">{activeInboundDeliveryKind === 'unknown'
+      {activeInboundDeliveryKind && <span className={activeInboundDeliveryKind === 'unknown' ? 'composer-sync-status' : 'chat-reference-warning'} role="status">{activeInboundDeliveryKind === 'unknown'
         ? t("ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1")
         : activeInboundDeliveryKind === 'secure_peer'
           ? 'An incoming encrypted peer delivery is running. Stop or Send now will interrupt it.'

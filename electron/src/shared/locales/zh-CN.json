@@ -1205,7 +1205,7 @@
   "ui.Composer.ChatMentionPalette.server_update_required_4a5a2af": "需要更新服务端",
   "ui.Composer.ChatMentionPalette.try_a_title_folder_or_session_id_50d6f13": "尝试搜索标题、文件夹或会话 ID。",
   "ui.Composer.Composer.add_9fd728c": "添加",
-  "ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1": "当前有一个轮次正在运行，但会话同步不可用。无法确认其来源；“停止”或“立即发送”可能会中断传入投递。",
+  "ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1": "同步中…",
   "ui.Composer.Composer.an_incoming_delivery_is_running_stop_or_se_92e6678": "传入的{delivery}投递正在运行。“停止”或“立即发送”会将其中断。",
   "ui.Composer.Composer.attach_files_e697cc1": "添加附件",
   "ui.Composer.Composer.drop_to_attach_34a7a63": "拖放以添加附件",

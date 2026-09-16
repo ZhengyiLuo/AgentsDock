@@ -1,5 +1,12 @@
 # Public development log
 
+## 2026-09-15 — Quiet chat synchronization status (unreleased)
+
+- Replace the uncertain incoming-delivery warning during chat synchronization
+  with a muted “Syncing…” status. Keep known incoming-delivery notices and
+  explicit Stop/Send now confirmations unchanged. This is a desktop-only
+  presentation change with no new requests, subscriptions or server changes.
+
 ## 2026-09-15 — Indexed Mail and Bulletin search (unreleased)
 
 - Add explicit Search/Enter and Clear controls to Inbox, Sent and Bulletin.

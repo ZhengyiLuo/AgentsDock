@@ -1205,7 +1205,7 @@
   "ui.Composer.ChatMentionPalette.server_update_required_4a5a2af": "Server update required",
   "ui.Composer.ChatMentionPalette.try_a_title_folder_or_session_id_50d6f13": "Try a title, folder, or session ID.",
   "ui.Composer.Composer.add_9fd728c": "Add",
-  "ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1": "An active turn is running while chat sync is not live. Its origin cannot be verified; Stop or Send now may interrupt an incoming delivery.",
+  "ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1": "Syncing…",
   "ui.Composer.Composer.an_incoming_delivery_is_running_stop_or_se_92e6678": "An incoming {delivery} delivery is running. Stop or Send now will interrupt it.",
   "ui.Composer.Composer.attach_files_e697cc1": "Attach files",
   "ui.Composer.Composer.drop_to_attach_34a7a63": "Drop to attach",
