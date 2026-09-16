@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-15 — Indexed Mail and Bulletin search (unreleased)
+
+- Add explicit Search/Enter and Clear controls to Inbox, Sent and Bulletin.
+  Search current subjects, message contents and sender names across accessible
+  history, with indexed server queries and explicit result pagination. Typing
+  stays local; no polling, timers or per-keystroke requests are introduced.
+- Keep filtered results separate from ordinary snapshots, unread counts and
+  notification acknowledgements. Fence old-query and old-connection results;
+  preserve route, read, edit and delete behavior for individual results.
+- Capability-gate the feature on the matching standalone server contract and
+  migration. Older hosts retain ordinary Mail with an update explanation.
+  See [Mail search](TEAM_MAIL_SEARCH.md) for compatibility and migration notes.
+- Validate renderer, IPC, direct and secure-peer paths, pagination, stale
+  responses, notification isolation and current-content indexing. The actual
+  renderer passes eight isolated light/dark and wide/narrow journeys: typing
+  and idle issue no requests; Enter searches, open/back retains the query, and
+  Clear restores the normal list. Type checks and production compilation pass.
+  No published artifact, installed app or running server is changed.
+
 ## 2026-09-15 — Desktop 1.0.1 accepted
 
 - Published stable [AgentsDock 1.0.1](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.1),

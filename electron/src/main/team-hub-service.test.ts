@@ -85,6 +85,11 @@ function teamNetworkCapability() {
   }
 }
 
+function teamMessageSearchCapability() {
+  return { available: true as const, version: 1 as const,
+    fields: ['subject', 'body', 'sender'] as ['subject', 'body', 'sender'], max_query_chars: 200 as const }
+}
+
 function teamMessagesCapability() {
   return {
     available: true as const,
@@ -379,7 +384,7 @@ function harness(
   }
 }
 
-async function connectWithTeamMessages(test: ReturnType<typeof harness>): Promise<TeamHubScope> {
+async function connectWithTeamMessages(test: ReturnType<typeof harness>, search = false): Promise<TeamHubScope> {
   test.setRefreshToken('refresh-old')
   test.client.health.mockResolvedValue({
     ok: true,
@@ -391,7 +396,8 @@ async function connectWithTeamMessages(test: ReturnType<typeof harness>): Promis
     bootstrap_required: false,
     capabilities: {
       team_network_v1: teamNetworkCapability(),
-      team_messages_v1: teamMessagesCapability()
+      team_messages_v1: teamMessagesCapability(),
+      ...(search ? { team_message_search_v1: teamMessageSearchCapability() } : {})
     }
   })
   test.client.refresh.mockResolvedValue(authBundle())
@@ -399,6 +405,81 @@ async function connectWithTeamMessages(test: ReturnType<typeof harness>): Promis
 }
 
 const TRANSIENT_CONNECTION_ID = '09d7bb2e-3b47-4be7-89fc-2cecd90f4434'
+
+describe('Team Messages indexed search service contract', () => {
+  const page = { box: 'sent', address: null, messages: [], next_after_sequence: 7, has_more: false }
+
+  it('overlays negotiated search and forwards literal normalized query with existing filters and cursor', async () => {
+    const test = harness()
+    const scope = await connectWithTeamMessages(test, true)
+    expect(test.service.teamMessagesCapabilities(scope).search).toEqual(teamMessageSearchCapability())
+    test.client.teamMessages.mockResolvedValue(page)
+    await expect(test.service.teamMessages(scope, { teamId: 'team-1', box: 'sent', q: '  部署 & 😀  ', afterSequence: 7,
+      limit: 20, fromKind: 'server', fromId: 'sender-1', since: '2026-09-01T00:00:00Z' })).resolves.toEqual(page)
+    expect(test.client.teamMessages).toHaveBeenCalledExactlyOnceWith('access-new', 'team-1', {
+      box: 'sent', q: '部署 & 😀', unread: false, fromKind: 'server', fromId: 'sender-1', since: '2026-09-01T00:00:00Z',
+      afterSequence: 7, limit: 20
+    })
+    expect(test.client.teamMessages.mock.calls[0][2]).not.toHaveProperty('includeMailboxCoverage')
+  })
+
+  it('rejects unsupported hosts and invalid queries without a read, but leaves blank legacy reads usable', async () => {
+    const test = harness()
+    const scope = await connectWithTeamMessages(test)
+    expect(test.service.teamMessagesCapabilities(scope).search).toBeUndefined()
+    await expect(test.service.teamMessages(scope, { teamId: 'team-1', box: 'sent', q: 'needle' })).rejects.toThrow('does not support message search')
+    await expect(test.service.teamMessages(scope, { teamId: 'team-1', box: 'sent', q: 'a'.repeat(201) })).rejects.toThrow('search')
+    expect(test.client.teamMessages).not.toHaveBeenCalled()
+    test.client.teamMessages.mockResolvedValue(page)
+    await test.service.teamMessages(scope, { teamId: 'team-1', box: 'sent', q: '   ', afterSequence: 7 })
+    expect(test.client.teamMessages.mock.calls[0][2]).not.toHaveProperty('q')
+  })
+
+  it('fences stale profiles, foreign teams, and delayed search receipts using the existing read scope', async () => {
+    const test = harness()
+    const scope = await connectWithTeamMessages(test, true)
+    const query = { teamId: 'team-1', box: 'sent' as const, q: 'needle', afterSequence: 7 }
+    await expect(test.service.teamMessages({ ...scope, profileGeneration: 999 }, query)).rejects.toThrow()
+    await expect(test.service.teamMessages(scope, { ...query, teamId: 'foreign' })).rejects.toThrow()
+    expect(test.client.teamMessages).not.toHaveBeenCalled()
+    const waiting = deferred<typeof page>()
+    test.client.teamMessages.mockReturnValue(waiting.promise)
+    const request = test.service.teamMessages(scope, query)
+    await vi.waitFor(() => expect(test.client.teamMessages).toHaveBeenCalledTimes(1))
+    test.setServerScope({ profileId: 'server-profile-2', profileGeneration: 2, serverIdentity: 'server-stable-2',
+      serverUrl: 'http://127.0.0.1:7852', serverName: 'Other server' })
+    waiting.resolve(page)
+    await expect(request).rejects.toThrow()
+  })
+
+  it.each([true, false])('uses exact member secure transport and current host search negotiation (supported=%s)', async available => {
+    const test = harness()
+    const peer = await connectTransientPeer(test, 'service', available ? 'available' : 'unavailable')
+    const scope = scopeFrom(test.service.status())
+    expect(test.service.status().authenticationMode).toBe('paired_node')
+    expect(test.service.teamMessagesCapabilities(scope).search).toEqual(available ? teamMessageSearchCapability() : undefined)
+    const calls: URL[] = []
+    const original = peer.secureFetch.getMockImplementation()!
+    peer.secureFetch.mockImplementation(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (!url.pathname.endsWith('/network/messages')) return original(input, init)
+      calls.push(url)
+      expect(new Headers(init?.headers).get('Authorization')).toBeNull()
+      return new Response(JSON.stringify(page), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    const request = test.service.teamMessages(scope, { teamId: 'team-1', box: 'sent', q: 'remote & sender', afterSequence: 7 })
+    if (available) {
+      await expect(request).resolves.toEqual(page)
+      expect(calls).toHaveLength(1)
+      expect(calls[0].pathname).toBe(`/api/team-hub-secure/${TRANSIENT_CONNECTION_ID}/v1/teams/team-1/network/messages`)
+      expect(calls[0].searchParams.get('q')).toBe('remote & sender')
+    } else {
+      await expect(request).rejects.toThrow('does not support message search')
+      expect(calls).toHaveLength(0)
+    }
+    expect(test.client.teamMessages).not.toHaveBeenCalled()
+  })
+})
 
 describe('Team Mail thread service capability', () => {
   it('rejects old hosts before any thread request and fences exact connected-team responses', async () => {
@@ -560,7 +641,8 @@ describe('pending-only secure pairing completion observer', () => {
   })
 })
 
-async function connectTransientPeer(test: ReturnType<typeof harness>, principalKind: 'node' | 'service' = 'node') {
+async function connectTransientPeer(test: ReturnType<typeof harness>, principalKind: 'node' | 'service' = 'node',
+  messageSearch?: 'available' | 'unavailable') {
   const profileScope = {
     profileId: 'server-profile-1',
     profileGeneration: 1,
@@ -626,7 +708,9 @@ async function connectTransientPeer(test: ReturnType<typeof harness>, principalK
       bootstrapped: true,
       bootstrap_required: false,
       peer_session_available: true,
-      capabilities: { team_network_v1: teamNetworkCapability() }
+      capabilities: { team_network_v1: teamNetworkCapability(),
+        ...(messageSearch ? { team_messages_v1: teamMessagesCapability() } : {}),
+        ...(messageSearch === 'available' ? { team_message_search_v1: teamMessageSearchCapability() } : {}) }
     } : {
       session: { id: 'peer-session', device_label: 'Paired server', expires_at: '2027-01-01T00:00:00Z' },
       principal: {

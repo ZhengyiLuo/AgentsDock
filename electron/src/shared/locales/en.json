@@ -2766,5 +2766,15 @@
   "chatShare.web.settingsHelp": "Changes apply to this chat for everyone. Model and permission controls are beside the composer.",
   "chatShare.web.disconnected": "Disconnected. Your current draft is still here. Reopen the page to reconnect.",
   "chatShare.web.dismiss": "Dismiss notice",
-  "chatShare.web.close": "Close"
+  "chatShare.web.close": "Close",
+  "teamNetwork.search.mail": "Search mail",
+  "teamNetwork.search.bulletin": "Search bulletin",
+  "teamNetwork.search.placeholder": "Title, content, or sender",
+  "teamNetwork.search.hint": "Search words in titles, content, or sender names. Press Enter to search.",
+  "teamNetwork.search.submit": "Search",
+  "teamNetwork.search.clear": "Clear search",
+  "teamNetwork.search.noResults": "No matching messages",
+  "teamNetwork.search.tryAgain": "Try different words or clear your search.",
+  "teamNetwork.search.unavailable": "Update the Team Network host and connected server to enable search.",
+  "teamNetwork.search.legacy": "Legacy Bulletin posts are not included in search."
 }

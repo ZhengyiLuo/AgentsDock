@@ -218,9 +218,11 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
 }) {
   useLocale()
   const initialLoadRef = useRef(initialLoad)
+  const search = useMessageSearch(JSON.stringify([scope, teamId, lifecycleCacheKey]), capability)
+  const resultScroll = useSearchScroll(search.key, search.query)
   const feed = useTeamMessages(
     scope,
-    { teamId, box: 'feed' },
+    { teamId, box: 'feed', ...(search.query ? { q: search.query } : {}) },
     true,
     initialLoadRef.current,
     isBulletinMessage,
@@ -247,7 +249,7 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
       message,
       bulletin: null
     })),
-    ...legacyBulletinPosts.filter(bulletin => (
+    ...(search.query ? [] : legacyBulletinPosts).filter(bulletin => (
       !hiddenLegacyIds.has(bulletin.id) && !deletionKeys.has(`bulletin:${bulletin.id}`)
     )).map(bulletin => ({
       id: `bulletin:${bulletin.id}`,
@@ -255,7 +257,7 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
       message: null,
       bulletin
     }))
-  ].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [deletionKeys, feed.messages, hiddenLegacyIds, legacyBulletinPosts])
+  ].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [deletionKeys, feed.messages, hiddenLegacyIds, legacyBulletinPosts, search.query])
 
   useEffect(() => {
     setSelected(null)
@@ -369,11 +371,13 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
       loading={feed.loading}
       onRefresh={refreshFeed}
     />
+    <MessageSearch key={search.key} kind="bulletin" search={search} loading={feed.loading} onRepeat={feed.refresh} />
+    {search.query && legacyBulletinPosts.length > 0 && <p className="network-v2-search-note">{t('teamNetwork.search.legacy')}</p>}
     {activityNotice}
     {feed.error && <InlineError message={feed.error} onRetry={() => { void feed.refresh(); void deletionJournal.refresh() }} />}
-    <div className="network-v2-scroll network-v2-feed-stream">
+    <div ref={resultScroll} className="network-v2-scroll network-v2-feed-stream">
       {feed.loading && <div className="network-v2-feed-sync" role="status"><LoaderCircle className="spin" size={15} />{t('teamNetwork.mail.syncBulletin')}</div>}
-      {!feed.loading && entries.length === 0 && <EmptyState icon={<RadioTower size={23} />} title={t('teamNetwork.mail.emptyBulletinTitle')} body={t('teamNetwork.mail.emptyBulletinBody')} />}
+      {!feed.loading && !feed.error && entries.length === 0 && <EmptyState icon={<RadioTower size={23} />} title={t(search.query ? 'teamNetwork.search.noResults' : 'teamNetwork.mail.emptyBulletinTitle')} body={t(search.query ? 'teamNetwork.search.tryAgain' : 'teamNetwork.mail.emptyBulletinBody')} />}
       {entries.map(entry => entry.message
         ? <FeedMessageCard
           key={entry.id}
@@ -399,7 +403,7 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
         />)}
       {feed.hasMore && <button type="button" className="quiet-button network-v2-load-more" disabled={feed.loadingMore} onClick={feed.loadMore}>{feed.loadingMore && <LoaderCircle className="spin" size={14} />}{t('teamNetwork.mail.loadMore')}</button>}
     </div>
-    {canWrite && !feed.loading && <TeamFeedComposer
+    {canWrite && !search.query && !feed.loading && <TeamFeedComposer
       key={draftKey}
       scope={scope}
       teamId={teamId}
@@ -421,7 +425,8 @@ function TeamFeed({ scope, teamId, capability, canWrite, canManageMessages, canH
       teamId={teamId}
       onCancel={() => setEditTarget(null)}
       onSaved={message => {
-        feed.replace(message.id, () => summaryFromMessage(message))
+        if (search.query) void feed.refresh()
+        else feed.replace(message.id, () => summaryFromMessage(message))
         setEditTarget(null)
       }}
     />}
@@ -703,6 +708,8 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
   const address = addresses.find(candidate => initialAddress && candidate.kind === initialAddress.kind && candidate.id === initialAddress.id)
     ?? addresses[0]
     ?? null
+  const search = useMessageSearch(JSON.stringify([scope, teamId, box, address?.kind, address?.id, lifecycleCacheKey]), capability)
+  const resultScroll = useSearchScroll(search.key, search.query)
   useEffect(() => {
     readReceiptGeneration.current += 1
     readReceiptsInFlight.current.clear()
@@ -714,6 +721,7 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
   const mail = useTeamMessages(scope, {
     teamId,
     box,
+    ...(search.query ? { q: search.query } : {}),
     ...(box === 'inbox' && address ? { addressKind: address.kind, addressId: address.id } : {})
   }, box === 'sent' || Boolean(address), null, retainEveryMessage, lifecycleCacheKey)
   const deletionJournal = useTeamNetworkDeletionJournal(scope, teamId)
@@ -725,8 +733,8 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
   const unreadSnapshot = useRef(onUnreadSnapshot)
   unreadSnapshot.current = onUnreadSnapshot
   useEffect(() => {
-    if (box === 'inbox' && !mail.loading) unreadSnapshot.current?.(unreadCount, mail.hasMore)
-  }, [address?.kind, address?.id, box, mail.hasMore, mail.loading, unreadCount])
+    if (box === 'inbox' && !search.query && !mail.loading) unreadSnapshot.current?.(unreadCount, mail.hasMore)
+  }, [address?.kind, address?.id, box, mail.hasMore, mail.loading, unreadCount, search.query])
 
   const markMailboxState = async (message: TeamMessageSummary, unread: boolean) => {
     if (box !== 'inbox' || address?.kind !== 'server' || capability.mailbox_state?.available !== true) return
@@ -925,11 +933,12 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
         if (next) onAddressChange?.(next)
       }}><option value="" disabled>{t('teamNetwork.mail.chooseAddress')}</option>{addresses.map(option => <option key={addressKey(option)} value={addressKey(option)}>{option.label}</option>)}</select></label>}
     </SurfaceHeader>
+    <MessageSearch key={search.key} kind="mail" search={search} loading={mail.loading} onRepeat={mail.refresh} />
     {activityNotice}
     {mail.error && <InlineError message={mail.error} onRetry={mail.refresh} />}
-    <div className="network-v2-scroll network-v2-bundle-grid">
+    <div ref={resultScroll} className="network-v2-scroll network-v2-bundle-grid">
       {box === 'inbox' && !address && <EmptyState icon={<Inbox size={23} />} title={t('teamNetwork.mail.noMailboxTitle')} body={t('teamNetwork.mail.noMailboxBody')} />}
-      {(box === 'sent' || address) && !mail.loading && visibleMessages.length === 0 && <EmptyState icon={<Mail size={23} />} title={box === 'inbox' ? t('teamNetwork.mail.emptyInbox') : t('teamNetwork.mail.emptySent')} body={box === 'inbox' ? t('teamNetwork.mail.emptyInboxBody') : t('teamNetwork.mail.emptySentBody')} />}
+      {(box === 'sent' || address) && !mail.loading && !mail.error && visibleMessages.length === 0 && <EmptyState icon={<Mail size={23} />} title={search.query ? t('teamNetwork.search.noResults') : box === 'inbox' ? t('teamNetwork.mail.emptyInbox') : t('teamNetwork.mail.emptySent')} body={search.query ? t('teamNetwork.search.tryAgain') : box === 'inbox' ? t('teamNetwork.mail.emptyInboxBody') : t('teamNetwork.mail.emptySentBody')} />}
       {visibleMessages.map(message => <MessageCard
         key={message.id}
         message={message}
@@ -959,6 +968,60 @@ function TeamMail({ scope, teamId, capability, canWrite, callerPostingKind, draf
       onConfirm={() => void confirmDelete()}
     />}
   </section>
+}
+
+function useMessageSearch(identity: string, capability: TeamMessagesCapability) {
+  const supported = capability.search?.available === true
+  const key = JSON.stringify([identity, supported])
+  const [applied, setApplied] = useState({ key, query: '' })
+  useEffect(() => { setApplied(current => current.key === key ? current : { key, query: '' }) }, [key])
+  return {
+    key,
+    supported,
+    query: supported && applied.key === key ? applied.query : '',
+    submit: (query: string) => setApplied({ key, query: query.trim().replace(/\s+/gu, ' ') })
+  }
+}
+
+function useSearchScroll(identity: string, query: string) {
+  const scroll = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (scroll.current) scroll.current.scrollTop = 0 }, [identity, query])
+  return scroll
+}
+
+/** Draft typing stays inside this small form; only explicit submission touches the list. */
+function MessageSearch({ kind, search, loading, onRepeat }: {
+  kind: 'mail' | 'bulletin'
+  search: ReturnType<typeof useMessageSearch>
+  loading: boolean
+  onRepeat: () => void
+}) {
+  useLocale()
+  const [draft, setDraft] = useState(search.query)
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!search.supported) return
+    const next = draft.trim().replace(/\s+/gu, ' ')
+    if (next === search.query) onRepeat()
+    else search.submit(next)
+  }
+  return <div className="network-v2-message-search">
+    <form role="search" aria-label={t(kind === 'mail' ? 'teamNetwork.search.mail' : 'teamNetwork.search.bulletin')} onSubmit={submit}>
+      <label className="network-v2-message-search-field">
+        <Search size={15} aria-hidden="true" />
+        <input type="search" aria-label={t(kind === 'mail' ? 'teamNetwork.search.mail' : 'teamNetwork.search.bulletin')}
+          placeholder={t('teamNetwork.search.placeholder')} title={t('teamNetwork.search.hint')}
+          disabled={!search.supported} value={draft} onChange={event => setDraft(Array.from(event.target.value).slice(0, 200).join(''))} />
+      </label>
+      <button className="quiet-button" type="submit" disabled={!search.supported || (!draft.trim() && !search.query)}>
+        {loading && search.query && <LoaderCircle className="spin" size={14} aria-hidden="true" />}
+        {t('teamNetwork.search.submit')}
+      </button>
+      {(draft || search.query) && <button className="icon-button" type="button" aria-label={t('teamNetwork.search.clear')} title={t('teamNetwork.search.clear')}
+        onClick={() => { setDraft(''); search.submit('') }}><X size={15} /></button>}
+    </form>
+    {!search.supported && <p className="network-v2-search-note">{t('teamNetwork.search.unavailable')}</p>}
+  </div>
 }
 
 /** Subscribe only this quiet affordance, never a message loader, to arrival hints. */
@@ -2111,7 +2174,7 @@ function useTeamNetworkDeletionJournal(scope: TeamHubScope, teamId: string): {
   return { keys, supported, refresh: read }
 }
 
-type MessageQuery = TeamMessagesSnapshotQuery
+type MessageQuery = TeamMessagesSnapshotQuery & { q?: string }
 
 function useTeamMessages(
   scope: TeamHubScope,
@@ -2121,7 +2184,9 @@ function useTeamMessages(
   retainMessage: (message: TeamMessageSummary) => boolean = retainEveryMessage,
   lifecycleCacheKey = JSON.stringify(scope)
 ) {
-  const [initialSnapshot] = useState(() => enabled
+  const stateKey = JSON.stringify([scope, query, enabled, lifecycleCacheKey])
+  const [appliedStateKey, setAppliedStateKey] = useState(stateKey)
+  const [initialSnapshot] = useState(() => enabled && !query.q
     ? peekTeamMessagesSnapshot(lifecycleCacheKey, query)
     : null)
   const [messages, setMessages] = useState<TeamMessageSummary[]>(initialSnapshot?.messages ?? [])
@@ -2134,6 +2199,8 @@ function useTeamMessages(
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestGeneration = useRef(0)
+  const initialLoadScope = useRef(JSON.stringify([scope, query.teamId, lifecycleCacheKey]))
+  const consumedInitialLoads = useRef(new WeakSet<TeamFeedInitialLoad>())
   const inFlightGeneration = useRef<number | null>(null)
   const receiptReconcileGeneration = useRef<number | null>(null)
   const receiptReconcileOffset = useRef(0)
@@ -2147,6 +2214,8 @@ function useTeamMessages(
   const queryKey = JSON.stringify(query)
   const scopeKey = JSON.stringify(scope)
   const persistSnapshot = useCallback(() => {
+    // Filtered pages never replace a full mailbox/feed snapshot or its cursor.
+    if (query.q) return
     writeTeamMessagesSnapshot(lifecycleCacheKey, query, {
       messages: messagesRef.current,
       nextAfter: nextAfterRef.current,
@@ -2176,14 +2245,14 @@ function useTeamMessages(
     if (!quiet) append ? setLoadingMore(true) : setLoading(true)
     if (!quiet) setError(null)
     const bulletinContinuation = bulletinRefreshContinuation.current
-    let bulletinCapture = query.box === 'feed' && !prefetchedLoad
+    let bulletinCapture = !query.q && query.box === 'feed' && !prefetchedLoad
       ? afterSequence == null ? captureBulletinHintRefresh(scope, query.teamId)
         : append && bulletinContinuation?.nextAfter === afterSequence ? bulletinContinuation.capture : null
       : null
     bulletinRefreshContinuation.current = null
     try {
       let cursor = afterSequence
-      const hintScope = retainMessage === retainEveryMessage ? captureMailHintScope(scope, query) : null
+      const hintScope = !query.q && retainMessage === retainEveryMessage ? captureMailHintScope(scope, query) : null
       const continuation = mailCoverageContinuation.current
       let requestedAfter: Readonly<MailArrivalCursor> | null = hintScope
         ? cursor == null
@@ -2195,7 +2264,7 @@ function useTeamMessages(
       const prefetched = prefetchedLoad ? await prefetchedLoad : null
       if (requestGeneration.current !== generation) return
       if (prefetched?.state === 'error') throw new Error(prefetched.message)
-      for (let pageNumber = 0; pageNumber < MAX_CATCH_UP_PAGES_PER_REQUEST; pageNumber += 1) {
+      for (let pageNumber = 0; pageNumber < (query.q ? 1 : MAX_CATCH_UP_PAGES_PER_REQUEST); pageNumber += 1) {
         const isPrefetched = pageNumber === 0 && prefetched?.state === 'ready'
         const page = isPrefetched
           ? prefetched.page
@@ -2274,7 +2343,7 @@ function useTeamMessages(
     }
   }, [enabled, persistSnapshot, queryKey, retainMessage, scopeKey])
   const reconcileReceiptStates = useCallback(async () => {
-    if (!enabled || query.box !== 'inbox' || messagesRef.current.length === 0) return
+    if (!enabled || query.q || query.box !== 'inbox' || messagesRef.current.length === 0) return
     const generation = requestGeneration.current
     if (receiptReconcileGeneration.current === generation) return
     receiptReconcileGeneration.current = generation
@@ -2320,28 +2389,34 @@ function useTeamMessages(
     receiptReconcileOffset.current = 0
     mailCoverageContinuation.current = null
     bulletinRefreshContinuation.current = null
-    const cached = enabled ? peekTeamMessagesSnapshot(lifecycleCacheKey, query) : null
+    const cached = enabled && !query.q ? peekTeamMessagesSnapshot(lifecycleCacheKey, query) : null
+    setAppliedStateKey(stateKey)
     const stagedMessages = cached?.messages ?? []
     messagesRef.current = stagedMessages
     latestSequence.current = cached?.latestSequence ?? 0
     nextAfterRef.current = cached?.nextAfter ?? null
     hasMoreRef.current = cached?.hasMore ?? false
     setMessages(stagedMessages)
+    setError(null)
+    setLoadingMore(false)
     setNextAfter(nextAfterRef.current)
     setHasMore(hasMoreRef.current)
     setLoading(enabled && !cached)
-    void fetchPage(undefined, false, Boolean(cached), true, initialLoad)
+    const prefetch = !query.q && initialLoad && !consumedInitialLoads.current.has(initialLoad)
+      && initialLoadScope.current === JSON.stringify([scope, query.teamId, lifecycleCacheKey]) ? initialLoad : null
+    if (prefetch) consumedInitialLoads.current.add(prefetch)
+    void fetchPage(undefined, false, Boolean(cached), true, prefetch)
     return () => {
       requestGeneration.current += 1
       inFlightGeneration.current = null
     }
   }, [fetchPage, initialLoad, lifecycleCacheKey, queryKey])
   return {
-    messages,
-    loading,
-    loadingMore,
-    hasMore,
-    error,
+    messages: appliedStateKey === stateKey ? messages : [],
+    loading: enabled && (appliedStateKey !== stateKey || loading),
+    loadingMore: appliedStateKey === stateKey && loadingMore,
+    hasMore: appliedStateKey === stateKey && hasMore,
+    error: appliedStateKey === stateKey ? error : null,
     setError,
     refresh: async () => {
       // A manual refresh reconciles existing rows too, including remote edits.

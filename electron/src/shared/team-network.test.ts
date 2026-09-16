@@ -28,6 +28,7 @@ import {
   parseTeamMessageRevisionInput,
   parseTeamMessageResponse,
   parseTeamMessagesCapability,
+  parseTeamMessageSearchCapability,
   parseTeamMailSubjectsCapability,
   parseTeamMailboxStateCapability,
   parseTeamMailboxStateInput,
@@ -42,6 +43,35 @@ import {
   teamBulletinAliasAvailable,
   teamAllServersAliasAvailable
 } from './team-network'
+
+describe('Team Messages indexed search contract', () => {
+  const search = { available: true, version: 1, fields: ['subject', 'body', 'sender'], max_query_chars: 200 }
+  const query = { teamId: 'team-1', box: 'sent' }
+
+  it('accepts only the exact separately negotiated capability', () => {
+    expect(parseTeamMessageSearchCapability(search)).toEqual(search)
+    for (const invalid of [null, { ...search, available: false }, { ...search, version: 2 },
+      { ...search, fields: ['body'] }, { ...search, max_query_chars: 201 }, { ...search, enabled: true }]) {
+      expect(() => parseTeamMessageSearchCapability(invalid)).toThrow()
+    }
+    expect(() => parseTeamMessagesCapability({ ...messagesCapability, search })).toThrow()
+  })
+
+  it('trims and forwards literal Unicode query text, omitting blank search', () => {
+    expect(parseTeamMessageQuery({ ...query, q: '  subject: "部署" & a+b  ' }).q).toBe('subject: "部署" & a+b')
+    for (const q of [undefined, '', '   ']) expect(parseTeamMessageQuery({ ...query, q })).not.toHaveProperty('q')
+    for (const q of ['a'.repeat(200), '😀'.repeat(200)]) expect(parseTeamMessageQuery({ ...query, q }).q).toBe(q)
+    for (const q of [null, 1, {}, 'a'.repeat(201), '😀'.repeat(201), '\ud800', 'a\u0000b', 'a\nb', 'a\u0085b']) {
+      expect(() => parseTeamMessageQuery({ ...query, q })).toThrow('search')
+    }
+  })
+
+  it('never treats a filtered search as full inbox coverage', () => {
+    const inbox = { teamId: 'team-1', box: 'inbox', addressKind: 'server', addressId: 'node-1', includeMailboxCoverage: true }
+    expect(() => parseTeamMessageQuery({ ...inbox, q: 'needle' })).toThrow('unfiltered')
+    expect(parseTeamMessageQuery({ ...inbox, q: '  ' })).not.toHaveProperty('q')
+  })
+})
 
 describe('member server profile rename contract', () => {
   const input = { teamId: 'team-1', serverId: 'node-1', displayName: '  New name  ' }

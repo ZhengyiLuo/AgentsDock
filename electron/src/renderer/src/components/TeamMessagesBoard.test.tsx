@@ -61,6 +61,11 @@ const capability: TeamMessagesCapability = {
   }
 }
 
+const searchCapability: TeamMessagesCapability = {
+  ...capability,
+  search: { available: true, version: 1, fields: ['subject', 'body', 'sender'], max_query_chars: 200 }
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
   let reject!: (reason?: unknown) => void
@@ -304,6 +309,149 @@ describe('fresh exact-mailbox page acknowledgement', () => {
     useAppStore.setState({ mailHints: { ...current, revision: current.revision + 1,
       bulletin: applyBulletinHint(current.bulletin!, hintScope, 'hint', { ...bulletinCursor(sequence), reset: false }, null) } })
   }
+
+  it('searches only on submit, one page at a time, without acknowledging mail coverage or overwriting unread counts', async () => {
+    const api = installAPI([])
+    const acknowledge = installHints()
+    const onUnreadSnapshot = vi.fn()
+    api.teamMessages.mockResolvedValue(page(7))
+    const view = render(board({ capability: searchCapability, onUnreadSnapshot }))
+    await waitFor(() => expect(acknowledge).toHaveBeenCalledOnce())
+    acknowledge.mockClear()
+    onUnreadSnapshot.mockClear()
+    api.teamMessages.mockClear()
+    const input = screen.getByRole('searchbox', { name: 'Search mail' })
+    const scroll = view.container.querySelector('.network-v2-scroll') as HTMLElement
+    scroll.scrollTop = 123
+    await userEvent.type(input, '  rollout review  ')
+    expect(api.teamMessages).not.toHaveBeenCalled()
+    expect(scroll.scrollTop).toBe(123)
+    api.teamMessages.mockResolvedValue(page(600, true))
+    fireEvent.submit(screen.getByRole('search', { name: 'Search mail' }))
+    await screen.findByRole('button', { name: 'Open Arrival 600' })
+    expect(scroll.scrollTop).toBe(0)
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    expect(api.teamMessages.mock.calls[0][1]).toMatchObject({ q: 'rollout review', box: 'inbox', addressId: 'server-local', limit: 25 })
+    expect(api.teamMessages.mock.calls[0][1]).not.toHaveProperty('includeMailboxCoverage')
+    expect(acknowledge).not.toHaveBeenCalled()
+    expect(onUnreadSnapshot).not.toHaveBeenCalled()
+    api.teamMessages.mockResolvedValue(page(700))
+    scroll.scrollTop = 45
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await screen.findByRole('button', { name: 'Open Arrival 700' })
+    expect(scroll.scrollTop).toBe(45)
+    expect(api.teamMessages).toHaveBeenCalledTimes(2)
+    expect(api.teamMessages.mock.calls[1][1]).toMatchObject({ q: 'rollout review', afterSequence: 600 })
+    expect(screen.getByRole('button', { name: 'Open Arrival 600' })).toBeVisible()
+    expect(acknowledge).not.toHaveBeenCalled()
+    const fresh = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValue(fresh.promise)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(screen.queryByRole('button', { name: 'Open Arrival 600' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Open Arrival 7' })).toBeVisible()
+    expect(api.teamMessages.mock.calls[2][1]).not.toHaveProperty('q')
+    await act(async () => fresh.resolve(page(7)))
+    expect(onUnreadSnapshot).toHaveBeenCalledWith(1, false)
+    expect(onUnreadSnapshot.mock.calls.every(([count]) => count === 1)).toBe(true)
+  })
+
+  it('does not reuse Bulletin prefetch or clear its hint during search, and clearing searches fetches fresh history', async () => {
+    const api = installAPI([])
+    const { acknowledgeBulletinRefresh } = installBulletinHints()
+    const prefetched = messageSummary(bulletinMessage({ id: 'prefetched', body: 'Original item' }), { preview: 'Original item' })
+    render(board({ section: 'feed', capability: searchCapability,
+      initialFeedLoad: Promise.resolve({ state: 'ready', page: { ...feedPage(7), messages: [prefetched] } }) }))
+    await screen.findByText('Original item')
+    api.teamMessages.mockResolvedValue(feedPage())
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search bulletin' }), { target: { value: 'missing' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await screen.findByText('No matching messages')
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+    expect(api.teamMessages.mock.calls[0][1]).toMatchObject({ box: 'feed', q: 'missing' })
+    expect(acknowledgeBulletinRefresh).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Bulletin updated · Refresh' })).toBeVisible()
+    expect(screen.queryByText('Original item')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    await waitFor(() => expect(api.teamMessages).toHaveBeenCalledTimes(2))
+    expect(api.teamMessages.mock.calls[1][1]).not.toHaveProperty('q')
+    await waitFor(() => expect(acknowledgeBulletinRefresh).toHaveBeenCalledOnce())
+  })
+
+  it('fences late search results and resets input/cursors across Inbox, Sent and connection changes', async () => {
+    const api = installAPI([])
+    const view = render(board({ capability: searchCapability }))
+    await screen.findByText('Inbox is empty')
+    const delayed = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValueOnce(delayed.promise)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search mail' }), { target: { value: 'rollout' } })
+    fireEvent.submit(screen.getByRole('search', { name: 'Search mail' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sent' }))
+    await waitFor(() => expect(api.teamMessages.mock.lastCall?.[1]).toMatchObject({ box: 'sent' }))
+    expect(screen.getByRole('searchbox', { name: 'Search mail' })).toHaveValue('')
+    expect(api.teamMessages.mock.lastCall?.[1]).not.toHaveProperty('q')
+    await act(async () => delayed.resolve(page(900)))
+    expect(screen.queryByRole('button', { name: 'Open Arrival 900' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }))
+    expect(screen.getByRole('searchbox', { name: 'Search mail' })).toHaveValue('')
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search mail' }), { target: { value: 'sender' } })
+    fireEvent.submit(screen.getByRole('search', { name: 'Search mail' }))
+    await waitFor(() => expect(api.teamMessages.mock.lastCall?.[1]).toHaveProperty('q', 'sender'))
+    view.rerender(board({ capability: searchCapability, scope: { ...scope, generation: 4 } }))
+    await waitFor(() => expect(api.teamMessages.mock.lastCall?.[0]).toMatchObject({ generation: 4 }))
+    expect(api.teamMessages.mock.lastCall?.[1]).not.toHaveProperty('q')
+    expect(screen.getByRole('searchbox', { name: 'Search mail' })).toHaveValue('')
+  })
+
+  it('explains search support on older hosts without pretending loaded rows are all search results', async () => {
+    const api = installAPI([])
+    render(board())
+    await waitFor(() => expect(api.teamMessages).toHaveBeenCalledOnce())
+    expect(screen.getByRole('searchbox', { name: 'Search mail' })).toBeDisabled()
+    expect(screen.getByText('Update the Team Network host and connected server to enable search.')).toBeVisible()
+    fireEvent.submit(screen.getByRole('search', { name: 'Search mail' }))
+    expect(api.teamMessages).toHaveBeenCalledOnce()
+  })
+
+  it('submits with Enter and keeps search results stable through hint floods without polling', async () => {
+    const api = installAPI([])
+    installHints()
+    render(board({ capability: searchCapability }))
+    await screen.findByText('Inbox is empty')
+    api.teamMessages.mockResolvedValue(page(42))
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search mail' }), 'Astra{Enter}')
+    await screen.findByRole('button', { name: 'Open Arrival 42' })
+    const calls = api.teamMessages.mock.calls.length
+    const details = api.teamMessage.mock.calls.length
+    vi.useFakeTimers()
+    floodHints()
+    act(() => vi.advanceTimersByTime(180_000))
+    expect(api.teamMessages).toHaveBeenCalledTimes(calls)
+    expect(api.teamMessage).toHaveBeenCalledTimes(details)
+    expect(screen.getByRole('button', { name: 'Open Arrival 42' })).toBeVisible()
+    expect(screen.getByRole('searchbox', { name: 'Search mail' })).toHaveValue('Astra')
+    expect(screen.getByRole('button', { name: 'New mail · Refresh' })).toBeVisible()
+  })
+
+  it('shows search failures without a false empty-state and ignores a superseded query failure', async () => {
+    const api = installAPI([])
+    render(board({ capability: searchCapability }))
+    await screen.findByText('Inbox is empty')
+    const old = deferred<TeamMessagePage>()
+    api.teamMessages.mockReturnValueOnce(old.promise)
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search mail' }), 'first{Enter}')
+    api.teamMessages.mockRejectedValueOnce(new Error('Search unavailable. Update the connected server.'))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search mail' }), { target: { value: 'second' } })
+    fireEvent.submit(screen.getByRole('search', { name: 'Search mail' }))
+    await screen.findByText('Search unavailable. Update the connected server.')
+    expect(screen.queryByText('No matching messages')).not.toBeInTheDocument()
+    await act(async () => old.reject(new Error('Superseded error')))
+    expect(screen.queryByText('Superseded error')).not.toBeInTheDocument()
+    api.teamMessages.mockResolvedValue(page(43))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByRole('button', { name: 'Open Arrival 43' })
+    expect(api.teamMessages.mock.lastCall?.[1]).toHaveProperty('q', 'second')
+    expect(api.teamMessage).not.toHaveBeenCalled()
+  })
 
   it('keeps a Bulletin draft, focus and scroll on hint floods, then acknowledges only the head captured before Refresh', async () => {
     const api = installAPI([])

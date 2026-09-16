@@ -2766,5 +2766,15 @@
   "chatShare.web.settingsHelp": "更改会影响此会话的所有参与者。模型和权限控件位于输入框旁。",
   "chatShare.web.disconnected": "连接已断开，当前草稿仍保留在此页面。重新打开页面以连接。",
   "chatShare.web.dismiss": "关闭提示",
-  "chatShare.web.close": "关闭"
+  "chatShare.web.close": "关闭",
+  "teamNetwork.search.mail": "Search mail",
+  "teamNetwork.search.bulletin": "Search bulletin",
+  "teamNetwork.search.placeholder": "Title, content, or sender",
+  "teamNetwork.search.hint": "Search words in titles, content, or sender names. Press Enter to search.",
+  "teamNetwork.search.submit": "Search",
+  "teamNetwork.search.clear": "Clear search",
+  "teamNetwork.search.noResults": "No matching messages",
+  "teamNetwork.search.tryAgain": "Try different words or clear your search.",
+  "teamNetwork.search.unavailable": "Update the Team Network host and connected server to enable search.",
+  "teamNetwork.search.legacy": "Legacy Bulletin posts are not included in search."
 }

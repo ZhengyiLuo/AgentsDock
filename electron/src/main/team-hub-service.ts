@@ -542,6 +542,8 @@ export class TeamHubService {
                   ? { mail_subjects: health.capabilities.team_mail_subjects_v1 } : {}),
                 ...(health.capabilities.team_mail_threads_v1
                   ? { mail_threads: health.capabilities.team_mail_threads_v1 } : {}),
+                ...(health.capabilities.team_message_search_v1
+                  ? { search: health.capabilities.team_message_search_v1 } : {}),
                 ...(health.capabilities.team_mailbox_state_v1
                   ? { mailbox_state: health.capabilities.team_mailbox_state_v1 } : {}) }
             : null
@@ -1630,6 +1632,9 @@ export class TeamHubService {
   async teamMessages(scope: TeamHubScope, rawQuery: TeamMessageQuery): Promise<import('../shared/team-network').TeamMessagePage> {
     const query = parseTeamMessageQuery(rawQuery)
     const teamId = this.requireTeamMessagesTeam(scope, query.teamId)
+    if (query.q && !this.requireTeamMessagesCapability().search) {
+      throw new Error('This Team Hub does not support message search. Update the Team Network host to search mail.')
+    }
     const coverageScope = () => {
       if (!query.includeMailboxCoverage) return null
       const hint = this.serverScope && this.discovery.currentMailHintScope?.(this.serverScope)
@@ -1646,6 +1651,7 @@ export class TeamHubService {
     )
     const result = await this.withAuth(scope, token => this.requireClient().teamMessages(token, teamId, {
       box: query.box,
+      ...(query.q ? { q: query.q } : {}),
       ...(query.addressKind ? { addressKind: query.addressKind } : {}),
       ...(query.addressId ? { addressId: query.addressId } : {}),
       unread: query.unread,
