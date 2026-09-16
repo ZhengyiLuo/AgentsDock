@@ -6800,9 +6800,19 @@ class SecurePeerRuntime:
         after_sequence: int = 0,
         limit: int = 50,
         include_mail_subject: bool = False,
+        from_kind: str | None = None,
+        from_id: str | None = None,
     ) -> dict[str, Any]:
         if type(include_mail_subject) is not bool:
             raise SecurePeerError("invalid_request", "Mail subject projection flag is invalid", 422)
+        if (
+            (from_kind is None) != (from_id is None)
+            or (from_kind is not None and (
+                not isinstance(from_kind, str) or from_kind not in {"server", "human"}
+                or not isinstance(from_id, str) or not from_id
+            ))
+        ):
+            raise SecurePeerError("invalid_request", "Message sender filter is invalid", 422)
         realm = self.team_realm(team_id)
         result = self._team_hub_get(
             realm,
@@ -6814,6 +6824,7 @@ class SecurePeerRuntime:
                 "after_sequence": after_sequence,
                 "limit": limit,
                 "include_mail_subject": include_mail_subject,
+                **({"from_kind": from_kind, "from_id": from_id} if from_kind is not None else {}),
             },
         )
         result["team_id"] = realm["team_id"]

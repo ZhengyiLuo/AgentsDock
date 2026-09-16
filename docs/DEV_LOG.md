@@ -1,5 +1,23 @@
 # Development and release log
 
+## 2026-09-15 — Direct Team Network reads from mentions (unreleased)
+
+- Teach both provider runtimes and their shared tool description that
+  `@@bulletin` and named `@@` mentions refer to Team Network, not external
+  connectors. Reading mail or the Bulletin does not require manual routing
+  and does not authorize an automatic send or post.
+- Expose `team bulletin` as a read-only alias for the existing feed. Follow
+  sender-filtered inbox pages on demand, retaining explicit continuation and
+  incomplete status instead of claiming no mail after filtering one page.
+- Resolve selected mentions on demand to exact team/sender identities, so
+  duplicate names and renamed members cannot silently select different mail.
+- Keep runtime guidance out of user messages; add no polling, refresh timer,
+  new route grant or message mutation. See [agent reads](TEAM_AGENT_READS.md).
+  Guarded helper-to-endpoint-to-Hub journeys cover duplicate names, renames,
+  exact Bulletin selection, history pages and unchanged unread mail. Isolated
+  checks also cover multi-team scope, revoked authority and bounded output.
+  No installed app or running server is changed by this implementation.
+
 ## 2026-09-15 — 1.0.1-beta.1 replacement accepted
 
 - Republished the explicitly authorized same-version beta from source
