@@ -29,6 +29,16 @@ assert(normalHide.avoidanceEnabled, 'will-hide must retain avoidance through the
 const hidden = reduceIOSKeyboardLifecycle(normalHide, { type: 'keyboard-did-hide' })
 assert(!hidden.avoidanceEnabled, 'did-hide must disable avoidance after the animation settles')
 
+const missedWillHide = reduceIOSKeyboardLifecycle(
+  apply([
+    { type: 'keyboard-will-show' },
+    { type: 'keyboard-did-show' },
+  ]),
+  { type: 'keyboard-did-hide' },
+)
+assert(!missedWillHide.visible, 'a direct did-hide must clear visibility when iOS omits will-hide')
+assert(!missedWillHide.avoidanceEnabled, 'a direct did-hide must clear stale avoiding-view padding')
+
 const missedActiveDidHide = reduceIOSKeyboardLifecycle(normalHide, { type: 'keyboard-hide-timeout' })
 assert(!missedActiveDidHide.avoidanceEnabled, 'the hide fallback must clear padding when active iOS omits did-hide')
 assert(missedActiveDidHide.hideCompletionPending, 'the hide fallback must retain cancellation recovery until hide completion')
