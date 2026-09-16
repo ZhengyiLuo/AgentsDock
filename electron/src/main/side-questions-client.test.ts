@@ -33,6 +33,18 @@ describe('side-question HTTP contract', () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
+  it('preserves the ordered side history in the HTTP body', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(answer)))
+    vi.stubGlobal('fetch', fetch)
+    const client = new AgentServerClient('https://server.example.test', '')
+    const followup = { ...input, history: [
+      { role: 'user' as const, text: 'First?' }, { role: 'assistant' as const, text: 'First answer.' }
+    ] }
+    await client.askSideQuestion('chat/a', followup)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(followup)
+  })
+
   it('cancels only the exact side-question URL', async () => {
     const cancelled = { request_id: 'request/a', status: 'cancelled' }
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(cancelled)))

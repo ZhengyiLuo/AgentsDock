@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-16 — Side chat in the inspector dock
+
+- Replace the temporary question dialog with a full-height Side chat tab next
+  to Details. A labeled chat-header action opens and focuses it directly,
+  leaving the main conversation visible and usable.
+- Keep per-chat drafts and side answers in memory when the dock is hidden or
+  Details is selected. Follow-ups carry only the side conversation's bounded
+  completed question/answer pairs; Clear and Cancel affect only Side chat.
+- Keep typing local and introduce no polling, main timeline subscription or
+  normal chat turn. Fence in-flight work by server profile, generation, chat
+  and request identity; unsupported servers explain the missing capability.
+- Pair with the standalone server's additive side-history support. Packaging
+  does not install, publish or restart either running application or server.
+
 ## 2026-09-15 — Independent side questions (unreleased)
 
 - Add a localized Side question entry for Codex and Claude chats. Questions and

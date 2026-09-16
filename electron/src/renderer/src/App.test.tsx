@@ -12,6 +12,7 @@ const workspaceEditorHarness = vi.hoisted(() => ({
   onReady: null as (() => void) | null
 }))
 const appRenderHarness = vi.hoisted(() => ({ sidebarRenders: 0 }))
+const sideChatHarness = vi.hoisted(() => ({ props: null as any }))
 const teamspaceHarness = vi.hoisted(() => ({
   mounts: 0,
   unmounts: 0,
@@ -51,7 +52,10 @@ vi.mock('./components/Composer', () => ({
   }
 }))
 vi.mock('./components/Dialogs', () => ({ Dialogs: () => <div data-testid="dialogs" /> }))
-vi.mock('./components/InspectorDock', () => ({ InspectorDock: () => <div data-testid="inspector" /> }))
+vi.mock('./components/InspectorDock', () => ({ InspectorDock: (props: any) => {
+  sideChatHarness.props = props
+  return <div data-testid="inspector" />
+} }))
 vi.mock('./components/CodeReview', () => ({ CodeReview: () => <div data-testid="review" /> }))
 vi.mock('./components/TerminalDock', () => ({ TerminalDock: () => <div data-testid="terminal" /> }))
 vi.mock('./components/TeamNetwork', () => ({
@@ -132,6 +136,7 @@ const sessions: Session[] = [
 
 describe('App chat workspace identity', () => {
   beforeEach(() => {
+    sideChatHarness.props = null
     appRenderHarness.sidebarRenders = 0
     workspaceEditorHarness.autoReady = true
     workspaceEditorHarness.onReady = null
@@ -218,6 +223,57 @@ describe('App chat workspace identity', () => {
     cleanup()
     window.history.replaceState({}, '', '/')
     vi.restoreAllMocks()
+  })
+
+  it('opens Side chat for the explicitly clicked split pane and rejects stale routing', () => {
+    useAppStore.setState({ chatPanes: { primary: 'chat-a', secondary: 'chat-b' } })
+    render(<App />)
+    const open = (profileGeneration: number, sessionId: string) => act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', {
+      detail: { profileId: profile.id, profileGeneration, sessionId }
+    })))
+    open(3, 'chat-b')
+    expect(useAppStore.getState().inspectorVisible).toBe(false)
+    expect(useAppStore.getState().selectedSessionId).toBe('chat-a')
+    open(4, 'chat-b')
+    expect(useAppStore.getState().selectedSessionId).toBe('chat-b')
+    expect(useAppStore.getState().focusedChatPane).toBe('secondary')
+    expect(sideChatHarness.props.open).toBe(true)
+    expect(sideChatHarness.props.content.props.tab).toBe('sidechat')
+    expect(sideChatHarness.props.content.props.session.id).toBe('chat-b')
+    const focusVersion = sideChatHarness.props.content.props.focusVersion
+    open(4, 'chat-b')
+    expect(sideChatHarness.props.content.props.focusVersion).toBe(focusVersion + 1)
+    open(4, 'missing')
+    expect(sideChatHarness.props.content.props.session.id).toBe('chat-b')
+  })
+
+  it('keeps side state on hide but retires pending work at failed profile-switch start', async () => {
+    let answer!: (value: unknown) => void
+    const ask = vi.fn((_scope: unknown, _sessionId: string, _input: { request_id: string }) => new Promise(resolve => { answer = resolve }))
+    const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' })
+    Object.assign(window.agentsDock, { sideQuestions: { ask, cancel } })
+    useAppStore.setState({ connected: true, health: { ok: true, capabilities: { side_questions: {
+      available: true, version: 1, history: true, backends: ['codex', 'claude'], max_question_chars: 8000
+    } } } })
+    render(<App />)
+    act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', {
+      detail: { profileId: profile.id, profileGeneration: 4, sessionId: 'chat-a' }
+    })))
+    const { controller, scope } = sideChatHarness.props.content.props
+    controller.setDraft(scope, 'chat-a', 'Explain the choice.')
+    const pending = controller.send(scope, sessions[0])
+    expect(ask).toHaveBeenCalledOnce()
+    act(() => sideChatHarness.props.content.props.onHide())
+    expect(cancel).not.toHaveBeenCalled()
+    expect(controller.snapshot(scope, 'chat-a').pending).not.toBeNull()
+    act(() => useAppStore.setState({ switchingProfileId: 'profile-b' }))
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel.mock.calls[0].slice(0, 2)).toEqual([scope, 'chat-a'])
+    act(() => useAppStore.setState({ switchingProfileId: null }))
+    answer({ request_id: ask.mock.calls[0][2].request_id, session_id: 'chat-a', backend: 'codex', answer: 'STALE' })
+    await act(async () => { await pending })
+    expect(controller.snapshot(scope, 'chat-a').pending).toBeNull()
+    expect(controller.snapshot(scope, 'chat-a').exchanges).toEqual([])
   })
 
   it('wraps every selected chat in its cwd-scoped workspace editor while keeping chat visible', () => {

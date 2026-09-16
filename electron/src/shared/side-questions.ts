@@ -1,12 +1,17 @@
 import type { Backend, Health } from './types'
 
 export const SIDE_QUESTION_MAX_CHARS = 8000
+export const SIDE_QUESTION_MAX_HISTORY_ITEMS = 32
+export const SIDE_QUESTION_MAX_HISTORY_CHARS = 60000
 
 export interface SideQuestionsCapability {
   available: boolean
   version: number
   backends: Array<'codex' | 'claude'>
   max_question_chars: number
+  history?: boolean
+  max_history_items?: number
+  max_history_chars?: number
 }
 
 export interface SideQuestionScope {
@@ -17,6 +22,12 @@ export interface SideQuestionScope {
 export interface SideQuestionInput {
   request_id: string
   question: string
+  history?: SideQuestionHistoryItem[]
+}
+
+export interface SideQuestionHistoryItem {
+  role: 'user' | 'assistant'
+  text: string
 }
 
 export interface SideQuestionAnswer {
@@ -48,14 +59,47 @@ export function sideQuestionLimit(health: Health | null | undefined): number {
     : SIDE_QUESTION_MAX_CHARS
 }
 
+export function sideQuestionHistoryAvailable(health: Health | null | undefined): boolean {
+  return health?.capabilities?.side_questions?.history === true
+}
+
+function validUnicode(text: string): boolean {
+  // A lone surrogate is replaced in transit, changing the request and its
+  // receipt identity. Keep frontend and server validation consistent.
+  for (const character of text) {
+    const code = character.codePointAt(0)!
+    if (code >= 0xd800 && code <= 0xdfff) return false
+  }
+  return true
+}
+
 export function validateSideQuestionInput(input: SideQuestionInput, limit = SIDE_QUESTION_MAX_CHARS): SideQuestionInput {
   if (!input || typeof input.request_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(input.request_id)) {
     throw new Error('side_question_invalid_request')
   }
-  if (typeof input.question !== 'string' || !input.question.trim() || Array.from(input.question.trim()).length > limit) {
+  if (typeof input.question !== 'string' || !input.question.trim() || !validUnicode(input.question)
+    || Array.from(input.question.trim()).length > limit) {
     throw new Error('side_question_invalid_question')
   }
-  return { request_id: input.request_id, question: input.question.trim() }
+  const result: SideQuestionInput = { request_id: input.request_id, question: input.question.trim() }
+  if (input.history !== undefined) {
+    if (!Array.isArray(input.history) || input.history.length > SIDE_QUESTION_MAX_HISTORY_ITEMS || input.history.length % 2 !== 0) {
+      throw new Error('side_question_invalid_history')
+    }
+    let characters = 0
+    result.history = input.history.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)
+        || Object.keys(item).some(key => key !== 'role' && key !== 'text')
+        || item.role !== (index % 2 === 0 ? 'user' : 'assistant')
+        || typeof item.text !== 'string' || !item.text.trim() || !validUnicode(item.text)) {
+        throw new Error('side_question_invalid_history')
+      }
+      characters += Array.from(item.text).length
+      if (characters > SIDE_QUESTION_MAX_HISTORY_CHARS) throw new Error('side_question_invalid_history')
+      return { role: item.role, text: item.text }
+    })
+  }
+  return result
 }
 
 export function parseSideQuestionAnswer(value: unknown, sessionId: string, requestId: string): SideQuestionAnswer {

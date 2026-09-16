@@ -51,4 +51,25 @@ describe('main side-question service scope', () => {
     await expect(service.askSideQuestion(expected, 'chat-a', { ...input, question: 'x'.repeat(8001) })).rejects.toThrow('invalid_question')
     expect(clientFactory).not.toHaveBeenCalled()
   })
+
+  it('requires explicit server history support rather than silently losing follow-up context', async () => {
+    const { service, clientFactory } = fixture()
+    await expect(service.askSideQuestion(expected, 'chat-a', { ...input, history: [
+      { role: 'user', text: 'First?' }, { role: 'assistant', text: 'First answer.' }
+    ] })).rejects.toThrow('side_question_history_unsupported')
+    expect(clientFactory).not.toHaveBeenCalled()
+  })
+
+  it('sends side history only through its own client, never through the main chat', async () => {
+    const { service, sideClient, mainClient, cache } = fixture()
+    Object.assign(service, { health: { capabilities: { side_questions: {
+      available: true, version: 1, history: true, backends: ['codex'], max_question_chars: 8000
+    } } } })
+    const followup = { ...input, history: [
+      { role: 'user' as const, text: 'First?' }, { role: 'assistant' as const, text: 'First answer.' }
+    ] }
+    await expect(service.askSideQuestion(expected, 'chat-a', followup)).resolves.toEqual(answer)
+    expect(sideClient.askSideQuestion).toHaveBeenCalledExactlyOnceWith('chat-a', followup, expect.any(AbortSignal))
+    for (const operation of [...Object.values(mainClient), ...Object.values(cache)]) expect(operation).not.toHaveBeenCalled()
+  })
 })
