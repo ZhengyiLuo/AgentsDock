@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-15 — Local desktop 1.0.1 build 1169 accepted
+
+- Package committed source `9ca56af` as an Apple Silicon local desktop build,
+  including explicit Mail/Bulletin search and the quiet synchronization status.
+  Exclude unrelated unfinished worktree changes.
+- Verify TypeScript, desktop regressions, compile/license guards and production
+  compilation. Confirm all 86 compiled files match the packaged archive, the
+  hardened Electron bundle passes its audit, and the Developer ID signature
+  verifies. Keep local auto-updates disabled.
+- No publication, running-app replacement or server deployment. Indexed search
+  still requires the matching standalone server update; the synchronization
+  status change works without it.
+
 ## 2026-09-15 — Quiet chat synchronization status (unreleased)
 
 - Replace the uncertain incoming-delivery warning during chat synchronization
