@@ -114,7 +114,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("import claude_agent_sdk", INSTALLER.read_text())
         self.assertIn("import croniter, dateutil", INSTALLER.read_text())
         self.assertIn(
-            "import agentsdock_team_hub, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime",
+            "import side_questions, codex_side_question, agentsdock_team_hub, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime",
             INSTALLER.read_text(),
         )
         self.assertIn("from agentsdock_team_hub import secure_peer, secure_peer_hub", INSTALLER.read_text())
@@ -765,7 +765,7 @@ exit 0
         self.assertIn("'$REMOTE_SERVER_DIR/provider_commands.py'", source)
         self.assertIn("'$REMOTE_SERVER_DIR/agentsdock_team_hub'", source)
         self.assertIn(
-            "import agentsdock_team_hub, claude_agent_sdk, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime, team_hub_host, agentsdock_mail, agentsdock_team, provider_commands",
+            "import side_questions, codex_side_question, agentsdock_team_hub, claude_agent_sdk, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime, team_hub_host, agentsdock_mail, agentsdock_team, provider_commands",
             source,
         )
         self.assertIn("from agentsdock_team_hub import secure_peer, secure_peer_hub", source)
@@ -1412,7 +1412,7 @@ exit 0
         self.assertIn('"$STAGE_DIR/codex_app_server.py"', installer_source)
         self.assertIn('"$STAGE_DIR/cursor_agent_client.py"', installer_source)
         self.assertIn(
-            "import agentsdock_team_hub, cursor_agent_client, cursor_process_guard, secure_peer_delivery",
+            "import side_questions, codex_side_question, agentsdock_team_hub, cursor_agent_client, cursor_process_guard, secure_peer_delivery",
             installer_source,
         )
         self.assertIn(
