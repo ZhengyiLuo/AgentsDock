@@ -1035,6 +1035,10 @@ def read_message_stdin() -> str:
 
 
 def add_message_arguments(command: argparse.ArgumentParser) -> None:
+    command.epilog = (
+        "Preserve normal word spacing, punctuation, and paragraph breaks in message bodies; "
+        "keep technical summaries concise without concatenating words or numbers."
+    )
     body = command.add_mutually_exclusive_group(required=True)
     body.add_argument("--message")
     body.add_argument("--message-stdin", action="store_true", help="read the message body from stdin")

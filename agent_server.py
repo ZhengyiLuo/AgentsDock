@@ -159,6 +159,7 @@ from claude_background_reconciliation import (
 )
 from public_chat_share_routes import create_public_chat_share_router, redact_public_share_path
 from interactive_chat_share_routes import create_interactive_chat_share_router
+import side_questions
 from shared_chat_videos import (SharedVideoUnavailable, shared_chat_video_descriptor,
                                open_shared_chat_video)
 from interactive_chat_projection import IncrementalChatTranscript
@@ -1470,7 +1471,9 @@ PROVIDER_TOOL_DESCRIPTION = (
     "chats list and contact its exact --route. Legacy one-use handles use "
     "chats send|ask --target-index N. For the current inbound reply use chats "
     "respond-current. Put chats/mail/team message bodies in stdin; Chats also "
-    "accepts --message (choose one, not both). An async send is confirmed only "
+    "accepts --message (choose one, not both). Preserve normal word spacing, "
+    "punctuation, and paragraph breaks in message bodies; keep technical summaries "
+    "concise without concatenating words or numbers. An async send is confirmed only "
     "by an accepted receipt with message_id; a tool error is not delivery confirmation. "
     "@@ mentions refer to AgentsDock Team Network, not Slack or email. Use helper=team "
     "with arguments=[mentions] to discover selected @@ references. Read @@bulletin with "
@@ -72908,6 +72911,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         SERVER_SHUTTING_DOWN = True
+        await bounded_shutdown_phase("side-questions", SIDE_QUESTIONS.close())
         # Every phase below is bounded by SERVER_SHUTDOWN_PHASE_TIMEOUT_SECONDS
         # (see bounded_shutdown_phase) so one stuck join cannot starve the
         # provider teardown that follows it. The order is load-bearing.
@@ -76215,6 +76219,7 @@ async def health() -> dict[str, Any]:
             and bool(tmux["available"])
         ),
         "capabilities": {
+            "side_questions": side_questions.capability(),
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
             "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
@@ -77554,6 +77559,72 @@ def public_chat_share_session_exists(session_id: str) -> bool:
         and not session.get("_history_import_initializing")
         and not session.get("_fork_initializing")
     )
+
+
+def side_question_context(session_id: str) -> tuple[list[dict], str]:
+    """Take an on-demand snapshot without history repair/import or state writes."""
+    if not public_chat_share_session_exists(session_id):
+        raise side_questions.SideQuestionError(404, "Chat not found")
+    sessions_root = STATE_DIR / "sessions"
+    selected = session_dir(session_id)
+    try:
+        if (sessions_root.is_symlink() or selected.is_symlink()
+                or selected.resolve(strict=True).parent != sessions_root.resolve(strict=True)):
+            raise side_questions.SideQuestionError(409, "Conversation context is unavailable")
+    except OSError:
+        raise side_questions.SideQuestionError(409, "Conversation context is unavailable") from None
+    projector = make_public_event_projector(
+        session_id, event_is_visible=is_client_visible_event,
+        event_files_belong=event_files_belong_to_session,
+        project_provider_event=project_provider_history_event_for_egress,
+        strip_user_context=strip_agentsdock_generated_user_text,
+        fork_internal_purposes=FORK_INTERNAL_PURPOSES,
+    )
+    def project(event):
+        # Ordinary steering carries another actual user prompt. Apply the
+        # same proven-context stripping as the initial prompt boundary.
+        if event.get("type") == "turn_steered":
+            event = {**event, "type": "turn_started"}
+        return projector(event)
+    try:
+        return side_questions.read_context_snapshot(events_path(session_id), project)
+    except PublicTranscriptError:
+        raise side_questions.SideQuestionError(409, "Conversation context is unavailable") from None
+
+
+async def answer_side_question(session_id: str, question: str) -> dict[str, Any]:
+    if SERVER_SHUTTING_DOWN:
+        raise side_questions.SideQuestionError(503, "Server is shutting down")
+    if not public_chat_share_session_exists(session_id):
+        raise side_questions.SideQuestionError(404, "Chat not found")
+    session = dict(STORE.sessions[session_id])
+    backend = str(session.get("backend") or DEFAULT_BACKEND).lower()
+    if backend not in {BACKEND_CODEX, BACKEND_CLAUDE}:
+        raise side_questions.SideQuestionError(503, "This backend does not support side questions")
+    model = session.get("model")
+    if not isinstance(model, str) or not model.strip():
+        model = None
+    messages, note = await asyncio.to_thread(side_question_context, session_id)
+    if not public_chat_share_session_exists(session_id):
+        raise side_questions.SideQuestionError(404, "Chat not found")
+    prompt = side_questions.build_prompt(question, messages, note)
+    env = side_questions.isolated_environment(runner_env())
+    if backend == BACKEND_CLAUDE:
+        answer = await side_questions.answer_claude(prompt, executable=CLAUDE_BIN, model=model, env=env)
+    else:
+        from codex_side_question import answer_side_question as answer_codex_side_question
+        answer = await answer_codex_side_question(prompt, executable=CODEX_BIN, model=model, env=env)
+    if not public_chat_share_session_exists(session_id):
+        raise side_questions.SideQuestionError(404, "Chat not found")
+    return {"backend": backend, "answer": answer, "context_note": note}
+
+
+SIDE_QUESTIONS = side_questions.SideQuestions(answer_side_question)
+app.include_router(side_questions.create_side_question_router(
+    authorize=require_native_admin_control,
+    session_exists=public_chat_share_session_exists,
+    runtime=SIDE_QUESTIONS,
+))
 
 
 def shared_chat_event_videos(session_id: str, event: dict[str, Any]) -> list[dict[str, Any]]:

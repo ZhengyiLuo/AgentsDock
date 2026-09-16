@@ -800,6 +800,16 @@ idle; no current turn, goal, child agent, or provider process is interrupted by
 saving this setting. Explicit chat overrides take precedence. No polling or
 background configuration refresh is added.
 
+## Side Questions
+
+Native clients can ask Codex or Claude a temporary side question about recent
+visible conversation text without changing the main turn, queue, goals or chat
+history. Capability-gated POST/DELETE endpoints provide independent answers and
+cancellation. The response describes the bounded text snapshot; tool results,
+attachments and hidden provider context are not included. See
+[Side questions](docs/SIDE_QUESTIONS.md) for the API, provider isolation and
+context limitations.
+
 ## Context Digests
 
 `POST /api/sessions/{session_id}/digest` creates a real LLM-summarized handoff

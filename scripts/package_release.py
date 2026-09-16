@@ -33,6 +33,8 @@ FILES = (
     "claude_sdk_client.py",
     "claude_background_reconciliation.py",
     "codex_app_server.py",
+    "side_questions.py",
+    "codex_side_question.py",
     "cursor_agent_client.py",
     "cursor_process_guard.py",
     "claude_history_repair.py",
