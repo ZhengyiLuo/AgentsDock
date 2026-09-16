@@ -1,6 +1,7 @@
-import { useEffect, useReducer, useState } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
 import { AppState, Keyboard, Platform, StyleSheet, View } from 'react-native'
-import { KeyboardAvoidingView, KeyboardController } from 'react-native-keyboard-controller'
+import { KeyboardAvoidingView, KeyboardController, useGenericKeyboardHandler } from 'react-native-keyboard-controller'
+import { runOnJS } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { initialIOSKeyboardLifecycle, IOS_KEYBOARD_HIDE_FALLBACK_MS, reduceIOSKeyboardLifecycle } from '../lib/keyboard-lifecycle'
 import { usePalette } from '../theme'
@@ -34,6 +35,17 @@ export function ChatScreen({ sessionId, compact, onBack, onOptions, onSearch, on
   const composerKeyboardConstrained = Platform.OS === 'ios' ? iosKeyboard.avoidanceEnabled : keyboardVisible
   const [keyboardSettleRequest, setKeyboardSettleRequest] = useState(0)
   const backend = useAppStore(state => state.sessions.find(value => value.id === sessionId)?.backend)
+  const completeIOSKeyboardControllerHide = useCallback(() => {
+    if (Platform.OS !== 'ios') return
+    dispatchIOSKeyboard({ type: 'keyboard-did-hide' })
+    setKeyboardSettleRequest(value => value + 1)
+  }, [])
+  useGenericKeyboardHandler({
+    onEnd: event => {
+      'worklet'
+      if (event.height <= 0) runOnJS(completeIOSKeyboardControllerHide)()
+    },
+  }, [completeIOSKeyboardControllerHide])
   useEffect(() => {
     let hideFallbackTimer: ReturnType<typeof setTimeout> | null = null
     const cancelHideFallback = () => {
