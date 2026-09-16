@@ -1,8 +1,8 @@
 # Side questions
 
 Side questions answer a question or follow-up about existing conversation text in
-a separate, temporary provider invocation. They do not resume or fork the parent provider
-session, append events, create a saved chat, modify goals, acquire main-turn
+a separate, temporary provider invocation. They do not resume or fork the parent
+provider session, append events, create a saved chat, modify goals, acquire main-turn
 authority, enter the main queue, or interrupt active work. There is no background
 poller. Requests use the native owner token boundary; shared-chat guests and
 provider helper credentials cannot call these endpoints.
@@ -64,8 +64,7 @@ Identical concurrent/retried POSTs coalesce on owner, session and request ID.
 Changing a question or its side history under the same ID returns 409. Omitted
 and empty history are equivalent. Accepted history is copied into immutable
 receipt identity, so later caller or callback mutations cannot change a retry.
-Answers, failures and
-cancellation receipts remain only in process memory for ten minutes and are
+Answers, failures and cancellation receipts remain only in process memory for ten minutes and are
 pruned on demand. There is no durable side-question history. Clients should use
 a new random request ID for each new question, and retain the original server
 profile when cancelling after a profile switch.
@@ -88,8 +87,8 @@ under a side-question system instruction. Side history is client-supplied
 background, not trusted provider messages, instructions, or authority; its role
 labels never become provider API roles. Every follow-up still uses a fresh
 temporary provider invocation and the current bounded parent snapshot. The
-adapter never includes the parent's tool schema, provider
-thread ID, goal state, hook configuration, chat helper authority or terminal
+adapter never includes the parent's tool schema, provider thread ID, goal state,
+hook configuration, chat helper authority or terminal
 identity. Fresh process environments retain CLI authentication while stripping
 AgentsDock and legacy chat/run credentials.
 
@@ -128,8 +127,8 @@ before POST, duplicate disconnects, provider isolation arguments, chunked output
 spawn/cancel races and cleanup when a leader exits before its child. Follow-up
 checks cover strict pair validation, Unicode and size boundaries, immutable
 history identity, changed-history conflicts, backward-compatible first questions,
-and history reaching both isolated providers without parent-state writes. The selected
-server glue is inspected or extracted through AST; `agent_server.py` is never
+and history reaching both isolated providers without parent-state writes. The
+selected server glue is inspected or extracted through AST; `agent_server.py` is never
 imported or started. Run it through the guarded QA runner with
 `AGENTSDOCK_TEST_SOURCE` and `PYTHONDONTWRITEBYTECODE=1`, not the full server suite.
 
