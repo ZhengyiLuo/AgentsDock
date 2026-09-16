@@ -99,6 +99,19 @@ describe('ChatHeader', () => {
     expect(screen.getByRole('button', { name: 'Show chat list' })).toBeInTheDocument()
   })
 
+  it('does not offer the retired create-digest action in the chat menu', async () => {
+    useAppStore.setState({
+      sessions: [{ id: 'chat', title: 'Chat', backend: 'codex' }],
+      selectedSessionId: 'chat'
+    })
+    render(<ChatHeader />)
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Chat actions' }))
+
+    expect(screen.queryByRole('menuitem', { name: 'Create digest' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Fork chat' })).toBeInTheDocument()
+  })
+
   it.each(['running', 'admitting'] as const)('forks a %s chat through its completed prefix on a capable server', async state => {
     const forkSession = vi.fn().mockResolvedValue(undefined)
     const session = { id: 'chat', title: 'Chat', backend: 'claude' as const }
