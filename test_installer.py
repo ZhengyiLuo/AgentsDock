@@ -7161,6 +7161,9 @@ exit 0
             connection.execute("DROP TRIGGER network_bulletin_body_limit_on_insert")
             connection.execute("DROP TRIGGER network_bulletin_body_limit_on_update")
             for trigger in (
+                "team_message_search_insert", "team_message_search_revision", "team_message_search_delete",
+                "team_message_sender_nodes_insert", "team_message_sender_nodes_update", "team_message_sender_nodes_delete",
+                "team_message_sender_principals_insert", "team_message_sender_principals_update", "team_message_sender_principals_delete",
                 "team_bulletin_created",
                 "team_bulletin_revised",
                 "team_bulletin_deleted",
@@ -7177,6 +7180,7 @@ exit 0
             ):
                 connection.execute(f"DROP TRIGGER {trigger}")
             for index in (
+                "team_messages_sender_node_order",
                 "team_bulletin_changes_by_team",
                 "team_mail_server_arrival_lookup",
                 "team_messages_parent_order",
@@ -7189,6 +7193,8 @@ exit 0
             ):
                 connection.execute(f"DROP INDEX {index}")
             for table in (
+                # Migration 0023 (current-content/name search projections).
+                "team_message_search", "team_message_sender_nodes", "team_message_sender_principals",
                 # Migration 0022 (metadata-only Bulletin change journal).
                 "team_bulletin_changes",
                 # Migration 0020 (durable Mail arrival watermark).

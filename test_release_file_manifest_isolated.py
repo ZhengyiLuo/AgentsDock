@@ -25,6 +25,7 @@ NEW_MODULES = {
 NEW_MIGRATION = "migrations/0020_team_mail_arrivals.sql"
 THREAD_MIGRATION = "migrations/0021_team_mail_threads.sql"
 BULLETIN_MIGRATION = "migrations/0022_team_bulletin_changes.sql"
+SEARCH_MIGRATION = "migrations/0023_team_message_search.sql"
 
 
 def shell_array(source, name):
@@ -75,6 +76,7 @@ class ReleaseFileManifestTests(unittest.TestCase):
         self.assertIn(NEW_MIGRATION, package)
         self.assertIn(THREAD_MIGRATION, package)
         self.assertIn(BULLETIN_MIGRATION, package)
+        self.assertIn(SEARCH_MIGRATION, package)
         self.assertIn("notification_hints.py", package)
         self.assertIn("mail_hints.py", package)
         # Validate a clean release tree, not interpreter caches left by other
@@ -119,6 +121,7 @@ class ReleaseFileManifestTests(unittest.TestCase):
         self.assertIn(NEW_MIGRATION, expected)
         self.assertIn(THREAD_MIGRATION, expected)
         self.assertIn(BULLETIN_MIGRATION, expected)
+        self.assertIn(SEARCH_MIGRATION, expected)
         self.assertIn("notification_hints.py", expected)
         self.assertEqual(set(expected), set(self.manifest["DIRECTORY_FILES"]["agentsdock_team_hub"]))
         for name, digest in expected.items():

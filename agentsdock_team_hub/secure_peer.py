@@ -31,6 +31,7 @@ import ssl
 import stat
 import threading
 import time
+import unicodedata
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit
 import uuid
@@ -5059,6 +5060,7 @@ def sanitize_proxy_request(
                     "include_mailbox_state",
                     "include_mailbox_coverage",
                     "after_arrival_id",
+                    "q",
                 }
             elif (
                 len(pieces) == 2
@@ -5191,6 +5193,11 @@ def sanitize_proxy_request(
             raise SecurePeerError("invalid_request", "Proxy query is invalid", 422)
         messages_route = path.endswith("/network/messages")
         mailbox_route = path.endswith("/network/mailbox")
+        if "q" in values and (
+            not 1 <= len(values["q"]) <= 200 or not values["q"].strip()
+            or any(unicodedata.category(char) in {"Cc", "Cs"} for char in values["q"])
+        ):
+            raise SecurePeerError("invalid_request", "Search query is invalid", 422)
         if "address_kind" in values and values["address_kind"] not in (
             {"server"}
             if mailbox_route

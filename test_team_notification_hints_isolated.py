@@ -255,7 +255,7 @@ class NotificationStoreTests(unittest.TestCase):
                         "team_bulletin_changes_immutable", "team_bulletin_changes_retained"):
             legacy.execute("DROP TRIGGER " + trigger)
         legacy.execute("DROP TABLE team_bulletin_changes")
-        for statement in _statements(MIGRATIONS[-1].source):
+        for statement in _statements(next(item.source for item in MIGRATIONS if item.version == 22)):
             legacy.execute(statement)
         self.assertEqual(legacy.execute("SELECT message_id,change_kind,message_version FROM team_bulletin_changes").fetchall(),
                          [(message["id"], "created", 2)])

@@ -6740,6 +6740,7 @@ class SecurePeerRuntime:
                 include_mail_subject=flag("include_mail_subject"),
                 include_mailbox_coverage=flag("include_mailbox_coverage"),
                 after_arrival_id=query.get("after_arrival_id"),
+                q=query.get("q"),
             )
         if method == "GET" and pieces == ["deletions"]:
             return store.list_network_content_deletions(

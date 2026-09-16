@@ -1563,6 +1563,7 @@ TEAM_HUB_RELEASE_FILES=(
   migrations/0020_team_mail_arrivals.sql
   migrations/0021_team_mail_threads.sql
   migrations/0022_team_bulletin_changes.sql
+  migrations/0023_team_message_search.sql
 )
 
 for name in "${RELEASE_FILES[@]}"; do

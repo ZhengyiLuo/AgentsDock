@@ -688,6 +688,8 @@ class SecurePeerHubAdapter:
                 not values[key].isdigit() or str(int(values[key])) != values[key]
             ):
                 raise HubError("invalid_request", "Query is invalid", 422)
+        if "q" in values:
+            HubStore._team_message_search_expression(values["q"])
         if "limit" in values and not 1 <= int(values["limit"]) <= 100:
             raise HubError("invalid_request", "Query is invalid", 422)
         if "version" in values and not 1 <= int(values["version"]) <= 200:
@@ -1072,6 +1074,7 @@ class SecurePeerHubAdapter:
                             "include_mail_subject",
                             "include_mailbox_state",
                             "include_mailbox_coverage", "after_arrival_id",
+                            "q",
                         },
                     )
                     result = self.store.list_team_messages(
@@ -1091,6 +1094,7 @@ class SecurePeerHubAdapter:
                         include_mailbox_state=self._query_flag(values, "include_mailbox_state"),
                         include_mailbox_coverage=self._query_flag(values, "include_mailbox_coverage"),
                         after_arrival_id=values.get("after_arrival_id"),
+                        q=values.get("q"),
                     )
                 elif len(pieces) == 4 and pieces[1:3] == [_NETWORK_CHILD, "messages"]:
                     values = self._team_query(request, allowed={"include_revision", "include_mail_subject", "include_mailbox_state"})

@@ -1778,13 +1778,14 @@ class VendoredTeamHubParityTests(unittest.TestCase):
             "migrations/0020_team_mail_arrivals.sql": "4f4c393a441b1eace56bc8b3cca4e0f2094cc68e8cb10b07a3a88c15ef6a7f7f",
             "migrations/0021_team_mail_threads.sql": "34bf4718d053230d54a260258f78a683e07a1f5d0cb85e2ff8b57007db4836c9",
             "migrations/0022_team_bulletin_changes.sql": "38695efad74590fcfcb76b0dd1e83f23ca2f1d6e3dadeaed83da684a26918d60",
+            "migrations/0023_team_message_search.sql": "abe6442afad762e5fb806c4181b59cc24981eba834a646b7dda49695ffffff71",
             "migrations/__init__.py": "aaf340c45c8d39c2939814977ba4cef8eb6b3bd0671b0f7542ebe06f5431d6ec",
             "notification_hints.py": "794f76b4240f8c534bdb3c5928c702d02dfc8e022d44224cb8fe8b4b9d9d96d2",
-            "secure_peer.py": "b3bab318e3a8fc00939a6818c7bbaf487d9b9c7a7f2ba383b78fcb55c88f3b86",
-            "secure_peer_hub.py": "027e2a21854776d31cd4cfc7e0d65358259ffd1f1a9b21de85efd2ea6a1e32fd",
+            "secure_peer.py": "9e686a66cbff7ff2ea7ffd96913e9000f4646d93f8b826b3d8c42a2b28b958cf",
+            "secure_peer_hub.py": "1f3f8c23b9de7180889fe04f9532af7e9000941526687a558bf6250cf647fa26",
             "security.py": "0c1895c7443e7be07a2f53c7e4c4228e3ee04c65d6cd36f039b7bbba1813e4fa",
-            "service.py": "bf4900abe5c861498d5ebd74a3e046eb6a0cf431c6ce7507dc329502feba57b3",
-            "store.py": "3975f15beb036775ade158aae3c7a1bcb6aa4bbe5a59547810613c91c4918d7d",
+            "service.py": "449462013919687089c8a227fa5b83e65fc2c6fc601cd09952a51300ab81255f",
+            "store.py": "fd575a19d3408dbfa92c26009f126b8163f9c1862c6ea75684bfc1c31434aa55",
         }
         entries = list(vendored.rglob("*"))
         for path in entries:
