@@ -1,5 +1,30 @@
 # Development and release log
 
+## 2026-09-17 — 1.0.2 stable release prepared
+
+- Set the standalone server release version to `1.0.2` for the explicitly
+  requested stable app/server release. The committed runtime includes the
+  1.0.1 beta mail gateway, durable joins, indexed search, exact-recipient reads,
+  isolated Side chat and shutdown-budget fixes, followed by endpoint recovery
+  in source `4753c8dd0b70e6896c04b81608c813b84010ca25`.
+- Add [stable release notes](RELEASE_1.0.2.md) against the published 1.0.0
+  baseline. API contract remains 28; Team Hub schema is 23, introduced by the
+  indexed-search migration in beta.2. Existing trust, approvals and routes are
+  preserved by explicit endpoint recovery; each member requires its own update
+  and endpoint migration after a host address change.
+- Prepare this release only from committed source. Unrelated uncommitted
+  Claude history, subagent and deployment/packaging changes remain excluded.
+  Local validation uses a temporary source snapshot, rejects `agent_server`
+  imports and process launches, and allows only private test transports.
+- All 39 endpoint recovery checks pass on that committed snapshot. Four of
+  five release-manifest checks also pass; the remaining check identifies the
+  frozen `secure_peer.py` source digest that must be refreshed after the
+  recovery change before the full release gate can pass.
+- Publication and deployment are pending. Run the release workflow in
+  `prepare_only` mode, then verify the held signed assets against the committed
+  source before publication. Record the accepted workflow, archive digest and
+  public-download verification in a subsequent entry after they succeed.
+
 ## 2026-09-16 — Secure Team Network endpoint recovery (unreleased)
 
 - Identify a vanished host bind address explicitly instead of repeatedly
