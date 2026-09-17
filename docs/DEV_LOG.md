@@ -2,6 +2,9 @@
 
 ## 2026-09-17 — Side chat in the shared inspector (local only)
 
+- Build **1.0.3-local.1173 / 1173** from `85471ed`. Verify the ARM64
+  Developer ID signature, local-only updater marker and exact compiled payload
+  against the accepted source. Do not replace the installed app or publish.
 - Place Side chat directly below Subagents in the existing inspector scroll;
   remove its separate tab and nested inspector landmark. Keep Review available.
 - Preserve per-chat drafts, replies and pending requests across panel/review
