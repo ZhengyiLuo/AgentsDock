@@ -1,5 +1,22 @@
 # Development and release log
 
+## 2026-09-17 — AgentsServer 1.0.2 stable accepted
+
+- Publish [AgentsServer 1.0.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.2)
+  from `c1f3cc45d0317cf8f7789a62a787ada2f3728515`. Includes the endpoint
+  recovery API and the preceding collaboration and Side chat beta changes.
+- [Release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35193337072)
+  passes dependency-lock validation, compilation and all 4,295 server tests
+  (two skipped), then packages and signs the release manifest.
+- Verify the Ed25519 signature, Stable/API 28 metadata and byte-for-byte
+  equality of all 81 packaged files with the release commit. Fresh public
+  downloads of the archive, manifest and signature match the verified assets.
+  Archive SHA-256:
+  `75c7c6f9d0285ac341a29e2e6e445c3c9be234518426c653fe437f0e6eafdb43`.
+- Cancel the redundant tag-triggered rebuild after publishing those verified
+  assets. Unrelated uncommitted work remains excluded. Installation is a
+  separate managed operation; publication itself does not restart servers.
+
 ## 2026-09-17 — 1.0.2 stable release prepared
 
 - Set the standalone server release version to `1.0.2` for the explicitly
