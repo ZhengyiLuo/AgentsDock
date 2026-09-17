@@ -5,6 +5,7 @@ import ast
 import asyncio
 import json
 from pathlib import Path
+import re
 import tempfile
 import sys
 from types import SimpleNamespace
@@ -41,6 +42,18 @@ class ShutdownBudgetTests(unittest.TestCase):
                                 for target in node.targets))
         self.assertIn("side-questions", [ast.literal_eval(call.args[0]) for call in phases])
         self.assertEqual(declared, len(phases))
+        budget_names = {"MAX_UVICORN_GRACEFUL_SHUTDOWN_SECONDS",
+                        "SERVER_SHUTDOWN_PHASE_TIMEOUT_SECONDS"}
+        budgets = {node.targets[0].id: ast.literal_eval(node.value)
+                   for node in tree.body if isinstance(node, ast.Assign)
+                   and isinstance(node.targets[0], ast.Name)
+                   and node.targets[0].id in budget_names}
+        installer = Path(__file__).with_name("install.sh").read_text()
+        attempts = int(re.search(r"^LAUNCHCTL_STOP_ATTEMPTS=(\d+)$", installer, re.M).group(1))
+        delay = float(re.search(r"^LAUNCHCTL_STOP_DELAY=([0-9.]+)$", installer, re.M).group(1))
+        maximum = (budgets["MAX_UVICORN_GRACEFUL_SHUTDOWN_SECONDS"]
+                   + declared * budgets["SERVER_SHUTDOWN_PHASE_TIMEOUT_SECONDS"] + 5.0)
+        self.assertGreaterEqual(attempts * delay, maximum + 30.0)
 
 
 class HistoryTests(unittest.TestCase):
