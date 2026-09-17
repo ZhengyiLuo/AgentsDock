@@ -27,7 +27,7 @@ beforeEach(() => {
   hide = vi.fn()
   Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
     sideQuestions: { ask: vi.fn(() => new Promise(() => undefined)), cancel }, native: { openExternal: vi.fn() },
-    pins: { list: vi.fn().mockResolvedValue([]) }, files: { list: vi.fn() }
+    pins: { list: vi.fn().mockResolvedValue([]) }, files: { list: vi.fn().mockResolvedValue({ files: [], total: 0 }) }
   } })
   useAppStore.setState({ activeProfileId: scope.profileId, profileGeneration: scope.profileGeneration, switchingProfileId: null,
     connected: true, health: { ok: true, capabilities: { side_questions: { available: true, version: 1, backends: ['codex'], history: true, max_question_chars: 8000 } } },
@@ -39,18 +39,32 @@ beforeEach(() => {
 afterEach(() => { cleanup(); controller.reset(); vi.restoreAllMocks() })
 
 describe('Inspector workspace', () => {
-  it('shows Side chat directly below Subagents in one inspector with no side-chat tab or nested aside', async () => {
+  it('shows Side chat below collapsed or expanded Media & files in one inspector with no side-chat tab or nested aside', async () => {
     const view = await act(async () => render(<Workspace />))
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(view.container.querySelectorAll('aside')).toHaveLength(1)
     const subagents = view.container.querySelector('.subagents-section')!
+    const mediaToggle = screen.getByRole('button', { name: /Media & files/ })
+    const media = mediaToggle.closest('.inspector-section')!
     const sideChat = view.container.querySelector('.side-chat-section')!
-    expect(subagents.nextElementSibling).toBe(sideChat)
-    expect(sideChat.parentElement).toBe(subagents.parentElement)
+    expect(subagents.nextElementSibling).toBe(media)
+    expect(media.nextElementSibling).toBe(sideChat)
+    expect(sideChat.parentElement).toBe(media.parentElement)
     expect(screen.getByLabelText('Side message')).toBeVisible()
     expect(screen.getByLabelText('Side message')).not.toHaveFocus()
     expect(window.agentsDock.sideQuestions!.ask).not.toHaveBeenCalled()
     expect(window.agentsDock.files.list).not.toHaveBeenCalled()
+    expect(media.querySelector('.media-inspector')).not.toBeInTheDocument()
+
+    await act(async () => fireEvent.click(mediaToggle))
+    expect(media.querySelector('.media-inspector')).toBeVisible()
+    expect(media.nextElementSibling).toBe(sideChat)
+    expect(screen.getByLabelText('Side message')).toBeVisible()
+    expect(window.agentsDock.files.list).toHaveBeenCalledOnce()
+
+    fireEvent.click(mediaToggle)
+    expect(media.querySelector('.media-inspector')).not.toBeInTheDocument()
+    expect(media.nextElementSibling).toBe(sideChat)
   })
 
   it('restores the shared inspector scroll across Review and dock remounts', async () => {

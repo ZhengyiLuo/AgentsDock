@@ -65,5 +65,5 @@ function InspectorDetails({ scope, sessionId, controller, children }: { scope: S
     element.scrollTop = controller.detailsScroll(scope, sessionId)
     return () => controller.saveDetailsScroll(scope, sessionId, element.scrollTop)
   }, [scope.profileId, scope.profileGeneration, sessionId, controller])
-  return <div className="inspector-details-host" ref={host}><Inspector embedded afterSubagents={children} /></div>
+  return <div className="inspector-details-host" ref={host}><Inspector embedded afterMedia={children} /></div>
 }

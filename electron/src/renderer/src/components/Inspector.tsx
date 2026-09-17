@@ -19,7 +19,7 @@ import { NativeFileDragSurface } from './NativeFileDragSurface'
 
 const EMPTY_FILES: AgentFile[] = []
 
-export function Inspector({ embedded = false, afterSubagents }: { embedded?: boolean; afterSubagents?: ReactNode } = {}) {
+export function Inspector({ embedded = false, afterMedia }: { embedded?: boolean; afterMedia?: ReactNode } = {}) {
   useLocale()
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -126,11 +126,11 @@ export function Inspector({ embedded = false, afterSubagents }: { embedded?: boo
 
         {pinProfileScope && <PinnedSection key={`pinned:${session.id}`} profileScope={pinProfileScope} sessionId={session.id} pins={pins} setPins={setPins} files={files} />}
         <SubagentsSection key={`subagents:${session.id}`} sessionId={session.id} />
-        {afterSubagents}
         <section className="inspector-section collapsible-section">
           <div className="section-heading-row"><button className="section-toggle" onClick={toggleMedia}>{mediaOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<FileStack size={15} /><strong>{t("ui.Inspector.Inspector.media_files_9d2cd70")}</strong><small>{files.length}/{filesTotal || files.length}</small></button><button className="nested-icon" title={t("ui.Inspector.Inspector.refresh_0e91610")} onClick={() => void loadFiles(true)}><RefreshCw size={12} /></button></div>
           {mediaOpen && pinProfileScope && <MediaInspector profileScope={pinProfileScope} sessionId={session.id} workspaceRoot={session.cwd ?? null} files={files} total={filesTotal} loading={loadingFiles} loadMore={() => void loadFiles(false)} onPreview={setPreview} />}
         </section>
+        {afterMedia}
         <MediaPreviewDialog sessionId={session.id} file={preview} files={files} onSelect={setPreview} onClose={() => setPreview(null)} />
       </>}
     </div>
