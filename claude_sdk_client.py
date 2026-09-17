@@ -1260,6 +1260,7 @@ class _SideQuestionClient:
 @dataclass
 class _GetSideQuestionClient:
     response: asyncio.Future[_SideQuestionClient]
+    expected_provider_id: str | None = None
     cancelled: bool = False
 
 
@@ -1531,12 +1532,16 @@ class ClaudeSDKSupervisor:
             response.cancel()
             raise
 
-    async def get_side_question_client(self) -> _SideQuestionClient:
+    async def get_side_question_client(
+        self, *, expected_provider_id: str | None = None,
+    ) -> _SideQuestionClient:
         """Connect/resume through the actor without submitting a main turn."""
 
         loop = self._ensure_actor()
         response: asyncio.Future[_SideQuestionClient] = loop.create_future()
-        command = _GetSideQuestionClient(response=response)
+        command = _GetSideQuestionClient(
+            response=response, expected_provider_id=expected_provider_id,
+        )
         assert self._commands is not None
         await self._commands.put(command)
         try:
@@ -2289,6 +2294,13 @@ class ClaudeSDKSupervisor:
         if command.cancelled:
             return
         try:
+            if not self.connected and command.expected_provider_id is not None:
+                resume = (self.options.get("resume") if isinstance(self.options, dict)
+                          else getattr(self.options, "resume", None))
+                if not resume or resume != command.expected_provider_id:
+                    raise ClaudeSDKUnavailable(
+                        "The native Claude conversation is not available to resume"
+                    )
             client = await self._ensure_client()
             generation = self.control_generation
             if generation is None or self._closed:
@@ -3163,6 +3175,7 @@ class ClaudeSDKSupervisorManager:
         options: Any,
         configuration_key: str,
         timeout_seconds: float = 150.0,
+        expected_provider_id: str | None = None,
     ) -> dict[str, Any]:
         """Lease native parent context without occupying its main-turn actor.
 
@@ -3181,7 +3194,9 @@ class ClaudeSDKSupervisorManager:
         side_task: asyncio.Task[dict[str, Any]] | None = None
         retired_task: asyncio.Task[bool] | None = None
         try:
-            lease = await supervisor.get_side_question_client()
+            lease = await supervisor.get_side_question_client(
+                expected_provider_id=expected_provider_id,
+            )
 
             async def check_owner() -> None:
                 assert self._lock is not None

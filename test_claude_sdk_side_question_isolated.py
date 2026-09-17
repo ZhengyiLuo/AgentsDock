@@ -63,7 +63,8 @@ class ClaudeSDKSideQuestionTests(unittest.IsolatedAsyncioTestCase):
             return answer
 
         with patch("claude_side_question.ask_native_side_question", native):
-            self.assertEqual(await self.ask(history=history, timeout_seconds=4), answer)
+            self.assertEqual(await self.ask(history=history, timeout_seconds=4,
+                expected_provider_id="existing-provider-session"), answer)
         client = self.factory.clients[0]
         self.assertEqual([call[0] for call in client.calls], ["connect", "receive_messages"])
         self.assertFalse(self.manager._supervisors["chat"].is_active)
@@ -219,6 +220,28 @@ class ClaudeSDKSideQuestionTests(unittest.IsolatedAsyncioTestCase):
         self.factory.connect_error = None
         await self.start_main()
         self.assertEqual(len(self.factory.clients), 2)
+
+    async def test_cold_resume_rejects_missing_or_different_native_parent(self) -> None:
+        for resume in (None, "", "different-provider"):
+            with self.subTest(resume=resume):
+                self.options = {"resume": resume}
+                with patch("claude_side_question.ask_native_side_question") as native:
+                    with self.assertRaises(ClaudeSDKUnavailable):
+                        await self.ask(expected_provider_id="existing-provider-session")
+                    native.assert_not_called()
+                self.assertEqual(self.factory.clients, [])
+                self.assertEqual(self.manager._pins, {})
+
+    async def test_connected_main_without_resume_option_retains_its_native_context(self) -> None:
+        self.options = {"resume": None}
+        main = await self.start_main()
+        original_calls = list(self.factory.clients[0].calls)
+        with patch("claude_side_question.ask_native_side_question", return_value={"answer": "Live context"}) as native:
+            self.assertEqual(await self.ask(expected_provider_id="now-bound-provider"),
+                             {"answer": "Live context"})
+            self.assertIs(native.call_args.args[0], self.factory.clients[0])
+        self.assertFalse(main.done)
+        self.assertEqual(self.factory.clients[0].calls, original_calls)
 
     async def test_side_control_progress_never_enters_main_run_projection(self) -> None:
         main = await self.start_main()
