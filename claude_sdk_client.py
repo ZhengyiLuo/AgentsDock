@@ -1250,6 +1250,19 @@ class _GetServerInfo:
     cancelled: bool = False
 
 
+@dataclass(frozen=True)
+class _SideQuestionClient:
+    client: ClaudeSDKClientProtocol
+    generation: str
+    retired: asyncio.Event
+
+
+@dataclass
+class _GetSideQuestionClient:
+    response: asyncio.Future[_SideQuestionClient]
+    cancelled: bool = False
+
+
 @dataclass
 class _MutateMCPServer:
     action: str
@@ -1341,6 +1354,7 @@ class ClaudeSDKSupervisor:
         self._generation = 0
         self._closed = False
         self._connected = False
+        self._connection_retired = asyncio.Event()
         self._last_used_at = time.monotonic()
         self._inflight_response: asyncio.Future[Any] | None = None
 
@@ -1517,6 +1531,23 @@ class ClaudeSDKSupervisor:
             response.cancel()
             raise
 
+    async def get_side_question_client(self) -> _SideQuestionClient:
+        """Connect/resume through the actor without submitting a main turn."""
+
+        loop = self._ensure_actor()
+        response: asyncio.Future[_SideQuestionClient] = loop.create_future()
+        command = _GetSideQuestionClient(response=response)
+        assert self._commands is not None
+        await self._commands.put(command)
+        try:
+            return await asyncio.shield(response)
+        except asyncio.CancelledError:
+            # Cancelling a side request must not cancel a shared connect or
+            # close a client that a main turn may already be waiting to use.
+            command.cancelled = True
+            response.cancel()
+            raise
+
     async def mutate_mcp_server(
         self,
         *,
@@ -1595,6 +1626,7 @@ class ClaudeSDKSupervisor:
         self._connecting_client = None
         self._receiver_task = None
         self._connected = False
+        self._connection_retired.set()
         response = self._inflight_response
         if response is not None and not response.done():
             response.set_exception(
@@ -1750,6 +1782,7 @@ class ClaudeSDKSupervisor:
         self._generation += 1
         self._client = client
         self._connected = True
+        self._connection_retired = asyncio.Event()
         self._last_used_at = time.monotonic()
         generation = self._generation
         self._receiver_task = asyncio.create_task(
@@ -1771,7 +1804,13 @@ class ClaudeSDKSupervisor:
     ) -> None:
         error: BaseException | None = None
         try:
+            from claude_side_question import is_native_side_question_progress
+
             async for message in client.receive_messages():
+                # Native side-control lifecycle packets are not main-turn
+                # activity, including packets arriving after side cancellation.
+                if is_native_side_question_progress(message):
+                    continue
                 commands = self._commands
                 if commands is None:
                     return
@@ -1790,6 +1829,7 @@ class ClaudeSDKSupervisor:
                 )
 
     async def _disconnect_current_client(self) -> None:
+        self._connection_retired.set()
         self._cancel_ack_timeout()
         if self._pending_mail_hint_hook is not None:
             self._pending_mail_hint_hook.retire()
@@ -2243,6 +2283,28 @@ class ClaudeSDKSupervisor:
         if not command.response.done():
             command.response.set_result((value, generation))
 
+    async def _handle_get_side_question_client(
+        self, command: _GetSideQuestionClient,
+    ) -> None:
+        if command.cancelled:
+            return
+        try:
+            client = await self._ensure_client()
+            generation = self.control_generation
+            if generation is None or self._closed:
+                raise ClaudeSDKGenerationChanged(
+                    f"Claude SDK side-question connection changed for {self.chat_id}"
+                )
+        except Exception as exc:
+            if not command.response.done():
+                command.response.set_exception(exc)
+            return
+        self._last_used_at = time.monotonic()
+        if not command.response.done():
+            command.response.set_result(
+                _SideQuestionClient(client, generation, self._connection_retired)
+            )
+
     async def _mcp_control_bounded(
         self,
         operation: Awaitable[Any],
@@ -2636,6 +2698,8 @@ class ClaudeSDKSupervisor:
                     await self._handle_get_mcp_status(command)
                 elif isinstance(command, _GetServerInfo):
                     await self._handle_get_server_info(command)
+                elif isinstance(command, _GetSideQuestionClient):
+                    await self._handle_get_side_question_client(command)
                 elif isinstance(command, _MutateMCPServer):
                     await self._handle_mutate_mcp_server(command)
                 elif isinstance(command, _ReceivedMessage):
@@ -3089,6 +3153,76 @@ class ClaudeSDKSupervisorManager:
                 async with self._lock:
                     if self._evicting.get(clean_chat_id) is close_task:
                         self._evicting.pop(clean_chat_id, None)
+
+    async def ask_side_question(
+        self,
+        chat_id: str,
+        question: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+        options: Any,
+        configuration_key: str,
+        timeout_seconds: float = 150.0,
+    ) -> dict[str, Any]:
+        """Lease native parent context without occupying its main-turn actor.
+
+        Only connection admission is actor-serialized. The adapter owns its
+        separate control request and cancellation; side failures never stop,
+        disconnect, or retire the parent's supervisor.
+        """
+        from claude_side_question import ask_native_side_question
+
+        clean_chat_id = str(chat_id or "").strip()
+        supervisor = await self._pin_mcp_supervisor(
+            clean_chat_id,
+            options=options,
+            configuration_key=configuration_key,
+        )
+        side_task: asyncio.Task[dict[str, Any]] | None = None
+        retired_task: asyncio.Task[bool] | None = None
+        try:
+            lease = await supervisor.get_side_question_client()
+
+            async def check_owner() -> None:
+                assert self._lock is not None
+                async with self._lock:
+                    if (
+                        self._supervisors.get(clean_chat_id) is not supervisor
+                        or supervisor.closed
+                        or supervisor._client is not lease.client
+                        or supervisor.control_generation != lease.generation
+                        or lease.retired.is_set()
+                    ):
+                        raise ClaudeSDKGenerationChanged(
+                            f"Claude SDK side-question connection changed for {clean_chat_id}"
+                        )
+
+            await check_owner()
+            side_task = asyncio.create_task(
+                ask_native_side_question(
+                    lease.client, question, history=history,
+                    timeout_seconds=timeout_seconds,
+                ),
+                name=f"claude-sdk-side-question:{clean_chat_id}",
+            )
+            retired_task = asyncio.create_task(lease.retired.wait())
+            await asyncio.wait(
+                {side_task, retired_task}, return_when=asyncio.FIRST_COMPLETED,
+            )
+            await check_owner()
+            result = await side_task
+            await check_owner()
+            return result
+        finally:
+            try:
+                tasks = [task for task in (side_task, retired_task) if task is not None]
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                await self._unpin_mcp_supervisor(clean_chat_id, supervisor)
 
     async def get_mcp_status(
         self,
