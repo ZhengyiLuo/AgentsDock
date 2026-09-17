@@ -2378,6 +2378,43 @@ describe('emergency contact service fencing', () => {
   })
 })
 
+describe('workspace Git scope fencing', () => {
+  const expected = { profileId: 'profile', profileGeneration: 4, serverIdentity: 'server-a' }
+  function fixture() {
+    const client = Object.fromEntries(['workspaceGitStatus', 'workspaceGitDiff', 'workspaceGitConflict', 'workspaceGitAction']
+      .map(method => [method, vi.fn().mockResolvedValue({ revision: 'snapshot' })]))
+    const scope = { client }
+    const service = Object.create(AppService.prototype) as AppService
+    const requireWorkspaceScope = vi.fn(() => scope)
+    const ensureValidatedScope = vi.fn().mockResolvedValue(undefined)
+    const assertCurrentScope = vi.fn()
+    Object.assign(service, { requireWorkspaceScope, ensureValidatedScope, assertCurrentScope })
+    return { service, client, requireWorkspaceScope, ensureValidatedScope, assertCurrentScope }
+  }
+  it('checks profile before and after every read and mutation', async () => {
+    const f = fixture()
+    await f.service.workspaceGitStatus(expected, 'chat')
+    await f.service.workspaceGitDiff(expected, 'chat', 'file.ts', 'staged')
+    await f.service.workspaceGitConflict(expected, 'chat', 'file.ts')
+    await f.service.workspaceGitAction(expected, 'chat', { action: 'commit', expected_revision: 'rev', message: 'Reviewed' })
+    expect(f.requireWorkspaceScope).toHaveBeenCalledTimes(4)
+    for (const call of f.requireWorkspaceScope.mock.calls) expect(call).toEqual([expected])
+    expect(f.assertCurrentScope).toHaveBeenCalledTimes(8)
+  })
+  it('never mutates after server validation discovers a profile switch', async () => {
+    const f = fixture()
+    f.assertCurrentScope.mockImplementation(() => { throw new Error('Server changed') })
+    await expect(f.service.workspaceGitAction(expected, 'chat', { action: 'stage', paths: ['file'], expected_revision: 'rev' })).rejects.toThrow('Server changed')
+    expect(f.client.workspaceGitAction).not.toHaveBeenCalled()
+  })
+  it('does not return an old server response into a new workspace', async () => {
+    const f = fixture()
+    f.assertCurrentScope.mockImplementationOnce(() => {}).mockImplementationOnce(() => { throw new Error('Server changed') })
+    await expect(f.service.workspaceGitStatus(expected, 'chat')).rejects.toThrow('Server changed')
+    expect(f.client.workspaceGitStatus).toHaveBeenCalledOnce()
+  })
+})
+
 describe('persistent agent handoff route scope fencing', () => {
   it('validates the active profile around every route admin operation', async () => {
     const route = { route_id: 'route-1', alias: 'mobile' }

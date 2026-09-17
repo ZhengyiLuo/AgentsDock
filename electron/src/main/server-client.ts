@@ -7,6 +7,8 @@ import { Readable } from 'node:stream'
 import { compactTimelineEvent, compactTimelineEvents } from '../shared/event-compaction'
 import { parseSideQuestionAnswer, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput } from '../shared/side-questions'
 import { parseChatInboxDelete, parseChatInboxPage } from '../shared/chat-inbox'
+import { parseWorkspaceGitStatus, validateWorkspaceGitAction, workspaceGitPath, workspaceGitSessionId,
+  type WorkspaceGitAction, type WorkspaceGitDiff, type WorkspaceGitConflict, type WorkspaceGitView } from '../shared/workspace-git'
 import { chatShareCreateBody, chatShareId, chatShareMode, parseChatShareList, parseChatSharePreview, parseCreatedChatShare,
   type ChatShareMode, type CreateChatShareInput } from '../shared/chat-shares'
 import { inferredFileContentType } from '../shared/file-content-type'
@@ -1518,6 +1520,36 @@ export class AgentServerClient {
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`)
   }
 
+  async workspaceGitStatus(sessionId: string) {
+    return parseWorkspaceGitStatus(await this.privilegedNativeRequest(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git`, {}, 40_000, 200, 16 * 1024 * 1024))
+  }
+
+  async workspaceGitDiff(sessionId: string, path: string, view: WorkspaceGitView): Promise<WorkspaceGitDiff> {
+    if (view !== 'staged' && view !== 'unstaged') throw new Error('Invalid Git diff view.')
+    const query = new URLSearchParams({ path: workspaceGitPath(path), view })
+    const result = await this.privilegedNativeRequest<WorkspaceGitDiff>(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git/diff?${query}`, {}, 40_000, 200, 16 * 1024 * 1024)
+    if (result.path !== path || result.view !== view || typeof result.diff !== 'string' || typeof result.revision !== 'string'
+      || typeof result.binary !== 'boolean' || typeof result.truncated !== 'boolean') throw new Error('Invalid Git diff response.')
+    return result
+  }
+
+  async workspaceGitConflict(sessionId: string, path: string): Promise<WorkspaceGitConflict> {
+    const query = new URLSearchParams({ path: workspaceGitPath(path) })
+    const result = await this.privilegedNativeRequest<WorkspaceGitConflict>(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git/conflict?${query}`, {}, 40_000, 200, 16 * 1024 * 1024)
+    if (result.path !== path || typeof result.result !== 'string' || typeof result.revision !== 'string'
+      || typeof result.binary !== 'boolean' || !['base', 'ours', 'theirs'].every(key => result[key as 'base'] === null || typeof result[key as 'base'] === 'string')) {
+      throw new Error('Invalid Git conflict response.')
+    }
+    return result
+  }
+
+  async workspaceGitAction(sessionId: string, input: WorkspaceGitAction) {
+    const body = JSON.stringify(validateWorkspaceGitAction(input))
+    return parseWorkspaceGitStatus(await this.privilegedNativeRequest(`/api/sessions/${workspaceGitSessionId(sessionId)}/workspace/git/action`, {
+      method: 'POST', body
+    }, 120_000, 200, 16 * 1024 * 1024))
+  }
+
   workspaceEntries(sessionId: string, path = '', offset = 0, limit = 500): Promise<WorkspaceEntriesPage> {
     const query = new URLSearchParams({ path, offset: String(offset), limit: String(limit) })
     return this.get(`/api/sessions/${encodeURIComponent(sessionId)}/workspace/entries?${query}`)
@@ -2329,7 +2361,10 @@ export class AgentServerClient {
     if (!isPrivilegedNativeControlTarget(target, server, serverPrefix, method)) {
       throw new Error('Privileged native control route is invalid.')
     }
-    const body = boundedJSONRequestBody(init.body, method)
+    // Conflict results are file contents, not a tiny control message. Keep this
+    // larger bound exclusive to the validated Git action route.
+    const gitAction = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git\/action$/.test(target.pathname.slice(serverPrefix.length))
+    const body = boundedJSONRequestBody(init.body, method, gitAction ? 8 * 1024 * 1024 : SECURE_PEER_MAX_REQUEST_BYTES)
     const response = await securePeerNodeResponse(target, {
       method,
       headers: privilegedNativeTransportHeaders(configuration.token, body),
@@ -2829,12 +2864,13 @@ function securePeerMethod(value: string, allowed: readonly SecurePeerMethod[]): 
   return method
 }
 
-function boundedJSONRequestBody(body: BodyInit | null | undefined, method: SecurePeerMethod): Buffer | null {
+function boundedJSONRequestBody(body: BodyInit | null | undefined, method: SecurePeerMethod, maxBytes = SECURE_PEER_MAX_REQUEST_BYTES): Buffer | null {
   if (body === null || body === undefined) return null
   if (method === 'GET' || method === 'HEAD') throw new TypeError(`Secure peer ${method} requests cannot carry a body.`)
   if (typeof body !== 'string') throw new TypeError('Secure peer requests require a buffered JSON body.')
   const bytes = Buffer.from(body, 'utf8')
-  if (bytes.byteLength > SECURE_PEER_MAX_REQUEST_BYTES) throw new Error('Secure peer request body is too large.')
+  if (bytes.byteLength > maxBytes) throw new Error(maxBytes === SECURE_PEER_MAX_REQUEST_BYTES
+    ? 'Secure peer request body is too large.' : 'Git resolution request body is too large.')
   try { JSON.parse(body) } catch { throw new TypeError('Secure peer requests require a JSON body.') }
   return bytes
 }
@@ -2896,6 +2932,14 @@ function isPrivilegedNativeControlTarget(
     || !target.pathname.startsWith(`${serverPrefix}/api/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
+  const workspaceGit = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/workspace\/git(?:\/(diff|conflict|action))?$/.exec(path)
+  if (workspaceGit) {
+    const operation = workspaceGit[1]
+    if (!operation || operation === 'action') return !target.search && method === (operation ? 'POST' : 'GET')
+    const keys = [...target.searchParams.keys()]
+    return method === 'GET' && keys.length === (operation === 'diff' ? 2 : 1)
+      && keys.includes('path') && (operation !== 'diff' || keys.includes('view'))
+  }
   const sideQuestion = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-questions(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (sideQuestion) return !target.search && method === (sideQuestion[1] ? 'DELETE' : 'POST')
   const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)

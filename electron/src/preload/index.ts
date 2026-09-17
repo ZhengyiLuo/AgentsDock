@@ -4,6 +4,12 @@ import type { AppEventMap } from '../shared/types'
 import { buildMediaURL, buildWorkspaceMediaURL } from '../shared/media-url'
 
 const api: AgentsDockAPI = {
+  workspaceGit: {
+    status: (scope, sessionId) => ipcRenderer.invoke('workspace-git:status', scope, sessionId),
+    diff: (scope, sessionId, path, view) => ipcRenderer.invoke('workspace-git:diff', scope, sessionId, path, view),
+    conflict: (scope, sessionId, path) => ipcRenderer.invoke('workspace-git:conflict', scope, sessionId, path),
+    action: (scope, sessionId, input) => ipcRenderer.invoke('workspace-git:action', scope, sessionId, input)
+  },
   sideQuestions: {
     ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
     cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId)

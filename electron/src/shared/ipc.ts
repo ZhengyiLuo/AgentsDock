@@ -210,6 +210,13 @@ import type {
 } from './secure-peer'
 
 export interface AgentsDockAPI {
+  /** Native operator-only controls, deliberately absent from shared-chat clients. */
+  workspaceGit?: {
+    status(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./workspace-git').WorkspaceGitStatus>
+    diff(scope: WorkspaceProfileScope, sessionId: string, path: string, view: import('./workspace-git').WorkspaceGitView): Promise<import('./workspace-git').WorkspaceGitDiff>
+    conflict(scope: WorkspaceProfileScope, sessionId: string, path: string): Promise<import('./workspace-git').WorkspaceGitConflict>
+    action(scope: WorkspaceProfileScope, sessionId: string, input: import('./workspace-git').WorkspaceGitAction): Promise<import('./workspace-git').WorkspaceGitStatus>
+  }
   /** Restricted browser renderer. It has no native, filesystem, or other-chat authority. */
   readonly sharedChat?: true
   sideQuestions?: {

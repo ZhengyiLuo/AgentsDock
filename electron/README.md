@@ -96,5 +96,19 @@ from memory, and revision-checked saves prevent overwriting agent changes.
 Files above 512 KiB use a lightweight read-only text viewer instead of the
 syntax parser so opening source never competes with the chat renderer.
 
+The **Changes** tab reviews the selected workspace's entire Git worktree, not
+only changes attributed to an agent turn. Open it to inspect staged, unstaged,
+untracked and conflicted files; stage/unstage whole files; review and commit the
+staged set; or resolve text conflicts before continuing an existing merge or
+rebase. Abort requires confirmation. Git reads happen only on opening the tab,
+explicit refresh, file selection and action reconciliation—there is no polling.
+Repository revisions fence mutations against changes made by other agents or
+editors. This requires matching standalone AgentsServer Git endpoints and the
+native operator connection; shared-chat web guests have no Git controls.
+
+This first cut does not create branches/merges, push, or manage PRs/MRs. Binary
+conflicts and repositories requiring executable Git hooks/custom filters may
+need the terminal; the app reports that rather than bypassing repository policy.
+
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the implementation contract and
 verification status.

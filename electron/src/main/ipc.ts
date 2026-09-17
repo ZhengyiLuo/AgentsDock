@@ -41,6 +41,10 @@ export function registerIpc(
   }
 
   handle('app:bootstrap', () => service.bootstrap())
+  handle('workspace-git:status', (scope, sessionId) => service.workspaceGitStatus(scope, sessionId))
+  handle('workspace-git:diff', (scope, sessionId, path, view) => service.workspaceGitDiff(scope, sessionId, path, view))
+  handle('workspace-git:conflict', (scope, sessionId, path) => service.workspaceGitConflict(scope, sessionId, path))
+  handle('workspace-git:action', (scope, sessionId, input) => service.workspaceGitAction(scope, sessionId, input))
   handle('side-questions:ask', (scope, sessionId, input) => service.askSideQuestion(scope, sessionId, input))
   handle('side-questions:cancel', (scope, sessionId, requestId) => service.cancelSideQuestion(scope, sessionId, requestId))
   handle('chat-shares:preview', (scope, sessionId) => service.previewChatShare(scope, sessionId))

@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
 import { isImportedProviderControlMetadata, mergeProviderInterruptionEvent } from '../shared/provider-origin'
 import type { ChatShareMode, CreateChatShareInput } from '../shared/chat-shares'
+import type { WorkspaceGitAction, WorkspaceGitView } from '../shared/workspace-git'
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
@@ -3892,6 +3893,42 @@ export class AppService {
     const info = await scope.client.workspaceInfo(sessionId)
     this.assertCurrentScope(scope)
     return info
+  }
+
+  async workspaceGitStatus(expected: WorkspaceProfileScope, sessionId: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitStatus(sessionId)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceGitDiff(expected: WorkspaceProfileScope, sessionId: string, path: string, view: WorkspaceGitView) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitDiff(sessionId, path, view)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceGitConflict(expected: WorkspaceProfileScope, sessionId: string, path: string) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitConflict(sessionId, path)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async workspaceGitAction(expected: WorkspaceProfileScope, sessionId: string, input: WorkspaceGitAction) {
+    const scope = this.requireWorkspaceScope(expected)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.workspaceGitAction(sessionId, input)
+    this.assertCurrentScope(scope)
+    return result
   }
 
   async workspaceEntries(sessionId: string, path = '', offset = 0, limit = 500): Promise<WorkspaceEntriesPage> {

@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-17 — Workspace Changes first cut (unreleased)
+
+- Add a lazy Changes workspace tab for repository-wide staged, unstaged,
+  untracked and conflicted files, on-demand diffs, whole-file staging,
+  staged-set commit review, and text conflict resolution. Continue reports
+  further conflicts honestly; abort requires explicit confirmation.
+- Use native operator-only, profile-scoped requests and repository revisions.
+  Preserve conflict drafts on stale writes, reject late responses from another
+  workspace, and add no polling or per-keystroke Git requests.
+- Exercise production workspace entry/renderer, preload, HTTP client, server
+  Git router and native authorization with mouse/keyboard in isolated offscreen
+  Electron against disposable real repositories. Verify actual commits/index,
+  stale stage and resolution rejection, merge completion, confirmed abort,
+  tab switching/closing, light/dark and narrow views, and zero idle requests.
+  Session lookup and app-shell context are fixtures; full installed-app startup
+  and production-profile acceptance are not claimed.
+- Validate focused desktop regressions, TypeScript and production compilation.
+  This feature needs the matching standalone server Git endpoints. PR/MR,
+  push and branch creation remain outside this first cut. Not published,
+  installed or deployed; existing applications and research jobs remain intact.
+
 ## 2026-09-17 — Desktop 1.0.3 acceptance checkpoint (not published)
 
 - Validate clean source `f387a1ac874ab3e153a648bd53e42bf4347ae4e4` with TypeScript,

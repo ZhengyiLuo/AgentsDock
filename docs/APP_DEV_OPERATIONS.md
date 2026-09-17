@@ -97,6 +97,7 @@ running. Keep the guard intact. A screenshot of the panel alone cannot pass it.
 | Sharing | Open the real URL in a separate browser session; exercise token access/revoke, media and the actual read-only/interactive restrictions. |
 | Updates | Validate installed-version → candidate update, failed/offline behavior, retained settings and active-work safety; do not infer install success from download success. |
 | Storage | Simulate write failure in an isolated fixture/volume; preserve existing data and show a recoverable error. Never fill the user's disk deliberately. |
+| Workspace Git | Use a disposable repository through the native Changes tab: review staged/unstaged/untracked files, stage and unstage, commit only the reviewed index, resolve conflicts, continue and explicitly confirm abort. Change the repository between review and mutation to verify stale rejection; switch chats/servers and check request ownership, both themes, narrow layout, and no idle polling. |
 
 ## 6. Handoff and release honestly
 
