@@ -3,6 +3,7 @@
   --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   /* Interface roles; chat, code, and terminal text keep their own settings. */
+  --text-size-micro: 9px;
   --text-size-caption: 11px;
   --text-size-meta: 12px;
   --text-size-label: 13px;
@@ -500,7 +501,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .sidebar-topbar strong { font-size: var(--text-size-ui); }
 .sidebar-brand { min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); margin-right: var(--space-2); }
 .sidebar-brand strong, .sidebar-topbar .toolbar-cluster { flex-shrink: 0; }
-.sidebar-app-version { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-size-caption); font-weight: var(--text-weight-body); }
+.sidebar-app-version { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-size-micro); font-weight: var(--text-weight-body); }
 .toolbar-cluster { display: flex; gap: var(--space-1); }
 .server-selector-trigger { min-width: 0; min-height: 45px; margin: 0 10px 7px; display: flex; align-items: center; gap: 9px; padding: var(--space-3) 9px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius-selection); text-align: left; -webkit-app-region: no-drag; }
 .server-selector-trigger:hover, .server-selector-trigger[data-state="open"] { background: var(--surface-3); border-color: var(--border); }

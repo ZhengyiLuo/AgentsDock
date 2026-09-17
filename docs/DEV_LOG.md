@@ -1,5 +1,14 @@
 # Public development log
 
+## 2026-09-17 — Quiet sidebar version label (unreleased)
+
+- Keep the installed app version beside the brand at a small, muted 9px size;
+  preserve the title and control layout and keep the full version in its tooltip.
+- Check production Sidebar rendering in isolated offscreen Electron at narrow
+  and normal sidebar widths, light and dark themes. Verify no title/control
+  overlap, working keyboard navigation, one local metadata read and no network
+  requests. This is renderer acceptance, not packaged-release acceptance.
+
 ## 2026-09-17 — Workspace Changes first cut (unreleased)
 
 - Add a lazy Changes workspace tab for repository-wide staged, unstaged,
