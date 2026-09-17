@@ -1,5 +1,23 @@
 # Public development log
 
+## 2026-09-17 — Desktop 1.0.3 acceptance checkpoint (not published)
+
+- Validate clean source `f387a1ac874ab3e153a648bd53e42bf4347ae4e4` with TypeScript,
+  production compilation, 4,369 passing desktop tests (10 skipped) and eight
+  package/license guards. Keep unrelated working-tree changes out of the pin.
+- Exercise Side chat with native Electron input, production preload IPC,
+  request ownership and HTTP client, the unchanged server authorization/router,
+  and a real Claude provider. First answer, contextual follow-up and cancellation
+  pass; the old generic transport reproduces 403. Session context and the main
+  task are synthetic: this does not validate a concurrent live main agent or
+  full production profile bootstrap.
+- The equivalent real Codex check uncovers a separate server adapter startup
+  failure before a thread starts: fresh temporary state indexes existing
+  provider history synchronously and initialization times out. Do not classify
+  that as an app authentication failure or extend deadlines to hide the work.
+- Hold publication pending the known Codex limitation and release decision.
+  No installed app or production server was replaced or restarted.
+
 ## 2026-09-17 — Desktop 1.0.3 side-chat transport and visible versions
 
 - Correct side-question POST and cancellation to use the existing native HTTP
