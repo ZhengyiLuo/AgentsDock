@@ -14,6 +14,13 @@
   production Inspector and Side chat with native offscreen Electron input in
   light/dark and narrow layouts, using synthetic sessions and provider replies.
   This is layout/interaction acceptance; transport and providers are unchanged.
+- Catch and correct a narrow-window clipping case by revealing the complete
+  composer rather than only its textarea. Verify long-history wheel scrolling,
+  localization and no extra transport/global-store writes while typing.
+- The final package pass has 4,387 tests passing, 10 skipped. One earlier run
+  encountered an intermittent pre-existing Team Network address-label timing
+  assertion; its focused rerun and final full run pass without changing that
+  feature. Package startup and live-provider behavior are not retested here.
 - Prepare a local desktop package only. No publication, server update or
   replacement of the running application is part of this change.
 
