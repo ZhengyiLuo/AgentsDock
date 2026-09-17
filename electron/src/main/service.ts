@@ -163,6 +163,7 @@ import type {
   SecurePeerControlStatus,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPairing,
   SecurePeerPublishRouteInput,
@@ -173,6 +174,7 @@ import type {
 } from '../shared/secure-peer'
 import {
   normalizeSecurePeerJoinTarget,
+  normalizeSecurePeerEndpoint,
   normalizeSecurePeerIPv4,
   normalizeSecurePeerPort,
   normalizeSecurePeerScopes,
@@ -180,6 +182,7 @@ import {
 } from '../shared/secure-peer'
 import {
   automaticPairingCompletionAvailable,
+  securePeerEndpointUpdateAvailable,
   parseSecurePeerControlStatus,
   parseSecurePeerHostPeerRevocation,
   parseSecurePeerHostPeers,
@@ -949,6 +952,7 @@ export class AppService {
     this.requireSecurePeerControlContext(context)
     return {
       ...parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId),
+      endpointUpdateAvailable: securePeerEndpointUpdateAvailable(this.health?.capabilities?.secure_peer_v1),
       automaticPairingCompletionAvailable: automaticPairingCompletionAvailable(this.health?.capabilities?.automatic_pairing_completion_v1)
     }
   }
@@ -1273,6 +1277,74 @@ export class AppService {
     this.requireSecurePeerControlContext(context)
     this.mailHints.retire()
     return parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
+  }
+
+  async updateSecurePeerConnectionEndpoint(
+    expected: SecurePeerProfileScope,
+    input: SecurePeerUpdateEndpointInput,
+    beforeWrite?: () => void
+  ): Promise<SecurePeerControlStatus> {
+    const context = await this.securePeerControlContext(expected)
+    if (!securePeerEndpointUpdateAvailable(this.health?.capabilities?.secure_peer_v1)) {
+      throw new Error('Update this AgentsServer to change a saved host address.')
+    }
+    if (input?.confirmed !== true) throw new Error('Confirm the saved host address change before continuing.')
+    if (input.expectedServerInstanceId !== context.serverInstanceId) throw staleProfileError()
+    const connectionId = securePeerV4ID(input.connectionId, 'connection')
+    const hostIdentity = boundedTeamHubControlField(input.expectedHostServerIdentity, 'host server identity', 240)
+    const hubIdentity = boundedTeamHubControlField(input.expectedHubIdentity, 'Hub identity', 240)
+    const previousEndpoint = normalizeSecurePeerEndpoint(input.expectedRemoteEndpoint)
+    const endpoint = normalizeSecurePeerEndpoint(input.host)
+    if (endpoint.endpoint === previousEndpoint.endpoint) throw new Error('Enter a different host address or port.')
+
+    // Read local authenticated state; recovery must not depend on the old
+    // remote endpoint being reachable or currently selected.
+    const beforeRaw = await context.scope.client.securePeerStatus()
+    this.requireSecurePeerControlContext(context)
+    const before = parseSecurePeerControlStatus(beforeRaw, context.expected, context.serverInstanceId)
+    const matching = before.pairings.filter(pairing => pairing.connectionId === connectionId)
+    const pairing = matching[0]
+    if (matching.length !== 1 || !pairing || pairing.direction !== 'outgoing' || pairing.trustState !== 'approved'
+      || pairing.hostServerIdentity !== hostIdentity || pairing.hubIdentity !== hubIdentity
+      || pairing.remoteEndpoint !== previousEndpoint.endpoint) {
+      throw new Error('The saved secure connection changed. Refresh Team Network and try again.')
+    }
+    beforeWrite?.()
+    let raw: unknown
+    try {
+      raw = await context.scope.client.updateSecurePeerConnectionEndpoint(connectionId, {
+        request_id: randomUUID(),
+        expected_server_identity: context.expected.serverIdentity,
+        expected_server_instance_id: context.serverInstanceId,
+        expected_host_server_identity: hostIdentity,
+        expected_hub_id: hubIdentity,
+        expected_host_ip: previousEndpoint.host,
+        expected_port: previousEndpoint.port,
+        host_ip: endpoint.host,
+        port: endpoint.port,
+        confirmed: true
+      })
+    } catch (error) {
+      if (error instanceof ServerError) throw error
+      // Never repeat a potentially committed migration: one status read can
+      // establish success after an interrupted response without another write.
+      this.requireSecurePeerControlContext(context)
+      try { raw = await context.scope.client.securePeerStatus() } catch { throw error }
+      this.requireSecurePeerControlContext(context)
+      const recovered = parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
+      if (!recovered.pairings.some(item => item.connectionId === connectionId && item.remoteEndpoint === endpoint.endpoint)) throw error
+    }
+    this.requireSecurePeerControlContext(context)
+    const result = parseSecurePeerControlStatus(raw, context.expected, context.serverInstanceId)
+    const migrated = result.pairings.filter(item => item.connectionId === connectionId)
+    if (result.activeConnectionId !== before.activeConnectionId || migrated.length !== 1
+      || migrated[0].remoteEndpoint !== endpoint.endpoint
+      || securePeerEndpointTrustKey(migrated[0]) !== securePeerEndpointTrustKey(pairing)) {
+      throw new Error('AgentsServer returned a mismatched secure host address change.')
+    }
+    if (result.activeConnectionId === connectionId) this.mailHints.retire()
+    return { ...result, endpointUpdateAvailable: true,
+      automaticPairingCompletionAvailable: automaticPairingCompletionAvailable(this.health?.capabilities?.automatic_pairing_completion_v1) }
   }
 
   async publishSecurePeerRoute(
@@ -6839,6 +6911,16 @@ function parseTeamHubDiscovery(value: unknown, serverIdentity: string): TeamHubD
     hubIdentity: item.hub_id,
     hostServerIdentity: serverIdentity
   }
+}
+
+function securePeerEndpointTrustKey(pairing: SecurePeerPairing): string {
+  return JSON.stringify([
+    pairing.id, pairing.direction, pairing.trustState, pairing.connectionId,
+    pairing.hostServerIdentity, pairing.hubIdentity, pairing.hostCaFingerprint,
+    pairing.peerServerIdentity, pairing.peerPublicKeyFingerprint, pairing.transcriptHash,
+    pairing.teamId, pairing.certificateFingerprint, pairing.localProxyBasePath,
+    [...pairing.grantedScopes].sort()
+  ])
 }
 
 function securePeerCapabilityUUID(value: unknown): string {

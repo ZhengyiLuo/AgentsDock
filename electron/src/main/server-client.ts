@@ -526,6 +526,9 @@ export class AgentServerClient {
   async forgetSecurePeerConnection(connectionId: string, input: unknown): Promise<unknown> {
     return this.securePeerRequest(`/api/admin/secure-peers/v1/connections/${securePeerSegment(connectionId)}/forget`, { method: 'POST', body: JSON.stringify(input) })
   }
+  async updateSecurePeerConnectionEndpoint(connectionId: string, input: unknown): Promise<unknown> {
+    return this.securePeerRequest(`/api/admin/secure-peers/v1/connections/${securePeerSegment(connectionId)}/endpoint`, { method: 'PUT', body: JSON.stringify(input) })
+  }
   async revokeSecurePeerHostPeer(peerId: string, input: unknown): Promise<unknown> {
     return this.securePeerRequest(`/api/admin/secure-peers/v1/peers/${securePeerSegment(peerId)}/revoke`, { method: 'POST', body: JSON.stringify(input) })
   }
@@ -2464,7 +2467,7 @@ function securePeerSegment(value: string): string {
 
 function isSecurePeerControlPath(path: string): boolean {
   const identifier = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
-  return new RegExp(`^/api/admin/secure-peers/v1/(?:status|host|peers|pairings|routes|pairings/${identifier}(?:/(?:cancel|approve|reject|activate|completion))?|connections/${identifier}/(?:deactivate|forget)|peers/${identifier}/revoke|routes/${identifier}/revoke)$`).test(path)
+  return new RegExp(`^/api/admin/secure-peers/v1/(?:status|host|peers|pairings|routes|pairings/${identifier}(?:/(?:cancel|approve|reject|activate|completion))?|connections/${identifier}/(?:deactivate|forget|endpoint)|peers/${identifier}/revoke|routes/${identifier}/revoke)$`).test(path)
 }
 
 function isExactSecurePeerCompletionQuery(query: URLSearchParams): boolean {

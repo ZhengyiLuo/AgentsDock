@@ -326,6 +326,11 @@ function harness(
     cancelSecurePeerPairing: vi.fn(),
     deactivateSecurePeerConnection: vi.fn(),
     forgetSecurePeerConnection: vi.fn(),
+    updateSecurePeerConnectionEndpoint: vi.fn<(
+      scope: import('../shared/secure-peer').SecurePeerProfileScope,
+      input: import('../shared/secure-peer').SecurePeerUpdateEndpointInput,
+      beforeWrite: () => void
+    ) => Promise<SecurePeerControlStatus>>(),
     secureTeamHubProxyFetch: vi.fn(() => fetch),
     serverTeamHubProxyFetch: vi.fn(() => fetch)
   }
@@ -2644,6 +2649,148 @@ describe('TeamHubService embedded discovery', () => {
       connectionState: 'disconnected',
       backgroundReconnectAllowed: false
     })
+    expect(test.discovery.discover).not.toHaveBeenCalled()
+  })
+
+  it('fences old secure authority during endpoint migration and verifies the same saved pin once after success', async () => {
+    const test = harness()
+    const { profileScope, connectionId } = await connectDurablePeer(test)
+    const saved = { ...test.bindings.get(profileScope.profileId)! }
+    const oldScope = scopeFrom(test.service.status())
+    const migrated = securePeerControl(connectionId)
+    migrated.pairings[0].remoteEndpoint = '100.64.0.2:7852'
+    const response = deferred<SecurePeerControlStatus>()
+    test.discovery.updateSecurePeerConnectionEndpoint.mockImplementation(async (_scope, _input, beforeWrite) => {
+      beforeWrite()
+      return response.promise
+    })
+    test.discovery.discover.mockClear()
+    const input = { connectionId, expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-remote',
+      expectedServerInstanceId: 'server-instance-1', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2:7852', confirmed: true as const }
+    const updating = test.service.updateSecurePeerConnectionEndpoint(profileScope, input)
+    await vi.waitFor(() => expect(test.discovery.updateSecurePeerConnectionEndpoint).toHaveBeenCalledOnce())
+    expect(test.service.status().authenticated).toBe(false)
+    await expect(test.service.workspace(oldScope)).rejects.toThrow()
+    expect(test.bindings.get(profileScope.profileId)).toEqual(saved)
+    test.discovery.securePeerStatus.mockResolvedValue(migrated)
+    response.resolve(migrated)
+    await expect(updating).resolves.toMatchObject({ profileGeneration: 1, pairings: [{ remoteEndpoint: input.host }] })
+    expect(test.service.status()).toMatchObject({ authenticated: true, connectionId, hubIdentity: 'hub-remote' })
+    expect(test.discovery.discover).toHaveBeenCalledOnce()
+    expect(test.discovery.activateSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.discovery.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.settings.forgetBinding).not.toHaveBeenCalled()
+    expect(test.bindings.get(profileScope.profileId)).toEqual(saved)
+  })
+
+  it('preserves an inactive saved endpoint without reconnecting or activating it after migration', async () => {
+    const test = harness()
+    const { profileScope, connectionId } = await connectDurablePeer(test)
+    const saved = { ...test.bindings.get(profileScope.profileId)! }
+    const inactive = securePeerControl(connectionId)
+    inactive.activeConnectionId = null
+    inactive.pairings[0].status = 'approved'
+    inactive.pairings[0].transportState = 'disconnected'
+    inactive.pairings[0].remoteEndpoint = '100.64.0.2:7851'
+    test.discovery.updateSecurePeerConnectionEndpoint.mockImplementation(async (_scope, _input, beforeWrite) => {
+      beforeWrite()
+      return inactive
+    })
+    test.discovery.discover.mockClear()
+    await test.service.updateSecurePeerConnectionEndpoint(profileScope, { connectionId,
+      expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-remote',
+      expectedServerInstanceId: 'server-instance-1', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2', confirmed: true })
+    expect(test.service.status()).toMatchObject({ authenticated: false, connectionState: 'disconnected' })
+    expect(test.bindings.get(profileScope.profileId)).toEqual(saved)
+    expect(test.discovery.discover).not.toHaveBeenCalled()
+    expect(test.discovery.activateSecurePeerPairing).not.toHaveBeenCalled()
+  })
+
+  it('keeps saved trust while a failed endpoint migration leaves stale transport unauthenticated', async () => {
+    const test = harness()
+    const { profileScope, connectionId } = await connectDurablePeer(test)
+    const saved = { ...test.bindings.get(profileScope.profileId)! }
+    const failure = new Error('Candidate host did not match the trusted host identity')
+    test.discovery.updateSecurePeerConnectionEndpoint.mockImplementation(async (_scope, _input, beforeWrite) => {
+      beforeWrite()
+      throw failure
+    })
+    test.discovery.discover.mockClear()
+    await expect(test.service.updateSecurePeerConnectionEndpoint(profileScope, { connectionId,
+      expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-remote',
+      expectedServerInstanceId: 'server-instance-1', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2', confirmed: true })).rejects.toBe(failure)
+    expect(test.service.status().authenticated).toBe(false)
+    expect(test.bindings.get(profileScope.profileId)).toEqual(saved)
+    expect(test.discovery.discover).not.toHaveBeenCalled()
+    expect(test.settings.forgetBinding).not.toHaveBeenCalled()
+  })
+
+  it.each(['Enter a different host address or port.', 'Update this AgentsServer to change a saved host address.'])(
+    'preserves healthy authentication when endpoint preflight rejects: %s', async message => {
+      const test = harness()
+      const { profileScope, connectionId } = await connectDurablePeer(test)
+      const before = test.service.status()
+      test.discovery.updateSecurePeerConnectionEndpoint.mockRejectedValue(new Error(message))
+      test.discovery.discover.mockClear()
+      await expect(test.service.updateSecurePeerConnectionEndpoint(profileScope, { connectionId,
+        expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-remote',
+        expectedServerInstanceId: 'server-instance-1', expectedRemoteEndpoint: '100.64.0.1:7851',
+        host: '100.64.0.1:7851', confirmed: true })).rejects.toThrow(message)
+      expect(test.service.status()).toMatchObject({ generation: before.generation, authenticated: true,
+        connectionId, hubIdentity: 'hub-remote' })
+      expect(test.discovery.discover).not.toHaveBeenCalled()
+    }
+  )
+
+  it('rejects endpoint migration replies after a profile switch without reconnecting the new profile', async () => {
+    const test = harness()
+    const { profileScope, connectionId } = await connectDurablePeer(test)
+    const response = deferred<SecurePeerControlStatus>()
+    test.discovery.updateSecurePeerConnectionEndpoint.mockImplementation(async (_scope, _input, beforeWrite) => {
+      beforeWrite()
+      return response.promise
+    })
+    const updating = test.service.updateSecurePeerConnectionEndpoint(profileScope, { connectionId,
+      expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-remote',
+      expectedServerInstanceId: 'server-instance-1', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2', confirmed: true })
+    await vi.waitFor(() => expect(test.discovery.updateSecurePeerConnectionEndpoint).toHaveBeenCalledOnce())
+    test.setServerScope({ profileId: 'server-profile-2', profileGeneration: 2, serverIdentity: 'server-stable-2',
+      serverUrl: 'http://127.0.0.1:7859', serverName: 'Other server' })
+    test.discovery.discover.mockClear()
+    const migrated = securePeerControl(connectionId)
+    migrated.pairings[0].remoteEndpoint = '100.64.0.2:7851'
+    response.resolve(migrated)
+    await expect(updating).rejects.toThrow('connection changed')
+    expect(test.discovery.discover).not.toHaveBeenCalled()
+    expect(test.service.status()).toMatchObject({ profileId: 'server-profile-2', authenticated: false })
+  })
+
+  it('does not reconnect over a newer local runtime after an in-flight endpoint migration', async () => {
+    const test = harness()
+    const { profileScope } = await connectTransientPeer(test)
+    const response = deferred<SecurePeerControlStatus>()
+    test.discovery.updateSecurePeerConnectionEndpoint.mockImplementation(async (_scope, _input, beforeWrite) => {
+      beforeWrite()
+      return response.promise
+    })
+    const updating = test.service.updateSecurePeerConnectionEndpoint(profileScope, { connectionId: TRANSIENT_CONNECTION_ID,
+      expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-remote',
+      expectedServerInstanceId: 'server-instance-1', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2', confirmed: true })
+    await vi.waitFor(() => expect(test.discovery.updateSecurePeerConnectionEndpoint).toHaveBeenCalledOnce())
+    test.discovery.securePeerStatus.mockResolvedValue(securePeerControl(null))
+    await expect(test.service.connect()).resolves.toMatchObject({ authenticated: true, hubIdentity: 'hub-stable-1' })
+    const generation = test.service.status().generation
+    test.discovery.discover.mockClear()
+    const migrated = securePeerControl(TRANSIENT_CONNECTION_ID)
+    migrated.pairings[0].remoteEndpoint = '100.64.0.2:7851'
+    response.resolve(migrated)
+    await updating
+    expect(test.service.status()).toMatchObject({ generation, authenticated: true, hubIdentity: 'hub-stable-1' })
     expect(test.discovery.discover).not.toHaveBeenCalled()
   })
 

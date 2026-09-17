@@ -102,6 +102,7 @@ const api: AgentsDockAPI = {
     activateSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:activate', scope, input),
     deactivateSecurePeerConnection: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:deactivate', scope, input),
     forgetSecurePeerConnection: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:forget', scope, input),
+    updateSecurePeerConnectionEndpoint: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:connection:endpoint', scope, input),
     securePeers: (scope, teamId) => ipcRenderer.invoke('team-hub:secure-peer:list', scope, teamId),
     approveSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:approve', scope, input),
     rejectSecurePeerPairing: (scope, input) => ipcRenderer.invoke('team-hub:secure-peer:reject', scope, input),

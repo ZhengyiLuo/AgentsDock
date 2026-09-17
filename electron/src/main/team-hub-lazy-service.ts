@@ -51,6 +51,7 @@ import type {
   SecurePeerCompletionWaitInput,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPublishRouteInput,
   SecurePeerProfileScope,
@@ -171,6 +172,7 @@ export class LazyTeamHubService {
   activateSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerActivateInput) { return this.requireService().activateSecurePeerPairing(scope, input) }
   deactivateSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerDeactivateInput) { return this.requireService().deactivateSecurePeerConnection(scope, input) }
   forgetSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerForgetConnectionInput) { return this.requireService().forgetSecurePeerConnection(scope, input) }
+  updateSecurePeerConnectionEndpoint(scope: SecurePeerProfileScope, input: SecurePeerUpdateEndpointInput) { return this.requireService().updateSecurePeerConnectionEndpoint(scope, input) }
   securePeers(scope: TeamHubScope, teamId: string) { return this.requireService().securePeers(scope, teamId) }
   revokeSecurePeer(scope: TeamHubScope, teamId: string, input: SecurePeerRevokeInput) { return this.requireService().revokeSecurePeer(scope, teamId, input) }
   publishSecurePeerRoute(scope: SecurePeerProfileScope, input: SecurePeerPublishRouteInput) { return this.requireService().publishSecurePeerRoute(scope, input) }

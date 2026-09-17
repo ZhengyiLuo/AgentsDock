@@ -944,6 +944,109 @@ describe('secure peer control fencing', () => {
     expect(test.retireMailHints).toHaveBeenCalledOnce()
   })
 
+  function endpointHarness(active = true) {
+    const test = completionHarness()
+    test.pairing.transport_state = active ? 'offline' : 'disconnected'
+    test.pairing.status = active ? 'connected' : 'approved'
+    test.status.active_connection_id = active ? test.pairing.connection_id : null
+    const migrated = structuredClone(test.status)
+    migrated.pairings[0].remote_endpoint = '100.64.0.2:7852'
+    const update = vi.fn().mockResolvedValue(migrated)
+    Object.assign(test.client, { updateSecurePeerConnectionEndpoint: update })
+    Object.assign(test.service, { health: { capabilities: { secure_peer_v1: {
+      available: true, version: 1, endpoint_update_version: 1,
+      endpoint_update_path: '/api/admin/secure-peers/v1/connections/{connection_id}/endpoint'
+    } } } })
+    const input = { connectionId: test.pairing.connection_id, expectedServerInstanceId: 'instance-a',
+      expectedHostServerIdentity: 'server-host', expectedHubIdentity: 'hub-host',
+      expectedRemoteEndpoint: '100.64.0.1:7851', host: '100.64.0.2:7852', confirmed: true as const }
+    return { ...test, migrated, update, endpointInput: input }
+  }
+
+  it.each([true, false])('migrates an approved unreachable endpoint preserving active=%s and exact trust', async active => {
+    const test = endpointHarness(active)
+    const result = await test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)
+    expect(result).toMatchObject({ activeConnectionId: test.status.active_connection_id,
+      endpointUpdateAvailable: true, pairings: [{ remoteEndpoint: '100.64.0.2:7852', trustState: 'approved' }] })
+    expect(test.update).toHaveBeenCalledExactlyOnceWith(test.pairing.connection_id, {
+      request_id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      expected_server_identity: 'server-a', expected_server_instance_id: 'instance-a',
+      expected_host_server_identity: 'server-host', expected_hub_id: 'hub-host',
+      expected_host_ip: '100.64.0.1', expected_port: 7851, host_ip: '100.64.0.2', port: 7852, confirmed: true
+    })
+    expect(test.client.securePeerStatus).toHaveBeenCalledOnce()
+    expect(test.client.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(test.retireMailHints).toHaveBeenCalledTimes(active ? 1 : 0)
+  })
+
+  it.each(['old-address', 'host-pin', 'hub-pin', 'connection', 'unapproved', 'instance', 'unsupported', 'confirmation', 'invalid-address', 'unchanged'])(
+    'rejects %s endpoint migration before any write', async fault => {
+      const test = endpointHarness()
+      if (fault === 'old-address') test.endpointInput.expectedRemoteEndpoint = '100.64.0.3:7851'
+      if (fault === 'host-pin') test.endpointInput.expectedHostServerIdentity = 'other-host'
+      if (fault === 'hub-pin') test.endpointInput.expectedHubIdentity = 'other-hub'
+      if (fault === 'connection') test.endpointInput.connectionId = test.pairing.id
+      if (fault === 'unapproved') { test.pairing.status = 'revoked'; test.pairing.trust_state = 'revoked'; test.pairing.transport_state = 'revoked' }
+      if (fault === 'instance') test.endpointInput.expectedServerInstanceId = 'old-instance'
+      if (fault === 'unsupported') Object.assign(test.service, { health: { capabilities: {} } })
+      if (fault === 'confirmation') Object.assign(test.endpointInput, { confirmed: false })
+      if (fault === 'invalid-address') test.endpointInput.host = 'https://other.invalid'
+      if (fault === 'unchanged') test.endpointInput.host = test.endpointInput.expectedRemoteEndpoint
+      const beforeWrite = vi.fn()
+      await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput, beforeWrite)).rejects.toThrow()
+      expect(beforeWrite).not.toHaveBeenCalled()
+      expect(test.update).not.toHaveBeenCalled()
+      expect(test.retireMailHints).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['address', 'host-pin', 'hub-pin', 'certificate', 'selection', 'instance'])(
+    'rejects a migration receipt with the wrong %s', async fault => {
+      const test = endpointHarness()
+      if (fault === 'address') test.migrated.pairings[0].remote_endpoint = '100.64.0.3:7852'
+      if (fault === 'host-pin') test.migrated.pairings[0].host_server_identity = 'other-host'
+      if (fault === 'hub-pin') test.migrated.pairings[0].hub_id = 'other-hub'
+      if (fault === 'certificate') test.migrated.pairings[0].certificate_fingerprint = `sha256:${'e'.repeat(64)}`
+      if (fault === 'selection') test.migrated.active_connection_id = null
+      if (fault === 'instance') test.migrated.server_instance_id = 'other-instance'
+      await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).rejects.toThrow()
+      expect(test.update).toHaveBeenCalledOnce()
+      expect(test.retireMailHints).not.toHaveBeenCalled()
+    }
+  )
+
+  it('resolves a committed lost response with one status read and never repeats the write', async () => {
+    const test = endpointHarness()
+    test.update.mockRejectedValue(new Error('socket closed after commit'))
+    test.client.securePeerStatus.mockResolvedValueOnce(test.status).mockResolvedValueOnce(test.migrated)
+    await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).resolves.toMatchObject({
+      pairings: [{ remoteEndpoint: '100.64.0.2:7852' }]
+    })
+    expect(test.update).toHaveBeenCalledOnce()
+    expect(test.client.securePeerStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains an interrupted migration failure when readback still has the old endpoint', async () => {
+    const test = endpointHarness()
+    const failure = new Error('socket closed before commit')
+    test.update.mockRejectedValue(failure)
+    await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).rejects.toBe(failure)
+    expect(test.update).toHaveBeenCalledOnce()
+    expect(test.client.securePeerStatus).toHaveBeenCalledTimes(2)
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
+  it('discards a migrated receipt when the active profile changed while awaiting it', async () => {
+    const test = endpointHarness()
+    const requireContext = vi.fn().mockImplementationOnce(() => undefined).mockImplementation(() => {
+      throw new Error('AgentsServer profile changed')
+    })
+    Object.assign(test.service, { requireSecurePeerControlContext: requireContext })
+    await expect(test.service.updateSecurePeerConnectionEndpoint(test.expected, test.endpointInput)).rejects.toThrow('profile changed')
+    expect(test.update).toHaveBeenCalledOnce()
+    expect(test.retireMailHints).not.toHaveBeenCalled()
+  })
+
   it.each(['wrong-transcript', 'wrong-connection', 'offline', 'no-consent'] as const)('rejects %s completion instead of adopting it', async fault => {
     const test = completionHarness()
     if (fault === 'wrong-transcript') test.pairing.transcript_hash = 'e'.repeat(64)

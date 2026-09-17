@@ -113,6 +113,7 @@ import type {
   SecurePeerControlStatus,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPairing,
   SecurePeerPublishRouteInput,
@@ -121,6 +122,7 @@ import type {
   SecurePeerRevokeRouteInput,
   SecurePeerRevokeInput
 } from '../shared/secure-peer'
+import { normalizeSecurePeerEndpoint } from '../shared/secure-peer'
 import {
   TeamHubClient,
   TeamHubClientError,
@@ -187,6 +189,7 @@ export interface TeamHubDiscoveryProvider {
   activateSecurePeerPairing?(expected: SecurePeerProfileScope, input: SecurePeerActivateInput): Promise<SecurePeerControlStatus>
   deactivateSecurePeerConnection?(expected: SecurePeerProfileScope, input: SecurePeerDeactivateInput): Promise<SecurePeerControlStatus>
   forgetSecurePeerConnection?(expected: SecurePeerProfileScope, input: SecurePeerForgetConnectionInput): Promise<SecurePeerControlStatus>
+  updateSecurePeerConnectionEndpoint?(expected: SecurePeerProfileScope, input: SecurePeerUpdateEndpointInput, beforeWrite: () => void): Promise<SecurePeerControlStatus>
   secureTeamHubProxyFetch?(expected: TeamHubServerScope, basePath: string): typeof fetch
   serverTeamHubProxyFetch?(expected: TeamHubServerScope, basePath: string): typeof fetch
   publishSecurePeerRoute?(expected: SecurePeerProfileScope, input: SecurePeerPublishRouteInput): Promise<SecurePeerControlStatus>
@@ -2472,6 +2475,50 @@ export class TeamHubService {
     this.requireSameServerScope(server)
     const stillAffectsCurrent = affectsCurrent && secureBindingMatches(this.binding, input)
     if (stillAffectsCurrent) this.dropSecurePeerRuntime(false)
+    return clone(result)
+  }
+
+  async updateSecurePeerConnectionEndpoint(
+    scope: SecurePeerProfileScope,
+    input: SecurePeerUpdateEndpointInput
+  ): Promise<SecurePeerControlStatus> {
+    const server = this.requireSecurePeerProfileScope(scope)
+    if (!this.discovery.updateSecurePeerConnectionEndpoint) throw securePeerUnavailable()
+    const endpoint = normalizeSecurePeerEndpoint(input?.host)
+    if (input.confirmed !== true) throw new Error('Confirm the saved host address change before continuing.')
+    const affectsCurrent = secureBindingMatches(this.binding, input)
+    const affectsSaved = secureBindingMatches(this.savedSecurePeerBinding(server), input)
+    let generation = this.generation
+    let attempt = this.connectAttempt
+    const result = await this.discovery.updateSecurePeerConnectionEndpoint(scope, input, () => {
+      this.requireSameServerScope(server)
+      // The member control preflight has now validated capability, instance,
+      // saved address and trust. Fence only an admitted write, keeping invalid
+      // or unchanged input side-effect free for the current healthy runtime.
+      if (this.generation !== generation || this.connectAttempt !== attempt) return
+      if (affectsCurrent && secureBindingMatches(this.binding, input)) this.dropSecurePeerRuntime(false)
+      generation = this.generation
+      attempt = this.connectAttempt
+    })
+    this.requireSameServerScope(server)
+    this.requireSecurePeerControlScope(result, server)
+    const migrated = result.pairings.filter(pairing => pairing.connectionId === input.connectionId)
+    if (result.serverInstanceId !== input.expectedServerInstanceId || migrated.length !== 1
+      || migrated[0].direction !== 'outgoing' || migrated[0].trustState !== 'approved'
+      || migrated[0].hostServerIdentity !== input.expectedHostServerIdentity
+      || migrated[0].hubIdentity !== input.expectedHubIdentity
+      || migrated[0].remoteEndpoint !== endpoint.endpoint) {
+      throw new Error('AgentsServer returned a mismatched secure host address change.')
+    }
+    if (this.generation === generation && this.connectAttempt === attempt
+      && result.activeConnectionId === input.connectionId
+      && ((affectsCurrent && secureBindingMatches(this.binding, input))
+        || (affectsSaved && !this.binding && secureBindingMatches(this.savedSecurePeerBinding(server), input)))) {
+      // This explicit action permits one normal pinned health/session check.
+      // An inactive saved connection remains inactive; no activation is sent.
+      await this.connect({ transport: 'secure_peer' })
+      this.requireSameServerScope(server)
+    }
     return clone(result)
   }
 

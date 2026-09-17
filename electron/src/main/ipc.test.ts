@@ -402,6 +402,24 @@ describe('Team Hub IPC registration', () => {
     expect(approveSecurePeerPairing).toHaveBeenCalledWith(scope, input)
   })
 
+  it('keeps endpoint migration bound to its exact profile, instance, connection and prior address', async () => {
+    const updateSecurePeerConnectionEndpoint = vi.fn().mockResolvedValue({ version: 2 })
+    const teamHub = new Proxy({ updateSecurePeerConnectionEndpoint }, {
+      get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn()
+    }) as unknown as LazyTeamHubService
+    registerIpc({} as AppService, {} as AppUpdateManager, teamHub)
+    const scope = { profileId: 'profile-a', profileGeneration: 7, serverIdentity: 'server-local' }
+    const input = { connectionId: '09d7bb2e-3b47-4be7-89fc-2cecd90f4434', expectedServerInstanceId: 'instance-a',
+      expectedHostServerIdentity: 'host', expectedHubIdentity: 'hub', expectedRemoteEndpoint: '100.64.0.1:7851',
+      host: '100.64.0.2:7852', confirmed: true }
+    await harness.handlers.get('team-hub:secure-peer:connection:endpoint')?.(trustedEvent, scope, input)
+    expect(updateSecurePeerConnectionEndpoint).toHaveBeenCalledExactlyOnceWith(scope, input)
+    const untrusted = { sender: { id: 2, getURL: () => 'https://attacker.invalid/' },
+      senderFrame: { url: 'https://attacker.invalid/', parent: null } }
+    expect(() => harness.handlers.get('team-hub:secure-peer:connection:endpoint')?.(untrusted, scope, input)).toThrow('untrusted renderer')
+    expect(updateSecurePeerConnectionEndpoint).toHaveBeenCalledOnce()
+  })
+
   it('routes the passive Team Network surface through dedicated trusted IPC only', async () => {
     const methods = {
       networkCapabilities: vi.fn(), network: vi.fn(), registerNetworkAgent: vi.fn(),

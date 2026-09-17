@@ -185,6 +185,7 @@ export function registerIpc(
     handle('team-hub:secure-peer:activate', (scope, input) => teamHub.activateSecurePeerPairing(scope, input))
     handle('team-hub:secure-peer:connection:deactivate', (scope, input) => teamHub.deactivateSecurePeerConnection(scope, input))
     handle('team-hub:secure-peer:connection:forget', (scope, input) => teamHub.forgetSecurePeerConnection(scope, input))
+    handle('team-hub:secure-peer:connection:endpoint', (scope, input) => teamHub.updateSecurePeerConnectionEndpoint(scope, input))
     handle('team-hub:secure-peer:list', (scope, teamId) => teamHub.securePeers(scope, teamId))
     handle('team-hub:secure-peer:approve', (scope, input) => teamHub.approveSecurePeerPairing(scope, input))
     handle('team-hub:secure-peer:reject', (scope, input) => teamHub.rejectSecurePeerPairing(scope, input))

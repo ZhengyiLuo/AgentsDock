@@ -199,6 +199,7 @@ import type {
   SecurePeerControlStatus,
   SecurePeerDeactivateInput,
   SecurePeerForgetConnectionInput,
+  SecurePeerUpdateEndpointInput,
   SecurePeerJoinInput,
   SecurePeerPairing,
   SecurePeerPublishRouteInput,
@@ -303,6 +304,7 @@ export interface AgentsDockAPI {
     activateSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerActivateInput): Promise<SecurePeerControlStatus>
     deactivateSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerDeactivateInput): Promise<SecurePeerControlStatus>
     forgetSecurePeerConnection(scope: SecurePeerProfileScope, input: SecurePeerForgetConnectionInput): Promise<SecurePeerControlStatus>
+    updateSecurePeerConnectionEndpoint(scope: SecurePeerProfileScope, input: SecurePeerUpdateEndpointInput): Promise<SecurePeerControlStatus>
     securePeers(scope: TeamHubScope, teamId: string): Promise<SecurePeerPairing[]>
     approveSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerApproveInput): Promise<SecurePeerControlStatus>
     rejectSecurePeerPairing(scope: SecurePeerProfileScope, input: SecurePeerRejectInput): Promise<SecurePeerControlStatus>
