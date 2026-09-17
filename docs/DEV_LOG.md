@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-17 — Desktop 1.0.2 endpoint recovery prepared
+
+- Add a single Change host address action for the current Team Network and
+  saved approved connections, including offline members. Reuse one localized
+  dialog with the previous address prefilled; preserve approval and routes.
+- Require the additive member-side AgentsServer 1.0.2 capability. Verify the
+  exact local server instance, saved connection and remote trust before a
+  write; reject stale replies and leave inactive connections inactive.
+- Retire old authenticated state only when a validated write begins, then
+  revalidate the current connection once. A lost write response permits one
+  status check, not a repeated mutation. Add no polling or per-keystroke work.
+- Inspect the actual isolated Electron actions and dialog in light/dark,
+  wide/narrow, error, pending and unsupported-server states. Exercise explicit
+  save/cancel and confirm typing makes no global store writes. These UI checks
+  use synthetic endpoints and cannot mutate real Team Networks.
+- Prepare stable notes against desktop 1.0.1. The release also includes the
+  committed independent Side chat, indexed Mail/Bulletin search, visible
+  changed-file summaries and quiet syncing status. Unrelated unfinished
+  changes remain excluded. Publication acceptance is recorded separately.
+
 ## 2026-09-16 — Local desktop 1.0.1 build 1170 accepted
 
 - Package committed source `7f116b2` as an Apple Silicon local desktop build

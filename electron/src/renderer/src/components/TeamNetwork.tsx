@@ -48,6 +48,7 @@ import type {
 } from '@shared/team-network'
 import type { TeamReference } from '@shared/types'
 import { SecurePeerPanel } from './SecurePeerPanel'
+import { TeamNetworkHostAddressAction } from './SecurePeerHostAddress'
 import { startTeamFeedInitialLoad, TeamMessagesBoard, type TeamFeedInitialLoad, type TeamMailRouteTarget, type TeamMessageAddress } from './TeamMessagesBoard'
 import { buildTeamMailBundles, type TeamMailBundle } from '../lib/team-mail-board'
 import { validTeamReferences } from '../lib/team-references'
@@ -1417,6 +1418,7 @@ export function TeamNetwork({
       ? <button type="button" className="quiet-button network-manage-binding-action" aria-label={t('teamNetwork.shell.connectNetwork')} disabled={Boolean(busy)} onClick={() => void reconnectNetwork()}><RefreshCw size={14} />{t('teamNetwork.shell.connectNetwork')}</button>
       : null
   const bindingLifecycleBusy = busy === 'connect' || busy === 'disconnect-network' || busy === 'forget-network'
+  const connectionActions = <>{localBindingAction}{status?.transport === 'secure_peer' && status.connectionId && !status.designatedHost && <TeamNetworkHostAddressAction status={status} onUpdated={loadStatus} />}</>
   const localBindingManager = status && bindingManagerOpen && status.transport !== 'secure_peer'
     ? <LocalBindingManager
         status={status}
@@ -1513,7 +1515,7 @@ export function TeamNetwork({
     /></div>}
   </NetworkShell>
 
-  if (status.authenticated && !workspace) return <NetworkShell status={status} onClose={onClose} actions={localBindingAction}>
+  if (status.authenticated && !workspace) return <NetworkShell status={status} onClose={onClose} actions={connectionActions}>
     <div className="teamspace-onboarding">
       <div className="teamspace-onboarding-card network-onboarding-card">
         <div className="network-onboarding-hero" role="alert">
@@ -1572,7 +1574,7 @@ export function TeamNetwork({
     {projection && <div className="network-header-summary" aria-label={t(projectionHasMore ? 'teamNetwork.shell.serverCountMore' : projection.servers.length === 1 ? 'teamNetwork.shell.serverCountOne' : 'teamNetwork.shell.serverCountOther', { count: projection.servers.length })}>
       <span><Server size={13} /><strong>{projection.servers.length}{projectionHasMore && '+'}</strong>{projection.servers.length === 1 && !projectionHasMore ? t('teamNetwork.shell.serverSingular') : t('teamNetwork.shell.serverPlural')}</span>
     </div>}
-    {localBindingAction}
+    {connectionActions}
     {(canInvite || !status.serverManaged) && <Dialog.Root open={inviteOpen} onOpenChange={setInviteOpen}>
       <Dialog.Trigger asChild><button className="quiet-button network-invite-action" aria-label={status.designatedHost ? t('teamNetwork.shell.invite') : t('teamNetwork.shell.connectServer')}>{status.designatedHost ? <UserPlus size={14} /> : <KeyRound size={14} />}{status.designatedHost ? t('teamNetwork.shell.invite') : t('teamNetwork.shell.connectServer')}{status.designatedHost && pendingApprovals > 0 && <b className="network-nav-badge" aria-label={t('teamNetwork.shell.waitingCount', { count: pendingApprovals })}>{pendingApprovals}</b>}</button></Dialog.Trigger>
       <Dialog.Portal>

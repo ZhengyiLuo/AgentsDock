@@ -381,6 +381,7 @@ function installAPI(options: APIOptions = {}) {
     cancelSecurePeerPairing: vi.fn(),
     activateSecurePeerPairing: vi.fn(),
     deactivateSecurePeerConnection: vi.fn(),
+    updateSecurePeerConnectionEndpoint: vi.fn(),
     forgetSecurePeerConnection: vi.fn(),
     approveSecurePeerPairing: vi.fn(),
     rejectSecurePeerPairing: vi.fn(),
@@ -3003,6 +3004,38 @@ describe('Team Network', () => {
     expect(screen.getByText('Studio')).toBeVisible()
     expect(screen.queryByText('Build agent')).not.toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Remove Studio' })).toBeVisible()
+  })
+
+  it('changes the saved host address from the offline recovery card and restores Team Network', async () => {
+    useAppStore.setState({ activeProfileId: peerStatus.profileId, profileGeneration: peerStatus.profileGeneration, switchingProfileId: null, profiles: [] })
+    const offline = { ...peerStatus, authenticated: false, connectionState: 'offline' as const,
+      backgroundReconnectAllowed: false, principal: null, session: null, error: 'The saved host is offline.' }
+    const saved = securePairing({ status: 'approved', trustState: 'approved', transportState: 'offline',
+      connectionId: peerStatus.connectionId, hubIdentity: peerStatus.hubIdentity, teamId: 'team-1',
+      certificateFingerprint: `sha256:${'d'.repeat(64)}` })
+    const initialControl = { ...secureControl(offline), endpointUpdateAvailable: true, pairings: [saved] }
+    const nextControl = { ...initialControl, pairings: [{ ...saved, remoteEndpoint: '100.64.0.9:7851', transportState: 'online' as const }] }
+    const teamHub = installAPI({ statusValue: offline, workspaceValue: workspaceFor(peerStatus),
+      detailsValue: detailsFor(peerStatus), projectionValue: projectionFor(peerStatus), overrides: {
+        securePeerStatus: vi.fn().mockResolvedValue(initialControl),
+        updateSecurePeerConnectionEndpoint: vi.fn().mockResolvedValue(nextControl)
+      } })
+    render(<TeamNetwork onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Change host address' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Change host address' })
+    expect(within(dialog).getByRole('textbox')).toHaveValue('100.64.0.1:7851')
+    expect(teamHub.workspace).not.toHaveBeenCalled()
+    expect(teamHub.mailbox).not.toHaveBeenCalled()
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '100.64.0.9' } })
+    teamHub.status.mockResolvedValue(peerStatus)
+    teamHub.securePeerStatus.mockResolvedValue(nextControl)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Initial update')).toBeVisible()
+    expect(teamHub.updateSecurePeerConnectionEndpoint).toHaveBeenCalledTimes(1)
+    expect(teamHub.connect).not.toHaveBeenCalled()
+    expect(teamHub.requestSecurePeerPairing).not.toHaveBeenCalled()
+    expect(screen.getByTitle('Current host address: 100.64.0.9:7851')).toBeVisible()
+    useAppStore.setState({ activeProfileId: null, profileGeneration: 0 })
   })
 
   it('renders network text as text rather than executable HTML', async () => {
