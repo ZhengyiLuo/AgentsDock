@@ -1,5 +1,26 @@
 # Public development log
 
+## 2026-09-17 — Desktop 1.0.2 stable accepted
+
+- Publish [AgentsDock 1.0.2](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.2),
+  build **1170**, from `94659a201581a2adf1f0938f157e519a859e1459`.
+  The public and legacy repositories carry identical sets of 14 release assets
+  and Stable updater metadata. Preserve unrelated uncommitted work.
+- Native release preparation `35195524801` and publication `35197194846` pass
+  all platform gates. macOS universal is Developer ID signed and notarized;
+  Linux x64/arm64 and the explicitly unsigned Windows x64 installer are verified.
+- Validate the exact committed desktop source with TypeScript, production
+  compilation, 4,360 desktop tests (10 skipped) and eight package/license guards.
+  Deterministic regressions cover both first-click races found by the initial
+  native release attempt; the failed candidate was never published.
+- Inspect the actual isolated Electron recovery dialog and full Team Network
+  surface in light/dark and wide/narrow layouts. Verify cancel/focus, wrong-host
+  errors, offline-to-workspace recovery and no typing-triggered requests or
+  global store writes. Synthetic endpoints never mutate live networks.
+- Pair with the published standalone AgentsServer 1.0.2 recovery contract.
+  Members must update their own server and explicitly change a moved host's
+  saved address; publication does not migrate addresses or restart services.
+
 ## 2026-09-17 — Preserve the first recovery and attachment click
 
 - Native release checks expose a commit/passive-effect ordering race: a late
