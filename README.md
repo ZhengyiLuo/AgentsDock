@@ -1283,6 +1283,37 @@ Workspace-files capability v4 adds no-overwrite creation. Post
 descriptor-relative, rejects symlinked parents and existing destinations, and
 is unavailable for archived chats.
 
+## Workspace Git
+
+Native administrator clients can inspect the canonical Git worktree containing
+a chat's working directory, including changes outside that directory when the
+chat is rooted in a repository subdirectory. Shared and restricted principals
+cannot access these endpoints. Requests run on demand, off the event loop.
+
+```text
+GET /api/sessions/{session_id}/workspace/git
+GET /api/sessions/{session_id}/workspace/git/diff?path=src/app.ts&view=staged
+GET /api/sessions/{session_id}/workspace/git/conflict?path=src/app.ts
+POST /api/sessions/{session_id}/workspace/git/action
+```
+
+Actions are `stage`, `unstage`, `commit`, `resolve`, `continue`, and `abort`.
+Every action requires the current status `expected_revision`; stale reviews
+return HTTP 409. Abort additionally requires `confirmed: true`. Commit uses
+the reviewed staged index while preserving unstaged edits. Resolve accepts
+`path` and UTF-8 `content`, saves the text, and stages it. Archived chats remain
+read-only. Non-Git workspaces return `workspace_not_git` (HTTP 422).
+
+Commands have a 30-second deadline. Text conflict sides and edited results are
+limited to 2 MiB each; large diffs report `truncated`, and oversized conflict
+responses fail explicitly. Binary conflicts, executable Git hooks, and files
+with custom filters or merge drivers require the terminal; those mechanisms
+are never silently bypassed. A rebase that reaches another conflict returns
+the new conflicted status so the client can continue reviewing it.
+If publishing the resulting index fails, `git_index_recovery_required`
+identifies the retained index snapshot and lock. The lock blocks later writes
+until the user restores that snapshot using the supplied recovery instructions.
+
 ## Imported provider history
 
 Opening a chat catches its timeline up with messages added to the provider

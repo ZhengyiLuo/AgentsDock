@@ -71,6 +71,7 @@ import uvicorn
 import websockets
 import team_mail_grants
 import chat_mailbox
+import workspace_git
 
 from codex_app_server import (
     CodexAppServerDisconnected,
@@ -90244,6 +90245,11 @@ async def put_session_workspace_file(session_id: str, req: WorkspaceWriteRequest
         req.content,
         req.expected_revision,
     )
+
+
+workspace_git.register_workspace_git_routes(
+    app, authorize=require_native_admin_control, workspace_root=session_workspace_root,
+)
 
 
 @app.put("/api/sessions/{session_id}/workspace/absolute-file")

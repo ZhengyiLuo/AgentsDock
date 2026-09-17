@@ -12,6 +12,7 @@ import unittest
 
 ROOT = Path(__file__).parent
 NEW_MODULES = {
+    "workspace_git.py",
     "side_questions.py", "codex_side_question.py",
     "chat_mailbox.py",
     "claude_background_reconciliation.py",

@@ -1,5 +1,22 @@
 # Development and release log
 
+## 2026-09-17 — Native workspace Git controls (unreleased)
+
+- Add on-demand worktree status, staged/unstaged file diffs, conflict versions,
+  stage/unstage, reviewed commits, text resolutions and existing operation
+  continuation/confirmed abort. Restrict every endpoint to native operator
+  authorization, not shared-chat guests or arbitrary workspace file access.
+- Resolve the canonical worktree and serialize mutations using Git's index
+  lock and revision checks. Preserve coherent conflict indexes when a rebase
+  continues into another conflict. Refuse executable hooks/affected custom
+  filters with actionable guidance rather than silently bypassing them.
+- Exercise real disposable repositories for stale state, unborn and linked
+  worktrees, renames, merge/rebase continuation, abort, unsafe paths and storage
+  failures; validate package file inclusion. Native offscreen desktop checks
+  cross the actual Git router/auth boundary, with fixture session lookup.
+- No server restart, deployment or publication performed. Matching desktop
+  support is required; these endpoints do not add any background polling.
+
 ## 2026-09-17 — AgentsServer 1.0.2 stable accepted
 
 - Publish [AgentsServer 1.0.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.2)

@@ -16,6 +16,7 @@ from pathlib import Path
 FILES = (
     "activation_transaction.py",
     "agent_server.py",
+    "workspace_git.py",
     "team_hub_host.py",
     "secure_peer_runtime.py",
     "team_mail_runtime.py",
