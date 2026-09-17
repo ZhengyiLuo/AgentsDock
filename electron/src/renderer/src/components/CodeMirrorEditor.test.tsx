@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { EditorView } from '@codemirror/view'
-import { redo, undo } from '@codemirror/commands'
+import { insertNewline, redo, undo } from '@codemirror/commands'
 import { getSearchQuery, openSearchPanel, SearchQuery, setSearchQuery } from '@codemirror/search'
 import { setLocale } from '@shared/i18n'
 import { t, useLocale } from '../lib/i18n'
@@ -90,6 +90,159 @@ describe('CodeMirrorEditor', () => {
     />)
 
     expect(encode).toHaveBeenCalledTimes(callsAfterMount)
+  })
+
+  it.each([
+    ['CRLF', '\r\n'],
+    ['LF', '\n'],
+    ['CR', '\r']
+  ])('preserves %s line endings through edits, undo and redo', (_name, separator) => {
+    const value = `one${separator}two${separator}`
+    const edited = `o!ne${separator}two${separator}`
+    const onChange = vi.fn()
+    render(<CodeMirrorEditor
+      path="sample.txt"
+      value={value}
+      readOnly={false}
+      ariaLabel="Line ending sample"
+      onChange={onChange}
+    />)
+
+    const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'Line ending sample' }))!
+    act(() => { view.dispatch({ changes: { from: 1, insert: '!' } }) })
+    expect(onChange).toHaveBeenLastCalledWith(edited, 3)
+
+    act(() => { undo(view) })
+    expect(onChange).toHaveBeenLastCalledWith(value, 3)
+
+    act(() => { redo(view) })
+    expect(onChange).toHaveBeenLastCalledWith(edited, 3)
+  })
+
+  it.each([
+    ['LF', 'CRLF', '\n', '\r\n'],
+    ['CRLF', 'LF', '\r\n', '\n']
+  ])('uses %s to %s externally reloaded line endings for subsequent edits', (_oldName, _newName, previous, next) => {
+    const onChange = vi.fn()
+    const rendered = render(<CodeMirrorEditor
+      path="sample.txt"
+      value={`one${previous}two${previous}`}
+      readOnly={false}
+      ariaLabel="Reloaded line ending sample"
+      onChange={onChange}
+    />)
+    const editor = screen.getByRole('textbox', { name: 'Reloaded line ending sample' })
+    const view = EditorView.findFromDOM(editor)!
+
+    rendered.rerender(<CodeMirrorEditor
+      path="sample.txt"
+      value={`one${next}two${next}`}
+      readOnly={false}
+      ariaLabel="Reloaded line ending sample"
+      onChange={onChange}
+    />)
+
+    expect(EditorView.findFromDOM(editor)).toBe(view)
+    expect(onChange).not.toHaveBeenCalled()
+    act(() => { view.dispatch({ changes: { from: 1, insert: '!' } }) })
+    expect(onChange).toHaveBeenLastCalledWith(`o!ne${next}two${next}`, 3)
+  })
+
+  it('counts both CRLF bytes when rejecting a newline over the file limit', async () => {
+    const onChange = vi.fn()
+    const onLimitExceeded = vi.fn()
+    render(<CodeMirrorEditor
+      path="sample.txt"
+      value={'a\r\nb'}
+      readOnly={false}
+      ariaLabel="CRLF insertion limit sample"
+      maxBytes={5}
+      onLimitExceeded={onLimitExceeded}
+      onChange={onChange}
+    />)
+
+    const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'CRLF insertion limit sample' }))!
+    act(() => {
+      view.dispatch({ selection: { anchor: view.state.doc.length } })
+      insertNewline(view)
+    })
+
+    await waitFor(() => expect(onLimitExceeded).toHaveBeenCalledOnce())
+    expect(onChange).not.toHaveBeenCalled()
+    expect(view.state.doc.toString()).toBe('a\nb')
+  })
+
+  it('reclaims both CRLF bytes after deleting a newline at the file limit', () => {
+    const onChange = vi.fn()
+    render(<CodeMirrorEditor
+      path="sample.txt"
+      value={'a\r\nb'}
+      readOnly={false}
+      ariaLabel="CRLF deletion limit sample"
+      maxBytes={5}
+      onChange={onChange}
+    />)
+
+    const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'CRLF deletion limit sample' }))!
+    act(() => { view.dispatch({ changes: { from: 1, to: 2 } }) })
+    expect(onChange).toHaveBeenLastCalledWith('ab', 1)
+
+    act(() => { view.dispatch({ changes: { from: 2, insert: 'cde' } }) })
+    expect(onChange).toHaveBeenLastCalledWith('abcde', 1)
+  })
+
+  it('splits LF inserts into logical lines while preserving CRLF output', () => {
+    const onChange = vi.fn()
+    render(<CodeMirrorEditor
+      path="sample.txt"
+      value={'a\r\nb'}
+      readOnly={false}
+      ariaLabel="CRLF paste sample"
+      onChange={onChange}
+    />)
+
+    const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'CRLF paste sample' }))!
+    act(() => { view.dispatch({ changes: { from: view.state.doc.length, insert: '\nnew\nlines' } }) })
+
+    expect(view.state.doc.lines).toBe(4)
+    expect(view.state.doc.line(3).text).toBe('new')
+    expect(onChange).toHaveBeenLastCalledWith('a\r\nb\r\nnew\r\nlines', 4)
+  })
+
+  it('clamps restored selections to logical document positions in CRLF files', () => {
+    render(<CodeMirrorEditor
+      path="sample.txt"
+      value={'a\r\nb'}
+      readOnly={false}
+      ariaLabel="CRLF restored selection sample"
+      initialViewState={{ anchor: 100, head: 100, scrollTop: 0, scrollLeft: 0 }}
+      onChange={vi.fn()}
+    />)
+
+    const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'CRLF restored selection sample' }))!
+    expect(view.state.selection.main).toMatchObject({ anchor: 3, head: 3 })
+  })
+
+  it('counts mixed line endings using the first separator and UTF-8 output size', async () => {
+    const onChange = vi.fn()
+    const onLimitExceeded = vi.fn()
+    render(<CodeMirrorEditor
+      path="sample.txt"
+      value={'a\r\nb\nc'}
+      readOnly={false}
+      ariaLabel="Mixed line ending sample"
+      maxBytes={9}
+      onLimitExceeded={onLimitExceeded}
+      onChange={onChange}
+    />)
+
+    const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'Mixed line ending sample' }))!
+    act(() => { view.dispatch({ changes: { from: view.state.doc.length, insert: 'é' } }) })
+    expect(onChange).toHaveBeenLastCalledWith('a\r\nb\r\ncé', 3)
+
+    act(() => { view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } }) })
+    await waitFor(() => expect(onLimitExceeded).toHaveBeenCalledOnce())
+    expect(onChange).toHaveBeenCalledOnce()
   })
 
   it('exposes its native scroll element and clears it on teardown', () => {
@@ -530,7 +683,7 @@ describe('CodeMirrorEditor', () => {
     await waitFor(() => expect(editorView.dom.querySelectorAll('.cm-foldPlaceholder')).toHaveLength(0))
   })
 
-  it('folds indentation-based legacy languages and restores folds after remounting', async () => {
+  it.each(['\n', '\r\n'])('folds indentation-based legacy languages and restores folds after remounting (%j)', async separator => {
     const value = [
       'root:',
       '  child: one',
@@ -538,7 +691,7 @@ describe('CodeMirrorEditor', () => {
       '    child: two',
       'next:',
       '  child: three'
-    ].join('\n')
+    ].join(separator)
     const remember = vi.fn()
     const first = render(<CodeMirrorEditor
       path="sample.yaml"
@@ -560,8 +713,8 @@ describe('CodeMirrorEditor', () => {
       editorView.dispatch({ selection: { anchor } })
       fireEvent.keyDown(editor, { key: '[', code: 'BracketLeft', altKey: true, ...modifier })
     }
-    foldAt(value.indexOf('nested:'))
-    foldAt(value.indexOf('next:'))
+    foldAt(editorView.state.doc.toString().indexOf('nested:'))
+    foldAt(editorView.state.doc.toString().indexOf('next:'))
     foldAt(0)
     await waitFor(() => expect(editorView.dom.querySelector('.cm-foldPlaceholder')).not.toBeNull())
 
