@@ -12,7 +12,7 @@ import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHint
 import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
 import { SideQuestionRequests } from './side-question-requests'
-import { sideQuestionHistoryAvailable, sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
+import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
 import {
   localSessionImportBatchLimit,
@@ -3157,12 +3157,12 @@ export class AppService {
   async askSideQuestion(expected: SideQuestionScope, sessionId: string, input: SideQuestionInput): Promise<SideQuestionAnswer> {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     const question = validateSideQuestionInput(input, sideQuestionLimit(this.health))
+    if (!question.side_chat_id || question.history !== undefined) throw new Error('side_question_invalid_request')
     return this.sideQuestions.ask(expected, sessionId, question, async () => {
       await this.ensureValidatedScope(scope)
       this.assertCurrentScope(scope)
       const session = this.sessions.find(candidate => candidate.id === sessionId)
       if (!session || !sideQuestionsAvailable(this.health, session.backend)) throw new Error('side_question_unsupported')
-      if (question.history?.length && !sideQuestionHistoryAvailable(this.health)) throw new Error('side_question_history_unsupported')
       validateSideQuestionInput(question, sideQuestionLimit(this.health))
       // A dedicated transport preserves exact cancellation ownership after the
       // selected profile changes. It is disposed with this one request.
@@ -3178,6 +3178,10 @@ export class AppService {
     // An old scope can cancel only its already-owned request, never a request
     // on the newly selected server or the main conversation turn.
     return this.sideQuestions.cancel(expected, sessionId, requestId)
+  }
+
+  closeSideChat(expected: SideQuestionScope, sessionId: string, sideChatId: string): Promise<void> {
+    return this.sideQuestions.close(expected, sessionId, sideChatId)
   }
 
   async sendTurn(input: SendTurnInput): Promise<{ session: Session; event?: Event; queued?: boolean; queued_id?: string; position?: number }> {

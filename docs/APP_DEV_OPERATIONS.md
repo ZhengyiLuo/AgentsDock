@@ -20,6 +20,11 @@ This applies to desktop, shared web views and changes requiring AgentsServer.
 
 ## 2. Implement the smallest complete workflow
 
+- Follow the provider's native context and lifecycle contracts. Do not replace
+  native features with a copied visible transcript or a fresh request unless
+  that fallback is explicitly approved and clearly labeled. For side chats,
+  verify tool-result context, follow-ups, cancellation and parent isolation
+  against the actual provider, not only a synthetic text fixture.
 - Follow the existing transport, authentication, component and state patterns.
   An existing UI pattern does not establish that its backend contract works.
 - Trace UI action → IPC → actual transport → server authorization → provider

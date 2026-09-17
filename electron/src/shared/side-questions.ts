@@ -12,6 +12,7 @@ export interface SideQuestionsCapability {
   history?: boolean
   max_history_items?: number
   max_history_chars?: number
+  native_context?: boolean
 }
 
 export interface SideQuestionScope {
@@ -23,6 +24,8 @@ export interface SideQuestionInput {
   request_id: string
   question: string
   history?: SideQuestionHistoryItem[]
+  side_chat_id?: string
+  after_request_id?: string
 }
 
 export interface SideQuestionHistoryItem {
@@ -47,7 +50,7 @@ export function sideQuestionsAvailable(health: Health | null | undefined, backen
   const capability = health?.capabilities?.side_questions
   return (backend === 'codex' || backend === 'claude')
     && capability?.available === true
-    && capability.version === 1
+    && capability.version === 2 && capability.native_context === true
     && Array.isArray(capability.backends)
     && capability.backends.includes(backend)
 }
@@ -82,6 +85,14 @@ export function validateSideQuestionInput(input: SideQuestionInput, limit = SIDE
     throw new Error('side_question_invalid_question')
   }
   const result: SideQuestionInput = { request_id: input.request_id, question: input.question.trim() }
+  for (const field of ['side_chat_id', 'after_request_id'] as const) {
+    const value = input[field]
+    if (value !== undefined) {
+      if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(value)) throw new Error('side_question_invalid_request')
+      result[field] = value
+    }
+  }
+  if (result.after_request_id && !result.side_chat_id) throw new Error('side_question_invalid_request')
   if (input.history !== undefined) {
     if (!Array.isArray(input.history) || input.history.length > SIDE_QUESTION_MAX_HISTORY_ITEMS || input.history.length % 2 !== 0) {
       throw new Error('side_question_invalid_history')

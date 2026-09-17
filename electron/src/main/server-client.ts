@@ -333,7 +333,7 @@ export class AgentServerClient {
 
   async askSideQuestion(sessionId: string, input: SideQuestionInput, signal?: AbortSignal): Promise<SideQuestionAnswer> {
     const body = validateSideQuestionInput(input)
-    // Independent one-shot provider calls have a 150-second server deadline.
+    // Native side questions have a 150-second server deadline.
     // Keep transport headroom and never retry or turn this into a chat turn.
     const response = await this.privilegedNativeRequest<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
       method: 'POST', body: JSON.stringify(body),
@@ -351,6 +351,12 @@ export class AgentServerClient {
       throw new Error('side_question_invalid_response')
     }
     return response
+  }
+
+  async closeSideChat(sessionId: string, sideChatId: string): Promise<void> {
+    const response = await this.privilegedNativeRequest<{ side_chat_id: string; status: string }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-chats/${encodeURIComponent(sideChatId)}`, { method: 'DELETE' })
+    if (response?.side_chat_id !== sideChatId || response.status !== 'closed') throw new Error('side_question_invalid_response')
   }
 
   async health(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, redirect: 'follow' | 'error' = 'error'): Promise<Health> {
@@ -2942,6 +2948,9 @@ function isPrivilegedNativeControlTarget(
   }
   const sideQuestion = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-questions(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (sideQuestion) return !target.search && method === (sideQuestion[1] ? 'DELETE' : 'POST')
+  if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-chats\/[A-Za-z0-9_-]{1,128}$/.test(path)) {
+    return !target.search && method === 'DELETE'
+  }
   const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'
     : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')

@@ -255,7 +255,7 @@ describe('App chat workspace identity', () => {
     const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' })
     Object.assign(window.agentsDock, { sideQuestions: { ask, cancel } })
     useAppStore.setState({ connected: true, health: { ok: true, capabilities: { side_questions: {
-      available: true, version: 1, history: true, backends: ['codex', 'claude'], max_question_chars: 8000
+      available: true, version: 2, native_context: true, backends: ['codex', 'claude'], max_question_chars: 8000
     } } } })
     render(<App />)
     act(() => window.dispatchEvent(new CustomEvent('agentsdock:open-side-chat', {

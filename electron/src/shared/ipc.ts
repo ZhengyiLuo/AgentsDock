@@ -222,6 +222,7 @@ export interface AgentsDockAPI {
   sideQuestions?: {
     ask(scope: import('./side-questions').SideQuestionScope, sessionId: string, input: import('./side-questions').SideQuestionInput): Promise<import('./side-questions').SideQuestionAnswer>
     cancel(scope: import('./side-questions').SideQuestionScope, sessionId: string, requestId: string): Promise<import('./side-questions').SideQuestionCancellation>
+    close?(scope: import('./side-questions').SideQuestionScope, sessionId: string, sideChatId: string): Promise<void>
   }
   chatShares: {
     preview(scope: WorkspaceProfileScope, sessionId: string): Promise<import('./chat-shares').ChatSharePreview>

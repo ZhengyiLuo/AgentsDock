@@ -12,7 +12,8 @@ const api: AgentsDockAPI = {
   },
   sideQuestions: {
     ask: (scope, sessionId, input) => ipcRenderer.invoke('side-questions:ask', scope, sessionId, input),
-    cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId)
+    cancel: (scope, sessionId, requestId) => ipcRenderer.invoke('side-questions:cancel', scope, sessionId, requestId),
+    close: (scope, sessionId, sideChatId) => ipcRenderer.invoke('side-questions:close', scope, sessionId, sideChatId)
   },
   chatShares: {
     preview: (scope, sessionId) => ipcRenderer.invoke('chat-shares:preview', scope, sessionId),

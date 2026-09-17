@@ -90,6 +90,7 @@ export function sideQuestionError(cause: unknown): string {
   if (/side_question_unsupported|side_question_http_(?:404|405|501)/.test(message)) return t('sideQuestion.unsupported')
   if (/side_question_http_(?:401|403)/.test(message)) return t('sideQuestion.unauthorized')
   if (/side_question_http_409/.test(message)) return t('sideQuestion.unavailableContext')
+  if (/side_question_http_410/.test(message)) return t('sideQuestion.ended')
   if (/side_question_http_429/.test(message)) return t('sideQuestion.busy')
   if (/side_question_http_503/.test(message)) return t('sideQuestion.providerUnavailable')
   if (/side_question_http_504|side_question_timeout|timeout|timed out/i.test(message)) return t('sideQuestion.timeout')

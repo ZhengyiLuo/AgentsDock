@@ -1,4 +1,4 @@
-import { sideQuestionHistoryAvailable, sideQuestionLimit, sideQuestionsAvailable,
+import { sideQuestionLimit, sideQuestionsAvailable,
   SIDE_QUESTION_MAX_HISTORY_CHARS, SIDE_QUESTION_MAX_HISTORY_ITEMS,
   type SideQuestionHistoryItem, type SideQuestionScope } from '@shared/side-questions'
 import type { Session } from '@shared/types'
@@ -12,6 +12,8 @@ export interface SideChatExchange {
   error?: string
 }
 export interface SideChatSnapshot {
+  sideChatId: string
+  lastRequestId?: string
   draft: string
   exchanges: SideChatExchange[]
   pending: string | null
@@ -19,7 +21,7 @@ export interface SideChatSnapshot {
   historyOmitted: boolean
   error: string | null
 }
-const emptySnapshot = (): SideChatSnapshot => ({ draft: '', exchanges: [], pending: null, contextNote: '', historyOmitted: false, error: null })
+const emptySnapshot = (): SideChatSnapshot => ({ sideChatId: crypto.randomUUID(), draft: '', exchanges: [], pending: null, contextNote: '', historyOmitted: false, error: null })
 
 export function sideChatHistory(exchanges: SideChatExchange[], maxItems = SIDE_QUESTION_MAX_HISTORY_ITEMS,
   maxChars = SIDE_QUESTION_MAX_HISTORY_CHARS): { history: SideQuestionHistoryItem[]; omitted: boolean } {
@@ -77,27 +79,19 @@ export class SideChatController {
     if (!api || window.agentsDock.sharedChat || !this.current(scope) || !app.connected
       || !sideQuestionsAvailable(app.health, session.backend) || snapshot.pending
       || !question || Array.from(question).length > sideQuestionLimit(app.health)) return
-    if (snapshot.exchanges.some(item => item.state === 'answered') && !sideQuestionHistoryAvailable(app.health)) {
-      this.update(scope, session.id, state => ({ ...state, error: 'side_question_history_unsupported' }))
-      return
-    }
-    const capability = app.health?.capabilities?.side_questions
-    const bounded = (value: number | undefined, maximum: number) => value !== undefined && Number.isSafeInteger(value) && value > 0 ? Math.min(value, maximum) : maximum
-    const itemLimit = bounded(capability?.max_history_items, SIDE_QUESTION_MAX_HISTORY_ITEMS)
-    const charLimit = bounded(capability?.max_history_chars, SIDE_QUESTION_MAX_HISTORY_CHARS)
-    const { history, omitted } = sideChatHistory(snapshot.exchanges, itemLimit, charLimit)
     const requestId = crypto.randomUUID()
     const key = this.key(scope, session.id)
     const epoch = this.epoch
     this.requests.set(key, { scope, sessionId: session.id, requestId })
     this.update(scope, session.id, state => ({ ...state, draft: '', pending: requestId, error: null,
-      historyOmitted: omitted, exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
+      historyOmitted: false, exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
     const current = () => this.epoch === epoch && this.current(scope) && this.requests.get(key)?.requestId === requestId
     try {
-      const answer = await api.ask(scope, session.id, { request_id: requestId, question, ...(history.length ? { history } : {}) })
+      const answer = await api.ask(scope, session.id, { request_id: requestId, question, side_chat_id: snapshot.sideChatId,
+        ...(snapshot.lastRequestId ? { after_request_id: snapshot.lastRequestId } : {}) })
       if (!current()) return
       if (answer.request_id !== requestId || answer.session_id !== session.id || answer.backend !== session.backend) throw new Error('side_question_invalid_response')
-      this.update(scope, session.id, state => ({ ...state, pending: null, contextNote: answer.context_note ?? state.contextNote,
+      this.update(scope, session.id, state => ({ ...state, pending: null, lastRequestId: requestId, contextNote: answer.context_note ?? state.contextNote,
         exchanges: state.exchanges.map(item => item.id === requestId ? { ...item, state: 'answered', answer: answer.answer } : item) }))
     } catch (cause) {
       if (!current()) return
@@ -126,13 +120,19 @@ export class SideChatController {
     }
   }
   clear(scope: SideQuestionScope, sessionId: string): void {
+    const sideChatId = this.snapshot(scope, sessionId).sideChatId
     void this.cancel(scope, sessionId)
+    void window.agentsDock.sideQuestions?.close?.(scope, sessionId, sideChatId).catch(() => undefined)
     this.update(scope, sessionId, () => emptySnapshot())
   }
   reset(): void {
     this.epoch += 1
     const requests = [...this.requests.values()]
     this.requests.clear()
+    for (const [key, snapshot] of this.snapshots) {
+      const [profileId, profileGeneration, sessionId] = JSON.parse(key)
+      void window.agentsDock.sideQuestions?.close?.({ profileId, profileGeneration }, sessionId, snapshot.sideChatId).catch(() => undefined)
+    }
     this.snapshots.clear()
     this.detailsOffsets.clear()
     for (const request of requests) void window.agentsDock.sideQuestions?.cancel(request.scope, request.sessionId, request.requestId).catch(() => undefined)

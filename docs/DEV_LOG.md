@@ -1,5 +1,25 @@
 # Public development log
 
+## 2026-09-17 — Native provider side conversations (local validation)
+
+- Place Side chat below Media & files, after Subagents, within one inspector.
+  Verify expanded/collapsed media and narrow/light/dark native Electron layouts.
+- Replace visible-text snapshots with native context: a persistent ephemeral
+  Codex fork, or Claude's native side-question control used by `/btw`. Include
+  provider tool results without injecting a new message into the main chat.
+- Keep follow-up identity and history on the server. Clear closes only the
+  selected side conversation; late requests cannot recreate it. Profile/chat
+  ownership, cancellation and provider-generation fences protect the main task.
+  No polling or per-keystroke network work is added.
+- Require the matching native-context server capability. Do not silently fall
+  back to a copied transcript on an older server or incompatible provider.
+- Real disposable-provider checks cover hidden tool-result recall, follow-ups,
+  cancellation while the main request runs, unchanged parent history/goals and
+  Claude cold resume without a main query. Focused transport and lifecycle
+  regressions cover cancellation, duplicate requests, expiry and cleanup races.
+- Native app/server acceptance and local packaging are tracked separately;
+  source changes are not a server deployment or an installed-app replacement.
+
 ## 2026-09-17 — Side chat in the shared inspector (local only)
 
 - Build **1.0.3-local.1173 / 1173** from `85471ed`. Verify the ARM64

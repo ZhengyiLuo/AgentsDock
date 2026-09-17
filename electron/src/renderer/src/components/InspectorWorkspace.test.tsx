@@ -30,7 +30,7 @@ beforeEach(() => {
     pins: { list: vi.fn().mockResolvedValue([]) }, files: { list: vi.fn().mockResolvedValue({ files: [], total: 0 }) }
   } })
   useAppStore.setState({ activeProfileId: scope.profileId, profileGeneration: scope.profileGeneration, switchingProfileId: null,
-    connected: true, health: { ok: true, capabilities: { side_questions: { available: true, version: 1, backends: ['codex'], history: true, max_question_chars: 8000 } } },
+    connected: true, health: { ok: true, capabilities: { side_questions: { available: true, version: 2, native_context: true, backends: ['codex'], max_question_chars: 8000 } } },
     sessions: [session], selectedSessionId: session.id, snapshots: { [session.id]: { session, files: [], queuedTurns: [], hasMoreEvents: false, filesTotal: 0, cachedAt: Date.now(), events: [{
       id: 'agent-event', session_id: session.id, seq: 1, type: 'subagent_state', ts: '2026-09-17T12:00:00Z',
       backend: 'codex', subagent_id: 'child-a', subagent_name: 'Reviewer', subagent_status: 'running'

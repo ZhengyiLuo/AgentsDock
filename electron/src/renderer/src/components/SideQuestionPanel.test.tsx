@@ -9,11 +9,12 @@ import { SideQuestionPanel } from './SideQuestionPanel'
 
 const session = { id: 'chat-a', title: 'Research', backend: 'codex' as const }
 const scope = { profileId: 'server-a', profileGeneration: 7 }
-const capability = { available: true, version: 1, backends: ['codex', 'claude'] as Array<'codex' | 'claude'>,
-  max_question_chars: 8000, history: true, max_history_items: 32, max_history_chars: 60000 }
+const capability = { available: true, version: 2, native_context: true,
+  backends: ['codex', 'claude'] as Array<'codex' | 'claude'>, max_question_chars: 8000 }
 let controller: SideChatController
 let ask: ReturnType<typeof vi.fn>
 let cancel: ReturnType<typeof vi.fn>
+let close: ReturnType<typeof vi.fn>
 let sendTurn: ReturnType<typeof vi.fn>
 
 function deferred<T>() {
@@ -32,20 +33,21 @@ beforeEach(() => {
   controller = new SideChatController()
   ask = vi.fn()
   cancel = vi.fn().mockImplementation((_scope, _sessionId, requestId) => Promise.resolve({ request_id: requestId, status: 'cancelled' }))
+  close = vi.fn().mockResolvedValue(undefined)
   sendTurn = vi.fn()
   Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
-    sideQuestions: { ask, cancel }, turns: { send: sendTurn }, native: { openExternal: vi.fn() }
+    sideQuestions: { ask, cancel, close }, turns: { send: sendTurn }, native: { openExternal: vi.fn() }
   } as unknown as AgentsDockAPI })
   useAppStore.setState({ activeProfileId: scope.profileId, profileGeneration: scope.profileGeneration,
     switchingProfileId: null, connected: true, health: { ok: true, capabilities: { side_questions: capability } },
     sessions: [session], selectedSessionId: session.id })
 })
-afterEach(() => { cleanup(); controller.reset(); setLocale('en'); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); controller.reset(); setLocale('en'); vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('Side chat panel', () => {
-  it('shows an inline multi-turn conversation and sends prior complete pairs without app-store writes', async () => {
+  it('shows native followups without copying old messages or writing the main conversation store', async () => {
     ask.mockImplementation((_scope, sessionId, input) => Promise.resolve({ request_id: input.request_id,
-      session_id: sessionId, backend: 'codex', answer: input.history?.length ? 'Follow-up answer.' : 'First answer.', context_note: 'Recent messages only.' }))
+      session_id: sessionId, backend: 'codex', answer: input.after_request_id ? 'Follow-up answer.' : 'First answer.', context_note: 'Native ephemeral fork.' }))
     render(panel())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Side message')).toHaveFocus()
@@ -56,7 +58,10 @@ describe('Side chat panel', () => {
     submit('And why?')
     expect(await screen.findByText('Follow-up answer.')).toBeVisible()
     expect(screen.getByText('First answer.')).toBeVisible()
-    expect(ask.mock.calls[1][2].history).toEqual([{ role: 'user', text: 'First question?' }, { role: 'assistant', text: 'First answer.' }])
+    const first = ask.mock.calls[0][2], followup = ask.mock.calls[1][2]
+    expect(followup).toMatchObject({ side_chat_id: first.side_chat_id, after_request_id: first.request_id, question: 'And why?' })
+    expect(first).not.toHaveProperty('history')
+    expect(followup).not.toHaveProperty('history')
     expect(listener).not.toHaveBeenCalled()
     expect(sendTurn).not.toHaveBeenCalled()
     unsubscribe()
@@ -71,6 +76,7 @@ describe('Side chat panel', () => {
     fireEvent.change(screen.getByLabelText('Side message'), { target: { value: 'Next draft' } })
     view.unmount()
     expect(cancel).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
     await act(async () => response.resolve({ request_id: requestId, session_id: session.id, backend: 'codex', answer: 'Completed while hidden.' }))
     render(panel())
     expect(screen.getByText('Completed while hidden.')).toBeVisible()
@@ -102,25 +108,47 @@ describe('Side chat panel', () => {
     expect(screen.getByText('Owned answer.')).toBeVisible()
   })
 
-  it('rejects followups on older servers without silently losing their context', async () => {
-    useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, history: false } } } })
+  it('requires no legacy snapshot-history flag for native followups', async () => {
     ask.mockImplementation((_scope, sessionId, input) => Promise.resolve({ request_id: input.request_id, session_id: sessionId, backend: 'codex', answer: 'First answer.' }))
     render(panel())
     submit()
     await screen.findByText('First answer.')
     submit('Follow up')
-    expect(await screen.findByRole('alert')).toHaveTextContent('Update AgentsServer')
-    expect(ask).toHaveBeenCalledTimes(1)
-    expect(screen.getByLabelText('Side message')).toHaveValue('Follow up')
+    await act(async () => undefined)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(ask).toHaveBeenCalledTimes(2)
+    expect(ask.mock.calls[1][2].after_request_id).toBe(ask.mock.calls[0][2].request_id)
   })
 
-  it.each(['old-server', 'cursor', 'shared-guest'] as const)('keeps %s read-only without fallback', kind => {
+  it.each(['old-server', 'snapshot-v1', 'native-unconfirmed', 'cursor', 'shared-guest'] as const)('keeps %s read-only without fallback', kind => {
     if (kind === 'old-server') useAppStore.setState({ health: { ok: true } })
+    if (kind === 'snapshot-v1') useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, version: 1, history: true } } } })
+    if (kind === 'native-unconfirmed') useAppStore.setState({ health: { ok: true, capabilities: { side_questions: { ...capability, native_context: undefined } } } })
     if (kind === 'shared-guest') Object.defineProperty(window.agentsDock, 'sharedChat', { value: true })
     render(<SideQuestionPanel session={kind === 'cursor' ? { ...session, backend: 'cursor' } : session} scope={scope} controller={controller} />)
-    expect(screen.getByRole('status')).toHaveTextContent('Side questions are unavailable')
+    expect(screen.getByRole('status')).toHaveTextContent('Native Side chat requires an updated AgentsServer')
     expect(screen.queryByLabelText('Side message')).not.toBeInTheDocument()
     expect(sendTurn).not.toHaveBeenCalled()
+    expect(ask).not.toHaveBeenCalled()
+  })
+
+  it('does not fetch or create provider work while typing, hiding, or idling', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    const view = render(panel())
+    for (let length = 1; length <= 40; length++) {
+      fireEvent.change(screen.getByLabelText('Side message'), { target: { value: 'q'.repeat(length) } })
+    }
+    view.rerender(<SideQuestionPanel session={session} scope={scope} controller={controller} active={false} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(ask).not.toHaveBeenCalled()
+    expect(cancel).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+    expect(sendTurn).not.toHaveBeenCalled()
+    view.unmount()
+    expect(close).not.toHaveBeenCalled()
+    expect(controller.snapshot(scope, session.id).draft).toBe('q'.repeat(40))
   })
 
   it('sends Enter, preserves Shift+Enter and does not send during IME composition', async () => {

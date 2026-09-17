@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentServerClient, type AgentServerClientOptions } from './server-client'
 
 const token = 'synthetic-owner-token'
-const input = { request_id: 'request-a', question: 'Why?' }
-const answer = { request_id: 'request-a', session_id: 'chat-a', backend: 'codex', answer: 'Because.', context_note: 'Recent snapshot.' }
+const input = { request_id: 'request-a', question: 'Why?', side_chat_id: 'side-a' }
+const answer = { request_id: 'request-a', session_id: 'chat-a', backend: 'codex', answer: 'Because.', context_note: 'Native ephemeral fork.' }
 const path = '/api/sessions/chat-a/side-questions'
 
 async function localTransport(
@@ -46,13 +46,11 @@ function browserHeaders(request: IncomingMessage): string[] {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('side-question native HTTP contract', () => {
-  it('passes the native owner guard that rejects real fetch and preserves follow-up history', async () => {
+  it('passes the native owner guard and sends only the native follow-up cursor', async () => {
     vi.unstubAllGlobals() // Restore actual Node fetch instead of the global test safety stub.
     const requests: Array<{ request: IncomingMessage; body: string }> = []
     const timeoutSignal = vi.fn(() => new AbortController().signal)
-    const followup = { ...input, history: [
-      { role: 'user' as const, text: 'First?' }, { role: 'assistant' as const, text: 'First answer.' }
-    ] }
+    const followup = { ...input, after_request_id: 'previous-a' }
     await localTransport(async (request, response) => {
       requests.push({ request, body: await body(request) })
       if (browserHeaders(request).length) return json(response, { detail: 'forbidden' }, 403)
@@ -78,6 +76,7 @@ describe('side-question native HTTP contract', () => {
     expect(sent.request.headers['x-agentsdock-token']).toBe(token)
     expect(sent.request.rawHeaders.filter(value => value.toLowerCase() === 'x-agentsdock-token')).toHaveLength(1)
     expect(JSON.parse(sent.body)).toEqual(followup)
+    expect(JSON.parse(sent.body)).not.toHaveProperty('history')
     expect(timeoutSignal).toHaveBeenCalledExactlyOnceWith(210_000)
   })
 
@@ -115,6 +114,28 @@ describe('side-question native HTTP contract', () => {
     expect(requests[0].headers['x-agentsdock-token']).toBe(token)
   })
 
+  it('closes only the native conversation with owner headers and no request replay', async () => {
+    const requests: Array<{ method?: string; url?: string; headers: IncomingMessage['headers']; body: string }> = []
+    await localTransport(async (request, response) => {
+      expect(browserHeaders(request)).toEqual([])
+      requests.push({ method: request.method, url: request.url, headers: request.headers, body: await body(request) })
+      json(response, { side_chat_id: 'side-a', status: 'closed' })
+    }, async client => {
+      client.configure(`${new URL(client.url('')).origin}/gateway`, token)
+      await client.closeSideChat('chat-a', 'side-a')
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ method: 'DELETE', url: '/gateway/api/sessions/chat-a/side-chats/side-a', body: '' })
+    expect(requests[0].headers['x-agentsdock-token']).toBe(token)
+  })
+
+  it.each([{ side_chat_id: 'foreign', status: 'closed' }, { side_chat_id: 'side-a', status: 'not_found' }])(
+    'rejects a mismatched native close acknowledgement %j', async receipt => {
+      await localTransport((_request, response) => json(response, receipt), async client => {
+        await expect(client.closeSideChat('chat-a', 'side-a')).rejects.toThrow('side_question_invalid_response')
+      })
+    })
+
   it('does not follow redirects or forward the owner credential', async () => {
     let redirected = 0
     await localTransport((_request, response) => { redirected++; json(response, answer) }, async destination => {
@@ -126,8 +147,9 @@ describe('side-question native HTTP contract', () => {
       }, async client => {
         await expect(client.askSideQuestion('chat-a', input)).rejects.toThrow('refused an unexpected redirect')
         await expect(client.cancelSideQuestion('chat-a', input.request_id)).rejects.toThrow('refused an unexpected redirect')
+        await expect(client.closeSideChat('chat-a', input.side_chat_id)).rejects.toThrow('refused an unexpected redirect')
       })
-      expect(requests).toEqual([`POST ${path}`, `DELETE ${path}/request-a`])
+      expect(requests).toEqual([`POST ${path}`, `DELETE ${path}/request-a`, 'DELETE /api/sessions/chat-a/side-chats/side-a'])
     })
     expect(redirected).toBe(0)
   })
@@ -137,6 +159,7 @@ describe('side-question native HTTP contract', () => {
     await localTransport((_request, response) => { requests++; json(response, answer) }, async client => {
       await expect(client.askSideQuestion('chat/a', input)).rejects.toThrow('route is invalid')
       await expect(client.cancelSideQuestion('chat-a', 'request/a')).rejects.toThrow('route is invalid')
+      await expect(client.closeSideChat('chat-a', 'side/a')).rejects.toThrow('route is invalid')
     })
     expect(requests).toBe(0)
   })

@@ -3,12 +3,13 @@ import { AppService } from './service'
 import { SideQuestionRequests } from './side-question-requests'
 
 const expected = { profileId: 'profile-a', profileGeneration: 7 }
-const input = { request_id: 'request-a', question: 'Why?' }
+const input = { request_id: 'request-a', question: 'Why?', side_chat_id: 'side-a' }
 const answer = { request_id: input.request_id, session_id: 'chat-a', backend: 'codex', answer: 'Because.' }
 
 function fixture() {
   const mainClient = { sendTurn: vi.fn(), stopTurn: vi.fn(), dispose: vi.fn() }
-  const sideClient = { askSideQuestion: vi.fn().mockResolvedValue(answer), cancelSideQuestion: vi.fn(), dispose: vi.fn() }
+  const sideClient = { askSideQuestion: vi.fn().mockResolvedValue(answer), cancelSideQuestion: vi.fn(),
+    closeSideChat: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
   const scope = { profileId: expected.profileId, generation: expected.profileGeneration,
     serverUrl: 'https://synthetic.example.test', client: mainClient }
   const clientFactory = vi.fn().mockReturnValue(sideClient)
@@ -21,7 +22,7 @@ function fixture() {
     sessions: [{ id: 'chat-a', backend: 'codex' }], cache,
     sideQuestions: new SideQuestionRequests(),
     health: { ok: true, capabilities: { side_questions: {
-      available: true, version: 1, backends: ['codex', 'claude'], max_question_chars: 8000
+      available: true, version: 2, native_context: true, backends: ['codex', 'claude'], max_question_chars: 8000
     } } }
   })
   return { service, mainClient, sideClient, clientFactory, cache }
@@ -33,6 +34,9 @@ describe('main side-question service scope', () => {
     await expect(service.askSideQuestion(expected, 'chat-a', input)).resolves.toEqual(answer)
     expect(clientFactory).toHaveBeenCalledExactlyOnceWith('https://synthetic.example.test', 'synthetic-owner-token')
     expect(sideClient.askSideQuestion).toHaveBeenCalledExactlyOnceWith('chat-a', input, expect.any(AbortSignal))
+    expect(sideClient.dispose).not.toHaveBeenCalled()
+    await service.closeSideChat(expected, 'chat-a', input.side_chat_id)
+    expect(sideClient.closeSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', input.side_chat_id)
     expect(sideClient.dispose).toHaveBeenCalledOnce()
     for (const operation of [...Object.values(mainClient), ...Object.values(cache)]) expect(operation).not.toHaveBeenCalled()
   })
@@ -52,24 +56,48 @@ describe('main side-question service scope', () => {
     expect(clientFactory).not.toHaveBeenCalled()
   })
 
-  it('requires explicit server history support rather than silently losing follow-up context', async () => {
+  it('rejects client-supplied history before dispatch instead of replaying old context', async () => {
     const { service, clientFactory } = fixture()
     await expect(service.askSideQuestion(expected, 'chat-a', { ...input, history: [
       { role: 'user', text: 'First?' }, { role: 'assistant', text: 'First answer.' }
-    ] })).rejects.toThrow('side_question_history_unsupported')
+    ] })).rejects.toThrow()
     expect(clientFactory).not.toHaveBeenCalled()
   })
 
-  it('sends side history only through its own client, never through the main chat', async () => {
+  it('sends the native follow-up cursor only through its own client', async () => {
     const { service, sideClient, mainClient, cache } = fixture()
-    Object.assign(service, { health: { capabilities: { side_questions: {
-      available: true, version: 1, history: true, backends: ['codex'], max_question_chars: 8000
-    } } } })
-    const followup = { ...input, history: [
-      { role: 'user' as const, text: 'First?' }, { role: 'assistant' as const, text: 'First answer.' }
-    ] }
+    const followup = { ...input, after_request_id: 'previous-a' }
     await expect(service.askSideQuestion(expected, 'chat-a', followup)).resolves.toEqual(answer)
     expect(sideClient.askSideQuestion).toHaveBeenCalledExactlyOnceWith('chat-a', followup, expect.any(AbortSignal))
     for (const operation of [...Object.values(mainClient), ...Object.values(cache)]) expect(operation).not.toHaveBeenCalled()
+    await service.closeSideChat(expected, 'chat-a', input.side_chat_id)
+  })
+
+  it('requires the native conversation identity and rejects even empty copied history', async () => {
+    const { service, clientFactory } = fixture()
+    await expect(service.askSideQuestion(expected, 'chat-a', { request_id: 'request-a', question: 'Why?' })).rejects.toThrow()
+    await expect(service.askSideQuestion(expected, 'chat-a', { ...input, history: [] })).rejects.toThrow()
+    expect(clientFactory).not.toHaveBeenCalled()
+  })
+
+  it.each([{ version: 1, native_context: true }, { version: 2, native_context: false }])(
+    'never downgrades native side chat to a snapshot server %j', async capability => {
+      const { service, clientFactory } = fixture()
+      Object.assign(service, { health: { capabilities: { side_questions: {
+        available: true, backends: ['codex'], max_question_chars: 8000, history: true, ...capability
+      } } } })
+      await expect(service.askSideQuestion(expected, 'chat-a', input)).rejects.toThrow('side_question_unsupported')
+      expect(clientFactory).not.toHaveBeenCalled()
+    })
+
+  it('closes the captured old profile conversation after switching server scope', async () => {
+    const { service, sideClient, mainClient } = fixture()
+    await service.askSideQuestion(expected, 'chat-a', input)
+    Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 8 })
+    await service.closeSideChat({ ...expected, profileGeneration: 8 }, 'chat-a', input.side_chat_id)
+    expect(sideClient.closeSideChat).not.toHaveBeenCalled()
+    await service.closeSideChat(expected, 'chat-a', input.side_chat_id)
+    expect(sideClient.closeSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', input.side_chat_id)
+    expect(mainClient.dispose).not.toHaveBeenCalled()
   })
 })
