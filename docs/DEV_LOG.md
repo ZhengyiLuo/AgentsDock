@@ -1,5 +1,12 @@
 # Public development log
 
+## 2026-09-17 — Surface native artifact-open failures
+
+- Propagate operating-system errors when opening an artifact so the existing
+  desktop action handlers can report the failure.
+- Add focused service coverage for successful opens, native error responses,
+  and download failures using synthetic data and mocked native boundaries.
+
 ## 2026-09-14 — Desktop 1.0.0 replacement accepted
 
 - Published desktop `1.0.0`, build `1167`, from committed source

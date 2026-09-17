@@ -4060,7 +4060,8 @@ export class AppService {
   }
 
   async openFile(sessionId: string, file: AgentFile): Promise<void> {
-    await shell.openPath(await this.ensureLocalFile(sessionId, file))
+    const error = await shell.openPath(await this.ensureLocalFile(sessionId, file))
+    if (error) throw new Error(error)
   }
   async openLinkedFile(sessionId: string, target: string): Promise<void> {
     const scope = this.captureScope()
