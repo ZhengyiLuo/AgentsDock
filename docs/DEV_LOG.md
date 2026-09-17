@@ -1,5 +1,22 @@
 # Public development log
 
+## 2026-09-17 — Desktop 1.0.3 side-chat transport and visible versions
+
+- Correct side-question POST and cancellation to use the existing native HTTP
+  transport. Generic fetch added a browser-style header that the server's
+  native-only authorization rejects. Preserve the authentication boundary,
+  response ownership, follow-up history, cancellation and timeout behavior.
+- Replace mock-only HTTP checks with loopback wire checks reproducing the 403
+  and exercising the corrected requests, redirects and cancellation.
+- Show the app version and selected server version in the sidebar using local
+  app status and scoped server metadata, without polling. Validate light/dark,
+  narrow layout and server switching in an isolated native Electron renderer.
+- Add the app development operational manual to the repository rules, requiring
+  hands-on workflows and explicit accounting for real versus mocked boundaries.
+- These desktop changes do not require a matching server update. Source
+  preparation and focused checks are not publication or live-provider acceptance;
+  record those separately when completed.
+
 ## 2026-09-17 — Desktop 1.0.2 stable accepted
 
 - Publish [AgentsDock 1.0.2](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.2),

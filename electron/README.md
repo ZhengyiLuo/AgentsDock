@@ -78,6 +78,9 @@ different server.
 
 Renderer visual changes follow the token and component guidance in
 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
+All feature work and bug fixes also follow the hands-on acceptance requirements
+in [APP_DEV_OPERATIONS.md](../docs/APP_DEV_OPERATIONS.md). Mocked checks alone
+do not establish that a feature works through the real app/server connection.
 
 The renderer is cache-first. It opens the cached tail immediately, subscribes
 to live events, and performs an `after=<last cached seq>` reconciliation in the

@@ -333,16 +333,17 @@ export class AgentServerClient {
     const body = validateSideQuestionInput(input)
     // Independent one-shot provider calls have a 150-second server deadline.
     // Keep transport headroom and never retry or turn this into a chat turn.
-    const response = await this.request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
+    const response = await this.privilegedNativeRequest<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/side-questions`, {
       method: 'POST', body: JSON.stringify(body),
       signal: combineAbortSignals(signal, this.timeoutSignal(210_000))
-    }, this.configuration, 2 * 1024 * 1024)
+    }, 210_000, 200, 2 * 1024 * 1024)
     return parseSideQuestionAnswer(response, sessionId, body.request_id)
   }
 
   async cancelSideQuestion(sessionId: string, requestId: string): Promise<SideQuestionCancellation> {
-    const response = await this.delete<SideQuestionCancellation>(
-      `/api/sessions/${encodeURIComponent(sessionId)}/side-questions/${encodeURIComponent(requestId)}`
+    const response = await this.privilegedNativeRequest<SideQuestionCancellation>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/side-questions/${encodeURIComponent(requestId)}`,
+      { method: 'DELETE' }
     )
     if (response?.request_id !== requestId || !['cancelled', 'not_found'].includes(response.status)) {
       throw new Error('side_question_invalid_response')
@@ -2892,9 +2893,11 @@ function isPrivilegedNativeControlTarget(
     || target.hash
     || target.username
     || target.password
-    || !target.pathname.startsWith(`${serverPrefix}/api/admin/`)
+    || !target.pathname.startsWith(`${serverPrefix}/api/`)
   ) return false
   const path = target.pathname.slice(serverPrefix.length)
+  const sideQuestion = /^\/api\/sessions\/[A-Za-z0-9_-]{1,128}\/side-questions(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
+  if (sideQuestion) return !target.search && method === (sideQuestion[1] ? 'DELETE' : 'POST')
   const share = /^\/api\/admin\/(chat-shares|interactive-chat-shares)\/[A-Za-z0-9_-]{1,128}(?:\/([A-Za-z0-9_-]{1,128}))?$/.exec(path)
   if (share) return !target.search && (!share[2] ? method === 'GET' || method === 'POST'
     : share[1] === 'chat-shares' && share[2] === 'preview' ? method === 'POST' : method === 'DELETE')

@@ -3,6 +3,11 @@
 - Preserve user work and keep changes scoped to the requested task.
 - Read the relevant package documentation before changing its code. Use the
   package's type checks and targeted tests, then validate the affected build.
+- Follow `docs/APP_DEV_OPERATIONS.md` for every app feature and bug fix.
+  Personally exercise the changed workflow in the actual app, through its real
+  client/server boundary when applicable. Mocked tests and screenshots alone
+  are not end-to-end acceptance. Record what was exercised and any untested
+  boundary; never call a feature ready when required real-app checks are blocked.
 - A request to change, build, test, or install does not authorize publishing a
   release, uploading artifacts, deploying a server, or submitting to an app
   store. Those external actions require an explicit user request.
