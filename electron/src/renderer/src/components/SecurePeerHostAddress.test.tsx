@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Profiler } from 'react'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { SecurePeerControlStatus, SecurePeerPairing } from '@shared/secure-peer'
 import type { TeamHubStatus } from '@shared/team-hub'
@@ -74,6 +75,24 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); setLocale('en') })
 
 describe('Change host address', () => {
+  it('keeps the first click when it arrives before passive mount effects', async () => {
+    const api = installAPI()
+    let clicked = false
+    await act(async () => { render(<Profiler id="host-address-first-click" onRender={() => {
+      if (clicked) return
+      const button = screen.queryByRole('button', { name: 'Change host address' })
+      if (!button) return
+      clicked = true
+      // A commit callback runs after the button exists and before passive
+      // effects: reproduce a fast first click on a slow renderer exactly.
+      button.click()
+    }}><SecurePeerHostAddressAction control={control()} pairing={pairing} onUpdated={vi.fn()} /></Profiler>) })
+    expect(clicked).toBe(true)
+    const dialog = await screen.findByRole('dialog', { name: 'Change host address' })
+    expect(within(dialog).getByRole('textbox')).toHaveValue(pairing.remoteEndpoint)
+    expect(api.updateSecurePeerConnectionEndpoint).not.toHaveBeenCalled()
+  })
+
   it('recovers an offline current host through one explicitly saved, immutable request', async () => {
     const api = installAPI()
     const onUpdated = vi.fn()

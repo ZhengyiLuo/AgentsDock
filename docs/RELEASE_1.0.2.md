@@ -31,6 +31,9 @@ an update explanation instead of attempting an unsafe rejoin.
 
 ## Search and clarity
 
+- Keep immediate clicks from being discarded during an identity reset, both
+  when opening the host-address editor and loading a Mail/Bulletin attachment
+  preview.
 - Search Mail and Bulletin with explicit, indexed server queries and paged
   results. Typing does not trigger repeated network searches.
 - Keep changed-file summaries visible outside collapsed progress.

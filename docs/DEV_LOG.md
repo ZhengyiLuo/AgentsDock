@@ -1,5 +1,18 @@
 # Public development log
 
+## 2026-09-17 — Preserve the first recovery and attachment click
+
+- Native release checks expose a commit/passive-effect ordering race: a late
+  identity reset can close the freshly opened host-address dialog or invalidate
+  the first explicit attachment preview request.
+- Reset only these identity-bound local states in layout effects, before the
+  controls can be used. Preserve the existing stale-request fences and exact
+  dependencies; add no timers, polling or per-keystroke work.
+- Add deterministic commit-phase click regressions. Both reproduce the old
+  failure and pass after the correction; all 300 affected renderer tests and
+  TypeScript checks pass. Rebuild the held desktop 1.0.2 source rather than
+  publishing the failed candidate or weakening its tests.
+
 ## 2026-09-17 — Desktop 1.0.2 endpoint recovery prepared
 
 - Add a single Change host address action for the current Team Network and

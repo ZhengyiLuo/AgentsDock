@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Profiler } from 'react'
 import userEvent from '@testing-library/user-event'
 import type { AgentsDockAPI } from '@shared/ipc'
 import type { TeamHubScope } from '@shared/team-hub'
@@ -2268,6 +2269,26 @@ describe('Team Messages board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose attachments' }))
     view.unmount()
     await act(async () => chosen.reject(new Error('Picker closed during teardown')))
+  })
+
+  it('keeps the first attachment load when clicked before passive mount effects', async () => {
+    const detail = message({ title: 'Immediate video preview', attachments: [attachment()],
+      recipients: [{ kind: 'all', id: 'all', display_name: 'Everyone', state: 'available', delivered_at: null, read_at: null }] })
+    const api = installAPI([messageSummary(detail, { attachments: [], delivery: undefined })], [detail])
+    let clicked = false
+    await act(async () => { render(<Profiler id="attachment-first-click" onRender={() => {
+      if (clicked) return
+      const button = screen.queryByRole('button', { name: 'Show video walkthrough.mp4' })
+      if (!button) return
+      clicked = true
+      // Click in the commit phase before AttachmentView's passive effects
+      // could invalidate this first explicit preview request.
+      button.click()
+    }}><TeamMessagesBoard section="feed" scope={scope} teamId="team-1" capability={capability} addresses={[]} canWrite /></Profiler>) })
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /Immediate video preview/ })) })
+    expect(await screen.findByLabelText('walkthrough.mp4')).toHaveAttribute('src', 'agentsdock-media://team/profile-1/team-1/attachment-1')
+    expect(clicked).toBe(true)
+    expect(api.cacheTeamAttachment).toHaveBeenCalledExactlyOnceWith(scope, { teamId: 'team-1', attachmentId: 'attachment-1' })
   })
 
   it('opens a message without caching attachments and loads each preview only after its explicit action', async () => {

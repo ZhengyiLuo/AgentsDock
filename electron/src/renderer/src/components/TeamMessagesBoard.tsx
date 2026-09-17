@@ -1,6 +1,6 @@
 import { getLocale } from '@shared/i18n'
 import { t, useLocale } from '../lib/i18n'
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -2026,7 +2026,9 @@ function AttachmentView({ attachment, scope }: { attachment: TeamAttachment; sco
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const request = useRef(0)
-  useEffect(() => {
+  // Fence the old identity before the new attachment can be clicked. A
+  // passive reset can invalidate a preview requested immediately on mount.
+  useLayoutEffect(() => {
     request.current += 1
     setURL(null)
     setText(null)

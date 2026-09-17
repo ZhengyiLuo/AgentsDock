@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { LoaderCircle, Pencil } from 'lucide-react'
 import { normalizeSecurePeerEndpoint, type SecurePeerControlStatus, type SecurePeerPairing, type SecurePeerProfileScope } from '@shared/secure-peer'
@@ -92,7 +92,9 @@ export function SecurePeerHostAddressAction({ control, pairing, disabled = false
   const [address, setAddress] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
+  // Reset identity-bound state before the new connection's button can be
+  // used. A passive mount reset can otherwise erase the first click.
+  useLayoutEffect(() => {
     setEdit(null)
     setError(null)
     setSaving(false)
