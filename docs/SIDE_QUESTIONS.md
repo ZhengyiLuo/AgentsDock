@@ -109,8 +109,11 @@ Codex validates the installed protocol's explicit empty-environment semantics
 before starting. Both the fresh ephemeral thread and its single turn use empty
 environments; workspace shell/file access is absent. Integrations, subagents,
 goals, skills, hosted tools and notification hooks are disabled independently.
-The owned app-server process uses temporary state/log paths and no persistent
-history (centrally managed requirements can override those paths). Harmless
+The owned app-server process keeps the configured provider runtime and sign-in
+state, with temporary logs and no persistent side-conversation history. Runtime
+database/cache writes by Codex remain possible; ephemeral conversation history
+does not imply a separate provider database. This avoids re-indexing existing
+history into a fresh database for every question. Harmless
 model-advertised utility tools can remain, but execution-code hosting is disabled;
 the panel never dispatches tools or permission requests itself.
 

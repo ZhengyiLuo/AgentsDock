@@ -1,5 +1,25 @@
 # Development and release log
 
+## 2026-09-17 — AgentsServer 1.0.3 stable accepted
+
+- Publish [AgentsServer 1.0.3](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.3)
+  from `9021327a91da63e08d194bb8176e01ea67d35290`, including native workspace
+  Git controls and the Codex Side chat startup correction.
+- [Release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35278319954)
+  validates the dependency lock, compilation and 4,306 tests (two skipped),
+  packages the source and signs its manifest. Verify the Ed25519 signature and
+  exact equality of all 82 packaged files with the release commit. Fresh public
+  downloads match the accepted archive, manifest and signature byte-for-byte.
+- Real native offscreen Side chat checks cover first answer, contextual
+  follow-up and cancellation. An additional disposable real-provider overlap
+  check cancels the side turn while a separate synthetic main turn remains
+  active and completes normally. No production research task is involved.
+- Archive SHA-256:
+  `304a1a26a54aeb2336da9557212df8614b41d3ec005654760eb69fc112b043a4`.
+  API contract remains 28. Publishing does not deploy or restart live servers.
+- Clarify provider-runtime sharing in the Side questions documentation. Keep
+  unrelated in-progress history/subagent changes out of the release source.
+
 ## 2026-09-17 — Codex Side chat startup correction (unreleased)
 
 - Retain Codex's configured runtime state instead of creating a fresh SQLite
