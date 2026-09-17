@@ -1,5 +1,15 @@
 # Public development log
 
+## 2026-09-17 — Preserve desktop editor line endings
+
+- Preserve a file's first line-ending style when emitting edits, including undo
+  and redo. External reloads adopt the newly loaded style; mixed line endings
+  normalize to the first separator on edit.
+- Count UTF-8 limits against serialized output, including both bytes of CRLF.
+  Keep cursor, fold and replacement ranges in CodeMirror's logical coordinates.
+- Add regressions for line-ending preservation, external reloads, LF inserts in
+  CRLF documents, byte limits, cursor clamping and fold restoration.
+
 ## 2026-09-14 — Desktop 1.0.0 replacement accepted
 
 - Published desktop `1.0.0`, build `1167`, from committed source

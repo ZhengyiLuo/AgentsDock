@@ -24,7 +24,7 @@ import {
   searchPanelOpen,
   type SearchQuery
 } from '@codemirror/search'
-import { Compartment, EditorSelection, EditorState, Prec, type Extension, type Text } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, Prec, Text, type Extension } from '@codemirror/state'
 import { EditorView, keymap, ViewPlugin, type MouseSelectionStyle, type ViewUpdate } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { basicSetup } from 'codemirror'
@@ -109,6 +109,7 @@ export function CodeMirrorEditor({
   const onViewStateChangeRef = useRef(onViewStateChange)
   const maxBytesRef = useRef(maxBytes)
   const documentBytesRef = useRef(0)
+  const lineSeparatorRef = useRef('\n')
   const applyingExternalValue = useRef(false)
   const lastEmittedValue = useRef(value)
   const languageRequestRef = useRef(0)
@@ -140,10 +141,12 @@ export function CodeMirrorEditor({
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    documentBytesRef.current = utf8Bytes(value)
+    const doc = Text.of(value.split(/\r\n?|\n/))
+    lineSeparatorRef.current = lineSeparator(value)
+    documentBytesRef.current = utf8Bytes(doc.sliceString(0, doc.length, lineSeparatorRef.current))
     const state = EditorState.create({
-      doc: value,
-      selection: restoredSelection(initialViewState, value.length),
+      doc,
+      selection: restoredSelection(initialViewState, doc.length),
       extensions: [
         basicSetup,
         searchOccurrenceCounter,
@@ -190,8 +193,8 @@ export function CodeMirrorEditor({
           if (!transaction.docChanged || applyingExternalValue.current) return transaction
           let nextBytes = documentBytesRef.current
           transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-            nextBytes -= utf8Bytes(transaction.startState.doc.sliceString(fromA, toA))
-            nextBytes += utf8Bytes(inserted.toString())
+            nextBytes -= utf8Bytes(transaction.startState.doc.sliceString(fromA, toA, lineSeparatorRef.current))
+            nextBytes += utf8Bytes(inserted.sliceString(0, inserted.length, lineSeparatorRef.current))
           })
           if (limit && nextBytes > limit) {
             queueMicrotask(() => onLimitExceededRef.current?.())
@@ -203,7 +206,7 @@ export function CodeMirrorEditor({
         EditorView.updateListener.of(update => {
           if (update.docChanged) {
             if (!applyingExternalValue.current) {
-              const nextValue = update.state.doc.toString()
+              const nextValue = update.state.doc.sliceString(0, update.state.doc.length, lineSeparatorRef.current)
               lastEmittedValue.current = nextValue
               onChangeRef.current(nextValue, update.state.doc.lines)
             }
@@ -213,7 +216,7 @@ export function CodeMirrorEditor({
     })
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
-    const initialFolds = restoredFoldRanges(initialViewState, value)
+    const initialFolds = restoredFoldRanges(initialViewState, doc.toString())
     if (initialFolds.length > 0) {
       view.dispatch({ effects: initialFolds.map(range => foldEffect.of(range)) })
     }
@@ -366,15 +369,17 @@ export function CodeMirrorEditor({
     const view = viewRef.current
     if (!view) return
     if (lastEmittedValue.current === value) return
-    const current = view.state.doc.toString()
+    const current = view.state.doc.sliceString(0, view.state.doc.length, lineSeparatorRef.current)
     if (current === value) {
       lastEmittedValue.current = value
       return
     }
     applyingExternalValue.current = true
     try {
-      documentBytesRef.current = utf8Bytes(value)
-      view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+      const doc = view.state.toText(value)
+      lineSeparatorRef.current = lineSeparator(value)
+      documentBytesRef.current = utf8Bytes(doc.sliceString(0, doc.length, lineSeparatorRef.current))
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } })
       lastEmittedValue.current = value
     } finally {
       applyingExternalValue.current = false
@@ -386,6 +391,12 @@ export function CodeMirrorEditor({
 
 function documentEditorTheme(): EditorThemeMode {
   return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+}
+
+function lineSeparator(value: string): string {
+  // Preserve the first line ending on output while letting CodeMirror parse all
+  // line ending styles in inserted or pasted text with its default configuration.
+  return value.match(/\r\n?|\n/)?.[0] ?? '\n'
 }
 
 function restoredSelection(viewState: CodeMirrorViewState | undefined, documentLength: number): EditorSelection {
