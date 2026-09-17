@@ -1,6 +1,28 @@
 # AgentsDock 1.0.3
 
-Stable desktop correction to **1.0.2**.
+Stable desktop update from **1.0.2**. Team Network remains a beta feature.
+
+## Workspace Changes
+
+- Open **Changes** beside Chat to review the current repository's staged,
+  unstaged, untracked and conflicted files, including changes made outside the
+  current agent turn.
+- Inspect file diffs on demand, stage or unstage whole files, then review and
+  commit the staged set with a commit message.
+- Resolve text conflicts in one place with base, current and incoming versions
+  alongside an editable result. Save the resolution before continuing an
+  existing merge, rebase, cherry-pick or revert. Aborting requires confirmation.
+- Reject changes made against a stale repository snapshot and preserve an
+  unsaved conflict result for review. Git reads are on demand, with no idle
+  polling or requests while typing.
+
+**Workspace Changes requires AgentsServer 1.0.3** and a native operator
+connection. Git controls are not available to shared-chat web guests.
+
+This first cut stages whole files, not individual hunks. It does not create
+branches or merges, push commits, or manage pull/merge requests. Binary and
+symbolic-link conflicts, oversized files, and operations requiring executable
+Git hooks or custom filters may need the terminal.
 
 ## Side chat authorization
 
@@ -12,9 +34,9 @@ Stable desktop correction to **1.0.2**.
   request ownership. Do not retry questions automatically or send them as main
   chat turns. The server's authentication checks remain unchanged.
 
-**No server update is required for this correction** if your server already
-supports Side chat. This does not add Side chat support to older servers that
-lack the feature.
+**The Side chat authorization correction is app-only:** no server update is
+required if your server already supports Side chat. This does not add Side chat
+support to older servers or change provider availability.
 
 ## Visible versions
 
@@ -22,15 +44,12 @@ lack the feature.
 - Show the selected server's version beside its address, using existing version
   metadata. Do not introduce background update checks or polling.
 
-## Development verification
+## Downloads and updates
 
-- Add an app development operational manual and reference it from the repo's
-  development rules. Require hands-on app workflows, verification across the
-  real client/server boundary and explicit disclosure of mocked or untested
-  boundaries before calling a feature ready.
-
-## Downloads
-
-- macOS builds are Developer ID signed and notarized.
+- macOS downloads are published only after Developer ID signing, notarization
+  and release verification.
 - Windows installers remain unsigned and may show the usual publisher warning.
-- Linux x64/arm64 packages and Stable auto-update metadata are included.
+- Linux x64/arm64 packages and Stable auto-update metadata accompany the
+  verified desktop release on the public and legacy desktop update feeds.
+- The matching standalone **AgentsServer 1.0.3** supplies Workspace Changes.
+  Publishing either release does not force a running server to restart.
