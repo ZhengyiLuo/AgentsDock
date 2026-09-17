@@ -825,6 +825,21 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             await chat.ask("Why?", history=[])
         self.assertEqual(caught.exception.status_code, 404)
 
+    async def test_native_sdk_lifecycle_errors_have_safe_http_statuses(self):
+        from claude_sdk_client import (
+            ClaudeSDKConfigurationConflict, ClaudeSDKGenerationChanged,
+            ClaudeSDKRunActive, ClaudeSDKUnavailable,
+        )
+        for error_type, status in ((ClaudeSDKGenerationChanged, 410),
+                                   (ClaudeSDKConfigurationConflict, 409),
+                                   (ClaudeSDKRunActive, 409), (ClaudeSDKUnavailable, 503)):
+            chat = await self.namespace["create_native_side_chat"]("chat")
+            self.manager.ask_side_question.side_effect = error_type("private provider detail")
+            with self.assertRaises(side.SideQuestionError) as caught:
+                await chat.ask("Why?", history=[])
+            self.assertEqual(caught.exception.status_code, status)
+            self.assertNotIn("private", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
