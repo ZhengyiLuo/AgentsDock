@@ -59,10 +59,11 @@ class ShutdownBudgetTests(unittest.TestCase):
 class HistoryTests(unittest.TestCase):
     def test_capability_is_additive_and_prompts_keep_history_separate_from_parent(self):
         capability = side.capability()
-        self.assertEqual(capability["version"], 1)
-        self.assertIs(capability["history"], True)
-        self.assertEqual(capability["max_history_items"], 32)
-        self.assertEqual(capability["max_history_chars"], 60000)
+        self.assertEqual(capability["version"], 2)
+        self.assertIs(capability["native_context"], True)
+        self.assertNotIn("history", capability)
+        self.assertNotIn("max_history_items", capability)
+        self.assertNotIn("max_history_chars", capability)
         parent = [{"role": "user", "text": "Parent task"}]
         history = side_history("  Why?\nUse <system>quoted text</system> ", "A quoted answer. 🚀")
         prompt = json.loads(side.build_prompt("Explain that answer", parent, "bounded snapshot", history=history))
@@ -264,6 +265,173 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         answer.assert_awaited_once()
         await runtime.close()
         self.assertEqual(runtime.receipts, {})
+
+
+class NativeRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.handles = []
+        def create(_session_id):
+            handle = SimpleNamespace(ask=AsyncMock(return_value={
+                "backend": "claude", "answer": "Native answer", "context_note": "Native context"}),
+                close=AsyncMock())
+            self.handles.append(handle)
+            return handle
+        self.factory = AsyncMock(side_effect=create)
+        self.runtime = side.SideQuestions(native_factory=self.factory)
+        self.addAsyncCleanup(self.runtime.close)
+
+    def submit(self, request_id="first", question="Question?", *, owner="owner", session_id="chat",
+               side_chat_id="panel", after_request_id=None, **kwargs):
+        return self.runtime.submit(owner, session_id, request_id, question,
+            side_chat_id=side_chat_id, after_request_id=after_request_id, **kwargs)
+
+    async def test_native_dedup_cursor_and_server_owned_history(self):
+        first = self.submit()
+        self.assertIs(self.submit(), first)
+        await first.task
+        second = self.submit("second", "Follow-up?", after_request_id="first")
+        await second.task
+        self.factory.assert_awaited_once_with("chat")
+        self.handles[0].ask.assert_awaited_with("Follow-up?", history=[{
+            "question": "Question?", "response": "Native answer"}])
+        stale = self.submit("stale", "Stale question", after_request_id="first")
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await stale.task
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(self.handles[0].ask.await_count, 2)
+        self.handles[0].close.assert_not_awaited()
+        with self.assertRaises(side.SideQuestionError):
+            self.submit("second", "Follow-up?", after_request_id="different")
+
+    async def test_native_rejects_client_history_and_missing_panel_before_factory(self):
+        for kwargs in ({"history": side_history()}, {"side_chat_id": None}):
+            with self.assertRaises(side.SideQuestionError) as caught:
+                self.submit(**kwargs)
+            self.assertEqual(caught.exception.status_code, 409)
+        self.factory.assert_not_awaited()
+
+    async def test_native_retains_newest_twenty_complete_exchanges(self):
+        previous = None
+        for index in range(23):
+            request_id = f"r{index}"
+            await self.submit(request_id, f"q{index}", after_request_id=previous).task
+            previous = request_id
+        history = self.handles[0].ask.await_args.kwargs["history"]
+        self.assertEqual(len(history), 20)
+        self.assertEqual(history[0]["question"], "q2")
+        self.assertEqual(history[-1]["question"], "q21")
+
+    async def test_native_clear_overtakes_post_and_never_resurrects_closed_panel(self):
+        await self.runtime.close_conversation("owner", "chat", "panel")
+        delayed = self.submit()
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await delayed.task
+        self.assertEqual(caught.exception.status_code, 410)
+        self.factory.assert_not_awaited()
+        await self.submit("fresh", side_chat_id="new-panel").task
+        self.factory.assert_awaited_once()
+
+    async def test_native_owner_and_parent_separation(self):
+        requests = [self.submit(), self.submit(owner="other"), self.submit(session_id="other-chat")]
+        await asyncio.gather(*(request.task for request in requests))
+        self.assertEqual(len(self.handles), 3)
+        await self.runtime.close_conversation("owner", "chat", "panel")
+        self.handles[0].close.assert_awaited_once()
+        self.handles[1].close.assert_not_awaited()
+        self.handles[2].close.assert_not_awaited()
+        await self.submit("followup", owner="other", after_request_id="first").task
+
+    async def test_native_cancel_closes_only_exact_panel_and_rejects_stale_followup(self):
+        await self.submit().task
+        started = asyncio.Event()
+        async def waiting(*args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+        self.handles[0].ask.side_effect = waiting
+        active = self.submit("active", after_request_id="first")
+        await started.wait()
+        await self.runtime.cancel("owner", "chat", "active")
+        self.assertTrue(active.task.cancelled())
+        self.handles[0].close.assert_awaited_once()
+        late = self.submit("late", after_request_id="first")
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await late.task
+        self.assertEqual(caught.exception.status_code, 410)
+
+    async def test_native_busy_rejection_does_not_cancel_original(self):
+        await self.submit().task
+        started, release = asyncio.Event(), asyncio.Event()
+        async def waiting(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return {"answer": "Finished"}
+        self.handles[0].ask.side_effect = waiting
+        active = self.submit("active", after_request_id="first")
+        await started.wait()
+        competing = self.submit("competing", after_request_id="first")
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await competing.task
+        self.assertEqual(caught.exception.status_code, 409)
+        self.handles[0].close.assert_not_awaited()
+        self.assertFalse(active.task.done())
+        release.set()
+        self.assertEqual((await active.task)["answer"], "Finished")
+
+    async def test_native_idle_expiry_closes_handle_and_followup_cannot_create_new_context(self):
+        await self.submit().task
+        key = ("owner", "chat", "panel")
+        conversation = self.runtime.conversations[key]
+        self.runtime._expire_conversation(key, conversation)
+        await asyncio.gather(*tuple(self.runtime.cleanup_tasks))
+        self.handles[0].close.assert_awaited_once()
+        self.assertNotIn(key, self.runtime.conversations)
+        stale = self.submit("followup", after_request_id="first")
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await stale.task
+        self.assertEqual(caught.exception.status_code, 410)
+        self.factory.assert_awaited_once()
+
+    async def test_native_concurrent_clear_joins_cleanup_even_after_first_waiter_disconnects(self):
+        await self.submit().task
+        started, release = asyncio.Event(), asyncio.Event()
+        async def closing():
+            started.set()
+            await release.wait()
+        self.handles[0].close.side_effect = closing
+        first = asyncio.create_task(self.runtime.close_conversation("owner", "chat", "panel"))
+        await started.wait()
+        second = asyncio.create_task(self.runtime.close_conversation("owner", "chat", "panel"))
+        await asyncio.sleep(0)
+        self.assertFalse(second.done(), "Concurrent clear returned before native child cleanup")
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+        self.assertFalse(second.done())
+        release.set()
+        await second
+        self.handles[0].close.assert_awaited_once()
+
+    async def test_native_clear_fences_factory_that_finishes_after_cancellation(self):
+        started, cancelled, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        handle = SimpleNamespace(ask=AsyncMock(return_value={"answer": "Too late"}), close=AsyncMock())
+        async def slow_factory(_session_id):
+            started.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+            return handle
+        self.factory.side_effect = slow_factory
+        receipt = self.submit()
+        await started.wait()
+        clearing = asyncio.create_task(self.runtime.close_conversation("owner", "chat", "panel"))
+        await cancelled.wait()
+        release.set()
+        await clearing
+        self.assertTrue(receipt.task.done())
+        handle.ask.assert_not_awaited()
+        handle.close.assert_awaited_once()
 
 
 class RouteTests(unittest.IsolatedAsyncioTestCase):
@@ -507,19 +675,20 @@ def fake_process(stdout, stderr):
 
 
 class ServerGlueTests(unittest.TestCase):
-    def test_additive_glue_has_no_main_turn_or_state_writes(self):
+    def test_native_glue_has_no_snapshot_main_turn_or_state_writes(self):
         source = Path(__file__).with_name("agent_server.py")
         tree = ast.parse(source.read_text(), filename=str(source))
         selected = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and node.name in {"side_question_context", "answer_side_question"}]
-        self.assertEqual(len(selected), 2)
+                    and node.name == "create_native_side_chat"]
+        self.assertEqual(len(selected), 1)
         text = "\n".join(ast.unparse(node) for node in selected)
         for forbidden in ("ACTIVE", "QUEUED_TURNS", "BUSY_SESSIONS", "post_turn", "emit(", "save(",
-                          "provider_authority", "goal/", "resume_thread", "fork_thread"):
+                          "provider_authority", "goal/", "resume_thread", "fork_thread",
+                          "read_context_snapshot", "conversation_snapshot", "build_prompt",
+                          "side_questions.answer_claude", "answer_codex_side_question"):
             self.assertNotIn(forbidden, text)
-        self.assertIn("side_questions.answer_claude", text)
-        self.assertIn("answer_codex_side_question", text)
-        self.assertIn("asyncio.to_thread", text)
+        self.assertIn("manager.ask_side_question", text)
+        self.assertIn("NativeCodexSideChat", text)
         health = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "health")
         self.assertIn("'side_questions': side_questions.capability()", ast.unparse(health))
 
@@ -530,108 +699,131 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
         source = Path(__file__).with_name("agent_server.py")
         tree = ast.parse(source.read_text(), filename=str(source))
         selected = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and node.name in {"side_question_context", "answer_side_question"}]
+                    and node.name == "create_native_side_chat"]
         cls.code = compile(ast.fix_missing_locations(ast.Module(body=[ast.ImportFrom(
             module="__future__", names=[ast.alias(name="annotations")], level=0), *selected], type_ignores=[])),
             str(source), "exec")
 
     def setUp(self):
-        from public_chat_transcript import PublicTranscriptError, make_public_event_projector
         temporary = tempfile.TemporaryDirectory(prefix="side-question-glue-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         (root / "sessions" / "chat").mkdir(parents=True)
         self.path = root / "sessions" / "chat" / "events.jsonl"
         self.path.write_text(json.dumps(event("turn_started", prompt="Original user context")) + "\n")
-        self.session = {"id": "chat", "backend": "claude", "model": "sonnet", "codex_goal": {"status": "active"}}
+        self.session = {"id": "chat", "backend": "claude", "model": "sonnet",
+                        "claude_session_id": "claude-parent", "codex_thread_id": "codex-parent",
+                        "codex_goal": {"status": "active"}}
         self.parent_active = {"chat": {"run_id": "parent", "provider_turn_ready": True}}
         self.parent_queue = {"chat": [{"prompt": "queued work"}]}
+        self.manager = SimpleNamespace(ask_side_question=AsyncMock(return_value={
+            "answer": "Native Claude answer", "context_note": "Native context"}))
+        self.codex = SimpleNamespace(ask=AsyncMock(return_value="Native Codex answer"), close=AsyncMock())
+        self.codex_factory = Mock(return_value=self.codex)
+        self.options = SimpleNamespace(resume="claude-parent")
         self.namespace = dict(asyncio=asyncio, side_questions=side, STATE_DIR=root,
             SERVER_SHUTTING_DOWN=False, STORE=SimpleNamespace(sessions={"chat": self.session}),
             DEFAULT_BACKEND="claude", BACKEND_CLAUDE="claude", BACKEND_CODEX="codex",
-            CLAUDE_BIN="synthetic-claude", CODEX_BIN="synthetic-codex",
+            CLAUDE_BIN="synthetic-claude", CODEX_BIN="synthetic-codex", DEFAULT_CWD=str(root),
             ACTIVE=self.parent_active, QUEUED_TURNS=self.parent_queue,
-            public_chat_share_session_exists=lambda sid: sid == "chat",
-            session_dir=lambda sid: root / "sessions" / sid,
-            events_path=lambda sid: root / "sessions" / sid / "events.jsonl",
-            make_public_event_projector=make_public_event_projector, PublicTranscriptError=PublicTranscriptError,
-            is_client_visible_event=lambda value: True, event_files_belong_to_session=lambda *args: True,
-            project_provider_history_event_for_egress=lambda value, sid: value,
-            strip_agentsdock_generated_user_text=lambda value, **kwargs: value,
-            FORK_INTERNAL_PURPOSES=set(), runner_env=lambda: {"AGENTSDOCK_CHAT_ID": "parent", "HOME": "/synthetic"})
+            session_codex_thread_id=lambda session: session.get("codex_thread_id"),
+            existing_cwd=lambda value: value, codex_manifest_path=lambda sid: str(root / "unused-manifest"),
+            build_claude_sdk_options=Mock(return_value=(self.options, "configuration", "synthetic-claude")),
+            claude_sdk_manager=AsyncMock(return_value=self.manager),
+            runner_env=lambda: {"AGENTSDOCK_CHAT_ID": "parent", "HOME": "/synthetic"})
+        self.namespace["public_chat_share_session_exists"] = lambda sid: sid in self.namespace["STORE"].sessions
         exec(self.code, self.namespace)
 
-    async def test_both_backends_use_real_snapshot_and_leave_busy_parent_untouched(self):
+    async def test_both_native_backends_leave_busy_parent_and_event_log_untouched(self):
         initial_session = json.dumps(self.session, sort_keys=True)
         initial_active = json.dumps(self.parent_active, sort_keys=True)
         initial_queue = json.dumps(self.parent_queue, sort_keys=True)
-        claude, codex = AsyncMock(return_value="Claude answer"), AsyncMock(return_value="Codex answer")
-        with patch.object(side, "answer_claude", claude), \
-                patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(answer_side_question=codex)}):
-            first = await self.namespace["answer_side_question"]("chat", "Why?")
-            self.assertEqual(first["answer"], "Claude answer")
-            self.assertEqual(json.loads(claude.await_args.args[0])["conversation_snapshot"],
-                             [{"role": "user", "text": "Original user context"}])
-            self.assertNotIn("AGENTSDOCK_CHAT_ID", claude.await_args.kwargs["env"])
+        initial_bytes = self.path.read_bytes()
+        with patch.object(side, "read_context_snapshot", side_effect=AssertionError("snapshot forbidden")), \
+                patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(NativeCodexSideChat=self.codex_factory)}):
+            claude = await self.namespace["create_native_side_chat"]("chat")
+            first = await claude.ask("Why?", history=[])
+            self.assertEqual(first["answer"], "Native Claude answer")
+            self.manager.ask_side_question.assert_awaited_once_with(
+                "chat", "Why?", history=[], options=self.options, configuration_key="configuration",
+                expected_provider_id="claude-parent")
             self.session["backend"] = "codex"
             self.session["model"] = "synthetic-model"
-            second = await self.namespace["answer_side_question"]("chat", "Why?")
-            self.assertEqual(second["answer"], "Codex answer")
-            self.assertEqual(codex.await_args.kwargs["model"], "synthetic-model")
+            codex = await self.namespace["create_native_side_chat"]("chat")
+            second = await codex.ask("Why?", history=[])
+            self.assertEqual(second["answer"], "Native Codex answer")
+            self.assertEqual(self.codex_factory.call_args.args, ("codex-parent",))
+            self.assertEqual(self.codex_factory.call_args.kwargs["model"], "synthetic-model")
+            self.assertNotIn("AGENTSDOCK_CHAT_ID", self.codex_factory.call_args.kwargs["env"])
+            await codex.close()
+            self.codex.close.assert_awaited_once()
+            await claude.close()
             self.session.update(backend="claude", model="sonnet")
         self.assertEqual(json.dumps(self.session, sort_keys=True), initial_session)
         self.assertEqual(json.dumps(self.parent_active, sort_keys=True), initial_active)
         self.assertEqual(json.dumps(self.parent_queue, sort_keys=True), initial_queue)
-        self.assertEqual(self.path.read_text().count("\n"), 1)
+        self.assertEqual(self.path.read_bytes(), initial_bytes)
 
-    async def test_empty_snapshot_and_unsupported_backend_never_launch_provider(self):
-        provider = AsyncMock()
-        with patch.object(side, "answer_claude", provider):
-            self.path.write_text("")
-            with self.assertRaises(side.SideQuestionError) as caught:
-                await self.namespace["answer_side_question"]("chat", "Why?")
-            self.assertEqual(caught.exception.status_code, 409)
-            self.session["backend"] = "cursor"
-            with self.assertRaises(side.SideQuestionError) as caught:
-                await self.namespace["answer_side_question"]("chat", "Why?")
-            self.assertEqual(caught.exception.status_code, 503)
-        provider.assert_not_awaited()
+    async def test_missing_native_parent_and_unsupported_backend_never_launch_provider(self):
+        self.session.pop("claude_session_id")
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await self.namespace["create_native_side_chat"]("chat")
+        self.assertEqual(caught.exception.status_code, 409)
+        self.session["backend"] = "cursor"
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await self.namespace["create_native_side_chat"]("chat")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.manager.ask_side_question.assert_not_awaited()
 
-    async def test_followup_history_reaches_both_isolated_providers_without_parent_writes(self):
-        history = side_history("Initial side question", "Initial side answer")
+    async def test_followup_history_uses_native_claude_pairs_and_retained_codex_handle(self):
+        history = [{"question": "Initial side question", "response": "Initial side answer"}]
         initial_bytes = self.path.read_bytes()
         initial_active = json.dumps(self.parent_active, sort_keys=True)
         initial_queue = json.dumps(self.parent_queue, sort_keys=True)
         initial_session = json.dumps(self.session, sort_keys=True)
-        claude, codex = AsyncMock(return_value="Claude follow-up"), AsyncMock(return_value="Codex follow-up")
-        with patch.object(side, "answer_claude", claude), \
-                patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(answer_side_question=codex)}):
-            await self.namespace["answer_side_question"]("chat", "Explain that", history=history)
+        with patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(NativeCodexSideChat=self.codex_factory)}):
+            claude = await self.namespace["create_native_side_chat"]("chat")
+            await claude.ask("Explain that", history=history)
+            self.assertEqual(self.manager.ask_side_question.await_args.kwargs["history"], history)
             self.session["backend"] = "codex"
-            await self.namespace["answer_side_question"]("chat", "Explain that", history=history)
+            codex = await self.namespace["create_native_side_chat"]("chat")
+            await codex.ask("Explain that", history=history)
+            await codex.ask("And that?", history=history)
+            self.codex_factory.assert_called_once()
+            self.assertEqual(self.codex.ask.await_args.args, ("And that?",))
             self.session["backend"] = "claude"
-        for provider in (claude, codex):
-            prompt = json.loads(provider.await_args.args[0])
-            self.assertEqual(prompt["side_history"], history)
-            self.assertEqual(prompt["conversation_snapshot"], [{"role": "user", "text": "Original user context"}])
-            self.assertEqual(prompt["side_question"], "Explain that")
         self.assertEqual(self.path.read_bytes(), initial_bytes)
         self.assertEqual(json.dumps(self.parent_active, sort_keys=True), initial_active)
         self.assertEqual(json.dumps(self.parent_queue, sort_keys=True), initial_queue)
         self.assertEqual(json.dumps(self.session, sort_keys=True), initial_session)
 
-    async def test_chat_removed_while_snapshot_loading_cannot_launch_provider(self):
-        snapshot = self.namespace["side_question_context"]
-        def removed_during_snapshot(sid):
-            value = snapshot(sid)
-            self.namespace["public_chat_share_session_exists"] = lambda sid: False
-            return value
-        self.namespace["side_question_context"] = removed_during_snapshot
-        with patch.object(side, "answer_claude", AsyncMock()) as provider:
+    async def test_changed_backend_or_native_parent_cannot_reuse_existing_side_chat(self):
+        for field, value in (("backend", "codex"), ("claude_session_id", "replacement-parent")):
+            original = self.session[field]
+            chat = await self.namespace["create_native_side_chat"]("chat")
+            self.session[field] = value
             with self.assertRaises(side.SideQuestionError) as caught:
-                await self.namespace["answer_side_question"]("chat", "Why?")
+                await chat.ask("Why?", history=[])
+            self.assertEqual(caught.exception.status_code, 410)
+            self.session[field] = original
+        self.manager.ask_side_question.assert_not_awaited()
+
+    async def test_deleted_parent_rejects_before_ask_and_discards_inflight_result(self):
+        chat = await self.namespace["create_native_side_chat"]("chat")
+        sessions = self.namespace["STORE"].sessions
+        sessions.clear()
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await chat.ask("Why?", history=[])
         self.assertEqual(caught.exception.status_code, 404)
-        provider.assert_not_awaited()
+        self.manager.ask_side_question.assert_not_awaited()
+        sessions["chat"] = self.session
+        async def remove_parent(*args, **kwargs):
+            sessions.clear()
+            return {"answer": "Stale", "context_note": "Native context"}
+        self.manager.ask_side_question.side_effect = remove_parent
+        with self.assertRaises(side.SideQuestionError) as caught:
+            await chat.ask("Why?", history=[])
+        self.assertEqual(caught.exception.status_code, 404)
 
 
 if __name__ == "__main__":

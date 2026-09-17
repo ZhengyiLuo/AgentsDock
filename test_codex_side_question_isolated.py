@@ -14,11 +14,14 @@ from side_questions import SideQuestionError
 
 def protocol_schema():
     return {"definitions": {
-        name: {"properties": {
-            "environments": {"type": ["array", "null"],
-                             "description": "Empty disables environment access for this turn."},
-            **({"ephemeral": {"type": ["boolean", "null"]}} if name == "ThreadStartParams" else {}),
-        }} for name in ("ThreadStartParams", "TurnStartParams")
+        "ThreadForkParams": {"properties": {
+            "ephemeral": {"type": "boolean"},
+            **{name: {} for name in ("excludeTurns", "runtimeWorkspaceRoots", "baseInstructions",
+                                    "developerInstructions", "config", "sandbox", "approvalPolicy")},
+        }},
+        "TurnStartParams": {"properties": {"environments": {
+            "type": ["array", "null"], "description": "Empty disables environment access for this turn.",
+        }}},
     }}
 
 
@@ -35,17 +38,19 @@ def completed(status="completed", error=None):
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_requires_explicit_empty_environment_semantics_on_both_boundaries(self):
-        self.assertTrue(adapter.supports_empty_environments(protocol_schema()))
-        for name in ("ThreadStartParams", "TurnStartParams"):
-            for invalid in ({}, {"type": ["array", "null"], "description": "Optional environments"}):
-                with self.subTest(name=name, invalid=invalid):
-                    schema = protocol_schema()
-                    schema["definitions"][name]["properties"]["environments"] = invalid
-                    self.assertFalse(adapter.supports_empty_environments(schema))
-        schema = protocol_schema()
-        del schema["definitions"]["ThreadStartParams"]["properties"]["ephemeral"]
-        self.assertFalse(adapter.supports_empty_environments(schema))
+    def test_requires_native_ephemeral_fork_and_explicit_empty_turn_environments(self):
+        self.assertTrue(adapter.supports_native_side_chat(protocol_schema()))
+        for invalid in ({}, {"type": ["array", "null"], "description": "Optional environments"}):
+            with self.subTest(invalid=invalid):
+                schema = protocol_schema()
+                schema["definitions"]["TurnStartParams"]["properties"]["environments"] = invalid
+                self.assertFalse(adapter.supports_native_side_chat(schema))
+        for field in protocol_schema()["definitions"]["ThreadForkParams"]["properties"]:
+            schema = protocol_schema()
+            del schema["definitions"]["ThreadForkParams"]["properties"][field]
+            self.assertFalse(adapter.supports_native_side_chat(schema), field)
+        for malformed in ({}, None, {"definitions": []}):
+            self.assertFalse(adapter.supports_native_side_chat(malformed))
 
     def test_disables_model_selected_subagents_and_legacy_notification_commands(self):
         config = adapter.isolated_config()
@@ -66,11 +71,13 @@ class ConfigurationTests(unittest.TestCase):
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[message(), completed()]))
+        self.turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[message(), completed()]), close=AsyncMock())
         self.client = SimpleNamespace(
             start=AsyncMock(), close=AsyncMock(),
             request=AsyncMock(return_value={"config": {"mcp_servers": {"ordinary": {}, "dotted.name": {}}}}),
             start_thread=AsyncMock(return_value="temporary-thread"),
+            fork_thread=AsyncMock(return_value="temporary-thread"),
+            read_thread=AsyncMock(return_value={"id": "temporary-thread", "ephemeral": True, "path": None}),
             start_turn=AsyncMock(return_value=self.turn),
         )
         self.factory = Mock(return_value=self.client)
@@ -79,22 +86,27 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(adapter, "_verify_protocol", self.verify))
 
     async def answer(self):
-        return await adapter.answer_side_question("quoted snapshot", executable="synthetic-codex",
+        return await adapter.answer_side_question("side question", parent_thread_id="parent-thread", executable="synthetic-codex",
             model="synthetic-model", env={"HOME": "/synthetic/auth", "PATH": "/bin",
                                          "AGENTSDOCK_CHAT_ID": "parent", "CODEX_THREAD_ID": "parent"})
 
-    async def test_uses_fresh_ephemeral_thread_without_parent_or_workspace_authority(self):
+    async def test_forks_native_parent_history_without_workspace_authority(self):
         self.assertEqual(await self.answer(), "Answer")
         args, options = self.factory.call_args
         self.assertEqual(args, ("synthetic-codex",))
         self.assertEqual(options["env_factory"](), {"HOME": "/synthetic/auth", "PATH": "/bin"})
-        self.assertTrue(options["cwd"].split("/")[-1].startswith("agentsdock-side-question-"))
+        self.assertTrue(options["cwd"].split("/")[-1].startswith("agentsdock-side-chat-"))
         self.verify.assert_awaited_once_with("synthetic-codex", options["cwd"], options["env_factory"]())
         self.client.request.assert_awaited_once_with("config/read", {"includeLayers": False})
-        params = self.client.start_thread.await_args.args[0]
+        source, params = self.client.fork_thread.await_args.args
+        self.assertEqual(source, "parent-thread")
+        self.client.start_thread.assert_not_awaited()
         self.assertTrue(params["ephemeral"])
-        self.assertEqual(params["environments"], [])
-        self.assertEqual(params["dynamicTools"], [])
+        self.assertTrue(params["excludeTurns"])
+        self.assertEqual(params["runtimeWorkspaceRoots"], [])
+        self.assertNotIn("environments", params)  # Unsupported on native forks.
+        self.assertNotIn("dynamicTools", params)
+        self.assertNotIn("deferGoalContinuation", params)
         self.assertEqual(params["cwd"], options["cwd"])
         self.assertEqual(params["approvalPolicy"], "never")
         self.assertEqual(params["sandbox"], "read-only")
@@ -115,19 +127,21 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(params["config"]["mcp_servers"]["ordinary"]["enabled"], False)
         self.assertIs(params["config"]["mcp_servers"]["dotted.name"]["enabled"], False)
         self.client.start_turn.assert_awaited_once_with("temporary-thread",
-            [{"type": "text", "text": "quoted snapshot"}], overrides={"environments": []})
+            [{"type": "text", "text": "side question"}], overrides={"environments": []})
+        self.client.read_thread.assert_awaited_once_with("temporary-thread", include_turns=False)
+        self.turn.close.assert_awaited_once()
         self.client.close.assert_awaited_once()
 
     async def test_preserves_provider_owned_runtime_location_without_reindexing_override(self):
         supplied = {"HOME": "/synthetic/auth", "CODEX_HOME": "/synthetic/provider",
                     "CODEX_SQLITE_HOME": "/synthetic/provider-state"}
-        self.assertEqual(await adapter.answer_side_question("snapshot", executable="synthetic-codex",
+        self.assertEqual(await adapter.answer_side_question("question", parent_thread_id="parent-thread", executable="synthetic-codex",
             model=None, env=supplied), "Answer")
         options = self.factory.call_args.kwargs
         self.assertEqual(options["env_factory"](), supplied)
         self.assertFalse(any(value.startswith("sqlite_home=") for value in options["app_server_args"]))
-        self.assertTrue(self.client.start_thread.await_args.args[0]["ephemeral"])
-        self.assertEqual(self.client.start_thread.await_args.args[0]["environments"], [])
+        self.assertTrue(self.client.fork_thread.await_args.args[1]["ephemeral"])
+        self.assertEqual(self.client.fork_thread.await_args.args[1]["runtimeWorkspaceRoots"], [])
         self.assertEqual(self.client.start_turn.await_args.kwargs["overrides"]["environments"], [])
 
     async def test_unsupported_protocol_never_starts_provider(self):
@@ -136,13 +150,94 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             await self.answer()
         self.factory.assert_not_called()
 
+    async def test_followups_reuse_provider_history_until_explicit_close(self):
+        chat = adapter.NativeCodexSideChat("parent-thread", executable="synthetic-codex",
+            model=None, env={"HOME": "/synthetic/auth"})
+        self.turn.next_notification.side_effect = [message("First answer"), completed(),
+                                                  message("Followup answer"), completed()]
+        self.assertEqual(await chat.ask("First question"), "First answer")
+        self.assertEqual(await chat.ask("What did you just mean?"), "Followup answer")
+        self.factory.assert_called_once()
+        self.client.fork_thread.assert_awaited_once()
+        self.assertEqual(self.client.start_turn.await_args_list[1].args,
+                         ("temporary-thread", [{"type": "text", "text": "What did you just mean?"}]))
+        self.assertEqual(self.turn.close.await_count, 2)
+        self.client.close.assert_not_awaited()
+        await chat.close()
+        await chat.close()
+        self.client.close.assert_awaited_once()
+        with self.assertRaises(SideQuestionError) as caught:
+            await chat.ask("Too late")
+        self.assertEqual(caught.exception.status_code, 409)
+
+    async def test_fork_must_confirm_ephemeral_before_any_model_turn(self):
+        for metadata in ({"ephemeral": False, "path": None}, {"ephemeral": True, "path": "/saved"}, {}):
+            with self.subTest(metadata=metadata):
+                self.client.read_thread.return_value = metadata
+                with self.assertRaises(SideQuestionError):
+                    await self.answer()
+        self.client.start_turn.assert_not_awaited()
+
+    async def test_fork_rejects_source_identity_without_touching_parent(self):
+        self.client.fork_thread.return_value = "parent-thread"
+        with self.assertRaises(SideQuestionError):
+            await self.answer()
+        self.client.read_thread.assert_not_awaited()
+        self.client.start_turn.assert_not_awaited()
+
+    async def test_native_rollout_path_is_only_passed_to_provider_fork(self):
+        await adapter.answer_side_question("question", parent_thread_id="parent-thread",
+            parent_rollout_path="/synthetic/parent.jsonl", executable="synthetic-codex", model=None, env={})
+        self.assertEqual(self.client.fork_thread.await_args.args[1]["path"], "/synthetic/parent.jsonl")
+        self.assertEqual(self.client.start_turn.await_args.args[1], [{"type": "text", "text": "question"}])
+
+    async def test_cancel_during_fork_joins_acceptance_before_owned_cleanup(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        order = []
+        async def fork(*args):
+            entered.set()
+            await release.wait()
+            order.append("forked")
+            return "temporary-thread"
+        async def close():
+            order.append("closed")
+        self.client.fork_thread.side_effect = fork
+        self.client.close.side_effect = close
+        task = asyncio.create_task(self.answer())
+        await entered.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        self.assertFalse(task.done())
+        release.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(order, ["forked", "closed"])
+        self.client.start_turn.assert_not_awaited()
+
+    async def test_explicit_close_cancels_current_ask_and_reaps_once(self):
+        entered = asyncio.Event()
+        async def wait():
+            entered.set()
+            await asyncio.Event().wait()
+        self.turn.next_notification.side_effect = wait
+        chat = adapter.NativeCodexSideChat("parent-thread", executable="synthetic-codex", model=None, env={})
+        task = asyncio.create_task(chat.ask("pending"))
+        await entered.wait()
+        with self.assertRaises(SideQuestionError) as caught:
+            await chat.ask("concurrent")
+        self.assertEqual(caught.exception.status_code, 409)
+        await chat.close()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.client.close.assert_awaited_once()
+
     async def test_unconfirmed_integrations_fail_before_thread_start(self):
         for invalid in (None, {}, {"config": None}, {"config": {"mcp_servers": []}}):
             with self.subTest(invalid=invalid):
                 self.client.request.return_value = invalid
                 with self.assertRaises(SideQuestionError):
                     await self.answer()
-        self.client.start_thread.assert_not_awaited()
+        self.client.fork_thread.assert_not_awaited()
         self.client.start_turn.assert_not_awaited()
 
     async def test_final_answer_ignores_commentary_and_duplicate_completion(self):
@@ -212,7 +307,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.assertEqual(order, ["started", "closed"])
-        self.client.start_thread.assert_not_awaited()
+        self.client.fork_thread.assert_not_awaited()
 
     async def test_repeated_cancellation_does_not_interrupt_process_cleanup(self):
         answering, closing, release = asyncio.Event(), asyncio.Event(), asyncio.Event()

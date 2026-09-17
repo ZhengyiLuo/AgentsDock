@@ -1,4 +1,4 @@
-"""Request-scoped answers about a read-only conversation snapshot.
+"""Transient side questions, receipts and native conversation ownership.
 
 Nothing starts on import. This module has no access to the main turn, queue,
 goal, provider authority, provider history import, or persistence callbacks.
@@ -52,9 +52,8 @@ class SideQuestionError(Exception):
 
 
 def capability():
-    return {"available": True, "version": 1, "backends": ["codex", "claude"],
-            "max_question_chars": MAX_QUESTION_CHARS, "history": True,
-            "max_history_items": MAX_HISTORY_ITEMS, "max_history_chars": MAX_HISTORY_CHARS}
+    return {"available": True, "version": 2, "native_context": True, "backends": ["codex", "claude"],
+            "max_question_chars": MAX_QUESTION_CHARS}
 
 
 def validate_history(value) -> tuple[tuple[str, str], ...]:
@@ -323,12 +322,109 @@ class _Receipt:
     expires_at: float = float("inf")
     cancelled: bool = False
     waiters: int = 0
+    side_chat_id: str | None = None
+    after_request_id: str | None = None
+
+
+@dataclass
+class _NativeConversation:
+    handle: object = None
+    last_request_id: str | None = None
+    history: list = None
+    busy: bool = False
+    closed: bool = False
+    timer: object = None
+    close_task: asyncio.Task | None = None
+
+
+NATIVE_IDLE_SECONDS = 30 * 60
 
 
 class SideQuestions:
-    def __init__(self, answer):
+    def __init__(self, answer=None, *, native_factory=None):
         self.answer = answer
+        self.native_factory = native_factory
         self.receipts: dict[tuple[str, str, str], _Receipt] = {}
+        self.conversations: dict[tuple[str, str, str], _NativeConversation] = {}
+        self.cleanup_tasks: set[asyncio.Task] = set()
+
+    async def _close_conversation(self, conversation):
+        conversation.closed = True
+        if conversation.timer is not None:
+            conversation.timer.cancel()
+        if conversation.handle is not None and conversation.close_task is None:
+            handle, conversation.handle = conversation.handle, None
+            conversation.close_task = asyncio.create_task(handle.close(), name="side-chat-close")
+            self.cleanup_tasks.add(conversation.close_task)
+            def finished(task):
+                self.cleanup_tasks.discard(task)
+                if not task.cancelled():
+                    task.exception()
+            conversation.close_task.add_done_callback(finished)
+        if conversation.close_task is not None:
+            # A disconnected DELETE only loses its waiter, never ownership of
+            # native child cleanup. Concurrent Clear requests join this task.
+            await asyncio.shield(conversation.close_task)
+
+    def _expire_conversation(self, key, conversation):
+        if self.conversations.get(key) is not conversation or conversation.busy:
+            return
+        self.conversations.pop(key, None)
+        task = asyncio.create_task(self._close_conversation(conversation), name="side-chat-expiry")
+        self.cleanup_tasks.add(task)
+        def finished(task):
+            self.cleanup_tasks.discard(task)
+            if not task.cancelled():
+                task.exception()
+        task.add_done_callback(finished)
+
+    async def _native_answer(self, owner, session_id, request_id, question, side_chat_id, after_request_id):
+        key = (owner, session_id, side_chat_id)
+        conversation = self.conversations.get(key)
+        if conversation is None:
+            if after_request_id is not None:
+                raise SideQuestionError(410, "Side chat expired. Clear Side chat to start a new native conversation.")
+            conversation = self.conversations[key] = _NativeConversation(history=[])
+        if conversation.closed:
+            raise SideQuestionError(410, "Side chat ended. Clear Side chat to start a new native conversation.")
+        if conversation.busy:
+            raise SideQuestionError(409, "A side question is already running in this conversation")
+        if conversation.last_request_id != after_request_id:
+            raise SideQuestionError(409, "Side chat changed; refresh or clear the side conversation")
+        conversation.busy = True
+        if conversation.timer is not None:
+            conversation.timer.cancel()
+        try:
+            if conversation.handle is None:
+                conversation.handle = await self.native_factory(session_id)
+            if conversation.closed:
+                raise SideQuestionError(410, "Side chat ended")
+            result = await conversation.handle.ask(question, history=list(conversation.history))
+            if conversation.closed:
+                raise SideQuestionError(410, "Side chat ended")
+            # Claude /btw replays the last twenty side exchanges natively.
+            # Codex keeps its separate ephemeral transcript and ignores this.
+            conversation.history = (conversation.history + [{"question": question, "response": result["answer"]}])[-20:]
+            conversation.last_request_id = request_id
+            return result
+        except BaseException:
+            await self._close_conversation(conversation)
+            raise
+        finally:
+            conversation.busy = False
+            conversation.timer = asyncio.get_running_loop().call_later(
+                NATIVE_IDLE_SECONDS, self._expire_conversation, key, conversation)
+
+    async def close_conversation(self, owner, session_id, side_chat_id):
+        key = (owner, session_id, side_chat_id)
+        conversation = self.conversations.setdefault(key, _NativeConversation(history=[]))
+        conversation.closed = True
+        for receipt_key, receipt in tuple(self.receipts.items()):
+            if receipt_key[:2] == key[:2] and receipt.side_chat_id == side_chat_id:
+                await self.cancel(*receipt_key)
+        await self._close_conversation(conversation)
+        conversation.timer = asyncio.get_running_loop().call_later(
+            NATIVE_IDLE_SECONDS, self._expire_conversation, key, conversation)
 
     def _prune(self):
         now = time.monotonic()
@@ -336,7 +432,8 @@ class SideQuestions:
             if receipt.expires_at <= now and (receipt.task is None or receipt.task.done()):
                 self.receipts.pop(key, None)
 
-    def submit(self, owner: str, session_id: str, request_id: str, question: str, *, history: list[dict] | None = None):
+    def submit(self, owner: str, session_id: str, request_id: str, question: str, *, history: list[dict] | None = None,
+               side_chat_id: str | None = None, after_request_id: str | None = None):
         frozen_history = validate_history([] if history is None else history)
         self._prune()
         key = (owner, session_id, request_id)
@@ -344,15 +441,20 @@ class SideQuestions:
         if receipt is not None:
             if receipt.cancelled:
                 raise SideQuestionError(409, "Side question was cancelled; submit with a new request ID")
-            if receipt.question != question or receipt.history != frozen_history:
+            if (receipt.question != question or receipt.history != frozen_history
+                    or receipt.side_chat_id != side_chat_id or receipt.after_request_id != after_request_id):
                 raise SideQuestionError(409, "Request ID already belongs to a different side question")
             return receipt
-        receipt = _Receipt(question, history=frozen_history)
+        if self.native_factory is not None and (not side_chat_id or frozen_history):
+            raise SideQuestionError(409, "Update the app to use native Side chat; copied conversation history is no longer accepted.")
+        receipt = _Receipt(question, history=frozen_history, side_chat_id=side_chat_id, after_request_id=after_request_id)
         self.receipts[key] = receipt
 
         async def run():
             try:
-                answer = (self.answer(session_id, question, history=history_messages(frozen_history))
+                answer = (self._native_answer(owner, session_id, request_id, question, side_chat_id, after_request_id)
+                          if self.native_factory is not None else
+                          self.answer(session_id, question, history=history_messages(frozen_history))
                           if frozen_history else self.answer(session_id, question))
                 return await asyncio.wait_for(answer, REQUEST_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
@@ -390,6 +492,9 @@ class SideQuestions:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self.receipts.clear()
+        await asyncio.gather(*(self._close_conversation(item) for item in self.conversations.values()), return_exceptions=True)
+        self.conversations.clear()
+        await asyncio.gather(*self.cleanup_tasks, return_exceptions=True)
 
 
 def create_side_question_router(*, authorize, session_exists, runtime: SideQuestions):
@@ -421,8 +526,13 @@ def create_side_question_router(*, authorize, session_exists, runtime: SideQuest
         except asyncio.TimeoutError:
             raise HTTPException(408, "Side question request was not received") from None
         if (not isinstance(value, dict) or not {"request_id", "question"} <= set(value)
-                or set(value) - {"request_id", "question", "history"}):
-            raise HTTPException(400, "Provide request_id, question, and optional history only")
+                or set(value) - {"request_id", "question", "history", "side_chat_id", "after_request_id"}):
+            raise HTTPException(400, "Invalid side question fields")
+        for field in ("side_chat_id", "after_request_id"):
+            if field in value and (not isinstance(value[field], str) or not IDENTIFIER.fullmatch(value[field])):
+                raise HTTPException(400, "Invalid side conversation ID")
+        if "after_request_id" in value and "side_chat_id" not in value:
+            raise HTTPException(400, "Side conversation ID is required")
         request_id, question = value["request_id"], value["question"]
         if not isinstance(request_id, str) or not IDENTIFIER.fullmatch(request_id):
             raise HTTPException(400, "Invalid side question request ID")
@@ -445,7 +555,8 @@ def create_side_question_router(*, authorize, session_exists, runtime: SideQuest
         watcher = None
         receipt = None
         try:
-            receipt = runtime.submit(owner, session_id, request_id, question, history=history)
+            receipt = runtime.submit(owner, session_id, request_id, question, history=history,
+                                     side_chat_id=value.get("side_chat_id"), after_request_id=value.get("after_request_id"))
             receipt.waiters += 1
             watcher = asyncio.create_task(disconnected())
             done, _ = await asyncio.wait({receipt.task, watcher}, return_when=asyncio.FIRST_COMPLETED)
@@ -473,5 +584,11 @@ def create_side_question_router(*, authorize, session_exists, runtime: SideQuest
         status = await runtime.cancel(owner, session_id, request_id)
         return JSONResponse({"request_id": request_id, "status": status},
                             headers={"Cache-Control": "no-store"})
+
+    @router.delete("/api/sessions/{session_id}/side-chats/{side_chat_id}")
+    async def close_side_chat(session_id: str, side_chat_id: str, request: Request):
+        owner = guard(request, session_id, side_chat_id)
+        await runtime.close_conversation(owner, session_id, side_chat_id)
+        return JSONResponse({"side_chat_id": side_chat_id, "status": "closed"}, headers={"Cache-Control": "no-store"})
 
     return router

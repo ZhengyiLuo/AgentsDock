@@ -77604,38 +77604,12 @@ def public_chat_share_session_exists(session_id: str) -> bool:
     )
 
 
-def side_question_context(session_id: str) -> tuple[list[dict], str]:
-    """Take an on-demand snapshot without history repair/import or state writes."""
-    if not public_chat_share_session_exists(session_id):
-        raise side_questions.SideQuestionError(404, "Chat not found")
-    sessions_root = STATE_DIR / "sessions"
-    selected = session_dir(session_id)
-    try:
-        if (sessions_root.is_symlink() or selected.is_symlink()
-                or selected.resolve(strict=True).parent != sessions_root.resolve(strict=True)):
-            raise side_questions.SideQuestionError(409, "Conversation context is unavailable")
-    except OSError:
-        raise side_questions.SideQuestionError(409, "Conversation context is unavailable") from None
-    projector = make_public_event_projector(
-        session_id, event_is_visible=is_client_visible_event,
-        event_files_belong=event_files_belong_to_session,
-        project_provider_event=project_provider_history_event_for_egress,
-        strip_user_context=strip_agentsdock_generated_user_text,
-        fork_internal_purposes=FORK_INTERNAL_PURPOSES,
-    )
-    def project(event):
-        # Ordinary steering carries another actual user prompt. Apply the
-        # same proven-context stripping as the initial prompt boundary.
-        if event.get("type") == "turn_steered":
-            event = {**event, "type": "turn_started"}
-        return projector(event)
-    try:
-        return side_questions.read_context_snapshot(events_path(session_id), project)
-    except PublicTranscriptError:
-        raise side_questions.SideQuestionError(409, "Conversation context is unavailable") from None
+async def create_native_side_chat(session_id: str):
+    """Bind a transient side conversation to the provider's actual parent.
 
-
-async def answer_side_question(session_id: str, question: str, history: list[dict] | None = None) -> dict[str, Any]:
+    No visible-message projection, main turn, queue or goal mutation belongs
+    here. Codex owns a native ephemeral fork; Claude uses native /btw control.
+    """
     if SERVER_SHUTTING_DOWN:
         raise side_questions.SideQuestionError(503, "Server is shutting down")
     if not public_chat_share_session_exists(session_id):
@@ -77644,25 +77618,65 @@ async def answer_side_question(session_id: str, question: str, history: list[dic
     backend = str(session.get("backend") or DEFAULT_BACKEND).lower()
     if backend not in {BACKEND_CODEX, BACKEND_CLAUDE}:
         raise side_questions.SideQuestionError(503, "This backend does not support side questions")
-    model = session.get("model")
-    if not isinstance(model, str) or not model.strip():
-        model = None
-    messages, note = await asyncio.to_thread(side_question_context, session_id)
-    if not public_chat_share_session_exists(session_id):
-        raise side_questions.SideQuestionError(404, "Chat not found")
-    prompt = side_questions.build_prompt(question, messages, note, history=history)
-    env = side_questions.isolated_environment(runner_env())
-    if backend == BACKEND_CLAUDE:
-        answer = await side_questions.answer_claude(prompt, executable=CLAUDE_BIN, model=model, env=env)
-    else:
-        from codex_side_question import answer_side_question as answer_codex_side_question
-        answer = await answer_codex_side_question(prompt, executable=CODEX_BIN, model=model, env=env)
-    if not public_chat_share_session_exists(session_id):
-        raise side_questions.SideQuestionError(404, "Chat not found")
-    return {"backend": backend, "answer": answer, "context_note": note}
+    def provider_id(value):
+        return (session_codex_thread_id(value) if backend == BACKEND_CODEX else
+                str(value.get("claude_session_id") or value.get("session_id") or "").strip())
+    parent_id = provider_id(session)
+    if not parent_id:
+        raise side_questions.SideQuestionError(409, "The native conversation has not started yet")
+
+    class NativeSideChat:
+        codex = None
+
+        def current(self):
+            if SERVER_SHUTTING_DOWN:
+                raise side_questions.SideQuestionError(503, "Server is shutting down")
+            if not public_chat_share_session_exists(session_id):
+                raise side_questions.SideQuestionError(404, "Chat not found")
+            current = STORE.sessions[session_id]
+            if str(current.get("backend") or DEFAULT_BACKEND).lower() != backend or provider_id(current) != parent_id:
+                raise side_questions.SideQuestionError(410, "The main provider conversation changed; clear Side chat")
+            return current
+
+        async def ask(self, question, *, history):
+            current = self.current()
+            if backend == BACKEND_CLAUDE:
+                from claude_sdk_client import (ClaudeSDKGenerationChanged, ClaudeSDKConfigurationConflict,
+                    ClaudeSDKRunActive, ClaudeSDKSupervisorError)
+                try:
+                    cwd = existing_cwd(str(current.get("cwd") or DEFAULT_CWD))
+                    options, configuration_key, _cli_path = build_claude_sdk_options(
+                        session_id, current, cwd, codex_manifest_path(session_id))
+                    manager = await claude_sdk_manager()
+                    result = await manager.ask_side_question(session_id, question, history=history,
+                        options=options, configuration_key=configuration_key, expected_provider_id=parent_id)
+                except ClaudeSDKGenerationChanged:
+                    raise side_questions.SideQuestionError(410, "Claude conversation changed; clear Side chat") from None
+                except (ClaudeSDKConfigurationConflict, ClaudeSDKRunActive):
+                    raise side_questions.SideQuestionError(409, "Claude conversation is changing; retry") from None
+                except ClaudeSDKSupervisorError:
+                    raise side_questions.SideQuestionError(503, "Claude native side questions are unavailable; retry after reconnecting") from None
+            else:
+                from codex_side_question import NativeCodexSideChat
+                if self.codex is None:
+                    model = current.get("model")
+                    self.codex = NativeCodexSideChat(parent_id, executable=CODEX_BIN,
+                        model=model if isinstance(model, str) and model.strip() else None,
+                        env=side_questions.isolated_environment(runner_env()))
+                result = {"answer": await self.codex.ask(question),
+                          "context_note": "Native Codex context from when Side chat started, including tool results. Clear Side chat to use the latest main context."}
+            self.current()
+            return {"backend": backend, **result}
+
+        async def close(self):
+            if self.codex is not None:
+                await self.codex.close()
+            # Claude /btw is request-scoped; never close the main SDK client.
+
+    return NativeSideChat()
 
 
-SIDE_QUESTIONS = side_questions.SideQuestions(answer_side_question)
+SIDE_QUESTIONS = side_questions.SideQuestions(native_factory=create_native_side_chat)
 app.include_router(side_questions.create_side_question_router(
     authorize=require_native_admin_control,
     session_exists=public_chat_share_session_exists,
