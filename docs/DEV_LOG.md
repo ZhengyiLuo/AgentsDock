@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-09-17 — Desktop 1.0.3 stable accepted
+
+- Publish [AgentsDock 1.0.3](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.3),
+  build **1172**, from `fa5d815118c28a1c18fa6d9afc3cc77f7d089fff`.
+  Include Workspace Changes, native Side chat transport correction and the
+  small 9px sidebar app-version label. Matching AgentsServer 1.0.3 is published
+  for Git controls and the Codex Side chat startup correction.
+- Preparation `35277907016` and publication `35279799800` pass all four
+  platform gates. macOS is Developer ID signed and notarized; Windows retains
+  the approved unsigned policy. Verify the exact downloaded universal Mac
+  package's 1.0.3/build 1172 metadata, signature, notarization, public Stable
+  update feed, bundled feature code and version typography.
+- Verify identical 14-asset public and legacy releases, the pinned source tag,
+  sealed checksums and fresh public updater metadata for every platform.
+  Checksum-manifest SHA-256:
+  `6ede115f1bceb8acbfcb37cb951b3bc10753582051db378f57913a945b44f39a`.
+- Native offscreen interaction covers Sidebar themes/widths, real-repository
+  Changes workflows through the production client/server boundary, and real
+  provider Side chat answers, follow-ups and cancellation. A disposable Codex
+  overlap check confirms cancelling the side turn leaves its separate test
+  main turn active through normal completion. Official package clean-start
+  checks run on disposable CI machines; local native fixtures do not claim a
+  full packaged production-profile Changes journey.
+- Preserve concurrent uncommitted work. Publication does not replace the
+  user's running app, install on another machine, or restart either server.
+
 ## 2026-09-17 — Quiet sidebar version label (unreleased)
 
 - Keep the installed app version beside the brand at a small, muted 9px size;
