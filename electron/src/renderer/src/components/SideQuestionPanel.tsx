@@ -30,7 +30,7 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   useEffect(() => {
     if (!active || !ready || (!autoFocus && !focusVersion)) return
     textarea.current?.focus({ preventScroll: true })
-    if (!autoFocus) textarea.current?.scrollIntoView({ block: 'nearest' })
+    if (!autoFocus) textarea.current?.closest('.side-chat-composer')?.scrollIntoView({ block: 'nearest' })
     onFocusHandled?.()
   }, [active, focusVersion, session.id, scope.profileId, scope.profileGeneration, ready, autoFocus, onFocusHandled])
   useEffect(() => {

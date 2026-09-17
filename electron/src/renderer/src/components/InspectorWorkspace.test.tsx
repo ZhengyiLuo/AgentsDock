@@ -89,7 +89,7 @@ describe('Inspector workspace', () => {
     const scrollIntoView = vi.fn()
     const view = await act(async () => render(<Workspace />))
     const input = screen.getByLabelText('Side message')
-    input.scrollIntoView = scrollIntoView
+    input.closest('.side-chat-composer')!.scrollIntoView = scrollIntoView
     view.rerender(<Workspace focusVersion={1} onFocusHandled={handled} />)
     expect(input).toHaveFocus()
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
