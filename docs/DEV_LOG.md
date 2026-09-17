@@ -1,7 +1,9 @@
 # Public development log
 
-## 2026-09-17 — Native provider side conversations (local validation)
+## 2026-09-17 — Native provider side conversations (local build)
 
+- Build **1.0.3-local.1174 / 1174** from `36ba482`. Verify all 88 compiled
+  payload files, ARM64 Developer ID signature and local-only updater marker.
 - Place Side chat below Media & files, after Subagents, within one inspector.
   Verify expanded/collapsed media and narrow/light/dark native Electron layouts.
 - Replace visible-text snapshots with native context: a persistent ephemeral
@@ -17,8 +19,18 @@
   cancellation while the main request runs, unchanged parent history/goals and
   Claude cold resume without a main query. Focused transport and lifecycle
   regressions cover cancellation, duplicate requests, expiry and cleanup races.
-- Native app/server acceptance and local packaging are tracked separately;
-  source changes are not a server deployment or an installed-app replacement.
+- Exercise native offscreen Electron mouse/keyboard input through production
+  preload, native HTTP authorization, router, provider binding and Claude SDK
+  manager into a real authenticated Claude provider. Verify first answer,
+  follow-up, cancellation, Clear/new conversation and continued main work.
+  Both provider adapters also pass real disposable-provider checks; synthetic
+  full-boundary UI fixtures cover both providers. Session store/SDK option
+  construction and full app-profile bootstrap remain fixture boundaries.
+- TypeScript, production compilation and the clean-source desktop suite pass
+  (4,412 tests, 10 skipped). Matching standalone server source is `39e59aad`.
+  Packaged startup is not exercised; payload/signature validation does not
+  claim an installed production-profile test. No server deployment, publication
+  or replacement of the running app is included.
 
 ## 2026-09-17 — Side chat in the shared inspector (local only)
 
