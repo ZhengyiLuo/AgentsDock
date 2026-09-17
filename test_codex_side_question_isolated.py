@@ -99,7 +99,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params["approvalPolicy"], "never")
         self.assertEqual(params["sandbox"], "read-only")
         self.assertEqual(params["model"], "synthetic-model")
-        self.assertEqual(params["config"]["sqlite_home"], str(Path(options["cwd"]) / "state"))
+        self.assertNotIn("sqlite_home", params["config"])
         self.assertEqual(params["config"]["log_dir"], str(Path(options["cwd"]) / "log"))
         self.assertEqual(params["config"]["history.persistence"], "none")
         # These must be process startup overrides, not only thread overrides:
@@ -107,7 +107,8 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         cli = options["app_server_args"]
         cli_config = {cli[index + 1].split("=", 1)[0]: json.loads(cli[index + 1].split("=", 1)[1])
                       for index in range(0, len(cli), 2)}
-        for key in ("sqlite_home", "log_dir", "history.persistence"):
+        self.assertNotIn("sqlite_home", cli_config)
+        for key in ("log_dir", "history.persistence"):
             self.assertEqual(cli_config[key], params["config"][key])
         self.assertNotIn("threadId", params)
         self.assertNotIn("parentThreadId", params)
@@ -116,6 +117,18 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.client.start_turn.assert_awaited_once_with("temporary-thread",
             [{"type": "text", "text": "quoted snapshot"}], overrides={"environments": []})
         self.client.close.assert_awaited_once()
+
+    async def test_preserves_provider_owned_runtime_location_without_reindexing_override(self):
+        supplied = {"HOME": "/synthetic/auth", "CODEX_HOME": "/synthetic/provider",
+                    "CODEX_SQLITE_HOME": "/synthetic/provider-state"}
+        self.assertEqual(await adapter.answer_side_question("snapshot", executable="synthetic-codex",
+            model=None, env=supplied), "Answer")
+        options = self.factory.call_args.kwargs
+        self.assertEqual(options["env_factory"](), supplied)
+        self.assertFalse(any(value.startswith("sqlite_home=") for value in options["app_server_args"]))
+        self.assertTrue(self.client.start_thread.await_args.args[0]["ephemeral"])
+        self.assertEqual(self.client.start_thread.await_args.args[0]["environments"], [])
+        self.assertEqual(self.client.start_turn.await_args.kwargs["overrides"]["environments"], [])
 
     async def test_unsupported_protocol_never_starts_provider(self):
         self.verify.side_effect = SideQuestionError(503, "Update Codex")

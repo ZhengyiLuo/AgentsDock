@@ -77,11 +77,12 @@ async def answer_side_question(prompt: str, *, executable: str, model: str | Non
     with tempfile.TemporaryDirectory(prefix="agentsdock-side-question-") as temporary:
         await _verify_protocol(executable, temporary, env)
         config = isolated_config()
-        # Ephemeral disables this thread's transcript, not process-wide state
-        # databases/logs. Keep those out of the main Codex runtime as well.
-        # Explicit sqlite_home takes precedence over CODEX_SQLITE_HOME.
+        # Keep Codex's configured runtime/auth state. A fresh sqlite_home while
+        # retaining its history root triggers startup reindexing of all old
+        # rollouts. The new ephemeral thread isolates conversation history;
+        # this owned child shares only normal provider runtime state, like the
+        # CLI, and cancellation still closes only this exact child process.
         config.update({
-            "sqlite_home": str(Path(temporary) / "state"),
             "log_dir": str(Path(temporary) / "log"),
             "history.persistence": "none",
         })

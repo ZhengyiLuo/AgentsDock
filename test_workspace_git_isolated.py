@@ -84,7 +84,7 @@ class WorkspaceGitTests(unittest.TestCase):
         os.rename(linked / "file.txt", linked / "renamed.txt")
         repository = Repository(linked / "nested")
         before = repository.status()
-        self.assertEqual(before["root"], str(linked))
+        self.assertEqual(before["root"], str(linked.resolve()))
         repository.action({"action": "stage", "paths": ["file.txt", "renamed.txt"], "expected_revision": before["revision"]})
         renamed = Repository(linked).status()
         self.assertEqual(renamed["files"][0]["original_path"], "file.txt")

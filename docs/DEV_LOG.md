@@ -1,5 +1,21 @@
 # Development and release log
 
+## 2026-09-17 — Codex Side chat startup correction (unreleased)
+
+- Retain Codex's configured runtime state instead of creating a fresh SQLite
+  database against its existing history root on every side question. Preserve
+  provider-owned authentication, temporary threads, disabled workspace/tools,
+  per-request process ownership and cancellation; do not copy credentials.
+- Exercise a real Codex first answer, contextual follow-up and cancellation
+  through native offscreen Electron, production preload/client and the native
+  server authorization/router. Observe temporary threads with no saved path,
+  no transcript for those threads, and cleanup of all owned child processes.
+  The main-chat context and app shell are fixtures, not a concurrently running
+  production research task or full installed-profile acceptance.
+- Validate focused isolation/cleanup regressions. Also make the Git worktree
+  assertion compare canonical paths on macOS's symlinked temporary directory.
+  These changes are prepared for 1.0.3; publication and deployment are separate.
+
 ## 2026-09-17 — Native workspace Git controls (unreleased)
 
 - Add on-demand worktree status, staged/unstaged file diffs, conflict versions,
