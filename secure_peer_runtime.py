@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 import asyncio
+import errno
 import hashlib
 import hmac
 import json
@@ -741,12 +742,35 @@ class SecurePeerRuntime:
                         "notification_hint_snapshot": self._peer_notification_hint_snapshot,
                     } if self._mail_hints.enabled else {}),
                 )
-                gateway.start()
+                self._start_host_gateway(gateway)
                 self._gateway = gateway
             with self._peer_admission:
                 self._peer_accepting = self._gateway is not None and not self._host_admission_closed
                 self._peer_admission.notify_all()
             self._pending_host_attachment = None
+
+    def _start_host_gateway(self, gateway: SecurePeerGateway) -> None:
+        try:
+            gateway.start()
+        except OSError as exc:
+            if exc.errno != errno.EADDRNOTAVAIL:
+                raise
+            # The trust store and Hub projection are already ready. Only an
+            # explicit endpoint change may recover a vanished interface; never
+            # widen the bind or select a replacement address automatically.
+            error = SecurePeerError(
+                "secure_peer_host_address_unavailable",
+                f"Secure peer host address {gateway.bind_ip}:{gateway.port} is no longer "
+                f"assigned to this server (errno {exc.errno}: {exc.strerror}). "
+                "Configure hosting with a current local IPv4 address.",
+                409,
+            )
+            self.mark_host_unavailable(
+                str(error),
+                error_code=error.code,
+                action="Configure hosting with a current local IPv4 address, or restore the previous address.",
+            )
+            raise error from exc
 
     def detach_host_hub(self, *, hub_store: HubStore) -> None:
         """Retire only this server's host role while preserving client state."""
@@ -798,11 +822,15 @@ class SecurePeerRuntime:
                 _resume_admission=False,
             )
         except Exception as exc:
-            self.mark_host_unavailable(
-                "Secure peer host could not be initialized",
-                error_code="secure_peer_host_initialization_failed",
-                action="Retry secure peer host initialization.",
-            )
+            if not (
+                isinstance(exc, SecurePeerError)
+                and exc.code == "secure_peer_host_address_unavailable"
+            ):
+                self.mark_host_unavailable(
+                    "Secure peer host could not be initialized",
+                    error_code="secure_peer_host_initialization_failed",
+                    action="Retry secure peer host initialization.",
+                )
             if self.logger is not None:
                 self.logger.warning(
                     "secure peer host attachment retry deferred error_type=%s",
@@ -847,10 +875,13 @@ class SecurePeerRuntime:
         if enabled:
             self.retry_host_attachment()
         with self._guard:
+            recovering_address = (
+                self._host_error_code == "secure_peer_host_address_unavailable"
+            )
             if enabled and (
                 self._host_store is None
                 or self._adapter is None
-                or self._host_error_code is not None
+                or (self._host_error_code is not None and not recovering_address)
             ):
                 raise SecurePeerError(
                     "host_unavailable",
@@ -871,11 +902,12 @@ class SecurePeerRuntime:
         with self._guard:
             old_gateway = self._gateway
             old_config = dict(self._config)
+            old_error = (self._host_error, self._host_error_code, self._host_action)
             new_gateway: SecurePeerGateway | None = None
             try:
                 if old_gateway is not None:
-                    old_gateway.stop()
                     self._gateway = None
+                    old_gateway.stop()
                 if enabled:
                     assert self._host_store is not None and self._adapter is not None and host is not None
                     new_gateway = SecurePeerGateway(
@@ -892,8 +924,14 @@ class SecurePeerRuntime:
                         relay_enabled=lambda: self._relay_enabled,
                         peer_heartbeat=self._record_authenticated_peer_heartbeat,
                         peer_revoker=self._revoke_authenticated_peer,
+                        **({
+                            "mail_hint_subscriber": self._subscribe_peer_mail_hints,
+                            "mail_hint_snapshot": self._peer_mail_hint_snapshot,
+                            "notification_hint_subscriber": self._subscribe_peer_notification_hints,
+                            "notification_hint_snapshot": self._peer_notification_hint_snapshot,
+                        } if self._mail_hints.enabled else {}),
                     )
-                    new_gateway.start()
+                    self._start_host_gateway(new_gateway)
                 next_config = {
                     "version": 1,
                     "server_identity": self.server_identity,
@@ -907,28 +945,58 @@ class SecurePeerRuntime:
                 self._host_error = None
                 self._host_error_code = None
                 self._host_action = None
+                if recovering_address:
+                    self._pending_host_attachment = None
             except BaseException:
                 if new_gateway is not None:
-                    new_gateway.stop()
-                # Restore the previous live listener when persistence failed.
-                if old_config["enabled"] and self._host_store is not None and self._adapter is not None:
-                    restored = SecurePeerGateway(
-                        self._host_store,
-                        str(old_config["advertised_host"]),
-                        int(old_config["listen_port"]),
-                        forwarder=self._forward_peer_request,
-                        resource_team_resolver=self._adapter.resource_team,
-                        attachment_max_bytes=(
-                            lambda: self._hub_store.team_attachment_max_bytes
-                            if self._hub_store is not None
-                            else 0
-                        ),
-                        relay_enabled=lambda: self._relay_enabled,
-                        peer_heartbeat=self._record_authenticated_peer_heartbeat,
-                        peer_revoker=self._revoke_authenticated_peer,
-                    )
-                    restored.start()
-                    self._gateway = restored
+                    with suppress(Exception):
+                        new_gateway.stop()
+                self._gateway = None
+                self._host_error, self._host_error_code, self._host_action = old_error
+                # A stale persisted endpoint was never live, so retrying it
+                # here would mask the requested endpoint/persistence failure.
+                if old_gateway is not None and self._host_store is not None and self._adapter is not None:
+                    try:
+                        restored = SecurePeerGateway(
+                            self._host_store,
+                            str(old_config["advertised_host"]),
+                            int(old_config["listen_port"]),
+                            forwarder=self._forward_peer_request,
+                            resource_team_resolver=self._adapter.resource_team,
+                            attachment_max_bytes=(
+                                lambda: self._hub_store.team_attachment_max_bytes
+                                if self._hub_store is not None
+                                else 0
+                            ),
+                            relay_enabled=lambda: self._relay_enabled,
+                            peer_heartbeat=self._record_authenticated_peer_heartbeat,
+                            peer_revoker=self._revoke_authenticated_peer,
+                            **({
+                                "mail_hint_subscriber": self._subscribe_peer_mail_hints,
+                                "mail_hint_snapshot": self._peer_mail_hint_snapshot,
+                                "notification_hint_subscriber": self._subscribe_peer_notification_hints,
+                                "notification_hint_snapshot": self._peer_notification_hint_snapshot,
+                            } if self._mail_hints.enabled else {}),
+                        )
+                        self._start_host_gateway(restored)
+                        self._gateway = restored
+                        self._host_error, self._host_error_code, self._host_action = old_error
+                    except Exception as restore_error:
+                        if not (
+                            isinstance(restore_error, SecurePeerError)
+                            and restore_error.code == "secure_peer_host_address_unavailable"
+                        ):
+                            self.mark_host_unavailable(
+                                f"Secure peer host listener could not be restored: {restore_error}",
+                                error_code="secure_peer_host_listener_failed",
+                                action="Restore the configured local endpoint and retry secure peer host initialization.",
+                            )
+                        if self._hub_store is not None:
+                            self._pending_host_attachment = (
+                                self._host_store.hub_id,
+                                self._hub_store.data_dir,
+                                self._hub_store,
+                            )
                 raise
             finally:
                 if not was_closed:
@@ -1163,6 +1231,47 @@ class SecurePeerRuntime:
                 if exc.status_code not in {403, 404}:
                     raise
         self._notify_pairing_completion()
+        return self.status()
+
+    def update_connection_endpoint(
+        self,
+        connection_id: str,
+        *,
+        host_ip: str,
+        port: int,
+        expected_host_ip: str,
+        expected_port: int,
+        expected_host_server_identity: str,
+        expected_hub_id: str,
+    ) -> dict[str, Any]:
+        """Move an approved peer to an explicitly selected, verified endpoint."""
+
+        # Serialize with heartbeat, renewal, role changes and route retirement.
+        # This changes transport only: no re-pairing, route grant or activation.
+        with self._outbound_guard:
+            if self._host_role_active:
+                raise SecurePeerError(
+                    "host_role_active",
+                    "This server cannot change its saved Member connection while it is the Team Network host",
+                    409,
+                )
+            connection = self.client.update_connection_endpoint(
+                connection_id,
+                host_ip,
+                port,
+                expected_host_ip=expected_host_ip,
+                expected_port=expected_port,
+                expected_host_server_identity=expected_host_server_identity,
+                expected_hub_id=expected_hub_id,
+            )
+            self._client_failure_counts.pop(connection_id, None)
+            if connection.get("active"):
+                self._client_error = None
+        if connection.get("active"):
+            # Notify once: this also retires the old endpoint's hint stream.
+            # Updating an inactive saved connection must not disturb another
+            # connection's live stream or its transport error.
+            self._notify_pairing_completion()
         return self.status()
 
     def deactivate_connection(

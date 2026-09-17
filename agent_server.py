@@ -9027,6 +9027,18 @@ class SecurePeerForgetRequest(SecurePeerDeactivateRequest):
     )
 
 
+class SecurePeerEndpointUpdateRequest(SecurePeerDeactivateRequest):
+    host_ip: str
+    port: int = Field(ge=1024, le=65535, strict=True)
+    expected_host_ip: str
+    expected_port: int = Field(ge=1024, le=65535, strict=True)
+
+    @field_validator("host_ip", "expected_host_ip")
+    @classmethod
+    def validate_endpoint_host(cls, value: str) -> str:
+        return canonical_secure_peer_ipv4(value)
+
+
 class SecurePeerHostPeerRevokeRequest(SecurePeerConfirmedRequest):
     team_id: str = Field(min_length=1, max_length=128)
     expected_certificate_fingerprint: str = Field(
@@ -75654,6 +75666,34 @@ async def secure_peer_connection_deactivate_endpoint(
     )
 
 
+@app.put("/api/admin/secure-peers/v1/connections/{connection_id}/endpoint")
+async def secure_peer_connection_endpoint_update_endpoint(
+    connection_id: str,
+    body: SecurePeerEndpointUpdateRequest,
+    request: Request,
+) -> Response:
+    require_secure_peer_control(request)
+    require_secure_peer_target(body)
+    clean_id = canonical_secure_peer_path_uuid(connection_id, "Connection")
+    try:
+        result = await asyncio.to_thread(
+            SECURE_PEER_RUNTIME.update_connection_endpoint,
+            clean_id,
+            host_ip=body.host_ip,
+            port=body.port,
+            expected_host_ip=body.expected_host_ip,
+            expected_port=body.expected_port,
+            expected_host_server_identity=body.expected_host_server_identity,
+            expected_hub_id=body.expected_hub_id,
+        )
+    except SecurePeerError as exc:
+        return secure_peer_error_response(exc)
+    return JSONResponse(
+        result,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+
+
 @app.post("/api/admin/secure-peers/v1/connections/{connection_id}/forget")
 async def secure_peer_connection_forget_endpoint(
     connection_id: str,
@@ -76343,6 +76383,8 @@ async def health() -> dict[str, Any]:
                 "version": 1,
                 "control_path": "/api/admin/secure-peers/v1/status",
                 "proxy_prefix": "/api/team-hub-secure",
+                "endpoint_update_path": "/api/admin/secure-peers/v1/connections/{connection_id}/endpoint",
+                "endpoint_update_version": 1,
                 "message": (
                     "Secure server pairing over pinned TLS 1.3 and mutual certificates is available."
                     if AGENT_TOKEN

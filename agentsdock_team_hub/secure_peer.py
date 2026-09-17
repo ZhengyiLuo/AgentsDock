@@ -6909,6 +6909,11 @@ class SecurePeerClient:
                     "ALTER TABLE client_connections "
                     "ADD COLUMN relay_available INTEGER NOT NULL DEFAULT 0"
                 )
+            if "endpoint_generation" not in columns:
+                connection.execute(
+                    "ALTER TABLE client_connections "
+                    "ADD COLUMN endpoint_generation INTEGER NOT NULL DEFAULT 0"
+                )
             stored_identity = connection.execute(
                 "SELECT value FROM client_meta WHERE key='server_identity'"
             ).fetchone()
@@ -8555,15 +8560,8 @@ class SecurePeerClient:
         with self._route_guard:
             return self._peer_health_locked(connection_id)
 
-    def _peer_health_locked(self, connection_id: str) -> dict[str, Any]:
-        row = self._connection_row(connection_id)
-        if row["status"] not in {"approved", "connected", "deactivated"}:
-            raise SecurePeerError("pairing_incomplete", "Secure peer connection is not approved", 409)
-        status, headers, raw, _leaf = self._request(
-            row["host_ip"], int(row["port"]), "GET", "/v1/peer/health",
-            context=self._pinned_context(row, mutual_tls=True)
-        )
-        value = self._decode_json_response(status, headers, raw)
+    @staticmethod
+    def _validate_peer_health_identity(row: Mapping[str, Any], value: Mapping[str, Any]) -> None:
         if (
             value.get("peer_id") != row["peer_id"]
             or value.get("team_id") != row["team_id"]
@@ -8577,6 +8575,135 @@ class SecurePeerClient:
             or ("mail_hints_v2_available" in value and type(value["mail_hints_v2_available"]) is not bool)
         ):
             raise SecurePeerError("host_identity_mismatch", "Connected peer health identity changed", 409)
+
+    def update_connection_endpoint(
+        self,
+        connection_id: str,
+        host_ip: str,
+        port: int,
+        *,
+        expected_host_server_identity: str,
+        expected_hub_id: str,
+        expected_host_ip: str | None = None,
+        expected_port: int | None = None,
+    ) -> dict[str, Any]:
+        """Move an approved connection only after pinned mTLS proves its identity.
+
+        Network I/O holds neither the route guard nor a database transaction,
+        so revocation remains immediate. The final transaction rejects changed
+        authority, renewal state, or endpoints rather than reviving old state.
+        """
+
+        canonical = _uuid(connection_id, "connection_id")
+        host = canonical_peer_ipv4(host_ip)
+        endpoint_port = canonical_peer_port(port)
+        expected_host = _identifier(expected_host_server_identity, "expected host identity")
+        expected_hub = _identifier(expected_hub_id, "expected hub id")
+        if (expected_host_ip is None) != (expected_port is None):
+            raise ValueError("expected host IP and port must be supplied together")
+        if expected_host_ip is not None:
+            expected_host_ip = canonical_peer_ipv4(expected_host_ip)
+            expected_port = canonical_peer_port(expected_port)
+
+        def renewals(database: sqlite3.Connection) -> list[dict[str, Any]]:
+            return [dict(item) for item in database.execute(
+                "SELECT * FROM client_renewals WHERE connection_id=? ORDER BY request_id",
+                (canonical,),
+            ).fetchall()]
+
+        with self._route_guard:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN")
+                row = connection.execute(
+                    "SELECT * FROM client_connections WHERE connection_id=?", (canonical,)
+                ).fetchone()
+                if row is None:
+                    raise SecurePeerError("connection_unavailable", "Secure peer connection is unavailable", 404)
+                if (
+                    row["host_server_identity"] != expected_host
+                    or row["hub_id"] != expected_hub
+                    or (expected_host_ip is not None and (
+                        row["host_ip"] != expected_host_ip or row["port"] != expected_port
+                    ))
+                ):
+                    raise SecurePeerError("connection_changed", "Secure peer connection identity or endpoint changed", 409)
+                if row["status"] not in {"approved", "connected", "deactivated"}:
+                    raise SecurePeerError("pairing_incomplete", "Secure peer connection is not approved", 409)
+                if int(row["certificate_expires_at"] or 0) <= self._timestamp() + 60:
+                    raise SecurePeerError("connection_unavailable", "Secure peer credential is expired or expiring", 409)
+                active = self._active_id(connection)
+                original_renewals = renewals(connection)
+                context = self._pinned_context(row, mutual_tls=True)
+            finally:
+                connection.close()
+
+        status, headers, raw, leaf = self._request(
+            host, endpoint_port, "GET", "/v1/peer/health", context=context
+        )
+        value = self._decode_json_response(status, headers, raw)
+        self._validate_initial_identity(
+            host_ip=host,
+            expected_host_server_identity=row["host_server_identity"],
+            leaf_der=leaf,
+            ca_pem=row["host_ca_certificate_pem"],
+            expected_ca_fingerprint=row["host_ca_fingerprint"],
+        )
+        self._validate_peer_health_identity(row, value)
+        with self._route_guard:
+            validated_at = self._timestamp()
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    "SELECT * FROM client_connections WHERE connection_id=?", (canonical,)
+                ).fetchone()
+                # Health timestamps/capabilities may change during the probe;
+                # every field carrying endpoint or connection authority must not.
+                health_fields = {"last_validated_at", "updated_at", "relay_available"}
+                if (
+                    current is None
+                    or any(current[key] != row[key] for key in row.keys() if key not in health_fields)
+                    or self._active_id(connection) != active
+                    or renewals(connection) != original_renewals
+                    or int(current["certificate_expires_at"] or 0) <= validated_at + 60
+                ):
+                    raise SecurePeerError("connection_changed", "Secure peer connection changed during endpoint validation", 409)
+                connection.execute(
+                    """UPDATE client_connections SET host_ip=?,port=?,
+                    endpoint_generation=endpoint_generation+1,last_validated_at=?,
+                    updated_at=?,relay_available=? WHERE connection_id=?""",
+                    (host, endpoint_port, validated_at, validated_at,
+                     int(value["remote_route_delivery_available"]), canonical),
+                )
+                connection.execute("COMMIT")
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+            if active == canonical:
+                self._mail_hint_health = (
+                    canonical, row["certificate_fingerprint"], row["hub_id"], row["team_id"],
+                    validated_at, value.get("mail_hints_available") is True,
+                )
+                self._notification_hint_health = (
+                    canonical, row["certificate_fingerprint"], row["hub_id"], row["team_id"],
+                    validated_at, value.get("mail_hints_v2_available") is True,
+                )
+            return self.get_connection(canonical)
+
+    def _peer_health_locked(self, connection_id: str) -> dict[str, Any]:
+        row = self._connection_row(connection_id)
+        if row["status"] not in {"approved", "connected", "deactivated"}:
+            raise SecurePeerError("pairing_incomplete", "Secure peer connection is not approved", 409)
+        status, headers, raw, _leaf = self._request(
+            row["host_ip"], int(row["port"]), "GET", "/v1/peer/health",
+            context=self._pinned_context(row, mutual_tls=True)
+        )
+        value = self._decode_json_response(status, headers, raw)
+        self._validate_peer_health_identity(row, value)
         validated_at = self._timestamp()
         connection = self._connect()
         try:

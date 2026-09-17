@@ -1,5 +1,29 @@
 # Development and release log
 
+## 2026-09-16 — Secure Team Network endpoint recovery (unreleased)
+
+- Identify a vanished host bind address explicitly instead of repeatedly
+  reporting a generic initialization/database failure. Permit a confirmed
+  reconfiguration to a current address without restarting the main server,
+  resetting the host CA or revoking approved members. Failed changes preserve
+  the prior configuration and restore a previously live listener when possible.
+- Add an authenticated member endpoint-migration control. Probe the explicitly
+  selected endpoint with the existing pinned CA and client certificate; verify
+  host, Hub, team and peer identity before changing the saved address. Preserve
+  routes and active selection, reject concurrent trust/renewal/endpoint changes,
+  and never reactivate a disconnected member or fall back to unverified TLS.
+- Preserve notification callbacks across host rebind/rollback. An inactive
+  connection migration does not invalidate the active connection's hint stream.
+  Add no renderer polling, network discovery or automatic address switching.
+- Focused tests cover actual missing-address socket failures, real TLS endpoint
+  verification, wrong certificates/identities, persistence failure, rollback,
+  revocation and renewal races, inactive connections, schema compatibility and
+  the authenticated asynchronous API boundary. Tests use isolated state and
+  private test transports, never the monolithic server or production chats.
+- See [endpoint recovery](SECURE_PEER_ENDPOINT_RECOVERY.md) for operator steps
+  and compatibility. This implementation is not yet published or deployed;
+  migrating a host alone cannot update endpoints saved by member servers.
+
 ## 2026-09-16 — 1.0.1-beta.2 publication verified
 
 - Published [AgentsServer 1.0.1-beta.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.1-beta.2)
