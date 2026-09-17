@@ -1,5 +1,28 @@
 # Development and release log
 
+## 2026-09-16 — 1.0.1-beta.2 publication verified
+
+- Published [AgentsServer 1.0.1-beta.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.1-beta.2)
+  from source `da063729e20a6163f96a26ec119a6c77b77c6a3c`. Includes isolated
+  Side chat follow-ups, indexed Mail/Bulletin search and exact-recipient
+  Team Network reads; unrelated unfinished worktree changes are excluded.
+- Release validation caught obsolete installer import assertions and the
+  missing Side chat cleanup allowance. Align all 18 bounded shutdown phases
+  with the cooperative watchdog and the installer's 185-second maximum
+  launchd wait. Add a guarded check of the complete budget relationship;
+  preserve existing forced-restart and systemd service bounds.
+- [Release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35164753174)
+  passed the full suite (4,256 tests, two skipped), packaging and Ed25519
+  manifest signing. Verify the held assets before uploading and publishing;
+  cancel the redundant tag-triggered run after publication.
+- Fresh unauthenticated public downloads pass signature verification, all
+  three GitHub asset digests, Beta/API 28 metadata and byte-for-byte comparison
+  of all 81 packaged source files with the release commit. Archive SHA-256:
+  `2ac24796d4a2cd6dd88c0c1b1060021a247dc90f7ff1cabc7791d138db87af46`.
+- The matching Side chat interface is in desktop 1.0.1 local build 1170.
+  Publication does not install or restart a running server or desktop app.
+  The stable server release remains 1.0.0.
+
 ## 2026-09-15 — Direct Team Network reads from mentions (unreleased)
 
 - Teach both provider runtimes and their shared tool description that
