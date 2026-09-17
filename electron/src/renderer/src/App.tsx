@@ -137,6 +137,7 @@ export function App() {
   const [sideChatController] = useState(() => new SideChatController())
   const [inspectorTab, setInspectorTab] = useState<InspectorWorkspaceTab>('details')
   const [sideChatFocusVersion, setSideChatFocusVersion] = useState(0)
+  const [sideChatFocusTarget, setSideChatFocusTarget] = useState<string | null>(null)
   useEffect(() => () => sideChatController.reset(), [sideChatController, activeRenderKey, Boolean(switchingProfileId)])
   useEffect(() => {
     const open = (event: Event) => {
@@ -148,7 +149,8 @@ export function App() {
       if (state.chatPanes.primary === session.id) state.focusChatPane('primary')
       else if (state.chatPanes.secondary === session.id) state.focusChatPane('secondary')
       else if (state.selectedSessionId !== session.id) return
-      setInspectorTab('sidechat')
+      setInspectorTab('details')
+      setSideChatFocusTarget(JSON.stringify([detail.profileId, detail.profileGeneration, session.id]))
       setSideChatFocusVersion(value => value + 1)
       state.setInspectorVisible(true)
     }
@@ -916,8 +918,8 @@ export function App() {
         disabled={Boolean(switchingProfileId)}
         contentKey={selectedRenderKey}
         content={<InspectorWorkspace session={selectedSession} scope={{ profileId: activeProfileId ?? '', profileGeneration }}
-          controller={sideChatController} tab={inspectorTab} focusVersion={sideChatFocusVersion} visible={visibleDockOpen}
-          onTabChange={tab => { setInspectorTab(tab); if (tab === 'sidechat') setSideChatFocusVersion(value => value + 1) }}
+          controller={sideChatController} tab={inspectorTab} focusVersion={sideChatFocusTarget === JSON.stringify([activeProfileId, profileGeneration, selectedSession?.id]) ? sideChatFocusVersion : 0} visible={visibleDockOpen}
+          onFocusHandled={() => setSideChatFocusTarget(null)} onTabChange={setInspectorTab}
           onHide={() => { setInspectorTab(current => current === 'review' ? 'details' : current); useAppStore.getState().setInspectorVisible(false) }}
           review={reviewTarget ? <CodeReview target={reviewTarget} onClose={() => { setScopedReviewTarget(null); setInspectorTab('details') }} /> : undefined} />}
       />

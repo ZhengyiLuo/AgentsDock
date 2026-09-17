@@ -9,8 +9,8 @@ import { useAppStore } from '../store/app-store'
 import { MarkdownContent } from './MarkdownContent'
 import './SideQuestionPanel.css'
 
-export function SideQuestionPanel({ session, scope, controller, active = true, focusVersion = 0 }: {
-  session: Session; scope: SideQuestionScope; controller: SideChatController; active?: boolean; focusVersion?: number
+export function SideQuestionPanel({ session, scope, controller, active = true, focusVersion = 0, autoFocus = true, onFocusHandled }: {
+  session: Session; scope: SideQuestionScope; controller: SideChatController; active?: boolean; focusVersion?: number; autoFocus?: boolean; onFocusHandled?: () => void
 }) {
   useLocale()
   const subscribe = useCallback((listener: () => void) => controller.subscribe(scope, session.id, listener), [controller, scope.profileId, scope.profileGeneration, session.id])
@@ -27,7 +27,12 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   const ready = supported && connected && !switchingProfileId && Boolean(scope.profileId)
   const limit = sideQuestionLimit(health)
   const length = Array.from(snapshot.draft.trim()).length
-  useEffect(() => { if (active && ready) textarea.current?.focus({ preventScroll: true }) }, [active, focusVersion, session.id, scope.profileId, scope.profileGeneration, ready])
+  useEffect(() => {
+    if (!active || !ready || (!autoFocus && !focusVersion)) return
+    textarea.current?.focus({ preventScroll: true })
+    if (!autoFocus) textarea.current?.scrollIntoView({ block: 'nearest' })
+    onFocusHandled?.()
+  }, [active, focusVersion, session.id, scope.profileId, scope.profileGeneration, ready, autoFocus, onFocusHandled])
   useEffect(() => {
     const element = history.current
     if (element && active && stickToBottom.current) element.scrollTop = element.scrollHeight

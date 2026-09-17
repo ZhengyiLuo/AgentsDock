@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-17 — Side chat in the shared inspector (local only)
+
+- Place Side chat directly below Subagents in the existing inspector scroll;
+  remove its separate tab and nested inspector landmark. Keep Review available.
+- Preserve per-chat drafts, replies and pending requests across panel/review
+  navigation. Only the explicit Side chat shortcut focuses the composer;
+  merely opening the inspector cannot steal main-chat input focus.
+- Validate focused component/App regressions and TypeScript. Exercise the
+  production Inspector and Side chat with native offscreen Electron input in
+  light/dark and narrow layouts, using synthetic sessions and provider replies.
+  This is layout/interaction acceptance; transport and providers are unchanged.
+- Prepare a local desktop package only. No publication, server update or
+  replacement of the running application is part of this change.
+
 ## 2026-09-17 — Desktop 1.0.3 stable accepted
 
 - Publish [AgentsDock 1.0.3](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.3),
