@@ -1,5 +1,5 @@
 import { createReadStream, openAsBlob } from 'node:fs'
-import { parseCodexAuthStatus, validateCodexApiKey } from '../shared/codex-auth'
+import { parseCodexAuthStatus } from '../shared/codex-auth'
 import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
@@ -743,12 +743,6 @@ export class AgentServerClient {
   }
   codexAuth(): Promise<CodexAuthStatus> {
     return this.codexAuthRequest('/api/admin/codex/auth')
-  }
-  codexLoginWithApiKey(apiKey: string): Promise<CodexAuthStatus> {
-    const key = validateCodexApiKey(apiKey)
-    return this.codexAuthRequest('/api/admin/codex/auth/api-key', {
-      method: 'POST', body: JSON.stringify({ api_key: key })
-    })
   }
   private async codexAuthRequest(path: string, init: RequestInit = {}): Promise<CodexAuthStatus> {
     try {
@@ -3028,7 +3022,6 @@ function isPrivilegedNativeControlTarget(
     return !target.search && (method === 'GET' || method === 'PUT')
   }
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
-  if (path === '/api/admin/codex/auth/api-key') return !target.search && method === 'POST'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'
   if (path === '/api/admin/update') {

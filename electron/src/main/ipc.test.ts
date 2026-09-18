@@ -41,6 +41,12 @@ const trustedEvent = {
 describe('Team Hub IPC registration', () => {
   beforeEach(() => harness.handlers.clear())
 
+  it('does not register the removed shared Codex credential mutation', () => {
+    registerIpc({} as AppService, {} as AppUpdateManager)
+    expect(harness.handlers.has('codex:auth:get')).toBe(true)
+    expect(harness.handlers.has('codex:auth:api-key')).toBe(false)
+  })
+
   it('routes side questions and exact cancellation only from trusted app renderers', async () => {
     const askSideQuestion = vi.fn().mockResolvedValue({ answer: 'Separate answer' })
     const cancelSideQuestion = vi.fn().mockResolvedValue({ status: 'cancelled' })

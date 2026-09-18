@@ -201,7 +201,6 @@ const api: AgentsDockAPI = {
   codex: {
     serverGoals: () => ipcRenderer.invoke('codex:server-goals:get'),
     auth: scope => ipcRenderer.invoke('codex:auth:get', scope),
-    loginWithApiKey: (scope, apiKey) => ipcRenderer.invoke('codex:auth:api-key', scope, apiKey),
     provider: scope => ipcRenderer.invoke('codex:provider:get', scope),
     testProvider: (scope, input) => ipcRenderer.invoke('codex:provider:test', scope, input),
     setProvider: (scope, input) => ipcRenderer.invoke('codex:provider:set', scope, input),

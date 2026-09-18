@@ -409,7 +409,6 @@ export interface AgentsDockAPI {
   }
   codex: {
     auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
-    loginWithApiKey(scope: CodexServerSettingsScope, apiKey: string): Promise<CodexAuthStatus>
     provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>
     testProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderTestResult>
     setProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderConfiguration>

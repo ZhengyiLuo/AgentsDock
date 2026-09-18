@@ -5,7 +5,7 @@ import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResu
 import { useLocale } from '../lib/i18n'
 import './CodexAuthSettings.css'
 
-type AuthFailure = 'admin' | 'update' | 'busy' | 'invalidKey' | 'connection' | 'failed' | 'readFailed'
+type AuthFailure = 'admin' | 'update' | 'connection' | 'readFailed'
 type ProviderFailure = 'providerAdmin' | 'providerUpdate' | 'providerBusy' | 'providerInvalid' | 'providerConnection' | 'providerFailed'
 
 function providerFailure(reason: unknown): ProviderFailure {
@@ -18,14 +18,12 @@ function providerFailure(reason: unknown): ProviderFailure {
   return 'providerFailed'
 }
 
-function authFailure(reason: unknown, fallback: 'failed' | 'readFailed' = 'failed'): AuthFailure {
+function authFailure(reason: unknown): AuthFailure {
   const message = reason instanceof Error ? reason.message : String(reason)
   if (/CODEX_AUTH_ADMIN|\b(?:401|403)\b|unauthori[sz]ed|forbidden/i.test(message)) return 'admin'
   if (/CODEX_AUTH_UPDATE|\b(?:404|405|501)\b|not found|not implemented|method not allowed/i.test(message)) return 'update'
-  if (/CODEX_AUTH_BUSY|\b409\b/i.test(message)) return 'busy'
-  if (/CODEX_AUTH_INVALID_KEY/i.test(message)) return 'invalidKey'
   if (/CODEX_AUTH_CONNECTION/i.test(message)) return 'connection'
-  return fallback
+  return 'readFailed'
 }
 
 export function CodexAuthSettings({ connected, profileId, profileGeneration, serverTitle }: {
@@ -43,10 +41,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<AuthFailure | null>(null)
-  const [authReadFailed, setAuthReadFailed] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [reload, setReload] = useState(0)
-  const [customEndpoint, setCustomEndpoint] = useState(false)
   const [provider, setProvider] = useState<CodexProviderConfiguration | null>(null)
   const [providerScope, setProviderScope] = useState<CodexServerSettingsScope | null>(null)
   const [providerLoading, setProviderLoading] = useState(false)
@@ -104,10 +99,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     setStatusScope(null)
     setFormOpen(false)
     setError(null)
-    setAuthReadFailed(false)
-    setSaved(false)
     setSaving(false)
-    setCustomEndpoint(false)
     setProvider(null)
     setProviderScope(null)
     setProviderLoading(false)
@@ -126,9 +118,8 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
         setStatusScope(scope)
       }).catch(reason => {
         if (ownsRequest(request, scope)) {
-          const failure = authFailure(reason, 'readFailed')
+          const failure = authFailure(reason)
           setError(failure)
-          setAuthReadFailed(failure === 'readFailed')
           setStatusScope(scope)
         }
       }).finally(() => {
@@ -143,37 +134,28 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   }, [connected, profileId, profileGeneration, reload])
 
   useEffect(() => {
-    if (formOpen && !providerLoading) {
-      if (customEndpoint) endpointInputRef.current?.focus()
-      else keyInputRef.current?.focus()
-    }
-  }, [formOpen, providerLoading, customEndpoint])
+    if (formOpen && !providerLoading) endpointInputRef.current?.focus()
+  }, [formOpen, providerLoading])
 
   const scopeMatches = statusScope?.profileId === profileId && statusScope?.profileGeneration === profileGeneration
   const currentStatus = connected && scopeMatches ? status : null
-  const unavailable = error === 'admin' || error === 'update'
-  const editable = connected && profileId != null && scopeMatches && currentStatus?.available === true
-    && !unavailable && !loading && !saving
-  const canOpenSettings = connected && profileId != null && scopeMatches && !unavailable && !loading && !saving
-    && (currentStatus?.available === true || authReadFailed)
-  const showForm = formOpen && connected && scopeMatches && !unavailable
+  // Endpoint configuration has its own authorization and readiness checks.
+  // A failed normal-account read must not strand the endpoint recovery flow.
+  const canOpenSettings = connected && profileId != null && !saving
+  const showForm = formOpen && connected && profileId != null
   const providerScopeMatches = providerScope?.profileId === profileId && providerScope?.profileGeneration === profileGeneration
   const currentProvider = connected && providerScopeMatches ? provider : null
   const providerEditable = connected && profileId != null && providerScopeMatches && currentProvider?.available === true
-    && !loading && !saving && !providerLoading && !providerReadFailed
+    && !saving && !providerLoading && !providerReadFailed
     && providerError !== 'providerAdmin' && providerError !== 'providerUpdate'
-  const defaultEditable = editable && !providerLoading && !providerReadFailed && (!providerError || providerError === 'providerUpdate')
   const canResetProvider = !testing && (providerEditable && currentProvider?.configured || canOpenSettings && !providerLoading && providerReadFailed)
   const providerDraftComplete = Boolean(baseURL.trim() && model.trim() && hasKey)
   const tested = testResult?.ok === true && testResult.status === 'ready' && testResult.revision === draftRevisionRef.current
 
-  async function loadProviderConfiguration(forceCustom: boolean) {
+  async function loadProviderConfiguration() {
     if (!canOpenSettings || !profileId) return
     clearKey()
     invalidateTest()
-    setError(null)
-    setSaved(false)
-    setCustomEndpoint(forceCustom)
     setProviderLoading(true)
     setProviderReadFailed(false)
     const scope = { profileId, profileGeneration }
@@ -185,7 +167,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       if (request !== providerRequestRef.current || !ownsScope(scope)) return
       setProvider(next)
       setProviderScope(scope)
-      setCustomEndpoint(forceCustom)
       setBaseURL(next.base_url ?? 'https://api.openai.com/v1')
       setModel(next.model ?? '')
     } catch (reason) {
@@ -197,16 +178,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     } finally {
       if (request === providerRequestRef.current && ownsScope(scope)) setProviderLoading(false)
     }
-  }
-
-  function openCustomEndpoint() {
-    if (!canOpenSettings) return
-    clearKey()
-    invalidateTest()
-    setError(null)
-    setSaved(false)
-    if (currentProvider) setCustomEndpoint(true)
-    else void loadProviderConfiguration(true)
   }
 
   async function testConnection() {
@@ -255,7 +226,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       if (!next.configured) { setProviderError('providerFailed'); return }
       setProviderNotice('providerSaved')
       setFormOpen(false)
-      setCustomEndpoint(false)
     } catch (reason) {
       if (request === providerRequestRef.current && ownsScope(scope)) setProviderError(providerFailure(reason))
     } finally {
@@ -281,7 +251,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       if (next.configured) { setProviderError('providerFailed'); return }
       setProviderReadFailed(false)
       setProviderNotice('providerReset')
-      setCustomEndpoint(false)
       setFormOpen(false)
     } catch (reason) {
       if (request === providerRequestRef.current && ownsScope(scope)) setProviderError(providerFailure(reason))
@@ -297,41 +266,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     setProviderLoading(false)
     setProviderReadFailed(false)
     setFormOpen(false)
-    setCustomEndpoint(false)
-    setError(null)
-  }
-
-  async function signIn() {
-    if (!defaultEditable || !profileId || !keyInputRef.current?.value.trim()) return
-    const scope = { profileId, profileGeneration }
-    const request = ++requestRef.current
-    let apiKey = keyInputRef.current.value.trim()
-    clearKey()
-    setSaving(true)
-    setError(null)
-    setSaved(false)
-    try {
-      const login = window.agentsDock.codex?.loginWithApiKey
-      if (typeof login !== 'function') {
-        setError('update')
-        return
-      }
-      const pending = login(scope, apiKey)
-      apiKey = ''
-      const next = await pending
-      if (!ownsRequest(request, scope)) return
-      setStatus(next)
-      setStatusScope(scope)
-      if (next.available && next.auth_mode === 'apiKey') {
-        setSaved(true)
-        setFormOpen(false)
-      } else setError('failed')
-    } catch (reason) {
-      if (ownsRequest(request, scope)) setError(authFailure(reason))
-    } finally {
-      apiKey = ''
-      if (ownsRequest(request, scope)) setSaving(false)
-    }
   }
 
   const account = currentStatus?.auth_mode === 'apiKey' ? t('codexAuth.apiKey')
@@ -346,10 +280,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
         <div><strong>{t('codexAuth.title')}</strong>{serverTitle && <small>{serverTitle}</small>}</div>
         <div className="codex-auth-settings-actions">
           {!showForm && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
-            clearKey(); setError(null); setSaved(false); setProviderNotice(null); setFormOpen(true); void loadProviderConfiguration(authReadFailed)
-          }}>{t(authReadFailed ? 'codexAuth.endpointSettings' : 'codexAuth.useKey')}</button>}
-          {!showForm && !authReadFailed && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
-            setProviderNotice(null); setFormOpen(true); void loadProviderConfiguration(true)
+            setFormOpen(true); void loadProviderConfiguration()
           }}>{t('codexAuth.customEndpoint')}</button>}
           <button type="button" className="quiet-button" disabled={!connected || !profileId || loading || saving}
             onClick={() => setReload(value => value + 1)}>
@@ -360,16 +291,12 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       <small>{!connected || !profileId ? t('codexAuth.connect') : loading ? t('codexAuth.loading')
         : currentStatus?.available === false ? t('codexAuth.nativeRequired') : currentStatus ? account : t('codexAuth.unknown')}</small>
       {currentProvider?.configured && <small>{t('codexAuth.customAccount', { model: currentProvider.model ?? '' })}</small>}
-      {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void (customEndpoint ? saveProvider() : signIn()) }}>
-        <small id={`${fieldId}-scope`} title={customEndpoint ? t('codexAuth.providerScope') : undefined}>{t(customEndpoint ? 'codexAuth.providerSummary' : 'codexAuth.replaces')}</small>
-        {!customEndpoint && <>
-          <small id={`${fieldId}-billing`}>{t('codexAuth.billing')}</small>
-          <small id={`${fieldId}-storage`}>{t('codexAuth.storage')}</small>
-        </>}
+      <small>{t('codexAuth.accountReadOnly')}</small>
+      {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void saveProvider() }}>
+        <small>{t('codexAuth.providerSummary')}</small>
+        <small id={`${fieldId}-scope`}>{t('codexAuth.providerScope')}</small>
         {providerLoading && <small>{t('codexAuth.providerLoading')}</small>}
-        {!customEndpoint && <button type="button" className="quiet-button codex-auth-custom-toggle" disabled={!canOpenSettings || providerLoading}
-          onClick={() => { void openCustomEndpoint() }}>{t('codexAuth.customEndpoint')}</button>}
-        {customEndpoint && <div className="codex-auth-endpoint-fields">
+        <div className="codex-auth-endpoint-fields">
           <strong>{t('codexAuth.customEndpoint')}</strong>
           {currentProvider?.available === false && <small>{t('codexAuth.nativeRequired')}</small>}
           <label htmlFor={`${fieldId}-endpoint`}>{t('codexAuth.baseURL')}</label>
@@ -378,33 +305,32 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
           <label htmlFor={`${fieldId}-model`}>{t('codexAuth.model')}</label>
           <input id={`${fieldId}-model`} type="text" value={model} disabled={!providerEditable} autoComplete="off" spellCheck={false}
             onChange={event => { setModel(event.currentTarget.value); invalidateTest() }} />
-        </div>}
-        <label htmlFor={fieldId}>{t(customEndpoint ? 'codexAuth.providerKey' : 'codexAuth.keyLabel')}</label>
+        </div>
+        <label htmlFor={fieldId}>{t('codexAuth.providerKey')}</label>
         <input ref={attachKeyInput} id={fieldId} type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off"
-          spellCheck={false} autoFocus maxLength={4096} disabled={customEndpoint ? !providerEditable : !defaultEditable} data-1p-ignore data-lpignore="true"
-          title={customEndpoint ? t('codexAuth.freshKey') : undefined}
-          aria-describedby={customEndpoint ? `${fieldId}-scope ${fieldId}-test-help` : `${fieldId}-scope ${fieldId}-billing ${fieldId}-storage`}
-          onChange={event => { setHasKey(Boolean(event.currentTarget.value.trim())); setError(null); setSaved(false); invalidateTest() }} />
-        {customEndpoint && <small id={`${fieldId}-test-help`} title={t('codexAuth.providerStorage')}>{t('codexAuth.testHelp')}</small>}
+          spellCheck={false} maxLength={4096} disabled={!providerEditable} data-1p-ignore data-lpignore="true"
+          aria-describedby={`${fieldId}-scope ${fieldId}-key-help ${fieldId}-test-help`}
+          onChange={event => { setHasKey(Boolean(event.currentTarget.value.trim())); invalidateTest() }} />
+        <small id={`${fieldId}-key-help`}>{t('codexAuth.freshKey')}</small>
+        <small id={`${fieldId}-test-help`}>{t('codexAuth.testHelp')}</small>
         <div className="codex-auth-settings-actions">
-          {customEndpoint && <button type="button" className="quiet-button" disabled={!providerEditable || !providerDraftComplete || testing}
-            onClick={() => { void testConnection() }}>{testing && <LoaderCircle className="spin" size={14} />}{t(testing ? 'codexAuth.testing' : 'codexAuth.test')}</button>}
-          <button type="submit" className="primary-button" disabled={customEndpoint ? !providerEditable || !providerDraftComplete || !tested || testing : !defaultEditable || !hasKey}>
-            {saving && <LoaderCircle className="spin" size={14} />}{t(customEndpoint ? saving ? 'codexAuth.providerSaving' : 'codexAuth.providerSave' : saving ? 'codexAuth.saving' : 'codexAuth.signIn')}
+          <button type="button" className="quiet-button" disabled={!providerEditable || !providerDraftComplete || testing}
+            onClick={() => { void testConnection() }}>{testing && <LoaderCircle className="spin" size={14} />}{t(testing ? 'codexAuth.testing' : 'codexAuth.test')}</button>
+          <button type="submit" className="primary-button" disabled={!providerEditable || !providerDraftComplete || !tested || testing}>
+            {saving && <LoaderCircle className="spin" size={14} />}{t(saving ? 'codexAuth.providerSaving' : 'codexAuth.providerSave')}
           </button>
           <button type="button" className="quiet-button" disabled={saving} onClick={cancelForm}>{t('codexAuth.cancel')}</button>
         </div>
-        {(customEndpoint && currentProvider?.configured || providerReadFailed) && <div className="codex-auth-provider-reset">
+        {(currentProvider?.configured || providerReadFailed) && <div className="codex-auth-provider-reset">
           <button type="button" className="quiet-button" disabled={!canResetProvider} title={t('codexAuth.providerResetHelp')}
             onClick={() => { void resetProvider() }}>{t('codexAuth.providerResetAction')}</button>
         </div>}
-        {customEndpoint && testResult && <small role={tested ? 'status' : 'alert'} className={tested ? undefined : 'codex-auth-settings-error'}>
+        {testResult && <small role={tested ? 'status' : 'alert'} className={tested ? undefined : 'codex-auth-settings-error'}>
           {t(`codexAuth.testResult.${testResult.ok && testResult.status === 'ready' ? 'ready' : testResult.status === 'ready' ? 'failed' : testResult.status}`)}
         </small>}
       </form>}
       {error && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${error}`)}</small>}
       {providerError && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${providerError}`)}</small>}
-      {saved && scopeMatches && <small role="status">{t('codexAuth.saved')}</small>}
       {providerNotice && providerScopeMatches && <small role="status">{t(`codexAuth.${providerNotice}`)}</small>}
     </div>
   </section>

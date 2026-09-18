@@ -27,6 +27,11 @@ import './index'
 describe('preload session IPC bridge', () => {
   beforeEach(() => electronHarness.invoke.mockReset())
 
+  it('exposes Codex account status without shared-login mutation', () => {
+    expect(electronHarness.exposed?.codex.auth).toBeTypeOf('function')
+    expect(electronHarness.exposed?.codex).not.toHaveProperty('loginWithApiKey')
+  })
+
   it('keeps side-question IPC separate from turn submission and binds cancellation to its original scope', async () => {
     const scope = { profileId: 'server-a', profileGeneration: 7 }
     const input = { request_id: 'question-a', question: 'Why?' }

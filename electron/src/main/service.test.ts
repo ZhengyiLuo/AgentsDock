@@ -80,7 +80,6 @@ import {
 import { AppService, mergePolledSessionSummaries, mergeSessionSummaries, sessionOwnedFilesPage } from './service'
 import { SettingsStore } from './settings'
 import { PortTunnelManager } from './port-tunnel-manager'
-import { runtimeDiagnosticFor } from '../shared/runtime-catalog'
 import { mailHintPending, TEAM_MAIL_HINTS_PATH, TEAM_MAIL_HINTS_PROTOCOL, type MailHintPacket, type MailboxCoverage } from '../shared/team-mail-hints'
 
 const cleanup: Array<() => void> = []
@@ -867,96 +866,39 @@ describe('server-wide Codex subagents scope', () => {
   )
 })
 
-describe('Codex account credentials profile isolation', () => {
+describe('Codex account status profile isolation', () => {
   const caller = { profileId: 'profile-a', profileGeneration: 1 }
   const account = { available: true, auth_mode: 'apiKey', email: null, plan_type: null, requires_openai_auth: true }
   function harness() {
-    const client = { codexAuth: vi.fn().mockResolvedValue(account), codexLoginWithApiKey: vi.fn().mockResolvedValue(account) }
+    const client = { codexAuth: vi.fn().mockResolvedValue(account) }
     const scope = { profileId: caller.profileId, generation: 1, namespace: 'profile:profile-a', client }
     const service = Object.create(AppService.prototype) as AppService
     Object.assign(service, { scope, activeProfileId: caller.profileId, profileGeneration: 1,
-      validatedGeneration: 1, profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime: vi.fn().mockResolvedValue(undefined) })
+      validatedGeneration: 1, profileResetIsPending: vi.fn().mockReturnValue(false) })
     return { service, client }
   }
-  it('sends credentials once to the captured selected server without persisting or refreshing profiles', async () => {
+  it('reads the captured account and has no credential-mutation method', async () => {
     const { service, client } = harness()
     expect(await service.codexAuth(caller)).toEqual(account)
-    expect(await service.codexLoginWithApiKey(caller, 'synthetic-key')).toEqual(account)
-    expect(client.codexLoginWithApiKey.mock.calls).toEqual([['synthetic-key']])
     expect(client.codexAuth).toHaveBeenCalledOnce()
-    expect((service as unknown as { refreshRuntime: ReturnType<typeof vi.fn> }).refreshRuntime).toHaveBeenCalledOnce()
+    expect(service).not.toHaveProperty('codexLoginWithApiKey')
   })
-  it('never sends credentials from a stale renderer to another server', async () => {
+  it('rejects a stale renderer before reading another server', async () => {
     const { service, client } = harness()
     Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
-    await expect(service.codexLoginWithApiKey(caller, 'synthetic-key')).rejects.toThrow('superseded')
-    expect(client.codexLoginWithApiKey).not.toHaveBeenCalled()
+    await expect(service.codexAuth(caller)).rejects.toThrow('superseded')
+    expect(client.codexAuth).not.toHaveBeenCalled()
   })
-  it('adopts the post-login Codex diagnostic when stale health has the same timestamp', async () => {
-    const { service, client } = harness()
-    const checked_at = '2026-09-17T12:00:00Z'
-    const ready = { backend: 'codex', status: 'ready', available: true, installed: true,
-      authenticated: true, checked_at, message: 'Ready' } as const
-    const claude = { ...ready, backend: 'claude' } as const
-    const health = { ok: true, runtimes: { claude, codex: { ...ready, status: 'unauthenticated',
-      authenticated: false, available: false } } } as Health
-    const catalog = { backends: { codex: { models: [], efforts: [], diagnostic: ready } } } as RuntimeCatalog
-    const refreshRuntime = vi.fn(async () => { Object.assign(service, { runtimeCatalog: catalog }) })
-    const emitConnection = vi.fn()
-    Object.assign(service, { health, refreshRuntime, emitConnection })
-    await expect(service.codexLoginWithApiKey(caller, 'synthetic-key')).resolves.toEqual(account)
-    const updated = (service as unknown as { health: Health }).health
-    expect(runtimeDiagnosticFor(updated, catalog, 'codex')?.status).toBe('ready')
-    expect(updated.runtimes?.claude).toBe(claude)
-    expect(health.runtimes?.codex.status).toBe('unauthenticated')
-    expect(emitConnection).toHaveBeenCalledWith(expect.objectContaining({ profileId: caller.profileId }), true, updated)
-    expect(refreshRuntime).toHaveBeenCalledWith(true, true, expect.anything(), true)
-    expect(client.codexLoginWithApiKey).toHaveBeenCalledOnce()
-  })
-  it('keeps login success truthful when its separate readiness refresh fails', async () => {
-    const { service, client } = harness()
-    const health = { ok: true }
-    const refreshRuntime = vi.fn().mockRejectedValue(new Error('Readiness probe unavailable'))
-    const emitConnection = vi.fn()
-    Object.assign(service, { health, refreshRuntime, emitConnection })
-    await expect(service.codexLoginWithApiKey(caller, 'synthetic-key')).resolves.toEqual(account)
-    expect((service as unknown as { health: Health }).health).toBe(health)
-    expect(emitConnection).not.toHaveBeenCalled()
-    expect(client.codexLoginWithApiKey).toHaveBeenCalledOnce()
-  })
-  it('waits for a pre-login runtime probe before starting the authoritative refresh', async () => {
-    const { service } = harness()
-    const earlier = deferred<void>()
-    const refreshRuntime = vi.fn().mockResolvedValue(undefined)
-    Object.assign(service, { runtimeRefreshInFlight: new Map([[1, { task: earlier.promise, forceProbe: true }]]), refreshRuntime })
-    const pending = service.codexLoginWithApiKey(caller, 'synthetic-key')
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(refreshRuntime).not.toHaveBeenCalled()
-    earlier.resolve()
-    await expect(pending).resolves.toEqual(account)
-    expect(refreshRuntime).toHaveBeenCalledOnce()
-  })
-  it('rejects a profile switch during validation before dispatching credentials', async () => {
-    const { service, client } = harness()
-    const validation = deferred<void>()
-    Object.assign(service, { validatedGeneration: 0, refreshAll: vi.fn(() => validation.promise) })
-    const pending = service.codexLoginWithApiKey(caller, 'synthetic-key')
-    Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
-    validation.resolve()
-    await expect(pending).rejects.toThrow('superseded')
-    expect(client.codexLoginWithApiKey).not.toHaveBeenCalled()
-  })
-  it('rejects a late login result without moving it to another profile or retrying', async () => {
+  it('rejects a late account result after switching servers', async () => {
     const { service, client } = harness()
     const response = deferred<typeof account>(), called = deferred<void>()
-    client.codexLoginWithApiKey.mockImplementation(() => { called.resolve(); return response.promise })
-    const pending = service.codexLoginWithApiKey(caller, 'synthetic-key')
+    client.codexAuth.mockImplementation(() => { called.resolve(); return response.promise })
+    const pending = service.codexAuth(caller)
     await called.promise
     Object.assign(service, { activeProfileId: 'profile-b', profileGeneration: 2 })
     response.resolve(account)
     await expect(pending).rejects.toThrow('superseded')
-    expect(client.codexLoginWithApiKey).toHaveBeenCalledOnce()
+    expect(client.codexAuth).toHaveBeenCalledOnce()
   })
 })
 
