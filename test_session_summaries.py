@@ -1,5 +1,6 @@
-import json
 import unittest
+
+from fastapi.responses import JSONResponse
 
 from agent_server import public_session
 
@@ -47,8 +48,9 @@ class SessionSummaryTests(unittest.TestCase):
         ]
         summaries = [public_session(session, summary=True) for session in raw_sessions]
         full_sessions = [public_session(session) for session in raw_sessions]
-        summary_bytes = len(json.dumps({"sessions": summaries}))
-        full_bytes = len(json.dumps({"sessions": full_sessions}))
+        # Match the compact UTF-8 response body returned by the session route.
+        summary_bytes = len(JSONResponse({"sessions": summaries}).body)
+        full_bytes = len(JSONResponse({"sessions": full_sessions}).body)
 
         self.assertLess(summary_bytes, 150_000)
         self.assertLess(summary_bytes, full_bytes * 0.05)
