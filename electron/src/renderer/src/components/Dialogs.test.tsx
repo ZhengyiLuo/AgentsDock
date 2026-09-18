@@ -742,6 +742,43 @@ describe('SessionDialog runtime selection', () => {
     }
   }
 
+  it('creates a custom Codex chat without replacing normal Codex choices', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'custom-chat' })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      sessions: { create }, preferences: { set: vi.fn().mockResolvedValue(undefined) }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ profiles: [], activeProfileId: null, profileGeneration: 0, sessions: [],
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } },
+      runtimeCatalog: { backends: { ...runtimeCatalog.backends, codex: { ...runtimeCatalog.backends.codex,
+        custom_provider: { configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1' }
+      } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
+      modals: { settings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<SessionDialog mode="newChat" />)
+    expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Codex · Custom endpoint' }))
+    expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'GPT-5.6-Sol' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Create chat' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
+  })
+
+  it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
+    const create = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sessions: { create } } as unknown as AgentsDockAPI })
+    useAppStore.setState({ sessions: [], runtimeCatalog, health: { ok: true },
+      modals: { settings: false, appSettings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
+    })
+    const user = userEvent.setup()
+    render(<SessionDialog mode="newChat" />)
+    await user.click(screen.getByRole('button', { name: /Codex · Custom endpoint · Configure in Settings/ }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(useAppStore.getState().modals.newChat).toBe(false)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it.each([{ mode: 'newChat' as const }, { mode: 'resume' as const }])(
     'offers an import-chat entry that opens the importer from the $mode dialog',
     async ({ mode }) => {

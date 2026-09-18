@@ -13,6 +13,7 @@ export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
 export type Backend = 'claude' | 'codex' | 'cursor'
+export type CodexProvider = 'default' | 'custom'
 export type ChatSyncStatus = 'idle' | 'cached' | 'syncing' | 'live' | 'reconnecting' | 'offline' | 'error'
 export type ServerConnectionState = 'online' | 'degraded' | 'connecting' | 'retrying' | 'offline' | 'cached'
 
@@ -367,6 +368,8 @@ export interface Session {
   folder?: string | null
   cwd?: string | null
   backend: Backend
+  /** Missing on older sessions means native Codex's default provider. */
+  codex_provider?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
@@ -459,6 +462,8 @@ export interface RuntimeDiagnostic {
   last_error_at?: string | null
 }
 export interface RuntimeBackendCatalog {
+  /** Safe metadata only; credentials stay on the server. */
+  custom_provider?: { configured: boolean; available: boolean; model: string | null; base_url: string | null }
   /** Explicit backend availability; required before optional backends are selectable. */
   available?: boolean
   models: RuntimeModelOption[]
@@ -1611,6 +1616,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean }
   side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability
@@ -2179,6 +2185,7 @@ export interface CreateSessionInput {
   folder: string
   cwd: string
   backend: Backend
+  codex_provider?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
@@ -2217,6 +2224,7 @@ export interface UpdateSessionInput {
   folder?: string
   cwd?: string
   backend?: Backend
+  codex_provider?: CodexProvider
   model?: string | null
   effort?: string | null
   system_prompt?: string | null

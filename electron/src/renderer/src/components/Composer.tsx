@@ -12,7 +12,7 @@ import { effectiveFileContentType } from '@shared/file-content-type'
 import { localSessionImportSupported } from '@shared/local-session-import'
 import type { AgentCrossChatRoute, AgentTeamMailRoute, AgentTeamMailRoutesSnapshot, AgentFile, ChatReference, ChatReferenceAction, ClaudePermissionMode, Event as AgentEvent, Health, NativeFileRef, ProviderCommand, ProviderCommandSelection, ProviderCommandsSnapshot, QueuedTurn, RuntimeCatalog, Session, TeamReference } from '@shared/types'
 import { teamAllServersAliasAvailable, teamBulletinAliasAvailable, type TeamNetworkServer } from '@shared/team-network'
-import { cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeDiagnosticFor, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
+import { chatBackendChoice, chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeDiagnosticFor, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices } from '@shared/runtime-catalog'
 import { trackEvent } from '../lib/analytics'
 import { backendLabel, formatBytes, runtimeLabel } from '../lib/format'
 import { cancelComposerEditorLayout, composerTextCanUseMirror, observeComposerEditorWidth, scheduleComposerEditorLayout, syncComposerEditorMirror } from '../lib/composer-editor-layout'
@@ -163,6 +163,7 @@ function composerHealthContractRevisions(health: Health | null): ComposerHealthC
       capabilities?.team_all_servers_alias_v1 ?? null,
       capabilities?.agent_team_mail_v1 ?? null,
       capabilities?.codex_controls ?? null,
+      capabilities?.codex_provider_v1 ?? null,
       capabilities?.claude_controls ?? null,
       capabilities?.cursor_backend ?? null,
       capabilities?.scheduled_jobs ?? null,
@@ -170,6 +171,7 @@ function composerHealthContractRevisions(health: Health | null): ComposerHealthC
       health.runtimes?.cursor ?? null
     ]),
     queueShelf: JSON.stringify([
+      capabilities?.codex_provider_v1 ?? null,
       capabilities?.cross_chat_handoffs_v1 ?? null,
       capabilities?.team_all_servers_alias_v1 ?? null,
       capabilities?.cursor_backend ?? null,
@@ -776,7 +778,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     if (command.id === 'permissions') return codexPermissionsAvailable || claudePermissionsAvailable || cursorPermissionsAvailable
     if (command.id === 'reasoning') {
       return session.backend !== 'cursor'
-        && runtimeEffortOptions(catalog, session.backend, session.model, session.effort)
+        && runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider)
         .some(option => Boolean(option.value))
     }
     if (command.id === 'mcp') return session.backend === 'claude' && claudeMcpAvailable
@@ -1294,7 +1296,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     if (!admissionToken) return
     try {
       const runtimeSnapshot = useAppStore.getState()
-      const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend)
+      const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend, session.codex_provider)
       if (diagnostic && !['ready', 'unknown'].includes(diagnostic.status)) {
         useAppStore.getState().setError([diagnostic.message, diagnostic.action].filter(Boolean).join(' '))
         return
@@ -1781,7 +1783,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         teamMentionsSupported={teamMentionsSupported}
       />
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
-      <RuntimeHealthNotice backend={session.backend} sessionId={session.id} />
+      <RuntimeHealthNotice backend={session.backend} codexProvider={session.codex_provider} sessionId={session.id} />
       {selectedRuntimeError && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
       {activeInboundDeliveryKind && <span className={activeInboundDeliveryKind === 'unknown' ? 'composer-sync-status' : 'chat-reference-warning'} role="status">{activeInboundDeliveryKind === 'unknown'
         ? t("ui.Composer.Composer.an_active_turn_is_running_while_chat_sync__2265ac1")
@@ -2835,11 +2837,11 @@ function composerCommandValue(
 ): string {
   if (command.provider) return command.provider.command.invocation
   if (command.id === 'model') {
-    return runtimeCatalogOptions(catalog, session.backend, 'models', session.model)
+    return runtimeCatalogOptions(catalog, session.backend, 'models', session.model, session.codex_provider)
       .find(option => option.value === (session.model ?? ''))?.label ?? 'Default'
   }
   if (command.id === 'reasoning') {
-    return runtimeEffortOptions(catalog, session.backend, session.model, session.effort)
+    return runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider)
       .find(option => option.value === (session.effort ?? ''))?.label ?? 'Default'
   }
   if (command.id === 'plan') return claudePermissionMode === 'plan' ? 'On' : 'Choose'
@@ -3138,8 +3140,8 @@ function RuntimeMenu({
   const catalog = useAppStore(state => state.runtimeCatalog)
   const codexRuntime = useCodexRuntime()
   const claudeRuntime = useClaudeRuntime()
-  const models = runtimeCatalogOptions(catalog, session.backend, 'models', session.model)
-  const efforts = runtimeEffortOptions(catalog, session.backend, session.model, session.effort)
+  const models = runtimeCatalogOptions(catalog, session.backend, 'models', session.model, session.codex_provider)
+  const efforts = runtimeEffortOptions(catalog, session.backend, session.model, session.effort, session.codex_provider)
   const [reloading, setReloading] = useState(false)
   const [reloadNotice, setReloadNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const reloadNoticeTimer = useRef<number | null>(null)
@@ -3165,7 +3167,7 @@ function RuntimeMenu({
 
   const selectModel = (value: string) => {
     const model = value || null
-    const effort = runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort)
+    const effort = runtimeEffortAfterModelChange(catalog, session.backend, model, session.effort, session.codex_provider)
     void useAppStore.getState().updateSession(session.id, { model, effort })
   }
   const dismissReloadNotice = () => {
@@ -3239,7 +3241,7 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
   const catalog = useAppStore(state => state.runtimeCatalog)
   const cursorAvailable = cursorBackendAvailable(health, catalog)
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
-  const backends = selectableChatBackends(health, catalog)
+  const backends = selectableChatBackendChoices(health, catalog)
   const providerLocked = isBackendLocked(session)
   const disabled = providerLocked || running || admitting
   const title = providerLocked
@@ -3249,9 +3251,14 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       : admitting
         ? 'Wait for the message to be accepted before changing backend'
         : t('ui.composer.changeAgent')
-  const chip = <button className="backend-chip" title={title} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{backendLabel(session.backend)}</span>{!disabled && <ChevronDown size={12} />}</button>
+  const chip = <button className="backend-chip" title={title} disabled={disabled}><BackendMark backend={session.backend} size={17} /><span>{backendLabel(session.backend, session.codex_provider)}</span>{!disabled && <ChevronDown size={12} />}</button>
   if (disabled) return chip
-  return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(backend => {
+  return <Tooltip.Provider delayDuration={250}><DropdownMenu.Root><DropdownMenu.Trigger asChild>{chip}</DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">{backends.map(choice => {
+    const { backend, codex_provider } = chatBackendSelection(choice)
+    if (choice === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)) return <DropdownMenu.Item key={choice} className="menu-item" onSelect={() => {
+      window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
+      useAppStore.getState().setModal('appSettings', true)
+    }}><BackendMark backend="codex" size={15} />{t('codexProvider.label')}{' '}<span className="menu-item-locked-hint">{t('codexProvider.configure')}</span></DropdownMenu.Item>
     const unavailable = backend === 'cursor' && !cursorAvailable
     const unavailableReason = cursorUnavailableReason || t('ui.Composer.agentUnavailableFallback')
     if (unavailable) return <Tooltip.Root key={backend}>
@@ -3265,7 +3272,7 @@ function BackendMenu({ session, running, admitting }: { session: Session; runnin
       </Tooltip.Trigger>
       <Tooltip.Portal><Tooltip.Content className="shortcut-tooltip backend-unavailable-tooltip" side="right" sideOffset={7}><span>{unavailableReason}</span><Tooltip.Arrow className="shortcut-tooltip-arrow" /></Tooltip.Content></Tooltip.Portal>
     </Tooltip.Root>
-    return <DropdownMenu.CheckboxItem key={backend} className="menu-item" checked={session.backend === backend} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend)}</DropdownMenu.CheckboxItem>
+    return <DropdownMenu.CheckboxItem key={choice} className="menu-item" checked={chatBackendChoice(session) === choice} onCheckedChange={() => void useAppStore.getState().updateSession(session.id, { backend, codex_provider, model: null, effort: null })}><BackendMark backend={backend} size={15} />{backendLabel(backend, codex_provider)}</DropdownMenu.CheckboxItem>
   })}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root></Tooltip.Provider>
 }
 
@@ -4327,7 +4334,7 @@ function sessionRuntimeAdmissionError(
   health: Parameters<typeof runtimeSelectionError>[0],
   catalog: Parameters<typeof runtimeSelectionError>[1]
 ): string | null {
-  return session ? runtimeSelectionError(health, catalog, session.backend, session.model) : null
+  return session ? runtimeSelectionError(health, catalog, session.backend, session.model, session.codex_provider) : null
 }
 
 function queuedTurnRuntimeAdmissionError(
@@ -4339,7 +4346,7 @@ function queuedTurnRuntimeAdmissionError(
   if (!sourceSession) return t("ui.Composer.queuedTurnRuntimeAdmissionError.the_source_chat_is_no_longer_available_0704bd1")
   const backend = turn.backend ?? sourceSession.backend
   const model = turn.model ?? (backend === sourceSession.backend ? sourceSession.model : null)
-  return runtimeSelectionError(health, catalog, backend, model)
+  return runtimeSelectionError(health, catalog, backend, model, backend === sourceSession.backend ? sourceSession.codex_provider : undefined)
 }
 
 /** Product-owned `/mcp` must never be admitted as a Claude model turn. */

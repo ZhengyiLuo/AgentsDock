@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getLocale, setLocale } from '@shared/i18n'
 import type { RuntimeCatalog, Session } from '@shared/types'
-import { formatDuration, formatTime, runtimeLabel } from './format'
+import { backendLabel, formatDuration, formatTime, runtimeLabel } from './format'
 
 describe('localized date and duration formatting', () => {
   afterEach(() => { setLocale('en'); vi.useRealTimers() })
@@ -39,6 +39,14 @@ describe('localized date and duration formatting', () => {
 })
 
 describe('runtimeLabel', () => {
+  it('labels custom Codex distinctly in both locales without changing normal Codex', () => {
+    expect(backendLabel('codex')).toBe('Codex')
+    expect(backendLabel('codex', 'custom')).toBe('Codex · Custom endpoint')
+    setLocale('zh-CN')
+    expect(backendLabel('codex', 'custom')).toBe('Codex · 自定义端点')
+    setLocale('en')
+    expect(runtimeLabel({ id: 'custom', title: '', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra', effort: 'high' })).toBe('gpt-6-astra')
+  })
   const catalog: RuntimeCatalog = {
     backends: {
       codex: {

@@ -7,7 +7,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Command, Copy, Download, ExternalLink, FileText, FolderOpen, GitFork, Import, KeyRound, Laptop, LoaderCircle, Network, RefreshCw, RotateCcw, Search, Server, Sparkles, X } from 'lucide-react'
 import type { AppUpdateStatus, AppUpdateTrack, Backend, BulkImportSessionItem, BulkImportSessionResult, ChatReference, ChatReferenceAction, CreateJobInput, Health, Job, JobContextMode, JobScheduleKind, LocalSessionCandidate, ServerRestartBlockerSnapshot, ServerSetupCapabilities, ServerSetupProgress, ServerUpdateStatus, ServerUpdateTrack, Session, TeamReference, UpdateJobInput, WorkspaceProfileScope } from '@shared/types'
 import { localSessionImportKey, localSessionImportSupported } from '@shared/local-session-import'
-import { cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackends } from '@shared/runtime-catalog'
+import { chatBackendSelection, codexCustomProviderAvailable, cursorBackendAvailable, cursorBackendUnavailableReason, runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError, selectableChatBackendChoices, selectableChatBackends, type ChatBackendChoice } from '@shared/runtime-catalog'
 import { isLoopbackHostname } from '@shared/team-hub-url'
 import { trackEvent } from '../lib/analytics'
 import { readAppearance, setAppearanceMode, type AppearanceMode } from '../lib/appearance'
@@ -2848,13 +2848,14 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   const [folder, setFolder] = useState('General')
   const [cwd, setCwd] = useState('')
   const [providerId, setProviderId] = useState('')
-  const [backend, setBackend] = useState<Backend>('codex')
+  const [backendChoice, setBackendChoice] = useState<ChatBackendChoice>('codex')
+  const { backend, codex_provider } = chatBackendSelection(backendChoice)
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [saving, setSaving] = useState(false)
   const folders = useMemo(() => [...new Set(sessions.map(session => session.folder || 'General'))].sort(), [sessions])
-  const backendOptions = useMemo(() => selectableChatBackends(health, catalog), [catalog, health])
+  const backendOptions = useMemo(() => selectableChatBackendChoices(health, catalog), [catalog, health])
   useEffect(() => {
     if (!open) return
     setTitle(mode === 'newChat' ? 'New chat' : 'Resumed chat')
@@ -2865,20 +2866,20 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
     setCwd(defaultCwd)
   }, [defaultCwd, mode, open])
   useEffect(() => {
-    if (!open || backendOptions.includes(backend)) return
-    setBackend('codex')
+    if (!open || backendOptions.includes(backendChoice)) return
+    setBackendChoice('codex')
     setModel('')
     setEffort('')
-  }, [backend, backendOptions, open])
+  }, [backendChoice, backendOptions, open])
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true)
     try {
       const state = useAppStore.getState()
       const preferenceScope = captureWorkspaceScope(state)
       if (!selectableChatBackends(state.health, state.runtimeCatalog).includes(backend)) throw new Error(`${backendLabel(backend)} is unavailable on this AgentsServer.`)
-      const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model)
+      const runtimeError = runtimeSelectionError(state.health, state.runtimeCatalog, backend, model, codex_provider)
       if (runtimeError) throw new Error(runtimeError)
-      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null }
+      const input = { title: title.trim() || 'New chat', folder: folder.trim() || 'General', cwd: cwd.trim(), backend, codex_provider, model: model || null, effort: effort || null, system_prompt: systemPrompt.trim() || null, cursor_permission_mode: backend === 'cursor' ? 'default' as const : null }
       const session = mode === 'resume' ? await window.agentsDock.sessions.resume({ ...input, providerId: providerId.trim() }) : await window.agentsDock.sessions.create(input)
       if (mode === 'newChat') {
         trackEvent('chat_created')
@@ -2889,14 +2890,14 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       await useAppStore.getState().refreshSessions(); useAppStore.getState().setModal(mode, false); await useAppStore.getState().selectSession(session.id)
     } catch (error) { useAppStore.getState().setError(message(error)) } finally { setSaving(false) }
   }
-  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model)
-  const effortOptions = runtimeEffortOptions(catalog, backend, model, effort)
+  const modelOptions = runtimeCatalogOptions(catalog, backend, 'models', model, codex_provider)
+  const effortOptions = runtimeEffortOptions(catalog, backend, model, effort, codex_provider)
   const hasReasoning = backend !== 'cursor' && effortOptions.some(option => Boolean(option.value))
   const selectModel = (value: string) => {
     setModel(value)
-    setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort) || '')
+    setEffort(runtimeEffortAfterModelChange(catalog, backend, value || null, effort, codex_provider) || '')
   }
-  const runtimeError = runtimeSelectionError(health, catalog, backend, model)
+  const runtimeError = runtimeSelectionError(health, catalog, backend, model, codex_provider)
   const cursorAvailable = cursorBackendAvailable(health, catalog)
   const cursorUnavailableReason = cursorBackendUnavailableReason(health, catalog)
   const resumeDescription = backend === 'cursor'
@@ -2913,9 +2914,19 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
       <label className="span-two"><span>{t("ui.Dialogs.SessionDialog.chat_name_09c3e4c")}</span><input value={title} onChange={event => setTitle(event.target.value)} autoFocus /></label>
       <label><span>{t("ui.Dialogs.SessionDialog.folder_74ccd43")}</span><input value={folder} onChange={event => setFolder(event.target.value)} list="folder-list" /><datalist id="folder-list">{folders.map(item => <option key={item}>{item}</option>)}</datalist></label>
       <WorkingDirectoryInput value={cwd} onChange={setCwd} defaultCwd={defaultCwd} available={directoryCompletionAvailable} showBrowseButton />
-      <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented">{backendOptions.map(value => {
+      <fieldset className="span-two"><legend>{t("ui.Dialogs.SessionDialog.backend_2fb4019")}</legend><div className="segmented session-backend-choices">{backendOptions.map(value => {
+        const selection = chatBackendSelection(value)
+        const needsConfiguration = value === 'codex-custom' && !codexCustomProviderAvailable(health, catalog)
         const unavailable = value === 'cursor' && !cursorAvailable
-        return <button type="button" className={backend === value ? 'active' : ''} key={value} aria-pressed={backend === value} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => { setBackend(value); setModel(''); setEffort('') }}><BackendMark backend={value} size={16} />{backendLabel(value)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+        return <button type="button" className={backendChoice === value ? 'active' : ''} key={value} aria-pressed={backendChoice === value} title={needsConfiguration ? t('codexProvider.configure') : unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => {
+          if (needsConfiguration) {
+            useAppStore.getState().setModal(mode, false)
+            window.dispatchEvent(new CustomEvent('agentsdock:app-settings-section', { detail: 'server' }))
+            useAppStore.getState().setModal('appSettings', true)
+            return
+          }
+          setBackendChoice(value); setModel(''); setEffort('')
+        }}><BackendMark backend={selection.backend} size={16} />{backendLabel(selection.backend, selection.codex_provider)}{needsConfiguration ? ` · ${t('codexProvider.configure')}` : unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div></fieldset>
       <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={model} onChange={event => selectModel(event.target.value)}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}</select></label>
       {hasReasoning && <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>}

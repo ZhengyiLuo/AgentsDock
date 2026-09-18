@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Health, RuntimeCatalog, RuntimeDiagnostic } from './types'
 import {
+  chatBackendChoice,
+  chatBackendSelection,
+  codexCustomProviderAvailable,
+  selectableChatBackendChoices,
   cursorBackendAvailable,
   cursorBackendSupported,
   runtimeCatalogHasSelectableModels,
@@ -22,6 +26,42 @@ const validCatalog: RuntimeCatalog = {
     codex: { models: [{ value: '', label: 'Server default' }, { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' }], efforts: [] }
   }
 }
+
+describe('per-chat Codex provider selection', () => {
+  const health: Health = { ok: true, capabilities: { codex_provider_v1: { per_chat: true } }, runtimes: {
+    codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'OpenAI sign-in required' }
+  } }
+  const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends, codex: { ...validCatalog.backends.codex,
+    custom_provider: { configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1' }
+  } } }
+
+  it('adds exactly one choice while preserving native Codex identity and legacy defaults', () => {
+    expect(selectableChatBackendChoices(health, catalog)).toEqual(['claude', 'codex', 'codex-custom'])
+    expect(chatBackendChoice({ backend: 'codex' })).toBe('codex')
+    expect(chatBackendChoice({ backend: 'codex', codex_provider: 'custom' })).toBe('codex-custom')
+    expect(chatBackendSelection('codex-custom')).toEqual({ backend: 'codex', codex_provider: 'custom' })
+    expect(chatBackendSelection('codex')).toEqual({ backend: 'codex', codex_provider: 'default' })
+  })
+
+  it('requires the per-chat capability and a configured ready endpoint', () => {
+    expect(codexCustomProviderAvailable(health, catalog)).toBe(true)
+    expect(codexCustomProviderAvailable({ ok: true }, catalog)).toBe(false)
+    expect(codexCustomProviderAvailable(health, validCatalog)).toBe(false)
+    expect(runtimeSelectionError({ ok: true }, catalog, 'codex', null, 'custom')).toContain('Update AgentsServer')
+    expect(runtimeSelectionError(health, validCatalog, 'codex', null, 'custom')).toContain('Settings')
+  })
+
+  it('admits custom independently of normal Codex login without replacing its model catalog', () => {
+    expect(runtimeDiagnosticFor(health, catalog, 'codex')?.status).toBe('unauthenticated')
+    expect(runtimeDiagnosticFor(health, catalog, 'codex', 'custom')?.status).toBe('ready')
+    expect(runtimeSelectionError(health, catalog, 'codex', null, 'custom')).toBeNull()
+    expect(runtimeSelectionError(health, catalog, 'codex', 'gpt-6-astra', 'custom')).toBeNull()
+    expect(runtimeSelectionError(health, catalog, 'codex', 'another-model', 'custom')).toContain('does not match')
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models')).toContainEqual({ value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' })
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom').some(option => option.value === 'gpt-5.6-sol')).toBe(false)
+    expect(runtimeEffortOptions(catalog, 'codex', null, 'high', 'custom')).toEqual([])
+  })
+})
 
 describe('runtimeCatalogHasSelectableModels', () => {
   it('accepts a catalog with concrete choices for both backends', () => {

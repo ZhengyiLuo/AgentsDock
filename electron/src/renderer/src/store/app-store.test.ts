@@ -924,6 +924,27 @@ describe('instant new chat defaults', () => {
     modals: closedModals
   }))
 
+  it.each([true, false])('preserves custom Codex defaults and fails closed when readiness is %s', async ready => {
+    const stored = { version: 1, folder: 'Saved', cwd: '/work/saved', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra', effort: null }
+    const create = vi.fn().mockResolvedValue({ id: 'custom-created', title: 'New chat', ...stored })
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      native: { analyticsDisabled: true }, preferences: { getScoped: vi.fn().mockResolvedValue(stored), setScoped: vi.fn().mockResolvedValue(undefined) }, sessions: { create }
+    } as unknown as AgentsDockAPI })
+    useAppStore.setState({ requestNewChat, profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
+      sessions: [], selectedSessionId: null, folderOrder: [], creatingChat: false, modals: closedModals,
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } },
+      runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: ready, available: ready, model: ready ? 'gpt-6-astra' : null, base_url: ready ? 'https://inference.example/v1' : null
+      } } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined)
+    })
+    await useAppStore.getState().requestNewChat()
+    if (ready) expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }))
+    else {
+      expect(create).not.toHaveBeenCalled()
+      expect(useAppStore.getState().modals.newChat).toBe(true)
+    }
+  })
+
   it('opens the chooser for the first chat in an empty workspace', async () => {
     const create = vi.fn()
     Object.defineProperty(window, 'agentsDock', {

@@ -1291,6 +1291,63 @@ describe('Composer', () => {
     expect(screen.queryByRole('menuitemcheckbox', { name: /Cursor$/ })).not.toBeInTheDocument()
   })
 
+  it('offers normal and custom Codex separately and sends the explicit provider selection', async () => {
+    const update = vi.fn().mockImplementation(async (id, patch) => ({ id, title: 'Chat', ...patch }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } }, runtimeCatalog: {
+      backends: { codex: { models: [], efforts: [], custom_provider: {
+        configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
+      } } }
+    } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex · Custom endpoint' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
+    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex · Custom endpoint')
+    await user.click(screen.getByTitle('Change backend'))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
+  })
+
+  it('routes an unconfigured custom choice to Settings without changing the chat', async () => {
+    const update = vi.fn()
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    const user = userEvent.setup()
+    render(<Composer />)
+    await user.click(screen.getByTitle('Change backend'))
+    await user.click(screen.getByRole('menuitem', { name: 'Codex · Custom endpoint Configure in Settings' }))
+    expect(useAppStore.getState().modals.appSettings).toBe(true)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('keeps the custom provider fixed once the native thread starts', () => {
+    useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_thread_id: 'native-custom' }] })
+    render(<Composer />)
+    const chip = screen.getByTitle('Backend is fixed after the provider session starts')
+    expect(chip).toBeDisabled()
+    expect(chip).toHaveTextContent('Codex · Custom endpoint')
+  })
+
+  it('sends a custom Codex chat independently of normal OpenAI sign-in', async () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }
+    const send = vi.fn().mockResolvedValue({ session: { ...session, backend_locked: true }, queued: false })
+    window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
+    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } }, runtimes: {
+      codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'Sign in to normal Codex' }
+    } }, runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
+    } } } } })
+    const user = userEvent.setup()
+    render(<Composer />)
+    expect(screen.queryByText('Sign in to normal Codex')).not.toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('Message'), 'A custom endpoint message')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('offers ready Cursor backend switching when its runtime catalog is available', async () => {
     useAppStore.setState({
       health: {

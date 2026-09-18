@@ -240,6 +240,8 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .segmented button:hover:not(.active):not(:disabled) { color: var(--text); background: var(--interaction-hover); }
 .segmented button:active:not(.active):not(:disabled) { background: var(--interaction-pressed); }
 .segmented button.active { background: var(--segmented-active-surface); color: var(--segmented-active-text); }
+.session-backend-choices { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.session-backend-choices button { min-width: 0; max-width: 100%; white-space: normal; text-align: left; }
 .segmented button:disabled { opacity: .5; }
 @media (prefers-reduced-motion: reduce) {
   .menu-content[data-state="open"] { animation: none; }

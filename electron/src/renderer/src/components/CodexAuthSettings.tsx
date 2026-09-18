@@ -162,7 +162,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   const providerEditable = connected && profileId != null && providerScopeMatches && currentProvider?.available === true
     && !loading && !saving && !providerLoading && !providerReadFailed
     && providerError !== 'providerAdmin' && providerError !== 'providerUpdate'
-  const defaultEditable = editable && !providerLoading && !providerReadFailed && (!providerError || providerError === 'providerUpdate') && !currentProvider?.configured
+  const defaultEditable = editable && !providerLoading && !providerReadFailed && (!providerError || providerError === 'providerUpdate')
   const canResetProvider = !testing && (providerEditable && currentProvider?.configured || canOpenSettings && !providerLoading && providerReadFailed)
   const providerDraftComplete = Boolean(baseURL.trim() && model.trim() && hasKey)
   const tested = testResult?.ok === true && testResult.status === 'ready' && testResult.revision === draftRevisionRef.current
@@ -185,7 +185,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       if (request !== providerRequestRef.current || !ownsScope(scope)) return
       setProvider(next)
       setProviderScope(scope)
-      setCustomEndpoint(forceCustom || next.configured)
+      setCustomEndpoint(forceCustom)
       setBaseURL(next.base_url ?? 'https://api.openai.com/v1')
       setModel(next.model ?? '')
     } catch (reason) {
@@ -334,8 +334,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     }
   }
 
-  const account = currentProvider?.configured ? t('codexAuth.customAccount', { model: currentProvider.model ?? '' })
-    : currentStatus?.auth_mode === 'apiKey' ? t('codexAuth.apiKey')
+  const account = currentStatus?.auth_mode === 'apiKey' ? t('codexAuth.apiKey')
     : currentStatus?.auth_mode === 'chatgpt' ? [t('codexAuth.chatgpt'), currentStatus.email, currentStatus.plan_type].filter(Boolean).join(' · ')
       : currentStatus?.auth_mode === 'other' ? t('codexAuth.other')
         : currentStatus?.requires_openai_auth === false ? t('codexAuth.notRequired') : t('codexAuth.signedOut')
@@ -349,6 +348,9 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
           {!showForm && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
             clearKey(); setError(null); setSaved(false); setProviderNotice(null); setFormOpen(true); void loadProviderConfiguration(authReadFailed)
           }}>{t(authReadFailed ? 'codexAuth.endpointSettings' : 'codexAuth.useKey')}</button>}
+          {!showForm && !authReadFailed && <button type="button" className="quiet-button" disabled={!canOpenSettings} onClick={() => {
+            setProviderNotice(null); setFormOpen(true); void loadProviderConfiguration(true)
+          }}>{t('codexAuth.customEndpoint')}</button>}
           <button type="button" className="quiet-button" disabled={!connected || !profileId || loading || saving}
             onClick={() => setReload(value => value + 1)}>
             {loading ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{t('codexAuth.recheck')}
@@ -356,7 +358,8 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
         </div>
       </div>
       <small>{!connected || !profileId ? t('codexAuth.connect') : loading ? t('codexAuth.loading')
-        : currentStatus?.available === false ? t('codexAuth.nativeRequired') : currentStatus || currentProvider?.configured ? account : t('codexAuth.unknown')}</small>
+        : currentStatus?.available === false ? t('codexAuth.nativeRequired') : currentStatus ? account : t('codexAuth.unknown')}</small>
+      {currentProvider?.configured && <small>{t('codexAuth.customAccount', { model: currentProvider.model ?? '' })}</small>}
       {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void (customEndpoint ? saveProvider() : signIn()) }}>
         <small id={`${fieldId}-scope`} title={customEndpoint ? t('codexAuth.providerScope') : undefined}>{t(customEndpoint ? 'codexAuth.providerSummary' : 'codexAuth.replaces')}</small>
         {!customEndpoint && <>

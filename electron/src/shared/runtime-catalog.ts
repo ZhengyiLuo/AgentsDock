@@ -1,4 +1,29 @@
-import type { Backend, Health, RuntimeCatalog, RuntimeDiagnostic, RuntimeOption } from './types'
+import type { Backend, CodexProvider, Health, RuntimeCatalog, RuntimeDiagnostic, RuntimeOption } from './types'
+import { t } from './i18n'
+
+/** UI identity only: the native runtime remains Codex for both choices. */
+export type ChatBackendChoice = Backend | 'codex-custom'
+
+export function chatBackendChoice(session: { backend: Backend; codex_provider?: CodexProvider }): ChatBackendChoice {
+  return session.backend === 'codex' && session.codex_provider === 'custom' ? 'codex-custom' : session.backend
+}
+
+export function chatBackendSelection(choice: ChatBackendChoice): { backend: Backend; codex_provider: CodexProvider } {
+  return { backend: choice === 'codex-custom' ? 'codex' : choice, codex_provider: choice === 'codex-custom' ? 'custom' : 'default' }
+}
+
+export function codexCustomProviderSupported(health: Health | null | undefined): boolean {
+  return health?.capabilities?.codex_provider_v1?.per_chat === true
+}
+
+export function codexCustomProviderAvailable(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): boolean {
+  const custom = catalog?.backends?.codex?.custom_provider
+  return codexCustomProviderSupported(health) && custom?.configured === true && custom.available === true && Boolean(custom.model?.trim())
+}
+
+export function selectableChatBackendChoices(health: Health | null | undefined, catalog: RuntimeCatalog | null | undefined): ChatBackendChoice[] {
+  return selectableChatBackends(health, catalog).flatMap(backend => backend === 'codex' ? ['codex', 'codex-custom'] as ChatBackendChoice[] : [backend])
+}
 
 // Claude and Codex are always expected on every server; Cursor is optional
 // (many servers won't have it configured/authenticated yet). Keeping it out
@@ -77,8 +102,16 @@ export function runtimeCatalogOptions(
   catalog: RuntimeCatalog | null | undefined,
   backend: string,
   type: 'models' | 'efforts',
-  current?: string | null
+  current?: string | null,
+  codexProvider?: CodexProvider
 ): RuntimeOption[] {
+  if (backend === 'codex' && codexProvider === 'custom') {
+    if (type === 'efforts') return []
+    const model = catalog?.backends?.codex?.custom_provider?.model?.trim()
+    const options: RuntimeOption[] = [{ value: model && current?.trim() === model ? model : '', label: model || t('codexProvider.configure') }]
+    if (current?.trim() && current.trim() !== model) options.push({ value: current.trim(), label: current.trim(), locked: true, locked_reason: t('codexProvider.modelMismatch') })
+    return options
+  }
   const backendCatalog = catalog?.backends[backend]
   const available = backendCatalog?.[type] ?? []
   const configuredDefault = type === 'models' ? backendCatalog?.default_model : backendCatalog?.default_effort
@@ -124,8 +157,15 @@ export function runtimeSelectionError(
   health: Health | null | undefined,
   catalog: RuntimeCatalog | null | undefined,
   backend: Backend,
-  model?: string | null
+  model?: string | null,
+  codexProvider?: CodexProvider
 ): string | null {
+  if (backend === 'codex' && codexProvider === 'custom') {
+    if (!codexCustomProviderSupported(health)) return t('codexProvider.update')
+    if (!codexCustomProviderAvailable(health, catalog)) return t('codexProvider.unavailable')
+    const configured = catalog?.backends?.codex?.custom_provider?.model?.trim()
+    return model?.trim() && model.trim() !== configured ? t('codexProvider.modelMismatch') : null
+  }
   if (backend === 'cursor' && !cursorBackendAvailable(health, catalog)) {
     return cursorBackendUnavailableReason(health, catalog)
   }
@@ -154,8 +194,10 @@ export function runtimeEffortOptions(
   catalog: RuntimeCatalog | null | undefined,
   backend: string,
   model?: string | null,
-  current?: string | null
+  current?: string | null,
+  codexProvider?: CodexProvider
 ): RuntimeOption[] {
+  if (backend === 'codex' && codexProvider === 'custom') return []
   const scoped = modelEfforts(catalog, backend, model)
   if (!scoped) return runtimeCatalogOptions(catalog, backend, 'efforts', current)
   const backendCatalog = catalog?.backends[backend]
@@ -173,8 +215,10 @@ export function runtimeEffortAfterModelChange(
   catalog: RuntimeCatalog | null | undefined,
   backend: string,
   model: string | null,
-  current?: string | null
+  current?: string | null,
+  codexProvider?: CodexProvider
 ): string | null {
+  if (backend === 'codex' && codexProvider === 'custom') return null
   if (backend === 'cursor') return null
   const selected = current?.trim() || ''
   const scoped = modelEfforts(catalog, backend, model)
@@ -199,8 +243,13 @@ export function runtimeEffortAfterModelChange(
 export function runtimeDiagnosticFor(
   health: Health | null | undefined,
   catalog: RuntimeCatalog | null | undefined,
-  backend: Backend
+  backend: Backend,
+  codexProvider?: CodexProvider
 ): RuntimeDiagnostic | null {
+  if (backend === 'codex' && codexProvider === 'custom') {
+    const available = codexCustomProviderAvailable(health, catalog)
+    return { backend, available, status: available ? 'ready' : 'error', message: available ? '' : t('codexProvider.unavailable') }
+  }
   const fromHealth = health?.runtimes?.[backend] ?? null
   const fromCatalog = catalog?.backends?.[backend]?.diagnostic ?? null
   if (!fromHealth) return fromCatalog

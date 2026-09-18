@@ -1,7 +1,8 @@
-import type { Backend, RuntimeCatalog, Session } from '@shared/types'
+import type { Backend, CodexProvider, RuntimeCatalog, Session } from '@shared/types'
 import { getLocale, t, type Locale } from '@shared/i18n'
 
-export function backendLabel(backend: Backend): string {
+export function backendLabel(backend: Backend, codexProvider?: CodexProvider): string {
+  if (backend === 'codex' && codexProvider === 'custom') return t('codexProvider.label')
   if (backend === 'codex') return 'Codex'
   if (backend === 'cursor') return 'Cursor'
   return 'Claude'
@@ -36,6 +37,7 @@ export function formatDuration(seconds?: number | null): string {
 
 export function runtimeLabel(session: Session, catalog?: RuntimeCatalog | null): string {
   const backend = catalog?.backends[session.backend]
+  if (session.backend === 'codex' && session.codex_provider === 'custom') return session.model?.trim() || backend?.custom_provider?.model || t('codexProvider.label')
   const model = session.model?.trim()
   const effort = session.backend === 'cursor' ? '' : session.effort?.trim()
   const modelLabel = model
