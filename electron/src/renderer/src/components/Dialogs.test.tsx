@@ -100,6 +100,9 @@ describe('AppSettingsDialog', () => {
     expect(within(dialog).queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('combobox', { name: 'App theme' })).toHaveValue('system')
     expect(within(dialog).queryByText('Set the color theme used throughout AgentsDock.')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('switch', { name: 'Share usage analytics' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /Privacy Policy/ })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Privacy' })).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toHaveAttribute('aria-current', 'page')

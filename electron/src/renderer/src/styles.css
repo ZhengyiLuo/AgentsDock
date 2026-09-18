@@ -2224,12 +2224,6 @@ button.tool-event-toggle:hover { background: #242424; }
 .codex-subagent-settings-controls input { width: 150px; max-width: 100%; min-height: var(--control-height-lg); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-2) var(--space-3); font-size: var(--text-size-ui); }
 .codex-subagent-settings-controls input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .codex-subagent-settings-controls input:disabled { opacity: .6; }
-.analytics-privacy-settings { min-height: 64px; display: flex; align-items: center; gap: 10px; padding: 10px 11px; background: #272727; border: 1px solid #323232; border-radius: 7px; }
-.analytics-privacy-settings-icon { width: 30px; height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); background: color-mix(in srgb, var(--accent), transparent 88%); border-radius: 7px; }
-.analytics-privacy-settings-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.analytics-privacy-settings-copy strong { color: var(--text); font-size: var(--text-size-ui); }
-.analytics-privacy-settings-copy small { color: var(--faint); font-size: var(--text-size-meta); line-height: 1.4; }
-.analytics-privacy-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .privacy-policy-link { display: inline-flex; align-items: center; gap: 4px; width: fit-content; padding: 0; color: var(--accent); background: transparent; font-size: var(--text-size-meta); font-weight: var(--text-weight-label); }
 .privacy-policy-link:hover { color: color-mix(in srgb, var(--accent), white 24%); }
 .settings-switch { position: relative; width: 31px; height: 18px; flex: none; padding: 0; background: #454545; border: 0; border-radius: 999px; transition: background 120ms ease; }
@@ -2897,7 +2891,6 @@ button.tool-event-toggle:hover { background: #242424; }
 :root[data-theme="light"] .digest-preview > header strong { color: var(--muted); }
 :root[data-theme="light"] .server-health,
 :root[data-theme="light"] .codex-server-settings,
-:root[data-theme="light"] .analytics-privacy-settings,
 :root[data-theme="light"] .update-panel { background: var(--surface-2); border-color: var(--border); }
 :root[data-theme="light"] .settings-switch { background: #d4d4d8; }
 :root[data-theme="light"] .settings-switch[data-state="checked"] { background: var(--accent); }

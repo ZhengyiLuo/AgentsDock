@@ -12,6 +12,7 @@ const workspaceEditorHarness = vi.hoisted(() => ({
   onReady: null as (() => void) | null
 }))
 const appRenderHarness = vi.hoisted(() => ({ sidebarRenders: 0 }))
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
 const teamspaceHarness = vi.hoisted(() => ({
   mounts: 0,
   unmounts: 0,
@@ -25,6 +26,8 @@ const teamspaceHarness = vi.hoisted(() => ({
     onSecurePeerInviteHandled?: (requestId: number) => void
   }
 }))
+
+vi.mock('./lib/analytics', () => analytics)
 
 vi.mock('./components/Sidebar', () => ({
   Sidebar: ({ hidden = false }: { hidden?: boolean }) => {
@@ -138,6 +141,7 @@ describe('App chat workspace identity', () => {
     teamspaceHarness.mounts = 0
     teamspaceHarness.unmounts = 0
     teamspaceHarness.props = null
+    analytics.trackEvent.mockClear()
     window.history.replaceState({}, '', '/')
     localStorage.clear()
     Object.defineProperty(window, 'agentsDock', {
@@ -299,6 +303,24 @@ describe('App chat workspace identity', () => {
     act(() => useAppStore.setState({ activeProfileId: profile.id, profileGeneration: 6 }))
     expect(screen.queryByTestId('teamspace')).not.toBeInTheDocument()
     expect(teamspaceHarness.mounts).toBe(1)
+  })
+
+  it('records each transition into Team Network once, not navigation within the open surface', async () => {
+    render(<App />)
+    analytics.trackEvent.mockClear()
+
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace')) })
+    expect(await screen.findByTestId('teamspace')).toBeVisible()
+    await waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('team_network_opened'))
+
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace', { detail: { section: 'feed' } })) })
+    expect(analytics.trackEvent).toHaveBeenCalledTimes(1)
+
+    act(() => { window.dispatchEvent(new Event('agentsdock:close-teamspace')) })
+    await waitFor(() => expect(screen.queryByTestId('teamspace')).not.toBeInTheDocument())
+    act(() => { window.dispatchEvent(new CustomEvent('agentsdock:open-teamspace')) })
+    await waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledTimes(2))
+    expect(analytics.trackEvent).toHaveBeenLastCalledWith('team_network_opened')
   })
 
   it('opens Teamspace directly to Inbox when a received-mail notice requests it', async () => {

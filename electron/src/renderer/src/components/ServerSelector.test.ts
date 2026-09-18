@@ -1,9 +1,12 @@
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PublicServerProfile } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 import { connectionStateLabel, profileHostSubtitle, ServerSelector, serverProfileHost } from './ServerSelector'
+
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
+vi.mock('../lib/analytics', () => analytics)
 
 const alpha: PublicServerProfile = {
   id: 'alpha',
@@ -25,7 +28,10 @@ const beta: PublicServerProfile = {
   connectionState: 'cached'
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  analytics.trackEvent.mockClear()
+})
 
 describe('server selector labels', () => {
   it('extracts the host and port from a server URL', () => {
@@ -98,5 +104,25 @@ describe('server selector labels', () => {
 
     expect(selectedSection).toBe('server')
     expect(useAppStore.getState().modals).toMatchObject({ settings: false, appSettings: true })
+  })
+
+  it('records one successful explicit server switch from the sidebar', async () => {
+    const switchServer = vi.fn(async (profileId: string) => {
+      useAppStore.setState({ activeProfileId: profileId })
+      return true
+    })
+    useAppStore.setState({
+      profiles: [alpha, beta],
+      activeProfileId: alpha.id,
+      switchingProfileId: null,
+      switchServer
+    })
+
+    render(createElement(ServerSelector))
+    fireEvent.pointerDown(screen.getByRole('button', { name: /Choose AgentsServer/ }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Beta/ }))
+
+    await waitFor(() => expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('server_switched', { success: true }))
+    expect(switchServer).toHaveBeenCalledExactlyOnceWith('beta')
   })
 })

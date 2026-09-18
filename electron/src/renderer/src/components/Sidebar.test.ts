@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@shared/types'
-import { buildSections, reorderFolderList, resolveSidebarDrop, sidebarFolderAssignmentPatch, SIDEBAR_LONG_PRESS } from './Sidebar'
+import { buildSections, reorderFolderList, resolveSidebarDrop, sidebarFolderAssignmentPatch, sidebarReorderAnalyticsEvent, SIDEBAR_LONG_PRESS } from './Sidebar'
 
 describe('gesture reorder activation', () => {
   it('requires a deliberate hold while tolerating small pointer movement', () => {
@@ -27,6 +27,15 @@ describe('folder ordering', () => {
 })
 
 describe('sidebar drop resolution', () => {
+  it('separates same-folder reorder analytics from cross-folder movement', () => {
+    expect(sidebarReorderAnalyticsEvent({
+      kind: 'reorder-session', sessionId: 'a', targetId: 'b', placement: 'after'
+    })).toBe('chat_reordered')
+    expect(sidebarReorderAnalyticsEvent({
+      kind: 'reorder-session', sessionId: 'a', targetId: 'b', placement: 'after', targetFolder: 'General'
+    })).toBe('chat_moved_to_folder')
+  })
+
   it('reorders a chat within its current folder', () => {
     expect(resolveSidebarDrop(
       'session:a',

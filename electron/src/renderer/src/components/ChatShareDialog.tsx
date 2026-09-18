@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Copy, LoaderCircle, X } from 'lucide-react'
 import type { Session, WorkspaceProfileScope } from '@shared/types'
 import { normalizeChatShareOrigin, type ChatShareMode, type ChatShareRecord, type CreatedChatShare } from '@shared/chat-shares'
+import { trackEvent } from '../lib/analytics'
 import { t, useLocale } from '../lib/i18n'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { useTransientClose } from '../lib/transient-close'
@@ -31,6 +32,7 @@ function profileShareOrigin(serverUrl: string | undefined): string {
 
 export function ChatShareDialog() {
   const [target, setTarget] = useState<Target | null>(null)
+  const targetRef = useRef<Target | null>(null)
   const profileId = useAppStore(state => state.activeProfileId)
   const generation = useAppStore(state => state.profileGeneration)
   const identity = useAppStore(state => state.profiles.find(profile => profile.id === state.activeProfileId)?.serverIdentity ?? null)
@@ -42,15 +44,27 @@ export function ChatShareDialog() {
       const scope = captureWorkspaceScope(state)
       if (session && scope?.serverIdentity && !state.switchingProfileId
         && requested.scope?.profileId === scope.profileId && requested.scope.profileGeneration === scope.profileGeneration
-        && requested.scope.serverIdentity === scope.serverIdentity) setTarget({ session, scope,
-        initialOrigin: profileShareOrigin(state.profiles.find(profile => profile.id === scope.profileId)?.serverUrl) })
+        && requested.scope.serverIdentity === scope.serverIdentity) {
+        const next = { session, scope,
+          initialOrigin: profileShareOrigin(state.profiles.find(profile => profile.id === scope.profileId)?.serverUrl) }
+        if (!targetRef.current) trackEvent('chat_share_opened')
+        targetRef.current = next
+        setTarget(next)
+      }
     }
     window.addEventListener('agentsdock:share-chat', open)
     return () => window.removeEventListener('agentsdock:share-chat', open)
   }, [])
-  useEffect(() => { setTarget(null) }, [profileId, generation, identity])
+  useEffect(() => {
+    targetRef.current = null
+    setTarget(null)
+  }, [profileId, generation, identity])
+  const close = () => {
+    targetRef.current = null
+    setTarget(null)
+  }
   return target ? <ChatSharePanel key={`${target.scope.profileId}:${target.scope.profileGeneration}:${target.session.id}`}
-    target={target} onClose={() => setTarget(null)} /> : null
+    target={target} onClose={close} /> : null
 }
 
 function ChatSharePanel({ target: { session, scope, initialOrigin }, onClose }: { target: Target; onClose: () => void }) {
@@ -88,6 +102,7 @@ function ChatSharePanel({ target: { session, scope, initialOrigin }, onClose }: 
     const value = await window.agentsDock.chatShares.create(scope, session.id, mode === 'snapshot'
       ? { mode, confirmed_public: true, title: [...session.title].slice(0, 256).join(''), base_url: baseUrl }
       : { mode, confirmed_interactive: true, title: [...session.title].slice(0, 256).join(''), base_url: baseUrl })
+    trackEvent(mode === 'snapshot' ? 'chat_share_snapshot_created' : 'chat_share_interactive_created')
     if (!mounted.current) return
     setCreated({ ...value, mode })
     setShares(previous => [listedShare(value, mode), ...previous.filter(item => item.id !== value.id || item.mode !== mode)])
@@ -102,6 +117,7 @@ function ChatSharePanel({ target: { session, scope, initialOrigin }, onClose }: 
   })
   const revoke = (item: ListedShare) => run(async () => {
     await window.agentsDock.chatShares.revoke(scope, session.id, item.mode, item.id)
+    trackEvent('chat_share_revoked')
     if (mounted.current) {
       setShares(previous => previous.map(row => row.id === item.id && row.mode === item.mode ? { ...row, revoked_at: Date.now() / 1000 } : row))
       setRevokedOpen(false)
