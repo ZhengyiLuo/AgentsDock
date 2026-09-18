@@ -1,6 +1,6 @@
 # Development and release log
 
-## 2026-09-18 — AgentsServer 1.0.4-beta.4 candidate
+## 2026-09-18 — AgentsServer 1.0.4-beta.4 accepted
 
 - Save endpoint/key settings without testing or interrupting active native
   sessions. Isolate normal Codex and immutable custom credential generations;
@@ -19,6 +19,17 @@
 - Repeat with simultaneous cold native startup. These checks use disposable
   state and synthetic availability/credentials; live external gateway access
   and production background startup are outside their acceptance boundary.
+- Accept [1.0.4-beta.4](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.4)
+  from `b4b116d022ba9d73949e56476cbfc46fdba27160` after all eight workers pass
+  in [release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35396277887).
+  Verify the Ed25519 signature, manifest and all 85 packaged source files;
+  unauthenticated public downloads byte-match the verified held assets.
+  Archive SHA-256:
+  `664133cd5ad39251b6276cb823d527c0ba9d59c48f96c187c1cf866042cb2888`.
+- Publish matching desktop **1.0.4-beta.3 / 1175**. Accept the managed server
+  update from **1.0.4-beta.3** to **1.0.4-beta.4** with idle installation;
+  the update remains pending while active work continues, with no forced
+  restart or interruption.
 
 ## 2026-09-18 — AgentsServer 1.0.4-beta.3 accepted
 
