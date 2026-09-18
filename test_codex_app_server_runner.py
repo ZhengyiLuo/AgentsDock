@@ -2401,7 +2401,9 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         agent_server.CURRENT_TURNS = {}
         runtime_started = asyncio.Event()
 
-        async def stalled_runtime(_backend: str) -> None:
+        async def stalled_runtime(
+            _backend: str, *, session: dict[str, object] | None = None,
+        ) -> None:
             runtime_started.set()
             await asyncio.Event().wait()
 

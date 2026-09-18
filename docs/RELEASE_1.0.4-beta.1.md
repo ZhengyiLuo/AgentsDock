@@ -36,8 +36,10 @@ account and custom-endpoint controls. Team Network remains a beta feature.
 
 ## Compatibility and rollout
 
-- Requires the matching desktop beta for the new picker, Settings and native
-  side-chat controls. Existing ordinary chats retain their provider selection.
+- Requires desktop **1.0.4-beta.1 (build 1175)** for the new picker, Settings and
+  native side-chat controls. Older desktop Side chat requests receive HTTP 409;
+  update the app to use the v2 native-context contract even though the overall
+  API contract remains 28. Existing ordinary chats retain their provider selection.
   Custom gateways must support the Responses protocol required by Codex;
   Chat Completions compatibility alone is not enough.
 - API contract **28**, dependencies, Team Hub schema and signing key are
@@ -46,6 +48,10 @@ account and custom-endpoint controls. Team Network remains a beta feature.
 - Install through the signed **Beta** managed updater. When-idle installation
   preserves active work and the existing Team Hub rollback checks. Publishing
   does not itself install, restart servers or opt stable users into the beta.
+- After creating custom-endpoint chats, do not resume them on a downgraded
+  1.0.3 server: that version does not understand their provider selection or
+  endpoint bindings. Team Hub rollback checks do not protect this custom-chat
+  compatibility boundary; restore a supporting server before resuming them.
 
 Validation includes isolated transport/lifecycle regressions, native desktop
 interaction through real HTTP and production session handlers, concurrent

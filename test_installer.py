@@ -30,6 +30,19 @@ RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "server-release.yml"
 
 
 class InstallerContractTests(unittest.TestCase):
+    def assert_smoke_check_imports(self, source, expected_modules):
+        checks = []
+        for command in re.findall(r"-c '([^'\n]+)'", source):
+            checks.append({
+                module.strip()
+                for statement in re.findall(r"(?:^|;)\s*import\s+([\w., \t]+)", command)
+                for module in statement.split(",")
+            })
+        self.assertTrue(
+            any(set(expected_modules) <= modules for modules in checks),
+            f"No runtime smoke check imports all required modules: {sorted(expected_modules)}",
+        )
+
     def test_top_level_release_symlinks_are_rejected_by_packager_and_installer(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -113,9 +126,11 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("-c 'import websockets'", INSTALLER.read_text())
         self.assertIn("import claude_agent_sdk", INSTALLER.read_text())
         self.assertIn("import croniter, dateutil", INSTALLER.read_text())
-        self.assertIn(
-            "import side_questions, codex_side_question, agentsdock_team_hub, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime",
+        self.assert_smoke_check_imports(
             INSTALLER.read_text(),
+            {"codex_auth", "codex_provider", "side_questions", "codex_side_question",
+             "claude_side_question", "agentsdock_team_hub", "cursor_agent_client",
+             "cursor_process_guard", "secure_peer_delivery", "secure_peer_runtime"},
         )
         self.assertIn("from agentsdock_team_hub import secure_peer, secure_peer_hub", INSTALLER.read_text())
         self.assertIn('"state_available": True', INSTALLER.read_text())
@@ -749,7 +764,9 @@ exit 0
         self.assertIn('"$SCRIPT_DIR/cursor_agent_client.py"', source)
         self.assertIn('"$SCRIPT_DIR/team_hub_host.py"', source)
         self.assertIn('"$SCRIPT_DIR/agentsdock_team_hub/"', source)
-        self.assertIn("import claude_agent_sdk, croniter, cryptography, dateutil, tzdata", source)
+        self.assert_smoke_check_imports(
+            source, {"claude_agent_sdk", "croniter", "cryptography", "dateutil", "tzdata"},
+        )
         self.assertIn(r'version(\"claude-agent-sdk\")', source)
         self.assertIn(r'raise SystemExit(0 if sdk_version == \"0.2.130\"', source)
         self.assertIn("'claude-agent-sdk==0.2.130'", source)
@@ -764,9 +781,13 @@ exit 0
         self.assertIn("'$REMOTE_SERVER_DIR/agentsdock_team.py'", source)
         self.assertIn("'$REMOTE_SERVER_DIR/provider_commands.py'", source)
         self.assertIn("'$REMOTE_SERVER_DIR/agentsdock_team_hub'", source)
-        self.assertIn(
-            "import side_questions, codex_side_question, agentsdock_team_hub, claude_agent_sdk, cursor_agent_client, cursor_process_guard, secure_peer_delivery, secure_peer_runtime, team_hub_host, agentsdock_mail, agentsdock_team, provider_commands",
+        self.assert_smoke_check_imports(
             source,
+            {"codex_auth", "codex_provider", "side_questions", "codex_side_question",
+             "claude_side_question", "agentsdock_team_hub", "claude_agent_sdk",
+             "cursor_agent_client", "cursor_process_guard", "secure_peer_delivery",
+             "secure_peer_runtime", "team_hub_host", "agentsdock_mail", "agentsdock_team",
+             "provider_commands"},
         )
         self.assertIn("from agentsdock_team_hub import secure_peer, secure_peer_hub", source)
         self.assertIn('"state_available": True', source)
@@ -1411,15 +1432,13 @@ exit 0
         self.assertIn('"$STAGE_DIR/claude_sdk_client.py"', installer_source)
         self.assertIn('"$STAGE_DIR/codex_app_server.py"', installer_source)
         self.assertIn('"$STAGE_DIR/cursor_agent_client.py"', installer_source)
-        self.assertIn(
-            "import side_questions, codex_side_question, agentsdock_team_hub, cursor_agent_client, cursor_process_guard, secure_peer_delivery",
+        self.assert_smoke_check_imports(
             installer_source,
+            {"codex_auth", "codex_provider", "side_questions", "codex_side_question",
+             "claude_side_question", "agentsdock_team_hub", "cursor_agent_client",
+             "cursor_process_guard", "secure_peer_delivery", "agentsdock_team",
+             "claude_history_repair", "chat_mailbox", "provider_commands"},
         )
-        self.assertIn(
-            "agentsdock_team, claude_history_repair",
-            installer_source,
-        )
-        self.assertIn("chat_mailbox, provider_commands;", installer_source)
         self.assertIn('"$STAGE_DIR/secure_peer_runtime.py"', installer_source)
         self.assertIn('"$STAGE_DIR/secure_peer_delivery.py"', installer_source)
         self.assertIn('"$STAGE_DIR/uninstall.sh"', installer_source)

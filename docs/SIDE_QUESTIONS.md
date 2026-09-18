@@ -1,4 +1,9 @@
-# Side questions
+# Side questions (legacy v1)
+
+Superseded in AgentsServer 1.0.4-beta.1 by
+[Native side conversations](NATIVE_SIDE_CHAT.md). This document describes the
+historical snapshot-based v1 API, not the current implementation. Current clients
+must use the v2 native-context contract; v1 requests are rejected with HTTP 409.
 
 Side questions answer a question or follow-up about existing conversation text in
 a separate, temporary provider invocation. They do not resume or fork the parent

@@ -2526,7 +2526,10 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
                     queue_if_busy=False,
                 )
 
-        ensure_runtime.assert_awaited_once_with(agent_server.BACKEND_CURSOR)
+        ensure_runtime.assert_awaited_once_with(
+            agent_server.BACKEND_CURSOR,
+            session=agent_server.STORE.sessions["target"],
+        )
         self.assertNotIn("target", agent_server.BUSY_SESSIONS)
 
     def test_target_delivery_capabilities_require_native_or_ready_runtimes(self) -> None:
