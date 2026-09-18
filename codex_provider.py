@@ -332,7 +332,11 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
             "analytics.enabled": False, "otel.exporter": "none", "otel.trace_exporter": "none"}
         args = config_args(config)
         env = native_environment(isolated_environment(environment), selected)
-        env.update({"TMPDIR": temporary, "OTEL_SDK_DISABLED": "true"})
+        # A fresh SQLite database paired with the user's Codex home triggers
+        # a full history reindex before native initialization can complete.
+        # The probe needs only its explicit endpoint/model/key, so isolate its
+        # configuration, auth and history together without changing HOME.
+        env.update({"CODEX_HOME": temporary, "TMPDIR": temporary, "OTEL_SDK_DISABLED": "true"})
         try:
             async with asyncio.timeout(TEST_TIMEOUT_SECONDS):
                 await verify_protocol(executable, temporary, {name: value for name, value in env.items() if name != ENV_KEY})

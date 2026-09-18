@@ -294,12 +294,16 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             captured["environment"] = kwargs["env_factory"]().copy()
             return native
         verify = AsyncMock()
-        result = await provider.test_connection(SELECTION, executable="synthetic-unused", environment={"OPENAI_API_KEY": "old"}, manager_factory=factory, verify_protocol=verify)
+        result = await provider.test_connection(SELECTION, executable="synthetic-unused",
+            environment={"OPENAI_API_KEY": "old", "HOME": "/synthetic-home", "CODEX_HOME": "/synthetic-existing-codex"},
+            manager_factory=factory, verify_protocol=verify)
         self.assertTrue(result["ok"])
         verify.assert_awaited_once()
         self.assertNotIn(KEY, str(captured["app_server_args"]))
         self.assertEqual(captured["environment"][provider.ENV_KEY], KEY)
         self.assertNotIn("OPENAI_API_KEY", captured["environment"])
+        self.assertEqual((captured["environment"]["HOME"], captured["environment"]["CODEX_HOME"]),
+            ("/synthetic-home", captured["cwd"]))
         params = native.start_thread.call_args.args[0]
         self.assertEqual(params["environments"], [])
         self.assertEqual(params["dynamicTools"], [])
