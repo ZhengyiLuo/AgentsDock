@@ -4231,7 +4231,8 @@ export function JobDialog() {
     health,
     catalog,
     selectedBackend,
-    selectedBackend === session?.backend ? session?.model : null
+    selectedBackend === session?.backend ? session?.model : null,
+    selectedBackend === session?.backend ? session?.codex_provider : undefined
   )
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!session || scheduleError || nextRunError) return; setSaving(true)
@@ -4253,7 +4254,8 @@ export function JobDialog() {
       currentState.health,
       currentState.runtimeCatalog,
       selectedBackend,
-      selectedBackend === currentSession.backend ? currentSession.model : null
+      selectedBackend === currentSession.backend ? currentSession.model : null,
+      selectedBackend === currentSession.backend ? currentSession.codex_provider : undefined
     )
     if (enabled && currentRuntimeError) {
       currentState.setError(currentRuntimeError)
@@ -4381,13 +4383,13 @@ export function JobDialog() {
       <label><span>{t("ui.Dialogs.JobDialog.title_7e8cd20")}</span><input value={title} onChange={event => setTitle(event.target.value)} required /></label>
       <fieldset><legend>{t("ui.Dialogs.JobDialog.backend_2fb4019")}</legend><div className="segmented">{selectableBackends.map(value => {
         const unavailable = value === 'cursor' && !cursorBackendAvailable(health, catalog)
-        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? 'job-cursor-runtime-help' : undefined} disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
+        return <button type="button" key={value} className={backend === value ? 'active' : ''} aria-pressed={backend === value} aria-describedby={unavailable ? 'job-cursor-runtime-help' : undefined} disabled={unavailable} title={unavailable ? cursorUnavailableReason ?? undefined : undefined} onClick={() => setBackend(value)}><BackendMark backend={value} size={14} />{backendLabel(value, value === session?.backend ? session.codex_provider : undefined)}{unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div>{selectableBackends.includes('cursor') && !cursorBackendAvailable(health, catalog) && cursorUnavailableReason
         ? <small id="job-cursor-runtime-help" className="runtime-option-help">{cursorUnavailableReason}</small>
         : null}</fieldset>
       <fieldset className="job-context-fieldset"><legend>{t("ui.Dialogs.JobDialog.run_context_20887b3")}</legend><div className={`job-context-picker${supportsIndependentRuns ? '' : ' single'}`} role="group" aria-label={t("ui.Dialogs.JobDialog.run_context_20887b3")}>
         <button type="button" className={contextMode === 'chat' ? 'active' : ''} aria-pressed={contextMode === 'chat'} onClick={() => selectContextMode('chat')}><strong>{t("ui.Dialogs.JobDialog.continue_in_this_chat_eed3ae3")}</strong><small>{t("ui.Dialogs.JobDialog.use_this_chat_s_existing_context_and_add_e_d7db2e4")}</small></button>
-        {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend) })}</small></button>}
+        {supportsIndependentRuns && <button type="button" className={contextMode === 'standalone' ? 'active' : ''} aria-pressed={contextMode === 'standalone'} onClick={() => selectContextMode('standalone')}><strong>{t("ui.Dialogs.JobDialog.independent_runs_3d32d40")}</strong><small>{t('ui.job.independentHelp', { backend: backendLabel(backend, backend === session?.backend ? session.codex_provider : undefined) })}</small></button>}
       </div>{!supportsIndependentRuns && <small className="job-context-unavailable">{t("ui.Dialogs.JobDialog.update_agentsserver_to_add_independent_run_6138641")}</small>}</fieldset>
       {runtimeError && <small className="schedule-validation error" role="alert">{runtimeError}{enabled ? t("ui.Dialogs.JobDialog.pause_this_job_or_choose_an_available_runt_1d574aa") : ''}</small>}
       <fieldset className="schedule-builder"><legend>{t("ui.Dialogs.JobDialog.schedule_f4830a1")}</legend><div className="segmented schedule-kind">{(['interval', 'cron', 'rrule'] as JobScheduleKind[]).map(kind => <button type="button" key={kind} className={scheduleKind === kind ? 'active' : ''} aria-pressed={scheduleKind === kind} onClick={() => setScheduleKind(kind)}>{kind === 'rrule' ? 'RRULE' : kind[0].toUpperCase() + kind.slice(1)}</button>)}</div>
