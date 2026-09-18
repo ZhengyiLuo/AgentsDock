@@ -1,6 +1,6 @@
 # Development and release log
 
-## 2026-09-18 — Isolate custom endpoint connection tests (beta.3 candidate)
+## 2026-09-18 — AgentsServer 1.0.4-beta.3 accepted
 
 - Reproduce a live connection-test failure before any endpoint request. The
   owned native process rebuilds existing rollout history against a fresh
@@ -11,13 +11,20 @@
   key. Normal account configuration, authentication and history are untouched.
 - Validate the corrected production probe without the QA sandbox, using the
   installed runtime environment and native Codex. Startup reaches the owned
-  local endpoint in under a second and maps its controlled 401 correctly;
+  local endpoint in under a second, completes a successful Responses stream
+  with status `ready`, and maps a controlled 401 correctly;
   existing auth/config hashes remain unchanged. Eighteen focused provider
   checks pass, including the temporary-home boundary. No real gateway key or
   external provider request is used in this acceptance check.
-- Compatible with desktop 1.0.4-beta.2. The app and provider API contract do
-  not change. Server signing, publication and deployment are recorded below
-  after release acceptance.
+- Publish [1.0.4-beta.3](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.3)
+  from `bd49fb1ded65cf168668d68574d00cef9334eb6e` after all eight release
+  workers pass in [preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35390360764).
+  Verify the Ed25519 signature, checksum and exact contents of all 85 runtime
+  files. Public downloads match the held, verified assets. Archive SHA-256:
+  `4ddb1528f3c958b17e98202ddfab181cccba3bc441156af817685447435c0a93`.
+- Compatible with desktop 1.0.4-beta.2; the app and API contract do not change.
+  Submit an identity-bound when-idle update. The running server remains on
+  beta.2 while this work is active; beta.3 installation is queued.
 
 ## 2026-09-18 — AgentsServer 1.0.4-beta.2 accepted
 
