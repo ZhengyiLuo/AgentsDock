@@ -1,5 +1,35 @@
 # Development and release log
 
+## 2026-09-17 — AgentsServer 1.0.4-beta.1 accepted; faster release gates
+
+- Publish [1.0.4-beta.1](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.1)
+  from `393976cd9a1b9bf024f42f6a854e5517a1727ea4`. Includes native Codex
+  API-key authentication, per-chat custom Responses endpoints and native-context
+  Side chat. Matching desktop beta build 1175 is required for the new controls.
+- Run the focused local gate against an exported committed tree first: 229
+  checks pass in 9.659 seconds under the production-state/import-blocking runner.
+  Additional extracted fixture checks correct stale provider/import expectations,
+  preserve the 150 KB wire-response limit, and isolate a leaked test steering flag.
+  No production server import, test turn or forced restart is used locally.
+- Replace serial release/PR testing with eight disjoint test-case shards; keep
+  every regression, including slow installer/migration/rollback cases. Sharding
+  whole files left installer tests on the critical path, so distribute cases
+  while retaining standard unittest class/module fixture handling.
+- [Accepted release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35312125393)
+  passes all 4,393 cases across eight workers, then packages and signs. Test-job
+  wall time is 3m43s; packaging/signing completes 12 seconds afterward. Verify
+  Ed25519 with Studio's installed trusted key and exact equality of all 85
+  packaged files with the release commit. Fresh unauthenticated public downloads
+  match all three held assets byte-for-byte. Cancel the redundant tag rebuild.
+- Archive SHA-256:
+  `dba40f59c594cd71296a3cf9fa2e2904c71f5d0131746bb96ece0376793d6017`.
+  API contract remains 28; dependencies, signing key and Team Hub schema remain
+  unchanged. Unrelated dirty history/subagent work is excluded from the release.
+- Submit and verify the authorized, identity-bound Studio update reservation
+  with `when_idle: true`. At handoff, Studio remains on 1.0.3 with one active run;
+  installation is pending, not yet claimed complete. No Supersonic change or
+  desktop publication was performed in this release pass.
+
 ## 2026-09-17 — AgentsServer 1.0.3 stable accepted
 
 - Publish [AgentsServer 1.0.3](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.3)
