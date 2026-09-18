@@ -22,6 +22,9 @@ import type {
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
   CodexAuthStatus,
+  CodexProviderConfiguration,
+  CodexProviderInput,
+  CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
   CodexOperationAccepted,
@@ -407,6 +410,10 @@ export interface AgentsDockAPI {
   codex: {
     auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
     loginWithApiKey(scope: CodexServerSettingsScope, apiKey: string): Promise<CodexAuthStatus>
+    provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>
+    testProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderTestResult>
+    setProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderConfiguration>
+    resetProvider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>
     serverGoals(): Promise<CodexGoalsConfiguration>
     setServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration>
     serverSubagents(scope: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration>

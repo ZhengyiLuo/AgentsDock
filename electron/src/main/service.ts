@@ -50,6 +50,9 @@ import type {
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
   CodexAuthStatus,
+  CodexProviderConfiguration,
+  CodexProviderInput,
+  CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
   CodexOperationAccepted,
@@ -2152,6 +2155,61 @@ export class AppService {
     const result = await scope.client.codexAuth()
     this.assertCurrentScope(scope)
     return result
+  }
+
+  async codexProvider(expected: CodexServerSettingsScope): Promise<CodexProviderConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.codexProvider()
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async testCodexProvider(expected: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderTestResult> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.testCodexProvider(input)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async setCodexProvider(expected: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.setCodexProvider(input)
+    this.assertCurrentScope(scope)
+    await this.refreshCodexProviderRuntime(scope)
+    return result
+  }
+
+  async resetCodexProvider(expected: CodexServerSettingsScope): Promise<CodexProviderConfiguration> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.resetCodexProvider()
+    this.assertCurrentScope(scope)
+    await this.refreshCodexProviderRuntime(scope)
+    return result
+  }
+
+  private async refreshCodexProviderRuntime(scope: ConnectionScope): Promise<void> {
+    // One explicit reconciliation after Save/reset; Test and Get never refresh.
+    const preceding = this.runtimeRefreshInFlight?.get(scope.generation)
+    if (preceding) await preceding.task.catch(() => undefined)
+    this.assertCurrentScope(scope)
+    const priorCatalog = this.runtimeCatalog
+    let refreshed = false
+    try { await this.refreshRuntime(true, true, scope, true); refreshed = true }
+    catch { /* Saved configuration stays saved even if readiness is offline. */ }
+    this.assertCurrentScope(scope)
+    const diagnostic = this.runtimeCatalog?.backends.codex?.diagnostic
+    if (refreshed && this.runtimeCatalog !== priorCatalog && this.health && diagnostic) {
+      this.health = { ...this.health, runtimes: { ...this.health.runtimes, codex: diagnostic } }
+      this.emitConnection(scope, true, this.health)
+    }
   }
 
   async codexLoginWithApiKey(expected: CodexServerSettingsScope, apiKey: string): Promise<CodexAuthStatus> {

@@ -1,5 +1,30 @@
 # Public development log
 
+## 2026-09-17 — Native Codex custom endpoint controls (source only)
+
+- Add endpoint base URL, exact model ID and a masked provider key to Codex
+  account settings, with explicit Test connection, Save and reset actions.
+  Test uses native Codex Responses behavior rather than a replacement agent.
+- Keep provider credentials separate from normal Codex sign-in. Require a
+  successful test of the current form before saving; invalidate it on edits
+  and fence late responses by server/profile generation. Never reuse a saved
+  key for a newly entered endpoint or show raw provider errors.
+- Add no polling, per-keystroke requests or automatic retries. Test does not
+  save configuration; Save/reset reconcile runtime readiness once.
+- Exercise native offscreen Electron Settings navigation and the real
+  renderer/preload/service/HTTP/router/native Codex path against a controlled
+  Responses endpoint. Verify failed tests and retries, unchanged unsaved
+  configuration, stale-result invalidation, busy/authorization failures,
+  save/reset, missing-credential recovery and narrow localized themes.
+- Full profile bootstrap, account status and runtime refresh callbacks remain
+  fixture boundaries in UI acceptance; isolated tests cover admission and
+  readiness reconciliation. No real external gateway or billing acceptance
+  is claimed. Requires matching standalone server endpoints. No release,
+  production deployment or existing account change is included.
+- Full desktop tests, TypeScript and production compilation pass after the
+  recovery changes. The standalone server's selective source snapshot passes
+  its focused authentication, provider, side-chat and manifest regressions.
+
 ## 2026-09-17 — Native Codex API-key authentication (source only)
 
 - Add Settings → Codex account with masked API-key sign-in, account status and

@@ -263,6 +263,29 @@ export interface CodexAuthStatus {
   requires_openai_auth: boolean
 }
 
+/** Custom Responses provider; never contains stored credentials. */
+export interface CodexProviderConfiguration {
+  available: boolean
+  configured: boolean
+  base_url: string | null
+  model: string | null
+  has_api_key: boolean
+  wire_api: 'responses'
+}
+
+/** Transient input sent only to the selected server's native admin route. */
+export interface CodexProviderInput {
+  base_url: string
+  model: string
+  api_key: string
+}
+
+export interface CodexProviderTestResult {
+  ok: boolean
+  status: 'ready' | 'unsupported' | 'authentication_failed' | 'connection_failed' | 'model_unavailable' | 'failed'
+  message: string
+}
+
 /** Server override, not the provider's resolved or currently running limit. */
 export interface CodexSubagentsConfiguration {
   configurable: boolean

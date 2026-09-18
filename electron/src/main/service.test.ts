@@ -960,6 +960,62 @@ describe('Codex account credentials profile isolation', () => {
   })
 })
 
+describe('Codex endpoint request profile isolation', () => {
+  const caller = { profileId: 'provider-a', profileGeneration: 1 }
+  const configuration = { available: true, configured: true, base_url: 'https://gateway.example/v1',
+    model: 'gpt-6-astra', has_api_key: true, wire_api: 'responses' }
+  const input = { base_url: configuration.base_url, model: configuration.model, api_key: 'synthetic-key' }
+  const testResult = { ok: true, status: 'ready', message: '' }
+  function harness() {
+    const client = { codexProvider: vi.fn().mockResolvedValue(configuration), testCodexProvider: vi.fn().mockResolvedValue(testResult),
+      setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration) }
+    const service = Object.create(AppService.prototype) as AppService
+    const refreshRuntime = vi.fn().mockResolvedValue(undefined)
+    Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:provider-a', client },
+      activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime })
+    return { service, client, refreshRuntime }
+  }
+  it('does not refresh or save during testing; saves/resets explicitly refresh once', async () => {
+    const { service, client, refreshRuntime } = harness()
+    expect(await service.codexProvider(caller)).toEqual(configuration)
+    expect(await service.testCodexProvider(caller, input)).toEqual(testResult)
+    expect(refreshRuntime).not.toHaveBeenCalled()
+    expect(client.setCodexProvider).not.toHaveBeenCalled()
+    expect(await service.setCodexProvider(caller, input)).toEqual(configuration)
+    expect(refreshRuntime).toHaveBeenCalledOnce()
+    await service.resetCodexProvider(caller)
+    expect(refreshRuntime).toHaveBeenCalledTimes(2)
+    expect(client.testCodexProvider.mock.calls).toEqual([[input]])
+    expect(client.setCodexProvider.mock.calls).toEqual([[input]])
+  })
+  it.each(['codexProvider', 'testCodexProvider', 'setCodexProvider', 'resetCodexProvider'] as const)(
+    'rejects stale selection before %s can dispatch any key', async action => {
+      const { service, client } = harness()
+      Object.assign(service, { activeProfileId: 'provider-b', profileGeneration: 2 })
+      await expect(service[action](caller, input)).rejects.toThrow('superseded')
+      for (const request of Object.values(client)) expect(request).not.toHaveBeenCalled()
+    }
+  )
+  it('discards late endpoint test result after changing servers', async () => {
+    const { service, client, refreshRuntime } = harness()
+    const response = deferred<typeof testResult>(), started = deferred<void>()
+    client.testCodexProvider.mockImplementation(() => { started.resolve(); return response.promise })
+    const pending = service.testCodexProvider(caller, input)
+    await started.promise
+    Object.assign(service, { activeProfileId: 'provider-b', profileGeneration: 2 })
+    response.resolve(testResult)
+    await expect(pending).rejects.toThrow('superseded')
+    expect(refreshRuntime).not.toHaveBeenCalled()
+  })
+  it('does not turn saved settings into a failure when readiness refresh fails', async () => {
+    const { service, client, refreshRuntime } = harness()
+    refreshRuntime.mockRejectedValue(new Error('offline'))
+    await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
+    expect(client.setCodexProvider).toHaveBeenCalledOnce()
+  })
+})
+
 describe('provider command compatibility', () => {
   it.each([404, 405, 501])('treats an older server HTTP %s as unsupported', async status => {
     const client = {

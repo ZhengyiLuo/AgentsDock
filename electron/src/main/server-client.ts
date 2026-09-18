@@ -1,5 +1,6 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseCodexAuthStatus, validateCodexApiKey } from '../shared/codex-auth'
+import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
@@ -46,6 +47,9 @@ import type {
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
   CodexAuthStatus,
+  CodexProviderConfiguration,
+  CodexProviderInput,
+  CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexOperationAccepted,
   CodexPendingInteraction,
@@ -765,6 +769,39 @@ export class AgentServerClient {
   }
   codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/subagents')
+  }
+  codexProvider(): Promise<CodexProviderConfiguration> {
+    return this.codexProviderRequest('/api/admin/codex/provider', {}, parseCodexProviderConfiguration)
+  }
+  testCodexProvider(input: CodexProviderInput): Promise<CodexProviderTestResult> {
+    const checked = validateCodexProviderInput(input)
+    return this.codexProviderRequest('/api/admin/codex/provider/test', {
+      method: 'POST', body: JSON.stringify(checked)
+    }, parseCodexProviderTestResult, 55_000)
+  }
+  setCodexProvider(input: CodexProviderInput): Promise<CodexProviderConfiguration> {
+    const checked = validateCodexProviderInput(input)
+    return this.codexProviderRequest('/api/admin/codex/provider', {
+      method: 'PUT', body: JSON.stringify(checked)
+    }, parseCodexProviderConfiguration)
+  }
+  resetCodexProvider(): Promise<CodexProviderConfiguration> {
+    return this.codexProviderRequest('/api/admin/codex/provider', { method: 'DELETE' }, parseCodexProviderConfiguration)
+  }
+  private async codexProviderRequest<T>(path: string, init: RequestInit, parse: (value: unknown) => T, timeoutMs = 30_000): Promise<T> {
+    try {
+      return parse(await this.privilegedNativeRequest(path, init, timeoutMs, 200, 8192))
+    } catch (error) {
+      if (error instanceof ServerError) {
+        const code = [401, 403].includes(error.status) ? 'ADMIN'
+          : [404, 405, 501].includes(error.status) ? 'UPDATE'
+            : error.status === 409 ? 'BUSY'
+              : [400, 413, 422].includes(error.status) ? 'INVALID' : 'FAILED'
+        throw new Error(`CODEX_PROVIDER_${code}`)
+      }
+      if (error instanceof Error && error.message === 'CODEX_PROVIDER_RESPONSE') throw error
+      throw new Error('CODEX_PROVIDER_CONNECTION')
+    }
   }
   setCodexServerSubagents(limit: number | null): Promise<CodexSubagentsConfiguration> {
     if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
@@ -2987,6 +3024,8 @@ function isPrivilegedNativeControlTarget(
   }
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/auth/api-key') return !target.search && method === 'POST'
+  if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
+  if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'
   if (path === '/api/admin/update') {
     if (method !== 'GET') return false
     const keys = [...target.searchParams.keys()]
