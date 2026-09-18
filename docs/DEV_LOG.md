@@ -1,5 +1,30 @@
 # Development and release log
 
+## 2026-09-18 — AgentsServer 1.0.4-beta.2 accepted
+
+- Publish [1.0.4-beta.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.2)
+  from `dfc05e997b7c97b366c87400f35e4c640f8f2f85`. Disable legacy shared
+  Codex API-key login before manager access and advertise read-only account
+  controls. Custom endpoint credentials remain separate.
+- Focused local auth/provider checks pass. Native offscreen Electron Settings
+  exercises the full imported server middleware, auth/provider routes, private
+  store, manager recreation and real Codex against controlled Responses
+  endpoints. Verify failure/retry, exact URL/model save/reopen, busy rejection,
+  removal, account-read failure recovery and legacy login rejection with zero
+  native login calls. A separate real manager completes simultaneous normal
+  and custom turns plus follow-ups with distinct credentials and models.
+- Test accounts, endpoints and state are disposable. Production background
+  startup tasks and live external gateway billing are outside this check.
+  No existing credentials are reconstructed by this release.
+- All eight release workers pass in
+  [the accepted preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35375031749).
+  Verify the Ed25519 signature, archive checksum and all 85 allowlisted files
+  against the committed source. Published downloads match the held assets.
+  Archive SHA-256:
+  `bfdb60938aecedfa16aa72e04bb50450461dce20b71c8b5602e4e0abc5cc301b`.
+- An identity-bound when-idle update reservation was accepted. Installation
+  remains pending while active work runs; publication is not deployment.
+
 ## 2026-09-17 — AgentsServer 1.0.4-beta.1 accepted; faster release gates
 
 - Publish [1.0.4-beta.1](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.1)
