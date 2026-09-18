@@ -23,6 +23,7 @@ import { useTransientClose } from '../lib/transient-close'
 import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
+import { AnalyticsPrivacySettings } from './AnalyticsPrivacySettings'
 import { ChatShareDialog } from './ChatShareDialog'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
@@ -573,6 +574,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                   <option value="dark">{t('settings.darkTheme')}</option>
                 </select>
               </label>
+              <AnalyticsPrivacySettings />
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
                 <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>

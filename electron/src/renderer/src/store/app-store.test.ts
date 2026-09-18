@@ -10,6 +10,9 @@ import { CHAT_FONT_SIZES } from '../lib/chat-font'
 import { cancelPendingSteering, isSteeringPending, steerQueuedTurn, type SteeringScope } from '../lib/queue-actions'
 import { boundedDeferredTimelineEvents, cacheSnapshot, compactSnapshotEvents, crossChatQueueRefreshSessionId, handleMenuCommand, interactiveClientCapabilities, mergeEvents, mergeSnapshots, reconcileSessions, replaceSnapshot, snapshotNeedsAuthoritativeTail, syncSnapshotSessions, timelineReplacementIsDiscontinuous, updateActiveSessions, updateQueuedTurns, useAppStore } from './app-store'
 
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
+vi.mock('../lib/analytics', () => analytics)
+
 const event = (type: string, patch: Partial<Event> = {}): Event => ({ id: `event-${type}`, session_id: 'chat-1', seq: 1, type, ts: '2026-07-09T10:00:00Z', ...patch })
 const providerInterruption = (patch: Partial<Event> = {}): Event => event('provider_interruption', {
   imported: true,
@@ -366,6 +369,7 @@ describe('chat forking', () => {
   })
 
   it('forks a supported running chat without stopping it or clearing its admission', async () => {
+    analytics.trackEvent.mockClear()
     const fork = vi.fn().mockResolvedValue(sessionFor('child-chat'))
     const stop = vi.fn()
     Object.defineProperty(window, 'agentsDock', {
@@ -392,6 +396,7 @@ describe('chat forking', () => {
       expect(useAppStore.getState().activeSessionIds).toContain('chat-1')
       expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBe('admission-1')
       expect(useAppStore.getState().error).toBeNull()
+      expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('chat_forked')
     } finally {
       useAppStore.setState({ refreshSessions: originalRefresh, selectSession: originalSelect })
     }
@@ -3279,6 +3284,7 @@ describe('chat selection', () => {
   })
 
   it('opens a chat in primary when no primary pane exists', async () => {
+    analytics.trackEvent.mockClear()
     const subscribe = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -3294,6 +3300,36 @@ describe('chat selection', () => {
 
     expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: null })
     expect(useAppStore.getState().focusedChatPane).toBe('primary')
+    expect(analytics.trackEvent).not.toHaveBeenCalledWith('split_view_opened')
+  })
+
+  it('records only the transition from one pane to two distinct chats', async () => {
+    const subscribe = vi.fn().mockResolvedValue(undefined)
+    const unsubscribe = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: { timeline: { subscribe, unsubscribe } } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({
+      activeProfileId: 'local', profileGeneration: 1, switchingProfileId: null,
+      chatPanes: { primary: 'chat-a', secondary: null }, focusedChatPane: 'primary', selectedSessionId: 'chat-a',
+      loadingSessionIds: new Set(), loadingSessionId: null,
+      sessions: [sessionFor('chat-a'), sessionFor('chat-b'), sessionFor('chat-c')],
+      snapshots: {
+        'chat-a': snapshot('chat-a', [eventFor('chat-a', 1)]),
+        'chat-b': snapshot('chat-b', [eventFor('chat-b', 2)]),
+        'chat-c': snapshot('chat-c', [eventFor('chat-c', 3)])
+      }
+    })
+    analytics.trackEvent.mockClear()
+
+    await useAppStore.getState().openSessionInSplit('chat-b')
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-b' })
+    expect(analytics.trackEvent.mock.calls.filter(([name]) => name === 'split_view_opened')).toHaveLength(1)
+
+    await useAppStore.getState().openSessionInSplit('chat-c')
+    expect(useAppStore.getState().chatPanes).toEqual({ primary: 'chat-a', secondary: 'chat-c' })
+    expect(analytics.trackEvent.mock.calls.filter(([name]) => name === 'split_view_opened')).toHaveLength(1)
   })
 
   it('subscribes a prefetched fallback that becomes visible after deleting the sole pane', async () => {

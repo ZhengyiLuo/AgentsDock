@@ -186,6 +186,11 @@ export function App() {
     ? scopedReviewTarget.target
     : null
   const teamspaceOpen = teamspaceScopeKey === activeRenderKey
+  const previousTeamspaceOpen = useRef(false)
+  useEffect(() => {
+    if (teamspaceOpen && !previousTeamspaceOpen.current) trackEvent('team_network_opened')
+    previousTeamspaceOpen.current = teamspaceOpen
+  }, [teamspaceOpen])
   const sidebarVisible = sidebarVisibilityByWorkspace[activeProfileKey] ?? savedWorkspaceSidebarVisible(activeProfileKey)
   const terminalOpen = selectedSessionId && !selectedSession?.archived ? terminalOpenBySession[selectedWorkspaceKey] ?? false : false
   const toggleSidebar = useCallback(() => {

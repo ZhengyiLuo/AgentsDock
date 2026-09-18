@@ -1282,8 +1282,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openSessionInSplit(sessionId, force = false) {
-    const pane: ChatPane = get().chatPanes.primary ? 'secondary' : 'primary'
-    await get().selectSessionInPane(sessionId, pane, force)
+    const scope = captureProfileScope(get())
+    const before = get().chatPanes
+    const pane: ChatPane = before.primary ? 'secondary' : 'primary'
+    const selection = get().selectSessionInPane(sessionId, pane, force)
+    if (profileScopeMatches(scope, get())) {
+      const after = get().chatPanes
+      const previouslySplit = Boolean(before.primary && before.secondary && before.primary !== before.secondary)
+      const nowSplit = Boolean(after.primary && after.secondary && after.primary !== after.secondary)
+      if (!previouslySplit && nowSplit) trackEvent('split_view_opened')
+    }
+    await selection
   },
 
   async reloadSession(sessionId) {
@@ -2023,6 +2032,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const scope = captureProfileScope(get())
     try {
       const session = await window.agentsDock.sessions.fork(sessionId)
+      trackEvent('chat_forked')
       if (!profileScopeMatches(scope, get())) return
       await get().refreshSessions()
       if (!profileScopeMatches(scope, get())) return

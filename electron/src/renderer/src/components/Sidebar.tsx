@@ -222,6 +222,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
           operation.targetFolder
         )
         useAppStore.setState({ sessions: next })
+        trackEvent(sidebarReorderAnalyticsEvent(operation))
       } catch (error) { useAppStore.getState().setError(error instanceof Error ? error.message : String(error)) }
     }
   }
@@ -559,4 +560,10 @@ export function resolveSidebarDrop(
 
 export function sidebarFolderAssignmentPatch(folder: string): Partial<Session> {
   return { folder, archived: false }
+}
+
+export function sidebarReorderAnalyticsEvent(
+  operation: Extract<SidebarDropOperation, { kind: 'reorder-session' }>
+): 'chat_moved_to_folder' | 'chat_reordered' {
+  return operation.targetFolder ? 'chat_moved_to_folder' : 'chat_reordered'
 }

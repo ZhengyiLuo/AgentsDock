@@ -9,9 +9,11 @@ const fixture = vi.hoisted(() => {
     profiles: [{ id: 'profile', serverIdentity: 'server', serverUrl: 'http://192.0.2.1:7850' }], sessions: [session] },
     create: vi.fn(), preview: vi.fn(), list: vi.fn(), revoke: vi.fn(), copy: vi.fn(), open: vi.fn() }
 })
+const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }))
 vi.mock('../store/app-store', () => ({ useAppStore: Object.assign(
   (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state), { getState: () => fixture.state }) }))
 vi.mock('../lib/workspace-preferences', () => ({ captureWorkspaceScope: () => fixture.scope }))
+vi.mock('../lib/analytics', () => analytics)
 vi.mock('../lib/i18n', () => ({ useLocale: () => 'en', t: (key: string, values?: { count?: number }) => key === 'chatShare.revokedCount' ? `Revoked (${values?.count})` : ({
   'chatShare.viewOnly': 'View only', 'chatShare.interactiveAction': 'Interactive',
   'chatShare.title': 'Share chat', 'chatShare.existing': 'Existing shares',
@@ -58,12 +60,16 @@ describe('two-action chat sharing', () => {
     fixture.create.mockResolvedValue({ id: 'synthetic-share', title: 'Synthetic conversation', created_at: 1,
       expires_at: null, revoked_at: null, path, url, access_token: token })
     openDialog()
+    expect(analytics.trackEvent).toHaveBeenCalledExactlyOnceWith('chat_share_opened')
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(fixture.preview).not.toHaveBeenCalled()
     expect(fixture.list).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: mode === 'snapshot' ? 'View only' : 'Interactive' }))
     await waitFor(() => expect(fixture.open).toHaveBeenCalledWith(url))
+    expect(analytics.trackEvent).toHaveBeenCalledWith(
+      mode === 'snapshot' ? 'chat_share_snapshot_created' : 'chat_share_interactive_created'
+    )
     expect(fixture.copy).toHaveBeenCalledWith(`${url}\nToken: ${token}`)
     expect(screen.getByRole('textbox', { name: 'Share URL' })).toHaveValue(url)
     expect(screen.getByRole('textbox', { name: 'Access token' })).toHaveValue(token)
@@ -117,6 +123,7 @@ describe('two-action chat sharing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Revoke' }))
     await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Access token' })).toBeNull())
     expect(fixture.revoke).toHaveBeenCalledExactlyOnceWith(fixture.scope, fixture.session.id, 'interactive', record.id)
+    expect(analytics.trackEvent).toHaveBeenCalledWith('chat_share_revoked')
     expect(document.body.textContent).not.toContain(token)
     const revoked = screen.getByText('Revoked (1)').closest('details')!
     expect(revoked.open).toBe(false)
@@ -161,6 +168,24 @@ describe('two-action chat sharing', () => {
     expect(fixture.copy).not.toHaveBeenCalled()
     expect(fixture.open).not.toHaveBeenCalled()
     expect(fixture.list).not.toHaveBeenCalled()
+    expect(analytics.trackEvent).not.toHaveBeenCalledWith(
+      mode === 'snapshot' ? 'chat_share_snapshot_created' : 'chat_share_interactive_created'
+    )
+  })
+
+  it('records a created share even when a follow-up clipboard action fails', async () => {
+    const path = `/shared-chat/share_${'a'.repeat(32)}`
+    const url = `http://192.0.2.1:7850${path}`
+    fixture.create.mockResolvedValue({ id: 'synthetic-share', title: fixture.session.title, created_at: 1,
+      expires_at: null, revoked_at: null, path, url, access_token: 'g'.repeat(43) })
+    fixture.copy.mockRejectedValueOnce(new Error('Clipboard unavailable'))
+    openDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View only' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Clipboard unavailable'))
+    expect(analytics.trackEvent).toHaveBeenCalledWith('chat_share_snapshot_created')
+    expect(fixture.create).toHaveBeenCalledTimes(1)
   })
 
   it.each(['snapshot', 'interactive'] as const)('creates %s with a custom LAN origin and keeps its returned URLs bound after editing the address', async mode => {
@@ -279,6 +304,7 @@ describe('two-action chat sharing', () => {
     await act(async () => resolve({ id: 'late-share', path: '/interactive-chat/late-share',
       url: 'http://192.0.2.1:7850/interactive-chat/late-share', access_token: 'late-token' }))
     expect(fixture.create).toHaveBeenCalledTimes(1)
+    expect(analytics.trackEvent).toHaveBeenCalledWith('chat_share_interactive_created')
     expect(fixture.copy).not.toHaveBeenCalled()
     expect(fixture.open).not.toHaveBeenCalled()
     requestDialog()
