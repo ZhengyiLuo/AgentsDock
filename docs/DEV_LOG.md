@@ -1,7 +1,11 @@
 # Public development log
 
-## 2026-09-18 — Custom endpoint model controls — beta candidate
+## 2026-09-18 — Custom endpoint model controls — 1.0.4-beta.3
 
+- Accept desktop **1.0.4-beta.3 / 1175** from
+  `c1dc59c56a666fe881317ff36781f78fcde6decd`, with matching standalone
+  AgentsServer **1.0.4-beta.4** from
+  `b4b116d022ba9d73949e56476cbfc46fdba27160`.
 - Configure a Codex endpoint with its URL and separate key. Saving no longer
   requires a successful test or a model ID, and a pending test does not block it.
 - Discover the endpoint's models and choose a model and reasoning effort in
@@ -14,6 +18,28 @@
   and HTTP boundary with disposable state and controlled provider endpoints.
 - The matching server scopes messaging instructions to its helper contract;
   the harness enforces messaging access instead of broad prompt restrictions.
+  Remove the blanket identifier prohibition without adding a special
+  permission paragraph for local log diagnosis or changing messaging grants.
+- Exercise simultaneous normal/custom native Codex threads against controlled
+  endpoints. Save and reset during active turns and a pending test; retain the
+  original endpoint through model/effort changes, follow-ups and native forks.
+  Stop one custom turn without interrupting the normal turn. Verify zero
+  account-login calls and unchanged normal runtime identity. Live external
+  gateway credentials and production background startup remain outside these
+  disposable acceptance fixtures.
+- Pass 4,536 desktop tests (10 skipped), TypeScript and production compilation.
+  Verify all packaged compiled files against the committed source and inspect
+  the packaged renderer/preload. Universal macOS signing, notarization,
+  Gatekeeper, DMG/ZIP parity and clean executable launch pass. Linux x64/arm64
+  and Windows x64 package and launch checks also pass; Windows remains an
+  explicitly approved unsigned preview.
+- Publish identical sets of 14 assets and checksum manifests to both desktop
+  Beta feeds. Independent publication checks revalidate every native platform
+  and confirm public updater metadata and Beta discovery. The matching signed
+  server release is published and its managed update is accepted for idle
+  installation; it remains pending while active work continues.
+- Releases: [desktop beta.3](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.3)
+  and [server beta.4](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.4).
 
 ## 2026-09-18 — Codex credential isolation — 1.0.4-beta.2
 
