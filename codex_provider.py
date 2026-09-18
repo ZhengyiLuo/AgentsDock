@@ -13,6 +13,8 @@ import tempfile
 import threading
 import uuid
 from urllib.parse import urlsplit, urlunsplit
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as URLRequest, build_opener
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -28,12 +30,21 @@ ENV_KEY = "AGENTSDOCK_CODEX_PROVIDER_API_KEY"
 MAX_BODY_BYTES = 16 * 1024
 TEST_TIMEOUT_SECONDS = 45
 TEST_PROMPT = "Reply with exactly CONNECTION_OK. Do not use tools."
+EFFORT_OPTIONS = [{"value": value, "label": label} for value, label in (
+    ("none", "None"), ("minimal", "Minimal"), ("low", "Low"), ("medium", "Medium"),
+    ("high", "High"), ("xhigh", "Extra high"), ("max", "Max"), ("ultra", "Ultra"))]
+
+
+def validate_model(value: object) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 256 or any(ord(char) < 33 or ord(char) > 126 for char in value.strip()):
+        raise HTTPException(400, "Enter a model ID without whitespace or control characters.")
+    return value.strip()
 
 
 def validate_selection(value: object, *, require_key: bool = True) -> dict:
-    fields = {"base_url", "model", "api_key"} if require_key else {"base_url", "model"}
-    if not isinstance(value, dict) or set(value) != fields:
-        raise HTTPException(400, "Provide the endpoint, model and a fresh provider API key.")
+    fields = {"base_url", "api_key"} if require_key else {"base_url"}
+    if not isinstance(value, dict) or not fields.issubset(value) or set(value) - fields - {"model"}:
+        raise HTTPException(400, "Provide the endpoint and a fresh provider API key.")
     base, model = value.get("base_url"), value.get("model")
     if not isinstance(base, str) or not 1 <= len(base.strip()) <= 2048:
         raise HTTPException(400, "Enter a valid provider base URL.")
@@ -52,16 +63,25 @@ def validate_selection(value: object, *, require_key: bool = True) -> dict:
         valid = False
     if not valid:
         raise HTTPException(400, "Use an HTTPS base URL, or HTTP on loopback, without credentials, query, fragment or an API operation suffix.")
-    if not isinstance(model, str) or not 1 <= len(model.strip()) <= 256 or any(ord(char) < 33 or ord(char) > 126 for char in model.strip()):
-        raise HTTPException(400, "Enter a model ID without whitespace or control characters.")
-    result = {"base_url": urlunsplit((url.scheme.lower(), url.netloc.lower(), url.path, "", "")), "model": model.strip()}
+    result = {"base_url": urlunsplit((url.scheme.lower(), url.netloc.lower(), url.path, "", ""))}
+    if model is not None:
+        result["model"] = validate_model(model)
     if require_key:
         result["api_key"] = validate_api_key({"api_key": value["api_key"]})
     return result
 
 
 def binding(selection: dict) -> str:
-    return hashlib.sha256(json.dumps([selection["base_url"], selection["model"]], separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([selection["base_url"]], separators=(",", ":")).encode()).hexdigest()
+
+
+def legacy_binding(selection: dict) -> str | None:
+    model = selection.get("legacy_model") or selection.get("model")
+    return hashlib.sha256(json.dumps([selection["base_url"], model], separators=(",", ":")).encode()).hexdigest() if model else None
+
+
+def catalog_key(selected: dict) -> str:
+    return hashlib.sha256((selected["base_url"] + "\0" + selected["api_key"]).encode()).hexdigest()
 
 
 def session_choice(value) -> str:
@@ -76,6 +96,9 @@ class ProviderStore:
     def __init__(self, root: Path):
         self.root = root
         self.lock = threading.RLock()
+        self._catalogs: dict[str, dict] = {}
+        self._public_selections: dict[str, dict] = {}
+        self._revision_catalog_keys: dict[str, str] = {}
 
     def _directory(self, *, create=False):
         if self.root.is_symlink() or self.root.parent.is_symlink():
@@ -134,22 +157,34 @@ class ProviderStore:
             with suppress(FileNotFoundError):
                 os.unlink(temporary)
 
-    def selection(self, *, include_key=False) -> dict | None:
+    def selection(self, *, include_key=False, revision: str | None = None, include_revision=False) -> dict | None:
         with self.lock:
             try:
-                metadata = self._read("settings.json")
-                if not metadata:
+                metadata = self._read("settings.json") or {}
+                identifier = revision or metadata.get("credential_id")
+                if not identifier and not metadata:
                     return None
-                selected = validate_selection({name: metadata.get(name) for name in ("base_url", "model")}, require_key=False)
-                identifier = metadata.get("credential_id")
                 if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
                     raise ValueError("invalid credential identity")
                 credential = self._read("credential-" + identifier + ".json")
-                if not credential or credential.get("binding") != binding(selected):
+                if not credential:
+                    raise ValueError("missing credential")
+                source = metadata if identifier == metadata.get("credential_id") else credential
+                selected = validate_selection({name: source[name] for name in ("base_url", "model") if name in source}, require_key=False)
+                legacy_model = credential.get("legacy_model") or source.get("model")
+                if legacy_model:
+                    selected["legacy_model"] = validate_model(legacy_model)
+                if not credential.get("binding") or credential.get("binding") not in (binding(selected), legacy_binding(selected)):
                     raise ValueError("credential binding mismatch")
                 key = validate_api_key({"api_key": credential.get("api_key")})
+                self._public_selections[identifier] = {**selected, "credential_id": identifier}
+                self._revision_catalog_keys[identifier] = catalog_key({**selected, "api_key": key})
                 if include_key:
                     selected["api_key"] = key
+                if include_revision or revision:
+                    selected["credential_id"] = identifier
+                if not include_revision and revision is None:
+                    selected.pop("legacy_model", None)
                 return selected
             except Exception:
                 raise HTTPException(503, "Saved provider settings or credentials are unavailable.") from None
@@ -158,32 +193,66 @@ class ProviderStore:
         selected = self.selection()
         return {"available": available, "configured": selected is not None,
             "base_url": selected["base_url"] if selected else None,
-            "model": selected["model"] if selected else None,
+            "model": selected.get("model") if selected else None,
             "has_api_key": selected is not None, "wire_api": "responses"}
 
     def for_session(self, session: dict, *, include_key=False) -> dict | None:
         if session_choice(session.get("codex_provider")) == "default":
             return None
-        selected = self.selection(include_key=include_key)
+        revision = session.get("codex_provider_revision")
+        selected = self.selection(include_key=include_key, revision=revision, include_revision=True)
         if selected is None:
             raise HTTPException(409, "Configure the custom Codex endpoint before using this chat.")
-        if session.get("codex_provider_binding") not in (None, binding(selected)):
-            raise HTTPException(409, "This conversation belongs to another Codex endpoint. Start a new Codex chat, or restore its original endpoint and model.")
+        if session.get("codex_provider_binding") not in (None, binding(selected), legacy_binding(selected)):
+            raise HTTPException(409, "This conversation belongs to another Codex endpoint. Start a new Codex chat, or restore its original endpoint.")
+        model = session.get("model") or selected.get("model") or self.cached_catalog(selected).get("default_model")
+        if model:
+            selected["model"] = validate_model(model)
         return selected
 
     def registration(self, *, include_key=False) -> dict | None:
         # A damaged optional endpoint must not prevent normal Codex startup.
         # Custom chat admission and the admin status route still fail closed.
         try:
-            return self.selection(include_key=include_key)
+            return self.selection(include_key=include_key, include_revision=True)
         except HTTPException:
             return None
 
-    def catalog(self, *, available: bool) -> dict:
-        selected = self.registration()
-        return {"configured": selected is not None, "available": available and selected is not None,
-            "model": selected["model"] if selected else None,
-            "base_url": selected["base_url"] if selected else None}
+    def catalog(self, *, available: bool, session: dict | None = None, summary=False) -> dict:
+        try:
+            # Immutable revisions permit public projections to reuse validated
+            # metadata without reopening credential files for every event.
+            selected = self._public_selections.get(session.get("codex_provider_revision")) if session else None
+            selected = selected or (self.for_session(session) if session is not None else self.registration())
+        except HTTPException:
+            selected = None
+        result = {"configured": selected is not None, "available": available and selected is not None,
+            "model": selected.get("model") if selected else None,
+            "base_url": selected["base_url"] if selected else None,
+            **(self.cached_catalog(selected) if selected else {"models": [], "efforts": EFFORT_OPTIONS,
+                "model_efforts": {}, "default_model": "", "default_effort": "high"})}
+        if summary:
+            result.pop("models", None)
+            result.pop("model_efforts", None)
+        return result
+
+    def cached_catalog(self, selected: dict | None = None) -> dict:
+        with self.lock:
+            if selected is None:
+                selected = self.registration(include_key=True)
+            identifier = (selected or {}).get("credential_id")
+            if selected and "api_key" not in selected and identifier not in self._revision_catalog_keys:
+                selected = self.selection(include_key=True, revision=selected.get("credential_id"))
+            key = (catalog_key(selected) if "api_key" in selected else self._revision_catalog_keys.get(identifier)) if selected else None
+            cached = self._catalogs.get(key, {})
+            return {"models": cached.get("models", []), "efforts": EFFORT_OPTIONS,
+                "model_efforts": cached.get("model_efforts", {}),
+                "default_model": cached.get("default_model") or (selected or {}).get("model") or "",
+                "default_effort": "high"}
+
+    def cache_catalog(self, selected: dict, catalog: dict):
+        with self.lock:
+            self._catalogs[catalog_key(selected)] = catalog
 
     def revision(self):
         with self.lock:
@@ -198,47 +267,77 @@ class ProviderStore:
         with self.lock:
             previous = self._read(self._binding_name(thread_id))
             expected = binding(selected) if selected else None
-            if (previous or {}).get("binding") != expected:
-                raise HTTPException(409, "This conversation belongs to another Codex endpoint. Start a new Codex chat, or restore its original endpoint and model.")
+            accepted = {expected}
+            if selected:
+                accepted.add(legacy_binding(selected))
+                accepted.discard(None)
+            if (previous or {}).get("binding") not in accepted or (
+                previous and previous.get("credential_id") and
+                previous["credential_id"] != (selected or {}).get("credential_id")
+            ):
+                raise HTTPException(409, "This conversation belongs to another Codex endpoint. Start a new Codex chat, or restore its original endpoint.")
 
     def record_thread(self, thread_id: str, selected: dict | None):
         with self.lock:
             if selected:
-                self._atomic(self._binding_name(thread_id), {"binding": binding(selected)})
+                self._atomic(self._binding_name(thread_id), {"binding": binding(selected),
+                    "credential_id": selected.get("credential_id")})
+
+    def for_thread(self, thread_id: str, *, include_key=False) -> dict | None:
+        with self.lock:
+            record = self._read(self._binding_name(thread_id)) or {}
+            revision = record.get("credential_id")
+            if revision:
+                return self.selection(revision=revision, include_key=include_key, include_revision=True)
+            if record.get("binding"):
+                selected = self.registration(include_key=include_key)
+                if selected and record["binding"] in (binding(selected), legacy_binding(selected)):
+                    return selected
+                raise HTTPException(409, "This conversation's original Codex endpoint is unavailable.")
+            return None
+
+    def retain_current(self) -> dict | None:
+        """Make the current generation independently readable before replacement."""
+        selected = self.selection(include_key=True, include_revision=True)
+        if selected:
+            self._atomic("credential-" + selected["credential_id"] + ".json",
+                {**selected, "binding": binding(selected)})
+            for path in self.root.glob("thread-*.json"):
+                previous = self._read(path.name) or {}
+                if not previous.get("credential_id") and previous.get("binding") and previous["binding"] in (binding(selected), legacy_binding(selected)):
+                    self._atomic(path.name, {"binding": binding(selected), "credential_id": selected["credential_id"]})
+        return selected
 
     def save(self, selected: dict):
         with self.lock:
-            previous = self._read("settings.json")
+            try:
+                self.retain_current()
+            except HTTPException:
+                # A missing old credential must not prevent an operator from
+                # repairing the current selection with a fresh credential.
+                pass
             identifier = uuid.uuid4().hex
             credential_name = "credential-" + identifier + ".json"
-            self._atomic(credential_name, {"binding": binding(selected), "api_key": selected["api_key"]})
+            self._atomic(credential_name, {**selected, "binding": binding(selected)})
             try:
-                durable = self._atomic("settings.json", {"base_url": selected["base_url"], "model": selected["model"], "credential_id": identifier})
+                self._atomic("settings.json", {name: value for name, value in
+                    {**selected, "credential_id": identifier}.items() if name != "api_key"})
             except BaseException:
                 with suppress(OSError):
                     os.unlink(self.root / credential_name)
                 raise
-            if durable:
-                self._remove_previous(previous)
-
-    def _remove_previous(self, previous):
-        identifier = previous.get("credential_id") if isinstance(previous, dict) else None
-        if isinstance(identifier, str) and re.fullmatch(r"[0-9a-f]{32}", identifier):
-            with suppress(OSError):
-                os.unlink(self.root / ("credential-" + identifier + ".json"))
 
     def reset(self):
         with self.lock:
             try:
-                previous = self._read("settings.json")
-            except (ValueError, UnicodeError):
-                previous = None
-            if self._atomic("settings.json", {}):
-                self._remove_previous(previous)
+                self.retain_current()
+            except (HTTPException, ValueError, UnicodeError):
+                pass
+            self._atomic("settings.json", {})
 
 
 def native_config(selected: dict) -> dict:
-    return {"model_provider": PROVIDER_ID, "model": selected["model"],
+    return {"model_provider": PROVIDER_ID, **({"model": selected["model"]} if selected.get("model") else {}),
         "model_providers": {PROVIDER_ID: {"name": "AgentsDock custom endpoint",
             "base_url": selected["base_url"], "env_key": ENV_KEY, "requires_openai_auth": False,
             "wire_api": "responses", "request_max_retries": 0, "stream_max_retries": 0,
@@ -253,18 +352,15 @@ def native_args(selected: dict) -> tuple[str, ...]:
 def registration_args(selected: dict) -> tuple[str, ...]:
     config = native_config(selected)
     config.pop("model_provider")
-    config.pop("model")
-    # Do not overwrite the normal provider's effective shell policy. The
-    # shared client merges the dedicated secret exclusion per thread after
+    config.pop("model", None)
+    # The client merges the dedicated secret exclusion per thread after
     # resolving native profile/project layers for that thread's cwd.
     config.pop("shell_environment_policy.exclude")
     return config_args(config)
 
 
 def registration_environment(environment: dict, selected: dict) -> dict:
-    # One native manager serves both providers. Keep its original normal
-    # credentials; the custom definition requires only its dedicated env_key.
-    return {**environment, ENV_KEY: selected["api_key"], "RUST_LOG": "off"}
+    return native_environment(environment, selected)
 
 
 def config_args(config: dict) -> tuple[str, ...]:
@@ -293,6 +389,55 @@ def native_environment(environment: dict, selected: dict) -> dict:
     clean[ENV_KEY] = selected["api_key"]
     clean["RUST_LOG"] = "off"
     return clean
+
+
+class _NoModelRedirects(HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def discover_models(selected: dict) -> dict:
+    """One bounded operator-requested listing; never forward a key on redirect."""
+    request = URLRequest(selected["base_url"] + "/models", headers={
+        "Authorization": "Bearer " + selected["api_key"], "Accept": "application/json"})
+    try:
+        with build_opener(ProxyHandler({}), _NoModelRedirects()).open(request, timeout=15) as response:
+            raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise ValueError("model response too large")
+            payload = json.loads(raw)
+        entries = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(entries, list):
+            raise ValueError("invalid model list")
+        models = []
+        seen = set()
+        for entry in entries[:2000]:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                value = validate_model(entry.get("id"))
+            except HTTPException:
+                continue
+            if value not in seen:
+                seen.add(value)
+                models.append({"value": value, "label": value})
+            if len(models) == 512:
+                break
+        return {"ok": True, "status": "ready",
+            "message": "The endpoint accepted the key and returned its model list. Choose a model in the chat.",
+            "models": models, "efforts": EFFORT_OPTIONS, "model_efforts": {},
+            "default_model": models[0]["value"] if models else "", "default_effort": "high"}
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            return test_result("authentication_failed")
+        if exc.code in (404, 405):
+            return {**test_result("unsupported"),
+                "message": "The endpoint does not provide model discovery. Save it and enter a model ID in the chat."}
+        return test_result("failed")
+    except (URLError, TimeoutError, ConnectionError):
+        return test_result("connection_failed")
+    except Exception:
+        return test_result("failed")
 
 
 def test_result(status: str) -> dict:
@@ -409,7 +554,7 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
                 raise asyncio.CancelledError
 
 
-def create_router(*, authorize, store: ProviderStore, mutate, probe, available) -> APIRouter:
+def create_router(*, authorize, store: ProviderStore, mutate, probe, available, discover=discover_models, session_lookup=None) -> APIRouter:
     router = APIRouter()
 
     async def body(request):
@@ -430,6 +575,12 @@ def create_router(*, authorize, store: ProviderStore, mutate, probe, available) 
         if not available():
             raise HTTPException(503, "Custom providers require native Codex app-server transport.")
 
+    async def catalog(selected):
+        result = await asyncio.to_thread(discover, selected)
+        if result.get("ok") is True:
+            store.cache_catalog(selected, result)
+        return result
+
     @router.get("/api/admin/codex/provider")
     async def status(request: Request):
         authorize(request)
@@ -440,11 +591,38 @@ def create_router(*, authorize, store: ProviderStore, mutate, probe, available) 
         access(request)
         selected = await body(request)
         try:
-            return JSONResponse(await probe(selected), headers={"Cache-Control": "no-store"})
+            result = await probe(selected) if selected.get("model") else await catalog(selected)
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except HTTPException:
             raise
         except Exception:
             raise HTTPException(503, "Provider test is unavailable.") from None
+        finally:
+            selected.clear()
+
+    @router.get("/api/admin/codex/provider/models")
+    async def models(request: Request, session_id: str | None = None):
+        access(request)
+        if session_id is not None:
+            session = session_lookup(session_id) if session_lookup else None
+            if not session:
+                raise HTTPException(404, "Chat not found.")
+            selected = await asyncio.to_thread(store.for_session, session, include_key=True)
+        else:
+            selected = await asyncio.to_thread(store.selection, include_key=True)
+        if selected is None:
+            raise HTTPException(409, "Save a custom endpoint before refreshing its models.")
+        try:
+            return JSONResponse(await catalog(selected), headers={"Cache-Control": "no-store"})
+        finally:
+            selected.clear()
+
+    @router.post("/api/admin/codex/provider/models")
+    async def entered_models(request: Request):
+        access(request)
+        selected = await body(request)
+        try:
+            return JSONResponse(await catalog(selected), headers={"Cache-Control": "no-store"})
         finally:
             selected.clear()
 

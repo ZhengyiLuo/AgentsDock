@@ -130,8 +130,8 @@ class CodexThreadPolicyTests(unittest.IsolatedAsyncioTestCase):
                     session,
                 )
 
-        # v10 migrates resumed threads onto the out-of-band provider tool.
-        self.assertEqual(agent_server.CODEX_THREAD_POLICY_VERSION, "10")
+        # v11 scopes messaging guidance to the out-of-band provider tool.
+        self.assertEqual(agent_server.CODEX_THREAD_POLICY_VERSION, "11")
         self.assertNotEqual(current_hash, previous_hash)
 
     def test_claude_policy_has_the_same_retry_and_context_hygiene_rules(self) -> None:

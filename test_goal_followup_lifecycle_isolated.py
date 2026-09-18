@@ -132,6 +132,7 @@ class GoalFollowupLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.ns.update({
             "codex_provider": codex_provider,
+            "CODEX_PROVIDER_STORE": SimpleNamespace(for_session=lambda session: None),
             "Path": Path, "CodexAppServerDisconnected": CodexAppServerDisconnected,
             "HTTPException": AdmissionHTTPException, "BACKEND_CLAUDE": "claude",
             "DEFAULT_BACKEND": "claude", "CODEX_TRANSPORT_APP_SERVER": "app_server",
@@ -154,6 +155,9 @@ class GoalFollowupLifecycleTests(unittest.IsolatedAsyncioTestCase):
             "now_iso": lambda: "2026-09-13T10:00:00Z",
             "run_event_metadata": lambda run: self.ns["RUN_METADATA"].get(run, {}),
             "codex_app_server_manager": AsyncMock(return_value=self.manager),
+            "existing_codex_app_server_manager": lambda session=None: self.manager,
+            "existing_codex_app_server_manager_for_thread": lambda thread: self.manager,
+            "codex_app_server_managers": lambda: (self.manager,),
             "acquire_codex_run_thread": AsyncMock(return_value="thread"),
             "persist_run_provider_session": AsyncMock(return_value=True),
             "codex_provider_mcp_run_proof": Mock(return_value="synthetic-original-proof"),

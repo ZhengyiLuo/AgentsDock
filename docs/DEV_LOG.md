@@ -1,5 +1,25 @@
 # Development and release log
 
+## 2026-09-18 — AgentsServer 1.0.4-beta.4 candidate
+
+- Save endpoint/key settings without testing or interrupting active native
+  sessions. Isolate normal Codex and immutable custom credential generations;
+  retain each existing chat's original routing across settings edits.
+- Discover models from the selected provider, support per-chat model/effort
+  changes, and migrate existing provider bindings without key reentry.
+- Route controls, forks, subagents and update-admission checks to their owning
+  native process. Scope cached state to the correct manager generation.
+- Replace broad cross-chat prohibitions in the Codex, Claude and Cursor
+  preludes with concrete messaging-helper guidance. Runtime grants and
+  authorization remain enforced by the harness; no automatic access is added.
+- Exercise the full HTTP/session/settings/native-manager flow with normal and
+  two custom loopback providers. Hold two turns active, save a new endpoint,
+  start its chat immediately, and change model/effort on an older chat. Save
+  and reset during a pending native test succeed; no account login is called.
+- Repeat with simultaneous cold native startup. These checks use disposable
+  state and synthetic availability/credentials; live external gateway access
+  and production background startup are outside their acceptance boundary.
+
 ## 2026-09-18 — AgentsServer 1.0.4-beta.3 accepted
 
 - Reproduce a live connection-test failure before any endpoint request. The

@@ -753,7 +753,7 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_side_chat_inherits_custom_selection_but_default_ignores_custom_revision(self):
         self.session["backend"] = "codex"
-        selected = {"base_url": "https://synthetic.invalid/v1", "model": "synthetic-model", "api_key": "synthetic-key"}
+        selected = {"base_url": "https://synthetic.invalid/v1", "model": "synthetic-model", "api_key": "synthetic-key", "credential_id": "retained"}
         revision = Mock(return_value="first")
         self.namespace["CODEX_PROVIDER_STORE"] = SimpleNamespace(revision=revision,
             for_session=lambda session, **kwargs: selected if session.get("codex_provider") == "custom" else None,
@@ -769,6 +769,11 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             await custom.ask("Custom?", history=[])
             self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], selected)
             revision.return_value = "third"
+            await custom.ask("Still retained after another endpoint is saved?", history=[])
+            revision.return_value = None
+            await custom.ask("Still retained after settings reset?", history=[])
+            revision.assert_not_called()
+            selected["credential_id"] = "changed-chat-binding"
             with self.assertRaises(side.SideQuestionError) as caught:
                 await custom.ask("Stale?", history=[])
             self.assertEqual(caught.exception.status_code, 410)

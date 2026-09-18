@@ -51,6 +51,7 @@ def make_namespace(root: Path):
         "CODEX_TRANSPORT": "app-server", "CODEX_TRANSPORT_EXEC": "exec",
         "CODEX_PROVIDER_STORE": codex_provider.ProviderStore(root / "providers"),
         "normalize_runtime_effort_for_model": lambda backend, model, effort, **kwargs: effort,
+        "normalize_runtime_effort": lambda backend, effort, **kwargs: effort,
         "ensure_codex_thread_not_pending_fork_cleanup": lambda value: None,
         "ensure_dirs": lambda session: None, "now_iso": lambda: "2026-09-18T00:00:00Z",
         "clean_session_system_prompt": lambda value: value, "append_event": AsyncMock(),
@@ -167,9 +168,9 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             self.ns["codex_runtime_settings"]({**normal, "codex_provider": "custom", "model": self.selection["model"]})
 
-    async def test_custom_unavailable_wrong_backend_and_wrong_model_fail_without_state(self):
+    async def test_custom_unavailable_wrong_backend_and_invalid_model_fail_without_state(self):
         for kwargs in [{"backend": "claude", "codex_provider": "custom"},
-                {"codex_provider": "custom", "model": "wrong-model"}]:
+                {"codex_provider": "custom", "model": "invalid model"}]:
             with self.assertRaises(HTTPException):
                 await self.create(**kwargs)
         self.ns["CODEX_PROVIDER_STORE"].reset()
@@ -178,13 +179,20 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ns["STORE"].sessions, {})
         self.assertEqual((await self.create())["codex_provider"], "default")
 
-    def test_registration_preserves_default_auth_and_never_changes_process_default(self):
+    async def test_custom_effort_is_independent_of_the_normal_account_default_model(self):
+        self.ns["normalize_runtime_effort_for_model"] = Mock(side_effect=AssertionError("normal account model limits must not apply"))
+        custom = await self.create(codex_provider="custom", model="gateway/custom", effort="ultra")
+        self.assertEqual((custom["model"], custom["effort"]), ("gateway/custom", "ultra"))
+
+    def test_registration_isolates_custom_auth_and_leaves_caller_environment_unchanged(self):
         args = codex_provider.registration_args(self.selection)
         self.assertFalse(any(value.startswith(("model=", "model_provider=")) for value in args))
         self.assertNotIn(self.selection["api_key"], str(args))
-        env = codex_provider.registration_environment({"OPENAI_API_KEY": "normal-key", "CODEX_API_KEY": "normal-codex-key"}, self.selection)
-        self.assertEqual(env["OPENAI_API_KEY"], "normal-key")
-        self.assertEqual(env["CODEX_API_KEY"], "normal-codex-key")
+        original = {"OPENAI_API_KEY": "normal-key", "CODEX_API_KEY": "normal-codex-key"}
+        env = codex_provider.registration_environment(original, self.selection)
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("CODEX_API_KEY", env)
+        self.assertEqual(original["OPENAI_API_KEY"], "normal-key")
         self.assertEqual(env[codex_provider.ENV_KEY], self.selection["api_key"])
 
     async def test_provider_update_save_failure_restores_prior_routing(self):
@@ -198,23 +206,34 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["model"], "normal-model")
         self.ns["STORE"].persist_restored_state.assert_awaited_once_with(durable=True)
 
-    async def test_changed_endpoint_rejects_detached_history_and_fork_before_memory_fallback(self):
+    async def test_changed_endpoint_preserves_existing_chat_revision_and_model_controls(self):
         custom = await self.create(codex_provider="custom")
         self.ns["CODEX_PROVIDER_STORE"].save({**self.selection, "base_url": "https://other.example.invalid/v1"})
         current = self.ns["STORE"].sessions[custom["id"]]
         current["backend_locked"] = True
         self.assertIsNone(current["codex_thread_id"])
-        with self.assertRaises(HTTPException) as caught:
-            self.ns["codex_runtime_settings"](current)
-        self.assertEqual(caught.exception.status_code, 409)
-        self.ns["validated_fork_cwd"] = lambda session: str(self.root)
-        self.ns["fork_codex_thread"] = AsyncMock()
-        with self.assertRaises(HTTPException) as caught:
-            await self.ns["_fork_session_locked"](custom["id"], SimpleNamespace(title=None))
-        self.assertEqual(caught.exception.status_code, 409)
-        self.ns["fork_codex_thread"].assert_not_awaited()
+        self.assertEqual(self.ns["codex_runtime_settings"](current), (self.selection["model"], "high", ""))
+        self.assertEqual(self.ns["CODEX_PROVIDER_STORE"].for_session(current)["base_url"], self.selection["base_url"])
+        changed = (await self.ns["update_session"](custom["id"], self.ns["UpdateSessionRequest"](model="new/custom-model", effort="ultra")))["session"]
+        self.assertEqual((changed["model"], changed["effort"]), ("new/custom-model", "ultra"))
+        self.assertEqual(self.ns["codex_runtime_settings"](current), ("new/custom-model", "ultra", ""))
         self.assertEqual(len(self.ns["STORE"].sessions), 1)
         self.assertNotIn("codex_provider_binding", custom)
+        self.assertNotIn("codex_provider_revision", custom)
+
+    async def test_internal_fork_creation_retains_parent_provider_after_reset(self):
+        parent = await self.create(codex_provider="custom", model="parent-model", effort="ultra")
+        source = self.ns["STORE"].sessions[parent["id"]]
+        original_revision = source["codex_provider_revision"]
+        self.ns["CODEX_PROVIDER_STORE"].reset()
+        public = self.ns["public_session"](source, summary=True)
+        self.assertTrue(public["codex_provider_catalog"]["available"])
+        self.assertNotIn(self.selection["api_key"], json.dumps(public))
+        child = await self.ns["STORE"].create(self.ns["CreateSessionRequest"](
+            codex_provider="custom", model="parent-model", effort="ultra"),
+            parent_id=parent["id"], initializing_fork=True)
+        self.assertEqual(child["codex_provider_revision"], original_revision)
+        self.assertEqual(self.ns["codex_runtime_settings"](child), ("parent-model", "ultra", ""))
 
     def test_custom_native_results_do_not_change_default_diagnostic_or_fall_back_to_exec(self):
         runner = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "run_codex_app_server")

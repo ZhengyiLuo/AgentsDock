@@ -50,13 +50,15 @@ class CodexSubagentIdentityTests(unittest.IsolatedAsyncioTestCase):
             "CODEX_SUBAGENT_INDEX_LOCK": threading.RLock(),
             "CODEX_SUBAGENT_TRANSITION_LOCKS": weakref.WeakValueDictionary(),
             "CODEX_SUBAGENT_STATE": {}, "CODEX_SUBAGENT_SESSION_INDEX": {},
-            "CODEX_SUBAGENT_LIVE_GENERATIONS": {}, "CODEX_QUARANTINED_GOAL_THREADS": {},
+            "CODEX_SUBAGENT_LIVE_GENERATIONS": {}, "CODEX_SUBAGENT_LIVE_MANAGERS": {}, "CODEX_QUARANTINED_GOAL_THREADS": {},
             "CODEX_APP_SERVER_MANAGER": SimpleNamespace(ready=True, generation=9),
             "now_iso": lambda: self.now, "append_event": AsyncMock(side_effect=append),
             "session_codex_thread_id": lambda session: session.get("codex_thread_id", ""),
             "logger": Mock(), "concise_error_message": str,
             "codex_session_has_active_run": AsyncMock(side_effect=AssertionError("identity must not inspect/wake execution")),
         }
+        self.ns["existing_codex_app_server_manager"] = lambda session=None: self.ns["CODEX_APP_SERVER_MANAGER"]
+        self.ns["existing_codex_app_server_manager_for_thread"] = lambda thread: self.ns["CODEX_APP_SERVER_MANAGER"]
         self.ns["codex_session_id_for_thread"] = lambda thread: (
             "chat" if thread == "parent" else self.ns["CODEX_SUBAGENT_SESSION_INDEX"].get(thread))
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "subagent-identity-isolated", "exec"), self.ns)
@@ -74,6 +76,31 @@ class CodexSubagentIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def rename(self, value, *, thread="child"):
         await self.ns["project_codex_notification"]({"method": "thread/name/updated",
             "params": {"threadId": thread, "threadName": value}})
+
+    async def test_custom_session_reconciliation_and_generation_use_its_manager(self):
+        self.session.update(codex_provider="custom", codex_provider_revision="synthetic-generation")
+        custom = SimpleNamespace(ready=True, generation=23,
+            list_descendant_threads=AsyncMock(return_value=[{
+                "id": "child", "status": {"type": "active"}, "parentThreadId": "parent",
+            }]))
+        self.ns["CODEX_APP_SERVER_MANAGER"] = Mock(
+            list_descendant_threads=AsyncMock(side_effect=AssertionError("normal provider was used")))
+        select = Mock(return_value=custom)
+        self.ns["existing_codex_app_server_manager"] = select
+        result = await self.ns["reconcile_codex_subagents"]("chat")
+        self.assertEqual(result["reconciled"], 1)
+        custom.list_descendant_threads.assert_awaited_once_with("parent")
+        self.assertEqual(self.ns["CODEX_SUBAGENT_LIVE_GENERATIONS"]["child"], 23)
+        self.assertTrue(all(call.args == (self.session,) for call in select.call_args_list))
+
+    async def test_missing_custom_manager_does_not_fall_back_to_normal_provider(self):
+        self.session["codex_provider"] = "custom"
+        self.ns["existing_codex_app_server_manager"] = Mock(return_value=None)
+        normal = SimpleNamespace(list_descendant_threads=AsyncMock())
+        self.ns["CODEX_APP_SERVER_MANAGER"] = normal
+        self.assertEqual(await self.ns["reconcile_codex_subagents"]("chat"),
+                         {"reconciled": 0, "descendants": 0})
+        normal.list_descendant_threads.assert_not_awaited()
 
     async def test_thread_list_explicit_title_is_separate_from_nickname_path_and_preview(self):
         manager = SimpleNamespace(list_descendant_threads=AsyncMock(return_value=[{

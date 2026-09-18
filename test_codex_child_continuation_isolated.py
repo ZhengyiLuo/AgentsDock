@@ -74,6 +74,7 @@ class CodexChildContinuationTests(unittest.IsolatedAsyncioTestCase):
         self.ns.update({
             "CODEX_SUBAGENT_STATE": {}, "CODEX_SUBAGENT_SESSION_INDEX": {},
             "CODEX_SUBAGENT_LIVE_GENERATIONS": {},
+            "CODEX_SUBAGENT_LIVE_MANAGERS": {},
             "CODEX_SUBAGENT_INDEX_LOCK": threading.RLock(),
             "IDLE_WARN_SECONDS": 10_000, "IDLE_KILL_SECONDS": 20_000,
             "codex_app_server_changed_paths": lambda item: set(),
@@ -105,6 +106,7 @@ class CodexChildContinuationTests(unittest.IsolatedAsyncioTestCase):
         # still observe the actual native spawn notification, not a fake prompt.
         self.ns["CODEX_SUBAGENT_SESSION_INDEX"][child] = "chat"
         self.ns["CODEX_SUBAGENT_LIVE_GENERATIONS"][child] = 1
+        self.ns["CODEX_SUBAGENT_LIVE_MANAGERS"][child] = self.manager
         self.ns["CODEX_SUBAGENT_STATE"][child] = {
             "session_id": "chat", "run_id": "operation", "subagent_id": child,
             "subagent_parent_thread_id": "thread", "subagent_status": "running",
@@ -118,6 +120,7 @@ class CodexChildContinuationTests(unittest.IsolatedAsyncioTestCase):
     def child_completed(self, child="child-1"):
         self.ns["CODEX_SUBAGENT_STATE"][child]["subagent_status"] = "completed"
         self.ns["CODEX_SUBAGENT_LIVE_GENERATIONS"].pop(child, None)
+        self.ns["CODEX_SUBAGENT_LIVE_MANAGERS"].pop(child, None)
         self.route("turn/completed", thread=child, turn_id=f"{child}-turn",
                    turn={"id": f"{child}-turn", "status": "completed"})
 

@@ -9,8 +9,9 @@ import tempfile
 import threading
 import tomllib
 from types import SimpleNamespace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -42,7 +43,8 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         old = self.store.revision()
         self.store.save({**SELECTION, "api_key": "replacement-synthetic"})
-        self.assertFalse((self.store.root / ("credential-" + old + ".json")).exists())
+        self.assertTrue((self.store.root / ("credential-" + old + ".json")).exists())
+        self.assertEqual(self.store.selection(revision=old, include_key=True)["api_key"], KEY)
         self.store.reset()
         self.assertFalse(self.store.status()["configured"])
 
@@ -52,12 +54,26 @@ class StoreTests(unittest.TestCase):
             self.store.require_thread("old-default-thread", SELECTION)
         self.store.record_thread("custom-thread/../../not-a-path", SELECTION)
         self.store.require_thread("custom-thread/../../not-a-path", SELECTION)
+        self.store.require_thread("custom-thread/../../not-a-path", {**SELECTION, "model": "different"})
         with self.assertRaises(HTTPException):
-            self.store.require_thread("custom-thread/../../not-a-path", {**SELECTION, "model": "different"})
+            self.store.require_thread("custom-thread/../../not-a-path", {**SELECTION, "base_url": "https://other.example.invalid/v1"})
         self.store.reset()
         with self.assertRaises(HTTPException):
             self.store.require_thread("custom-thread/../../not-a-path", None)
         self.store.require_thread("old-default-thread", None)
+
+    def test_legacy_binding_migrates_without_key_reentry_and_survives_reset(self):
+        self.store.save(SELECTION)
+        revision = self.store.revision()
+        self.store._atomic("credential-" + revision + ".json", {"api_key": KEY, "binding": provider.legacy_binding(SELECTION)})
+        self.store._atomic(self.store._binding_name("legacy-thread"), {"binding": provider.legacy_binding(SELECTION)})
+        selected = self.store.for_session({"codex_provider": "custom", "codex_provider_binding": provider.legacy_binding(SELECTION), "model": "another-model"})
+        self.store.require_thread("legacy-thread", selected)
+        self.store.save({"base_url": "https://next.example.invalid/v1", "api_key": "new-synthetic"})
+        self.store.reset()
+        retained = self.store.for_thread("legacy-thread", include_key=True)
+        self.assertEqual((retained["credential_id"], retained["api_key"]), (revision, KEY))
+        self.store.require_thread("legacy-thread", {**retained, "model": "third-model"})
 
     def test_failure_before_metadata_commit_retains_old_key(self):
         self.store.save(SELECTION)
@@ -132,6 +148,9 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.manager = fixture.manager
         self.manager.close = AsyncMock()
         self.ns.update({"codex_provider": provider, "CODEX_PROVIDER_STORE": self.store,
+            "CODEX_PROVIDER_SETTINGS_LOCK": asyncio.Lock(),
+            "STORE": SimpleNamespace(_lock=asyncio.Lock(), sessions={}, save=AsyncMock()),
+            "session_codex_thread_id": lambda session: session.get("codex_thread_id", ""),
             "CODEX_APP_SERVER_MANAGER": self.manager, "CODEX_APP_SERVER_MANAGER_EPOCH": 1,
             "CODEX_APP_SERVER_MANAGER_LOCK": asyncio.Lock(), "CODEX_APP_SERVER_THREAD_LRU_LOCK": asyncio.Lock(),
             "CODEX_APP_SERVER_EVICTING_THREADS": {}, "CODEX_APP_SERVER_THREAD_LRU": {},
@@ -145,31 +164,33 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.ns["suppress"] = suppress
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), self.ns)
         self.probe = AsyncMock(return_value=provider.test_result("ready"))
+        self.discover = Mock(return_value={**provider.test_result("ready"), "models": [{"value": "first/model", "label": "first/model"}], "default_model": "first/model"})
         app = FastAPI()
         app.middleware("http")(self.ns["require_agent_token"])
         app.include_router(provider.create_router(authorize=self.ns["require_native_admin_control"], store=self.store,
-            mutate=self.ns["mutate_codex_provider"], probe=self.probe, available=lambda: True))
+            mutate=self.ns["mutate_codex_provider"], probe=self.probe, available=lambda: True, discover=self.discover,
+            session_lookup=lambda session_id: self.ns["STORE"].sessions.get(session_id)))
         app.include_router(codex_auth.create_router(authorize=self.ns["require_native_admin_control"],
             operation=self.ns["codex_auth_operation"], available=lambda: True,
             ))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
 
-    def test_save_reset_only_retires_idle_codex_and_clears_its_readiness(self):
+    def test_save_reset_preserve_manager_and_normal_readiness(self):
         response = self.client.put("/api/admin/codex/provider", headers=NATIVE, json=SELECTION)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["configured"])
         self.assertNotIn(KEY, response.text)
-        self.manager.close.assert_awaited_once()
+        self.manager.close.assert_not_awaited()
         self.ns["close_codex_app_server_manager"].assert_not_awaited()
-        self.assertEqual(self.ns["RUNTIME_DIAGNOSTICS"], {"claude": {"ready": True}})
+        self.assertEqual(self.ns["RUNTIME_DIAGNOSTICS"], {"codex": {"ready": False}, "claude": {"ready": True}})
         self.assertFalse(self.ns["CODEX_GOALS_RECONFIGURING"])
         self.ns["CODEX_APP_SERVER_MANAGER"] = self.manager
         response = self.client.delete("/api/admin/codex/provider", headers=NATIVE)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["configured"])
 
-    def test_custom_preserves_normal_login_and_busy_blocks_mutation(self):
+    def test_custom_preserves_normal_login_and_busy_work_does_not_block_reset(self):
         self.store.save(SELECTION)
         response = self.client.post("/api/admin/codex/auth/api-key", headers=NATIVE, json={"api_key": KEY})
         self.assertEqual(response.status_code, 409, response.text)
@@ -177,9 +198,63 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.selection(include_key=True), SELECTION)
         self.manager.client._turns_by_thread = {"native": SimpleNamespace(_completed=False)}
         response = self.client.delete("/api/admin/codex/provider", headers=NATIVE)
-        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
         self.manager.close.assert_not_awaited()
-        self.assertTrue(self.store.status()["configured"])
+        self.assertFalse(self.store.status()["configured"])
+
+    def test_save_pins_legacy_live_session_before_selecting_new_credentials(self):
+        self.store.save(SELECTION)
+        revision = self.store.revision()
+        session = {"codex_provider": "custom", "codex_provider_binding": provider.legacy_binding(SELECTION), "codex_thread_id": "old-thread"}
+        self.ns["STORE"].sessions["chat"] = session
+        self.manager.client._turns_by_thread = {"old-thread": SimpleNamespace(_completed=False)}
+        response = self.client.put("/api/admin/codex/provider", headers=NATIVE, json={"base_url": SELECTION["base_url"], "api_key": "new-synthetic"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(session["codex_provider_revision"], revision)
+        self.assertEqual(self.store.for_session(session, include_key=True)["api_key"], KEY)
+        self.assertEqual(self.store.for_thread("old-thread")["credential_id"], revision)
+        self.ns["STORE"].save.assert_awaited_once_with(durable=True)
+        self.manager.close.assert_not_awaited()
+
+    def test_endpoint_only_save_and_explicit_discovery_cache_per_credential(self):
+        selected = {"base_url": SELECTION["base_url"], "api_key": KEY}
+        tested = self.client.post("/api/admin/codex/provider/test", headers=NATIVE, json=selected)
+        self.assertEqual(tested.status_code, 200, tested.text)
+        self.probe.assert_not_awaited()
+        self.assertFalse(self.store.root.exists())
+        response = self.client.put("/api/admin/codex/provider", headers=NATIVE, json=selected)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["model"])
+        self.assertEqual(self.store.catalog(available=True)["default_model"], "first/model")
+        self.assertEqual(self.discover.call_count, 1)
+        response = self.client.get("/api/admin/codex/provider/models", headers=NATIVE)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.discover.call_count, 2)
+        self.store.save({**selected, "api_key": "different-synthetic"})
+        self.assertEqual(self.store.catalog(available=True)["models"], [])
+
+    def test_model_refresh_uses_retained_chat_credentials_after_reset(self):
+        self.store.save(SELECTION)
+        session = {"codex_provider": "custom", "codex_provider_revision": self.store.revision(), "model": "chat/model"}
+        self.ns["STORE"].sessions["chat"] = session
+        self.store.reset()
+        received = []
+        def discover(selected):
+            received.append(dict(selected))
+            return {"ok": True, "status": "ready", "models": [{"value": "retained/model", "label": "retained/model"}]}
+        self.discover.side_effect = discover
+        response = self.client.get("/api/admin/codex/provider/models?session_id=chat", headers=NATIVE)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(received[0]["api_key"], KEY)
+        self.assertNotIn(KEY, response.text)
+        self.assertEqual(self.store.catalog(available=True, session=session)["models"][0]["value"], "retained/model")
+        self.assertTrue(self.store.catalog(available=True, session=session)["available"])
+        self.assertFalse(self.store.catalog(available=True)["available"])
+        with patch.object(self.store, "_read", side_effect=AssertionError("projection must not read credentials")):
+            summary = self.store.catalog(available=True, session=session, summary=True)
+            self.assertTrue(summary["available"])
+            self.assertNotIn("models", summary)
+            self.assertNotIn(KEY, json.dumps(summary))
 
     def test_reset_with_missing_credential_never_initializes_a_provider(self):
         self.store.save(SELECTION)
@@ -225,13 +300,96 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await asyncio.to_thread(entered.wait, 3))
             task.cancel()
             await asyncio.sleep(0)
-            self.assertTrue(self.ns["CODEX_GOALS_RECONFIGURING"])
+            self.assertTrue(self.ns["CODEX_PROVIDER_SETTINGS_LOCK"].locked())
+            self.assertFalse(self.ns["CODEX_GOALS_RECONFIGURING"])
             self.assertFalse(task.done())
             release.set()
             with self.assertRaises(asyncio.CancelledError):
                 await task
         self.assertFalse(self.ns["CODEX_GOALS_RECONFIGURING"])
         self.assertTrue(self.store.status()["configured"])
+
+
+class DiscoveryTests(unittest.TestCase):
+    def test_owned_models_endpoint_success_auth_failure_and_redirect_no_follow(self):
+        requests = []
+        class Handler(BaseHTTPRequestHandler):
+            status = 200
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                requests.append((self.path, self.headers.get("Authorization")))
+                self.send_response(self.status)
+                self.send_header("Location", "/must-not-follow")
+                self.end_headers()
+                self.wfile.write(json.dumps({"data": [{"id": "model/one"}, {"id": "model/two"}, {"id": "model/one"}, {"id": "invalid model"}]}).encode())
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            selected = {"base_url": f"http://127.0.0.1:{server.server_port}/v1", "api_key": KEY}
+            ready = provider.discover_models(selected)
+            self.assertEqual([model["value"] for model in ready["models"]], ["model/one", "model/two"])
+            self.assertTrue(ready["ok"])
+            Handler.status = 401
+            self.assertEqual(provider.discover_models(selected)["status"], "authentication_failed")
+            Handler.status = 302
+            self.assertEqual(provider.discover_models(selected)["status"], "failed")
+            self.assertEqual(requests, [("/v1/models", "Bearer " + KEY)] * 3)
+            self.assertNotIn(KEY, json.dumps(ready))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+
+class ManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_simultaneous_generations_freeze_credentials_without_touching_normal_manager(self):
+        with tempfile.TemporaryDirectory(prefix="provider-managers-") as temporary:
+            store = provider.ProviderStore(Path(temporary) / "private")
+            store.save(SELECTION)
+            revision = store.revision()
+            source = Path(__file__).with_name("agent_server.py")
+            names = {"codex_app_server_managers", "existing_codex_app_server_manager", "codex_app_server_manager"}
+            nodes = [node for node in ast.parse(source.read_text()).body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names]
+            created = []
+            def factory(*args, **kwargs):
+                manager = SimpleNamespace(client=SimpleNamespace(), add_notification_handler=Mock(), close=AsyncMock(), options=kwargs)
+                created.append(manager)
+                return manager
+            normal_env = {"OPENAI_API_KEY": "normal-synthetic"}
+            ns = {"asyncio": asyncio, "CODEX_PROVIDER_STORE": store, "codex_provider": provider,
+                "CODEX_APP_SERVER_MANAGER": None, "CODEX_CUSTOM_APP_SERVER_MANAGERS": {},
+                "CODEX_APP_SERVER_MANAGER_EPOCH": 0, "CODEX_GOALS_CONFIG_LOCK": asyncio.Lock(),
+                "CODEX_APP_SERVER_MANAGER_LOCK": asyncio.Lock(), "CODEX_GOALS_ENABLED": True,
+                "ensure_provider_manager_factory_admission": lambda **kwargs: None,
+                "CodexAppServerManager": factory, "CODEX_BIN": "unused", "existing_cwd": lambda value: value,
+                "DEFAULT_CWD": temporary, "SERVER_VERSION": "test", "HTTPException": HTTPException,
+                "codex_app_server_env": lambda selected=None: provider.native_environment(normal_env, selected) if selected else dict(normal_env)}
+            for name in ("CODEX_APP_SERVER_TIMEOUT_SECONDS", "CODEX_APP_SERVER_LIFECYCLE_TIMEOUT_SECONDS", "CODEX_APP_SERVER_JSONL_LIMIT_BYTES", "CODEX_APP_SERVER_NOTIFICATION_QUEUE_LIMIT"):
+                ns[name] = 10
+            for name in ("handle_codex_server_request", "register_codex_app_server_child", "unregister_codex_app_server_child", "project_codex_notification", "cache_codex_approval_item"):
+                ns[name] = Mock()
+            exec(compile(ast.fix_missing_locations(ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), *nodes], type_ignores=[])), str(source), "exec"), ns)
+            normal = await ns["codex_app_server_manager"]()
+            old_session = {"codex_provider": "custom", "codex_provider_revision": revision}
+            old = await ns["codex_app_server_manager"](old_session)
+            store.save({"base_url": SELECTION["base_url"], "api_key": "replacement-synthetic"})
+            new = await ns["codex_app_server_manager"]({"codex_provider": "custom", "model": "another-model"})
+            self.assertIs(await ns["codex_app_server_manager"](old_session), old)
+            with patch.object(store, "for_session", side_effect=AssertionError("lookup must not read credentials")):
+                self.assertIs(ns["existing_codex_app_server_manager"](old_session), old)
+            self.assertIs(await ns["codex_app_server_manager"](), normal)
+            self.assertIsNot(old, new)
+            self.assertEqual(old.options["env_factory"]()[provider.ENV_KEY], KEY)
+            self.assertEqual(new.options["env_factory"]()[provider.ENV_KEY], "replacement-synthetic")
+            self.assertEqual(normal.options["env_factory"](), normal_env)
+            self.assertNotIn("OPENAI_API_KEY", old.options["env_factory"]())
+            self.assertIn('cli_auth_credentials_store="ephemeral"', old.options["app_server_args"])
+            self.assertNotIn(KEY, str(old.options["app_server_args"]))
+            self.assertEqual(ns["codex_app_server_managers"](), tuple(created))
+            for manager in created:
+                manager.close.assert_not_awaited()
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
