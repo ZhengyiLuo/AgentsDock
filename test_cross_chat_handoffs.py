@@ -1379,7 +1379,9 @@ class CrossChatStoreTests(unittest.IsolatedAsyncioTestCase):
             {"queued_id": "delivery", "purpose": "cross_chat_handoff_delivery"},
             {"queued_id": "normal", "purpose": None, "prompt": "Send this now"},
         ])
-        with patch.object(agent_server, "managed_server_update_admission_blocker", return_value=None), \
+        # The mocked waiter cannot clear its steering fence after admission.
+        with patch.object(agent_server, "STEERING_SESSIONS", set()), \
+                patch.object(agent_server, "managed_server_update_admission_blocker", return_value=None), \
                 patch.object(agent_server, "stop_turn", new_callable=AsyncMock, return_value={"stopped": False}), \
                 patch.object(agent_server, "append_durable_event", new_callable=AsyncMock), \
                 patch.object(agent_server, "schedule_steered_turn_slot_waiter"):

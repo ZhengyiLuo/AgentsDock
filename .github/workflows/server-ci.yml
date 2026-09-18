@@ -28,7 +28,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
-      - name: Lock and test assigned modules
+      - name: Lock and test assigned cases
         run: |
           uv lock --check
           ulimit -s 65536
