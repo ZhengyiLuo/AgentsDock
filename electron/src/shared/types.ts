@@ -254,6 +254,15 @@ export interface CodexGoalsConfiguration {
 /** Server selection displayed by the caller, checked before sending an admin request. */
 export type CodexServerSettingsScope = Pick<WorkspaceProfileScope, 'profileId' | 'profileGeneration'>
 
+/** Native Codex account metadata only. Credentials never cross back to the renderer. */
+export interface CodexAuthStatus {
+  available: boolean
+  auth_mode: 'apiKey' | 'chatgpt' | 'other' | 'none'
+  email: string | null
+  plan_type: string | null
+  requires_openai_auth: boolean
+}
+
 /** Server override, not the provider's resolved or currently running limit. */
 export interface CodexSubagentsConfiguration {
   configurable: boolean

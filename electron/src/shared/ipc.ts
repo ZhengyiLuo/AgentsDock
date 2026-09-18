@@ -21,6 +21,7 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexAuthStatus,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
   CodexOperationAccepted,
@@ -404,6 +405,8 @@ export interface AgentsDockAPI {
     stop(sessionId: string): Promise<TurnStopResult>
   }
   codex: {
+    auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
+    loginWithApiKey(scope: CodexServerSettingsScope, apiKey: string): Promise<CodexAuthStatus>
     serverGoals(): Promise<CodexGoalsConfiguration>
     setServerGoals(enabled: boolean): Promise<CodexGoalsConfiguration>
     serverSubagents(scope: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration>

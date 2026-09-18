@@ -24,6 +24,7 @@ import { captureWorkspaceScope } from '../lib/workspace-preferences'
 import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../store/app-store'
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
+import { CodexAuthSettings } from './CodexAuthSettings'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -2749,6 +2750,7 @@ export function SettingsDialog() {
     <ServerManagement addRequest={addServerRequest} manageRequest={manageServersRequest} />
     <div className={`server-health ${connected ? degraded ? 'degraded' : 'online' : 'offline'}`}><span /><div className="server-health-copy"><strong>{connected ? degraded ? t("ui.Dialogs.SettingsDialog.connected_limited_a6733ca") : t("ui.Dialogs.SettingsDialog.connected_2296556") : t("ui.Dialogs.SettingsDialog.offline_a179478")}</strong><small>{health?.server_identity || t("ui.Dialogs.SettingsDialog.connection_settings_are_stored_on_this_mac_7348bfb")}</small>{restartNotice && <small className={`server-restart-notice ${restartNotice.kind}`} role={restartNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{restartNotice.message}</small>}</div>{restartServerButton()}</div>
     <RuntimeHealthPanel />
+    <CodexAuthSettings connected={connected} profileId={activeProfileId} profileGeneration={profileGeneration} serverTitle={activeProfile?.name} />
     <CodexServerSettings
       connected={connected}
       profileId={activeProfileId}

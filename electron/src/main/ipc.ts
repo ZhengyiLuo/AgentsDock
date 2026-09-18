@@ -276,6 +276,8 @@ export function registerIpc(
   handle('turns:stop', sessionId => service.stopTurn(sessionId))
 
   handle('codex:server-goals:get', () => service.codexServerGoals())
+  handle('codex:auth:get', scope => service.codexAuth(scope))
+  handle('codex:auth:api-key', (scope, apiKey) => service.codexLoginWithApiKey(scope, apiKey))
   handle('codex:server-goals:set', enabled => service.setCodexServerGoals(Boolean(enabled)))
   handle('codex:server-subagents:get', scope => service.codexServerSubagents(scope))
   handle('codex:server-subagents:set', (scope, limit) => service.setCodexServerSubagents(scope, limit))

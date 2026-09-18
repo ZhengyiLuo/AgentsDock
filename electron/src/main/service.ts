@@ -49,6 +49,7 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexAuthStatus,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
   CodexOperationAccepted,
@@ -2142,6 +2143,49 @@ export class AppService {
         throw error
       }
     })
+  }
+
+  async codexAuth(expected: CodexServerSettingsScope): Promise<CodexAuthStatus> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    const result = await scope.client.codexAuth()
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async codexLoginWithApiKey(expected: CodexServerSettingsScope, apiKey: string): Promise<CodexAuthStatus> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    // This is an explicit server-scoped account change, never a profile setting,
+    // cached secret, terminal command, user turn, or background retry.
+    const result = await scope.client.codexLoginWithApiKey(apiKey)
+    this.assertCurrentScope(scope)
+    // A successful login must clear stale unauthenticated composer gating.
+    // One explicit refresh, never a poll or retry of the credential submission.
+    if (result.available && result.auth_mode === 'apiKey') {
+      // A probe already underway may have read the old authentication. Let it
+      // settle before requesting the one authoritative post-login probe.
+      const preceding = this.runtimeRefreshInFlight?.get(scope.generation)
+      if (preceding) await preceding.task.catch(() => undefined)
+      this.assertCurrentScope(scope)
+      const priorCatalog = this.runtimeCatalog
+      let refreshed = false
+      try {
+        await this.refreshRuntime(true, true, scope, true)
+        refreshed = true
+      } catch { /* Native login succeeded even if the independent readiness probe failed. */ }
+      this.assertCurrentScope(scope)
+      const diagnostic = this.runtimeCatalog?.backends.codex?.diagnostic
+      if (refreshed && this.runtimeCatalog !== priorCatalog && this.health && diagnostic) {
+        // Provider timestamps have second precision. Explicitly adopt this
+        // result so an equal-time old health record cannot keep Send disabled.
+        this.health = { ...this.health, runtimes: { ...this.health.runtimes, codex: diagnostic } }
+        this.emitConnection(scope, true, this.health)
+      }
+    }
+    return result
   }
 
   async codexServerSubagents(expected: CodexServerSettingsScope): Promise<CodexSubagentsConfiguration> {

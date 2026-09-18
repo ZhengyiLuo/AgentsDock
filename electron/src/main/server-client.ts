@@ -1,4 +1,5 @@
 import { createReadStream, openAsBlob } from 'node:fs'
+import { parseCodexAuthStatus, validateCodexApiKey } from '../shared/codex-auth'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
@@ -44,6 +45,7 @@ import type {
   CodexGoalInput,
   CodexGoalSnapshot,
   CodexGoalsConfiguration,
+  CodexAuthStatus,
   CodexSubagentsConfiguration,
   CodexOperationAccepted,
   CodexPendingInteraction,
@@ -734,6 +736,32 @@ export class AgentServerClient {
   }
   codexServerGoals(): Promise<CodexGoalsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/goals')
+  }
+  codexAuth(): Promise<CodexAuthStatus> {
+    return this.codexAuthRequest('/api/admin/codex/auth')
+  }
+  codexLoginWithApiKey(apiKey: string): Promise<CodexAuthStatus> {
+    const key = validateCodexApiKey(apiKey)
+    return this.codexAuthRequest('/api/admin/codex/auth/api-key', {
+      method: 'POST', body: JSON.stringify({ api_key: key })
+    })
+  }
+  private async codexAuthRequest(path: string, init: RequestInit = {}): Promise<CodexAuthStatus> {
+    try {
+      return parseCodexAuthStatus(await this.privilegedNativeRequest(path, init, 30_000, 200, 8192))
+    } catch (error) {
+      // Never pass a native provider/HTTP error body into IPC or log output:
+      // even misconfigured servers may echo the submitted secret in an error.
+      if (error instanceof ServerError) {
+        const code = [401, 403].includes(error.status) ? 'ADMIN'
+          : [404, 405, 501].includes(error.status) ? 'UPDATE'
+            : error.status === 409 ? 'BUSY'
+              : [400, 422].includes(error.status) ? 'INVALID_KEY' : 'FAILED'
+        throw new Error(`CODEX_AUTH_${code}`)
+      }
+      if (error instanceof Error && error.message === 'CODEX_AUTH_RESPONSE') throw error
+      throw new Error('CODEX_AUTH_CONNECTION')
+    }
   }
   codexServerSubagents(): Promise<CodexSubagentsConfiguration> {
     return this.privilegedNativeRequest('/api/admin/codex/subagents')
@@ -2957,6 +2985,8 @@ function isPrivilegedNativeControlTarget(
   if (path === '/api/admin/codex/goals' || path === '/api/admin/codex/subagents') {
     return !target.search && (method === 'GET' || method === 'PUT')
   }
+  if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
+  if (path === '/api/admin/codex/auth/api-key') return !target.search && method === 'POST'
   if (path === '/api/admin/update') {
     if (method !== 'GET') return false
     const keys = [...target.searchParams.keys()]

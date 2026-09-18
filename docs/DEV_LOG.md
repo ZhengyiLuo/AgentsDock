@@ -1,5 +1,31 @@
 # Public development log
 
+## 2026-09-17 — Native Codex API-key authentication (source only)
+
+- Add Settings → Codex account with masked API-key sign-in, account status and
+  an explicit Recheck action. Explain server-wide account scope, native Codex
+  credential storage and separate API billing. Support English and Chinese.
+- Use the installed Codex app-server's native account API through the selected
+  server's operator-only HTTP endpoint. Do not replace Codex with a model API
+  client or put credentials into settings, histories, logs or command arguments.
+- Clear credentials on submit, cancel, close and server switch. Fence requests
+  by profile/generation, reject redirects and use fixed secret-free errors.
+  Add no polling, automatic login retries or per-keystroke network activity.
+- Preserve active/queued Codex work during authentication changes. Refresh
+  runtime readiness once after a successful save, including same-timestamp
+  health records and a pre-login probe that was already in flight.
+- Exercise the real UI with native offscreen Electron keyboard/mouse input,
+  production preload, scoped service methods, native HTTP, server authorization
+  and the actual Codex process using synthetic credentials in an ephemeral
+  store. Verify save/recheck/repeat, busy and permission failures, stale replies,
+  clearing secrets, idle traffic and narrow light/dark localized layouts.
+- Full Settings/profile bootstrap and runtime-catalog behavior remain isolated
+  fixture boundaries in UI acceptance; focused service tests cover readiness
+  reconciliation. TypeScript, production compilation and desktop regressions
+  pass. Native credential acceptance alone is not a live model/billing test.
+- Requires matching standalone server authentication endpoints. Availability
+  is source only: no public release, production deployment or account switch.
+
 ## 2026-09-17 — Native provider side conversations (local build)
 
 - Build **1.0.3-local.1174 / 1174** from `36ba482`. Verify all 88 compiled

@@ -200,6 +200,8 @@ const api: AgentsDockAPI = {
   },
   codex: {
     serverGoals: () => ipcRenderer.invoke('codex:server-goals:get'),
+    auth: scope => ipcRenderer.invoke('codex:auth:get', scope),
+    loginWithApiKey: (scope, apiKey) => ipcRenderer.invoke('codex:auth:api-key', scope, apiKey),
     setServerGoals: enabled => ipcRenderer.invoke('codex:server-goals:set', enabled),
     serverSubagents: scope => ipcRenderer.invoke('codex:server-subagents:get', scope),
     setServerSubagents: (scope, limit) => ipcRenderer.invoke('codex:server-subagents:set', scope, limit),
