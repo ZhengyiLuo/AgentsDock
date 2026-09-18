@@ -601,7 +601,7 @@ class ChatMailboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(items[0]["role"], "developer")
             self.assertNotIn("Exact synthetic peer message", items[0]["content"][0]["text"])
         manager.inject_items_guarded = AsyncMock(side_effect=inject)
-        self.ns["CODEX_APP_SERVER_MANAGER"] = manager
+        self.ns["existing_codex_app_server_manager"] = lambda session=None: manager
         await self.ns["maybe_notify_chat_mailbox_codex"]("recipient")
         manager.inject_items_guarded.assert_awaited_once()
         await self.ns["maybe_notify_chat_mailbox_codex"]("recipient")

@@ -1895,7 +1895,7 @@ class CursorFileDeliveryInstructionTests(unittest.TestCase):
             )
         current = agent_server.cursor_instruction_hash("chat-x", {}, manifest)
 
-        self.assertEqual(agent_server.CURSOR_PROMPT_POLICY_VERSION, "4")
+        self.assertEqual(agent_server.CURSOR_PROMPT_POLICY_VERSION, "5")
         self.assertNotEqual(previous, current)
 
 
