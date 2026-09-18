@@ -294,6 +294,33 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(KEY, str(result))
         factory.assert_not_called()
 
+    async def test_first_native_error_finishes_before_completion_and_closes_without_retry(self):
+        cases = [
+            (True, "Connection failed: error sending request " + KEY, "connection_failed"),
+            (False, "Upstream returned 401 Unauthorized " + KEY, "authentication_failed"),
+            (True, "Unknown failure " + KEY, "failed"),
+        ]
+        for will_retry, details, expected in cases:
+            with self.subTest(will_retry=will_retry, expected=expected):
+                turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[
+                    {"method": "error", "params": {"threadId": "ephemeral", "turnId": "probe-turn",
+                        "willRetry": will_retry, "error": {"message": "Reconnecting... 1/4", "additionalDetails": details}}},
+                    {"method": "turn/completed", "params": {"turn": {"status": "completed"}}},
+                ]), close=AsyncMock())
+                config = {**provider.native_config(SELECTION), "cli_auth_credentials_store": "ephemeral"}
+                native = SimpleNamespace(client=SimpleNamespace(), start=AsyncMock(),
+                    request=AsyncMock(return_value={"config": config}), start_thread=AsyncMock(return_value="ephemeral"),
+                    read_thread=AsyncMock(return_value={"ephemeral": True, "path": None}),
+                    start_turn=AsyncMock(return_value=turn), close=AsyncMock())
+                result = await asyncio.wait_for(provider.test_connection(SELECTION, executable="unused", environment={},
+                    manager_factory=lambda *args, **kwargs: native, verify_protocol=AsyncMock()), 1)
+                self.assertEqual(result, provider.test_result(expected))
+                self.assertNotIn(KEY, str(result))
+                turn.next_notification.assert_awaited_once()
+                turn.close.assert_awaited_once()
+                native.start_turn.assert_awaited_once()
+                native.close.assert_awaited_once()
+
     async def test_cancel_during_spawn_joins_owned_start_and_close(self):
         entered, release = asyncio.Event(), asyncio.Event()
         async def start():

@@ -269,7 +269,7 @@ def classify_failure(value) -> str:
         return "model_unavailable"
     if any(marker in text for marker in ("405", "unsupported protocol", "/responses is not supported", "cannot post /v1/responses")):
         return "unsupported"
-    if any(marker in text for marker in ("connection refused", "dns error", "failed to lookup address", "connection timed out", "request timed out")):
+    if any(marker in text for marker in ("connection refused", "dns error", "failed to lookup address", "connection timed out", "request timed out", "connection failed:", "error sending request")):
         return "connection_failed"
     return "failed"
 
@@ -320,6 +320,11 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
                     while True:
                         packet = await turn.next_notification()
                         data = packet.get("params", {})
+                        if packet.get("method") == "error":
+                            # This scoped probe is one explicit attempt. Native
+                            # retry notices are not terminal for normal chats,
+                            # but must not silently retry a connection test.
+                            return test_result(classify_failure(data.get("error") or data.get("message")))
                         if packet.get("method") == "item/completed" and data.get("item", {}).get("type") == "agentMessage":
                             answered = bool(data["item"].get("text"))
                         if packet.get("method") == "turn/completed":
