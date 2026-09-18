@@ -724,6 +724,8 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.namespace = dict(asyncio=asyncio, side_questions=side, STATE_DIR=root,
             SERVER_SHUTTING_DOWN=False, STORE=SimpleNamespace(sessions={"chat": self.session}),
             CODEX_GOALS_RECONFIGURING=False,
+            CODEX_PROVIDER_STORE=SimpleNamespace(revision=lambda: None, selection=lambda **kwargs: None,
+                require_thread=lambda *args: None),
             DEFAULT_BACKEND="claude", BACKEND_CLAUDE="claude", BACKEND_CODEX="codex",
             CLAUDE_BIN="synthetic-claude", CODEX_BIN="synthetic-codex", DEFAULT_CWD=str(root),
             ACTIVE=self.parent_active, QUEUED_TURNS=self.parent_queue,

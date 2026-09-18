@@ -72,7 +72,7 @@ async def login_api_key(manager, key: str) -> dict:
     return account_summary({"account": {"type": "apiKey"}, "requiresOpenaiAuth": True})
 
 
-def create_router(*, authorize, operation, available) -> APIRouter:
+def create_router(*, authorize, operation, available, login_allowed=lambda: True) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/admin/codex/auth")
@@ -97,6 +97,8 @@ def create_router(*, authorize, operation, available) -> APIRouter:
         authorize(request)
         if not available():
             raise HTTPException(503, "Codex authentication controls require the app-server transport.")
+        if not login_allowed():
+            raise HTTPException(409, "Reset the custom Codex endpoint before changing normal Codex sign-in.")
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
@@ -112,6 +114,8 @@ def create_router(*, authorize, operation, available) -> APIRouter:
         body.clear()
         try:
             async with operation(mutate=True) as manager:
+                if not login_allowed():
+                    raise HTTPException(409, "Reset the custom Codex endpoint before changing normal Codex sign-in.")
                 result = await login_api_key(manager, key)
         except HTTPException:
             raise

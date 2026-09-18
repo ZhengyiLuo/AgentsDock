@@ -59,6 +59,7 @@ class CodexSubagentConfigTests(unittest.TestCase):
             "CODEX_DEFAULT_SANDBOX_MODE": "workspace-write",
             "CODEX_PROVIDER_MCP_NAME": "fixture",
             "codex_runtime_settings": Mock(return_value=("", "", "")),
+            "CODEX_PROVIDER_STORE": SimpleNamespace(selection=lambda: None),
             "codex_provider_mcp_config": Mock(return_value=self.transport),
             "codex_app_server_service_tier": lambda value: value,
             "codex_thread_instructions": Mock(return_value="fixture instructions"),

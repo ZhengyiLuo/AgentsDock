@@ -104,7 +104,8 @@ class NativeCodexSideChat:
     """
 
     def __init__(self, parent_thread_id: str, *, executable: str, model: str | None,
-                 env: dict, parent_rollout_path: str | None = None):
+                 env: dict, parent_rollout_path: str | None = None,
+                 provider_selection: dict | None = None):
         if not isinstance(parent_thread_id, str) or not parent_thread_id.strip():
             raise SideQuestionError(409, "The parent Codex conversation is not available yet")
         self.parent_thread_id = parent_thread_id
@@ -112,6 +113,14 @@ class NativeCodexSideChat:
         self.executable = executable
         self.model = model
         self.env = isolated_environment(env)
+        self.provider_config = {}
+        self.sensitive_values = ()
+        if provider_selection:
+            # Lazy import avoids the provider probe/isolated-config cycle.
+            from codex_provider import native_config, native_environment
+            self.env = native_environment(self.env, provider_selection)
+            self.provider_config = native_config(provider_selection)
+            self.sensitive_values = (provider_selection["api_key"],)
         self.thread_id: str | None = None
         self._client: CodexAppServerClient | None = None
         self._temporary: tempfile.TemporaryDirectory | None = None
@@ -132,14 +141,17 @@ class NativeCodexSideChat:
         if self._closed:
             raise SideQuestionError(409, "Side chat was closed; open a new side chat")
         config = isolated_config()
+        config.update(self.provider_config)
         # Preserve Codex's auth/runtime location. Overriding sqlite_home while
         # retaining the user's history root can trigger a complete reindex.
         config.update({"log_dir": str(Path(temporary) / "log"), "history.persistence": "none"})
-        args = [part for key, value in config.items() for part in ("-c", f"{key}={json.dumps(value)}")]
+        from codex_provider import config_args
+        args = config_args(config)
         self._client = CodexAppServerClient(
             self.executable, cwd=temporary, env_factory=lambda: self.env,
             app_server_args=args, request_timeout=20, lifecycle_timeout=30,
             process_stream_limit=MAX_OUTPUT_BYTES, notification_queue_limit=512,
+            sensitive_values=self.sensitive_values,
         )
         await self._client.start()
         if self._closed:
@@ -162,6 +174,8 @@ class NativeCodexSideChat:
         }
         if self.model:
             params["model"] = self.model
+        if self.provider_config:
+            params["modelProvider"] = self.provider_config["model_provider"]
         if self.parent_rollout_path:
             params["path"] = self.parent_rollout_path
         # Native ephemeral forks cannot carry a goal. In particular, do not set

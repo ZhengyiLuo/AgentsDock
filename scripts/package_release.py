@@ -35,6 +35,7 @@ FILES = (
     "claude_background_reconciliation.py",
     "codex_app_server.py",
     "codex_auth.py",
+    "codex_provider.py",
     "side_questions.py",
     "codex_side_question.py",
     "claude_side_question.py",

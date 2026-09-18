@@ -564,10 +564,12 @@ class CodexAppServerClient:
         initialize_params: dict[str, Any] | None = None,
         on_process_started: ProcessLifecycleHook | None = None,
         on_process_exited: ProcessLifecycleHook | None = None,
+        sensitive_values: Sequence[str] = (),
     ) -> None:
         self.codex_bin = codex_bin
         self.cwd = cwd
         self.env_factory = env_factory
+        self._sensitive_values = tuple(value for value in sensitive_values if isinstance(value, str) and value)
         # Lifecycle hooks receive ``(pid, process_group_id)``. The group id is
         # None whenever start() could not prove it owns the child's session,
         # so a hook must never derive a signal target from the pid alone.
@@ -637,7 +639,7 @@ class CodexAppServerClient:
         self._stderr_tail: deque[str] = deque(maxlen=40)
         # Native authentication can emit delayed diagnostics. Once credentials
         # have crossed this transport, never retain unstructured stderr from it.
-        self._authentication_submitted = False
+        self._authentication_submitted = bool(self._sensitive_values)
         # Diagnostic-only record of notifications _route_notification could
         # not match to any live subscription (see its docstring) - these are
         # otherwise dropped with no trace, which is exactly what makes a
@@ -1211,6 +1213,17 @@ class CodexAppServerClient:
             request_sent=request_sent,
         ) from send_timeout
 
+    def _redact_sensitive(self, value):
+        if isinstance(value, str):
+            for secret in self._sensitive_values:
+                value = value.replace(secret, "[REDACTED]")
+            return value
+        if isinstance(value, list):
+            return [self._redact_sensitive(item) for item in value]
+        if isinstance(value, dict):
+            return {self._redact_sensitive(key): self._redact_sensitive(item) for key, item in value.items()}
+        return value
+
     async def _reader_loop(self, proc: asyncio.subprocess.Process) -> None:
         error: BaseException | None = None
         try:
@@ -1237,6 +1250,8 @@ class CodexAppServerClient:
                 if not isinstance(message, dict):
                     continue
 
+                if self._sensitive_values:
+                    message = self._redact_sensitive(message)
                 request_id = message.get("id")
                 if request_id is not None and ("result" in message or "error" in message):
                     pending = self._pending.get(request_id)
@@ -2634,6 +2649,7 @@ class CodexAppServerManager:
         initialize_params: dict[str, Any] | None = None,
         on_process_started: ProcessLifecycleHook | None = None,
         on_process_exited: ProcessLifecycleHook | None = None,
+        sensitive_values: Sequence[str] = (),
     ) -> None:
         self.client = CodexAppServerClient(
             codex_bin,
@@ -2650,6 +2666,7 @@ class CodexAppServerManager:
             initialize_params=initialize_params,
             on_process_started=on_process_started,
             on_process_exited=on_process_exited,
+            sensitive_values=sensitive_values,
         )
 
     @property

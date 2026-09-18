@@ -150,6 +150,22 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             await self.answer()
         self.factory.assert_not_called()
 
+    async def test_custom_provider_key_survives_isolation_without_normal_login_credentials(self):
+        from codex_provider import ENV_KEY, PROVIDER_ID
+        selected = {"base_url": "https://example.invalid/v1", "model": "custom/model", "api_key": "synthetic-provider-key"}
+        chat = adapter.NativeCodexSideChat("parent-thread", executable="synthetic-codex", model=selected["model"],
+            env={"OPENAI_API_KEY": "unrelated-key", "AGENTSDOCK_TOKEN": "server-token"}, provider_selection=selected)
+        self.assertEqual(await chat.ask("question"), "Answer")
+        options = self.factory.call_args.kwargs
+        self.assertEqual(options["env_factory"]()[ENV_KEY], selected["api_key"])
+        self.assertNotIn("OPENAI_API_KEY", options["env_factory"]())
+        self.assertNotIn("AGENTSDOCK_TOKEN", options["env_factory"]())
+        self.assertNotIn(selected["api_key"], str(options["app_server_args"]))
+        params = self.client.fork_thread.await_args.args[1]
+        self.assertEqual(params["modelProvider"], PROVIDER_ID)
+        self.assertFalse(params["config"]["model_providers"][PROVIDER_ID]["requires_openai_auth"])
+        await chat.close()
+
     async def test_followups_reuse_provider_history_until_explicit_close(self):
         chat = adapter.NativeCodexSideChat("parent-thread", executable="synthetic-codex",
             model=None, env={"HOME": "/synthetic/auth"})

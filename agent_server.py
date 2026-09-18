@@ -73,6 +73,7 @@ import team_mail_grants
 import chat_mailbox
 import workspace_git
 import codex_auth
+import codex_provider
 
 from codex_app_server import (
     CodexAppServerDisconnected,
@@ -374,6 +375,7 @@ SERVER_UPDATE_LOG_FILE = SERVER_ADMIN_ROOT / "server-update.log"
 SERVER_RESTART_STATUS_FILE = SERVER_ADMIN_ROOT / "server-restart.json"
 TEAM_HUB_HOST_CONTROL_STATUS_FILE = SERVER_ADMIN_ROOT / "team-hub-host.json"
 CODEX_SETTINGS_FILE = SERVER_ADMIN_ROOT / "codex-settings.json"
+CODEX_PROVIDER_STORE = codex_provider.ProviderStore(SERVER_ADMIN_ROOT / "codex-provider")
 ABANDONED_FORK_THREADS_FILE = SERVER_ADMIN_ROOT / "abandoned-fork-threads.json"
 # Process-group ids of provider children this server spawned in their own
 # session (``start_new_session=True``). A SIGKILL of the server cannot reach
@@ -50566,6 +50568,9 @@ def codex_app_server_env() -> dict[str, str]:
     env["AGENTSDOCK_MAIL_CLI"] = str(SERVER_ROOT / "agentsdock_mail.py")
     env["AGENTSDOCK_TEAM_CLI"] = str(SERVER_ROOT / "agentsdock_team.py")
     scrub_provider_runtime_environment(env)
+    selected = CODEX_PROVIDER_STORE.selection(include_key=True)
+    if selected:
+        env = codex_provider.native_environment(env, selected)
     return env
 
 
@@ -53401,12 +53406,14 @@ async def codex_app_server_manager() -> CodexAppServerManager:
             ensure_provider_manager_factory_admission(codex=True)
             manager = CODEX_APP_SERVER_MANAGER
             if manager is None:
+                selected = CODEX_PROVIDER_STORE.selection(include_key=True)
                 manager = CodexAppServerManager(
                     CODEX_BIN,
                     cwd=existing_cwd(DEFAULT_CWD),
                     env_factory=codex_app_server_env,
                     app_server_args=(
-                        () if CODEX_GOALS_ENABLED else ("--disable", "goals")
+                        (() if CODEX_GOALS_ENABLED else ("--disable", "goals"))
+                        + (codex_provider.native_args(selected) if selected else ())
                     ),
                     request_timeout=CODEX_APP_SERVER_TIMEOUT_SECONDS,
                     lifecycle_timeout=CODEX_APP_SERVER_LIFECYCLE_TIMEOUT_SECONDS,
@@ -53428,8 +53435,11 @@ async def codex_app_server_manager() -> CodexAppServerManager:
                     },
                     on_process_started=register_codex_app_server_child,
                     on_process_exited=unregister_codex_app_server_child,
+                    sensitive_values=(selected["api_key"],) if selected else (),
                 )
                 manager.add_notification_handler(project_codex_notification)
+                if selected:
+                    manager.client._authentication_submitted = True
                 manager.add_notification_handler(cache_codex_approval_item)
                 CODEX_APP_SERVER_MANAGER_EPOCH += 1
                 CODEX_APP_SERVER_MANAGER = manager
@@ -56053,6 +56063,28 @@ def probe_runtime(backend: str) -> dict[str, Any]:
             executable=resolved,
         )
 
+    if backend == BACKEND_CODEX:
+        try:
+            custom_provider = CODEX_PROVIDER_STORE.selection()
+        except Exception:
+            return runtime_diagnostic_payload(
+                backend, "error", installed=True, authenticated=None, version=version,
+                message="Saved Codex endpoint settings are unavailable. Open Codex account settings to check them.",
+            )
+        if custom_provider:
+            if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC:
+                return runtime_diagnostic_payload(
+                    backend, "error", installed=True, authenticated=None, version=version,
+                    message="Custom endpoints require native Codex app-server transport.",
+                )
+            # Native login status describes the normal OpenAI account, not the
+            # custom provider's separate key. Do not contact either provider or
+            # reject a configured gateway because ChatGPT is signed out.
+            return runtime_diagnostic_payload(
+                backend, "ready", installed=True, authenticated=True, version=version,
+                message="Native Codex endpoint and provider key are configured. Use Test connection to check access.",
+            )
+
     if backend == BACKEND_CLAUDE:
         auth_cmd = [resolved, "auth", "status", "--json"]
     else:
@@ -56347,6 +56379,13 @@ def codex_app_server_service_tier(service_tier: str) -> str:
 
 
 def discover_codex_catalog() -> dict[str, Any]:
+    selected = CODEX_PROVIDER_STORE.selection()
+    if selected:
+        model = selected["model"]
+        return {"models": [{"value": "", "label": f"Server default ({model})"}, {"value": model, "label": model}],
+            "efforts": [], "model_efforts": {model: []}, "model_source": "configured native Responses endpoint",
+            "effort_source": "provider default", "default_model": model, "default_effort": None,
+            "default_service_tier": None}
     models: list[dict[str, Any]] = []
     model_options: list[dict[str, Any]] = []
     effort_options: list[dict[str, Any]] = []
@@ -56909,6 +56948,13 @@ def codex_thread_instruction_hash(session_id: str, sess: dict[str, Any]) -> str:
 
 
 def codex_runtime_settings(sess: dict[str, Any]) -> tuple[str, str, str]:
+    selected = CODEX_PROVIDER_STORE.selection()
+    CODEX_PROVIDER_STORE.require_thread(session_codex_thread_id(sess), selected)
+    if selected:
+        model = str(sess.get("model") or selected["model"]).strip()
+        if model != selected["model"]:
+            raise HTTPException(409, "Choose the configured custom endpoint model or start a new Codex chat.")
+        return model, "", ""
     configured_model, configured_effort, configured_service_tier = codex_user_config_defaults()
     model = str(sess.get("model") or configured_model or CODEX_DEFAULT_MODEL).strip()
     effort = clamp_codex_runtime_effort(
@@ -57021,6 +57067,9 @@ def codex_thread_params(
         params["developerInstructions"] = developer_instructions
     if model:
         params["model"] = model
+    selected = CODEX_PROVIDER_STORE.selection()
+    if selected:
+        params["modelProvider"] = codex_provider.PROVIDER_ID
     if service_tier:
         params["serviceTier"] = codex_app_server_service_tier(service_tier)
     # Honor explicit per-thread settings for start, resume and fork without
@@ -57434,6 +57483,7 @@ async def ensure_codex_app_server_thread(
                     "serviceName": "AgentsDock",
                 }
             )
+            await asyncio.to_thread(CODEX_PROVIDER_STORE.record_thread, provider_id)
             await pin_codex_app_server_thread(provider_id, manager)
             pinned = True
         elif already_loaded and policy_changed:
@@ -58591,6 +58641,7 @@ async def fork_codex_thread(
     *,
     last_turn_id: str | None = None,
 ) -> str:
+    CODEX_PROVIDER_STORE.require_thread(source_thread_id, CODEX_PROVIDER_STORE.selection())
     cwd = existing_cwd(str(sess.get("cwd") or DEFAULT_CWD))
     manager = await codex_app_server_manager()
     params = {
@@ -58694,6 +58745,7 @@ async def fork_codex_thread(
         )
 
     try:
+        await asyncio.to_thread(CODEX_PROVIDER_STORE.record_thread, forked_id)
         forked_thread = await manager.read_thread(
             forked_id,
             include_turns=False,
@@ -73768,6 +73820,7 @@ async def require_agent_token(request: Request, call_next):
     codex_goals_admin_route = request.url.path in {
         "/api/admin/codex/goals", "/api/admin/codex/subagents",
         "/api/admin/codex/auth", "/api/admin/codex/auth/api-key",
+        "/api/admin/codex/provider", "/api/admin/codex/provider/test",
     }
     public_chat_shares_admin_route = (
         request.url.path == "/api/admin/chat-shares"
@@ -73959,6 +74012,20 @@ async def require_agent_token(request: Request, call_next):
             body_error = await prebuffer_bounded_request_body(
                 request, max_body_bytes=codex_auth.MAX_BODY_BYTES,
                 declared_size=declared_size,
+            )
+            if body_error is not None:
+                status_code, detail = body_error
+                return JSONResponse({"detail": detail}, status_code=status_code)
+        elif request.url.path in {"/api/admin/codex/provider", "/api/admin/codex/provider/test"} and request.method.upper() in {"PUT", "POST"}:
+            declared_size, transport_error = privileged_native_json_transport(
+                request, max_body_bytes=codex_provider.MAX_BODY_BYTES,
+                label="Codex endpoint", require_content_length=True,
+            )
+            if transport_error is not None:
+                status_code, detail = transport_error
+                return JSONResponse({"detail": detail}, status_code=status_code)
+            body_error = await prebuffer_bounded_request_body(
+                request, max_body_bytes=codex_provider.MAX_BODY_BYTES, declared_size=declared_size,
             )
             if body_error is not None:
                 status_code, detail = body_error
@@ -76280,6 +76347,7 @@ async def health() -> dict[str, Any]:
         "capabilities": {
             "side_questions": side_questions.capability(),
             "codex_auth_v1": codex_auth.capability(available=bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC),
+            "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses"},
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
             "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
@@ -77611,7 +77679,7 @@ def require_native_admin_control(request: Request) -> None:
 
 
 @asynccontextmanager
-async def codex_auth_operation(*, mutate: bool):
+async def codex_auth_operation(*, mutate: bool, existing_only: bool = False):
     """Fence native authentication changes with the existing Codex admission barrier."""
     async with CODEX_AUTH_LOCK:
         reserved = False
@@ -77637,8 +77705,8 @@ async def codex_auth_operation(*, mutate: bool):
                     for (_owner, session_id, _request_id), receipt in SIDE_QUESTIONS.receipts.items()
                 ):
                     raise HTTPException(409, codex_auth.BUSY_MESSAGE)
-            manager = await codex_app_server_manager()
-            if mutate and any(not turn._completed for turn in manager.client._turns_by_thread.values()):
+            manager = CODEX_APP_SERVER_MANAGER if existing_only else await codex_app_server_manager()
+            if mutate and manager is not None and any(not turn._completed for turn in manager.client._turns_by_thread.values()):
                 raise HTTPException(409, codex_auth.BUSY_MESSAGE)
             yield manager
         finally:
@@ -77649,6 +77717,68 @@ async def codex_auth_operation(*, mutate: bool):
 app.include_router(codex_auth.create_router(
     authorize=require_native_admin_control,
     operation=codex_auth_operation,
+    available=lambda: CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC,
+    login_allowed=lambda: CODEX_PROVIDER_STORE.selection() is None,
+))
+
+
+CODEX_PROVIDER_TEST_LOCK = asyncio.Lock()
+
+
+async def probe_codex_provider(selected: dict):
+    if CODEX_PROVIDER_TEST_LOCK.locked():
+        raise HTTPException(409, "A Codex endpoint test is already running.")
+    async with CODEX_PROVIDER_TEST_LOCK:
+        return await codex_provider.test_connection(selected, executable=CODEX_BIN, environment=runner_env())
+
+
+async def mutate_codex_provider(selected: dict | None):
+    """Replace only an idle Codex manager; never cancel unrelated Claude work."""
+    async with codex_auth_operation(mutate=True, existing_only=True) as manager:
+        task = asyncio.create_task(replace_codex_provider_settings(manager, selected))
+        try:
+            await asyncio.shield(task)
+        except BaseException:
+            # Disk writes and native close are owned operations. Hold admission
+            # until they settle even if the HTTP caller disconnects or cancels.
+            with suppress(BaseException):
+                await join_task_despite_caller_cancellation(task)
+            raise
+
+
+async def replace_codex_provider_settings(manager, selected: dict | None):
+    global CODEX_APP_SERVER_MANAGER, CODEX_APP_SERVER_MANAGER_EPOCH
+    async with CODEX_GOALS_CONFIG_LOCK:
+        async with CODEX_APP_SERVER_MANAGER_LOCK:
+            if CODEX_APP_SERVER_MANAGER is not manager:
+                raise HTTPException(409, "Codex configuration changed; refresh and try again.")
+            if manager is not None:
+                await manager.close()
+            CODEX_APP_SERVER_MANAGER = None
+            CODEX_APP_SERVER_MANAGER_EPOCH += 1
+        async with CODEX_APP_SERVER_THREAD_LRU_LOCK:
+            for event in CODEX_APP_SERVER_EVICTING_THREADS.values():
+                event.set()
+            CODEX_APP_SERVER_EVICTING_THREADS.clear()
+            CODEX_APP_SERVER_THREAD_LRU.clear()
+            CODEX_APP_SERVER_PINNED_THREADS.clear()
+            CODEX_APP_SERVER_THREAD_PIN_COUNTS.clear()
+            CODEX_APP_SERVER_INVALIDATED_THREADS.clear()
+        CODEX_APPROVAL_ITEM_CACHE.clear()
+        CODEX_PERMISSION_PROFILES_CACHE.clear()
+        if selected is None:
+            await asyncio.to_thread(CODEX_PROVIDER_STORE.reset)
+        else:
+            await asyncio.to_thread(CODEX_PROVIDER_STORE.save, selected)
+        with RUNTIME_DIAGNOSTICS_LOCK:
+            RUNTIME_DIAGNOSTICS.pop(BACKEND_CODEX, None)
+
+
+app.include_router(codex_provider.create_router(
+    authorize=require_native_admin_control,
+    store=CODEX_PROVIDER_STORE,
+    mutate=mutate_codex_provider,
+    probe=probe_codex_provider,
     available=lambda: CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC,
 ))
 
@@ -77686,6 +77816,7 @@ async def create_native_side_chat(session_id: str):
     parent_id = provider_id(session)
     if not parent_id:
         raise side_questions.SideQuestionError(409, "The native conversation has not started yet")
+    provider_revision = CODEX_PROVIDER_STORE.revision() if backend == BACKEND_CODEX else None
 
     class NativeSideChat:
         codex = None
@@ -77695,6 +77826,10 @@ async def create_native_side_chat(session_id: str):
                 raise side_questions.SideQuestionError(503, "Server is shutting down")
             if backend == BACKEND_CODEX and CODEX_GOALS_RECONFIGURING:
                 raise side_questions.SideQuestionError(409, "Wait for Codex configuration to finish before using Side chat")
+            if backend == BACKEND_CODEX:
+                CODEX_PROVIDER_STORE.require_thread(parent_id, CODEX_PROVIDER_STORE.selection())
+                if CODEX_PROVIDER_STORE.revision() != provider_revision:
+                    raise side_questions.SideQuestionError(410, "The Codex endpoint changed; clear Side chat")
             if not public_chat_share_session_exists(session_id):
                 raise side_questions.SideQuestionError(404, "Chat not found")
             current = STORE.sessions[session_id]
@@ -77726,7 +77861,8 @@ async def create_native_side_chat(session_id: str):
                     model = current.get("model")
                     self.codex = NativeCodexSideChat(parent_id, executable=CODEX_BIN,
                         model=model if isinstance(model, str) and model.strip() else None,
-                        env=side_questions.isolated_environment(runner_env()))
+                        env=side_questions.isolated_environment(runner_env()),
+                        provider_selection=CODEX_PROVIDER_STORE.selection(include_key=True))
                 result = {"answer": await self.codex.ask(question),
                           "context_note": "Native Codex context from when Side chat started, including tool results. Clear Side chat to use the latest main context."}
             self.current()
