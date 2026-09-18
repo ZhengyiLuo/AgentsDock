@@ -1,5 +1,44 @@
 # Public development log
 
+## 2026-09-18 — Codex credential isolation — 1.0.4-beta.2
+
+- Accept published desktop **1.0.4-beta.2 / 1173** from
+  `f87790cf69e66261a2271c2056bd5bcd06ff666a`, with matching standalone
+  AgentsServer **1.0.4-beta.2** from
+  `dfc05e997b7c97b366c87400f35e4c640f8f2f85`.
+- Remove shared API-key sign-in from Settings and every desktop transport
+  layer. Normal Codex account status is read-only. The matching server rejects
+  the legacy login route before accessing the account manager, including
+  requests from older clients. This prevents Settings from overwriting the
+  credentials used by ordinary Codex chats and the CLI.
+- Keep one explicit Custom endpoint flow: enter URL/model/key, Test, then
+  Save. Explain that a new chat must select **Codex · Custom endpoint**.
+  Normal account-status failures no longer block endpoint configuration.
+- Reproduce the original shared-login call in a disposable native runtime.
+  Exercise the corrected Settings with native mouse/keyboard input through
+  the full production server module and actual Codex process against a
+  controlled Responses service. Verify failed tests and retry, exact URL/model
+  persistence, invalidated tests after edits, busy-save rejection, Remove,
+  account-status failure recovery and legacy-route rejection. Confirm zero
+  native login calls and unchanged ordinary account state.
+- Verify simultaneous normal/custom native threads and follow-ups retain
+  separate credentials and models. Inspect the packaged renderer/preload and
+  all 88 compiled files; the removed shared-login paths are absent. UI fixtures
+  use disposable profiles and controlled endpoints; production background
+  lifecycle and a live external provider account are not claimed by these checks.
+- Pass focused regressions, TypeScript and production compilation. The macOS
+  release run passes 4,528 tests (10 skipped), universal signature/notarization,
+  DMG/ZIP parity and clean executable launch. Linux x64/arm64 and Windows x64
+  packaging and native launch checks also pass. Windows remains an explicitly
+  approved unsigned preview.
+- Publish the verified desktop packages to the canonical and legacy Beta
+  feeds with identical assets and checksum manifests. Independent publication
+  checks verify every platform again and confirm public Beta discovery.
+  Matching signed server artifacts are published; the managed server update
+  is queued for idle installation without interrupting active work.
+- Releases: [desktop beta.2](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.2)
+  and [server beta.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.2).
+
 ## 2026-09-17 — Per-chat native Codex endpoint selection (beta candidate)
 
 - Accept local desktop **1.0.4-beta.1 / 1175** from `59451a6` and matching

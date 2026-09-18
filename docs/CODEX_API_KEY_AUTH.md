@@ -1,76 +1,56 @@
-# Codex API-key sign-in
+# Codex account and custom endpoints
 
-Open **Settings → Codex account → Use API key** on the selected server.
-Enter the key in the masked field and choose **Sign in with API key**.
-This requires the matching AgentsServer authentication endpoints and an
-authenticated native administrator connection. Older servers show an update
-message rather than attempting a terminal command or another login route.
+Open **Settings → Server → Codex account**. Normal Codex account status is
+read-only. **Recheck** refreshes the displayed status. Manage normal ChatGPT
+or OpenAI authentication with Codex on the server.
 
-The app still runs the installed `codex app-server`, including its tools,
-sessions and native context management. It does not make direct model API
-requests or implement a separate agent loop. OpenAI documents this native
-[`account/login/start` API-key flow](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
+Starting with **1.0.4-beta.2**, AgentsDock no longer offers shared API-key
+sign-in. AgentsServer also rejects the legacy login route from older clients.
+Entering a provider key must not replace the credentials used by ordinary
+Codex chats or the Codex CLI.
 
-## Scope and storage
+## Configure an endpoint
 
-- This changes the Codex account for the server user, not for one chat.
-  Active and queued Codex work must finish first; sign-in never stops a run.
-- The key goes to the selected server over its existing authenticated
-  connection. Use HTTPS or a trusted encrypted network for a remote server.
-- Codex owns credential storage. AgentsDock does not save the key in its
-  settings, cache, chat history or logs. Closing the form, changing servers,
-  cancelling or submitting clears the password field.
-- API usage is billed separately from a ChatGPT subscription. Saving a key is
-  not proof that the account has credit or access to a particular model.
-- Existing ChatGPT authentication is unchanged until a key is submitted.
-  To return to ChatGPT sign-in, use the normal `codex login` flow as the server
-  user, then choose Recheck. This feature does not add a second OAuth flow.
-
-## Requests and failures
-
-Account state is fetched when the settings control opens and when Recheck is
-chosen. There is no polling, per-keystroke network activity or automatic login
-retry. A successful save triggers one runtime-catalog refresh so an old
-unauthenticated status does not keep blocking the composer.
-
-The renderer's profile ID and generation are checked before sending a key.
-Late responses cannot be attributed to a newly selected server. The native
-HTTP transport rejects redirects, and errors are mapped to fixed messages
-before they cross IPC, so a provider error cannot echo a submitted key.
-
-If a request disconnects after submission, choose Recheck before trying again:
-the native runtime may already have saved the credential.
-
-## Custom endpoints
-
-The expanded account form also provides **Custom endpoint** with an API base
-URL, exact model ID and masked provider key. This still uses the installed Codex
-runtime, with its native custom Responses provider configuration. A provider
-that only supports Chat Completions is not automatically compatible.
-
-1. Enter the provider's API base URL, not its website/model-catalog URL or an
-   individual `/responses` or `/chat/completions` operation URL.
-2. Enter its exact model ID and a fresh key for that endpoint.
-3. Choose **Test connection**. This runs one small, isolated native Codex request
-   and may incur provider usage. It does not save settings or change live chats.
+1. Choose **Custom endpoint**.
+2. Enter the provider's API base URL, exact model ID and a fresh API key.
+   Use the API base URL, not its website or an individual `/responses` or
+   `/chat/completions` operation URL.
+3. Choose **Test connection**. This makes one small request through native
+   Codex and may incur provider usage. It does not save the configuration.
 4. After a successful test, choose **Save endpoint** while Codex work is idle.
-   Editing any field invalidates the previous result. There is no automatic
-   test, retry, polling or credential submission while typing.
+5. Create a chat and select **Codex · Custom endpoint** in its provider picker.
+   Saving endpoint settings does not switch an ordinary Codex chat.
 
-Custom credentials are separate from the normal Codex account. The server
-keeps them in endpoint-bound, owner-only credential storage and passes them to
-its owned Codex process; the app never reads back the key. HTTPS is required
-except for local loopback endpoints. The normal ChatGPT/OpenAI login is not
-forwarded to the custom provider.
+The endpoint must support the Responses protocol required by native Codex.
+Chat Completions compatibility alone is insufficient. Editing a field invalidates
+its previous connection test. Testing and saving remain available even when
+normal Codex account status cannot be read, provided the server authorizes
+endpoint configuration.
 
-The selected endpoint is for new Codex chats. A thread bound to a different
-provider cannot silently send its history to the newly selected endpoint.
-Choose **Use Codex default** to remove the override and use the original
-Codex configuration and account again. Existing work is never stopped by Save
-or reset.
+Custom provider keys are stored separately in private files on the selected
+server and are bound to the configured URL and model. The app never reads back
+a saved key. HTTPS is required except for local loopback endpoints. Normal
+Codex credentials are not used to authenticate to the custom provider.
 
-Connection failures are reported separately from saving a key. A successful
-test establishes a small native response for that model and endpoint, not
-every tool, model or billing capability. Provider error bodies are not shown,
-because they can contain credentials. These controls require the matching
-AgentsServer provider endpoints.
+A started chat retains its provider and endpoint binding. Choose **Remove
+custom endpoint** to delete the separate configuration; affected custom chats
+need their original configuration restored before they can continue. Normal
+Codex authentication is unchanged. Active work is not interrupted by Save or
+Remove.
+
+## Requests and recovery
+
+The app checks request ownership against the selected server. Closing the
+form, changing servers, cancelling or saving clears its key field. There is
+no request on each keystroke, idle polling or automatic login retry. Provider
+errors are mapped to fixed messages so they cannot echo credentials.
+
+A successful connection test verifies a small native response with the entered
+endpoint and model; it does not establish every tool or billing capability.
+
+If shared credentials were replaced with 1.0.4-beta.1, restore authentication
+through Codex's normal sign-in flow. Restoring a credential file may leave an
+existing native process with its previous in-memory account. Recreate that
+process after active work finishes, for example through the managed when-idle
+server update. The fixed beta prevents another overwrite; it cannot reconstruct
+credentials that were already replaced.
