@@ -724,7 +724,8 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.namespace = dict(asyncio=asyncio, side_questions=side, STATE_DIR=root,
             SERVER_SHUTTING_DOWN=False, STORE=SimpleNamespace(sessions={"chat": self.session}),
             CODEX_GOALS_RECONFIGURING=False,
-            CODEX_PROVIDER_STORE=SimpleNamespace(revision=lambda: None, selection=lambda **kwargs: None,
+            codex_provider=SimpleNamespace(session_choice=lambda value: value or "default"),
+            CODEX_PROVIDER_STORE=SimpleNamespace(revision=lambda: None, for_session=lambda *args, **kwargs: None,
                 require_thread=lambda *args: None),
             DEFAULT_BACKEND="claude", BACKEND_CLAUDE="claude", BACKEND_CODEX="codex",
             CLAUDE_BIN="synthetic-claude", CODEX_BIN="synthetic-codex", DEFAULT_CWD=str(root),
@@ -749,6 +750,28 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             self.codex.ask.assert_not_awaited()
             self.namespace["CODEX_GOALS_RECONFIGURING"] = False
             self.assertEqual((await chat.ask("Why?", history=[]))["answer"], "Native Codex answer")
+
+    async def test_side_chat_inherits_custom_selection_but_default_ignores_custom_revision(self):
+        self.session["backend"] = "codex"
+        selected = {"base_url": "https://synthetic.invalid/v1", "model": "synthetic-model", "api_key": "synthetic-key"}
+        revision = Mock(return_value="first")
+        self.namespace["CODEX_PROVIDER_STORE"] = SimpleNamespace(revision=revision,
+            for_session=lambda session, **kwargs: selected if session.get("codex_provider") == "custom" else None,
+            require_thread=Mock())
+        with patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(NativeCodexSideChat=self.codex_factory)}):
+            normal = await self.namespace["create_native_side_chat"]("chat")
+            revision.return_value = "second"
+            await normal.ask("Normal?", history=[])
+            self.assertIsNone(self.codex_factory.call_args.kwargs["provider_selection"])
+            revision.assert_not_called()
+            self.session["codex_provider"] = "custom"
+            custom = await self.namespace["create_native_side_chat"]("chat")
+            await custom.ask("Custom?", history=[])
+            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], selected)
+            revision.return_value = "third"
+            with self.assertRaises(side.SideQuestionError) as caught:
+                await custom.ask("Stale?", history=[])
+            self.assertEqual(caught.exception.status_code, 410)
 
     async def test_both_native_backends_leave_busy_parent_and_event_log_untouched(self):
         initial_session = json.dumps(self.session, sort_keys=True)

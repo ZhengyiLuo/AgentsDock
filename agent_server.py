@@ -6086,6 +6086,7 @@ class CreateSessionRequest(BaseModel):
     folder: str | None = None
     cwd: str | None = None
     backend: str | None = None
+    codex_provider: Literal["default", "custom"] | None = None
     model: str | None = None
     effort: str | None = None
     system_prompt: str | None = Field(default=None, max_length=MAX_SESSION_SYSTEM_PROMPT_CHARS)
@@ -6152,6 +6153,7 @@ class UpdateSessionRequest(BaseModel):
     folder: str | None = None
     cwd: str | None = None
     backend: str | None = None
+    codex_provider: Literal["default", "custom"] | None = None
     model: str | None = None
     effort: str | None = None
     system_prompt: str | None = Field(default=None, max_length=MAX_SESSION_SYSTEM_PROMPT_CHARS)
@@ -6176,6 +6178,7 @@ class UpdateSessionRequest(BaseModel):
 SESSION_LIFECYCLE_UPDATE_FIELDS = frozenset({
     "cwd",
     "backend",
+    "codex_provider",
     "model",
     "effort",
     "system_prompt",
@@ -6955,15 +6958,26 @@ def preview_session_runtime_update(
             ),
         )
 
+    current_provider = codex_provider.session_choice(sess.get("codex_provider"))
+    prospective_provider = codex_provider.session_choice(
+        patch.get("codex_provider") if "codex_provider" in patch
+        else "default" if backend_changed else current_provider
+    )
+    provider_changed = prospective_provider != current_provider
+    if prospective_provider == "custom" and prospective_backend != BACKEND_CODEX:
+        raise HTTPException(400, "A custom Codex provider requires the Codex backend.")
+    if provider_changed and session_backend_locked(sess):
+        raise HTTPException(409, "Codex provider is locked after the chat starts; create a new chat to use another provider.")
+
     prospective_model = (
         str(patch.get("model") or "").strip() or None
         if "model" in patch
-        else None if backend_changed else sess.get("model")
+        else None if backend_changed or provider_changed else sess.get("model")
     )
     prospective_effort = (
         patch.get("effort")
         if "effort" in patch
-        else None if backend_changed else sess.get("effort")
+        else None if backend_changed or provider_changed else sess.get("effort")
     )
     normalized_effort = normalize_runtime_effort_for_model(
         prospective_backend,
@@ -6974,8 +6988,20 @@ def preview_session_runtime_update(
 
     preview = dict(sess)
     preview["backend"] = prospective_backend
+    preview["codex_provider"] = prospective_provider
+    if provider_changed or prospective_provider == "default":
+        preview.pop("codex_provider_binding", None)
     preview["model"] = prospective_model
     preview["effort"] = normalized_effort
+    if prospective_provider == "custom" and {"backend", "codex_provider", "model", "effort"}.intersection(patch):
+        if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC:
+            raise HTTPException(409, "Custom endpoints require native Codex app-server transport.")
+        selected = CODEX_PROVIDER_STORE.for_session(preview)
+        if prospective_model and prospective_model != selected["model"]:
+            raise HTTPException(400, "Choose the model configured for the custom Codex endpoint.")
+        preview["model"] = selected["model"]
+        preview["effort"] = None
+        preview["codex_provider_binding"] = codex_provider.binding(selected)
     if backend_changed:
         provider_id_field = {
             BACKEND_CLAUDE: "claude_session_id",
@@ -10174,13 +10200,10 @@ class SessionStore:
         backend = (req.backend or DEFAULT_BACKEND).lower()
         if backend not in VALID_BACKENDS:
             raise HTTPException(status_code=400, detail=f"backend must be one of {sorted(VALID_BACKENDS)}")
-        model = str(req.model or "").strip() or None
-        effort = normalize_runtime_effort_for_model(
-            backend,
-            model,
-            req.effort,
-            strict=True,
-        )
+        runtime = preview_session_runtime_update({"backend": backend}, {
+            "codex_provider": req.codex_provider, "model": req.model, "effort": req.effort,
+        })
+        model, effort = runtime["model"], runtime["effort"]
         provider_id = req.provider_session_id or req.session_id
         claude_session_id = req.claude_session_id or (provider_id if backend == BACKEND_CLAUDE else None)
         codex_thread_id = req.codex_thread_id or (provider_id if backend == BACKEND_CODEX else None)
@@ -10204,6 +10227,8 @@ class SessionStore:
         # switching, so validate every supplied Codex thread, not only the
         # currently active provider identity.
         ensure_codex_thread_not_pending_fork_cleanup(codex_thread_id)
+        if backend == BACKEND_CODEX:
+            CODEX_PROVIDER_STORE.require_thread(codex_thread_id, CODEX_PROVIDER_STORE.for_session(runtime))
         sid = f"sess_{uuid.uuid4().hex[:16]}"
         ensure_dirs(sid)
         now = now_iso()
@@ -10218,6 +10243,8 @@ class SessionStore:
             "folder": req.folder or "General",
             "cwd": req.cwd or DEFAULT_CWD,
             "backend": backend,
+            "codex_provider": runtime["codex_provider"],
+            "codex_provider_binding": runtime.get("codex_provider_binding"),
             "model": model,
             "effort": effort,
             "system_prompt": clean_session_system_prompt(req.system_prompt),
@@ -10320,6 +10347,7 @@ class SessionStore:
             sess = self.sessions.get(sid)
             if not sess:
                 raise HTTPException(status_code=404, detail="session not found")
+            previous_provider_runtime = dict(sess) if "codex_provider" in patch else None
             missing_policy = object()
             previous_provider_jobs_access = sess.get(
                 "provider_jobs_access",
@@ -10331,6 +10359,7 @@ class SessionStore:
                 runtime_preview.get("backend") or DEFAULT_BACKEND
             ).lower()
             backend_changed = prospective_backend != current_backend
+            provider_changed = runtime_preview["codex_provider"] != codex_provider.session_choice(sess.get("codex_provider"))
             prospective_effort = (
                 patch.get("effort")
                 if "effort" in patch
@@ -10370,6 +10399,12 @@ class SessionStore:
                     if "effort" not in patch:
                         sess["effort"] = None
                     await append_event(sid, "backend_changed", {"old": old, "new": backend})
+            if "codex_provider" in patch or backend_changed:
+                sess["codex_provider"] = runtime_preview["codex_provider"]
+                sess["codex_provider_binding"] = runtime_preview.get("codex_provider_binding")
+            if provider_changed:
+                sess["model"] = runtime_preview["model"]
+                sess["effort"] = runtime_preview["effort"]
             for key in ("title", "folder", "cwd"):
                 if key in patch and patch[key] is not None:
                     sess[key] = patch[key]
@@ -10439,6 +10474,9 @@ class SessionStore:
                 # which value was retained, and a following effort PATCH can
                 # choose any supported value.
                 sess["effort"] = normalized_prospective_effort
+            if runtime_preview["codex_provider"] == "custom" and {"backend", "codex_provider", "model", "effort"}.intersection(patch):
+                sess["model"] = runtime_preview["model"]
+                sess["effort"] = None
             if "pinned" in patch and patch["pinned"] is not None:
                 pinned = bool(patch["pinned"])
                 if pinned and not sess.get("pinned"):
@@ -10463,6 +10501,10 @@ class SessionStore:
             try:
                 await self.save()
             except BaseException:
+                if previous_provider_runtime is not None:
+                    sess.clear()
+                    sess.update(previous_provider_runtime)
+                    await self.persist_restored_state(durable=True)
                 # This field is an agent authorization boundary. Never leave
                 # a failed durable PATCH applied only in memory—especially a
                 # failed expansion from blocked/read-only to full.
@@ -49686,7 +49728,7 @@ def public_session(sess: dict[str, Any], *, summary: bool = False) -> dict[str, 
     public = {
         k: sess.get(k)
         for k in (
-            "id", "title", "folder", "cwd", "backend", "model", "effort",
+            "id", "title", "folder", "cwd", "backend", "model", "effort", "codex_provider",
             *detail_fields,
             "codex_thread_status",
             "codex_pending_interaction_count", "codex_needs_user_action",
@@ -49701,6 +49743,7 @@ def public_session(sess: dict[str, Any], *, summary: bool = False) -> dict[str, 
     # Provider ids are intentionally omitted from summary responses, but the
     # UI still needs the authoritative first-turn backend fence.
     public["backend_locked"] = session_backend_locked(sess)
+    public["codex_provider"] = codex_provider.session_choice(sess.get("codex_provider"))
     emergency_alert, emergency_count = emergency_summary(sess)
     # Ordinary session-list summaries are a high-volume payload. Keep the
     # emergency keys sparse when there is nothing to report; the dedicated
@@ -50568,9 +50611,9 @@ def codex_app_server_env() -> dict[str, str]:
     env["AGENTSDOCK_MAIL_CLI"] = str(SERVER_ROOT / "agentsdock_mail.py")
     env["AGENTSDOCK_TEAM_CLI"] = str(SERVER_ROOT / "agentsdock_team.py")
     scrub_provider_runtime_environment(env)
-    selected = CODEX_PROVIDER_STORE.selection(include_key=True)
+    selected = CODEX_PROVIDER_STORE.registration(include_key=True)
     if selected:
-        env = codex_provider.native_environment(env, selected)
+        env = codex_provider.registration_environment(env, selected)
     return env
 
 
@@ -53406,14 +53449,14 @@ async def codex_app_server_manager() -> CodexAppServerManager:
             ensure_provider_manager_factory_admission(codex=True)
             manager = CODEX_APP_SERVER_MANAGER
             if manager is None:
-                selected = CODEX_PROVIDER_STORE.selection(include_key=True)
+                selected = CODEX_PROVIDER_STORE.registration(include_key=True)
                 manager = CodexAppServerManager(
                     CODEX_BIN,
                     cwd=existing_cwd(DEFAULT_CWD),
                     env_factory=codex_app_server_env,
                     app_server_args=(
                         (() if CODEX_GOALS_ENABLED else ("--disable", "goals"))
-                        + (codex_provider.native_args(selected) if selected else ())
+                        + (codex_provider.registration_args(selected) if selected else ())
                     ),
                     request_timeout=CODEX_APP_SERVER_TIMEOUT_SECONDS,
                     lifecycle_timeout=CODEX_APP_SERVER_LIFECYCLE_TIMEOUT_SECONDS,
@@ -53436,6 +53479,7 @@ async def codex_app_server_manager() -> CodexAppServerManager:
                     on_process_started=register_codex_app_server_child,
                     on_process_exited=unregister_codex_app_server_child,
                     sensitive_values=(selected["api_key"],) if selected else (),
+                    protected_env_keys=(codex_provider.ENV_KEY,) if selected else (),
                 )
                 manager.add_notification_handler(project_codex_notification)
                 if selected:
@@ -56063,28 +56107,6 @@ def probe_runtime(backend: str) -> dict[str, Any]:
             executable=resolved,
         )
 
-    if backend == BACKEND_CODEX:
-        try:
-            custom_provider = CODEX_PROVIDER_STORE.selection()
-        except Exception:
-            return runtime_diagnostic_payload(
-                backend, "error", installed=True, authenticated=None, version=version,
-                message="Saved Codex endpoint settings are unavailable. Open Codex account settings to check them.",
-            )
-        if custom_provider:
-            if CODEX_TRANSPORT == CODEX_TRANSPORT_EXEC:
-                return runtime_diagnostic_payload(
-                    backend, "error", installed=True, authenticated=None, version=version,
-                    message="Custom endpoints require native Codex app-server transport.",
-                )
-            # Native login status describes the normal OpenAI account, not the
-            # custom provider's separate key. Do not contact either provider or
-            # reject a configured gateway because ChatGPT is signed out.
-            return runtime_diagnostic_payload(
-                backend, "ready", installed=True, authenticated=True, version=version,
-                message="Native Codex endpoint and provider key are configured. Use Test connection to check access.",
-            )
-
     if backend == BACKEND_CLAUDE:
         auth_cmd = [resolved, "auth", "status", "--json"]
     else:
@@ -56251,8 +56273,14 @@ def record_runtime_success(backend: str) -> None:
     store_runtime_diagnostic(current, preserve_last_error=False)
 
 
-async def ensure_runtime_available(backend: str) -> dict[str, Any]:
+async def ensure_runtime_available(backend: str, *, session: dict[str, Any] | None = None) -> dict[str, Any]:
     diagnostic = await asyncio.to_thread(runtime_diagnostic, backend)
+    if backend == BACKEND_CODEX and codex_provider.session_choice((session or {}).get("codex_provider")) == "custom":
+        CODEX_PROVIDER_STORE.for_session(session)
+        if CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC and diagnostic.get("installed") is True:
+            return {**diagnostic, "status": "ready", "authenticated": True,
+                "message": "The custom Codex endpoint and provider key are configured."}
+        raise HTTPException(503, "The custom endpoint requires an installed native Codex app-server runtime.")
     if diagnostic.get("status") == "ready":
         if backend == BACKEND_CURSOR and not diagnostic.get("_executable"):
             # Carry one compatibility-probed absolute path from admission to
@@ -56379,13 +56407,6 @@ def codex_app_server_service_tier(service_tier: str) -> str:
 
 
 def discover_codex_catalog() -> dict[str, Any]:
-    selected = CODEX_PROVIDER_STORE.selection()
-    if selected:
-        model = selected["model"]
-        return {"models": [{"value": "", "label": f"Server default ({model})"}, {"value": model, "label": model}],
-            "efforts": [], "model_efforts": {model: []}, "model_source": "configured native Responses endpoint",
-            "effort_source": "provider default", "default_model": model, "default_effort": None,
-            "default_service_tier": None}
     models: list[dict[str, Any]] = []
     model_options: list[dict[str, Any]] = []
     effort_options: list[dict[str, Any]] = []
@@ -56906,6 +56927,10 @@ def discover_runtime_catalog(*, force_runtime_probe: bool = False) -> dict[str, 
         "permission_modes": list(CURSOR_PERMISSION_MODES),
         "default_permission_mode": CURSOR_DEFAULT_PERMISSION_MODE,
     })
+    catalog["backends"][BACKEND_CODEX]["custom_provider"] = CODEX_PROVIDER_STORE.catalog(
+        available=CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC
+        and diagnostics.get(BACKEND_CODEX, {}).get("installed") is True,
+    )
     return catalog
 
 
@@ -56948,7 +56973,7 @@ def codex_thread_instruction_hash(session_id: str, sess: dict[str, Any]) -> str:
 
 
 def codex_runtime_settings(sess: dict[str, Any]) -> tuple[str, str, str]:
-    selected = CODEX_PROVIDER_STORE.selection()
+    selected = CODEX_PROVIDER_STORE.for_session(sess)
     CODEX_PROVIDER_STORE.require_thread(session_codex_thread_id(sess), selected)
     if selected:
         model = str(sess.get("model") or selected["model"]).strip()
@@ -57067,7 +57092,7 @@ def codex_thread_params(
         params["developerInstructions"] = developer_instructions
     if model:
         params["model"] = model
-    selected = CODEX_PROVIDER_STORE.selection()
+    selected = CODEX_PROVIDER_STORE.for_session(sess)
     if selected:
         params["modelProvider"] = codex_provider.PROVIDER_ID
     if service_tier:
@@ -57483,7 +57508,7 @@ async def ensure_codex_app_server_thread(
                     "serviceName": "AgentsDock",
                 }
             )
-            await asyncio.to_thread(CODEX_PROVIDER_STORE.record_thread, provider_id)
+            await asyncio.to_thread(CODEX_PROVIDER_STORE.record_thread, provider_id, CODEX_PROVIDER_STORE.for_session(sess))
             await pin_codex_app_server_thread(provider_id, manager)
             pinned = True
         elif already_loaded and policy_changed:
@@ -58641,7 +58666,7 @@ async def fork_codex_thread(
     *,
     last_turn_id: str | None = None,
 ) -> str:
-    CODEX_PROVIDER_STORE.require_thread(source_thread_id, CODEX_PROVIDER_STORE.selection())
+    CODEX_PROVIDER_STORE.require_thread(source_thread_id, CODEX_PROVIDER_STORE.for_session(sess))
     cwd = existing_cwd(str(sess.get("cwd") or DEFAULT_CWD))
     manager = await codex_app_server_manager()
     params = {
@@ -58745,7 +58770,7 @@ async def fork_codex_thread(
         )
 
     try:
-        await asyncio.to_thread(CODEX_PROVIDER_STORE.record_thread, forked_id)
+        await asyncio.to_thread(CODEX_PROVIDER_STORE.record_thread, forked_id, CODEX_PROVIDER_STORE.for_session(sess))
         forked_thread = await manager.read_thread(
             forked_id,
             include_turns=False,
@@ -67082,6 +67107,7 @@ async def run_codex_app_server(
             thread_pinned = False
         can_fallback = (
             allow_exec_fallback
+            and codex_provider.session_choice(sess.get("codex_provider")) == "default"
             and provider_command is None
             and not stop_requested
             and (
@@ -67312,7 +67338,8 @@ async def run_codex_app_server(
     try:
         if terminal_status == "failed":
             terminal_error = terminal_error or "Codex app-server turn failed."
-            record_runtime_failure(BACKEND_CODEX, terminal_error)
+            if codex_provider.session_choice(sess.get("codex_provider")) == "default":
+                record_runtime_failure(BACKEND_CODEX, terminal_error)
             if not error_emitted:
                 await append_event(session_id, "error", {
                     "run_id": current_run_id,
@@ -67321,7 +67348,7 @@ async def run_codex_app_server(
                     "transport": CODEX_TRANSPORT_APP_SERVER,
                     **current_metadata(),
                 })
-        elif not stopped:
+        elif not stopped and codex_provider.session_choice(sess.get("codex_provider")) == "default":
             record_runtime_success(BACKEND_CODEX)
 
         await flush_pending_unknown(
@@ -68203,7 +68230,7 @@ async def _start_turn_locked(
                 sess = await STORE.update(session_id, runtime_patch)
 
         backend = sess.get("backend") or DEFAULT_BACKEND
-        runtime_status = await ensure_runtime_available(backend)
+        runtime_status = await ensure_runtime_available(backend, session=sess)
         if provider_context_mode == "chat":
             sess = await STORE.mark_backend_started(session_id, str(backend))
         if backend == BACKEND_CURSOR:
@@ -76347,7 +76374,7 @@ async def health() -> dict[str, Any]:
         "capabilities": {
             "side_questions": side_questions.capability(),
             "codex_auth_v1": codex_auth.capability(available=bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC),
-            "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses"},
+            "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses", "per_chat": True},
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
             "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
@@ -77718,7 +77745,6 @@ app.include_router(codex_auth.create_router(
     authorize=require_native_admin_control,
     operation=codex_auth_operation,
     available=lambda: CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC,
-    login_allowed=lambda: CODEX_PROVIDER_STORE.selection() is None,
 ))
 
 
@@ -77816,7 +77842,8 @@ async def create_native_side_chat(session_id: str):
     parent_id = provider_id(session)
     if not parent_id:
         raise side_questions.SideQuestionError(409, "The native conversation has not started yet")
-    provider_revision = CODEX_PROVIDER_STORE.revision() if backend == BACKEND_CODEX else None
+    custom_codex = backend == BACKEND_CODEX and codex_provider.session_choice(session.get("codex_provider")) == "custom"
+    provider_revision = CODEX_PROVIDER_STORE.revision() if custom_codex else None
 
     class NativeSideChat:
         codex = None
@@ -77827,8 +77854,8 @@ async def create_native_side_chat(session_id: str):
             if backend == BACKEND_CODEX and CODEX_GOALS_RECONFIGURING:
                 raise side_questions.SideQuestionError(409, "Wait for Codex configuration to finish before using Side chat")
             if backend == BACKEND_CODEX:
-                CODEX_PROVIDER_STORE.require_thread(parent_id, CODEX_PROVIDER_STORE.selection())
-                if CODEX_PROVIDER_STORE.revision() != provider_revision:
+                CODEX_PROVIDER_STORE.require_thread(parent_id, CODEX_PROVIDER_STORE.for_session(session))
+                if custom_codex and CODEX_PROVIDER_STORE.revision() != provider_revision:
                     raise side_questions.SideQuestionError(410, "The Codex endpoint changed; clear Side chat")
             if not public_chat_share_session_exists(session_id):
                 raise side_questions.SideQuestionError(404, "Chat not found")
@@ -77862,7 +77889,7 @@ async def create_native_side_chat(session_id: str):
                     self.codex = NativeCodexSideChat(parent_id, executable=CODEX_BIN,
                         model=model if isinstance(model, str) and model.strip() else None,
                         env=side_questions.isolated_environment(runner_env()),
-                        provider_selection=CODEX_PROVIDER_STORE.selection(include_key=True))
+                        provider_selection=CODEX_PROVIDER_STORE.for_session(current, include_key=True))
                 result = {"answer": await self.codex.ask(question),
                           "context_note": "Native Codex context from when Side chat started, including tool results. Clear Side chat to use the latest main context."}
             self.current()
@@ -81363,15 +81390,16 @@ async def ensure_backend_update_allowed(
     yet, while still allowing idempotent saves from older clients.
     """
 
-    if "backend" not in patch or patch.get("backend") is None:
+    if ("backend" not in patch or patch.get("backend") is None) and "codex_provider" not in patch:
         return
     current_backend = str(
         current.get("backend") or DEFAULT_BACKEND
     ).strip().lower()
     requested_backend = str(
-        patch.get("backend") or DEFAULT_BACKEND
+        patch.get("backend") or current_backend
     ).strip().lower()
-    if requested_backend == current_backend:
+    provider_changed = "codex_provider" in patch and codex_provider.session_choice(patch.get("codex_provider")) != codex_provider.session_choice(current.get("codex_provider"))
+    if requested_backend == current_backend and not provider_changed:
         return
 
     async with ACTIVE_LOCK:
@@ -84518,6 +84546,12 @@ async def _fork_session_locked(
     parent_codex_thread_id = parent.get("codex_thread_id") or (
         parent.get("session_id") if parent_backend == BACKEND_CODEX else None
     )
+    if parent_backend == BACKEND_CODEX:
+        # Endpoint rejection must not become a memory fork that sends the
+        # original conversation to a different host after settings change.
+        CODEX_PROVIDER_STORE.require_thread(
+            parent_codex_thread_id, CODEX_PROVIDER_STORE.for_session(parent),
+        )
     parent_claude_session_id = (
         validated_claude_fork_provider_id(parent, session_id, fork_cwd)
         if parent_backend == BACKEND_CLAUDE and not empty_snapshot
@@ -84590,6 +84624,7 @@ async def _fork_session_locked(
             folder=parent.get("folder"),
             cwd=parent.get("cwd"),
             backend=parent_backend,
+            codex_provider=codex_provider.session_choice(parent.get("codex_provider")),
             model=parent.get("model"),
             effort=parent.get("effort"),
             system_prompt=parent.get("system_prompt"),

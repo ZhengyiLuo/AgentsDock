@@ -565,11 +565,13 @@ class CodexAppServerClient:
         on_process_started: ProcessLifecycleHook | None = None,
         on_process_exited: ProcessLifecycleHook | None = None,
         sensitive_values: Sequence[str] = (),
+        protected_env_keys: Sequence[str] = (),
     ) -> None:
         self.codex_bin = codex_bin
         self.cwd = cwd
         self.env_factory = env_factory
         self._sensitive_values = tuple(value for value in sensitive_values if isinstance(value, str) and value)
+        self._protected_env_keys = tuple(protected_env_keys)
         # Lifecycle hooks receive ``(pid, process_group_id)``. The group id is
         # None whenever start() could not prove it owns the child's session,
         # so a hook must never derive a signal target from the pid alone.
@@ -1024,6 +1026,21 @@ class CodexAppServerClient:
         transport_turn: CodexAppServerTurn | None = None,
         before_send: Callable[[], bool] | None = None,
     ) -> Any:
+        if self._protected_env_keys and method in {"thread/start", "thread/resume", "thread/fork"}:
+            effective = await self._request_connected("config/read", {
+                "includeLayers": False, "cwd": params.get("cwd") or self.cwd,
+            }, discard_on_send_timeout=False)
+            config = effective.get("config") if isinstance(effective, dict) else None
+            policy = config.get("shell_environment_policy") if isinstance(config, dict) else None
+            if not isinstance(config, dict) or policy is not None and not isinstance(policy, dict):
+                raise CodexAppServerProtocolError("Native shell environment policy could not be verified", request_sent=False, safe_to_retry=False)
+            exclusions = (policy or {}).get("exclude") or []
+            overrides = dict(params.get("config") or {})
+            requested = overrides.get("shell_environment_policy.exclude") or []
+            if not all(isinstance(values, list) and all(isinstance(value, str) for value in values) for values in (exclusions, requested)):
+                raise CodexAppServerProtocolError("Native shell environment exclusions could not be verified", request_sent=False, safe_to_retry=False)
+            overrides["shell_environment_policy.exclude"] = list(dict.fromkeys([*exclusions, *requested, *self._protected_env_keys]))
+            params = {**params, "config": overrides}
         proc = self._proc
         if not proc or proc.returncode is not None or not proc.stdin:
             raise CodexAppServerDisconnected(
@@ -2650,6 +2667,7 @@ class CodexAppServerManager:
         on_process_started: ProcessLifecycleHook | None = None,
         on_process_exited: ProcessLifecycleHook | None = None,
         sensitive_values: Sequence[str] = (),
+        protected_env_keys: Sequence[str] = (),
     ) -> None:
         self.client = CodexAppServerClient(
             codex_bin,
@@ -2667,6 +2685,7 @@ class CodexAppServerManager:
             on_process_started=on_process_started,
             on_process_exited=on_process_exited,
             sensitive_values=sensitive_values,
+            protected_env_keys=protected_env_keys,
         )
 
     @property

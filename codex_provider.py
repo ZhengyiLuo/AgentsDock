@@ -64,6 +64,13 @@ def binding(selection: dict) -> str:
     return hashlib.sha256(json.dumps([selection["base_url"], selection["model"]], separators=(",", ":")).encode()).hexdigest()
 
 
+def session_choice(value) -> str:
+    choice = "default" if value is None else value
+    if not isinstance(choice, str) or choice not in {"default", "custom"}:
+        raise HTTPException(400, "Codex provider must be default or custom.")
+    return choice
+
+
 class ProviderStore:
     """Atomic metadata pointer plus private, endpoint-bound credential records."""
     def __init__(self, root: Path):
@@ -154,6 +161,30 @@ class ProviderStore:
             "model": selected["model"] if selected else None,
             "has_api_key": selected is not None, "wire_api": "responses"}
 
+    def for_session(self, session: dict, *, include_key=False) -> dict | None:
+        if session_choice(session.get("codex_provider")) == "default":
+            return None
+        selected = self.selection(include_key=include_key)
+        if selected is None:
+            raise HTTPException(409, "Configure the custom Codex endpoint before using this chat.")
+        if session.get("codex_provider_binding") not in (None, binding(selected)):
+            raise HTTPException(409, "This conversation belongs to another Codex endpoint. Start a new Codex chat, or restore its original endpoint and model.")
+        return selected
+
+    def registration(self, *, include_key=False) -> dict | None:
+        # A damaged optional endpoint must not prevent normal Codex startup.
+        # Custom chat admission and the admin status route still fail closed.
+        try:
+            return self.selection(include_key=include_key)
+        except HTTPException:
+            return None
+
+    def catalog(self, *, available: bool) -> dict:
+        selected = self.registration()
+        return {"configured": selected is not None, "available": available and selected is not None,
+            "model": selected["model"] if selected else None,
+            "base_url": selected["base_url"] if selected else None}
+
     def revision(self):
         with self.lock:
             return (self._read("settings.json") or {}).get("credential_id")
@@ -170,9 +201,8 @@ class ProviderStore:
             if (previous or {}).get("binding") != expected:
                 raise HTTPException(409, "This conversation belongs to another Codex endpoint. Start a new Codex chat, or restore its original endpoint and model.")
 
-    def record_thread(self, thread_id: str):
+    def record_thread(self, thread_id: str, selected: dict | None):
         with self.lock:
-            selected = self.selection()
             if selected:
                 self._atomic(self._binding_name(thread_id), {"binding": binding(selected)})
 
@@ -218,6 +248,23 @@ def native_config(selected: dict) -> dict:
 
 def native_args(selected: dict) -> tuple[str, ...]:
     return config_args(native_config(selected))
+
+
+def registration_args(selected: dict) -> tuple[str, ...]:
+    config = native_config(selected)
+    config.pop("model_provider")
+    config.pop("model")
+    # Do not overwrite the normal provider's effective shell policy. The
+    # shared client merges the dedicated secret exclusion per thread after
+    # resolving native profile/project layers for that thread's cwd.
+    config.pop("shell_environment_policy.exclude")
+    return config_args(config)
+
+
+def registration_environment(environment: dict, selected: dict) -> dict:
+    # One native manager serves both providers. Keep its original normal
+    # credentials; the custom definition requires only its dedicated env_key.
+    return {**environment, ENV_KEY: selected["api_key"], "RUST_LOG": "off"}
 
 
 def config_args(config: dict) -> tuple[str, ...]:

@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 import codex_auth
 import codex_provider as provider
-from codex_app_server import CodexAppServerClient, CodexAppServerRequestError
+from codex_app_server import CodexAppServerClient, CodexAppServerRequestError, CodexAppServerProtocolError
 from test_codex_app_server import FakeProcessFactory, NO_RESPONSE
 import test_codex_auth_isolated as auth_fixture
 from test_codex_auth_isolated import NATIVE
@@ -50,7 +50,7 @@ class StoreTests(unittest.TestCase):
         self.store.save(SELECTION)
         with self.assertRaises(HTTPException):
             self.store.require_thread("old-default-thread", SELECTION)
-        self.store.record_thread("custom-thread/../../not-a-path")
+        self.store.record_thread("custom-thread/../../not-a-path", SELECTION)
         self.store.require_thread("custom-thread/../../not-a-path", SELECTION)
         with self.assertRaises(HTTPException):
             self.store.require_thread("custom-thread/../../not-a-path", {**SELECTION, "model": "different"})
@@ -151,7 +151,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
             mutate=self.ns["mutate_codex_provider"], probe=self.probe, available=lambda: True))
         app.include_router(codex_auth.create_router(authorize=self.ns["require_native_admin_control"],
             operation=self.ns["codex_auth_operation"], available=lambda: True,
-            login_allowed=lambda: self.store.selection() is None))
+            ))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
 
@@ -169,11 +169,11 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["configured"])
 
-    def test_custom_blocks_normal_login_and_busy_blocks_mutation(self):
+    def test_custom_preserves_normal_login_and_busy_blocks_mutation(self):
         self.store.save(SELECTION)
         response = self.client.post("/api/admin/codex/auth/api-key", headers=NATIVE, json={"api_key": KEY})
-        self.assertEqual(response.status_code, 409, response.text)
-        self.manager.request.assert_not_awaited()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.manager.request.assert_awaited_once()
         self.manager.client._turns_by_thread = {"native": SimpleNamespace(_completed=False)}
         response = self.client.delete("/api/admin/codex/provider", headers=NATIVE)
         self.assertEqual(response.status_code, 409, response.text)
@@ -234,6 +234,29 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shared_native_registration_preserves_effective_shell_exclusions(self):
+        self.assertFalse(any(value.startswith("shell_environment_policy.exclude=") for value in provider.registration_args(SELECTION)))
+        factory = FakeProcessFactory()
+        client = CodexAppServerClient("unused", cwd="/tmp", env_factory=dict,
+            process_factory=factory, protected_env_keys=(provider.ENV_KEY,), request_timeout=1)
+        self.addAsyncCleanup(client.close)
+        factory.process.responders["config/read"] = lambda _: {"config": {"shell_environment_policy": {"exclude": ["OPERATOR_SECRET_*", "PROJECT_PRIVATE"]}}}
+        for method in ("thread/start", "thread/resume", "thread/fork"):
+            factory.process.responders[method] = lambda _: {"thread": {"id": "synthetic"}}
+            original = {"cwd": "/synthetic-project", "config": {"shell_environment_policy.exclude": ["THREAD_PRIVATE"], "unrelated": True}}
+            await client.request(method, original)
+            received = factory.process.messages[-1]["params"]
+            self.assertEqual(received["config"]["shell_environment_policy.exclude"],
+                ["OPERATOR_SECRET_*", "PROJECT_PRIVATE", "THREAD_PRIVATE", provider.ENV_KEY])
+            self.assertTrue(received["config"]["unrelated"])
+            self.assertEqual(original["config"]["shell_environment_policy.exclude"], ["THREAD_PRIVATE"])
+            self.assertEqual(factory.process.messages[-2]["params"]["cwd"], "/synthetic-project")
+        factory.process.responders["config/read"] = lambda _: {"config": {"shell_environment_policy": {"exclude": "invalid"}}}
+        before = len([message for message in factory.process.messages if message["method"] == "thread/start"])
+        with self.assertRaises(CodexAppServerProtocolError):
+            await client.request("thread/start", {"cwd": "/synthetic-project"})
+        self.assertEqual(len([message for message in factory.process.messages if message["method"] == "thread/start"]), before)
+
     async def test_custom_upstream_error_notification_and_stderr_are_redacted(self):
         factory = FakeProcessFactory()
         client = CodexAppServerClient("unused", cwd="/tmp", env_factory=dict,
