@@ -723,6 +723,7 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.options = SimpleNamespace(resume="claude-parent")
         self.namespace = dict(asyncio=asyncio, side_questions=side, STATE_DIR=root,
             SERVER_SHUTTING_DOWN=False, STORE=SimpleNamespace(sessions={"chat": self.session}),
+            CODEX_GOALS_RECONFIGURING=False,
             DEFAULT_BACKEND="claude", BACKEND_CLAUDE="claude", BACKEND_CODEX="codex",
             CLAUDE_BIN="synthetic-claude", CODEX_BIN="synthetic-codex", DEFAULT_CWD=str(root),
             ACTIVE=self.parent_active, QUEUED_TURNS=self.parent_queue,
@@ -733,6 +734,19 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             runner_env=lambda: {"AGENTSDOCK_CHAT_ID": "parent", "HOME": "/synthetic"})
         self.namespace["public_chat_share_session_exists"] = lambda sid: sid in self.namespace["STORE"].sessions
         exec(self.code, self.namespace)
+
+    async def test_codex_auth_reservation_rejects_side_chat_before_provider_creation(self):
+        self.session["backend"] = "codex"
+        chat = await self.namespace["create_native_side_chat"]("chat")
+        self.namespace["CODEX_GOALS_RECONFIGURING"] = True
+        with patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(NativeCodexSideChat=self.codex_factory)}):
+            with self.assertRaises(side.SideQuestionError) as raised:
+                await chat.ask("Why?", history=[])
+            self.assertEqual(raised.exception.status_code, 409)
+            self.codex_factory.assert_not_called()
+            self.codex.ask.assert_not_awaited()
+            self.namespace["CODEX_GOALS_RECONFIGURING"] = False
+            self.assertEqual((await chat.ask("Why?", history=[]))["answer"], "Native Codex answer")
 
     async def test_both_native_backends_leave_busy_parent_and_event_log_untouched(self):
         initial_session = json.dumps(self.session, sort_keys=True)

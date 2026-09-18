@@ -635,6 +635,9 @@ class CodexAppServerClient:
         ] = {}
         self._server_request_tasks: dict[Any, asyncio.Task[None]] = {}
         self._stderr_tail: deque[str] = deque(maxlen=40)
+        # Native authentication can emit delayed diagnostics. Once credentials
+        # have crossed this transport, never retain unstructured stderr from it.
+        self._authentication_submitted = False
         # Diagnostic-only record of notifications _route_notification could
         # not match to any live subscription (see its docstring) - these are
         # otherwise dropped with no trace, which is exactly what makes a
@@ -997,8 +1000,16 @@ class CodexAppServerClient:
         *,
         timeout: float | None = None,
     ) -> Any:
+        if method == "account/login/start":
+            self._authentication_submitted = True
+            self._stderr_tail.clear()
         await self.start()
-        return await self._request_connected(method, params, timeout=timeout)
+        return await self._request_connected(
+            method, params, timeout=timeout,
+            # A status refresh must not retire an active shared provider if its
+            # small control write stalls. Auth mutations are never replayed.
+            discard_on_send_timeout=not method.startswith("account/"),
+        )
 
     async def _request_connected(
         self,
@@ -1240,7 +1251,9 @@ class CodexAppServerClient:
                                 future.set_exception(
                                     CodexAppServerRequestError(
                                         request_method,
-                                        message.get("error"),
+                                        {"message": "Native Codex authentication request failed"}
+                                        if request_method.startswith("account/")
+                                        else message.get("error"),
                                     )
                                 )
                             else:
@@ -1325,11 +1338,15 @@ class CodexAppServerClient:
             if not line:
                 return
             text = line.decode("utf-8", "replace").strip()
-            if text:
+            if text and not self._authentication_submitted:
                 self._stderr_tail.append(text)
 
     def _route_notification(self, notification: dict[str, Any]) -> None:
         method = str(notification.get("method") or "")
+        # Authentication notifications are not chat events. Do not expose
+        # account metadata or upstream login errors to event subscribers.
+        if method in {"account/login/completed", "account/updated"}:
+            return
         params = notification.get("params")
         if not isinstance(params, dict):
             return

@@ -72,6 +72,7 @@ import websockets
 import team_mail_grants
 import chat_mailbox
 import workspace_git
+import codex_auth
 
 from codex_app_server import (
     CodexAppServerDisconnected,
@@ -13532,6 +13533,7 @@ CLAUDE_SDK_MANAGER: ClaudeSDKSupervisorManager | None = None
 CLAUDE_SDK_MANAGER_LOCK = asyncio.Lock()
 CODEX_GOALS_CONFIG_LOCK = asyncio.Lock()
 CODEX_GOALS_RECONFIGURING = False
+CODEX_AUTH_LOCK = asyncio.Lock()
 CODEX_APP_SERVER_THREAD_LRU: OrderedDict[str, float] = OrderedDict()
 CODEX_APP_SERVER_PINNED_THREADS: set[str] = set()
 CODEX_APP_SERVER_THREAD_PIN_COUNTS: dict[str, int] = {}
@@ -73765,6 +73767,7 @@ async def require_agent_token(request: Request, call_next):
     )
     codex_goals_admin_route = request.url.path in {
         "/api/admin/codex/goals", "/api/admin/codex/subagents",
+        "/api/admin/codex/auth", "/api/admin/codex/auth/api-key",
     }
     public_chat_shares_admin_route = (
         request.url.path == "/api/admin/chat-shares"
@@ -73940,6 +73943,21 @@ async def require_agent_token(request: Request, call_next):
             body_error = await prebuffer_bounded_request_body(
                 request,
                 max_body_bytes=PRIVILEGED_NATIVE_UPDATE_MAX_BODY_BYTES,
+                declared_size=declared_size,
+            )
+            if body_error is not None:
+                status_code, detail = body_error
+                return JSONResponse({"detail": detail}, status_code=status_code)
+        elif request.url.path == "/api/admin/codex/auth/api-key" and request.method.upper() == "POST":
+            declared_size, transport_error = privileged_native_json_transport(
+                request, max_body_bytes=codex_auth.MAX_BODY_BYTES,
+                label="Codex authentication", require_content_length=True,
+            )
+            if transport_error is not None:
+                status_code, detail = transport_error
+                return JSONResponse({"detail": detail}, status_code=status_code)
+            body_error = await prebuffer_bounded_request_body(
+                request, max_body_bytes=codex_auth.MAX_BODY_BYTES,
                 declared_size=declared_size,
             )
             if body_error is not None:
@@ -76261,6 +76279,7 @@ async def health() -> dict[str, Any]:
         ),
         "capabilities": {
             "side_questions": side_questions.capability(),
+            "codex_auth_v1": codex_auth.capability(available=bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC),
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
             "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
@@ -77591,6 +77610,49 @@ def require_native_admin_control(request: Request) -> None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
+@asynccontextmanager
+async def codex_auth_operation(*, mutate: bool):
+    """Fence native authentication changes with the existing Codex admission barrier."""
+    async with CODEX_AUTH_LOCK:
+        reserved = False
+        try:
+            if mutate:
+                try:
+                    await reserve_codex_goals_reconfiguration()
+                except HTTPException as exc:
+                    if exc.status_code == 409:
+                        raise HTTPException(409, codex_auth.BUSY_MESSAGE) from None
+                    raise
+                reserved = True
+                # Native goals may run between server-owned turns. Side chats
+                # own separate ephemeral processes using the same native login.
+                if any(
+                    str(session.get("backend") or DEFAULT_BACKEND).lower() == BACKEND_CODEX
+                    and isinstance(session.get("codex_goal"), dict)
+                    and session["codex_goal"].get("status") == "active"
+                    for session in STORE.sessions.values()
+                ) or any(
+                    receipt.task is not None and not receipt.task.done()
+                    and str((STORE.sessions.get(session_id) or {}).get("backend") or DEFAULT_BACKEND).lower() == BACKEND_CODEX
+                    for (_owner, session_id, _request_id), receipt in SIDE_QUESTIONS.receipts.items()
+                ):
+                    raise HTTPException(409, codex_auth.BUSY_MESSAGE)
+            manager = await codex_app_server_manager()
+            if mutate and any(not turn._completed for turn in manager.client._turns_by_thread.values()):
+                raise HTTPException(409, codex_auth.BUSY_MESSAGE)
+            yield manager
+        finally:
+            if reserved:
+                await release_codex_goals_reconfiguration()
+
+
+app.include_router(codex_auth.create_router(
+    authorize=require_native_admin_control,
+    operation=codex_auth_operation,
+    available=lambda: CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC,
+))
+
+
 def public_chat_share_session_exists(session_id: str) -> bool:
     if not isinstance(session_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id) is None:
         return False
@@ -77631,6 +77693,8 @@ async def create_native_side_chat(session_id: str):
         def current(self):
             if SERVER_SHUTTING_DOWN:
                 raise side_questions.SideQuestionError(503, "Server is shutting down")
+            if backend == BACKEND_CODEX and CODEX_GOALS_RECONFIGURING:
+                raise side_questions.SideQuestionError(409, "Wait for Codex configuration to finish before using Side chat")
             if not public_chat_share_session_exists(session_id):
                 raise side_questions.SideQuestionError(404, "Chat not found")
             current = STORE.sessions[session_id]
