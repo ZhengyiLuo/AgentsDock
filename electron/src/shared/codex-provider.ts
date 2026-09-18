@@ -1,6 +1,11 @@
 import { validateCodexApiKey } from './codex-auth'
 import type { CodexProviderConfiguration, CodexProviderInput, CodexProviderTestResult } from './types'
 
+export function validateCodexProviderSelection(value: unknown): 'default' | 'custom' | undefined {
+  if (value === undefined || value === 'default' || value === 'custom') return value
+  throw new Error('Invalid Codex endpoint selection.')
+}
+
 export function validateCodexProviderURL(value: unknown): string {
   if (typeof value !== 'string') throw new Error('CODEX_PROVIDER_INVALID')
   const text = value.trim()

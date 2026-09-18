@@ -1,5 +1,24 @@
 # Public development log
 
+## 2026-09-17 — Per-chat native Codex endpoint selection (beta candidate)
+
+- Add **Codex · Custom endpoint** beside ordinary Codex in the composer and
+  New chat. Configure its base URL, exact model and separate masked key in
+  Settings; test explicitly before saving. Ordinary Codex sign-in remains
+  available and existing chats retain their original provider.
+- Persist the choice per chat and reject unsupported older servers before
+  they can silently ignore it or replace a global provider. Started chats
+  cannot switch providers. Custom readiness does not require ordinary OpenAI
+  sign-in; removing the endpoint leaves custom chats unavailable, not rerouted.
+- Run a real native Codex manager with simultaneous normal/custom threads and
+  repeated follow-ups against two controlled Responses endpoints. Verify
+  separate credentials/models, unchanged process defaults and no tool calls,
+  external requests or production account/history changes. The earlier real
+  gateway probe verifies the configured native protocol separately.
+- Add no polling, automatic model requests or per-keystroke network work.
+  Focused transport, renderer, persistence and provider-isolation checks pass.
+  Local beta packaging and UI acceptance are recorded separately below.
+
 ## 2026-09-17 — Native Codex custom endpoint controls (source only)
 
 - Add endpoint base URL, exact model ID and a masked provider key to Codex

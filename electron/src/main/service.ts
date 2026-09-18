@@ -2179,6 +2179,10 @@ export class AppService {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
+    // Old endpoint implementations changed the process-wide default provider.
+    // Never apply the per-chat settings UI to that incompatible contract.
+    try { this.requirePerChatCodexProvider('custom') }
+    catch { throw new Error('CODEX_PROVIDER_UPDATE') }
     const result = await scope.client.setCodexProvider(input)
     this.assertCurrentScope(scope)
     await this.refreshCodexProviderRuntime(scope)
@@ -2294,6 +2298,8 @@ export class AppService {
   async createSession(input: CreateSessionInput): Promise<Session> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requirePerChatCodexProvider(input.codex_provider)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
     this.upsertSession(scope, session)
@@ -2303,6 +2309,8 @@ export class AppService {
   async resumeSession(input: ResumeSessionInput): Promise<Session> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requirePerChatCodexProvider(input.codex_provider)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
     this.upsertSession(scope, session)
@@ -2373,6 +2381,8 @@ export class AppService {
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
     const scope = this.captureScope()
     await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requirePerChatCodexProvider(patch.codex_provider)
     const session = await scope.client.updateSession(sessionId, patch)
     this.assertCurrentScope(scope)
     if (session.archived) {
@@ -2381,6 +2391,16 @@ export class AppService {
     }
     this.upsertSession(scope, session)
     return session
+  }
+
+  private requirePerChatCodexProvider(selection: unknown): void {
+    if (selection === undefined || selection === 'default') return
+    if (selection !== 'custom') throw new Error('Invalid Codex endpoint selection.')
+    const capability = this.health?.capabilities?.codex_provider_v1
+    if (!capability || typeof capability !== 'object' || Array.isArray(capability)
+      || (capability as { per_chat?: unknown }).per_chat !== true) {
+      throw new Error('Update AgentsServer to select a custom Codex endpoint for this chat.')
+    }
   }
 
   async reloadProvider(sessionId: string): Promise<ProviderReloadResult> {

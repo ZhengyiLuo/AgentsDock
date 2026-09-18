@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { AgentServerClient } from './server-client'
-import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput } from '../shared/codex-provider'
+import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderSelection } from '../shared/codex-provider'
 
 const fakeKey = 'synthetic-provider-key'
 const input = { base_url: 'https://gateway.example/v1', model: 'gpt-6-astra', api_key: fakeKey }
@@ -88,5 +88,38 @@ describe('Codex custom provider native transport', () => {
     for (const value of [null, [], { ...config, wire_api: 'chat' }, { ...empty, has_api_key: true }, { ...config, base_url: 'https://user:secret@example.com' }]) {
       expect(() => parseCodexProviderConfiguration(value)).toThrow('CODEX_PROVIDER_RESPONSE')
     }
+  })
+  it('preserves the per-chat provider choice across create and update without changing legacy creation', async () => {
+    const calls: Array<{ method?: string; url?: string; body: Record<string, unknown> }> = []
+    await withServer(async (req, res) => {
+      const chunks: Buffer[] = []; for await (const part of req) chunks.push(Buffer.from(part))
+      const body = JSON.parse(Buffer.concat(chunks).toString())
+      calls.push({ method: req.method, url: req.url, body })
+      res.end(JSON.stringify({ session: { id: 'chat', backend: 'codex', codex_provider: body.codex_provider ?? 'default' } }))
+    }, async url => {
+      const client = new AgentServerClient(url, 'synthetic-admin')
+      try {
+        const draft = { title: 'New chat', folder: 'General', cwd: '/work', backend: 'codex' as const }
+        expect((await client.createSession({ ...draft, codex_provider: 'custom' })).codex_provider).toBe('custom')
+        expect((await client.updateSession('chat', { codex_provider: 'default' })).codex_provider).toBe('default')
+        await client.createSession(draft)
+        await expect(client.createSession({ ...draft, backend: 'claude', codex_provider: 'custom' })).rejects.toThrow('require Codex')
+        await expect(client.updateSession('chat', { backend: 'cursor', codex_provider: 'custom' })).rejects.toThrow('require Codex')
+      } finally { client.dispose() }
+    })
+    expect(calls.map(call => [call.method, call.url])).toEqual([
+      ['POST', '/api/sessions'], ['PATCH', '/api/sessions/chat'], ['POST', '/api/sessions']
+    ])
+    expect(calls[0].body).toMatchObject({ backend: 'codex', codex_provider: 'custom' })
+    expect(calls[1].body).toEqual({ codex_provider: 'default' })
+    expect(calls[2].body).not.toHaveProperty('codex_provider')
+  })
+  it('rejects malformed per-chat provider choices rather than falling back to the normal account', () => {
+    for (const value of [null, '', 'nvidia', {}, ['custom']]) {
+      expect(() => validateCodexProviderSelection(value)).toThrow('Invalid Codex endpoint selection')
+    }
+    expect(validateCodexProviderSelection(undefined)).toBeUndefined()
+    expect(validateCodexProviderSelection('default')).toBe('default')
+    expect(validateCodexProviderSelection('custom')).toBe('custom')
   })
 })

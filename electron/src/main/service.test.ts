@@ -973,6 +973,7 @@ describe('Codex endpoint request profile isolation', () => {
     const refreshRuntime = vi.fn().mockResolvedValue(undefined)
     Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:provider-a', client },
       activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
+      health: { capabilities: { codex_provider_v1: { available: true, per_chat: true } } },
       profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime })
     return { service, client, refreshRuntime }
   }
@@ -1013,6 +1014,45 @@ describe('Codex endpoint request profile isolation', () => {
     refreshRuntime.mockRejectedValue(new Error('offline'))
     await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
     expect(client.setCodexProvider).toHaveBeenCalledOnce()
+  })
+  it('does not configure a custom endpoint on older global-override servers, but permits recovery reset', async () => {
+    const { service, client } = harness()
+    Object.assign(service, { health: { capabilities: { codex_provider_v1: { available: true } } } })
+    await expect(service.setCodexProvider(caller, input)).rejects.toThrow('CODEX_PROVIDER_UPDATE')
+    expect(client.setCodexProvider).not.toHaveBeenCalled()
+    await expect(service.resetCodexProvider(caller)).resolves.toEqual(configuration)
+  })
+})
+
+describe('per-chat Codex endpoint compatibility', () => {
+  function harness(perChat: boolean) {
+    const session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom' }
+    const client = { createSession: vi.fn().mockResolvedValue(session), updateSession: vi.fn().mockResolvedValue(session) }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope: { profileId: 'profile', generation: 1, namespace: 'profile:profile', client },
+      activeProfileId: 'profile', profileGeneration: 1, validatedGeneration: 1,
+      profileResetIsPending: vi.fn().mockReturnValue(false), upsertSession: vi.fn(),
+      health: { capabilities: { codex_provider_v1: { available: true, per_chat: perChat } } } })
+    return { service, client }
+  }
+  const draft = { title: 'Chat', folder: 'General', cwd: '/work', backend: 'codex' as const, codex_provider: 'custom' as const }
+  it('refuses an old server before it can silently create or switch to ordinary Codex', async () => {
+    const { service, client } = harness(false)
+    await expect(service.createSession(draft)).rejects.toThrow('Update AgentsServer')
+    await expect(service.resumeSession({ ...draft, providerId: 'native-thread' })).rejects.toThrow('Update AgentsServer')
+    await expect(service.updateSession('chat', { codex_provider: 'custom' })).rejects.toThrow('Update AgentsServer')
+    expect(client.createSession).not.toHaveBeenCalled()
+    expect(client.updateSession).not.toHaveBeenCalled()
+  })
+  it('passes explicit choices to a capable server without changing normal chat behavior', async () => {
+    const { service, client } = harness(true)
+    await service.createSession(draft)
+    await service.updateSession('chat', { codex_provider: 'default' })
+    expect(client.createSession).toHaveBeenCalledWith(draft)
+    expect(client.updateSession).toHaveBeenCalledWith('chat', { codex_provider: 'default' })
+    const legacy = harness(false)
+    await legacy.service.createSession({ ...draft, codex_provider: undefined })
+    expect(legacy.client.createSession).toHaveBeenCalledOnce()
   })
 })
 

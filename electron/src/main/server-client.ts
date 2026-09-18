@@ -1,6 +1,6 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseCodexAuthStatus, validateCodexApiKey } from '../shared/codex-auth'
-import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput } from '../shared/codex-provider'
+import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
@@ -873,12 +873,15 @@ export class AgentServerClient {
   }
 
   async createSession(input: CreateSessionInput | ResumeSessionInput): Promise<Session> {
+    const codexProvider = validateCodexProviderSelection(input.codex_provider)
+    if (codexProvider === 'custom' && input.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const providerId = 'providerId' in input ? input.providerId : undefined
     const response = await this.post<{ session: Session }>('/api/sessions', {
       title: input.title,
       folder: input.folder,
       cwd: input.cwd,
       backend: input.backend,
+      ...(codexProvider !== undefined ? { codex_provider: codexProvider } : {}),
       model: input.model || null,
       effort: input.effort || null,
       system_prompt: input.system_prompt || null,
@@ -924,6 +927,8 @@ export class AgentServerClient {
   }
 
   async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
+    const codexProvider = validateCodexProviderSelection(patch.codex_provider)
+    if (codexProvider === 'custom' && patch.backend !== undefined && patch.backend !== 'codex') throw new Error('Custom endpoints require Codex.')
     const normalizedPatch = patch.cursor_permission_mode === undefined
       ? patch
       : {

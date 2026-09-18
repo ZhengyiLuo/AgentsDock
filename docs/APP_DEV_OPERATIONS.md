@@ -103,6 +103,7 @@ running. Keep the guard intact. A screenshot of the panel alone cannot pass it.
 | Updates | Validate installed-version → candidate update, failed/offline behavior, retained settings and active-work safety; do not infer install success from download success. |
 | Storage | Simulate write failure in an isolated fixture/volume; preserve existing data and show a recoverable error. Never fill the user's disk deliberately. |
 | Workspace Git | Use a disposable repository through the native Changes tab: review staged/unstaged/untracked files, stage and unstage, commit only the reviewed index, resolve conflicts, continue and explicitly confirm abort. Change the repository between review and mutation to verify stale rejection; switch chats/servers and check request ownership, both themes, narrow layout, and no idle polling. |
+| Custom Codex endpoint | Enter Settings through the picker, test/save an endpoint, select it for a new chat and reopen that chat. Run normal and custom threads together through one native manager; verify distinct endpoint credentials, exact models and unchanged normal account. Reject unsupported servers before mutations. Test removal, endpoint changes, fork/side-chat inheritance, busy saves and zero typing/idle traffic. |
 
 ## 6. Handoff and release honestly
 
