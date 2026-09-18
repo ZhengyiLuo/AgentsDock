@@ -18,9 +18,11 @@
   save/reset, missing-credential recovery and narrow localized themes.
 - Full profile bootstrap, account status and runtime refresh callbacks remain
   fixture boundaries in UI acceptance; isolated tests cover admission and
-  readiness reconciliation. No real external gateway or billing acceptance
-  is claimed. Requires matching standalone server endpoints. No release,
-  production deployment or existing account change is included.
+  readiness reconciliation. A separate authorized probe also completes a
+  native Codex response against a real external Responses gateway with its
+  exact model ID. That verifies a small model request, not every tool or
+  billing capability. Requires matching standalone server endpoints. No
+  release, production deployment or existing account change is included.
 - Full desktop tests, TypeScript and production compilation pass after the
   recovery changes. The standalone server's selective source snapshot passes
   its focused authentication, provider, side-chat and manifest regressions.
