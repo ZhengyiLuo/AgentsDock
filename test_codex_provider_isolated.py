@@ -172,8 +172,9 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
     def test_custom_preserves_normal_login_and_busy_blocks_mutation(self):
         self.store.save(SELECTION)
         response = self.client.post("/api/admin/codex/auth/api-key", headers=NATIVE, json={"api_key": KEY})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.manager.request.assert_awaited_once()
+        self.assertEqual(response.status_code, 409, response.text)
+        self.manager.request.assert_not_awaited()
+        self.assertEqual(self.store.selection(include_key=True), SELECTION)
         self.manager.client._turns_by_thread = {"native": SimpleNamespace(_completed=False)}
         response = self.client.delete("/api/admin/codex/provider", headers=NATIVE)
         self.assertEqual(response.status_code, 409, response.text)

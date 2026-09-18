@@ -1,7 +1,6 @@
-"""Native Codex authentication, with no credential storage or server side effects on import."""
+"""Read-only native Codex authentication; custom keys belong to codex_provider."""
 from __future__ import annotations
 
-import json
 import re
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,7 +15,7 @@ BUSY_MESSAGE = "Wait for Codex chats, goals, queued turns and Side chat requests
 
 def capability(*, available: bool) -> dict:
     return {"available": available, "version": 1, "native_only": True,
-            "api_key_login": True, "max_api_key_chars": MAX_API_KEY_CHARS}
+            "api_key_login": False, "max_api_key_chars": MAX_API_KEY_CHARS}
 
 
 def account_summary(result: object) -> dict:
@@ -60,19 +59,7 @@ async def read_account(manager) -> dict:
     return account_summary(result)
 
 
-async def login_api_key(manager, key: str) -> dict:
-    try:
-        result = await manager.request("account/login/start", {"type": "apiKey", "apiKey": key}, timeout=AUTH_TIMEOUT_SECONDS)
-    except Exception:
-        # A timeout/disconnect may occur after native persistence. Never retry
-        # or expose the provider error, which may contain the submitted key.
-        raise HTTPException(502, "Codex could not confirm API key sign-in. Refresh authentication status before trying again.") from None
-    if not isinstance(result, dict) or result.get("type") != "apiKey":
-        raise HTTPException(502, "Codex could not confirm API key sign-in. Refresh authentication status before trying again.")
-    return account_summary({"account": {"type": "apiKey"}, "requiresOpenaiAuth": True})
-
-
-def create_router(*, authorize, operation, available, login_allowed=lambda: True) -> APIRouter:
+def create_router(*, authorize, operation, available) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/admin/codex/auth")
@@ -95,34 +82,12 @@ def create_router(*, authorize, operation, available, login_allowed=lambda: True
     @router.post("/api/admin/codex/auth/api-key")
     async def login(request: Request):
         authorize(request)
-        if not available():
-            raise HTTPException(503, "Codex authentication controls require the app-server transport.")
-        if not login_allowed():
-            raise HTTPException(409, "Reset the custom Codex endpoint before changing normal Codex sign-in.")
-        raw = bytearray()
-        async for chunk in request.stream():
-            raw.extend(chunk)
-            if len(raw) > MAX_BODY_BYTES:
-                raise HTTPException(413, "Codex authentication request is too large.")
-        try:
-            body = json.loads(raw)
-        except (ValueError, UnicodeError, RecursionError):
-            raise HTTPException(400, "Provide a valid JSON API key request.") from None
-        finally:
-            raw.clear()
-        key = validate_api_key(body)
-        body.clear()
-        try:
-            async with operation(mutate=True) as manager:
-                if not login_allowed():
-                    raise HTTPException(409, "Reset the custom Codex endpoint before changing normal Codex sign-in.")
-                result = await login_api_key(manager, key)
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(503, "Codex authentication is unavailable.") from None
-        finally:
-            key = ""
-        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        # Older clients must not replace the login shared by every normal
+        # Codex chat and the host CLI. Do not read a key or open the manager.
+        raise HTTPException(409,
+            "API key sign-in is disabled because it changes the shared Codex CLI login. "
+            "Configure Custom endpoint with its base URL, model and API key, then select "
+            "Codex · Custom endpoint for a new chat. Manage normal Codex sign-in in the server's CLI.",
+            headers={"Cache-Control": "no-store"})
 
     return router

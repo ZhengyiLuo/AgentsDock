@@ -60,8 +60,9 @@ class CodexAuthTests(unittest.IsolatedAsyncioTestCase):
         exec(OPERATION_CODE, self.ns)
         self.app = FastAPI()
         self.app.middleware("http")(self.ns["require_agent_token"])
-        self.app.include_router(codex_auth.create_router(authorize=self.ns["require_native_admin_control"],
-            operation=self.ns["codex_auth_operation"], available=lambda: self.ns["CODEX_TRANSPORT"] != "exec"))
+        self.auth_router = codex_auth.create_router(authorize=self.ns["require_native_admin_control"],
+            operation=self.ns["codex_auth_operation"], available=lambda: self.ns["CODEX_TRANSPORT"] != "exec")
+        self.app.include_router(self.auth_router)
         self.client = TestClient(self.app)
         self.addCleanup(self.client.close)
 
@@ -69,15 +70,18 @@ class CodexAuthTests(unittest.IsolatedAsyncioTestCase):
         return self.client.post("/api/admin/codex/auth/api-key", headers=NATIVE if headers is None else headers,
             json={"api_key": SECRET} if body is None else body)
 
-    def test_success_submits_once_to_native_login_without_read_or_restart(self):
+    def test_legacy_login_rejected_without_native_access_or_restart(self):
         result = self.login()
-        self.assertEqual(result.status_code, 200, result.text)
-        self.assertEqual(result.json(), {"available": True, "auth_mode": "apiKey", "email": None,
-            "plan_type": None, "requires_openai_auth": True})
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertIn("Custom endpoint", result.json()["detail"])
+        self.assertIn("shared Codex CLI login", result.json()["detail"])
+        self.assertNotIn(SECRET, result.text)
         self.assertEqual(result.headers["cache-control"], "no-store")
-        self.manager.request.assert_awaited_once_with("account/login/start", {"type": "apiKey", "apiKey": SECRET}, timeout=30.0)
+        self.manager.request.assert_not_awaited()
+        self.ns["codex_app_server_manager"].assert_not_awaited()
         self.assertFalse(self.ns["CODEX_GOALS_RECONFIGURING"])
         self.ns["close_codex_app_server_manager"].assert_not_called()
+        self.assertFalse(codex_auth.capability(available=True)["api_key_login"])
 
     def test_status_projects_api_key_chatgpt_signed_out_and_future_mode(self):
         cases = [(None, "none", None), ({"type": "apiKey", "apiKey": SECRET, "email": SECRET}, "apiKey", None),
@@ -94,18 +98,30 @@ class CodexAuthTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(SECRET, response.text)
                 self.manager.request.assert_awaited_once_with("account/read", {"refreshToken": False}, timeout=30.0)
 
-    def test_body_validation_never_echoes_secret_or_coerces_input(self):
+    def test_rejected_body_never_echoes_secret_or_reaches_native(self):
         cases = [{}, {"api_key": SECRET, "extra": SECRET}, {"api_key": [SECRET]}, {"api_key": 123},
             {"api_key": True}, {"api_key": ""}, {"api_key": SECRET + " "}, {"api_key": SECRET + "\n"},
             {"api_key": SECRET + "é"}, {"api_key": SECRET * 150}, [SECRET]]
         for body in cases:
             response = self.login(body)
-            self.assertIn(response.status_code, (400, 413), response.text)
+            self.assertIn(response.status_code, (409, 413), response.text)
             self.assertNotIn(SECRET, response.text)
         self.manager.request.assert_not_awaited()
         response = self.client.post("/api/admin/codex/auth/api-key", headers={**NATIVE, "Content-Type": "application/json"}, content='{"api_key":"' + SECRET)
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
         self.assertNotIn(SECRET, response.text)
+
+    async def test_rejected_route_never_reads_submitted_key(self):
+        request = Request({"type": "http", "method": "POST", "path": "/api/admin/codex/auth/api-key",
+            "headers": [(b"x-agentsdock-token", b"synthetic-native-token")], "query_string": b""},
+            receive=AsyncMock(side_effect=AssertionError("body read")))
+        endpoint = next(route.endpoint for route in self.auth_router.routes
+            if getattr(route, "path", None) == "/api/admin/codex/auth/api-key")
+        with self.assertRaises(HTTPException) as rejected:
+            await endpoint(request)
+        self.assertEqual(rejected.exception.status_code, 409)
+        self.manager.request.assert_not_awaited()
+        self.ns["codex_app_server_manager"].assert_not_awaited()
 
     def test_authentication_and_transport_rejected_before_body_or_provider(self):
         cases = [({}, 401), ({"Authorization": "Bearer synthetic-native-token"}, 401),
@@ -138,19 +154,19 @@ class CodexAuthTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, expected)
             next_handler.assert_not_called()
 
-    def test_provider_failures_and_unknown_ack_are_sanitized_without_retry(self):
+    def test_status_failures_are_sanitized_without_retry(self):
         for failure in (RuntimeError(SECRET), asyncio.TimeoutError(SECRET)):
             self.manager.request.reset_mock(side_effect=True)
             self.manager.request.side_effect = failure
-            response = self.login()
-            self.assertEqual(response.status_code, 502)
+            response = self.client.get("/api/admin/codex/auth", headers=NATIVE)
+            self.assertEqual(response.status_code, 503)
             self.assertNotIn(SECRET, response.text)
             self.manager.request.assert_awaited_once()
             self.assertFalse(self.ns["CODEX_GOALS_RECONFIGURING"])
         self.manager.request.side_effect = None
-        for ack in (None, {}, {"type": "chatgpt", "error": SECRET}, {"type": [SECRET]}):
+        for ack in (None, {}, {"account": SECRET, "requiresOpenaiAuth": True}):
             self.manager.request.return_value = ack
-            response = self.login()
+            response = self.client.get("/api/admin/codex/auth", headers=NATIVE)
             self.assertEqual(response.status_code, 502)
             self.assertNotIn(SECRET, response.text)
 
@@ -158,7 +174,7 @@ class CodexAuthTests(unittest.IsolatedAsyncioTestCase):
         self.ns["CODEX_TRANSPORT"] = "exec"
         response = self.client.get("/api/admin/codex/auth", headers=NATIVE)
         self.assertFalse(response.json()["available"])
-        self.assertEqual(self.login().status_code, 503)
+        self.assertEqual(self.login().status_code, 409)
         self.ns["codex_app_server_manager"].assert_not_awaited()
 
     async def test_busy_active_queue_goal_side_chat_subagent_and_native_turn_are_preserved(self):

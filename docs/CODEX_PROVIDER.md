@@ -17,6 +17,10 @@ Test and Save accept exactly `base_url`, `model`, and `api_key`. HTTPS is requir
 
 The server saves provider credentials in a private `codex-provider` directory under its administrative state directory. A mode-0600 credential file is bound to the exact normalized endpoint and model. It is not encrypted at rest; only the server user should have access to this directory. Native config and process arguments contain the dedicated environment-variable name, never the key. Normal OpenAI/ChatGPT credentials are not copied to the custom endpoint, and Reset does not overwrite the original Codex login.
 
+The legacy `/api/admin/codex/auth/api-key` mutation is disabled for all clients,
+including when no custom endpoint is saved. It cannot replace the shared CLI
+login; provider keys must use the custom endpoint routes above.
+
 Save and Reset reject active Codex turns, goals, subagents, and side questions. They retire only the idle Codex manager, never unrelated Claude work. Cancellation cannot release admission while a credential write is still in progress. Existing custom conversations are endpoint-bound: changing endpoints or models requires a new chat, or restoring that conversation's original endpoint and model. Removing the endpoint does not silently reroute those chats through the normal account. Custom side chats must be cleared after a provider/key change; ordinary Codex side chats retain their normal provider.
 
 Test connection does not save credentials or change the active provider. It uses a separately owned Codex app-server, ephemeral auth/thread state, temporary logs/databases, a fixed minimal prompt, disabled integrations and tools, and explicit empty turn environments. The test budget is 45 seconds, followed by owned-process cleanup. Test results and errors use fixed safe messages; there are no automatic retries. Configured readiness means the local provider key is present, not that the provider accepted it; use Test connection to check access.
