@@ -1,7 +1,8 @@
 """Run a deterministic portion of the suite in an isolated CI checkout.
 
-Keep the whole checkout available: test modules share fixture helpers. Use
---list to inspect assignments without importing tests or production code.
+Keep the whole checkout available: test modules share fixture helpers. Distribute
+individual cases, so one slow module cannot monopolize a worker. Use --list to
+inspect compilation assignments without importing tests or production code.
 """
 
 from __future__ import annotations
@@ -9,6 +10,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+
+
+def test_cases(suite):
+    import unittest
+
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from test_cases(item)
+        else:
+            yield item
 
 
 def main() -> int:
@@ -33,14 +44,17 @@ def main() -> int:
     if args.list:
         print('\n'.join(path.stem for path in selected))
         return 0
-    print(f'Shard {args.index + 1}/{args.count}: {len(selected)}/{len(paths)} modules', flush=True)
     for path in selected:
         compile(path.read_bytes(), str(path), 'exec')
     # Import only after assignment; --list stays safe in a live development tree.
     import unittest
 
     sys.path.insert(0, str(root))
-    suite = unittest.defaultTestLoader.loadTestsFromNames([path.stem for path in selected])
+    discovered = unittest.defaultTestLoader.loadTestsFromNames([path.stem for path in paths])
+    cases = list(test_cases(discovered))
+    selected_cases = cases[args.index::args.count]
+    print(f'Shard {args.index + 1}/{args.count}: {len(selected_cases)}/{len(cases)} test cases', flush=True)
+    suite = unittest.TestSuite(selected_cases)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 
