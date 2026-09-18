@@ -2,6 +2,11 @@
 
 ## 2026-09-17 — Per-chat native Codex endpoint selection (beta candidate)
 
+- Accept local desktop **1.0.4-beta.1 / 1175** from `59451a6` and matching
+  standalone server **1.0.4-beta.1** from `46d72a4a`. Stamp only the desktop
+  package metadata in the clean build snapshot; verify all 88 compiled files
+  byte-for-byte, ARM64 Developer ID signature and disabled local updater.
+  The server archive matches all 85 allowlisted source files and its checksum.
 - Add **Codex · Custom endpoint** beside ordinary Codex in the composer and
   New chat. Configure its base URL, exact model and separate masked key in
   Settings; test explicitly before saving. Ordinary Codex sign-in remains
@@ -17,7 +22,19 @@
   gateway probe verifies the configured native protocol separately.
 - Add no polling, automatic model requests or per-keystroke network work.
   Focused transport, renderer, persistence and provider-isolation checks pass.
-  Local beta packaging and UI acceptance are recorded separately below.
+  Scheduled jobs use the same provider-specific readiness and label.
+- Exercise native offscreen mouse/keyboard input through the production
+  picker, New chat and Settings, real preload/main HTTP transport and extracted
+  production session routes/store. Verify Save, default/custom switching,
+  persisted selection, locked-thread rejection, older-server refusal and no
+  typing/idle requests. Inspect light/dark narrow layouts. Full application
+  bootstrap/cache/profile lifecycle remain fixture boundaries; packaged
+  production-profile startup is not claimed.
+- The clean-source package pass has 4,539 desktop tests passing (10 skipped),
+  TypeScript and production compilation. The clean standalone snapshot passes
+  175 focused tests and the real same-manager native provider check. These are
+  local test candidates, not published/notarized releases; no installed app,
+  production server or active chat was replaced or restarted.
 
 ## 2026-09-17 — Native Codex custom endpoint controls (source only)
 
