@@ -1,5 +1,24 @@
 # Development and release log
 
+## 2026-09-18 — Isolate custom endpoint connection tests (beta.3 candidate)
+
+- Reproduce a live connection-test failure before any endpoint request. The
+  owned native process rebuilds existing rollout history against a fresh
+  temporary database, then exceeds its 15-second startup/request deadline.
+  The earlier QA sandbox denied history reads and therefore hid this delay.
+- Give the test a temporary Codex home as well as temporary state. Keep HOME
+  unchanged and use only the explicitly entered endpoint, model and separate
+  key. Normal account configuration, authentication and history are untouched.
+- Validate the corrected production probe without the QA sandbox, using the
+  installed runtime environment and native Codex. Startup reaches the owned
+  local endpoint in under a second and maps its controlled 401 correctly;
+  existing auth/config hashes remain unchanged. Eighteen focused provider
+  checks pass, including the temporary-home boundary. No real gateway key or
+  external provider request is used in this acceptance check.
+- Compatible with desktop 1.0.4-beta.2. The app and provider API contract do
+  not change. Server signing, publication and deployment are recorded below
+  after release acceptance.
+
 ## 2026-09-18 — AgentsServer 1.0.4-beta.2 accepted
 
 - Publish [1.0.4-beta.2](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.2)
