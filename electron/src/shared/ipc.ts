@@ -23,6 +23,7 @@ import type {
   CodexGoalsConfiguration,
   CodexAuthStatus,
   CodexProviderConfiguration,
+  CodexProviderModels,
   CodexProviderInput,
   CodexProviderTestResult,
   CodexSubagentsConfiguration,
@@ -410,6 +411,7 @@ export interface AgentsDockAPI {
   codex: {
     auth(scope: CodexServerSettingsScope): Promise<CodexAuthStatus>
     provider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>
+    providerModels(scope: CodexServerSettingsScope, sessionId?: string): Promise<CodexProviderModels>
     testProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderTestResult>
     setProvider(scope: CodexServerSettingsScope, input: CodexProviderInput): Promise<CodexProviderConfiguration>
     resetProvider(scope: CodexServerSettingsScope): Promise<CodexProviderConfiguration>

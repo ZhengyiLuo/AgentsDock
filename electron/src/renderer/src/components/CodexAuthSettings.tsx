@@ -49,7 +49,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   const [providerError, setProviderError] = useState<ProviderFailure | null>(null)
   const [providerNotice, setProviderNotice] = useState<'providerSaved' | 'providerReset' | null>(null)
   const [baseURL, setBaseURL] = useState('https://api.openai.com/v1')
-  const [model, setModel] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; status: CodexProviderTestResult['status']; revision: number } | null>(null)
   const providerRequestRef = useRef(0)
@@ -148,8 +147,8 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   const providerEditable = connected && profileId != null && providerScopeMatches && currentProvider?.available === true
     && !saving && !providerLoading && !providerReadFailed
     && providerError !== 'providerAdmin' && providerError !== 'providerUpdate'
-  const canResetProvider = !testing && (providerEditable && currentProvider?.configured || canOpenSettings && !providerLoading && providerReadFailed)
-  const providerDraftComplete = Boolean(baseURL.trim() && model.trim() && hasKey)
+  const canResetProvider = providerEditable && currentProvider?.configured || canOpenSettings && !providerLoading && providerReadFailed
+  const providerDraftComplete = Boolean(baseURL.trim() && hasKey)
   const tested = testResult?.ok === true && testResult.status === 'ready' && testResult.revision === draftRevisionRef.current
 
   async function loadProviderConfiguration() {
@@ -168,7 +167,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       setProvider(next)
       setProviderScope(scope)
       setBaseURL(next.base_url ?? 'https://api.openai.com/v1')
-      setModel(next.model ?? '')
     } catch (reason) {
       if (request === providerRequestRef.current && ownsScope(scope)) {
         const failure = providerFailure(reason)
@@ -192,7 +190,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
     try {
       const test = window.agentsDock.codex?.testProvider
       if (typeof test !== 'function') { setProviderError('providerUpdate'); return }
-      const pending = test(scope, { base_url: baseURL.trim(), model: model.trim(), api_key: apiKey })
+      const pending = test(scope, { base_url: baseURL.trim(), api_key: apiKey })
       apiKey = ''
       const next = await pending
       if (request !== testRequestRef.current || !ownsScope(scope) || revision !== draftRevisionRef.current) return
@@ -207,23 +205,23 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
   }
 
   async function saveProvider() {
-    if (!providerEditable || !providerDraftComplete || !tested || testing || !profileId || !keyInputRef.current) return
+    if (!providerEditable || !providerDraftComplete || !profileId || !keyInputRef.current) return
     const scope = { profileId, profileGeneration }
     const request = ++providerRequestRef.current
     let apiKey = keyInputRef.current.value.trim()
-    clearKey()
     invalidateTest()
     setSaving(true)
     try {
       const save = window.agentsDock.codex?.setProvider
       if (typeof save !== 'function') { setProviderError('providerUpdate'); return }
-      const pending = save(scope, { base_url: baseURL.trim(), model: model.trim(), api_key: apiKey })
+      const pending = save(scope, { base_url: baseURL.trim(), api_key: apiKey })
       apiKey = ''
       const next = await pending
       if (request !== providerRequestRef.current || !ownsScope(scope)) return
       setProvider(next)
       setProviderScope(scope)
       if (!next.configured) { setProviderError('providerFailed'); return }
+      clearKey()
       setProviderNotice('providerSaved')
       setFormOpen(false)
     } catch (reason) {
@@ -290,7 +288,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
       </div>
       <small>{!connected || !profileId ? t('codexAuth.connect') : loading ? t('codexAuth.loading')
         : currentStatus?.available === false ? t('codexAuth.nativeRequired') : currentStatus ? account : t('codexAuth.unknown')}</small>
-      {currentProvider?.configured && <small>{t('codexAuth.customAccount', { model: currentProvider.model ?? '' })}</small>}
+      {currentProvider?.configured && <small>{t('codexAuth.customAccount', { endpoint: currentProvider.base_url ?? '' })}</small>}
       <small>{t('codexAuth.accountReadOnly')}</small>
       {showForm && <form className="codex-auth-settings-form" onSubmit={event => { event.preventDefault(); void saveProvider() }}>
         <small>{t('codexAuth.providerSummary')}</small>
@@ -302,9 +300,6 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
           <label htmlFor={`${fieldId}-endpoint`}>{t('codexAuth.baseURL')}</label>
           <input ref={endpointInputRef} id={`${fieldId}-endpoint`} type="url" value={baseURL} disabled={!providerEditable} autoComplete="off" spellCheck={false}
             onChange={event => { setBaseURL(event.currentTarget.value); invalidateTest() }} />
-          <label htmlFor={`${fieldId}-model`}>{t('codexAuth.model')}</label>
-          <input id={`${fieldId}-model`} type="text" value={model} disabled={!providerEditable} autoComplete="off" spellCheck={false}
-            onChange={event => { setModel(event.currentTarget.value); invalidateTest() }} />
         </div>
         <label htmlFor={fieldId}>{t('codexAuth.providerKey')}</label>
         <input ref={attachKeyInput} id={fieldId} type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off"
@@ -316,7 +311,7 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
         <div className="codex-auth-settings-actions">
           <button type="button" className="quiet-button" disabled={!providerEditable || !providerDraftComplete || testing}
             onClick={() => { void testConnection() }}>{testing && <LoaderCircle className="spin" size={14} />}{t(testing ? 'codexAuth.testing' : 'codexAuth.test')}</button>
-          <button type="submit" className="primary-button" disabled={!providerEditable || !providerDraftComplete || !tested || testing}>
+          <button type="submit" className="primary-button" disabled={!providerEditable || !providerDraftComplete}>
             {saving && <LoaderCircle className="spin" size={14} />}{t(saving ? 'codexAuth.providerSaving' : 'codexAuth.providerSave')}
           </button>
           <button type="button" className="quiet-button" disabled={saving} onClick={cancelForm}>{t('codexAuth.cancel')}</button>

@@ -278,6 +278,7 @@ export function registerIpc(
   handle('codex:server-goals:get', () => service.codexServerGoals())
   handle('codex:auth:get', scope => service.codexAuth(scope))
   handle('codex:provider:get', scope => service.codexProvider(scope))
+  handle('codex:provider:models', (scope, sessionId) => service.codexProviderModels(scope, sessionId))
   handle('codex:provider:test', (scope, input) => service.testCodexProvider(scope, input))
   handle('codex:provider:set', (scope, input) => service.setCodexProvider(scope, input))
   handle('codex:provider:reset', scope => service.resetCodexProvider(scope))

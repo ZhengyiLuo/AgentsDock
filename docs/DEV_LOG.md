@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-18 — Custom endpoint model controls — beta candidate
+
+- Configure a Codex endpoint with its URL and separate key. Saving no longer
+  requires a successful test or a model ID, and a pending test does not block it.
+- Discover the endpoint's models and choose a model and reasoning effort in
+  the normal chat controls. Keep an explicit model entry for endpoints without
+  discovery, and keep custom catalogs separate from ordinary Codex.
+- Require the matching server capability before using the new controls.
+  Existing custom chats retain their endpoint when the default is edited.
+- Validate production compilation and focused renderer, service and transport
+  regressions. Exercise native Electron input through the production service
+  and HTTP boundary with disposable state and controlled provider endpoints.
+- The matching server scopes messaging instructions to its helper contract;
+  the harness enforces messaging access instead of broad prompt restrictions.
+
 ## 2026-09-18 — Codex credential isolation — 1.0.4-beta.2
 
 - Accept published desktop **1.0.4-beta.2 / 1173** from

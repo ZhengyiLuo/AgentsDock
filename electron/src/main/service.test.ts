@@ -254,6 +254,14 @@ afterEach(() => {
 })
 
 describe('session summary merging', () => {
+  it('keeps the retained endpoint model list when a slim summary omits it', () => {
+    const catalog = { configured: true, available: true, model: null, base_url: 'https://first.example/v1',
+      models: [{ value: 'first/model', label: 'First' }], model_efforts: { 'first/model': [{ value: 'high', label: 'High' }] } }
+    const existing: Session = { id: 'chat', title: 'Chat', backend: 'codex', codex_provider: 'custom', codex_provider_catalog: catalog }
+    const { models: _models, model_efforts: _efforts, ...summary } = catalog
+    expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: summary }])[0].codex_provider_catalog).toEqual(catalog)
+    expect(mergeSessionSummaries([existing], [{ ...existing, codex_provider_catalog: { ...summary, base_url: 'https://second.example/v1' } }])[0].codex_provider_catalog?.models).toBeUndefined()
+  })
   it('preserves selected-session details omitted by compact polling', () => {
     const previous: Session[] = [{
       id: 'chat',
@@ -909,13 +917,13 @@ describe('Codex endpoint request profile isolation', () => {
   const input = { base_url: configuration.base_url, model: configuration.model, api_key: 'synthetic-key' }
   const testResult = { ok: true, status: 'ready', message: '' }
   function harness() {
-    const client = { codexProvider: vi.fn().mockResolvedValue(configuration), testCodexProvider: vi.fn().mockResolvedValue(testResult),
+    const client = { codexProviderModels: vi.fn().mockRejectedValue(new Error('offline discovery')), codexProvider: vi.fn().mockResolvedValue(configuration), testCodexProvider: vi.fn().mockResolvedValue(testResult),
       setCodexProvider: vi.fn().mockResolvedValue(configuration), resetCodexProvider: vi.fn().mockResolvedValue(configuration) }
     const service = Object.create(AppService.prototype) as AppService
     const refreshRuntime = vi.fn().mockResolvedValue(undefined)
     Object.assign(service, { scope: { profileId: caller.profileId, generation: 1, namespace: 'profile:provider-a', client },
       activeProfileId: caller.profileId, profileGeneration: 1, validatedGeneration: 1,
-      health: { capabilities: { codex_provider_v1: { available: true, per_chat: true } } },
+      health: { capabilities: { codex_provider_v1: { available: true, per_chat: true, per_chat_models: true } } },
       profileResetIsPending: vi.fn().mockReturnValue(false), refreshRuntime })
     return { service, client, refreshRuntime }
   }
@@ -956,6 +964,12 @@ describe('Codex endpoint request profile isolation', () => {
     refreshRuntime.mockRejectedValue(new Error('offline'))
     await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
     expect(client.setCodexProvider).toHaveBeenCalledOnce()
+  })
+  it('completes saving before a slow endpoint model discovery returns', async () => {
+    const { service, client } = harness()
+    client.codexProviderModels.mockImplementation(() => new Promise(() => {}))
+    await expect(service.setCodexProvider(caller, input)).resolves.toEqual(configuration)
+    expect(client.codexProviderModels).toHaveBeenCalledOnce()
   })
   it('does not configure a custom endpoint on older global-override servers, but permits recovery reset', async () => {
     const { service, client } = harness()

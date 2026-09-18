@@ -748,9 +748,10 @@ describe('SessionDialog runtime selection', () => {
       sessions: { create }, preferences: { set: vi.fn().mockResolvedValue(undefined) }
     } as unknown as AgentsDockAPI })
     useAppStore.setState({ profiles: [], activeProfileId: null, profileGeneration: 0, sessions: [],
-      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } },
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
       runtimeCatalog: { backends: { ...runtimeCatalog.backends, codex: { ...runtimeCatalog.backends.codex,
-        custom_provider: { configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1' }
+        custom_provider: { configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+          models: [{ value: 'provider/fast', label: 'Provider Fast' }], efforts: [{ value: 'high', label: 'High' }] }
       } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
       modals: { settings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
     })
@@ -759,10 +760,15 @@ describe('SessionDialog runtime selection', () => {
     expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'true')
     await user.click(screen.getByRole('button', { name: 'Codex · Custom endpoint' }))
     expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Reasoning')).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'GPT-5.6-Sol' })).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Model'), 'provider/fast')
+    await user.selectOptions(screen.getByLabelText('Reasoning'), 'high')
+    await user.selectOptions(screen.getByLabelText('Model'), '__manual__')
+    await user.clear(screen.getByLabelText('Model ID'))
+    await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
     await user.click(screen.getByRole('button', { name: 'Create chat' }))
-    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'provider/unlisted', effort: 'high' })))
   })
 
   it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
@@ -1130,7 +1136,7 @@ describe('JobDialog', () => {
     const create = vi.fn().mockResolvedValue({})
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: { jobs: { create } } as unknown as AgentsDockAPI })
     useAppStore.setState({ selectedSessionId: 'chat-1', sessions: [{ id: 'chat-1', title: 'Custom chat', backend: 'codex', codex_provider: 'custom', model: 'shared-model' }],
-      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true },
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true },
         scheduled_jobs: { available: true, required: false, message: '', action: null, version: 2, context_modes: ['chat', 'standalone'] }
       } }, runtimeCatalog: { backends: { codex: {
         models: [{ value: 'shared-model', label: 'Normal model', locked: true, locked_reason: 'Normal account model locked' }], efforts: [],

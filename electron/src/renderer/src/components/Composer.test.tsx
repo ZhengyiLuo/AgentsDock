@@ -1294,7 +1294,7 @@ describe('Composer', () => {
   it('offers normal and custom Codex separately and sends the explicit provider selection', async () => {
     const update = vi.fn().mockImplementation(async (id, patch) => ({ id, title: 'Chat', ...patch }))
     window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
-    useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } }, runtimeCatalog: {
+    useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: {
       backends: { codex: { models: [], efforts: [], custom_provider: {
         configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'
       } } }
@@ -1330,11 +1330,36 @@ describe('Composer', () => {
     expect(chip).toHaveTextContent('Codex · Custom endpoint')
   })
 
+  it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {
+    const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'provider/first', effort: 'high' }
+    const update = vi.fn().mockImplementation(async (_id, patch) => ({ ...useAppStore.getState().sessions.find(item => item.id === session.id), ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) }))
+    window.agentsDock.sessions = { update } as unknown as AgentsDockAPI['sessions']
+    useAppStore.setState({ sessions: [session], runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+      models: [{ value: 'provider/first', label: 'First' }, { value: 'provider/next', label: 'Next' }],
+      efforts: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }]
+    } } } } })
+    const user = userEvent.setup()
+    const { container } = render(<Composer />)
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Next' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/next', effort: 'high' }))
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Low' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { effort: 'low' }))
+    await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
+    await user.click(screen.getByRole('menuitem', { name: 'Enter model ID…' }))
+    await user.clear(screen.getByLabelText('Model ID'))
+    await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
+    await user.click(screen.getByRole('button', { name: 'Use model' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/unlisted', effort: 'low' }))
+  })
+
   it('sends a custom Codex chat independently of normal OpenAI sign-in', async () => {
     const session: Session = { id: 'chat-1', title: 'Chat', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra' }
     const send = vi.fn().mockResolvedValue({ session: { ...session, backend_locked: true }, queued: false })
     window.agentsDock.turns = { send } as unknown as AgentsDockAPI['turns']
-    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } }, runtimes: {
+    useAppStore.setState({ sessions: [session], health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
       codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'Sign in to normal Codex' }
     } }, runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
       configured: true, available: true, model: 'gpt-6-astra', base_url: 'https://inference.example/v1'

@@ -28,7 +28,7 @@ const validCatalog: RuntimeCatalog = {
 }
 
 describe('per-chat Codex provider selection', () => {
-  const health: Health = { ok: true, capabilities: { codex_provider_v1: { per_chat: true } }, runtimes: {
+  const health: Health = { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } }, runtimes: {
     codex: { backend: 'codex', status: 'unauthenticated', available: false, message: 'OpenAI sign-in required' }
   } }
   const catalog: RuntimeCatalog = { backends: { ...validCatalog.backends, codex: { ...validCatalog.backends.codex,
@@ -56,10 +56,37 @@ describe('per-chat Codex provider selection', () => {
     expect(runtimeDiagnosticFor(health, catalog, 'codex', 'custom')?.status).toBe('ready')
     expect(runtimeSelectionError(health, catalog, 'codex', null, 'custom')).toBeNull()
     expect(runtimeSelectionError(health, catalog, 'codex', 'gpt-6-astra', 'custom')).toBeNull()
-    expect(runtimeSelectionError(health, catalog, 'codex', 'another-model', 'custom')).toContain('does not match')
+    expect(runtimeSelectionError(health, catalog, 'codex', 'another-model', 'custom')).toBeNull()
     expect(runtimeCatalogOptions(catalog, 'codex', 'models')).toContainEqual({ value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' })
     expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom').some(option => option.value === 'gpt-5.6-sol')).toBe(false)
-    expect(runtimeEffortOptions(catalog, 'codex', null, 'high', 'custom')).toEqual([])
+    expect(runtimeEffortOptions(catalog, 'codex', null, 'high', 'custom')).toContainEqual({ value: 'high', label: 'high' })
+  })
+
+  it('uses discovered endpoint models and model-specific effort without pinning a configured model', () => {
+    const discovered: RuntimeCatalog = { backends: { ...catalog.backends, codex: { ...catalog.backends.codex, custom_provider: {
+      configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
+      models: [{ value: 'provider/fast', label: 'Fast' }, { value: 'provider/deep', label: 'Deep' }],
+      efforts: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
+      model_efforts: { 'provider/fast': [{ value: 'low', label: 'Low' }] }, default_model: 'provider/deep'
+    } } } }
+    expect(codexCustomProviderAvailable(health, discovered)).toBe(true)
+    expect(runtimeCatalogOptions(discovered, 'codex', 'models', null, 'custom')).toContainEqual({ value: 'provider/fast', label: 'Fast' })
+    expect(runtimeCatalogOptions(discovered, 'codex', 'models', null, 'custom').some(option => option.value === 'gpt-5.6-sol')).toBe(false)
+    expect(runtimeEffortOptions(discovered, 'codex', 'provider/deep', null, 'custom')).toContainEqual({ value: 'high', label: 'High' })
+    expect(runtimeEffortAfterModelChange(discovered, 'codex', 'provider/fast', 'high', 'custom')).toBe('low')
+    expect(runtimeEffortAfterModelChange(discovered, 'codex', 'unlisted-model', 'high', 'custom')).toBe('high')
+    expect(runtimeSelectionError(health, discovered, 'codex', 'unlisted-model', 'custom')).toBeNull()
+  })
+  it('keeps a retained chat available after endpoint removal and uses only that chat’s model catalog', () => {
+    const retained = { configured: true, available: true, model: null, base_url: 'https://first.example/v1',
+      models: [{ value: 'first/model', label: 'First' }], efforts: [{ value: 'high', label: 'High' }] }
+    const removed: RuntimeCatalog = { backends: { codex: { models: [], efforts: [], custom_provider: {
+      configured: false, available: false, model: null, base_url: null
+    } } } }
+    expect(runtimeSelectionError(health, removed, 'codex', 'first/model', 'custom', retained)).toBeNull()
+    expect(runtimeDiagnosticFor(health, removed, 'codex', 'custom', retained)?.available).toBe(true)
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', retained)).toContainEqual({ value: 'first/model', label: 'First' })
+    expect(runtimeCatalogOptions(catalog, 'codex', 'models', null, 'custom', retained).some(option => option.value === 'gpt-6-astra')).toBe(false)
   })
 })
 

@@ -11,7 +11,7 @@ const snapshot = (auth_mode: CodexAuthStatus['auth_mode'] = 'none'): CodexAuthSt
 })
 const providerSnapshot = (configured = false): CodexProviderConfiguration => ({
   available: true, configured, base_url: configured ? 'https://inference.example/v1' : null,
-  model: configured ? 'gpt-6-astra' : null, has_api_key: configured, wire_api: 'responses'
+  model: null, has_api_key: configured, wire_api: 'responses'
 })
 const readyResult: CodexProviderTestResult = { ok: true, status: 'ready', message: 'Unused provider response' }
 function bridge(read = vi.fn().mockResolvedValue(snapshot()), write = vi.fn().mockResolvedValue(snapshot('apiKey')), overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
@@ -36,11 +36,10 @@ async function openForm() {
 }
 async function openCustomForm() {
   const key = await openForm()
-  return { key, endpoint: screen.getByLabelText('Endpoint base URL'), model: screen.getByLabelText('Model ID') }
+  return { key, endpoint: screen.getByLabelText('Endpoint base URL') }
 }
 function fillProvider(fields: Awaited<ReturnType<typeof openCustomForm>>) {
   fireEvent.change(fields.endpoint, { target: { value: 'https://inference.example/v1' } })
-  fireEvent.change(fields.model, { target: { value: 'gpt-6-astra' } })
   fireEvent.change(fields.key, { target: { value: 'synthetic-provider-key' } })
 }
 afterEach(() => { cleanup(); setLocale('en'); vi.restoreAllMocks(); vi.useRealTimers() })
@@ -138,6 +137,26 @@ describe('Codex account settings', () => {
 })
 
 describe('Codex custom endpoint settings', () => {
+  it.each(['untested', 'pending', 'failed'] as const)('saves endpoint and key when the optional test is %s', async state => {
+    const api = bridge(undefined, undefined, { testProvider: vi.fn().mockImplementation(() => state === 'pending'
+      ? new Promise(() => {}) : Promise.resolve({ ok: false, status: 'connection_failed', message: '' })) })
+    render(<CodexAuthSettings {...props} />)
+    const fields = await openCustomForm()
+    fillProvider(fields)
+    expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
+    if (state !== 'untested') {
+      fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+      if (state === 'failed') await screen.findByText(/Could not reach the endpoint/)
+    }
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save endpoint' }))
+    await screen.findByText(/Endpoint saved. Choose Codex/)
+    expect(api.setProvider).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, {
+      base_url: 'https://inference.example/v1', api_key: 'synthetic-provider-key'
+    })
+    expect(api.write).not.toHaveBeenCalled()
+  })
+
   it('ignores provider metadata after a profile change', async () => {
     let resolve: (value: CodexProviderConfiguration) => void = () => {}
     bridge(undefined, undefined, { provider: vi.fn().mockImplementationOnce(() => new Promise(done => { resolve = done })).mockResolvedValue(providerSnapshot()) })
@@ -149,10 +168,10 @@ describe('Codex custom endpoint settings', () => {
     await act(async () => resolve(providerSnapshot(true)))
     expect(screen.getByLabelText('API key for this endpoint')).toBeEnabled()
     expect(screen.getByLabelText('Endpoint base URL')).toHaveValue('https://api.openai.com/v1')
-    expect(screen.queryByText('Custom endpoint · gpt-6-astra')).not.toBeInTheDocument()
+    expect(screen.queryByText('Custom endpoint · https://inference.example/v1')).not.toBeInTheDocument()
   })
 
-  it('tests exact endpoint/model/key without saving, then saves only after a successful current test', async () => {
+  it('tests endpoint/key optionally and saves without pinning a model', async () => {
     const api = bridge()
     const persist = vi.spyOn(Storage.prototype, 'setItem')
     render(<CodexAuthSettings {...props} />)
@@ -161,28 +180,27 @@ describe('Codex custom endpoint settings', () => {
     expect(api.provider).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 })
     expect(fields.endpoint).toHaveValue('https://api.openai.com/v1')
     expect(fields.key).toHaveAttribute('type', 'password')
-    expect(screen.getByText(/may incur a small API charge/)).toBeInTheDocument()
-    expect(screen.getByText('Normal Codex keeps its own account and models. Choose Codex · Custom endpoint for a new chat. A started chat cannot change provider.')).toBeVisible()
+    expect(screen.getByText(/Testing is optional/)).toBeInTheDocument()
+    expect(screen.getByText('Choose Codex · Custom endpoint for a new chat. Existing chats keep the endpoint and credentials they started with.')).toBeVisible()
     fillProvider(fields)
     expect(api.testProvider).not.toHaveBeenCalled()
     expect(api.setProvider).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
-    fireEvent.submit(fields.key.closest('form')!)
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
     expect(api.setProvider).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-    await screen.findByText(/Connection test passed using native Codex/)
-    const expected = { base_url: 'https://inference.example/v1', model: 'gpt-6-astra', api_key: 'synthetic-provider-key' }
+    await screen.findByText(/Endpoint model discovery succeeded/)
+    const expected = { base_url: 'https://inference.example/v1', api_key: 'synthetic-provider-key' }
     expect(api.testProvider).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, expected)
     expect(fields.key).toHaveValue('synthetic-provider-key')
     expect(api.setProvider).not.toHaveBeenCalled()
     expect(persist).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Save endpoint' }))
-    expect(fields.key).toHaveValue('')
     await screen.findByText(/Endpoint saved. Choose Codex/)
+    expect(fields.key).toHaveValue('')
     expect(api.setProvider).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, expected)
     expect(api.write).not.toHaveBeenCalled()
     expect(screen.queryByLabelText('API key for this endpoint')).not.toBeInTheDocument()
-    expect(screen.getByText('Custom endpoint · gpt-6-astra')).toBeInTheDocument()
+    expect(screen.getByText('Custom endpoint · https://inference.example/v1')).toBeInTheDocument()
     expect(persist).not.toHaveBeenCalled()
   })
 
@@ -194,7 +212,7 @@ describe('Codex custom endpoint settings', () => {
     expect(input).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Sign in with API key' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Endpoint base URL')).toHaveValue('https://inference.example/v1')
-    expect(screen.getByLabelText('Model ID')).toHaveValue('gpt-6-astra')
+    expect(screen.queryByLabelText('Model ID')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Endpoint base URL'), { target: { value: 'https://different.example/v1' } })
     expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
@@ -203,22 +221,22 @@ describe('Codex custom endpoint settings', () => {
     expect(api.write).not.toHaveBeenCalled()
   })
 
-  it.each(['endpoint', 'model', 'key'] as const)('invalidates a successful test when the %s changes', async field => {
+  it.each(['endpoint', 'key'] as const)('invalidates a successful test when the %s changes', async field => {
     const api = bridge()
     render(<CodexAuthSettings {...props} />)
     const fields = await openCustomForm()
     fillProvider(fields)
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-    await screen.findByText(/Connection test passed using native Codex/)
+    await screen.findByText(/Endpoint model discovery succeeded/)
     expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
     fireEvent.change(fields[field], { target: { value: field === 'endpoint' ? 'https://changed.example/v1' : 'changed-value' } })
-    expect(screen.queryByText(/Connection test passed using native Codex/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
+    expect(screen.queryByText(/Endpoint model discovery succeeded/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
     expect(api.testProvider).toHaveBeenCalledOnce()
     expect(api.setProvider).not.toHaveBeenCalled()
   })
 
-  it.each(['endpoint', 'model', 'key'] as const)('ignores late test results after the %s changes', async field => {
+  it.each(['endpoint', 'key'] as const)('ignores late test results after the %s changes', async field => {
     let resolve: (value: CodexProviderTestResult) => void = () => {}
     bridge(undefined, undefined, { testProvider: vi.fn().mockImplementation(() => new Promise(done => { resolve = done })) })
     render(<CodexAuthSettings {...props} />)
@@ -229,16 +247,16 @@ describe('Codex custom endpoint settings', () => {
     expect(fields[field]).toBeEnabled()
     fireEvent.change(fields[field], { target: { value: field === 'endpoint' ? 'https://changed.example/v1' : 'changed-value' } })
     await act(async () => resolve(readyResult))
-    expect(screen.queryByText(/Connection test passed using native Codex/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
+    expect(screen.queryByText(/Endpoint model discovery succeeded/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
   })
 
   it.each([
-    ['unsupported', /did not support the Responses API behavior/],
+    ['unsupported', /does not provide a compatible model list/],
     ['authentication_failed', /endpoint rejected authentication/],
     ['connection_failed', /Could not reach the endpoint/],
     ['model_unavailable', /endpoint could not use this model/],
-    ['failed', /native Codex connection test did not complete/]
+    ['failed', /endpoint check did not complete/]
   ] as const)('distinguishes %s without displaying provider-supplied messages', async (status, expected) => {
     const api = bridge(undefined, undefined, { testProvider: vi.fn().mockResolvedValue({ ok: false, status, message: 'Echoed synthetic-provider-key' }) })
     render(<CodexAuthSettings {...props} />)
@@ -247,7 +265,7 @@ describe('Codex custom endpoint settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     await screen.findByText(expected)
     expect(document.body.textContent).not.toContain('synthetic-provider-key')
-    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Test connection' })).toBeEnabled()
     expect(api.setProvider).not.toHaveBeenCalled()
   })
@@ -274,29 +292,29 @@ describe('Codex custom endpoint settings', () => {
     const fields = await openCustomForm()
     fillProvider(fields)
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-    await screen.findByText(/Connection test passed using native Codex/)
+    await screen.findByText(/Endpoint model discovery succeeded/)
     fireEvent.click(screen.getByRole('button', { name: 'Save endpoint' }))
     rerender(<CodexAuthSettings {...props} profileGeneration={2} />)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Custom endpoint' })).toBeEnabled())
     await act(async () => resolve(providerSnapshot(true)))
     expect(fields.key).toHaveValue('')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(screen.queryByText('Custom endpoint · gpt-6-astra')).not.toBeInTheDocument()
+    expect(screen.queryByText('Custom endpoint · https://inference.example/v1')).not.toBeInTheDocument()
   })
 
-  it('clears a submitted key after busy save and requires a new test before retrying', async () => {
+  it('retains the endpoint draft after a busy save and permits retry without a test', async () => {
     bridge(undefined, undefined, { setProvider: vi.fn().mockRejectedValue(new Error('CODEX_PROVIDER_BUSY')) })
     render(<CodexAuthSettings {...props} />)
     const fields = await openCustomForm()
     fillProvider(fields)
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-    await screen.findByText(/Connection test passed using native Codex/)
+    await screen.findByText(/Endpoint model discovery succeeded/)
     fireEvent.click(screen.getByRole('button', { name: 'Save endpoint' }))
-    await screen.findByText(/Codex work or another connection test is still running/)
-    expect(fields.key).toHaveValue('')
-    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
+    await screen.findByText(/server could not apply this change yet/)
+    expect(fields.key).toHaveValue('synthetic-provider-key')
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
     fireEvent.change(fields.key, { target: { value: 'replacement-key' } })
-    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Test connection' })).toBeEnabled()
   })
 
@@ -307,7 +325,7 @@ describe('Codex custom endpoint settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Custom endpoint' }))
     await screen.findByRole('button', { name: 'Remove custom endpoint' })
     fireEvent.click(screen.getByRole('button', { name: 'Remove custom endpoint' }))
-    await screen.findByText('Custom endpoint removed. Normal Codex and its login are unchanged.')
+    await screen.findByText('Endpoint removed for new chats. Existing custom chats keep their saved endpoint credentials.')
     expect(api.resetProvider).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 })
     expect(api.testProvider).not.toHaveBeenCalled()
     expect(api.setProvider).not.toHaveBeenCalled()
@@ -328,11 +346,11 @@ describe('Codex custom endpoint settings', () => {
     expect(screen.getByRole('button', { name: 'Save endpoint' })).toBeDisabled()
     expect(document.body.textContent).not.toContain('synthetic-private-file-detail')
     fireEvent.click(reset)
-    await screen.findByText(/Codex work or another connection test is still running/)
+    await screen.findByText(/server could not apply this change yet/)
     expect(reset).toBeEnabled()
     expect(screen.getByLabelText('API key for this endpoint')).toBeDisabled()
     fireEvent.click(reset)
-    await screen.findByText('Custom endpoint removed. Normal Codex and its login are unchanged.')
+    await screen.findByText('Endpoint removed for new chats. Existing custom chats keep their saved endpoint credentials.')
     expect(api.resetProvider.mock.calls).toEqual([[{ profileId: 'studio', profileGeneration: 1 }], [{ profileId: 'studio', profileGeneration: 1 }]])
     expect(api.write).not.toHaveBeenCalled()
     expect(api.testProvider).not.toHaveBeenCalled()
@@ -350,7 +368,7 @@ describe('Codex custom endpoint settings', () => {
     expect(screen.queryByRole('button', { name: 'Sign in with API key' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('API key for this endpoint')).toBeDisabled()
     fireEvent.click(reset)
-    await screen.findByText('Custom endpoint removed. Normal Codex and its login are unchanged.')
+    await screen.findByText('Endpoint removed for new chats. Existing custom chats keep their saved endpoint credentials.')
     expect(api.resetProvider).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 })
     expect(api.write).not.toHaveBeenCalled()
     expect(api.testProvider).not.toHaveBeenCalled()
@@ -366,14 +384,14 @@ describe('Codex custom endpoint settings', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Custom endpoint' }))
     const key = await screen.findByLabelText('API key for this endpoint') as HTMLInputElement
     await waitFor(() => expect(key).toBeEnabled())
-    const fields = { key, endpoint: screen.getByLabelText('Endpoint base URL'), model: screen.getByLabelText('Model ID') }
+    const fields = { key, endpoint: screen.getByLabelText('Endpoint base URL') }
     fillProvider(fields)
     expect(screen.queryByRole('button', { name: 'Sign in with API key' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-    await screen.findByText(/Connection test passed using native Codex/)
+    await screen.findByText(/Endpoint model discovery succeeded/)
     fireEvent.click(screen.getByRole('button', { name: 'Save endpoint' }))
     await screen.findByText(/Endpoint saved. Choose Codex/)
-    expect(screen.getByText('Custom endpoint · gpt-6-astra')).toBeInTheDocument()
+    expect(screen.getByText('Custom endpoint · https://inference.example/v1')).toBeInTheDocument()
     expect(api.write).not.toHaveBeenCalled()
     expect(api.setProvider).toHaveBeenCalledOnce()
   })
@@ -412,9 +430,9 @@ describe('Codex custom endpoint settings', () => {
     expect(api.setProvider).not.toHaveBeenCalled()
     await act(async () => setLocale('zh-CN'))
     expect(screen.getByLabelText('端点基础 URL')).toHaveValue('https://changed.example/v1')
-    expect(screen.getByLabelText('模型 ID')).toHaveValue('gpt-6-astra')
+    expect(screen.queryByLabelText('模型 ID')).not.toBeInTheDocument()
     expect(screen.getByLabelText('此端点的 API 密钥')).toHaveAttribute('type', 'password')
     expect(screen.getByRole('button', { name: '测试连接' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '保存端点' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存端点' })).toBeEnabled()
   })
 })

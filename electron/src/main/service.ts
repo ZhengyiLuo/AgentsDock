@@ -51,6 +51,7 @@ import type {
   CodexGoalsConfiguration,
   CodexAuthStatus,
   CodexProviderConfiguration,
+  CodexProviderModels,
   CodexProviderInput,
   CodexProviderTestResult,
   CodexSubagentsConfiguration,
@@ -2170,7 +2171,24 @@ export class AppService {
     const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
+    this.requireCodexProviderModels()
     const result = await scope.client.testCodexProvider(input)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async codexProviderModels(expected: CodexServerSettingsScope, sessionId?: string): Promise<CodexProviderModels> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    this.requireCodexProviderModels()
+    const result = await scope.client.codexProviderModels(sessionId)
+    this.assertCurrentScope(scope)
+    if (sessionId) {
+      const page = await scope.client.sessionPage(sessionId, { limit: 1 })
+      this.assertCurrentScope(scope)
+      this.upsertSession(scope, page.session)
+    } else await this.refreshCodexProviderRuntime(scope)
     this.assertCurrentScope(scope)
     return result
   }
@@ -2183,9 +2201,13 @@ export class AppService {
     // Never apply the per-chat settings UI to that incompatible contract.
     try { this.requirePerChatCodexProvider('custom') }
     catch { throw new Error('CODEX_PROVIDER_UPDATE') }
+    this.requireCodexProviderModels()
     const result = await scope.client.setCodexProvider(input)
     this.assertCurrentScope(scope)
     await this.refreshCodexProviderRuntime(scope)
+    // Save completes independently of endpoint reachability. This one explicit
+    // discovery updates the picker when it arrives and cannot affect a new server.
+    void this.codexProviderModels(expected).catch(() => undefined)
     return result
   }
 
@@ -2206,7 +2228,7 @@ export class AppService {
     this.assertCurrentScope(scope)
     const priorCatalog = this.runtimeCatalog
     let refreshed = false
-    try { await this.refreshRuntime(true, true, scope, true); refreshed = true }
+    try { await this.refreshRuntime(true, false, scope, true); refreshed = true }
     catch { /* Saved configuration stays saved even if readiness is offline. */ }
     this.assertCurrentScope(scope)
     const diagnostic = this.runtimeCatalog?.backends.codex?.diagnostic
@@ -2367,6 +2389,10 @@ export class AppService {
       || (capability as { per_chat?: unknown }).per_chat !== true) {
       throw new Error('Update AgentsServer to select a custom Codex endpoint for this chat.')
     }
+  }
+
+  private requireCodexProviderModels(): void {
+    if (this.health?.capabilities?.codex_provider_v1?.per_chat_models !== true) throw new Error('CODEX_PROVIDER_UPDATE')
   }
 
   async reloadProvider(sessionId: string): Promise<ProviderReloadResult> {
@@ -6439,6 +6465,7 @@ export class AppService {
   private upsertSession(scope: ConnectionScope, session: Session): void {
     this.assertCurrentScope(scope)
     const index = this.sessions.findIndex(candidate => candidate.id === session.id)
+    if (index >= 0) session = preserveCustomProviderModels(this.sessions[index], session)
     if (index >= 0) this.sessions = this.sessions.map(candidate => candidate.id === session.id ? session : candidate)
     else this.sessions = [...this.sessions, session]
     this.cache.putSession(scope.namespace, session)
@@ -7381,9 +7408,21 @@ export function mergeSessionSummaries(previous: Session[], incoming: Session[]):
   return incoming.map(summary => {
     const existing = previousById.get(summary.id)
     if (!existing) return summary
-    const merged = { ...existing, ...summary }
+    const merged = preserveCustomProviderModels(existing, { ...existing, ...summary })
     return jsonEqual(existing, merged) ? existing : merged
   })
+}
+
+function preserveCustomProviderModels(previous: Session, incoming: Session): Session {
+  const saved = previous.codex_provider_catalog
+  const summary = incoming.codex_provider_catalog
+  if (incoming.codex_provider !== 'custom' || previous.codex_provider !== 'custom' || !saved || !summary
+    || !summary.configured || saved.base_url !== summary.base_url || summary.models !== undefined) return incoming
+  return { ...incoming, codex_provider_catalog: {
+    ...summary,
+    ...(saved.models !== undefined ? { models: saved.models } : {}),
+    ...(saved.model_efforts !== undefined ? { model_efforts: saved.model_efforts } : {})
+  } }
 }
 
 export function mergePolledSessionSummaries(previous: Session[], incoming: Session[]): Session[] {

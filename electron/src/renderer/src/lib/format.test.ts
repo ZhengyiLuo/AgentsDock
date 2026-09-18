@@ -45,7 +45,7 @@ describe('runtimeLabel', () => {
     setLocale('zh-CN')
     expect(backendLabel('codex', 'custom')).toBe('Codex · 自定义端点')
     setLocale('en')
-    expect(runtimeLabel({ id: 'custom', title: '', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra', effort: 'high' })).toBe('gpt-6-astra')
+    expect(runtimeLabel({ id: 'custom', title: '', backend: 'codex', codex_provider: 'custom', model: 'gpt-6-astra', effort: 'high' })).toBe('gpt-6-astra · high')
   })
   const catalog: RuntimeCatalog = {
     backends: {

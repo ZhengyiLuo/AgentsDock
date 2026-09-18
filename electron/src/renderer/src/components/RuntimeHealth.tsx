@@ -132,7 +132,8 @@ function RuntimeStatus({
   const chatError = useAppStore(state => (
     compact && sessionId ? latestChatRunError(state.snapshots[sessionId]?.events, backend) : ''
   ))
-  const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider)
+  const customCatalog = useAppStore(state => state.sessions.find(session => session.id === sessionId)?.codex_provider_catalog)
+  const diagnostic = runtimeDiagnosticFor(health, catalog, backend, codexProvider, customCatalog)
   const cursorUnavailable = backend === 'cursor' && !cursorBackendAvailable(health, catalog)
   // Provider last_error is backend-wide, not session-scoped. Keep it in the
   // full Settings panel so a failure from one chat cannot leak into another

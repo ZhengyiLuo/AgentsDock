@@ -206,7 +206,7 @@ describe('ScheduledJobsPopover', () => {
   it.each(['chat', 'standalone'] as const)('uses the custom endpoint readiness for %s job run and resume actions', async contextMode => {
     const customSession: Session = { ...session, codex_provider: 'custom', model: 'shared-model' }
     useAppStore.setState({ sessions: [customSession], jobs: [{ ...useAppStore.getState().jobs[0], enabled: false, context_mode: contextMode, backend: 'codex' }],
-      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } }, runtimeCatalog: { backends: { codex: {
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } }, runtimeCatalog: { backends: { codex: {
         models: [{ value: 'shared-model', label: 'Normal model', locked: true, locked_reason: 'Normal account model locked' }], efforts: [],
         custom_provider: { configured: true, available: true, model: 'shared-model', base_url: 'https://inference.example/v1' }
       } } }

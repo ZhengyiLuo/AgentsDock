@@ -1,6 +1,6 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
-import { parseCodexProviderConfiguration, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderSelection } from '../shared/codex-provider'
+import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
@@ -48,6 +48,7 @@ import type {
   CodexGoalsConfiguration,
   CodexAuthStatus,
   CodexProviderConfiguration,
+  CodexProviderModels,
   CodexProviderInput,
   CodexProviderTestResult,
   CodexSubagentsConfiguration,
@@ -767,11 +768,16 @@ export class AgentServerClient {
   codexProvider(): Promise<CodexProviderConfiguration> {
     return this.codexProviderRequest('/api/admin/codex/provider', {}, parseCodexProviderConfiguration)
   }
+  codexProviderModels(sessionId?: string): Promise<CodexProviderModels> {
+    if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CODEX_PROVIDER_INVALID')
+    const query = sessionId ? `?${new URLSearchParams({ session_id: sessionId })}` : ''
+    return this.codexProviderRequest(`/api/admin/codex/provider/models${query}`, {}, parseCodexProviderModels, 30_000, 512_000)
+  }
   testCodexProvider(input: CodexProviderInput): Promise<CodexProviderTestResult> {
     const checked = validateCodexProviderInput(input)
     return this.codexProviderRequest('/api/admin/codex/provider/test', {
       method: 'POST', body: JSON.stringify(checked)
-    }, parseCodexProviderTestResult, 55_000)
+    }, parseCodexProviderTestResult, 55_000, 512_000)
   }
   setCodexProvider(input: CodexProviderInput): Promise<CodexProviderConfiguration> {
     const checked = validateCodexProviderInput(input)
@@ -782,9 +788,9 @@ export class AgentServerClient {
   resetCodexProvider(): Promise<CodexProviderConfiguration> {
     return this.codexProviderRequest('/api/admin/codex/provider', { method: 'DELETE' }, parseCodexProviderConfiguration)
   }
-  private async codexProviderRequest<T>(path: string, init: RequestInit, parse: (value: unknown) => T, timeoutMs = 30_000): Promise<T> {
+  private async codexProviderRequest<T>(path: string, init: RequestInit, parse: (value: unknown) => T, timeoutMs = 30_000, responseLimit = 8192): Promise<T> {
     try {
-      return parse(await this.privilegedNativeRequest(path, init, timeoutMs, 200, 8192))
+      return parse(await this.privilegedNativeRequest(path, init, timeoutMs, 200, responseLimit))
     } catch (error) {
       if (error instanceof ServerError) {
         const code = [401, 403].includes(error.status) ? 'ADMIN'
@@ -3024,6 +3030,8 @@ function isPrivilegedNativeControlTarget(
   if (path === '/api/admin/codex/auth') return !target.search && method === 'GET'
   if (path === '/api/admin/codex/provider') return !target.search && ['GET', 'PUT', 'DELETE'].includes(method)
   if (path === '/api/admin/codex/provider/test') return !target.search && method === 'POST'
+  if (path === '/api/admin/codex/provider/models') return method === 'GET' && (!target.search
+    || [...target.searchParams.keys()].length === 1 && Boolean(target.searchParams.get('session_id')))
   if (path === '/api/admin/update') {
     if (method !== 'GET') return false
     const keys = [...target.searchParams.keys()]

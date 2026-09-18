@@ -25,6 +25,7 @@ import { saveNewChatDefaults, useAppStore, waitForWorkspaceReady } from '../stor
 import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
 import { CodexAuthSettings } from './CodexAuthSettings'
+import { CodexModelDiscovery } from './CodexModelDiscovery'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -2851,6 +2852,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
   const [backendChoice, setBackendChoice] = useState<ChatBackendChoice>('codex')
   const { backend, codex_provider } = chatBackendSelection(backendChoice)
   const [model, setModel] = useState('')
+  const [manualModel, setManualModel] = useState(false)
   const [effort, setEffort] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [saving, setSaving] = useState(false)
@@ -2863,6 +2865,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
     setModel('')
     setEffort('')
     setSystemPrompt('')
+    setManualModel(false)
     setCwd(defaultCwd)
   }, [defaultCwd, mode, open])
   useEffect(() => {
@@ -2925,11 +2928,19 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
             useAppStore.getState().setModal('appSettings', true)
             return
           }
-          setBackendChoice(value); setModel(''); setEffort('')
+          setBackendChoice(value); setModel(''); setEffort(''); setManualModel(false)
         }}><BackendMark backend={selection.backend} size={16} />{backendLabel(selection.backend, selection.codex_provider)}{needsConfiguration ? ` · ${t('codexProvider.configure')}` : unavailable ? t("ui.Dialogs.unavailable_77649d6") : ''}</button>
       })}</div></fieldset>
-      <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={model} onChange={event => selectModel(event.target.value)}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}</select></label>
+      <label className={hasReasoning ? undefined : 'span-two'}><span>{t("ui.Dialogs.SessionDialog.model_5e2c614")}</span><select value={manualModel ? '__manual__' : model} onChange={event => {
+        const value = event.target.value
+        setManualModel(value === '__manual__')
+        if (value !== '__manual__') selectModel(value)
+      }}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}{codex_provider === 'custom' && <option value="__manual__">{t('codexProvider.manualModel')}</option>}</select></label>
       {hasReasoning && <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>}
+      {codex_provider === 'custom' && <div className="span-two">
+        {manualModel && <label><span>{t('codexAuth.model')}</span><input aria-label={t('codexAuth.model')} value={model} maxLength={256} autoComplete="off" spellCheck={false} onChange={event => selectModel(event.target.value)} /><small>{t('codexProvider.manualModelHelp')}</small></label>}
+        <CodexModelDiscovery />
+      </div>}
       {runtimeError && <small className="span-two schedule-validation error" role="alert">{runtimeError}</small>}
       <label className="span-two"><span>{t("ui.Dialogs.SessionDialog.system_prompt_561257c")}</span><textarea rows={4} value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder={t("ui.Dialogs.SessionDialog.optional_per_chat_instructions_454671b")} /></label>
       <footer className="span-two"><button type="button" className="quiet-button" onClick={() => useAppStore.getState().setModal(mode, false)}>{t("ui.Dialogs.SessionDialog.cancel_19766ed")}</button><button className="primary-button" disabled={saving || Boolean(runtimeError) || mode === 'resume' && !providerId.trim()}>{saving && <LoaderCircle className="spin" size={14} />}{mode === 'newChat' ? t("ui.Dialogs.SessionDialog.create_chat_35e51d6") : t("ui.Dialogs.SessionDialog.resume_chat_790e1b9")}</button></footer>
@@ -4232,7 +4243,7 @@ export function JobDialog() {
     catalog,
     selectedBackend,
     selectedBackend === session?.backend ? session?.model : null,
-    selectedBackend === session?.backend ? session?.codex_provider : undefined
+    selectedBackend === session?.backend ? session?.codex_provider : undefined, session?.codex_provider_catalog
   )
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!session || scheduleError || nextRunError) return; setSaving(true)
@@ -4255,7 +4266,7 @@ export function JobDialog() {
       currentState.runtimeCatalog,
       selectedBackend,
       selectedBackend === currentSession.backend ? currentSession.model : null,
-      selectedBackend === currentSession.backend ? currentSession.codex_provider : undefined
+      selectedBackend === currentSession.backend ? currentSession.codex_provider : undefined, currentSession.codex_provider_catalog
     )
     if (enabled && currentRuntimeError) {
       currentState.setError(currentRuntimeError)

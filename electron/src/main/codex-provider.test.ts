@@ -80,6 +80,22 @@ describe('Codex custom provider native transport', () => {
     expect(validateCodexProviderInput({ ...input, base_url: ' https://gateway.example/v1/ ', api_key: ` ${fakeKey} ` })).toEqual(input)
     expect(validateCodexProviderInput({ ...input, base_url: 'http://localhost:8080/v1' }).base_url).toBe('http://localhost:8080/v1')
     expect(validateCodexProviderInput({ ...input, model: 'openai/openai/gpt-6-astra' }).model).toBe('openai/openai/gpt-6-astra')
+    expect(validateCodexProviderInput({ base_url: input.base_url, api_key: fakeKey })).toEqual({ base_url: input.base_url, api_key: fakeKey })
+    expect(parseCodexProviderConfiguration({ ...config, model: null }).model).toBeNull()
+  })
+  it.each([undefined, 'retained-chat'])('discovers endpoint model choices through the authenticated native transport for %s', async sessionId => {
+    const catalog = { models: [{ value: 'provider/fast', label: 'Fast' }], efforts: [{ value: 'high', label: 'High' }], default_model: 'provider/fast', default_effort: null, model_efforts: {} }
+    await withServer((req, res) => {
+      expect(req.url).toBe(`/api/admin/codex/provider/models${sessionId ? `?session_id=${sessionId}` : ''}`)
+      expect(req.method).toBe('GET')
+      expect(req.headers['x-agentsdock-token']).toBe('synthetic-admin')
+      expect(req.headers['sec-fetch-mode']).toBeUndefined()
+      res.end(JSON.stringify({ ...catalog, api_key: fakeKey }))
+    }, async url => {
+      const client = new AgentServerClient(url, 'synthetic-admin')
+      try { expect(await client.codexProviderModels(sessionId)).toEqual(catalog) }
+      finally { client.dispose() }
+    })
   })
   it('rejects inconsistent successful or malformed provider results', () => {
     for (const value of [null, [], { ok: true, status: 'failed' }, { ok: false, status: 'ready' }, { ok: true, status: ['ready'] }]) {

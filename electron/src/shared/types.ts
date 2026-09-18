@@ -277,7 +277,7 @@ export interface CodexProviderConfiguration {
 /** Transient input sent only to the selected server's native admin route. */
 export interface CodexProviderInput {
   base_url: string
-  model: string
+  model?: string
   api_key: string
 }
 
@@ -285,6 +285,14 @@ export interface CodexProviderTestResult {
   ok: boolean
   status: 'ready' | 'unsupported' | 'authentication_failed' | 'connection_failed' | 'model_unavailable' | 'failed'
   message: string
+}
+
+export interface CodexProviderModels {
+  models: RuntimeModelOption[]
+  efforts: RuntimeOption[]
+  model_efforts?: Record<string, RuntimeOption[]>
+  default_model: string | null
+  default_effort: string | null
 }
 
 /** Server override, not the provider's resolved or currently running limit. */
@@ -370,6 +378,8 @@ export interface Session {
   backend: Backend
   /** Missing on older sessions means native Codex's default provider. */
   codex_provider?: CodexProvider
+  /** Safe catalog for this chat's retained endpoint credentials. */
+  codex_provider_catalog?: RuntimeBackendCatalog['custom_provider']
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
@@ -463,7 +473,17 @@ export interface RuntimeDiagnostic {
 }
 export interface RuntimeBackendCatalog {
   /** Safe metadata only; credentials stay on the server. */
-  custom_provider?: { configured: boolean; available: boolean; model: string | null; base_url: string | null }
+  custom_provider?: {
+    configured: boolean
+    available: boolean
+    model: string | null
+    base_url: string | null
+    models?: RuntimeModelOption[]
+    efforts?: RuntimeOption[]
+    model_efforts?: Record<string, RuntimeOption[]>
+    default_model?: string | null
+    default_effort?: string | null
+  }
   /** Explicit backend availability; required before optional backends are selectable. */
   available?: boolean
   models: RuntimeModelOption[]
@@ -1616,7 +1636,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
-  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean }
+  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean }
   side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability

@@ -932,7 +932,7 @@ describe('instant new chat defaults', () => {
     } as unknown as AgentsDockAPI })
     useAppStore.setState({ requestNewChat, profiles: [profile], activeProfileId: profile.id, profileGeneration: 1, switchingProfileId: null,
       sessions: [], selectedSessionId: null, folderOrder: [], creatingChat: false, modals: closedModals,
-      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true } } },
+      health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
       runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
         configured: ready, available: ready, model: ready ? 'gpt-6-astra' : null, base_url: ready ? 'https://inference.example/v1' : null
       } } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined)

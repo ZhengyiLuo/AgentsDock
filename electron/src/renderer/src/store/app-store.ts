@@ -1634,7 +1634,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: 'The selected chat is no longer available.' })
       return false
     }
-    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, currentTarget.codex_provider)
+    const runtimeError = runtimeSelectionError(get().health, get().runtimeCatalog, currentTarget.backend, currentTarget.model, currentTarget.codex_provider, currentTarget.codex_provider_catalog)
     if (runtimeError) {
       set({ error: runtimeError })
       return false
