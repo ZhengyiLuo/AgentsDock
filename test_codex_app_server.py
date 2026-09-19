@@ -1,9 +1,11 @@
 import asyncio
 import json
 import signal
+import tempfile
 import time
 import unittest
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -601,6 +603,12 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_timed_out_fork_deletes_child_from_late_started_notification(
         self,
     ) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        workspace = Path(temporary.name) / "workspace"
+        workspace.mkdir()
+        alias = Path(temporary.name) / "alias"
+        alias.symlink_to(workspace, target_is_directory=True)
         factory = FakeProcessFactory()
         process = factory.process
 
@@ -614,7 +622,7 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
                         "thread": {
                             "id": "thr_late_child",
                             "forkedFromId": "thr_source",
-                            "cwd": "/repo",
+                            "cwd": str(workspace.resolve()),
                             "createdAt": int(time.time()),
                         }
                     },
@@ -632,7 +640,7 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(client.close)
 
         with self.assertRaises(CodexAppServerTimeout) as raised:
-            await client.fork_thread("thr_source", {"cwd": "/repo"})
+            await client.fork_thread("thr_source", {"cwd": str(alias)})
 
         self.assertEqual(raised.exception.method, "thread/fork")
         self.assertFalse(

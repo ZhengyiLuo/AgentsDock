@@ -1692,7 +1692,8 @@ class CodexAppServerClient:
                 # fork resumed after an app-server reconnect can share the same
                 # ancestry but cannot share this creation window.
                 and expected_cwd
-                and child_cwd == expected_cwd
+                and child_cwd
+                and os.path.realpath(child_cwd) == os.path.realpath(expected_cwd)
                 and isinstance(created_at, int)
                 and not isinstance(created_at, bool)
                 and fork_started_at - 1 <= created_at <= int(time.time()) + 1

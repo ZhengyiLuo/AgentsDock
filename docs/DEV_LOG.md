@@ -1,5 +1,23 @@
 # Development and release log
 
+## 2026-09-19 — Native fork workspace verification — beta candidate
+
+- Compare resolved workspace paths when verifying a native Codex fork and
+  identifying a late-created child for cleanup. Preserve ancestry, exact
+  completed-turn and cleanup ownership checks.
+- Reproduce the false rejection with native Codex and a symlinked workspace.
+  Click Fork chat in native offscreen Electron through the production store,
+  preload, service, HTTP and standalone server. The previous server returns
+  409; the corrected server creates two separate forks while the parent runs.
+- Continue a child through the native provider. Its request contains the
+  completed context and excludes the parent's active prompt; the parent stays
+  active. The model endpoint uses controlled loopback responses and disposable
+  credentials/state; external model billing is outside this check.
+- Pass 129 focused native transport and fork tests, including rejection and
+  cleanup of a genuinely different workspace. Record safe failure categories
+  before returning a live-fork error; do not expose raw provider exceptions.
+- Include version-specific release notes for 1.0.4-beta.5.
+
 ## 2026-09-18 — AgentsServer 1.0.4-beta.4 accepted
 
 - Save endpoint/key settings without testing or interrupting active native

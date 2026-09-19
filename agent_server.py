@@ -82,6 +82,7 @@ from codex_app_server import (
     CodexAppServerProtocolError,
     CodexAppServerRequestError,
     CodexAppServerSubscriptionClosed,
+    CodexAppServerTimeout,
     decline_server_request,
 )
 from claude_sdk_client import (
@@ -58879,7 +58880,9 @@ async def fork_codex_thread(
                 safe_to_retry=False,
             )
         forked_cwd = str(forked_thread.get("cwd") or "").strip()
-        if not forked_cwd or os.path.normpath(forked_cwd) != os.path.normpath(cwd):
+        # Codex canonicalizes cwd, including symlinked workspaces and macOS
+        # /tmp -> /private/tmp. Both paths must identify the same workspace.
+        if not forked_cwd or os.path.realpath(forked_cwd) != os.path.realpath(cwd):
             raise CodexAppServerProtocolError(
                 "thread/fork working directory could not be verified",
                 request_sent=True,
@@ -84645,14 +84648,30 @@ async def _fork_session_locked(
             cleanup_state["provider_thread_id"] = e.thread_id
             raise
         except Exception as e:
-            if live_snapshot:
-                raise HTTPException(status_code=409, detail="The native completed-turn fork could not be verified. The running chat was left unchanged.") from e
+            reason = {
+                "thread/fork ancestry could not be verified": "Codex returned a fork with unverifiable ancestry.",
+                "thread/fork working directory could not be verified": "Codex returned a fork in a different working directory.",
+                "thread/fork completed-turn boundary could not be verified": "Codex returned a fork that did not end at the last completed turn.",
+                "thread/fork cleanup journal could not be persisted": "The fork recovery record could not be saved.",
+                "thread/fork returned the source thread id": "Codex did not create a separate conversation.",
+                "thread/fork returned a thread with a different source id": "Codex returned a fork from a different conversation.",
+            }.get(str(e), "Codex could not create or verify the completed-turn fork.")
+            if isinstance(e, CodexAppServerTimeout):
+                reason = "Codex timed out while creating or verifying the fork."
+            elif isinstance(e, CodexAppServerDisconnected):
+                reason = "The Codex connection closed while creating or verifying the fork."
+            elif isinstance(e, CodexAppServerRequestError):
+                reason = "Codex rejected the request to create or verify the fork."
             logger.warning(
-                "codex fork failed parent_session=%s source_thread=%s: %s",
+                "codex fork failed parent_session=%s source_thread=%s cutoff=%s error_type=%s: %s",
                 session_id,
                 parent_codex_thread_id,
-                e,
+                codex_cutoff,
+                type(e).__name__,
+                reason,
             )
+            if live_snapshot:
+                raise HTTPException(status_code=409, detail=f"{reason} The running chat was left unchanged.") from e
             codex_fork_error = str(e)
     elif parent_backend == BACKEND_CODEX and not empty_snapshot:
         # A goal-reconciliation rollover can deliberately detach an unsafe
