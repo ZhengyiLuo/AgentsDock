@@ -1,6 +1,9 @@
 # Public development log
 
-## 2026-09-19 — Inter-chat chronology — beta candidate
+## 2026-09-19 — Inter-chat chronology — 1.0.4-beta.4
+
+- Accept desktop **1.0.4-beta.4 / 1176** from
+  `d2b40e5b3e8f208d9b36f20be1efcb460ba821f4`.
 
 - Keep inter-chat cards among the work that happened around them, ahead of a
   later final answer even when the turn has early-created files or media.
@@ -14,7 +17,16 @@
   Provider execution and production chat data are outside this renderer check.
 - Pass 229 focused timeline tests, TypeScript and production compilation with
   output verification. No server contract change or deployment is required.
-- Include authored version-specific release notes in the desktop beta.
+- Pass 4,538 desktop tests (10 skipped) in release CI. Verify all 88 packaged
+  compiled files against the committed source and inspect the packaged
+  renderer/preload. Universal macOS signing, notarization, Gatekeeper,
+  DMG/ZIP parity and clean executable launch pass. Linux x64/arm64 and Windows
+  x64 package and launch checks also pass; Windows remains an unsigned preview.
+- Publish identical sets of 14 assets, checksum manifests and authored
+  version-specific notes to both desktop Beta feeds. Independent public
+  download checks confirm the exact source tag, asset digests and all four
+  updater metadata files after publication.
+- Release: [desktop beta.4](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.4).
 
 ## 2026-09-18 — Custom endpoint model controls — 1.0.4-beta.3
 
