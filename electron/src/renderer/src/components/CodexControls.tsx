@@ -58,6 +58,9 @@ export function CodexStatusButton() {
   const lifecycleActive = useAppStore(state => (
     session ? state.activeSessionIds.has(session.id) : false
   ))
+  const admitting = useAppStore(state => (
+    session ? Boolean(state.turnAdmissionTokens[session.id]) : false
+  ))
   const count = runtime?.pending_interactions?.length ?? 0
   const unavailable = runtime?.available === false
   const runtimeTone = codexStatusTone(runtime)
@@ -69,7 +72,8 @@ export function CodexStatusButton() {
     && !error
     && !unavailable
     && runtimeTone === 'idle'
-  const tone = error || unavailable ? 'error' : lifecycleRunning ? 'active' : runtimeTone
+  const lifecycleStarting = admitting && !lifecycleActive && !error && !unavailable
+  const tone = error || unavailable ? 'error' : lifecycleRunning || lifecycleStarting ? 'active' : runtimeTone
   const label = count > 0
     ? `${count} waiting`
     : error
@@ -78,6 +82,8 @@ export function CodexStatusButton() {
           ? 'Unavailable'
           : lifecycleRunning
             ? 'Running'
+            : lifecycleStarting
+              ? t('timeline.status.starting')
             : loading
               ? 'Loading'
               : codexStatusLabel(runtime?.status)

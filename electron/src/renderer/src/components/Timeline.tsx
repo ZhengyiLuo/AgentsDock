@@ -5,8 +5,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type WheelEven
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, ArrowUp, LoaderCircle, Search, X } from 'lucide-react'
 import type { CodexThreadStatus, Event as ServerEvent, PinnedItem, SessionSnapshot, TimelineIndex, TimelineIndexLandmark, TimelinePage, TimelineSearchResult, ViewState, WorkspaceProfileScope } from '@shared/types'
-import { isAgentVisibleEvent, reconcileRenderTimelineItems, settleInactiveTimelineItems, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
-import { snapshotNeedsAuthoritativeTail, useAppStore } from '../store/app-store'
+import { isAgentVisibleEvent, reconcileRenderTimelineItems, settleInactiveTimelineItems, type MessageItem, type RenderTimelineItem, type TimelineItem } from '../lib/timeline'
+import { pendingTurnSubmissionAccepted, snapshotNeedsAuthoritativeTail, useAppStore, type PendingTurnSubmission } from '../store/app-store'
 import { TimelineRowView } from './TimelineRows'
 import { TimelineMinimap, type TimelineMinimapHandle } from './TimelineMinimap'
 import { cachedTimelineLandmarks, countOlderTimelineLandmarks, hasOlderTimelineContent, mergeTimelineLandmarks, retainTimelineLandmarkSpine, type TimelineNavigatorLandmark } from '../lib/timeline-minimap'
@@ -57,6 +57,34 @@ interface WorkspaceLayoutAnchor {
   topOffset: number
 }
 
+export function pendingTurnMessageItem(sessionId: string, pending: PendingTurnSubmission): MessageItem {
+  const id = `pending-turn:${pending.token}`
+  const event: ServerEvent = {
+    id,
+    session_id: sessionId,
+    seq: pending.afterSeq + 1,
+    type: 'turn_started',
+    ts: new Date(pending.createdAt).toISOString(),
+    prompt: pending.prompt,
+    file_ids: pending.files.map(file => file.id),
+    chat_references: pending.chatReferences,
+    team_references: pending.teamReferences,
+    provider_user_authored: true
+  }
+  return {
+    kind: 'message',
+    id,
+    key: id,
+    seq: event.seq,
+    event,
+    events: [event],
+    role: 'user',
+    files: pending.files,
+    pending: true,
+    pendingPhase: pending.phase
+  }
+}
+
 export const Timeline = memo(function Timeline({ sessionId, focused = true }: { sessionId?: string | null; focused?: boolean } = {}) {
   useLocale()
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -68,6 +96,7 @@ export const Timeline = memo(function Timeline({ sessionId, focused = true }: { 
   const healthKnown = useAppStore(state => state.health !== null)
   const localSessionImportAvailable = useAppStore(state => localSessionImportSupported(state.health))
   const healthActive = useAppStore(state => resolvedSessionId ? state.activeSessionIds.has(resolvedSessionId) : false)
+  const pendingSubmission = useAppStore(state => resolvedSessionId ? state.pendingTurnSubmissions[resolvedSessionId] : undefined)
   const activeCodexRunId = useAppStore(state => {
     if (!resolvedSessionId) return null
     const run = state.health?.active_runs?.find(candidate => candidate.session_id === resolvedSessionId)
@@ -101,10 +130,10 @@ export const Timeline = memo(function Timeline({ sessionId, focused = true }: { 
     healthKnown,
     healthActive
   )
-  return <TimelineSession key={workspaceKey} profileId={activeProfileId} profileGeneration={profileGeneration} serverIdentity={serverIdentity} sessionId={resolvedSessionId} snapshot={snapshot} liveTurnState={liveTurnState} activeCodexRunId={activeCodexRunId} focused={focused} />
+  return <TimelineSession key={workspaceKey} profileId={activeProfileId} profileGeneration={profileGeneration} serverIdentity={serverIdentity} sessionId={resolvedSessionId} snapshot={snapshot} pendingSubmission={pendingSubmission} liveTurnState={liveTurnState} activeCodexRunId={activeCodexRunId} focused={focused} />
 })
 
-function TimelineSession({ profileId, profileGeneration, serverIdentity, sessionId, snapshot, liveTurnState, activeCodexRunId, focused }: { profileId: string | null; profileGeneration: number; serverIdentity: string | null; sessionId: string; snapshot: SessionSnapshot; liveTurnState: boolean | null; activeCodexRunId: string | null; focused: boolean }) {
+function TimelineSession({ profileId, profileGeneration, serverIdentity, sessionId, snapshot, pendingSubmission, liveTurnState, activeCodexRunId, focused }: { profileId: string | null; profileGeneration: number; serverIdentity: string | null; sessionId: string; snapshot: SessionSnapshot; pendingSubmission?: PendingTurnSubmission; liveTurnState: boolean | null; activeCodexRunId: string | null; focused: boolean }) {
   useLocale()
   const ref = useRef<VirtuosoHandle>(null)
   const minimapRef = useRef<TimelineMinimapHandle>(null)
@@ -294,7 +323,14 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     const presented = historicalWindow || liveTurnState === false
       ? settleInactiveTimelineItems(projection.rendered)
       : projection.rendered
-    const next = reconcileRenderTimelineItems(previous, omitQueuedPendingTimelineItems(presented, snapshot.queuedTurns, sessionId))
+    const canonical = omitQueuedPendingTimelineItems(presented, snapshot.queuedTurns, sessionId)
+    const showPending = !historicalWindow
+      && pendingSubmission
+      && !pendingTurnSubmissionAccepted(pendingSubmission, sourceEvents)
+    const displayed = showPending
+      ? [...canonical, pendingTurnMessageItem(sessionId, pendingSubmission)]
+      : canonical
+    const next = reconcileRenderTimelineItems(previous, displayed)
     firstItemIndex.current = shiftedTimelineFirstItemIndex(
       firstItemIndex.current,
       previous.map(item => item.key),
@@ -313,6 +349,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     sourceEvents,
     listSourceKey,
     projectionSourceKey,
+    pendingSubmission,
     workspaceKey
   ])
   itemsLength.current = items.length
