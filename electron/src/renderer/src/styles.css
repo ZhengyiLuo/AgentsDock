@@ -858,6 +858,8 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .message-row.assistant .message-surface { width: 100%; padding: 3px 4px 3px 3px; }
 .message-surface > header, .system-row header { display: flex; align-items: center; gap: 7px; min-height: 20px; margin-bottom: 3px; color: var(--muted); font-size: var(--text-size-meta); font-weight: var(--text-weight-label); user-select: none; }
 .message-surface > header time, .system-row header time { color: var(--faint); font-weight: var(--text-weight-body); }
+.message-pending-status { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--text-weight-body); }
+.message-pending-status .activity-ring { width: 8px; height: 8px; }
 .message-surface > header button, .system-row header button { width: 20px; height: 20px; }
 .pin-button.active { color: #e7bd55 !important; background: #3a321d !important; }
 .message-row.user .message-surface > header { justify-content: flex-end; }

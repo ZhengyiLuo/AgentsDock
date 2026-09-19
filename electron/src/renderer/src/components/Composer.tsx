@@ -492,6 +492,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   const uploadPaths = useAppStore(state => selectedId ? state.uploadPathsBySession[selectedId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)
   const running = useAppStore(state => selectedId ? state.activeSessionIds.has(selectedId) : false)
   const admitting = useAppStore(state => selectedId ? Boolean(state.turnAdmissionTokens[selectedId]) : false)
+  const pendingSubmissionMode = useAppStore(state => selectedId ? state.pendingTurnSubmissions[selectedId]?.mode : undefined)
   const stopping = useAppStore(state => selectedId ? state.stoppingSessionIds.has(selectedId) : false)
   const catalog = useAppStore(state => state.runtimeCatalog)
   const healthRevision = useAppStore(state => composerHealthContractRevision(state.health))
@@ -1292,6 +1293,41 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     }
     const admissionToken = useAppStore.getState().beginTurnAdmission(session.id)
     if (!admissionToken) return
+    const staged = useAppStore.getState().stagePendingTurnSubmission(session.id, admissionToken, {
+      prompt: outgoing,
+      steer,
+      consumeComposer,
+      chatReferences: outgoingReferences,
+      teamReferences: outgoingTeamReferences
+    })
+    if (!staged) {
+      useAppStore.getState().endTurnAdmission(session.id, admissionToken)
+      return
+    }
+    if (consumeComposer) {
+      providerCommandBindingRef.current = null
+      draftRef.current = ''
+      draftDirtyRef.current = false
+      referencesRef.current = []
+      referencesDirtyRef.current = false
+      teamReferencesRef.current = []
+      teamReferencesDirtyRef.current = false
+      setDraft('')
+      setReferences([])
+      setTeamReferences([])
+      setMention(null)
+      setMentionCandidates([])
+      setTeamMention(null)
+      setTeamMentionCandidates([])
+      if (selectedId) {
+        void Promise.all([
+          setWorkspacePreference(draftPreferenceScope(draftContextRef.current), `draft:${selectedId}`, ''),
+          setWorkspacePreference(draftPreferenceScope(draftContextRef.current), chatReferencesPreferenceKey(selectedId), []),
+          setWorkspacePreference(draftPreferenceScope(draftContextRef.current), teamReferencesPreferenceKey(selectedId), [])
+        ]).catch(() => undefined)
+      }
+    }
+    let submissionAccepted = false
     try {
       const runtimeSnapshot = useAppStore.getState()
       const diagnostic = runtimeDiagnosticFor(runtimeSnapshot.health, runtimeSnapshot.runtimeCatalog, session.backend)
@@ -1340,32 +1376,6 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         return
       }
       if (!composerSessionIsCurrent(activeProfileId, profileGeneration, serverIdentity, session.id, draftContextRef, mountedRef)) return
-      if (consumeComposer) {
-        providerCommandBindingRef.current = null
-        draftRef.current = ''
-        draftDirtyRef.current = false
-        referencesRef.current = []
-        referencesDirtyRef.current = false
-        teamReferencesRef.current = []
-        teamReferencesDirtyRef.current = false
-        setDraft('')
-        setReferences([])
-        setTeamReferences([])
-        setMention(null)
-        setMentionCandidates([])
-        setTeamMention(null)
-        setTeamMentionCandidates([])
-        if (selectedId) {
-          useAppStore.getState().setDraftForSession(selectedId, '')
-          useAppStore.getState().setChatReferencesForSession(selectedId, [])
-          useAppStore.getState().setTeamReferencesForSession(selectedId, [])
-          void Promise.all([
-            setWorkspacePreference(draftPreferenceScope(draftContextRef.current), `draft:${selectedId}`, ''),
-            setWorkspacePreference(draftPreferenceScope(draftContextRef.current), chatReferencesPreferenceKey(selectedId), []),
-            setWorkspacePreference(draftPreferenceScope(draftContextRef.current), teamReferencesPreferenceKey(selectedId), [])
-          ]).catch(() => undefined)
-        }
-      }
       const sent = await useAppStore.getState().sendPromptForSession(session.id, outgoing, steer, {
         consumeComposer,
         admissionToken,
@@ -1376,6 +1386,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
           ? () => Boolean(confirmInboundDeliveryInterruption(session.id, 'send_now', steerConsent))
           : undefined
       })
+      submissionAccepted = sent
       if (sent) {
         trackEvent('message_sent')
         if (boundProviderCommand) {
@@ -1384,67 +1395,73 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         if (outgoingReferences.length > 0) trackEvent('chat_reference_sent')
         if (outgoingTeamReferences.length > 0) trackEvent('team_reference_sent')
       }
-      const current = useAppStore.getState()
-      if (!sent && consumeComposer && mountedRef.current && current.activeProfileId === activeProfileId && current.profileGeneration === profileGeneration && activeIdentity(current) === serverIdentity && draftContextRef.current.sessionId === selectedId) {
-        // Local composer state is authoritative while a send is in flight.
-        // Draft-store synchronization is deliberately debounced so typing
-        // never fans out a global Zustand update per key.
-        const newerDraft = draftRef.current
-        const normalizedOutgoing = outgoing.trim()
-        const outgoingLeadingWhitespace = outgoing.length - outgoing.trimStart().length
-        const normalizedOutgoingReferences = validChatReferences(normalizedOutgoing, outgoingReferences.map(reference => ({
-          ...reference,
-          source_text_start: reference.source_text_start - outgoingLeadingWhitespace,
-          source_text_end: reference.source_text_end - outgoingLeadingWhitespace
-        })), selectedId)
-        const normalizedOutgoingTeamReferences = validTeamReferences(normalizedOutgoing, outgoingTeamReferences.map(reference => ({
-          ...reference,
-          source_text_start: reference.source_text_start - outgoingLeadingWhitespace,
-          source_text_end: reference.source_text_end - outgoingLeadingWhitespace
-        })))
-        const restored = newerDraft.trim() && newerDraft !== normalizedOutgoing
-          ? `${normalizedOutgoing}\n\n${newerDraft}`
-          : normalizedOutgoing
-        const newerReferences = validChatReferences(newerDraft, referencesRef.current, selectedId)
-        const newerTeamReferences = validTeamReferences(newerDraft, teamReferencesRef.current)
-        const restoredReferences = newerDraft.trim() && newerDraft !== normalizedOutgoing
-          ? [
-              ...normalizedOutgoingReferences,
-              ...newerReferences.map(reference => ({
-                ...reference,
-                source_text_start: reference.source_text_start + normalizedOutgoing.length + 2,
-                source_text_end: reference.source_text_end + normalizedOutgoing.length + 2
-              }))
-            ]
-          : normalizedOutgoingReferences
-        const restoredTeamReferences = newerDraft.trim() && newerDraft !== normalizedOutgoing
-          ? [
-              ...normalizedOutgoingTeamReferences,
-              ...newerTeamReferences.map(reference => ({
-                ...reference,
-                source_text_start: reference.source_text_start + normalizedOutgoing.length + 2,
-                source_text_end: reference.source_text_end + normalizedOutgoing.length + 2
-              }))
-            ]
-          : normalizedOutgoingTeamReferences
-        draftRef.current = restored
-        draftDirtyRef.current = false
-        referencesRef.current = restoredReferences
-        referencesDirtyRef.current = true
-        teamReferencesRef.current = restoredTeamReferences
-        teamReferencesDirtyRef.current = true
-        if (boundProviderCommand) {
-          providerCommandCache.delete(boundProviderCommand.contextKey)
-          void loadProviderCommands(true, true)
-        }
-        setDraft(restored)
-        setReferences(restoredReferences)
-        setTeamReferences(restoredTeamReferences)
-        current.setDraftForSession(selectedId!, restored)
-        current.setChatReferencesForSession(selectedId!, restoredReferences)
-        current.setTeamReferencesForSession(selectedId!, restoredTeamReferences)
-      }
     } finally {
+      if (!submissionAccepted) {
+        useAppStore.getState().rollbackPendingTurnSubmission(session.id, admissionToken)
+        const current = useAppStore.getState()
+        if (consumeComposer && mountedRef.current && current.activeProfileId === activeProfileId && current.profileGeneration === profileGeneration && activeIdentity(current) === serverIdentity && draftContextRef.current.sessionId === selectedId) {
+          // Local composer state is authoritative while a send is in flight.
+          // Draft-store synchronization is deliberately debounced so typing
+          // never fans out a global Zustand update per key.
+          const newerDraft = draftRef.current
+          const normalizedOutgoing = outgoing.trim()
+          const outgoingLeadingWhitespace = outgoing.length - outgoing.trimStart().length
+          const normalizedOutgoingReferences = validChatReferences(normalizedOutgoing, outgoingReferences.map(reference => ({
+            ...reference,
+            source_text_start: reference.source_text_start - outgoingLeadingWhitespace,
+            source_text_end: reference.source_text_end - outgoingLeadingWhitespace
+          })), selectedId)
+          const normalizedOutgoingTeamReferences = validTeamReferences(normalizedOutgoing, outgoingTeamReferences.map(reference => ({
+            ...reference,
+            source_text_start: reference.source_text_start - outgoingLeadingWhitespace,
+            source_text_end: reference.source_text_end - outgoingLeadingWhitespace
+          })))
+          const hasNewerDraft = Boolean(newerDraft.trim())
+          const separator = normalizedOutgoing && hasNewerDraft ? '\n\n' : ''
+          const restored = hasNewerDraft
+            ? `${normalizedOutgoing}${separator}${newerDraft}`
+            : normalizedOutgoing
+          const newerReferenceOffset = normalizedOutgoing.length + separator.length
+          const newerReferences = validChatReferences(newerDraft, referencesRef.current, selectedId)
+          const newerTeamReferences = validTeamReferences(newerDraft, teamReferencesRef.current)
+          const restoredReferences = hasNewerDraft
+            ? [
+                ...normalizedOutgoingReferences,
+                ...newerReferences.map(reference => ({
+                  ...reference,
+                  source_text_start: reference.source_text_start + newerReferenceOffset,
+                  source_text_end: reference.source_text_end + newerReferenceOffset
+                }))
+              ]
+            : normalizedOutgoingReferences
+          const restoredTeamReferences = hasNewerDraft
+            ? [
+                ...normalizedOutgoingTeamReferences,
+                ...newerTeamReferences.map(reference => ({
+                  ...reference,
+                  source_text_start: reference.source_text_start + newerReferenceOffset,
+                  source_text_end: reference.source_text_end + newerReferenceOffset
+                }))
+              ]
+            : normalizedOutgoingTeamReferences
+          draftRef.current = restored
+          draftDirtyRef.current = false
+          referencesRef.current = restoredReferences
+          referencesDirtyRef.current = true
+          teamReferencesRef.current = restoredTeamReferences
+          teamReferencesDirtyRef.current = true
+          if (boundProviderCommand) {
+            providerCommandCache.delete(boundProviderCommand.contextKey)
+            void loadProviderCommands(true, true)
+          }
+          setDraft(restored)
+          setReferences(restoredReferences)
+          setTeamReferences(restoredTeamReferences)
+          current.setDraftForSession(selectedId!, restored)
+          current.setChatReferencesForSession(selectedId!, restoredReferences)
+          current.setTeamReferencesForSession(selectedId!, restoredTeamReferences)
+        }
+      }
       useAppStore.getState().endTurnAdmission(session.id, admissionToken)
     }
   }
@@ -2138,7 +2155,15 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
           {session.backend === 'cursor' && <CursorPermissionMenu session={session} running={running} open={permissionMenuOpen} onOpenChange={setPermissionMenuOpen} />}
         </div>
         <div className="composer-actions">
-          {steeringPending && <span className="steering-pending" role="status"><span className="activity-ring" /><span className="steering-pending-label">{running ? t("ui.Composer.Composer.sending_now_2e3b74f") : t("ui.Composer.Composer.starting_bbe5fc3")}</span></span>}
+          {(steeringPending || admitting) && <span className="steering-pending" role="status"><span className="activity-ring" /><span className="steering-pending-label">{
+            steeringPending || pendingSubmissionMode === 'steer'
+              ? running ? t("ui.Composer.Composer.sending_now_2e3b74f") : t("ui.Composer.Composer.starting_bbe5fc3")
+              : pendingSubmissionMode === 'queue'
+                ? t('timeline.ui.waitingToStart')
+                : running
+                  ? t('timeline.status.running')
+                : t("ui.Composer.Composer.starting_bbe5fc3")
+          }</span></span>}
           {running && <button
             type="button"
             className="stop-button"

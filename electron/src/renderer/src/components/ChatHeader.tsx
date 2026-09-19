@@ -177,7 +177,7 @@ export function ChatHeader({
         {(running || admitting) && (
           session.backend === 'claude'
           || (session.backend === 'codex' && !codexControlsSupported)
-        ) && <AgentRunningStatus backend={session.backend} />}
+        ) && <AgentRunningStatus backend={session.backend} starting={!running && admitting} />}
         <ChatSyncStatus sessionId={session.id} />
         {focused && <ShortcutTooltip shortcut="toggleInspector" label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`}><button className="icon-button inspector-toggle" aria-label={`${inspector ? t("ui.ChatHeader.ChatHeader.hide_ac20a57") : 'Show'} right panel`} onClick={() => useAppStore.getState().setInspectorVisible(!inspector)}>{inspector ? <PanelRightClose size={16} /> : <PanelRight size={16} />}</button></ShortcutTooltip>}
         {onClosePane && <button className="icon-button" title={t("ui.ChatHeader.ChatHeader.close_this_chat_pane_4926598")} aria-label={t("ui.ChatHeader.ChatHeader.close_pane_fe2672f", { "title": String(session.title) })} onClick={onClosePane}><X size={15} /></button>}
@@ -186,9 +186,9 @@ export function ChatHeader({
   )
 }
 
-function AgentRunningStatus({ backend }: { backend: 'claude' | 'codex' }) {
+function AgentRunningStatus({ backend, starting = false }: { backend: 'claude' | 'codex'; starting?: boolean }) {
   const provider = backendLabel(backend)
-  const status = t('timeline.status.running')
+  const status = t(starting ? 'timeline.status.starting' : 'timeline.status.running')
   return <span className="codex-status-button active agent-running-status" role="status" aria-label={`${provider} ${status}`} title={`${provider} ${status}`}>
     <span aria-hidden="true" />
     <b>{provider}</b>

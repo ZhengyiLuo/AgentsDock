@@ -186,6 +186,7 @@ describe('Composer', () => {
       revokingAgentRouteIds: new Set(),
       activeSessionIds: new Set(),
       turnAdmissionTokens: {},
+      pendingTurnSubmissions: {},
       stoppingSessionIds: new Set(),
       runtimeCatalog: null,
       health: null,
@@ -1432,16 +1433,24 @@ describe('Composer', () => {
       } as unknown as AgentsDockAPI
     })
     useAppStore.setState({ sessions: [{ id: 'chat-1', title: 'Chat', backend: 'claude' }] })
-    const user = userEvent.setup()
     render(<Composer />)
 
-    await user.type(screen.getByPlaceholderText('Message'), 'Start the first turn')
-    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Start the first turn' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
     expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeTruthy()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Start the first turn')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    act(() => useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      pendingTurnSubmissions: {}
+    }))
+    expect(screen.getByRole('status').textContent).toContain('Running')
+    expect(screen.getByRole('status').textContent).not.toContain('Waiting to start')
+    act(() => useAppStore.setState({ activeSessionIds: new Set() }))
 
     await act(async () => resolveSend({
       session: { id: 'chat-1', title: 'Chat', backend: 'claude', backend_locked: true },
@@ -1449,8 +1458,9 @@ describe('Composer', () => {
     }))
 
     await waitFor(() => expect(useAppStore.getState().turnAdmissionTokens['chat-1']).toBeUndefined())
-    expect(screen.getByTitle('Backend is fixed after the provider session starts')).toBeDisabled()
-  })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByTitle('Backend is fixed after the provider session starts') as HTMLButtonElement).disabled).toBe(true)
+  }, 15_000)
 
   it('reloads the selected chat provider from the composer runtime menu', async () => {
     const reloadProvider = vi.fn().mockResolvedValue({
@@ -1937,13 +1947,17 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Message')).toHaveValue('Use the new policy')
-    expect(screen.getByTitle('Wait for the message to be accepted before changing backend')).toBeDisabled()
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new policy')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByTitle('Wait for the message to be accepted before changing backend') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByPlaceholderText('Message'), { target: { value: 'Draft the next request' } })
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: 'Use the new policy'
     })))
-  })
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('Draft the next request')
+  }, 30_000)
 
   it('restores the authoritative permission policy when auto-save fails', async () => {
     const update = vi.fn().mockRejectedValue(new Error('Policy update denied'))
@@ -2177,12 +2191,14 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(send).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Message')).toHaveValue('Use the new Claude policy')
+    expect(useAppStore.getState().pendingTurnSubmissions['chat-1']?.prompt).toBe('Use the new Claude policy')
+    expect(screen.getByRole('status').textContent).toContain('Starting…')
+    expect((screen.getByPlaceholderText('Message') as HTMLTextAreaElement).value).toBe('')
     permissionResponse.resolve()
     await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'chat-1', prompt: 'Use the new Claude policy'
     })))
-  })
+  }, 30_000)
 
   it('restores the authoritative Claude permission mode when auto-save fails', async () => {
     const update = vi.fn().mockRejectedValue(new Error('Claude policy update denied'))

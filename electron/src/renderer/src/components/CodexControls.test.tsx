@@ -195,6 +195,21 @@ describe('Codex controls', () => {
     expect(screen.getByRole('button', { name: 'Codex controls: Idle' }).querySelector('.spin')).toBeNull()
   })
 
+  it('shows local admission as starting until the server marks the run active', async () => {
+    runtimeResponse = { ...runtime, status: { type: 'idle' } }
+    useAppStore.setState({ turnAdmissionTokens: { [session.id]: 'admission-1' } })
+    renderControls()
+    expect((await screen.findByRole('button', { name: 'Codex controls: Starting' })).querySelector('.spin')).not.toBeNull()
+
+    act(() => {
+      useAppStore.setState({
+        activeSessionIds: new Set([session.id]),
+        turnAdmissionTokens: {}
+      })
+    })
+    expect(screen.getByRole('button', { name: 'Codex controls: Running' })).toBeDefined()
+  }, 15_000)
+
   it('quietly polls active threads for fresh context occupancy', async () => {
     vi.useFakeTimers()
     try {
