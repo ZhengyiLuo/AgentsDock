@@ -1950,7 +1950,16 @@ function renderTimelineItem(item: TimelineItem): RenderTimelineItem[] {
     }
   }
   if (outputFiles.length) {
-    rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: outputFiles[0].seq ?? item.seq, files: outputFiles })
+    // Media is displayed after the turn's content, even when its first file
+    // was created earlier. An older anchor would pull intervening messages
+    // below the final answer and media when chronological rows are inserted.
+    const toolStartSequences = progressToolStartSequences(sourceEvents)
+    const mediaSeq = rows.reduce((anchor, row) => {
+      if (row.kind !== 'progress') return Math.max(anchor, row.seq)
+      const progress = { ...row, toolStartSequences }
+      return row.events.reduce((seq, event) => Math.max(seq, progressEventSequence(event, progress)), Math.max(anchor, row.seq))
+    }, outputFiles[0].seq ?? item.seq)
+    rows.push({ kind: 'media', id: `${item.id}:media`, key: `${item.key}:media`, seq: mediaSeq, files: outputFiles })
   }
   return rows
 }
@@ -2064,7 +2073,7 @@ export function reconcileRenderTimelineItems(previous: RenderTimelineItem[], nex
       sameReferences(before.events, item.events) &&
       sameReferences(before.sourceEvents ?? [], item.sourceEvents ?? []) &&
       sameReferences(before.lifecycle ?? [], item.lifecycle ?? [])) return before
-    if (before.kind === 'media' && item.kind === 'media' && sameReferences(before.files, item.files)) return before
+    if (before.kind === 'media' && item.kind === 'media' && before.seq === item.seq && sameReferences(before.files, item.files)) return before
     return item
   })
 }

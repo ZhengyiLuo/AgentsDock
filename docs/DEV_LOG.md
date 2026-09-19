@@ -1,5 +1,21 @@
 # Public development log
 
+## 2026-09-19 — Inter-chat chronology — beta candidate
+
+- Keep inter-chat cards among the work that happened around them, ahead of a
+  later final answer even when the turn has early-created files or media.
+  Give the trailing media group a presentation anchor consistent with its
+  displayed position, and refresh cached rows when that anchor advances.
+  Preserve original message timestamps and attachment metadata.
+- Reproduce the incorrect order with the production Timeline, virtualizer and
+  row components in native offscreen Electron using synthetic event snapshots.
+  Exercise native controls for live/completed work, late read receipts, cold
+  reopen, a genuinely later send and card expansion. Inspect light/dark output.
+  Provider execution and production chat data are outside this renderer check.
+- Pass 229 focused timeline tests, TypeScript and production compilation with
+  output verification. No server contract change or deployment is required.
+- Include authored version-specific release notes in the desktop beta.
+
 ## 2026-09-18 — Custom endpoint model controls — 1.0.4-beta.3
 
 - Accept desktop **1.0.4-beta.3 / 1175** from
