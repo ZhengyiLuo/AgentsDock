@@ -2,6 +2,14 @@
 
 ## Mobile picker recovery, goal controls and live forks — 0.1.2 (177)
 
+- Apple validation, upload and processing completed successfully. Build 177
+  is active for internal TestFlight testing with automatic notifications
+  enabled. External beta review was not submitted. Binary source: `94f86c9`.
+- Both CI jobs passed for that exact source commit. The signed iPhone/iPad
+  archive and exported IPA passed distribution-signature, version, framework
+  ABI, privacy, production-feature and fixture-exclusion checks, with matching
+  app/debug symbols. Build artifacts and release logs remain on the external
+  development volume. Physical-device touch acceptance remains unverified.
 - Source verification passed 113 library/API/store modules, 497 rendered/
   contract checks, 30 goal component/provider checks, TypeScript and focused
   settings/file-transfer interactions. Focused suites overlap broad suites;

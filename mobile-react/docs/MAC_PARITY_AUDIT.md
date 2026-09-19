@@ -4,6 +4,14 @@
 
 Reference: committed desktop `6247a26`; uncommitted desktop work is excluded.
 
+Accepted release: **0.1.2 (177)**, active for internal TestFlight testing with
+automatic notifications enabled. Binary source `94f86c9` passed both CI jobs,
+all 113 library/API/store modules, 497 rendered/contract checks and 30 goal
+component/provider checks. Focused suites overlap broad suites. Apple
+validation/upload/processing and signed archive/export, framework ABI, privacy,
+production-feature and matching-symbol checks passed. External beta review was
+not submitted; physical-device touch/pixel acceptance remains unverified.
+
 | Surface | Change | Verification boundary |
 | --- | --- | --- |
 | Chat and server recipient pickers | App-owned root overlay replaces UIKit sheets; close, back, escape, search focus and draft restoration use committed overlay lifecycle | Actual provider/Composer interactions and press handling use synthetic native hosts, not physical-device touch delivery |
