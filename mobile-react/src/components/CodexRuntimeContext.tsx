@@ -67,6 +67,16 @@ const CodexRuntimeContext = createContext<CodexRuntimeContextValue>({
 // importing the desktop client's battery-heavy polling cadence to iOS.
 const ACTIVE_RUNTIME_POLL_MS = 5_000
 
+type GoalStatusIntent = Pick<CodexGoal, 'threadId' | 'objective' | 'createdAt' | 'status'>
+interface RuntimeOperationError { message: string; goalStatusIntent?: GoalStatusIntent }
+
+function goalStatusErrorRetired(intent: GoalStatusIntent | undefined, runtime: CodexRuntimeSnapshot | null): boolean {
+  if (!intent || runtime?.available !== true) return false
+  const goal = runtime.goal
+  return !goal || intent.threadId !== goal.threadId || intent.createdAt !== goal.createdAt
+    || intent.objective !== goal.objective || intent.status === goal.status
+}
+
 export function CodexRuntimeProvider({ sessionId, children }: { sessionId: string; children: ReactNode }) {
   const session = useAppStore(state => state.sessions.find(candidate => candidate.id === sessionId) ?? null)
   const health = useAppStore(state => state.health)
@@ -96,7 +106,7 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
   const [refreshing, setRefreshing] = useState(false)
   const [mutating, setMutating] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
-  const [operationError, setOperationError] = useState<string | null>(null)
+  const [operationError, setOperationError] = useState<RuntimeOperationError | null>(null)
   const [appActive, setAppActive] = useState(NativeAppState.currentState === 'active')
   const runtimeRef = useRef<CodexRuntimeSnapshot | null>(null)
   const requestEpoch = useRef(0)
@@ -121,6 +131,13 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
     runtime.status.activeFlags.includes('waitingOnApproval')
     || runtime.status.activeFlags.includes('waitingOnUserInput')
   )
+
+  useEffect(() => {
+    // A reply can fail after the requested status has taken effect or another
+    // device has replaced/cleared the goal. Retire only that goal's action;
+    // unrelated operation and read errors stay visible.
+    setOperationError(current => goalStatusErrorRetired(current?.goalStatusIntent, runtime) ? null : current)
+  }, [runtime, operationError])
 
   const performRefresh = useCallback(async (): Promise<CodexRuntimeSnapshot | null> => {
     if (!supported || !activeProfileId) {
@@ -344,7 +361,7 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
     refreshTimer.current = null
   }, [])
 
-  const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
+  const run = useCallback(async <T,>(operation: () => Promise<T>, goalStatusIntent?: GoalStatusIntent): Promise<T> => {
     const expectedScopeKey = scopeKeyRef.current
     const expectedMutationEpoch = mutationEpoch.current
     if (!activeProfileId || expectedScopeKey !== scopeKey || !runtimeScopeIsCurrent(client, activeProfileId, profileGeneration, sessionId)) {
@@ -358,7 +375,7 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
     try {
       return await operation()
     } catch (cause) {
-      if (scopeKeyRef.current === expectedScopeKey && mutationEpoch.current === expectedMutationEpoch) setOperationError(errorMessage(cause))
+      if (scopeKeyRef.current === expectedScopeKey && mutationEpoch.current === expectedMutationEpoch) setOperationError({ message: errorMessage(cause), goalStatusIntent })
       throw cause
     } finally {
       if (scopeKeyRef.current === expectedScopeKey && mutationEpoch.current === expectedMutationEpoch) {
@@ -377,6 +394,10 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
     const connection = client
     const expectedScopeKey = scopeKey
     const expectedMutationEpoch = mutationEpoch.current
+    const currentGoal = runtimeRef.current?.goal
+    const goalStatusIntent = currentGoal && input && Object.keys(input).length === 1 && input.status !== currentGoal.status && (input.status === 'active' || input.status === 'paused')
+      ? { threadId: currentGoal.threadId, createdAt: currentGoal.createdAt, objective: currentGoal.objective, status: input.status }
+      : undefined
     const operation = run(async () => {
       const state = useAppStore.getState()
       const feature = codexControlsCapability(state.health)?.features?.goals
@@ -403,7 +424,7 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
       runtimeRef.current = next
       setRuntime(next)
       return snapshot
-    }).catch(cause => {
+    }, goalStatusIntent).catch(cause => {
       // A prior connection's failure is no longer an error for this card or
       // editor. Suppress it for callers just as we discard its late snapshot.
       if (mutationEpoch.current !== expectedMutationEpoch) return null
@@ -427,7 +448,7 @@ export function CodexRuntimeProvider({ sessionId, children }: { sessionId: strin
     loading,
     refreshing,
     mutating,
-    error: operationError ?? refreshError,
+    error: (goalStatusErrorRetired(operationError?.goalStatusIntent, runtime) ? null : operationError?.message) ?? refreshError,
     runtime,
     session,
     refresh,

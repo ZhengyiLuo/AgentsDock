@@ -1281,7 +1281,14 @@ export interface AgentTeamMailCapability extends ServerCapability {
   }
 }
 
+export interface SessionForkCompletedPrefixCapability {
+  available: boolean
+  version: number
+  supported_backends: Backend[]
+}
+
 export interface HealthCapabilities {
+  session_fork_completed_prefix_v1?: SessionForkCompletedPrefixCapability
   local_session_import_v1?: LocalSessionImportCapability
   scheduled_jobs?: ScheduledJobsCapability
   agent_emergency_alerts_v1?: AgentEmergencyAlertsCapability
@@ -1300,7 +1307,7 @@ export interface HealthCapabilities {
   team_hub_v1?: TeamHubV1Capability
   server_updates?: ServerUpdatesCapability
   working_directory_completion?: WorkingDirectoryCompletionCapability
-  [key: string]: JsonValue | LocalSessionImportCapability | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
+  [key: string]: JsonValue | SessionForkCompletedPrefixCapability | LocalSessionImportCapability | InteractiveProviderCapability | CursorBackendCapability | ScheduledJobsCapability | AgentEmergencyAlertsCapability | ProviderJobsAccessControlCapability | AgentTeamMailCapability | CrossChatHandoffsCapability | TeamHubV1Capability | ServerUpdatesCapability | WorkingDirectoryCompletionCapability | undefined
 }
 
 export interface LocalSessionImportCapability extends ServerCapability {

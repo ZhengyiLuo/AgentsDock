@@ -8,6 +8,7 @@ import { usePalette } from '../theme'
 import type { Session, TimelineSearchResult } from '../types'
 import { formatChatDateTime, isUnread, runtimeSummary } from '../lib/format'
 import { compareSessions, orderedSessionSections, sessionSection } from '../lib/session-order'
+import { completedPrefixForkAvailable, RUNNING_FORK_DESCRIPTION, RUNNING_FORK_UNAVAILABLE } from '../lib/session-fork'
 import { sessionNeedsProviderInteraction, sessionPendingInteractionCount } from '../lib/claude-controls'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { isServerSetupRequired } from '../lib/first-launch'
@@ -493,6 +494,13 @@ function SessionRow({ session, profileScope, selected, running, searchSnippet, o
   const markUnread = useAppStore(state => state.markUnread)
   const update = useAppStore(state => state.updateSession)
   const fork = useAppStore(state => state.forkSession)
+  const connected = useAppStore(state => state.connected)
+  const liveFork = useAppStore(state => state.activeSessionIds.has(session.id) || state.stoppingSessionIds.has(session.id)
+    || Boolean(state.turnAdmissionTokens[session.id]) || state.sendingSessionIds.has(session.id)
+    || Boolean(state.snapshots[session.id]?.queuedTurns.some(turn => state.pendingQueuedRunIds.has(turn.queued_id))))
+  const liveForkSupported = useAppStore(state => completedPrefixForkAvailable(state.health, session.backend))
+  const forkDisabled = !connected || (liveFork && !liveForkSupported)
+  const forkHint = !connected ? 'Connect to the server to fork this chat.' : forkDisabled ? RUNNING_FORK_UNAVAILABLE : liveFork ? RUNNING_FORK_DESCRIPTION : undefined
   const remove = useAppStore(state => state.deleteSession)
   const folderSheetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -547,7 +555,7 @@ function SessionRow({ session, profileScope, selected, running, searchSnippet, o
     { id: 'read-state', title: unread ? 'Mark as Read' : 'Mark as Unread', image: unread ? 'envelope.open' : 'envelope.badge' },
     { id: 'rename', title: 'Rename Chat', image: 'pencil' },
     { id: 'primary-actions', title: '', displayInline: true, subactions: [
-      { id: 'fork', title: 'Fork Chat', image: 'arrow.triangle.branch' },
+      { id: 'fork', title: 'Fork Chat', image: 'arrow.triangle.branch', attributes: { disabled: forkDisabled } },
       { id: 'move-up', title: 'Move Up', image: 'arrow.up', attributes: { disabled: !canMoveUp } },
       { id: 'move-down', title: 'Move Down', image: 'arrow.down', attributes: { disabled: !canMoveDown } },
     ] },
@@ -596,7 +604,9 @@ function SessionRow({ session, profileScope, selected, running, searchSnippet, o
     const destructiveButtonIndex = sheetActions.findIndex(action => action.destructive)
     ActionSheetIOS.showActionSheetWithOptions({
       title: session.title,
+      message: forkHint,
       options: [...sheetActions.map(action => action.title), 'Cancel'],
+      disabledButtonIndices: forkDisabled ? [sheetActions.findIndex(action => action.id === 'fork')] : [],
       cancelButtonIndex,
       destructiveButtonIndex: destructiveButtonIndex >= 0 ? destructiveButtonIndex : undefined,
     }, index => {

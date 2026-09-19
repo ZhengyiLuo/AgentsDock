@@ -218,7 +218,7 @@ test('runtime refreshes are scoped, event-driven, and foreground-aware', () => {
 
 test('runtime operation errors survive the follow-up status refresh and are visible', () => {
   assert.match(runtimeContext, /const \[refreshError, setRefreshError\] = useState<string \| null>\(null\)/)
-  assert.match(runtimeContext, /const \[operationError, setOperationError\] = useState<string \| null>\(null\)/)
+  assert.match(runtimeContext, /const \[operationError, setOperationError\] = useState<RuntimeOperationError \| null>\(null\)/)
   assert.match(
     runtimeRefreshSuccess,
     /runtimeRef\.current = next\s+setRuntime\(next\)\s+setRefreshError\(null\)\s+return next/,
@@ -230,10 +230,10 @@ test('runtime operation errors survive the follow-up status refresh and are visi
   )
   assert.match(
     runtimeRun,
-    /catch \(cause\) \{\s+if \(scopeKeyRef\.current === expectedScopeKey && mutationEpoch\.current === expectedMutationEpoch\) setOperationError\(errorMessage\(cause\)\)\s+throw cause/,
+    /catch \(cause\) \{\s+if \(scopeKeyRef\.current === expectedScopeKey && mutationEpoch\.current === expectedMutationEpoch\) setOperationError\(\{ message: errorMessage\(cause\), goalStatusIntent \}\)\s+throw cause/,
   )
   assert.match(runtimeRun, /finally \{[\s\S]*?void refresh\(\)/)
-  assert.match(runtimeContext, /error: operationError \?\? refreshError/)
+  assert.match(runtimeContext, /error: \(goalStatusErrorRetired\(operationError\?\.goalStatusIntent, runtime\) \? null : operationError\?\.message\) \?\? refreshError/)
   assert.match(interactionShelf, /\{available && error \? \(/)
   assert.match(controls, /\{error \? <Notice text=\{error\} tone="warning" \/> : null\}/)
 })
@@ -342,7 +342,7 @@ test('mobile persistent goal controls are visible, directly editable, and touch 
   assert.match(controls, /useEffect\(\(\) => \{ if \(visible\) void refresh\(\)/)
   assert.match(goalBar, /accessibilityLabel="Persistent Codex goal"/)
   assert.match(goalBar, /accessibilityLabel="Edit goal"/)
-  assert.match(goalBar, /accessibilityLabel=\{view\.canPause \? 'Pause goal' : 'Resume goal'\}/)
+  assert.match(goalBar, /accessibilityLabel=\{actionLabel\}/)
   assert.match(goalBar, /action: \{ minHeight: 44, minWidth: 44/)
   assert.match(goalBar, /Alert\.alert\('Clear persistent goal\?'/)
   assert.match(goalBar, /text: 'Cancel', style: 'cancel'/)

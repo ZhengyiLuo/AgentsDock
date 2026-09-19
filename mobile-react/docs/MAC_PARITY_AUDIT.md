@@ -1,4 +1,32 @@
-# Mobile / Mac parity — 2026-09-15
+# Mobile / Mac parity — 2026-09-18
+
+## Build 177: picker recovery and live-work controls
+
+Reference: committed desktop `6247a26`; uncommitted desktop work is excluded.
+
+| Surface | Change | Verification boundary |
+| --- | --- | --- |
+| Chat and server recipient pickers | App-owned root overlay replaces UIKit sheets; close, back, escape, search focus and draft restoration use committed overlay lifecycle | Actual provider/Composer interactions and press handling use synthetic native hosts, not physical-device touch delivery |
+| Fork during live work | Negotiated `session_fork_completed_prefix_v1` permits a completed-prefix snapshot while the parent and admission continue; unsupported servers/backends retain an explained block | Capability, store race, Inspector and iOS/Android Sidebar regressions; no live user fork used as a fixture |
+| Goal lifecycle | Status-only Pause/Resume, pending/retry feedback, exact-goal lost-reply reconciliation and server-decided budget refusal; explicit Edit/activate or confirmed Clear/create for a new objective | Rendered goal/provider tests, changed-goal first-click timing and library regressions; no live goal mutated |
+
+The root overlay is outside the chat navigation gesture and excludes the
+underlying screen from hit testing and accessibility while visible. Recipient
+selection still requires current server scope and supported reference contracts.
+It no longer waits for a native sheet-dismissal notification to complete. This
+removes a native presentation boundary implicated by a whole-sheet failure;
+the precise reported on-device cause remains unproven.
+
+Desktop has no separate destructive Restart goal API in this reference. Mobile
+follows its explicit edit/status/clear contract rather than resetting a goal's
+usage counters or clearing it automatically. A running ordinary message is
+shown separately from a paused or completed goal.
+
+This is a focused behavioral catch-up, not all desktop changes. New desktop
+side-chat presentation, custom provider endpoint configuration, workspace Changes
+review and Team message search remain separate from these fixes. Earlier
+unported workflows below also remain open. Native touch/pixel acceptance is
+separate from source, signed-build and TestFlight acceptance.
 
 ## Build 176: recipient picker accessibility
 
@@ -200,7 +228,7 @@ backend switching, lean Inspector, and photo-upload completion fixes.
 | Persistent Codex goal | Visible objective, status, elapsed time/token use, Pause/Resume, direct editor, confirmed Clear; disabled/blocked/exhausted states remain explicit | Rendered component/provider tests plus goal helper and API regressions |
 | Server goal setting | Authenticated server-wide toggle in Settings; disabling requires confirmation; conflicts remain errors, not success | Nine rendered tests including duplicate taps, failure/retry, profile switches and reconnects |
 | New chat `+` | Capture the open chat's folder/cwd at the tap while retaining configured backend/model/effort; scoped single-flight | Store tests for creation, failure/retry, old-server responses and immediate selection |
-| Inspector | Copy session ID; Fork disabled/rejected during active/stopping/admitting turns, including queued Run now | Inspector wiring and real store-action tests |
+| Inspector | Copy session ID; at this historical build, Fork was disabled during live/admitting turns (superseded by build 177's capability-gated completed-prefix fork) | Inspector wiring and real store-action tests |
 | Purple cross-chat card | Release stale busy states on reconnect/revalidation/failed server switch; keep exact cancellation intent when a queued delivery starts; never claim unconfirmed removal | Twelve rendered interaction tests, including stale reads and terminal reconciliation |
 | Team Network | Independent mailbox/detail request tracking, per-team draft preservation, stale-team projection rejection, reconnect refresh | Request-sequence, authenticated-route and UI-contract tests |
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import type { ChatDefaults, CreateSessionInput, PublicServerProfile, QueuedRunNowResponse, Session } from '../types'
+import type { ChatDefaults, CreateSessionInput, Health, PublicServerProfile, QueuedRunNowResponse, Session } from '../types'
+import { RUNNING_FORK_UNAVAILABLE } from '../lib/session-fork'
 import { WELCOME_SESSION_ID } from '../lib/welcome-session'
 import { saveCachedSessions, saveWorkspacePreferences } from '../storage/cache'
 import { client, useAppStore } from './useAppStore'
@@ -203,8 +204,8 @@ try {
   ]) {
     resetCreation(blocked)
     await useAppStore.getState().forkSession(selected.id, generation)
-    assert.equal(forkCalls, 0, 'a fork cannot race an active or admitting turn')
-    assert.match(useAppStore.getState().error ?? '', /Wait for .* before forking/)
+    assert.equal(forkCalls, 0, 'an older server cannot fork an active or admitting turn')
+    assert.equal(useAppStore.getState().error, RUNNING_FORK_UNAVAILABLE)
   }
   resetCreation()
   const queuedGate = deferred<QueuedRunNowResponse>()
@@ -216,6 +217,61 @@ try {
   queuedGate.resolve({ ok: false, deferred: true })
   assert.equal(await queuedRun, false)
 
+  const liveHealth: Health = { ok: true, capabilities: { session_fork_completed_prefix_v1: {
+    available: true, version: 1, supported_backends: ['codex', 'claude'],
+  } } }
+  const originalStop = client.stop
+  let stopCalls = 0
+  client.stop = async () => { stopCalls += 1; throw new Error('Fork must not stop the source turn') }
+  try {
+    for (const backend of ['codex', 'claude'] as const) {
+      for (const activity of [
+        { activeSessionIds: new Set([selected.id]) },
+        { stoppingSessionIds: new Set([selected.id]) },
+        { sendingSessionIds: new Set([selected.id]) },
+        { turnAdmissionTokens: { [selected.id]: 'admission-in-progress' } },
+      ]) {
+        resetCreation({ sessions: [{ ...selected, backend }], health: liveHealth, ...activity })
+        const parent = useAppStore.getState()
+        await useAppStore.getState().forkSession(selected.id, generation)
+        const after = useAppStore.getState()
+        assert.equal(after.selectedSessionId, 'forked', `${backend} forks through its completed turn while busy`)
+        assert.equal(after.activeSessionIds, parent.activeSessionIds)
+        assert.equal(after.stoppingSessionIds, parent.stoppingSessionIds)
+        assert.equal(after.sendingSessionIds, parent.sendingSessionIds)
+        assert.equal(after.turnAdmissionTokens, parent.turnAdmissionTokens)
+        assert.equal(after.error, null)
+      }
+    }
+    assert.equal(stopCalls, 0)
+    resetCreation({ health: liveHealth })
+    const supportedQueuedGate = deferred<QueuedRunNowResponse>()
+    client.runQueuedNow = () => supportedQueuedGate.promise
+    const supportedQueuedRun = useAppStore.getState().runQueuedNow(selected.id, 'queued-live', generation)
+    const pending = useAppStore.getState().pendingQueuedRunIds
+    await useAppStore.getState().forkSession(selected.id, generation)
+    assert.equal(useAppStore.getState().selectedSessionId, 'forked', 'supported live fork remains available during queued Run now admission')
+    assert.equal(useAppStore.getState().pendingQueuedRunIds, pending)
+    supportedQueuedGate.resolve({ ok: false, deferred: true })
+    await supportedQueuedRun
+
+    resetCreation({ sessions: [{ ...selected, backend: 'cursor' }], health: liveHealth, activeSessionIds: new Set([selected.id]) })
+    const supportedForkCalls = forkCalls
+    await useAppStore.getState().forkSession(selected.id, generation)
+    assert.equal(forkCalls, supportedForkCalls, 'capability support is checked against the source backend')
+    assert.equal(useAppStore.getState().error, RUNNING_FORK_UNAVAILABLE)
+
+    resetCreation()
+    client.forkSession = async () => { throw new Error('wait for or stop the active turn before forking this chat') }
+    await useAppStore.getState().forkSession(selected.id, generation)
+    assert.equal(useAppStore.getState().error, RUNNING_FORK_UNAVAILABLE, 'raced older-server conflict has desktop guidance')
+    client.forkSession = async () => { throw new Error('The last completed Codex turn has no verifiable native snapshot. The running chat was left unchanged; retry after it finishes.') }
+    await useAppStore.getState().forkSession(selected.id, generation)
+    assert.match(useAppStore.getState().error ?? '', /no verifiable native snapshot/, 'newer-server safety failures stay precise')
+  } finally {
+    client.stop = originalStop
+  }
+  forkCalls = 0
   resetCreation()
   const forkGate = deferred<{ session: Session }>()
   client.forkSession = async () => { forkCalls += 1; return forkGate.promise }

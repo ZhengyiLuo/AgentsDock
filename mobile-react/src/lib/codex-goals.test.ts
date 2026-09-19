@@ -68,7 +68,7 @@ for (const [status, label, canResume] of statusCases) {
   equal(view?.label, label)
   equal(goalStatusLabel(status), label)
   equal(view?.canPause, false)
-  equal(view?.canResume, canResume, `Only a paused goal with available budgets can resume: ${status}`)
+  equal(view?.canResume, canResume, `Only a paused goal offers Resume: ${status}`)
   assert(view?.message, `${status} should explain the goal state`)
 }
 
@@ -78,19 +78,19 @@ equal(goalViewState(goal, timeLimitedRuntime)?.canPause, true, 'An active goal c
 equal(goalViewState({ ...goal, status: 'budgetLimited' }, timeLimitedRuntime)?.label, 'Time budget exhausted')
 const pausedAtTimeLimit = goalViewState({ ...goal, status: 'paused' }, timeLimitedRuntime)
 equal(pausedAtTimeLimit?.label, 'Goal paused', 'Time exhaustion must not conceal that the goal is paused')
-equal(pausedAtTimeLimit?.canResume, false)
+equal(pausedAtTimeLimit?.canResume, true, 'The server decides whether a paused goal can activate with its current time budget')
 assert(pausedAtTimeLimit?.message?.includes('Time budget exhausted'))
 equal(goalViewState({ ...goal, status: 'complete' }, timeLimitedRuntime)?.label, 'Goal complete')
 equal(goalViewState({ ...goal, status: 'blocked' }, timeLimitedRuntime)?.label, 'Goal blocked')
 
-// Older servers lack an exhaustion flag; their reported elapsed time still
-// prevents offering a Resume action that cannot start another goal turn.
+// Older servers lack an exhaustion flag; keep their reported exhaustion visible
+// without overriding the desktop status-only activation contract.
 equal(goalViewState({ ...goal, timeUsedSeconds: 600 }, { time_budget_seconds: 600 })?.timeBudgetExhausted, true)
 equal(goalViewState({ ...goal, timeUsedSeconds: 601 }, { time_budget_seconds: 600 })?.timeBudgetExhausted, true)
 equal(goalViewState(goal, { time_budget_seconds: null })?.timeBudgetExhausted, false)
 equal(goalViewState(goal, { time_budget_seconds: 0 })?.timeBudgetExhausted, false)
 const pausedAtTokenLimit = goalViewState({ ...goal, status: 'paused', tokensUsed: 20_000 }, runtime)
-equal(pausedAtTokenLimit?.canResume, false)
+equal(pausedAtTokenLimit?.canResume, true)
 equal(pausedAtTokenLimit?.tokenBudgetExhausted, true)
 assert(pausedAtTokenLimit?.message?.includes('Token budget exhausted'))
 equal(goalViewState({ ...goal, tokensUsed: 20_000 }, runtime)?.label, 'Budget limited', 'Exhausted token usage must not appear to be pursuing a goal')

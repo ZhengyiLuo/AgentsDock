@@ -6,6 +6,7 @@ import { Archive, Bot, Check, ChevronDown, Copy, FileText, FolderOpen, GitFork, 
 import { describeJobSchedule, effectiveScheduleKind } from '../lib/job-schedule'
 import { dismissAppKeyboard } from '../lib/app-keyboard'
 import { filesNewestFirst } from '../lib/format'
+import { completedPrefixForkAvailable, RUNNING_FORK_DESCRIPTION, RUNNING_FORK_UNAVAILABLE } from '../lib/session-fork'
 import { mobileFileViewerKind } from '../lib/file-viewer'
 import { runtimeCatalogOptions, runtimeEffortAfterModelChange, runtimeEffortOptions, runtimeSelectionError } from '../lib/runtime-catalog'
 import { PROVIDER_JOBS_ACCESS_MODES, providerJobsAccessDescription, providerJobsAccessLabel, providerJobsAccessState } from '../lib/provider-jobs-access'
@@ -117,7 +118,10 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
     jobRunFeedbackTimers.current.clear()
   }, [actionScopeKey])
   const providerSessionId = session?.session_id?.trim() || session?.codex_thread_id?.trim() || session?.claude_session_id?.trim() || session?.cursor_session_id?.trim() || ''
-  const forkDisabled = !connected || running || stopping || admitting
+  const liveFork = running || stopping || admitting
+  const forkBlocked = liveFork && !completedPrefixForkAvailable(health, session?.backend)
+  const forkDisabled = !connected || forkBlocked
+  const forkHint = !connected ? 'Connect to the server to fork this chat.' : forkBlocked ? RUNNING_FORK_UNAVAILABLE : liveFork ? RUNNING_FORK_DESCRIPTION : undefined
   const copySessionId = async () => {
     if (!providerSessionId || !scopeIsCurrent()) return
     try {
@@ -255,7 +259,7 @@ export function Inspector({ sessionId, onDigest, onJob, onTerminal, onProcesses,
     <SubagentsSection key={`${activeProfileId}:${profileGeneration}:${sessionId}`} sessionId={sessionId} backend={session.backend === 'claude' ? 'claude' : 'codex'} events={events} />
 
     <View style={styles.commandGrid}>
-      <Command icon={GitFork} label="Fork" testID="inspector-fork-chat" disabled={forkDisabled} hint={stopping ? 'Wait for the current turn to stop before forking this chat.' : running ? 'Wait for the active turn to finish before forking this chat.' : admitting ? 'Wait for the pending message to be accepted before forking this chat.' : !connected ? 'Connect to the server to fork this chat.' : undefined} onPress={() => { if (!forkDisabled && scopeIsCurrent()) void fork(sessionId, profileGeneration) }} />
+      <Command icon={GitFork} label="Fork" testID="inspector-fork-chat" disabled={forkDisabled} hint={forkHint} onPress={() => { if (!forkDisabled && scopeIsCurrent()) void fork(sessionId, profileGeneration) }} />
       <Command icon={providerSessionId && copiedSessionId === providerSessionId ? Check : Copy} label={providerSessionId && copiedSessionId === providerSessionId ? 'Copied' : 'Copy session'} testID="inspector-copy-session-id" disabled={!providerSessionId} hint={providerSessionId ? 'Copies the full provider session ID.' : 'Available after the chat agent starts a provider session.'} onPress={() => void copySessionId()} />
       <Command icon={FileText} label="Digest" onPress={() => { if (scopeIsCurrent()) onDigest() }} />
       <Command icon={Pin} label={session.pinned ? 'Unpin' : 'Pin'} onPress={() => { if (scopeIsCurrent()) void update(sessionId, { pinned: !session.pinned }, profileGeneration) }} />
