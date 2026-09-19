@@ -116,7 +116,9 @@ export function goalViewState(
     timeBudgetExhausted,
     tokenBudgetExhausted,
     canPause: goal.status === 'active',
-    canResume: goal.status === 'paused' && !timeBudgetExhausted && !tokenBudgetExhausted,
+    // Match desktop: a paused goal can request activation. Keep exhaustion
+    // visible, but let the server decide whether its current budget permits it.
+    canResume: goal.status === 'paused',
   }
 }
 

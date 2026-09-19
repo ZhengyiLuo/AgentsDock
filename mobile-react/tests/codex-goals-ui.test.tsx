@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
+import { useLayoutEffect } from 'react'
 import { create, act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { View } from 'react-native'
 import { AppTypographyProvider } from '../src/components/AppText'
@@ -116,7 +117,7 @@ test('a collapsed goal keeps a truncated alert and exposes the full error on exp
   const tree = await mount()
   await press(tree, 'codex-goal-details')
   await press(tree, 'codex-goal-toggle')
-  assert.equal(contents(node(tree, 'codex-goal-error')), message)
+  assert.equal(contents(node(tree, 'codex-goal-error')), `Could not pause goal: ${message}`)
   assert.equal(node(tree, 'codex-goal-error').props.numberOfLines, undefined)
   await press(tree, 'codex-goal-details')
   assert.equal(node(tree, 'codex-goal-error').props.accessibilityRole, 'alert')
@@ -125,7 +126,7 @@ test('a collapsed goal keeps a truncated alert and exposes the full error on exp
   assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal')
   assert.match(node(tree, 'codex-goal-details').props.accessibilityHint, /Goal alert/)
   await press(tree, 'codex-goal-details')
-  assert.equal(contents(node(tree, 'codex-goal-error')), message)
+  assert.equal(contents(node(tree, 'codex-goal-error')), `Could not pause goal: ${message}`)
   assert.equal(node(tree, 'codex-goal-error').props.numberOfLines, undefined)
 })
 
@@ -210,6 +211,273 @@ test('Resume sends only status; Clear requires confirmation and rejects duplicat
   await act(async () => Alert.__calls[1].buttons?.find(button => button.style === 'destructive')?.onPress?.())
   assert.equal(cleared, 1)
   assert.equal(nodes(tree, 'codex-goal-bar').length, 0)
+})
+
+test('Resume immediately reports progress, keeps failures through refresh, and retries the same status-only action', async () => {
+  let value = runtime({ ...goal, status: 'paused' })
+  const pending = deferred<CodexGoalSnapshot>()
+  const inputs: CodexGoalInput[] = []
+  setTestClient({ codexRuntime: async () => value, setCodexGoal: async (_id, input) => {
+    inputs.push(input)
+    if (inputs.length === 1) return pending.promise
+    value = runtime({ ...goal, status: 'active' })
+    return { goal: value.goal, time_budget_seconds: 600 }
+  } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  const resume = node(tree, 'codex-goal-toggle').props.onPress
+  await act(async () => { resume(); resume() })
+  assert.deepEqual(inputs, [{ status: 'active' }])
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Resuming goal…')
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Resuming goal…')
+  assert.deepEqual(node(tree, 'codex-goal-toggle').props.accessibilityState, { disabled: true, busy: true })
+  await press(tree, 'codex-goal-details')
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Resuming goal…')
+  await act(async () => pending.reject(new Error('Goal owner could not start')))
+  assert.equal(contents(node(tree, 'codex-goal-error')), 'Could not resume goal: Goal owner could not start')
+  await act(async () => { await context.refresh() })
+  assert.equal(contents(node(tree, 'codex-goal-error')), 'Could not resume goal: Goal owner could not start')
+  await press(tree, 'codex-goal-details')
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Retry resume goal')
+  await press(tree, 'codex-goal-toggle')
+  assert.deepEqual(inputs, [{ status: 'active' }, { status: 'active' }])
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Pause goal')
+  assert.equal(nodes(tree, 'codex-goal-error').length, 0)
+})
+
+test('the first Resume tap on a replacement goal survives the commit before passive effects', async () => {
+  let value = runtime()
+  const pending = deferred<CodexGoalSnapshot>()
+  const inputs: CodexGoalInput[] = []
+  setTestClient({ codexRuntime: async () => value, setCodexGoal: async (_id, input) => { inputs.push(input); return pending.promise } })
+  let tree!: ReactTestRenderer
+  function FirstCommittedTap() {
+    const current = useCodexRuntime()
+    useLayoutEffect(() => {
+      if (current.runtime?.goal?.createdAt === 42) node(tree, 'codex-goal-toggle').props.onPress()
+    }, [current.runtime?.goal?.createdAt])
+    return null
+  }
+  await act(async () => {
+    tree = create(<AppTypographyProvider><CodexRuntimeProvider sessionId="chat-a"><Probe /><CodexGoalBar /><FirstCommittedTap /></CodexRuntimeProvider></AppTypographyProvider>)
+  })
+  mounted.push(tree)
+  await press(tree, 'codex-goal-details')
+  value = runtime({ ...goal, objective: 'Replacement goal', createdAt: 42, status: 'paused' })
+  await act(async () => { await context.refresh() })
+  assert.deepEqual(inputs, [{ status: 'active' }])
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Resuming goal…')
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityState.busy, true)
+  value = runtime({ ...value.goal!, status: 'active' })
+  await act(async () => pending.resolve({ goal: value.goal, time_budget_seconds: 600 }))
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Pause goal')
+})
+
+test('authoritative activation reconciles a lost Resume reply without hiding a later runtime error', async () => {
+  let value = runtime({ ...goal, status: 'paused' })
+  let readError: Error | null = null
+  const pending = deferred<CodexGoalSnapshot>()
+  const inputs: CodexGoalInput[] = []
+  setTestClient({ codexRuntime: async () => { if (readError) throw readError; return value }, setCodexGoal: async (_id, input) => {
+    inputs.push(input)
+    if (inputs.length === 1) return pending.promise
+    value = runtime({ ...goal, status: 'paused' })
+    return { goal: value.goal, time_budget_seconds: 600 }
+  } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  await press(tree, 'codex-goal-toggle')
+  value = runtime({ ...goal, status: 'active' })
+  await act(async () => pending.reject(new Error('Goal response disconnected')))
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal')
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Pause goal')
+  assert.equal(nodes(tree, 'codex-goal-error').length, 0)
+  readError = new Error('Runtime unreachable')
+  await act(async () => { await context.refresh() })
+  assert.equal(contents(node(tree, 'codex-goal-error')), 'Runtime unreachable')
+  readError = null
+  await press(tree, 'codex-goal-toggle')
+  assert.deepEqual(inputs, [{ status: 'active' }, { status: 'paused' }])
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Goal paused')
+  assert.equal(nodes(tree, 'codex-goal-error').length, 0)
+})
+
+test('a replaced or cleared goal retires only the old goal status failure', async () => {
+  for (const replacement of [
+    { ...goal, status: 'paused' as const, threadId: 'replacement-thread' },
+    { ...goal, status: 'paused' as const, createdAt: 42 },
+    { ...goal, status: 'paused' as const, objective: 'Replacement objective' },
+    null,
+  ]) {
+    let value = runtime({ ...goal, status: 'paused' })
+    setTestClient({ codexRuntime: async () => value, setCodexGoal: async () => { throw new Error('Old goal failed to resume') } })
+    const tree = await mount()
+    await press(tree, 'codex-goal-details')
+    await press(tree, 'codex-goal-toggle')
+    assert.match(context.error ?? '', /Old goal failed/)
+    value = { ...runtime(null), available: false }
+    await act(async () => { await context.refresh() })
+    assert.match(context.error ?? '', /Old goal failed/, 'an unavailable runtime cannot prove the goal was cleared')
+    value = runtime(replacement)
+    await act(async () => { await context.refresh() })
+    assert.equal(context.error, null)
+    assert.equal(nodes(tree, 'codex-goal-error').length, 0)
+    value = runtime({ ...goal, status: 'paused' })
+    await act(async () => { await context.refresh() })
+    assert.equal(context.error, null, 'a retired error must not return if the former objective is restored')
+    await act(async () => tree.unmount())
+    mounted.splice(mounted.indexOf(tree), 1)
+  }
+})
+
+test('goal replacement preserves unrelated operation failures and subsequent refresh failures', async () => {
+  let value = runtime()
+  let readError: Error | null = null
+  setTestClient({ codexRuntime: async () => { if (readError) throw readError; return value } })
+  const tree = await mount()
+  await act(async () => {
+    await assert.rejects(context.run(async () => { throw new Error('Thread control failed') }), /Thread control failed/)
+  })
+  value = runtime({ ...goal, objective: 'Replacement goal', createdAt: 42 })
+  await act(async () => { await context.refresh() })
+  assert.equal(context.error, 'Thread control failed')
+  value = runtime(null)
+  await act(async () => { await context.refresh() })
+  assert.equal(context.error, 'Thread control failed')
+  await act(async () => { await context.run(async () => undefined) })
+  readError = new Error('Runtime refresh failed')
+  await act(async () => { await context.refresh() })
+  assert.equal(context.error, 'Runtime refresh failed')
+  assert.equal(nodes(tree, 'codex-goal-bar').length, 0)
+})
+
+test('captured goal toggle callbacks cannot mutate a replacement goal or a newer scope', async () => {
+  for (const replacement of [
+    { ...goal, status: 'paused' as const, threadId: 'replacement-thread' },
+    { ...goal, status: 'paused' as const, createdAt: 42 },
+    { ...goal, status: 'paused' as const, objective: 'Replacement objective' },
+    { ...goal, status: 'active' as const },
+    null,
+  ]) {
+    let value = runtime({ ...goal, status: 'paused' })
+    let writes = 0
+    setTestClient({ codexRuntime: async () => value, setCodexGoal: async () => { writes++; return { goal: value.goal, time_budget_seconds: 600 } } })
+    const tree = await mount()
+    await press(tree, 'codex-goal-details')
+    const stale = node(tree, 'codex-goal-toggle').props.onPress
+    value = runtime(replacement)
+    await act(async () => { await context.refresh() })
+    await act(async () => stale())
+    assert.equal(writes, 0)
+    if (replacement) {
+      const previousScope = node(tree, 'codex-goal-toggle').props.onPress
+      await act(async () => useAppStore.setState({ profileGeneration: useAppStore.getState().profileGeneration + 1 }))
+      await act(async () => previousScope())
+      assert.equal(writes, 0)
+      await press(tree, 'codex-goal-details')
+      await press(tree, 'codex-goal-toggle')
+      assert.equal(writes, 1, 'the current goal control remains usable')
+    }
+    await act(async () => tree.unmount())
+    mounted.splice(mounted.indexOf(tree), 1)
+  }
+})
+
+test('an exhausted paused goal delegates Resume to the server and shows its refusal without resetting budgets', async () => {
+  const value = { ...runtime({ ...goal, status: 'paused', tokensUsed: 1000 }), time_budget_seconds: 20, time_budget_exhausted: true }
+  const inputs: CodexGoalInput[] = []
+  setTestClient({ codexRuntime: async () => value, setCodexGoal: async (_id, input) => { inputs.push(input); throw new Error('Increase the time budget to continue') } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  assert.equal(node(tree, 'codex-goal-toggle').props.disabled, false)
+  await press(tree, 'codex-goal-toggle')
+  assert.deepEqual(inputs, [{ status: 'active' }])
+  assert.equal(contents(node(tree, 'codex-goal-state')), 'Goal paused')
+  assert.equal(contents(node(tree, 'codex-goal-error')), 'Could not resume goal: Increase the time budget to continue')
+  assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Retry resume goal')
+  assert.equal(context.runtime?.time_budget_seconds, 20)
+  assert.equal(context.runtime?.goal?.tokensUsed, 1000)
+})
+
+test('inactive goal status distinguishes ordinary live messages without resuming or advancing goal time', async () => {
+  let value = runtime({ ...goal, status: 'paused' })
+  let writes = 0
+  setTestClient({ codexRuntime: async () => value, setCodexGoal: async () => { writes++; return { goal, time_budget_seconds: 600 } } })
+  const tree = await mount()
+  await press(tree, 'codex-goal-details')
+  for (const threadStatus of ['idle', 'active'] as const) {
+    for (const [status, label] of [['paused', 'Goal paused'], ['blocked', 'Goal blocked'], ['complete', 'Goal complete'], ['budgetLimited', 'Budget limited']] as const) {
+      value = { ...runtime({ ...goal, status }), status: threadStatus === 'active' ? { type: 'active', activeFlags: [] } : { type: 'idle' } }
+      await act(async () => { useAppStore.setState({ activeSessionIds: new Set(['chat-a']) }); await context.refresh() })
+      assert.equal(contents(node(tree, 'codex-goal-state')), `${label} · Message running`)
+      assert.match(contents(node(tree, 'codex-goal-progress')), /^20s \/ 10m elapsed/)
+      if (status === 'paused') assert.equal(node(tree, 'codex-goal-toggle').props.accessibilityLabel, 'Resume goal')
+      else assert.equal(nodes(tree, 'codex-goal-toggle').length, 0)
+      await act(async () => useAppStore.setState({ activeSessionIds: new Set() }))
+      assert.equal(contents(node(tree, 'codex-goal-state')), label)
+    }
+  }
+  assert.equal(writes, 0)
+})
+
+test('complete and budget-limited goals can explicitly start a new objective through Edit without an implicit reset', async () => {
+  for (const status of ['complete', 'budgetLimited'] as const) {
+    let value = runtime({ ...goal, status })
+    const inputs: CodexGoalInput[] = []
+    setTestClient({ codexRuntime: async () => value, setCodexGoal: async (_id, input) => {
+      inputs.push(input)
+      value = { ...runtime({ ...goal, objective: input.objective!, status: input.status!, tokenBudget: input.token_budget!, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 3 }), time_budget_seconds: input.time_budget_seconds! }
+      return { goal: value.goal, time_budget_seconds: value.time_budget_seconds }
+    } })
+    const tree = await mount()
+    await press(tree, 'codex-goal-details')
+    await press(tree, 'codex-goal-edit')
+    await change(tree, 'codex-goal-objective-input', `Next ${status} objective`)
+    await press(tree, 'codex-goal-status')
+    await press(tree, 'codex-goal-status-active')
+    await change(tree, 'codex-goal-token-budget', '2000')
+    await change(tree, 'codex-goal-time-budget', '900')
+    assert.equal(inputs.length, 0)
+    assert.equal(context.runtime?.goal?.objective, goal.objective)
+    assert.equal(context.runtime?.goal?.status, status)
+    await press(tree, 'codex-goal-save')
+    assert.deepEqual(inputs, [{ objective: `Next ${status} objective`, status: 'active', token_budget: 2000, time_budget_seconds: 900 }])
+    assert.equal(contents(node(tree, 'codex-goal-state')), 'Pursuing goal')
+    assert.equal(node(tree, 'codex-goal-objective-input').props.value, `Next ${status} objective`)
+    assert.equal(context.runtime?.goal?.tokensUsed, 0)
+    await act(async () => tree.unmount())
+    mounted.splice(mounted.indexOf(tree), 1)
+  }
+})
+
+test('confirmed editor Clear resets the form so a new goal starts with explicitly saved budgets', async () => {
+  let value = runtime({ ...goal, status: 'complete' })
+  const inputs: CodexGoalInput[] = []
+  let clears = 0
+  setTestClient({ codexRuntime: async () => value, clearCodexGoal: async () => {
+    clears++
+    value = { ...runtime(null), time_budget_seconds: null }
+    return { goal: null, time_budget_seconds: null }
+  }, setCodexGoal: async (_id, input) => {
+    inputs.push(input)
+    value = { ...runtime({ ...goal, objective: input.objective!, status: 'active', tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 3 }), time_budget_seconds: null }
+    return { goal: value.goal, time_budget_seconds: null }
+  } })
+  const tree = await mount('editor')
+  await press(tree, 'codex-goal-editor-clear')
+  assert.equal(clears, 0)
+  await act(async () => Alert.__calls[0].buttons?.find(button => button.style === 'cancel')?.onPress?.())
+  assert.equal(node(tree, 'codex-goal-objective-input').props.value, goal.objective)
+  await press(tree, 'codex-goal-editor-clear')
+  await act(async () => Alert.__calls[1].buttons?.find(button => button.style === 'destructive')?.onPress?.())
+  assert.equal(clears, 1)
+  assert.equal(node(tree, 'codex-goal-objective-input').props.value, '')
+  assert.equal(node(tree, 'codex-goal-token-budget').props.value, '')
+  assert.equal(node(tree, 'codex-goal-time-budget').props.value, '')
+  assert.equal(node(tree, 'codex-goal-status').props.accessibilityLabel, 'Goal status: Pursuing goal')
+  await change(tree, 'codex-goal-objective-input', 'A fresh objective')
+  await press(tree, 'codex-goal-save')
+  assert.deepEqual(inputs, [{ objective: 'A fresh objective', status: 'active', token_budget: null, time_budget_seconds: null }])
 })
 
 test('goal drafts survive polling and newer edits survive a pending save', async () => {
@@ -343,7 +611,7 @@ test('blocked, budget-limited and complete goals show honest states without a re
   value = { ...runtime({ ...goal, status: 'paused' }), time_budget_seconds: 20 }
   await act(async () => { await context.refresh() })
   assert.equal(contents(node(tree, 'codex-goal-state')), 'Goal paused')
-  assert.equal(node(tree, 'codex-goal-toggle').props.disabled, true)
+  assert.equal(node(tree, 'codex-goal-toggle').props.disabled, false)
 })
 
 test('lifecycle Running overrides an idle provider snapshot and opening controls refreshes runtime', async () => {

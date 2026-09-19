@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, AppState, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { ChevronDown, Goal, Pause, Pencil, Play, Trash2 } from 'lucide-react-native'
@@ -17,7 +17,9 @@ export function CodexGoalBar() {
   const lifecycleActive = useAppStore(state => session ? state.activeSessionIds.has(session.id) : false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [statusAction, setStatusAction] = useState<{ status: 'active' | 'paused'; pending: boolean; error: string | null } | null>(null)
+  const statusActionEpoch = useRef(0)
+  const statusActionInFlight = useRef(false)
   const [clock, setClock] = useState(() => Date.now())
   const [observedAt, setObservedAt] = useState(() => Date.now())
   const [appActive, setAppActive] = useState(AppState.currentState === 'active')
@@ -25,14 +27,30 @@ export function CodexGoalBar() {
   const { confirmClear, clearError } = useConfirmedGoalClear(goal)
   const threadActive = lifecycleActive || runtime?.status?.type === 'active'
   const view = goalViewState(goal, runtime)
-  const currentScope = useRef(scopeKey)
-  currentScope.current = scopeKey
+  const actionIdentity = JSON.stringify([scopeKey, supported, goalsSupported, goalsEnabled, runtime?.available,
+    goal?.threadId, goal?.createdAt, goal?.objective, goal?.status])
+  const currentActionIdentity = useRef<string | null>(null)
+
+  useLayoutEffect(() => {
+    currentActionIdentity.current = actionIdentity
+    return () => { currentActionIdentity.current = null }
+  }, [actionIdentity])
 
   useEffect(() => {
     setEditorOpen(false)
     setExpanded(false)
-    setActionError(null)
   }, [scopeKey])
+  useLayoutEffect(() => {
+    // Retire the old action before this goal becomes tappable. A passive reset
+    // can erase the first Resume tap committed for a replacement goal.
+    statusActionEpoch.current += 1
+    statusActionInFlight.current = false
+    setStatusAction(null)
+    return () => { statusActionEpoch.current += 1 }
+  }, [scopeKey, supported, goal?.threadId, goal?.createdAt, goal?.objective])
+  useEffect(() => {
+    setStatusAction(current => current?.error && goal?.status === current.status ? null : current)
+  }, [goal?.status, statusAction])
   useEffect(() => {
     if (!supported) setEditorOpen(false)
   }, [supported])
@@ -50,25 +68,32 @@ export function CodexGoalBar() {
     const timer = setInterval(() => setClock(Date.now()), 1_000)
     return () => clearInterval(timer)
   }, [appActive, goal?.status, goalsEnabled, threadActive])
-  useEffect(() => {
-    currentScope.current = scopeKey
-    return () => { currentScope.current = '' }
-  }, [scopeKey])
-
   if (!supported || !session || !goal || !view) return null
   const elapsed = goalElapsedSeconds(goal, { threadActive: goalsEnabled && threadActive, observedAt, now: clock })
   const accent = !goalsEnabled || goal.status === 'paused' || view.tone === 'warning' ? colors.orange : view.tone === 'success' ? colors.green : colors.blue
   const available = goalsSupported && goalsEnabled && runtime?.available === true
+  const actionError = statusAction?.error && statusAction.status !== goal.status
+    ? `Could not ${statusAction.status === 'active' ? 'resume' : 'pause'} goal: ${statusAction.error}`
+    : null
+  const pendingLabel = statusAction?.pending ? statusAction.status === 'active' ? 'Resuming goal…' : 'Pausing goal…' : null
   const goalError = actionError ?? clearError ?? error
-  const statusLabel = !goalsSupported ? `${view.label} · Goals unavailable` : !goalsEnabled ? `${view.label} · Goals disabled` : view.label
+  const displayedStatus = goal.status !== 'active' && lifecycleActive ? `${view.label} · Message running` : view.label
+  const statusLabel = !goalsSupported ? `${displayedStatus} · Goals unavailable` : !goalsEnabled ? `${displayedStatus} · Goals disabled` : pendingLabel ?? displayedStatus
+  const actionLabel = pendingLabel ?? (actionError ? `Retry ${view.canPause ? 'pause' : 'resume'} goal` : view.canPause ? 'Pause goal' : 'Resume goal')
   const toggle = async () => {
-    if (!available || mutating || !(view.canPause || view.canResume)) return
-    const expectedScope = scopeKey
-    setActionError(null)
+    if (currentActionIdentity.current !== actionIdentity) return
+    if (!available || mutating || statusActionInFlight.current || !(view.canPause || view.canResume)) return
+    const epoch = statusActionEpoch.current
+    const status = view.canPause ? 'paused' : 'active'
+    statusActionInFlight.current = true
+    setStatusAction({ status, pending: true, error: null })
     try {
-      await updateGoal({ status: view.canPause ? 'paused' : 'active' })
+      await updateGoal({ status })
+      if (statusActionEpoch.current === epoch) setStatusAction(null)
     } catch (cause) {
-      if (currentScope.current === expectedScope) setActionError(errorMessage(cause))
+      if (statusActionEpoch.current === epoch) setStatusAction({ status, pending: false, error: errorMessage(cause) })
+    } finally {
+      if (statusActionEpoch.current === epoch) statusActionInFlight.current = false
     }
   }
   const closeEditor = () => { setEditorOpen(false); requestAnimationFrame(dismissAppKeyboard) }
@@ -98,10 +123,11 @@ export function CodexGoalBar() {
         {goalsSupported && goalsEnabled ? <View style={styles.actions}>
           {view.canPause || goal.status === 'paused' ? <GoalAction
             testID="codex-goal-toggle"
-            label={view.canPause ? 'Pause' : 'Resume'}
-            accessibilityLabel={view.canPause ? 'Pause goal' : 'Resume goal'}
+            label={pendingLabel ?? (actionError ? view.canPause ? 'Retry pause' : 'Retry resume' : view.canPause ? 'Pause' : 'Resume')}
+            accessibilityLabel={actionLabel}
             icon={view.canPause ? Pause : Play}
-            disabled={!available || mutating || !(view.canPause || view.canResume)}
+            busy={statusAction?.pending}
+            disabled={!available || mutating || statusAction?.pending || !(view.canPause || view.canResume)}
             onPress={() => void toggle()}
           /> : null}
           <GoalAction testID="codex-goal-edit" label="Edit" accessibilityLabel="Edit goal" icon={Pencil} disabled={!available || mutating} onPress={() => { setEditorOpen(true); void refresh(); requestAnimationFrame(dismissAppKeyboard) }} />

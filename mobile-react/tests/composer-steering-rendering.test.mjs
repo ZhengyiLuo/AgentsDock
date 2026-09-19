@@ -23,6 +23,7 @@ const mocks = {
     export const StyleSheet={create:value=>value,hairlineWidth:0.5,absoluteFill:{},flatten:value=>Object.assign({},...[value].flat(Infinity).filter(Boolean))};
     export const Platform={OS:'ios',select:choices=>choices.ios??choices.default};
     export const AppState={currentState:'active',addEventListener:()=>({remove(){}})};
+    export const BackHandler={addEventListener:()=>({remove(){}})};
     export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:fixture.height,scale:3,fontScale:1.6});
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
   'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,

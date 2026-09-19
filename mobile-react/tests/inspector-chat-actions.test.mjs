@@ -5,12 +5,14 @@ import assert from 'node:assert/strict'
 
 const inspector = fs.readFileSync(path.resolve('src/components/Inspector.tsx'), 'utf8')
 
-test('Fork exposes and enforces the active-turn and pending-message restrictions', () => {
+test('Fork gates active and pending turns by completed-prefix server support', () => {
   assert.match(inspector, /state\.activeSessionIds\.has\(sessionId\)/)
   assert.match(inspector, /state\.stoppingSessionIds\.has\(sessionId\)/)
   assert.match(inspector, /Boolean\(state\.turnAdmissionTokens\[sessionId\]\) \|\| state\.sendingSessionIds\.has\(sessionId\)/)
   assert.match(inspector, /state\.snapshots\[sessionId\]\?\.queuedTurns\.some\(turn => state\.pendingQueuedRunIds\.has\(turn\.queued_id\)\)/)
-  assert.match(inspector, /const forkDisabled = !connected \|\| running \|\| stopping \|\| admitting/)
+  assert.match(inspector, /const liveFork = running \|\| stopping \|\| admitting/)
+  assert.match(inspector, /const forkBlocked = liveFork && !completedPrefixForkAvailable\(health, session\?\.backend\)/)
+  assert.match(inspector, /const forkDisabled = !connected \|\| forkBlocked/)
   assert.doesNotMatch(inspector, /state\.queuedRunStatus\[sessionId\]/, 'Historical queue notices must not lock Fork')
   assert.match(inspector, /testID="inspector-fork-chat" disabled=\{forkDisabled\}/)
   assert.match(inspector, /if \(!forkDisabled && scopeIsCurrent\(\)\) void fork\(sessionId, profileGeneration\)/)

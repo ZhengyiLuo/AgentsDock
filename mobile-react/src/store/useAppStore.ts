@@ -42,6 +42,7 @@ import type {
 } from '../types'
 import { AgentServerClient, AgentServerClientDisposedError, AgentServerClientUnvalidatedError, ServerError, WebSocketConnectionError } from '../api/AgentServerClient'
 import { errorMessage, mergeEvents, mergeFiles, normalizeServerURL } from '../lib/format'
+import { completedPrefixForkAvailable, forkErrorMessage, RUNNING_FORK_UNAVAILABLE } from '../lib/session-fork'
 import { healthActiveSessions } from '../lib/active-sessions'
 import { ActivityHealthProjection } from '../lib/activity-health'
 import { isImportedHistoryRecord, isImportedProviderControlMetadata } from '../lib/provider-origin'
@@ -2773,13 +2774,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!scope) return
     const state = get()
     const inFlightKey = `${scope.generation}:${sessionId}`
-    if (state.activeSessionIds.has(sessionId) || state.stoppingSessionIds.has(sessionId)) {
-      set({ error: 'Wait for the active turn to finish before forking this chat.' })
-      return
-    }
-    if (state.turnAdmissionTokens[sessionId] || state.sendingSessionIds.has(sessionId)
-      || queuedRunInFlight.has(queuedOperationKey(scope, sessionId, get))) {
-      set({ error: 'Wait for the message to be accepted before forking this chat.' })
+    const source = state.sessions.find(session => session.id === sessionId)
+    const live = state.activeSessionIds.has(sessionId) || state.stoppingSessionIds.has(sessionId)
+      || state.turnAdmissionTokens[sessionId] || state.sendingSessionIds.has(sessionId)
+      || queuedRunInFlight.has(queuedOperationKey(scope, sessionId, get))
+    if (live && !completedPrefixForkAvailable(state.health, source?.backend)) {
+      set({ error: RUNNING_FORK_UNAVAILABLE })
       return
     }
     if (forkSessionInFlight.has(inFlightKey)) return
@@ -2795,7 +2795,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { sessions }
       })
       await get().selectSession(response.session.id, scope.generation)
-    } catch (error) { if (!isStaleConnectionError(error, scope)) set({ error: errorMessage(error) }) }
+    } catch (error) { if (!isStaleConnectionError(error, scope)) set({ error: forkErrorMessage(error) }) }
     finally { forkSessionInFlight.delete(inFlightKey) }
   },
   async deleteSession(sessionId, expectedGeneration) {

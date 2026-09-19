@@ -94,6 +94,7 @@ import { CursorPermissionMenu } from './CursorPermissionMenu'
 import { IconButton, Pill, SheetCloseButton } from './ui'
 import { FullscreenViewerCloseButton, SwipeDismissImage } from './FullscreenImageViewer'
 import { TeamTargetPicker } from './TeamTargetPicker'
+import { AppOverlay } from './AppOverlay'
 
 const EMPTY_FILES: AgentFile[] = []
 const EMPTY_PENDING: UploadRef[] = []
@@ -337,7 +338,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
       pickerTriggerRef.current = trigger
       setPickerTrigger(trigger)
     }
-    // Native @ opens a sheet; leave a brief window for the second @ first.
+    // Leave a brief window for the second @ before opening the chat picker.
     if (trigger.kind === '@') mentionOpenTimer.current = setTimeout(show, 250)
     else show()
   }, [activeProfileId, profileGeneration, sessionId, crossChatSupported])
@@ -384,7 +385,7 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
       ? selectionRef.current
       : { start: pendingCaret, end: pendingCaret }
     requestAnimationFrame(() => {
-      if (!composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId)) return
+      if (!composerScopeIsCurrent(activeProfileId, profileGeneration, sessionId) || pickerTriggerRef.current) return
       inputRef.current?.focus()
       inputRef.current?.setNativeProps({ selection })
       selectionRef.current = selection
@@ -396,12 +397,11 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     if (!currentTrigger) return
     dismissedMentionStartRef.current = currentTrigger.start
     restoreInputAfterPickerRef.current = true
+    dismissAppKeyboard()
     pickerTriggerRef.current = null
     setPickerTrigger(null)
     setPickerQuery('')
-    requestAnimationFrame(dismissAppKeyboard)
-    if (Platform.OS !== 'ios') requestAnimationFrame(finishTargetPickerDismissal)
-  }, [finishTargetPickerDismissal])
+  }, [])
 
   const openTeamFromChatPicker = useCallback((query = '') => {
     const trigger = pickerTriggerRef.current
@@ -463,16 +463,15 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     selectionRef.current = { start: inserted.caret, end: inserted.caret }
     draftRef.current = inserted.text
     restoreInputAfterPickerRef.current = true
+    dismissAppKeyboard()
     pickerTriggerRef.current = null
     setSessionDraft(sessionId, inserted.text, profileGeneration)
     storeReferences(nextReferences)
     storeTeamReferences(reconcileTeamReferences(currentDraft, inserted.text, teamReferencesRef.current))
     setPickerTrigger(null)
     setPickerQuery('')
-    requestAnimationFrame(dismissAppKeyboard)
-    if (Platform.OS !== 'ios') requestAnimationFrame(finishTargetPickerDismissal)
     return true
-  }, [activeProfileId, backend, crossChatSupported, finishTargetPickerDismissal, health, profileGeneration, sessionId, setSessionDraft, storeReferences, storeTeamReferences])
+  }, [activeProfileId, backend, crossChatSupported, health, profileGeneration, sessionId, setSessionDraft, storeReferences, storeTeamReferences])
 
   const chooseTeamTarget = useCallback((candidate: TeamMentionCandidate) => {
     const trigger = pickerTriggerRef.current
@@ -491,15 +490,14 @@ export function Composer({ sessionId, keyboardVisible, onSent, onOpenMcp }: { se
     selectionRef.current = { start: inserted.caret, end: inserted.caret }
     draftRef.current = inserted.text
     restoreInputAfterPickerRef.current = true
+    dismissAppKeyboard()
     setSessionDraft(sessionId, inserted.text, profileGeneration)
     storeReferences(reconcileChatReferences(previousText, inserted.text, referencesRef.current))
     storeTeamReferences(nextTeamReferences)
     setPickerTrigger(null)
     setPickerQuery('')
-    requestAnimationFrame(dismissAppKeyboard)
-    if (Platform.OS !== 'ios') requestAnimationFrame(finishTargetPickerDismissal)
     return true
-  }, [activeProfileId, profileGeneration, sessionId, finishTargetPickerDismissal, setSessionDraft, storeReferences, storeTeamReferences])
+  }, [activeProfileId, profileGeneration, sessionId, setSessionDraft, storeReferences, storeTeamReferences])
 
   const changeReferenceAction = useCallback((reference: ChatReference) => {
     showReferenceActionPicker({
@@ -1140,18 +1138,14 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
   const unavailableMessage = !connected || !client.isValidated
     ? 'Reconnect to this server to choose a chat.'
     : !referencesAvailable ? 'Chat references are unavailable on this server. Reconnect or update the server, then reopen this picker.' : ''
-  return <Modal
+  return <AppOverlay
     visible={visible}
-    animationType="slide"
-    presentationStyle={Platform.OS === 'ios' ? tablet ? 'formSheet' : 'pageSheet' : 'fullScreen'}
-    allowSwipeDismissal
     onShow={() => searchInputRef.current?.focus()}
-    onRequestClose={onClose}
-    onDismiss={onDidDismiss}
+    onClose={onClose}
+    onDidDismiss={onDidDismiss}
   >
-    {visible ? <SafeAreaView edges={Platform.OS === 'ios' ? ['bottom'] : ['top', 'bottom']} onAccessibilityEscape={onClose} style={[styles.targetPickerSafe, { backgroundColor: colors.background }]}>
+    {visible ? <SafeAreaView edges={['top', 'bottom', 'left', 'right']} onAccessibilityEscape={onClose} style={[styles.targetPickerSafe, { backgroundColor: colors.background }]}>
       <KeyboardSafeView testID="chat-target-keyboard-safe" automaticOffset behavior="padding" style={styles.targetPickerSafe}>
-      <View style={styles.targetPickerGrabber} />
       <View style={[styles.targetPickerPanel, tablet && styles.targetPickerPanelTablet]}>
         <View style={[styles.targetPickerHeader, { borderColor: colors.border }]}>
           <View style={styles.targetPickerHeading}>
@@ -1243,7 +1237,7 @@ export function ChatTargetPicker({ visible, width, query, sourceSessionId, suppo
       </View>
       </KeyboardSafeView>
     </SafeAreaView> : null}
-  </Modal>
+  </AppOverlay>
 }
 
 function availableChatReferenceActions(actions: readonly ChatReferenceAction[], requestReplySupportedForSource: boolean): ChatReferenceAction[] {
@@ -1992,7 +1986,6 @@ const styles = StyleSheet.create({
   uploadRail: { flexGrow: 0, minHeight: 64, maxHeight: 64 }, uploads: { flexDirection: 'row', gap: 7, paddingRight: 2 }, upload: { width: 216, height: 64, flexShrink: 0, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingLeft: 7, flexDirection: 'row', alignItems: 'center' }, uploadIdentity: { minWidth: 0, flex: 1, height: 62, flexDirection: 'row', alignItems: 'center', gap: 8 }, fileIconWell: { width: 48, height: 48, minWidth: 48, flexShrink: 0, borderRadius: 6, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, uploadText: { minWidth: 0, flex: 1, gap: 2 }, uploadName: { fontSize: 12, fontWeight: '700' }, uploadMeta: { fontSize: 10.5 }, uploadActionSpacer: { width: 44, height: 44, flexShrink: 0 }, uploadBusy: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000066' }, uploadError: { position: 'absolute', right: 3, bottom: 3, width: 19, height: 19, borderRadius: 10, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
   previewModal: { flex: 1 }, previewHeader: { minHeight: FULLSCREEN_HEADER_MIN_HEIGHT, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: FULLSCREEN_HEADER_GUTTER, flexDirection: 'row', alignItems: 'center', gap: 8 }, previewTitle: { minWidth: 0, flex: 1, fontSize: 14, fontWeight: '700' }, previewImage: { flex: 1, margin: 12 },
   targetPickerSafe: { flex: 1, minHeight: 0 },
-  targetPickerGrabber: { width: 38, height: 5, marginTop: 8, marginBottom: 3, borderRadius: 3, backgroundColor: '#8e8e9380', alignSelf: 'center' },
   targetPickerPanel: { flex: 1, minHeight: 0, width: '100%', alignSelf: 'center' }, targetPickerPanelTablet: { maxWidth: 760 },
   targetPickerHeader: { minHeight: 70, paddingLeft: 16, paddingRight: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 10 },
   targetPickerHeading: { minWidth: 0, flex: 1, gap: 3 }, targetPickerTitle: { fontSize: 18, fontWeight: '800' }, targetPickerSubtitle: { fontSize: 12.5 },

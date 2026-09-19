@@ -20,13 +20,19 @@ const mocks = {
     export const Pressable = props => createElement('Pressable', props, typeof props.children === 'function' ? props.children({pressed:false}) : props.children);
     export const Modal = ({visible=true,...props}) => visible ? createElement('Modal',props) : null;
     export const FlatList = ({data=[],renderItem,ListEmptyComponent,ListFooterComponent,...props}) => createElement('FlatList',props,data.length ? data.map((item,index) => createElement('ListItem',{key:item.id||index},renderItem({item,index}))) : typeof ListEmptyComponent === 'function' ? createElement(ListEmptyComponent) : ListEmptyComponent, ListFooterComponent);
-    export const StyleSheet={create:value=>value,hairlineWidth:0.5,absoluteFill:{},flatten:value=>Object.assign({},...[value].flat(Infinity).filter(Boolean))};
+    export const StyleSheet={create:value=>value,hairlineWidth:0.5,absoluteFill:{},absoluteFillObject:{position:'absolute',top:0,right:0,bottom:0,left:0},flatten:value=>Object.assign({},...[value].flat(Infinity).filter(Boolean))};
     export const Platform={OS:'ios',select:choices=>choices.ios??choices.default};
     export const AppState={currentState:'active',addEventListener:()=>({remove(){}})};
+    export const BackHandler={addEventListener:(event,listener)=>{fixture.backListener=listener;return {remove(){if(fixture.backListener===listener)fixture.backListener=null}}}};
     export const useColorScheme=()=>fixture.scheme; export const useWindowDimensions=()=>({width:fixture.width,height:fixture.height,scale:3,fontScale:1});
     export const Alert={alert:(...args)=>fixture.alerts.push(args)}; export const ActionSheetIOS={showActionSheetWithOptions:(options,callback)=>fixture.actionSheet={options,callback}};`,
-  'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
-  'react-native-keyboard-controller': `export const KeyboardAvoidingView='KeyboardSafeView';`,
+  'react-native-safe-area-context': `export const SafeAreaView='SafeAreaView', SafeAreaProvider='SafeAreaProvider'; export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
+  'react-native-keyboard-controller': `export const KeyboardAvoidingView='KeyboardSafeView', KeyboardProvider='KeyboardProvider';`,
+  'react-native-gesture-handler': `export const GestureHandlerRootView='GestureHandlerRootView';`,
+  'expo-status-bar': `export const StatusBar=()=>null;`,
+  './src/components/AppShell': `import {createElement} from 'react'; export const AppShell=()=>createElement('GestureDetector',{},globalThis.__teamComposerFixture.appChildren);`,
+  './src/components/AppText': `export const AppTypographyProvider=({children})=>children;`,
+  './src/lib/analytics': `export function trackEvent(){}`,
   'expo-image': `export const Image='Image';`,
   'expo-clipboard': `export async function setStringAsync(){}`,
   'expo-document-picker': `export async function getDocumentAsync(){return {canceled:true}}`,
@@ -48,7 +54,7 @@ const mocks = {
 const outfile = path.resolve('build/tmp', `team-composer-tests-${process.pid}.mjs`)
 await mkdir(path.dirname(outfile), { recursive: true })
 await build({
-  stdin: { contents: `export { Composer, ChatTargetPicker, QueueShelf } from './src/components/Composer'; export { TeamTargetPicker } from './src/components/TeamTargetPicker'; export { updateQueuedTurns } from './src/lib/queue'; export { projectTimeline } from './src/lib/timeline';`, resolveDir: process.cwd(), loader: 'ts' },
+  stdin: { contents: `export { default as App } from './App'; export { AppOverlay, AppOverlayProvider } from './src/components/AppOverlay'; export { Composer, ChatTargetPicker, QueueShelf } from './src/components/Composer'; export { TeamTargetPicker } from './src/components/TeamTargetPicker'; export { updateQueuedTurns } from './src/lib/queue'; export { projectTimeline } from './src/lib/timeline';`, resolveDir: process.cwd(), loader: 'ts' },
   outfile, bundle: true, format: 'esm', platform: 'node', packages: 'external', jsx: 'automatic', logLevel: 'silent', loader: { '.png': 'dataurl' },
   plugins: [{ name: 'team-composer-native-hosts', setup(context) {
     context.onResolve({ filter: /.*/ }, args => args.path === 'react' ? { path: args.path, external: true }
@@ -57,7 +63,8 @@ await build({
   } }],
 })
 after(async () => { await unlink(outfile); delete globalThis.__teamComposerFixture })
-const { Composer, ChatTargetPicker, QueueShelf, TeamTargetPicker, updateQueuedTurns, projectTimeline } = await import(pathToFileURL(outfile).href)
+const { App, AppOverlay, AppOverlayProvider, Composer, ChatTargetPicker, QueueShelf, TeamTargetPicker, updateQueuedTurns, projectTimeline } = await import(pathToFileURL(outfile).href)
+function appTree(children) { fixture.appChildren=children; return React.createElement(App) }
 
 function health() { return { ok: true, server_identity: 'local-server', server_instance_id: 'instance', capabilities: {
   agent_team_messages_v1: { available: true, version: 1, mention_sigil: '@@', send_requires_mention: true },
@@ -67,7 +74,7 @@ function reset(patch = {}) {
   fixture.alerts.length=0; fixture.reads.length=0; fixture.sends.length=0; fixture.client.isValidated=true; fixture.client.validationRevision=1
   fixture.routeReads.length=0;fixture.revokes.length=0;fixture.skips.length=0;fixture.width=390;fixture.height=844;fixture.scheme='dark'
   fixture.codexRuntime={supported:false,goalsSupported:false,goalsEnabled:false,runtime:null,session:null,mutating:false,error:null,scopeKey:'profile:1:chat',refresh:async()=>null,updateGoal:async()=>null,clearGoal:async()=>null}
-  fixture.focusedInput=null;fixture.blurredInputs=[];fixture.keyboardDismissals=0;fixture.nativeSelections=[]
+  fixture.focusedInput=null;fixture.focusEvents=[];fixture.blurredInputs=[];fixture.keyboardDismissals=0;fixture.nativeSelections=[]
   fixture.client.crossChatHandoff=async()=>{throw new Error('Unexpected message body read')}
   fixture.client.teamNetworkGet = async (base, endpoint) => {
     fixture.reads.push([base,endpoint])
@@ -96,7 +103,7 @@ function reset(patch = {}) {
 }
 async function render({expandQueue=true,...overrides}={}) {
   let renderer
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...overrides}),{createNodeMock:element=>({focus(){fixture.focusedInput=element.props.testID},isFocused(){return fixture.focusedInput===element.props.testID},blur(){fixture.blurredInputs.push(element.props.testID);fixture.focusedInput=null},clear(){},setNativeProps(props){fixture.nativeSelections.push([element.props.testID,props.selection])}})})})
+  await act(async()=>{renderer=TestRenderer.create(appTree(React.createElement(Composer,{sessionId:'chat',keyboardVisible:true,onSent(){},onOpenMcp(){},...overrides})),{createNodeMock:element=>({focus(){fixture.focusedInput=element.props.testID;fixture.focusEvents.push(element.props.testID)},isFocused(){return fixture.focusedInput===element.props.testID},blur(){fixture.blurredInputs.push(element.props.testID);fixture.focusedInput=null},clear(){},setNativeProps(props){fixture.nativeSelections.push([element.props.testID,props.selection])}})})})
   if(expandQueue && byID(renderer,'queued-section-toggle').length)await click(renderer,'queued-section-toggle')
   return renderer
 }
@@ -111,7 +118,7 @@ test('composer native-host harness keeps ordinary draft typing local without tea
     await type(renderer,'Ordinary message.')
     assert.equal(store.getState().drafts.chat,'Ordinary message.')
     assert.deepEqual(fixture.reads,[])
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
   }finally{await act(async()=>renderer.unmount())}
 })
 
@@ -121,7 +128,7 @@ const recipient=renderer=>renderer.root.findAllByType('Pressable').find(node=>no
 async function renderPicker(overrides={}){
   let renderer
   const props={visible:true,width:390,query:'',sourceSessionId:'chat',referenceLimitReached:false,onQueryChange(){},onSelect(value){fixture.selected=value;return true},onClose(){},onDidDismiss(){},...overrides}
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(TeamTargetPicker,props))})
+  await act(async()=>{renderer=TestRenderer.create(appTree(React.createElement(TeamTargetPicker,props)))})
   return {renderer,props}
 }
 
@@ -134,11 +141,11 @@ test('recipient picker uses approved proxy, displays destination and search, and
     assert.match(texts(renderer),/Mac Studio/)
     assert.match(texts(renderer),/Server inbox/)
     assert.ok(recipient(renderer))
-    await act(async()=>renderer.update(React.createElement(TeamTargetPicker,{...props,query:'not a server'})))
+    await act(async()=>renderer.update(appTree(React.createElement(TeamTargetPicker,{...props,query:'not a server'}))))
     assert.equal(recipient(renderer),undefined)
     assert.match(texts(renderer),/No matching/)
     assert.equal(fixture.reads.length,3,'Search is local, not a network request per keystroke')
-    await act(async()=>renderer.update(React.createElement(TeamTargetPicker,props)))
+    await act(async()=>renderer.update(appTree(React.createElement(TeamTargetPicker,props))))
     await act(async()=>{const select=recipient(renderer).props.onPress;select();select()})
     assert.equal(selections,1)
     assert.deepEqual(fixture.selected.target,{kind:'recipient',recipient_kind:'server',team_id:'team',target_id:'remote-node',display_name_snapshot:'Mac Studio'})
@@ -227,7 +234,7 @@ test('typing @@ opens the server picker, selection creates exact draft spans, an
     await type(renderer,'@')
     await type(renderer,'@@')
     assert.match(texts(renderer),/Team Network recipient/)
-    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
     assert.ok(recipient(renderer))
     await act(async()=>{const select=recipient(renderer).props.onPress;select();select()})
     assert.equal(store.getState().drafts.chat,'@@Mac Studio ')
@@ -235,7 +242,7 @@ test('typing @@ opens the server picker, selection creates exact draft spans, an
     assert.deepEqual(references,[{kind:'recipient',recipient_kind:'server',team_id:'team',target_id:'remote-node',display_name_snapshot:'Mac Studio',source_text_start:0,source_text_end:12,grant_intent:true}])
     assert.deepEqual(store.getState().chatReferencesBySession.chat,[])
     assert.equal(byID(renderer,'composer-team-references').length,1)
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
     await type(renderer,'@@Mac Studio Please check the renderer.')
     await click(renderer,'chat-send')
     assert.equal(fixture.sends.length,1)
@@ -284,7 +291,7 @@ test('unsupported @@ explains capability requirements without disguising the tok
     assert.deepEqual(fixture.reads,[])
     assert.deepEqual(store.getState().chatReferencesBySession.chat,[])
     await click(renderer,'team-target-picker-close')
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
     assert.equal(store.getState().drafts.chat,'@@')
   }finally{await act(async()=>renderer.unmount())}
 })
@@ -300,34 +307,29 @@ test('fast @@ wins over the single-@ picker even when local chat routing is enab
   const renderer=await render()
   try{
     await type(renderer,'@')
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
     await type(renderer,'@@')
     await act(async()=>new Promise(resolve=>setTimeout(resolve,280)))
     assert.equal(byID(renderer,'team-target-search').length,1)
     assert.equal(byID(renderer,'chat-target-search').length,0)
-    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
   }finally{await act(async()=>renderer.unmount())}
 })
 
-for(const entry of ['button','second @'])test(`local chat picker switches to servers via ${entry} only after its iOS sheet dismisses`,async()=>{
+for(const entry of ['button','second @'])test(`local chat picker switches to servers via ${entry} through the root overlay without a native dismissal event`,async()=>{
   reset({health:withLocalChats()})
   const renderer=await render()
   try{
     await type(renderer,'@')
     await act(async()=>new Promise(resolve=>setTimeout(resolve,280)))
     assert.equal(byID(renderer,'chat-target-search').length,1)
-    const localSheet=renderer.root.findByType('Modal')
-    await act(async()=>localSheet.props.onShow())
     assert.equal(fixture.focusedInput,'chat-target-search')
-    const dismiss=localSheet.props.onDismiss
     if(entry==='button')await click(renderer,'chat-target-team-network')
     else await act(async()=>byID(renderer,'chat-target-search')[0].props.onChangeText('@Mac'))
-    assert.equal(renderer.root.findAllByType('Modal').length,0,'Two native sheets must not compete')
-    await act(async()=>dismiss())
+    assert.equal(renderer.root.findAllByType('Modal').length,0,'No native controller should be presented')
     assert.equal(byID(renderer,'team-target-search').length,1)
-    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
     assert.equal(store.getState().drafts.chat,'@','Switching pickers must not replace the draft before selection')
-    await act(async()=>renderer.root.findByType('Modal').props.onShow())
     assert.equal(fixture.focusedInput,'team-target-search')
     assert.ok(recipient(renderer))
     await act(async()=>recipient(renderer).props.onPress())
@@ -362,12 +364,151 @@ async function openLocalPickerFromMenu(renderer){
   await act(async()=>fixture.actionSheet.callback(index))
 }
 
-async function finishNativePickerDismissal(dismiss){
+async function finishPickerDismissal(){
   await act(async()=>{
-    dismiss()
     await new Promise(resolve=>setTimeout(resolve,0))
   })
 }
+
+// These exercise the real App/provider/Composer lifecycle across the mocked
+// native host boundary. UIKit hit testing still requires a device run.
+for(const kind of ['chat','team'])test(`App presents the ${kind} picker outside chat gestures and blocks the underlying pane`,async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    if(kind==='chat')await openLocalPickerFromMenu(renderer)
+    else await type(renderer,'@@')
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    const surface=byID(renderer,'app-overlay-surface')[0]
+    const underlay=byID(renderer,'app-overlay-underlay')[0]
+    assert.equal(underlay.props.pointerEvents,'none')
+    assert.equal(underlay.props.accessibilityElementsHidden,true)
+    assert.equal(underlay.props.importantForAccessibility,'no-hide-descendants')
+    assert.equal(surface.props.accessibilityViewIsModal,true)
+    assert.equal(surface.props.collapsable,false)
+    assert.equal(underlay.findAll(node=>node===surface).length,0)
+    assert.equal(renderer.root.findByType('GestureDetector').findAll(node=>node===surface).length,0)
+    assert.equal(renderer.root.findByType('GestureHandlerRootView').findAll(node=>node===surface).length,1)
+    assert.deepEqual(surface.findByType('SafeAreaView').props.edges,['top','bottom','left','right'])
+    const search=byID(renderer,`${kind}-target-search`)[0]
+    const focusCount=fixture.focusEvents.length
+    await act(async()=>search.props.onChangeText('M'))
+    await act(async()=>byID(renderer,`${kind}-target-search`)[0].props.onChangeText('Ma'))
+    assert.equal(byID(renderer,`${kind}-target-search`)[0],search,'Search updates retain the native input')
+    assert.equal(fixture.focusEvents.length,focusCount,'Typing must not remount or refocus the input')
+    await act(async()=>surface.props.onAccessibilityEscape())
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    assert.equal(byID(renderer,'app-overlay-underlay')[0].props.pointerEvents,'auto')
+    assert.equal(byID(renderer,'app-overlay-underlay')[0].props.accessibilityElementsHidden,false)
+    assert.equal(fixture.backListener,null)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('Android back closes the current root picker and preserves its draft',async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    await type(renderer,'Keep this draft')
+    await openLocalPickerFromMenu(renderer)
+    let handled
+    await act(async()=>{handled=fixture.backListener()})
+    assert.equal(handled,true)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    assert.equal(store.getState().drafts.chat,'Keep this draft')
+    assert.equal(fixture.backListener,null)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('rapid local to team to local reopening cannot let an old focus restoration steal the search input',async()=>{
+  resetRoutes()
+  const renderer=await render()
+  const originalAnimationFrame=globalThis.requestAnimationFrame
+  const frames=[]
+  globalThis.requestAnimationFrame=callback=>{frames.push(callback);return frames.length}
+  try{
+    await openLocalPickerFromMenu(renderer)
+    await click(renderer,'chat-target-team-network')
+    assert.equal(fixture.focusedInput,'team-target-search')
+    await click(renderer,'team-target-picker-close')
+    await openLocalPickerFromMenu(renderer)
+    await act(async()=>{while(frames.length)frames.shift()(0)})
+    assert.equal(fixture.focusedInput,'chat-target-search')
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    await click(renderer,'chat-target-new')
+    await act(async()=>{while(frames.length)frames.shift()(0)})
+    assert.equal(fixture.focusedInput,'chat-composer-input')
+    assert.deepEqual(store.getState().chatReferencesBySession.chat.map(value=>value.session_id),['new'])
+  }finally{globalThis.requestAnimationFrame=originalAnimationFrame;await act(async()=>renderer.unmount())}
+})
+
+for(const kind of ['chat','team'])test(`${kind} root picker is removed on profile teardown and captured rows cannot change the new draft`,async()=>{
+  resetRoutes()
+  const renderer=await render()
+  try{
+    if(kind==='chat')await openLocalPickerFromMenu(renderer)
+    else await type(renderer,'@@')
+    const select=kind==='chat'?byID(renderer,'chat-target-target')[0].props.onPress:recipient(renderer).props.onPress
+    await act(async()=>store.setState({activeProfileId:'other',profileGeneration:2,drafts:{chat:'New profile draft'}}))
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    assert.equal(byID(renderer,'app-overlay-underlay')[0].props.pointerEvents,'auto')
+    await act(async()=>select())
+    assert.equal(store.getState().drafts.chat,'New profile draft')
+    await act(async()=>renderer.update(appTree(null)))
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    assert.equal(fixture.backListener,null)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('root overlay registration is stable and acknowledges only committed removals',async()=>{
+  reset()
+  const events=[]
+  let setState, sourceRenders=0, renderer
+  function Source(){
+    sourceRenders++
+    const [state,set]=React.useState({first:true,second:false,text:'Initial'})
+    setState=set
+    return React.createElement(React.Fragment,null,
+      React.createElement(AppOverlay,{visible:state.first,onClose(){},onShow(){events.push('first shown')},onDidDismiss(){assert.equal(byID(renderer,'first-overlay').length,0);events.push('first dismissed')}},React.createElement('Text',{testID:'first-overlay'},state.text)),
+      React.createElement(AppOverlay,{visible:state.second,onClose(){},onShow(){events.push('second shown')},onDidDismiss(){assert.equal(byID(renderer,'second-overlay').length,0);events.push('second dismissed')}},React.createElement('Text',{testID:'second-overlay'},'Second')))
+  }
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(AppOverlayProvider,null,React.createElement(Source)))})
+  try{
+    assert.equal(sourceRenders,1,'Host publication must not recursively render its source')
+    assert.deepEqual(events,['first shown'])
+    await act(async()=>setState(state=>({...state,text:'Changed'})))
+    assert.deepEqual(events,['first shown'],'Content updates are neither presentation nor dismissal')
+    await act(async()=>setState(state=>({...state,second:true})))
+    assert.equal(byID(renderer,'first-overlay').length,0)
+    assert.equal(byID(renderer,'second-overlay').length,1)
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
+    assert.deepEqual(events,['first shown','second shown'])
+    await act(async()=>setState(state=>({...state,first:false})))
+    assert.deepEqual(events,['first shown','second shown','first dismissed'])
+    await act(async()=>setState(state=>({...state,second:false})))
+    assert.deepEqual(events,['first shown','second shown','first dismissed','second dismissed'])
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    assert.equal(fixture.backListener,null)
+  }finally{await act(async()=>renderer.unmount())}
+})
+
+test('unmounting a picker source removes its root surface and acknowledges dismissal exactly once',async()=>{
+  reset()
+  let dismissals=0, renderer
+  const source=React.createElement(AppOverlay,{visible:true,onClose(){},onDidDismiss(){
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    dismissals++
+  }},React.createElement('Text',{},'Picker'))
+  await act(async()=>{renderer=TestRenderer.create(React.createElement(AppOverlayProvider,null,source))})
+  try{
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
+    await act(async()=>renderer.update(React.createElement(AppOverlayProvider,null,null)))
+    assert.equal(dismissals,1)
+    assert.equal(fixture.backListener,null)
+    await act(async()=>renderer.update(React.createElement(AppOverlayProvider,null,React.createElement('View'))))
+    assert.equal(dismissals,1)
+  }finally{await act(async()=>renderer.unmount())}
+})
 
 for(const entry of ['typed mention','Add menu'])test(`real Composer selects a local chat from ${entry} and sends its exact grant`,async()=>{
   resetRoutes()
@@ -380,9 +521,7 @@ for(const entry of ['typed mention','Add menu'])test(`real Composer selects a lo
       await type(renderer,'Please ask ')
       await openLocalPickerFromMenu(renderer)
     }
-    const sheet=renderer.root.findByType('Modal')
-    const dismiss=sheet.props.onDismiss
-    await act(async()=>sheet.props.onShow())
+    assert.equal(renderer.root.findAllByType('Modal').length,0)
     assert.equal(fixture.focusedInput,'chat-target-search')
     await act(async()=>byID(renderer,'chat-target-search')[0].props.onChangeText('target'))
     const row=byID(renderer,'chat-target-target')[0]
@@ -393,8 +532,8 @@ for(const entry of ['typed mention','Add menu'])test(`real Composer selects a lo
     assert.deepEqual(store.getState().chatReferencesBySession.chat,references)
     assert.deepEqual(store.getState().teamReferencesBySession.chat,[])
     assert.equal(byID(renderer,'composer-chat-references').length,1)
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
-    await finishNativePickerDismissal(dismiss)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
+    await finishPickerDismissal()
     assert.equal(fixture.focusedInput,'chat-composer-input')
     assert.deepEqual(fixture.nativeSelections.at(-1),['chat-composer-input',{start:24,end:24}])
     await type(renderer,'Please ask @Chat target to check this.')
@@ -405,28 +544,26 @@ for(const entry of ['typed mention','Add menu'])test(`real Composer selects a lo
   }finally{await act(async()=>renderer.unmount())}
 })
 
-test('real Composer closes, reopens, and selects again after each native dismissal',async()=>{
+test('real Composer closes, reopens, and selects again with dismissal acknowledged by host removal',async()=>{
   resetRoutes()
   const renderer=await render()
   try{
     await type(renderer,'Keep this draft. ')
     await openLocalPickerFromMenu(renderer)
-    let dismiss=renderer.root.findByType('Modal').props.onDismiss
     await click(renderer,'chat-target-picker-close')
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
     assert.equal(store.getState().drafts.chat,'Keep this draft. ')
     assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
-    await finishNativePickerDismissal(dismiss)
+    await finishPickerDismissal()
     assert.equal(fixture.focusedInput,'chat-composer-input')
     await openLocalPickerFromMenu(renderer)
-    dismiss=renderer.root.findByType('Modal').props.onDismiss
     await click(renderer,'chat-target-target')
-    await finishNativePickerDismissal(dismiss)
+    await finishPickerDismissal()
     await openLocalPickerFromMenu(renderer)
     await click(renderer,'chat-target-new')
     assert.equal(store.getState().drafts.chat,'Keep this draft. @Chat target @Chat new ')
     assert.deepEqual(store.getState().chatReferencesBySession.chat.map(reference=>reference.session_id),['target','new'])
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
   }finally{await act(async()=>renderer.unmount())}
 })
 
@@ -436,8 +573,6 @@ for(const kind of ['chat','team'])test(`${kind} picker keeps keyboard-open taps 
   try{
     if(kind==='chat')await openLocalPickerFromMenu(renderer)
     else await type(renderer,'@@')
-    const sheet=renderer.root.findByType('Modal')
-    await act(async()=>sheet.props.onShow())
     assert.equal(fixture.focusedInput,`${kind}-target-search`)
     const keyboardSafe=byID(renderer,`${kind}-target-keyboard-safe`)[0]
     assert.equal(keyboardSafe.props.behavior,'padding')
@@ -456,11 +591,10 @@ for(const kind of ['chat','team'])test(`${kind} picker keeps keyboard-open taps 
     assert.equal(store.getState().drafts.chat,draft)
     assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
     assert.deepEqual(store.getState().teamReferencesBySession.chat??[],[])
-    assert.equal(renderer.root.findAllByType('Modal').length,1)
-    await act(async()=>sheet.props.onShow())
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
     if(kind==='chat')await click(renderer,'chat-target-target')
     else await act(async()=>recipient(renderer).props.onPress())
-    assert.equal(renderer.root.findAllByType('Modal').length,0)
+    assert.equal(byID(renderer,'app-overlay-surface').length,0)
     assert.equal(kind==='chat'?store.getState().chatReferencesBySession.chat.length:store.getState().teamReferencesBySession.chat.length,1)
   }finally{await act(async()=>renderer.unmount())}
 })
@@ -479,7 +613,7 @@ test('an open local picker explains capability loss, rejects captured taps, and 
     await act(async()=>staleSelection())
     assert.equal(store.getState().drafts.chat,'')
     assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
-    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
     await act(async()=>store.setState({health:withLocalChats()}))
     assert.equal(byID(renderer,'chat-target-unavailable').length,0)
     assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,false)
@@ -498,7 +632,7 @@ test('real Composer reports an unreferenceable title and still accepts another t
     assert.equal(byID(renderer,'chat-target-selection-error').length,1)
     assert.equal(store.getState().drafts.chat,'')
     assert.deepEqual(store.getState().chatReferencesBySession.chat??[],[])
-    assert.equal(renderer.root.findAllByType('Modal').length,1)
+    assert.equal(byID(renderer,'app-overlay-surface').length,1)
     await click(renderer,'chat-target-target')
     assert.equal(store.getState().drafts.chat,'@Chat target ')
     assert.equal(store.getState().chatReferencesBySession.chat.length,1)
@@ -508,7 +642,7 @@ test('real Composer reports an unreferenceable title and still accepts another t
 async function renderChatPicker(overrides={}){
   let renderer
   const props={visible:true,width:fixture.width,query:'',sourceSessionId:'chat',supportedTargetBackends:['codex','claude'],references:[],requestReplySupported:true,referenceLimitReached:false,onQueryChange(){},onTeamNetwork(){},onSelect(value){fixture.selected=value;return true},onClose(){},onDidDismiss(){},...overrides}
-  await act(async()=>{renderer=TestRenderer.create(React.createElement(ChatTargetPicker,props))})
+  await act(async()=>{renderer=TestRenderer.create(appTree(React.createElement(ChatTargetPicker,props)))})
   return {renderer,props}
 }
 
@@ -535,9 +669,9 @@ test('route capacity blocks only new grants; existing and already-pending target
     assert.equal(byID(renderer,'chat-target-new')[0].props.disabled,true)
     assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,false)
     assert.equal(byID(renderer,'chat-route-capacity').length,1)
-    await act(async()=>renderer.update(React.createElement(ChatTargetPicker,{...props,references:[{session_id:'new',action:'route',grant_intent:true}]})))
+    await act(async()=>renderer.update(appTree(React.createElement(ChatTargetPicker,{...props,references:[{session_id:'new',action:'route',grant_intent:true}]}))))
     assert.equal(byID(renderer,'chat-target-new')[0].props.disabled,false)
-    await act(async()=>renderer.update(React.createElement(ChatTargetPicker,{...props,referenceLimitReached:true})))
+    await act(async()=>renderer.update(appTree(React.createElement(ChatTargetPicker,{...props,referenceLimitReached:true}))))
     assert.equal(byID(renderer,'chat-target-target')[0].props.disabled,true)
     assert.equal(byID(renderer,'chat-route-revoke-route')[0].props.disabled,false,'Access may still be revoked when the draft reference limit is full')
   }finally{await act(async()=>renderer.unmount())}
@@ -1137,9 +1271,9 @@ test('Team aliases stay distinct, searchable by exact sigil, and stale rows cann
   try{
     assert.match(texts(renderer),/All server inboxes/);assert.match(texts(renderer),/@@bulletin/)
     const old=renderer.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel==='Reference All servers in My team').props.onPress
-    await act(async()=>renderer.update(React.createElement(TeamTargetPicker,{...props,query:'@@bulletin'})))
+    await act(async()=>renderer.update(appTree(React.createElement(TeamTargetPicker,{...props,query:'@@bulletin'}))))
     assert.equal(renderer.root.findAllByType('Pressable').filter(node=>node.props.accessibilityLabel==='Reference All servers in My team').length,0)
-    await act(async()=>renderer.update(React.createElement(TeamTargetPicker,props)))
+    await act(async()=>renderer.update(appTree(React.createElement(TeamTargetPicker,props))))
     await act(async()=>store.setState({health:health()}))
     await act(async()=>old());assert.equal(selections,0)
     await act(async()=>recipient(renderer).props.onPress());assert.equal(selections,1)

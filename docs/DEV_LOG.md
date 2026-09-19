@@ -1,5 +1,41 @@
 # Public development log
 
+## Mobile picker recovery, goal controls and live forks — 0.1.2 (177)
+
+- Apple validation, upload and processing completed successfully. Build 177
+  is active for internal TestFlight testing with automatic notifications
+  enabled. External beta review was not submitted. Binary source: `94f86c9`.
+- Both CI jobs passed for that exact source commit. The signed iPhone/iPad
+  archive and exported IPA passed distribution-signature, version, framework
+  ABI, privacy, production-feature and fixture-exclusion checks, with matching
+  app/debug symbols. Build artifacts and release logs remain on the external
+  development volume. Physical-device touch acceptance remains unverified.
+- Source verification passed 113 library/API/store modules, 497 rendered/
+  contract checks, 30 goal component/provider checks, TypeScript and focused
+  settings/file-transfer interactions. Focused suites overlap broad suites;
+  these are not unique combined counts or physical-device acceptance tests.
+- Move chat and Team Network recipient pickers onto one app-owned overlay
+  surface outside the chat's navigation gesture. These pickers no longer
+  create UIKit modal controllers or depend on their dismissal callbacks.
+  Keep search, safe areas, keyboard avoidance, close/back/escape, exact draft
+  references and caret restoration; hide the underlying chat from touch and
+  accessibility while the picker is open.
+- Match desktop's capability-gated live fork: snapshot through the last
+  completed turn without stopping the parent or consuming its queued work.
+  Inspector and Sidebar menus explain when an older server cannot do this.
+- Align native goal Pause/Resume with desktop's status-only requests. Show
+  pending/retry state and reconcile a lost response against the same goal's
+  authoritative status. Let the server decide paused-goal budget eligibility.
+  Preserve explicit Edit/activate and confirmed Clear/create flows for starting
+  a new objective; do not invent a destructive restart or silently reset usage.
+- Distinguish a paused goal from an ordinary message that is still running.
+  Fence action state before a new goal becomes interactive, preserving fast
+  first clicks and rejecting stale results after identity changes.
+- Compare these behaviors with committed desktop `6247a26`. This targeted
+  catch-up does not claim complete desktop parity or physical-device touch
+  acceptance. The picker presentation change removes the suspect native
+  boundary; the exact reported native failure was not reproduced on a device.
+
 ## Mobile chat and server recipient pickers — 0.1.2 (176)
 
 - Apple validation, upload and processing completed successfully. Build 176
