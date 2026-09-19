@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Event, ViewState } from '@shared/types'
-import { clearTimelineViewStates, rememberTimelineViewState, resolveTimelineLiveState, savedTimelineViewState, timelineActiveRunId } from './Timeline'
+import { clearTimelineViewStates, pendingTurnMessageItem, rememberTimelineViewState, resolveTimelineLiveState, savedTimelineViewState, timelineActiveRunId } from './Timeline'
+import { pendingTurnSubmissionAccepted, type PendingTurnSubmission } from '../store/app-store'
 
 function viewState(topItemId: string): ViewState {
   return {
@@ -73,5 +74,48 @@ describe('timeline active-run inference', () => {
     expect(timelineActiveRunId([
       start, userStart, { ...userStart, id: 'finish', seq: 3, type: 'turn_finished', metadata_only: false }
     ])).toBe('live-run')
+  })
+})
+
+describe('pending outbound timeline presentation', () => {
+  const pending: PendingTurnSubmission = {
+    token: 'admission-1',
+    prompt: 'Run the checks',
+    files: [{ id: 'file-1', filename: 'report.txt', content_type: 'text/plain' }],
+    uploadPaths: [],
+    chatReferences: [],
+    teamReferences: [],
+    createdAt: Date.parse('2026-09-18T18:30:00Z'),
+    afterSeq: 8,
+    mode: 'start',
+    phase: 'submitting',
+    consumeComposer: true
+  }
+
+  it('builds a renderer-only pending user row without changing server history', () => {
+    const item = pendingTurnMessageItem('chat-1', pending)
+
+    expect(item).toMatchObject({
+      kind: 'message', role: 'user', pending: true, pendingPhase: 'submitting',
+      key: 'pending-turn:admission-1', files: pending.files
+    })
+    expect(item.event).toMatchObject({
+      session_id: 'chat-1', type: 'turn_started', prompt: 'Run the checks',
+      file_ids: ['file-1'], provider_user_authored: true
+    })
+  })
+
+  it('hides the pending row only for a matching newer authoritative admission', () => {
+    const accepted: Event = {
+      id: 'accepted', session_id: 'chat-1', seq: 9, type: 'turn_started',
+      ts: '2026-09-18T18:30:01Z', prompt: 'Run the checks', file_ids: ['file-1']
+    }
+
+    expect(pendingTurnSubmissionAccepted({ ...pending, phase: 'preflight' }, [accepted])).toBe(false)
+    expect(pendingTurnSubmissionAccepted(pending, [{ ...accepted, seq: 8 }])).toBe(false)
+    expect(pendingTurnSubmissionAccepted(pending, [{ ...accepted, prompt: 'Another request' }])).toBe(false)
+    expect(pendingTurnSubmissionAccepted(pending, [{ ...accepted, file_ids: [] }])).toBe(false)
+    expect(pendingTurnSubmissionAccepted(pending, [accepted])).toBe(true)
+    expect(pendingTurnSubmissionAccepted(pending, [{ ...accepted, type: 'turn_queued' }])).toBe(true)
   })
 })
