@@ -22,6 +22,18 @@
 - Release discovery copies no longer retain every completed test case and
   its fixture graph for the entire shard. Restore unittest's normal cleanup
   without changing test selection, assertions or deadlines.
+- Accept [1.0.4-beta.6](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.6)
+  from `21f7fca42adb2f0e8736af7cfc38b3a7e7279811` after all eight test workers
+  and signed packaging pass in
+  [release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35482901609).
+  Verify the Ed25519 signature, exact archive membership and all 85 packaged
+  source files. Public unauthenticated downloads match the three held assets;
+  the prerelease tag and authored release notes match the accepted source.
+  Archive SHA-256:
+  `d2ea302d1b36eacc3001a873cd54ca17d2701f89aa75f1c0bd6466c27932b96d`.
+- Confirm both identity-bound managed updates are pending for idle installation.
+  Active work keeps beta.4 running; no forced restart is performed. Publication
+  and accepted update reservations do not imply installation has completed.
 
 ## 2026-09-19 — AgentsServer 1.0.4-beta.5 accepted
 
