@@ -58,6 +58,9 @@ describe('native Codex activity presentation', () => {
     expect(view.container.querySelector('.trace-activity')?.lastElementChild).toHaveTextContent('Running printf TRACE_QA_TOOL')
     view.rerender(row(item([early, commentary, latest, start, finish], { active: false, finishedAt: finish.ts, hasFinalResponse: true })))
     expect(view.container.querySelectorAll('.is-active')).toHaveLength(0)
+    expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Ran printf TRACE_QA_TOOL' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }))
     expect(screen.getByRole('button', { name: 'Ran printf TRACE_QA_TOOL' })).toBeInTheDocument()
     expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
@@ -68,13 +71,19 @@ describe('native Codex activity presentation', () => {
     const partial = { ...latest, partial: true }
     const view = render(row(item([early, commentary, partial])))
     view.rerender(row(item([early, commentary, partial], { active: false, stoppedAt: partial.ts, hasFinalResponse: false })))
-    expect(screen.getByText('Partial thinking summary')).toBeInTheDocument()
+    expect(screen.queryByText('Partial thinking summary')).not.toBeInTheDocument()
+    expect(screen.getByText(commentary.text!)).toBeInTheDocument()
+    expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'false')
     expect(view.container.querySelectorAll('.is-active')).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Planning the next check' }))
+    fireEvent.click(screen.getByRole('button', { name: /You stopped after/ }))
+    expect(screen.queryByRole('button', { name: 'Planning the next check' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
+    expect(screen.getByText('Partial thinking summary')).toBeInTheDocument()
     expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
     view.unmount()
     const historical = render(row(item([early, commentary, partial], { active: false, stoppedAt: partial.ts, hasFinalResponse: false })))
     fireEvent.click(screen.getByRole('button', { name: /You stopped after/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
     expect(screen.getByText('Partial thinking summary')).toBeInTheDocument()
     expect(historical.container.querySelectorAll('.is-active')).toHaveLength(0)
   })
@@ -112,5 +121,76 @@ describe('native Codex activity presentation', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
     expect(screen.queryByText(/END_OF_RECEIVED_REASONING/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Planning the next check' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['compact', 'completed'], ['expanded', 'completed'],
+    ['compact', 'stopped'], ['expanded', 'stopped']
+  ] as const)('collapses %s live traces when the turn is %s and preserves manual history access', (display, terminal) => {
+    setReasoningDisplay(display)
+    const raw = event(6, 'reasoning_text', { phase: 'reasoning', partial: terminal === 'stopped', item_id: latest.item_id,
+      text: 'Provider plaintext retained for manual history.' })
+    const events = [early, commentary, latest, start, finish, raw]
+    const view = render(row(item(events)))
+    if (display === 'expanded') {
+      expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
+      expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
+      expect(screen.queryByText(raw.text!)).not.toBeInTheDocument()
+    }
+    const completed = item(events, {
+      active: false,
+      ...(terminal === 'completed' ? { finishedAt: raw.ts, hasFinalResponse: true } : { stoppedAt: raw.ts, hasFinalResponse: false })
+    })
+    view.rerender(row(completed))
+    expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'false')
+    expect(view.container.querySelectorAll('.is-active')).toHaveLength(0)
+    expect(screen.queryByText(raw.text!)).not.toBeInTheDocument()
+    expect(screen.queryByText('The full current explanation.')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: terminal === 'completed' ? /Worked for/ : /You stopped after/ }))
+    expect(screen.queryByText(raw.text!)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Planning the next check' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Earlier activity' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
+    expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
+    expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
+    expect(screen.getByText('The complete earlier explanation.')).toBeInTheDocument()
+    expect(view.container.querySelectorAll('.is-active')).toHaveLength(0)
+  })
+
+  it.each(['compact', 'expanded'] as const)('does not reopen or alter completed history when changing the %s preference', display => {
+    setReasoningDisplay(display)
+    const raw = event(6, 'reasoning_text', { phase: 'reasoning', item_id: latest.item_id, text: 'Historical provider plaintext.' })
+    const completed = item([early, commentary, latest, start, finish, raw], { active: false, finishedAt: raw.ts, hasFinalResponse: true })
+    const view = render(<><ReasoningDisplaySettings />{row(completed)}</>)
+    const history = () => view.container.querySelector('.trace')!
+    const collapsedText = history().textContent
+    expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+    expect(history().textContent).toBe(collapsedText)
+    expect(view.container.querySelector('.run-activity-summary')).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(screen.getByRole('button', { name: /Worked for/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
+    expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
+    const manualText = history().textContent
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+    expect(history().textContent).toBe(manualText)
+    expect(screen.getByRole('button', { name: 'Earlier activity' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
+  })
+
+  it('keeps the reasoning preference from opening a legacy historical trace', () => {
+    setReasoningDisplay('expanded')
+    const raw = event(4, 'reasoning_text', { phase: 'reasoning', item_id: latest.item_id, text: 'Legacy provider plaintext.' })
+    const view = render(<TimelineRowView item={{ kind: 'trace', id: 'legacy-trace', key: 'legacy-trace', seq: 1, events: [latest, raw], promotedCommentaryIds: [], active: false }}
+      sessionId="chat-1" profileScope={null} onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    expect(view.container.querySelector('.trace-summary')).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(raw.text!)).not.toBeInTheDocument()
+    fireEvent.click(view.container.querySelector('.trace-summary')!)
+    expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
+    expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
   })
 })

@@ -393,11 +393,12 @@ function TraceDisclosure({
   const sessionBackend = useAppStore(state => state.snapshots[sessionId]?.session.backend
     ?? state.sessions.find(session => session.id === sessionId)?.backend)
   const nativeCodex = (sessionBackend ?? events.find(event => event.backend)?.backend) === 'codex'
-  const expandedReasoning = useReasoningDisplay() === 'expanded'
+  const reasoningDisplay = useReasoningDisplay()
   const activityLive = Boolean(runActivity) && runActivity?.active !== false && !runActivity?.stoppedAt
-  // Historical runs stay compact. Once opened, a live run keeps the reader's
-  // choice through completion, cancellation, and subsequent history updates.
-  const [open, setOpen] = useState(() => activityLive || (nativeCodex && expandedReasoning))
+  // The preference reveals traces only during the active turn. Completed and
+  // stopped Codex turns use the same compact history under either setting.
+  const expandedReasoning = activityLive && reasoningDisplay === 'expanded'
+  const [open, setOpen] = useState(() => activityLive)
   const [reasoningHistoryOpen, setReasoningHistoryOpen] = useState(false)
   useEffect(() => {
     if (nativeCodex && expandedReasoning) setOpen(true)
@@ -459,14 +460,18 @@ function TraceDisclosure({
     }
     if (!runActivityMode) return
     if (previous.key !== runActivity?.key) {
-      setOpen(activityLive || (nativeCodex && expandedReasoning))
+      setOpen(activityLive)
       if (activityLive) setExpandedDiffScope(diffScope)
     }
     else if (activityLive && !previous.live) {
       setExpandedDiffScope(diffScope)
       setOpen(true)
     }
-  }, [activityLive, diffScope, expandedReasoning, nativeCodex, runActivityMode, runActivity?.key])
+    else if (nativeCodex && previous.live && !activityLive) {
+      setOpen(false)
+      setReasoningHistoryOpen(false)
+    }
+  }, [activityLive, diffScope, nativeCodex, runActivityMode, runActivity?.key])
   const displayEvents = useMemo(() => {
     const promotedIds = new Set(promotedCommentaryIds)
     const merged = loadedEvents ? mergeTraceEvents(runActivity?.sourceEvents ?? events, loadedEvents) : events
@@ -495,14 +500,21 @@ function TraceDisclosure({
   const activeToolKey = activityLive && latestActivity?.kind === 'tool' && !latestActivity.finished
     ? latestActivity.key : null
   const historicalReasoningCount = activity.reduce((count, entry) => count + (entry.kind === 'reasoning'
-    ? entry.events.filter(event => event !== latestReasoning && event.phase !== 'reasoning').length : 0), 0)
+    ? entry.events.filter(event => !activityLive || (event !== latestReasoning && event.phase !== 'reasoning')).length : 0), 0)
   const activityParts = useMemo<TracePart[]>(() => [
     ...activity.map(entry => ({ kind: 'activity' as const, seq: entry.seq, entry })),
     ...(runActivity?.lifecycle ?? []).map(system => ({ kind: 'lifecycle' as const, seq: system.seq, system }))
   ].sort((left, right) => left.seq - right.seq), [activity, runActivity?.lifecycle])
   const runActivitySegments = useMemo(
-    () => runActivityMode ? groupRunActivity(activityParts) : [],
-    [activityParts, runActivityMode]
+    // Hidden reasoning must not split adjacent commands into separate,
+    // indistinguishable support rows. Visible reasoning still preserves its
+    // original position between tools and commentary.
+    () => runActivityMode ? groupRunActivity(activityParts.filter(part =>
+      !nativeCodex || part.kind !== 'activity' || part.entry.kind !== 'reasoning'
+      || expandedReasoning || (reasoningHistoryOpen && part.entry.events.some(event =>
+        !activityLive || (event !== latestReasoning && event.phase !== 'reasoning')))
+    )) : [],
+    [activityLive, activityParts, expandedReasoning, latestReasoning, nativeCodex, reasoningHistoryOpen, runActivityMode]
   )
   const keepTerminalCommentaryVisible = Boolean(
     runActivity
@@ -625,12 +637,12 @@ function TraceDisclosure({
                 : open
                   ? segment.kind === 'reasoning'
                     ? nativeCodex
-                      ? (expandedReasoning || reasoningHistoryOpen) && <CodexReasoningEvent key={segment.key} entry={{ ...segment.entry, events: segment.entry.events.filter(event => expandedReasoning || (event !== latestReasoning && event.phase !== 'reasoning')) }} sessionId={sessionId} expanded activeKey={expandedReasoning ? activeReasoningKey : null} labeled />
+                      ? (expandedReasoning || reasoningHistoryOpen) && <CodexReasoningEvent key={segment.key} entry={{ ...segment.entry, events: segment.entry.events.filter(event => expandedReasoning || !activityLive || (event !== latestReasoning && event.phase !== 'reasoning')) }} sessionId={sessionId} expanded activeKey={expandedReasoning ? activeReasoningKey : null} labeled />
                       : <TraceReasoningEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
                     : <RunActivitySupportGroup key={segment.key} parts={segment.parts} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} activeToolKey={activeToolKey} runLive={activityLive} />
                   : null)
-            : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} showPlaintext={expandedReasoning} />)}
-          {open && runActivity && nativeCodex && latestReasoning && !expandedReasoning && <CodexReasoningEvent entry={{ kind: 'reasoning', key: reasoningItemKey(latestReasoning), seq: progressEventSequence(latestReasoning), events: [latestReasoning] }} sessionId={sessionId} activeKey={activeReasoningKey} />}
+            : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} showPlaintext />)}
+          {open && runActivity && nativeCodex && activityLive && latestReasoning && !expandedReasoning && <CodexReasoningEvent entry={{ kind: 'reasoning', key: reasoningItemKey(latestReasoning), seq: progressEventSequence(latestReasoning), events: [latestReasoning] }} sessionId={sessionId} activeKey={activeReasoningKey} />}
           {open && runActivity && nativeCodex && activeToolKey && latestActivity?.kind === 'tool' && <ToolEvent entry={latestActivity} nativeCodex active runLive />}
         </ol>
         {open && runActivity && nativeCodex && !expandedReasoning && historicalReasoningCount > 0 && <button type="button" className="codex-activity-history-toggle" aria-expanded={reasoningHistoryOpen} onClick={() => setReasoningHistoryOpen(value => !value)}><ChevronRight size={12} aria-hidden="true" />{t('timeline.activity.earlierActivity')}</button>}

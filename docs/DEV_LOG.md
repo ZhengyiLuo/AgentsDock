@@ -1,5 +1,28 @@
 # Public development log
 
+## 2026-09-19 — Live-only reasoning display — 1.0.4-beta.10 candidate
+
+- Apply the reasoning display preference only during an active Codex turn.
+  Collapse finished and stopped turns under both settings; changing Settings
+  leaves completed history unchanged. Explicit history expansion retains all
+  available text in chronological order, independently of the preference.
+- Group adjacent commands across hidden reasoning entries. Retain visible
+  commentary and reasoning boundaries instead of moving or dropping content.
+  Update the English and Chinese setting descriptions.
+- Exercise completion and interruption through actual sandboxed Codex, an
+  isolated production server, authenticated WebSocket, desktop service,
+  preload and timeline in native offscreen Electron. Click the real Settings
+  switch while running and after completion; verify both settings converge
+  to collapsed history, manual expansion retains text, and hidden reasoning
+  produces one command group. Check dark/light narrow layouts and no automatic
+  history requests. Responses are controlled fixtures; this validates native
+  transport and presentation, not external-model output or native GUI parity.
+- Pass 4,594 tests (10 skipped), eight build/license guard checks, TypeScript
+  validation and production compilation. Keep release verification temporary
+  extraction under the configured temporary directory, with a writable-path
+  check. This presentation change requires no server contract update.
+- Availability: source candidate; signed local package acceptance is pending.
+
 ## 2026-09-19 — Codex activity and per-chat limits — 1.0.4-beta.9
 
 - Present Codex commentary and command rows inline, with one muted pulsing
