@@ -1,7 +1,7 @@
-import { sideQuestionLimit, sideQuestionsAvailable,
+import { sideQuestionLimit, sideQuestionsAvailable, sideQuestionOwnerKey,
   SIDE_QUESTION_MAX_HISTORY_CHARS, SIDE_QUESTION_MAX_HISTORY_ITEMS,
   type SideQuestionHistoryItem, type SideQuestionScope } from '@shared/side-questions'
-import type { Session } from '@shared/types'
+import type { PublicServerProfile, Session } from '@shared/types'
 import { useAppStore } from '../store/app-store'
 
 export interface SideChatExchange {
@@ -40,14 +40,16 @@ export function sideChatHistory(exchanges: SideChatExchange[], maxItems = SIDE_Q
 /** App-owned transient state: hiding the dock does not own or stop requests. */
 export class SideChatController {
   private snapshots = new Map<string, SideChatSnapshot>()
+  private scopes = new Map<string, SideQuestionScope>()
   private listeners = new Map<string, Set<() => void>>()
   private requests = new Map<string, { scope: SideQuestionScope; sessionId: string; requestId: string }>()
   private detailsOffsets = new Map<string, number>()
   private epoch = 0
-  private key(scope: SideQuestionScope, sessionId: string): string { return JSON.stringify([scope.profileId, scope.profileGeneration, sessionId]) }
+  private key(scope: SideQuestionScope, sessionId: string): string { return JSON.stringify([sideQuestionOwnerKey(scope), sessionId]) }
 
   snapshot(scope: SideQuestionScope, sessionId: string): SideChatSnapshot {
     const key = this.key(scope, sessionId)
+    this.scopes.set(key, scope)
     if (!this.snapshots.has(key)) this.snapshots.set(key, emptySnapshot())
     return this.snapshots.get(key)!
   }
@@ -69,6 +71,7 @@ export class SideChatController {
   private current(scope: SideQuestionScope): boolean {
     const state = useAppStore.getState()
     return state.activeProfileId === scope.profileId && state.profileGeneration === scope.profileGeneration && !state.switchingProfileId
+      && (!scope.serverIdentity || state.profiles.find(profile => profile.id === scope.profileId)?.serverIdentity === scope.serverIdentity)
   }
 
   async send(scope: SideQuestionScope, session: Session): Promise<void> {
@@ -85,7 +88,7 @@ export class SideChatController {
     this.requests.set(key, { scope, sessionId: session.id, requestId })
     this.update(scope, session.id, state => ({ ...state, draft: '', pending: requestId, error: null,
       historyOmitted: false, exchanges: [...state.exchanges, { id: requestId, question, state: 'pending' }] }))
-    const current = () => this.epoch === epoch && this.current(scope) && this.requests.get(key)?.requestId === requestId
+    const current = () => this.epoch === epoch && this.requests.get(key)?.requestId === requestId
     try {
       const answer = await api.ask(scope, session.id, { request_id: requestId, question, side_chat_id: snapshot.sideChatId,
         ...(snapshot.lastRequestId ? { after_request_id: snapshot.lastRequestId } : {}) })
@@ -111,9 +114,9 @@ export class SideChatController {
     this.update(scope, sessionId, state => ({ ...state, pending: null,
       exchanges: state.exchanges.map(item => item.id === request.requestId ? { ...item, state: 'cancelled' } : item) }))
     const epoch = this.epoch
-    try { await window.agentsDock.sideQuestions?.cancel(scope, sessionId, request.requestId) }
+    try { await window.agentsDock.sideQuestions?.cancel(request.scope, sessionId, request.requestId) }
     catch {
-      if (this.epoch !== epoch || !this.current(scope)) return
+      if (this.epoch !== epoch || !this.snapshots.has(key)) return
       this.update(scope, sessionId, state => ({ ...state,
         exchanges: state.exchanges.map(item => item.id === request.requestId && item.state === 'cancelled'
           ? { ...item, state: 'error', error: 'side_question_cancel_failed' } : item) }))
@@ -125,15 +128,27 @@ export class SideChatController {
     void window.agentsDock.sideQuestions?.close?.(scope, sessionId, sideChatId).catch(() => undefined)
     this.update(scope, sessionId, () => emptySnapshot())
   }
+  reconcileProfiles(profiles: PublicServerProfile[]): void {
+    for (const [key, scope] of this.scopes) {
+      const profile = profiles.find(profile => profile.id === scope.profileId)
+      if (profile && (!scope.serverIdentity || profile.serverIdentity === scope.serverIdentity)) continue
+      const [, sessionId] = JSON.parse(key)
+      this.clear(scope, sessionId)
+      this.snapshots.delete(key)
+      this.scopes.delete(key)
+      this.detailsOffsets.delete(key)
+    }
+  }
   reset(): void {
     this.epoch += 1
     const requests = [...this.requests.values()]
     this.requests.clear()
     for (const [key, snapshot] of this.snapshots) {
-      const [profileId, profileGeneration, sessionId] = JSON.parse(key)
-      void window.agentsDock.sideQuestions?.close?.({ profileId, profileGeneration }, sessionId, snapshot.sideChatId).catch(() => undefined)
+      const [, sessionId] = JSON.parse(key)
+      void window.agentsDock.sideQuestions?.close?.(this.scopes.get(key)!, sessionId, snapshot.sideChatId).catch(() => undefined)
     }
     this.snapshots.clear()
+    this.scopes.clear()
     this.detailsOffsets.clear()
     for (const request of requests) void window.agentsDock.sideQuestions?.cancel(request.scope, request.sessionId, request.requestId).catch(() => undefined)
     for (const listeners of this.listeners.values()) for (const listener of listeners) listener()

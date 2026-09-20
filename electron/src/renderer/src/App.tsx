@@ -138,7 +138,12 @@ export function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorWorkspaceTab>('details')
   const [sideChatFocusVersion, setSideChatFocusVersion] = useState(0)
   const [sideChatFocusTarget, setSideChatFocusTarget] = useState<string | null>(null)
-  useEffect(() => () => sideChatController.reset(), [sideChatController, activeRenderKey, Boolean(switchingProfileId)])
+  useEffect(() => {
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (state.profiles !== previous.profiles) sideChatController.reconcileProfiles(state.profiles)
+    })
+    return () => { unsubscribe(); sideChatController.reset() }
+  }, [sideChatController])
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId: string; profileId: string | null; profileGeneration: number }>).detail
@@ -917,7 +922,7 @@ export function App() {
         open={visibleDockOpen}
         disabled={Boolean(switchingProfileId)}
         contentKey={selectedRenderKey}
-        content={<InspectorWorkspace session={selectedSession} scope={{ profileId: activeProfileId ?? '', profileGeneration }}
+        content={<InspectorWorkspace session={selectedSession} scope={{ profileId: activeProfileId ?? '', profileGeneration, serverIdentity: activeServerIdentity }}
           controller={sideChatController} tab={inspectorTab} focusVersion={sideChatFocusTarget === JSON.stringify([activeProfileId, profileGeneration, selectedSession?.id]) ? sideChatFocusVersion : 0} visible={visibleDockOpen}
           onFocusHandled={() => setSideChatFocusTarget(null)} onTabChange={setInspectorTab}
           onHide={() => { setInspectorTab(current => current === 'review' ? 'details' : current); useAppStore.getState().setInspectorVisible(false) }}

@@ -1,4 +1,5 @@
 import type { AgentServerClient } from './server-client'
+import { sideQuestionOwnerKey } from '../shared/side-questions'
 import type { SideQuestionAnswer, SideQuestionCancellation, SideQuestionInput, SideQuestionScope } from '../shared/side-questions'
 
 interface PendingSideQuestion {
@@ -51,7 +52,9 @@ export class SideQuestionRequests {
         }
       }
       const answer = await request.client.askSideQuestion(sessionId, input, request.controller.signal)
-      if (request.cancelled || !isCurrent()) throw new Error('side_question_cancelled')
+      // Selection only authorizes dispatch. The captured server still owns a
+      // submitted answer while another profile is visible.
+      if (request.cancelled) throw new Error('side_question_cancelled')
       return answer
     } finally {
       // Cancellation uses its own captured server client, including after a
@@ -83,13 +86,22 @@ export class SideQuestionRequests {
     }
   }
 
+  cancelProfile(profileId: string): void {
+    for (const request of this.pending.values()) {
+      if (request.scope.profileId === profileId) void this.cancel(request.scope, request.sessionId, request.requestId).catch(() => undefined)
+    }
+    for (const conversation of this.conversations.values()) {
+      if (conversation.scope.profileId === profileId) void this.close(conversation.scope, conversation.sessionId, conversation.sideChatId).catch(() => undefined)
+    }
+  }
+
   async close(scope: SideQuestionScope, sessionId: string, sideChatId: string): Promise<void> {
     const key = this.key(scope, sessionId, sideChatId)
     const conversation = this.conversations.get(key)
     if (conversation?.closing) return conversation.closing
     const cancelPending = () => Promise.all([...this.pending.values()]
       .filter(request => request.sessionId === sessionId && request.sideChatId === sideChatId
-        && request.scope.profileId === scope.profileId && request.scope.profileGeneration === scope.profileGeneration)
+        && sideQuestionOwnerKey(request.scope) === sideQuestionOwnerKey(scope))
       .map(request => this.cancel(request.scope, sessionId, request.requestId).catch(() => undefined)))
     if (!conversation) { await cancelPending(); return }
     conversation.closing = (async () => {
@@ -105,6 +117,6 @@ export class SideQuestionRequests {
   }
 
   private key(scope: SideQuestionScope, sessionId: string, requestId: string): string {
-    return JSON.stringify([scope.profileId, scope.profileGeneration, sessionId, requestId])
+    return JSON.stringify([sideQuestionOwnerKey(scope), sessionId, requestId])
   }
 }

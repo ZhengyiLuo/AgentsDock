@@ -4441,7 +4441,7 @@ export function isSupersededTimelineSelection(error: unknown): boolean {
   return /Timeline selection superseded/.test(errorMessage(error))
 }
 function forkErrorMessage(error: unknown): string {
-  const message = errorMessage(error)
+  const message = errorMessage(error).replace(/^Error invoking remote method 'sessions:fork': (?:Error: )?/, '')
   return message.toLocaleLowerCase().includes('active turn before forking')
     ? RUNNING_FORK_UNAVAILABLE
     : message

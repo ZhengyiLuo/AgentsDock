@@ -13,8 +13,8 @@ export function SideQuestionPanel({ session, scope, controller, active = true, f
   session: Session; scope: SideQuestionScope; controller: SideChatController; active?: boolean; focusVersion?: number; autoFocus?: boolean; onFocusHandled?: () => void
 }) {
   useLocale()
-  const subscribe = useCallback((listener: () => void) => controller.subscribe(scope, session.id, listener), [controller, scope.profileId, scope.profileGeneration, session.id])
-  const getSnapshot = useCallback(() => controller.snapshot(scope, session.id), [controller, scope.profileId, scope.profileGeneration, session.id])
+  const subscribe = useCallback((listener: () => void) => controller.subscribe(scope, session.id, listener), [controller, scope.profileId, scope.profileGeneration, scope.serverIdentity, session.id])
+  const getSnapshot = useCallback(() => controller.snapshot(scope, session.id), [controller, scope.profileId, scope.profileGeneration, scope.serverIdentity, session.id])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
   const health = useAppStore(state => state.health)
   const connected = useAppStore(state => state.connected)

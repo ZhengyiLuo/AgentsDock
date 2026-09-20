@@ -17,7 +17,8 @@ function fixture() {
   const cache = { putEvents: vi.fn(), putSessions: vi.fn() }
   Object.assign(service, {
     scope, profileGeneration: 7, activeProfileId: expected.profileId, clientFactory,
-    settings: { accessToken: vi.fn().mockReturnValue('synthetic-owner-token') },
+    settings: { accessToken: vi.fn().mockReturnValue('synthetic-owner-token'),
+      getProfile: vi.fn().mockReturnValue({ id: expected.profileId, serverIdentity: 'identity-a', serverUrl: 'https://synthetic.example.test' }) },
     ensureValidatedScope: vi.fn().mockResolvedValue(undefined),
     sessions: [{ id: 'chat-a', backend: 'codex' }], cache,
     sideQuestions: new SideQuestionRequests(),
@@ -29,6 +30,51 @@ function fixture() {
 }
 
 describe('main side-question service scope', () => {
+  it('finishes an owned request while another server is selected and resumes it after returning', async () => {
+    const { service, sideClient, mainClient } = fixture()
+    const owner = { ...expected, serverIdentity: 'identity-a' }
+    let resolve!: (value: typeof answer) => void
+    sideClient.askSideQuestion.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const pending = service.askSideQuestion(owner, 'chat-a', input)
+    await vi.waitFor(() => expect(sideClient.askSideQuestion).toHaveBeenCalledOnce())
+    const originalScope = (service as any).scope
+    Object.assign(service, { scope: { ...originalScope, profileId: 'profile-b', generation: 8 }, activeProfileId: 'profile-b', profileGeneration: 8 })
+    resolve(answer)
+    await expect(pending).resolves.toEqual(answer)
+    expect(sideClient.cancelSideQuestion).not.toHaveBeenCalled()
+    expect(sideClient.closeSideChat).not.toHaveBeenCalled()
+    const returned = { ...owner, profileGeneration: 9 }
+    Object.assign(service, { scope: { ...originalScope, generation: 9 }, activeProfileId: owner.profileId, profileGeneration: 9 })
+    const followup = { ...input, request_id: 'request-followup', after_request_id: input.request_id }
+    await service.askSideQuestion(returned, 'chat-a', followup)
+    expect(sideClient.askSideQuestion).toHaveBeenLastCalledWith('chat-a', followup, expect.any(AbortSignal))
+    await service.closeSideChat({ ...returned, serverIdentity: 'identity-b' }, 'chat-a', input.side_chat_id)
+    expect(sideClient.closeSideChat).not.toHaveBeenCalled()
+    await service.closeSideChat(returned, 'chat-a', input.side_chat_id)
+    expect(sideClient.closeSideChat).toHaveBeenCalledExactlyOnceWith('chat-a', input.side_chat_id)
+    expect(mainClient.dispose).not.toHaveBeenCalled()
+  })
+
+  it('rejects an old identity before dispatch after its profile has been rebound', async () => {
+    const { service, clientFactory } = fixture()
+    await expect(service.askSideQuestion({ ...expected, serverIdentity: 'retired-identity' }, 'chat-a', input)).rejects.toThrow()
+    expect(clientFactory).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ accessToken: 'replacement-test-token' }, true],
+    [{ serverUrl: 'https://replacement.example.test' }, true],
+    [{ name: 'Renamed only' }, false]
+  ] as const)('retires captured authority only for connection edits %j', (patch, retired) => {
+    const { service } = fixture()
+    const internals = service as any
+    internals.settings.updateProfile = vi.fn().mockReturnValue({ id: expected.profileId })
+    internals.profileHealthAccessTokens = new Map()
+    const cancelProfile = vi.spyOn(internals.sideQuestions, 'cancelProfile')
+    internals.persistServerUpdate(expected.profileId, patch)
+    expect(cancelProfile).toHaveBeenCalledTimes(retired ? 1 : 0)
+    if (retired) expect(cancelProfile).toHaveBeenCalledWith(expected.profileId)
+  })
   it('uses one separately owned client without writing conversation cache or controlling the main turn', async () => {
     const { service, mainClient, sideClient, clientFactory, cache } = fixture()
     await expect(service.askSideQuestion(expected, 'chat-a', input)).resolves.toEqual(answer)

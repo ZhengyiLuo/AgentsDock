@@ -1695,6 +1695,7 @@ export class AppService {
       // retaining confidential rows for a profile the user chose to remove.
       this.cache.removeServerNamespaces(cacheNamespaces)
       this.settings.removeProfile(profileId)
+      this.sideQuestions.cancelProfile(profileId)
     } catch (error) { throw error }
     this.invalidateProfileHealthProbe(profileId)
     this.profileHealthAccessTokens.delete(profileId)
@@ -3275,11 +3276,13 @@ export class AppService {
     return this.sideQuestions.ask(expected, sessionId, question, async () => {
       await this.ensureValidatedScope(scope)
       this.assertCurrentScope(scope)
+      if (expected.serverIdentity !== undefined
+        && expected.serverIdentity !== (this.settings.getProfile(scope.profileId)?.serverIdentity ?? null)) throw staleProfileError()
       const session = this.sessions.find(candidate => candidate.id === sessionId)
       if (!session || !sideQuestionsAvailable(this.health, session.backend)) throw new Error('side_question_unsupported')
       validateSideQuestionInput(question, sideQuestionLimit(this.health))
-      // A dedicated transport preserves exact cancellation ownership after the
-      // selected profile changes. It is disposed with this one request.
+      // A dedicated transport preserves native follow-ups and cancellation
+      // ownership even while another server is selected.
       return this.clientFactory(scope.serverUrl, this.settings.accessToken(scope.profileId))
     }, () => this.isCurrentScope(scope)).catch(error => {
       if (error instanceof ServerError) throw new Error(`side_question_http_${error.status}: ${error.message}`)
@@ -5860,7 +5863,7 @@ export class AppService {
     // The generation fence is already active. From here onward every old
     // resource is retired independently so one hostile/buggy close callback
     // cannot prevent a coherent replacement scope from being installed.
-    retire(() => this.sideQuestions.cancelAll())
+    // Side chats own independent transports and survive ordinary navigation.
     retire(() => this.flushEventCache())
     retire(() => this.closeAllTimelineSubscriptions())
     retire(() => this.stopEmergencyStream())
@@ -5975,6 +5978,7 @@ export class AppService {
     profileId: string,
     retiredNamespaces: readonly string[]
   ): Promise<string | null> {
+    this.sideQuestions.cancelProfile(profileId)
     const namespaces = [...new Set([
       ...(this.pendingProfileAuthorityNamespaces.get(profileId) ?? []),
       ...retiredNamespaces
@@ -6352,6 +6356,7 @@ export class AppService {
       ...storedPatch,
       ...(resetServerIdentity ? { serverIdentity: null, retiredServerNamespaces: retiredNamespaces } : {})
     })
+    if (profileConnectionChanged(previous, patch)) this.sideQuestions.cancelProfile(profileId)
     if (retiredNamespaces?.length) this.pendingProfileAuthorityNamespaces.set(profileId, retiredNamespaces)
     if (patch.accessToken !== undefined) this.profileHealthAccessTokens.delete(profileId)
     return profile

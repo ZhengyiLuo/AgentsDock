@@ -249,7 +249,7 @@ describe('App chat workspace identity', () => {
     expect(sideChatHarness.props.content.props.session.id).toBe('chat-b')
   })
 
-  it('keeps side state on hide but retires pending work at failed profile-switch start', async () => {
+  it('keeps side state and pending work through hiding and a failed profile switch', async () => {
     let answer!: (value: unknown) => void
     const ask = vi.fn((_scope: unknown, _sessionId: string, _input: { request_id: string }) => new Promise(resolve => { answer = resolve }))
     const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' })
@@ -269,13 +269,44 @@ describe('App chat workspace identity', () => {
     expect(cancel).not.toHaveBeenCalled()
     expect(controller.snapshot(scope, 'chat-a').pending).not.toBeNull()
     act(() => useAppStore.setState({ switchingProfileId: 'profile-b' }))
-    expect(cancel).toHaveBeenCalledOnce()
-    expect(cancel.mock.calls[0].slice(0, 2)).toEqual([scope, 'chat-a'])
+    expect(cancel).not.toHaveBeenCalled()
     act(() => useAppStore.setState({ switchingProfileId: null }))
-    answer({ request_id: ask.mock.calls[0][2].request_id, session_id: 'chat-a', backend: 'codex', answer: 'STALE' })
+    answer({ request_id: ask.mock.calls[0][2].request_id, session_id: 'chat-a', backend: 'codex', answer: 'Still owned by A' })
     await act(async () => { await pending })
     expect(controller.snapshot(scope, 'chat-a').pending).toBeNull()
-    expect(controller.snapshot(scope, 'chat-a').exchanges).toEqual([])
+    expect(controller.snapshot(scope, 'chat-a').exchanges).toEqual([expect.objectContaining({ answer: 'Still owned by A' })])
+  })
+
+  it('restores drafts and native replies after A to B to A without cancelling background work', async () => {
+    let answer!: (value: unknown) => void
+    const ask = vi.fn((_scope: unknown, _sessionId: string, _input: { request_id: string; side_chat_id: string }) => new Promise(resolve => { answer = resolve }))
+    const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' })
+    const close = vi.fn().mockResolvedValue(undefined)
+    Object.assign(window.agentsDock, { sideQuestions: { ask, cancel, close } })
+    const other = { ...profile, id: 'profile-b', serverIdentity: 'server-b' }
+    useAppStore.setState({ profiles: [profile, other], connected: true, health: { ok: true, capabilities: { side_questions: {
+      available: true, version: 2, native_context: true, backends: ['codex'], max_question_chars: 8000
+    } } } })
+    render(<App />)
+    const { controller, scope } = sideChatHarness.props.content.props
+    controller.setDraft(scope, 'chat-a', 'Explain A')
+    const pending = controller.send(scope, sessions[0])
+    controller.setDraft(scope, 'chat-a', 'Next A draft')
+    act(() => useAppStore.setState({ switchingProfileId: other.id }))
+    act(() => useAppStore.setState({ activeProfileId: other.id, profileGeneration: 5, switchingProfileId: null }))
+    const otherScope = sideChatHarness.props.content.props.scope
+    expect(controller.snapshot(otherScope, 'chat-a').exchanges).toEqual([])
+    controller.setDraft(otherScope, 'chat-a', 'B draft')
+    answer({ request_id: ask.mock.calls[0][2].request_id, session_id: 'chat-a', backend: 'codex', answer: 'A completed while away' })
+    await act(async () => { await pending })
+    expect(controller.snapshot(otherScope, 'chat-a')).toMatchObject({ draft: 'B draft', exchanges: [] })
+    act(() => useAppStore.setState({ activeProfileId: profile.id, profileGeneration: 6 }))
+    const returned = sideChatHarness.props.content.props.scope
+    expect(controller.snapshot(returned, 'chat-a')).toMatchObject({ draft: 'Next A draft', pending: null,
+      sideChatId: ask.mock.calls[0][2].side_chat_id,
+      exchanges: [expect.objectContaining({ answer: 'A completed while away' })] })
+    expect(cancel).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
   })
 
   it('wraps every selected chat in its cwd-scoped workspace editor while keeping chat visible', () => {

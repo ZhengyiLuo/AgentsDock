@@ -20,6 +20,28 @@ function clientFixture() {
 }
 
 describe('SideQuestionRequests isolation', () => {
+  it('cancels a still-pending request after returning with a new generation, without touching another server', async () => {
+    const requests = new SideQuestionRequests()
+    const first = clientFixture(), second = clientFixture()
+    const owner = { ...scope, serverIdentity: 'server-a' }
+    const other = { ...scope, profileId: 'profile-b', serverIdentity: 'server-b', profileGeneration: 8 }
+    const native = { ...input, side_chat_id: 'side-a' }
+    const pending = requests.ask(owner, 'chat-a', native, async () => first.typedClient, () => true)
+    const otherPending = requests.ask(other, 'chat-a', native, async () => second.typedClient, () => true)
+    const cancelled = expect(pending).rejects.toThrow('side_question_cancelled')
+    await Promise.resolve()
+    await requests.cancel({ ...owner, profileGeneration: 9 }, 'chat-a', input.request_id)
+    expect(first.client.cancelSideQuestion).toHaveBeenCalledOnce()
+    expect(second.client.cancelSideQuestion).not.toHaveBeenCalled()
+    first.response.resolve(answer)
+    second.response.resolve(answer)
+    await cancelled
+    await expect(otherPending).resolves.toEqual(answer)
+    requests.cancelProfile(owner.profileId)
+    await vi.waitFor(() => expect(first.client.closeSideChat).toHaveBeenCalledOnce())
+    expect(second.client.closeSideChat).not.toHaveBeenCalled()
+    await requests.close(other, 'chat-a', native.side_chat_id)
+  })
   it('does not dispatch a duplicate pending native request', async () => {
     const requests = new SideQuestionRequests()
     const { response, client, typedClient } = clientFixture()

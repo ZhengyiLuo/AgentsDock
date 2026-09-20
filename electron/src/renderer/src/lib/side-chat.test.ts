@@ -11,6 +11,33 @@ beforeEach(() => useAppStore.setState({ activeProfileId: 'a', profileGeneration:
   health: { ok: true, capabilities: { side_questions: capability } } }))
 
 describe('SideChatController', () => {
+  it('discards only removed or rebound profile state and rejects its late reply', async () => {
+    const response = deferred()
+    const ask = vi.fn().mockReturnValue(response.promise)
+    const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' })
+    const close = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: { ask, cancel, close } } })
+    const owner = { ...scope, serverIdentity: 'identity-a' }
+    const other = { profileId: 'b', profileGeneration: 8, serverIdentity: 'identity-b' }
+    const profile = { id: 'a', name: 'A', serverUrl: 'http://localhost:7850', serverIdentity: 'identity-a', hasAccessToken: true,
+      serverSetupComplete: true, connectionState: 'online' as const, cachedUnreadCount: 0 }
+    const otherProfile = { ...profile, id: 'b', serverIdentity: 'identity-b' }
+    useAppStore.setState({ profiles: [profile, otherProfile] })
+    const controller = new SideChatController()
+    controller.setDraft(owner, session.id, 'Old owner question')
+    controller.setDraft(other, session.id, 'Keep B draft')
+    const pending = controller.send(owner, session)
+    const sent = ask.mock.calls[0][2]
+    controller.reconcileProfiles([{ ...profile, serverIdentity: 'replacement-a' }, otherProfile])
+    response.resolve({ request_id: sent.request_id, session_id: session.id, backend: 'codex', answer: 'Retired reply' })
+    await pending
+    expect(controller.snapshot(owner, session.id)).toMatchObject({ draft: '', exchanges: [], pending: null })
+    expect(controller.snapshot(other, session.id).draft).toBe('Keep B draft')
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(owner, session.id, sent.request_id)
+    expect(close).toHaveBeenCalledExactlyOnceWith(owner, session.id, sent.side_chat_id)
+    controller.reconcileProfiles([profile])
+    expect(controller.snapshot(other, session.id).draft).toBe('')
+  })
   it('keeps only whole recent pairs and discloses dropped history', () => {
     const exchanges: SideChatExchange[] = Array.from({ length: 20 }, (_, index) => ({ id: String(index), question: `q${index}`, answer: `a${index}`, state: 'answered' }))
     const result = sideChatHistory(exchanges)
@@ -21,7 +48,7 @@ describe('SideChatController', () => {
     expect(sideChatHistory([{ id: '1', question: 'x', state: 'cancelled' }]).history).toEqual([])
   })
 
-  it('retires a failed profile switch without resurrecting a pending answer', async () => {
+  it('explicit reset retires pending work without resurrecting a late answer', async () => {
     const response = deferred()
     const ask = vi.fn().mockReturnValue(response.promise)
     const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' })
@@ -105,7 +132,7 @@ describe('SideChatController', () => {
     expect(controller.snapshot(scope, session.id).exchanges[0].answer).toBeUndefined()
   })
 
-  it('isolates native identity and reset cleanup by both profile generation and parent session', () => {
+  it('keeps unverified profile generations and parent sessions separate during reset cleanup', () => {
     const close = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'agentsDock', { configurable: true, value: { sideQuestions: { close } } })
     const controller = new SideChatController()

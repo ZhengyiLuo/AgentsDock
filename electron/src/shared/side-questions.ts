@@ -18,6 +18,12 @@ export interface SideQuestionsCapability {
 export interface SideQuestionScope {
   profileId: string
   profileGeneration: number
+  serverIdentity?: string | null
+}
+
+/** Connection generations authorize new work; a verified server owns its conversation across visits. */
+export function sideQuestionOwnerKey(scope: SideQuestionScope): string {
+  return JSON.stringify([scope.profileId, scope.serverIdentity || scope.profileGeneration])
 }
 
 export interface SideQuestionInput {

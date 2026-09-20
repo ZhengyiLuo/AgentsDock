@@ -397,9 +397,15 @@ describe('chat forking', () => {
     }
   })
 
-  it('translates a raced server conflict instead of exposing the raw IPC error', async () => {
+  it.each([
+    ['wait for or stop the active turn before forking this chat', RUNNING_FORK_UNAVAILABLE],
+    [
+      'The native completed-turn fork could not be verified. The running chat was left unchanged.',
+      'The native completed-turn fork could not be verified. The running chat was left unchanged.'
+    ]
+  ])('shows a readable fork failure for %s', async (detail, expectedMessage) => {
     const fork = vi.fn().mockRejectedValue(new Error(
-      "Error invoking remote method 'sessions:fork': Error: wait for or stop the active turn before forking this chat"
+      `Error invoking remote method 'sessions:fork': Error: ${detail}`
     ))
     Object.defineProperty(window, 'agentsDock', {
       configurable: true,
@@ -414,7 +420,7 @@ describe('chat forking', () => {
     await useAppStore.getState().forkSession('chat-1')
 
     expect(fork).toHaveBeenCalledWith('chat-1')
-    expect(useAppStore.getState().error).toBe(RUNNING_FORK_UNAVAILABLE)
+    expect(useAppStore.getState().error).toBe(expectedMessage)
   })
 })
 

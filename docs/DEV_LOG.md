@@ -1,5 +1,27 @@
 # Public development log
 
+## 2026-09-19 — Preserve side chats across servers — beta candidate
+
+- Keep side-chat state and its native conversation owned by the saved server
+  identity and chat, across connection generations. Preserve drafts, replies,
+  pending work and follow-up context when switching away and back. Retain
+  dispatch checks and explicit cancellation, removal and shutdown cleanup.
+- Reproduce lost history/drafts and a switch-triggered close request in native
+  offscreen Electron. Exercise the production panel/controller/lifecycle,
+  preload, AppService switching, isolated settings/cache and native HTTP to two
+  controlled servers with matching chat IDs. Verify background completion,
+  follow-up continuity, server separation and cancellation after returning.
+  Inspect dark and narrow/light views. The picker and store hydration are
+  outside this focused fixture; provider responses are explicitly controlled.
+- Remove Electron's internal fork-error prefix. Exercise the production chat
+  menu through HTTP and native Codex: reproduce a valid symlink-workspace fork
+  rejection, then verify repeated forks and a child continuation with the
+  corrected standalone server while the parent continues running.
+- Pass 111 focused side-chat checks, four fork-error checks, TypeScript and
+  production compilation with output verification. The side-chat navigation
+  fix needs no server contract change; the fork workspace correction is in
+  AgentsServer 1.0.4-beta.5. Include authored notes for both releases.
+
 ## 2026-09-19 — Inter-chat chronology — 1.0.4-beta.4
 
 - Accept desktop **1.0.4-beta.4 / 1176** from
