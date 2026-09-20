@@ -37,6 +37,8 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(self.store.status()["configured"])
         self.store.save(SELECTION)
         self.assertEqual(self.store.selection(include_key=True), SELECTION)
+        self.assertEqual(self.store.status()["credential_id"], self.store.revision())
+        self.assertEqual(self.store.catalog(available=True)["credential_id"], self.store.revision())
         self.assertNotIn(KEY, json.dumps(self.store.status()))
         self.assertNotIn(KEY, (self.store.root / "settings.json").read_text())
         for path in self.store.root.iterdir():
@@ -61,6 +63,28 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.store.require_thread("custom-thread/../../not-a-path", None)
         self.store.require_thread("old-default-thread", None)
+
+    def test_model_capability_evidence_survives_refresh_without_crossing_credentials(self):
+        self.store.save(SELECTION)
+        listed = {"models": [{"value": "test/model", "label": "test/model"}, {"value": "other/model", "label": "other/model"}],
+            "model_capabilities": {"test/model": {"kind": "chat", "reasoning_efforts": ["low", "high"]}}}
+        self.store.cache_catalog(SELECTION, listed)
+        self.store.cache_model_capability(SELECTION, {"compatibility": "verified", "api_key": KEY})
+        self.store.cache_catalog(SELECTION, listed)
+        catalog = self.store.cached_catalog(SELECTION)
+        self.assertEqual(catalog["model_capabilities"]["test/model"], {"kind": "chat", "compatibility": "verified",
+            "reasoning_efforts": ["low", "high"], "reasoning_supported": True})
+        self.assertEqual(catalog["model_capabilities"]["other/model"]["compatibility"], "unverified")
+        self.assertEqual(catalog["model_efforts"]["other/model"], [])
+        self.assertEqual((catalog["efforts"], catalog["default_effort"]), ([], ""))
+        self.assertNotIn(KEY, json.dumps(self.store._model_capabilities))
+        revision = self.store.revision()
+        self.store.save({**SELECTION, "api_key": "new-synthetic"})
+        self.assertEqual(self.store.cached_catalog()["model_capabilities"]["test/model"]["compatibility"], "unverified")
+        self.assertEqual(self.store.catalog(available=True, session={"codex_provider": "custom", "codex_provider_revision": revision})["model_capabilities"]["test/model"]["compatibility"], "verified")
+        other_endpoint = {**SELECTION, "base_url": "https://other.example.invalid/v1"}
+        self.store.cache_catalog(other_endpoint, listed)
+        self.assertEqual(self.store.cached_catalog(other_endpoint)["model_capabilities"]["test/model"]["compatibility"], "unverified")
 
     def test_legacy_binding_migrates_without_key_reentry_and_survives_reset(self):
         self.store.save(SELECTION)
@@ -287,6 +311,29 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertNotIn(KEY, response.text)
 
+    def test_saved_model_check_uses_pinned_chat_key_and_caches_only_that_model(self):
+        self.store.save(SELECTION)
+        revision = self.store.revision()
+        self.ns["STORE"].sessions["chat"] = {"codex_provider": "custom", "codex_provider_revision": revision}
+        self.store.save({**SELECTION, "api_key": "new-synthetic-key"})
+        received = []
+        async def probe(selected):
+            received.append(dict(selected))
+            return {**provider.test_result("ready"), "compatibility": "verified", "model": selected["model"]}
+        self.probe.side_effect = probe
+        response = self.client.post("/api/admin/codex/provider/test", headers=NATIVE,
+            json={"model": "checked/model", "session_id": "chat", "credential_id": revision})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((received[0]["api_key"], received[0]["model"]), (KEY, "checked/model"))
+        self.assertNotIn(KEY, response.text)
+        cached = self.store.cached_catalog(received[0])["model_capabilities"]
+        self.assertEqual(cached["checked/model"]["compatibility"], "verified")
+        self.assertNotIn("checked/model", self.store.cached_catalog()["model_capabilities"])
+        response = self.client.post("/api/admin/codex/provider/test", headers=NATIVE,
+            json={"model": "checked/model", "credential_id": revision})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(len(received), 1)
+
     async def test_cancelled_save_keeps_admission_until_disk_commit_finishes(self):
         entered, release = threading.Event(), threading.Event()
         save = self.store.save
@@ -322,14 +369,24 @@ class DiscoveryTests(unittest.TestCase):
                 self.send_response(self.status)
                 self.send_header("Location", "/must-not-follow")
                 self.end_headers()
-                self.wfile.write(json.dumps({"data": [{"id": "model/one"}, {"id": "model/two"}, {"id": "model/one"}, {"id": "invalid model"}]}).encode())
+                self.wfile.write(json.dumps({"data": [
+                    {"id": "model/one"}, {"id": "model/two", "type": "chat", "reasoning_efforts": ["low", "high", "not-a-native-effort"]},
+                    {"id": "model/one"}, {"id": "invalid model"}, {"id": "text-embedding-3-small"}, {"id": "whisper-1"},
+                    {"id": "provider/new-name", "task": "reranking"}, {"id": "provider/art", "architecture": {"output_modalities": ["image"]}},
+                    {"id": "model/three", "reasoning_supported": False, "reasoning_efforts": ["high"]},
+                    {"id": "chat-with-embedding-tools", "output_modalities": ["text", "image"]}
+                ]}).encode())
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             selected = {"base_url": f"http://127.0.0.1:{server.server_port}/v1", "api_key": KEY}
             ready = provider.discover_models(selected)
-            self.assertEqual([model["value"] for model in ready["models"]], ["model/one", "model/two"])
+            self.assertEqual([model["value"] for model in ready["models"]], ["model/one", "model/two", "model/three", "chat-with-embedding-tools"])
+            self.assertEqual(ready["model_capabilities"]["model/one"], {"kind": "unknown", "compatibility": "unverified", "reasoning_efforts": [], "reasoning_supported": None})
+            self.assertEqual(ready["model_efforts"], {"model/one": [], "model/two": [{"value": "low", "label": "Low"}, {"value": "high", "label": "High"}], "model/three": [], "chat-with-embedding-tools": []})
+            self.assertFalse(ready["model_capabilities"]["model/three"]["reasoning_supported"])
+            self.assertEqual((ready["efforts"], ready["default_effort"]), ([], ""))
             self.assertTrue(ready["ok"])
             Handler.status = 401
             self.assertEqual(provider.discover_models(selected)["status"], "authentication_failed")
@@ -438,15 +495,30 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(seen)
         self.assertEqual(client.stderr_tail, [])
 
-    async def test_probe_ephemeral_no_tool_flags_and_cleanup(self):
-        turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[
-            {"method": "item/completed", "params": {"item": {"type": "agentMessage", "text": "CONNECTION_OK"}}},
-            {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}]), close=AsyncMock())
+    async def test_probe_native_tool_roundtrip_followup_and_isolated_cleanup(self):
         config = {**provider.native_config(SELECTION), "cli_auth_credentials_store": "ephemeral", "mcp_servers": {"inherited": {}}}
         native = SimpleNamespace(client=SimpleNamespace(), start=AsyncMock(), request=AsyncMock(return_value={"config": config}),
             start_thread=AsyncMock(return_value="ephemeral"), read_thread=AsyncMock(return_value={"ephemeral": True, "path": None}),
-            start_turn=AsyncMock(return_value=turn), close=AsyncMock())
-        captured = {}
+            close=AsyncMock())
+        captured, turns = {}, []
+        token = ""
+        async def start_turn(thread, inputs, *, overrides):
+            nonlocal token
+            self.assertEqual((thread, overrides), ("ephemeral", {**provider.turn_overrides(SELECTION["model"]), "environments": []}))
+            if not turns:
+                reply = await captured["server_request_handler"](1, "item/tool/call", {
+                    "threadId": thread, "tool": provider.TEST_TOOL, "arguments": {}})
+                self.assertTrue(reply["success"])
+                token = reply["contentItems"][0]["text"]
+            else:
+                self.assertNotIn(token, str(inputs), "Follow-up must recover the previous result from native context")
+            turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[
+                {"method": "turn/plan/updated", "params": {"plan": [{"step": "Compatibility check", "status": "completed"}]}},
+                {"method": "item/completed", "params": {"item": {"type": "agentMessage", "text": token}}},
+                {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}]), close=AsyncMock())
+            turns.append(turn)
+            return turn
+        native.start_turn = AsyncMock(side_effect=start_turn)
         def factory(*args, **kwargs):
             captured.update(kwargs)
             captured["environment"] = kwargs["env_factory"]().copy()
@@ -456,6 +528,11 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             environment={"OPENAI_API_KEY": "old", "HOME": "/synthetic-home", "CODEX_HOME": "/synthetic-existing-codex"},
             manager_factory=factory, verify_protocol=verify)
         self.assertTrue(result["ok"])
+        self.assertEqual(result["compatibility"], "verified")
+        self.assertTrue(all(result["checks"].values()))
+        self.assertEqual(len(turns), 2)
+        for turn in turns:
+            turn.close.assert_awaited_once()
         verify.assert_awaited_once()
         self.assertNotIn(KEY, str(captured["app_server_args"]))
         self.assertEqual(captured["environment"][provider.ENV_KEY], KEY)
@@ -464,13 +541,27 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             ("/synthetic-home", captured["cwd"]))
         params = native.start_thread.call_args.args[0]
         self.assertEqual(params["environments"], [])
-        self.assertEqual(params["dynamicTools"], [])
+        self.assertEqual(params["dynamicTools"][0]["name"], provider.TEST_TOOL)
+        self.assertTrue(params["config"]["tools.update_plan.enabled"])
         self.assertEqual(params["config"]["mcp_servers"], {"inherited": {"enabled": False}})
         self.assertEqual(params["approvalPolicy"], "never")
-        self.assertEqual(native.start_turn.call_args.kwargs["overrides"], {"environments": []})
         self.assertFalse(Path(captured["cwd"]).exists())
         native.close.assert_awaited_once()
         self.assertEqual(captured["env_factory"](), {})
+
+    async def test_text_only_reply_does_not_claim_tool_compatibility(self):
+        turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[
+            {"method": "item/completed", "params": {"item": {"type": "agentMessage", "text": "CONNECTION_OK"}}},
+            {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}]), close=AsyncMock())
+        config = {**provider.native_config(SELECTION), "cli_auth_credentials_store": "ephemeral"}
+        native = SimpleNamespace(client=SimpleNamespace(), start=AsyncMock(), request=AsyncMock(return_value={"config": config}),
+            start_thread=AsyncMock(return_value="ephemeral"), read_thread=AsyncMock(return_value={"ephemeral": True, "path": None}),
+            start_turn=AsyncMock(return_value=turn), close=AsyncMock())
+        result = await provider.test_connection(SELECTION, executable="unused", environment={},
+            manager_factory=lambda *args, **kwargs: native, verify_protocol=AsyncMock())
+        self.assertEqual((result["ok"], result["compatibility"], result["status"]), (False, "unverified", "inconclusive"))
+        native.start_turn.assert_awaited_once()
+        native.close.assert_awaited_once()
 
     async def test_protocol_or_native_errors_are_safe_and_never_retry(self):
         verify = AsyncMock(side_effect=RuntimeError(KEY))
@@ -485,6 +576,8 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             (True, "Connection failed: error sending request " + KEY, "connection_failed"),
             (False, "Upstream returned 401 Unauthorized " + KEY, "authentication_failed"),
             (True, "Unknown failure " + KEY, "failed"),
+            (False, "Unsupported parameter: reasoning.effort " + KEY, "unsupported_parameter"),
+            (False, {"message": "Invalid value: custom. Supported values: function", "param": "tools[0].type", "private": KEY}, "unsupported_parameter"),
         ]
         for will_retry, details, expected in cases:
             with self.subTest(will_retry=will_retry, expected=expected):
@@ -500,7 +593,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                     start_turn=AsyncMock(return_value=turn), close=AsyncMock())
                 result = await asyncio.wait_for(provider.test_connection(SELECTION, executable="unused", environment={},
                     manager_factory=lambda *args, **kwargs: native, verify_protocol=AsyncMock()), 1)
-                self.assertEqual(result, provider.test_result(expected))
+                self.assertEqual(result["status"], expected)
                 self.assertNotIn(KEY, str(result))
                 turn.next_notification.assert_awaited_once()
                 turn.close.assert_awaited_once()

@@ -1,5 +1,43 @@
 # Development and release log
 
+## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7 candidate
+
+- Add explicit saved-model checks using the endpoint's retained credential
+  revision. Exercise isolated native tool calls, a dynamic tool-result token
+  and continuation in the same thread; distinguish unsupported models from
+  inconclusive, authentication and transport failures.
+- Keep discovery separate from compatibility proof. Filter affirmative
+  non-chat models, preserve unfamiliar model IDs and cache capability evidence
+  per endpoint, key and model without exposing credentials.
+- Remove universal custom-model effort defaults. Use advertised per-model
+  efforts, clear stale persisted settings when changing models, and replace
+  native turn settings to avoid inheriting ordinary account effort. Disable
+  custom reasoning summaries while preserving ordinary Codex behavior.
+- Pass 72 focused provider and side-chat checks. Capture eight native Codex
+  requests against a controlled loopback Responses endpoint using the
+  production override helper: known and unknown models clear inherited and
+  earlier explicit effort, retain thread instructions, and leave a separate
+  control thread's effort unchanged. The native request still contains an
+  empty reasoning object; this does not prove compatibility with every gateway.
+- Complete one isolated check against the user's saved endpoint and selected
+  model through native Codex: the native plan tool, dynamic tool-result token,
+  and same-thread continuation all pass. Before/after hashes confirm unchanged
+  normal account authentication, native configuration, and saved provider
+  settings and credentials. Existing sessions and provider processes remain
+  untouched.
+- Verify the same three-request flow against a controlled Responses endpoint.
+  An explicit unsupported-parameter response fails after one request, reports
+  the fixed compatibility error, and never reflects the synthetic credential.
+  These checks establish basic isolated compatibility, not every production
+  workspace tool, integration, or reasoning setting.
+- Final candidate acceptance, signed packaging, publication and managed
+  deployment remain pending. No released build is claimed by this entry.
+- Exercise the production chat runner in isolated state: custom unknown-model
+  turns clear effort and summaries and surface an empty response once without
+  rollover, while ordinary Codex retains its existing recovery behavior.
+  Native capture confirms the turn override removes inherited detailed
+  summaries as well as effort; normal sibling settings stay unchanged.
+
 ## 2026-09-19 — Scheduled history catch-up — 1.0.4-beta.6
 
 - Capture the initial WebSocket replay boundary under the same delivery lock

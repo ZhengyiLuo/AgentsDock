@@ -164,6 +164,11 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         params = self.client.fork_thread.await_args.args[1]
         self.assertEqual(params["modelProvider"], PROVIDER_ID)
         self.assertFalse(params["config"]["model_providers"][PROVIDER_ID]["requires_openai_auth"])
+        self.assertEqual(params["config"]["model_reasoning_summary"], "none")
+        overrides = self.client.start_turn.await_args.kwargs["overrides"]
+        self.assertEqual(overrides["environments"], [])
+        self.assertNotIn("effort", overrides)
+        self.assertIsNone(overrides["collaborationMode"]["settings"]["reasoning_effort"])
         await chat.close()
 
     async def test_followups_reuse_provider_history_until_explicit_close(self):

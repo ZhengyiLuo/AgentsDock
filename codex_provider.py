@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from codex_auth import validate_api_key
-from codex_app_server import CodexAppServerManager
+from codex_app_server import CodexAppServerManager, decline_server_request
 from codex_side_question import isolated_config, _verify_protocol
 from side_questions import isolated_environment
 
@@ -29,10 +29,78 @@ PROVIDER_ID = "agentsdock_custom"
 ENV_KEY = "AGENTSDOCK_CODEX_PROVIDER_API_KEY"
 MAX_BODY_BYTES = 16 * 1024
 TEST_TIMEOUT_SECONDS = 45
-TEST_PROMPT = "Reply with exactly CONNECTION_OK. Do not use tools."
+TEST_TOOL = "agentsdock_compatibility_ping"
+TEST_INSTRUCTIONS = (
+    "You are checking basic Codex compatibility. Follow only the current check prompt. "
+    "The only permitted tools are update_plan and agentsdock_compatibility_ping. "
+    "Do not access files, execute commands, browse, or use integrations."
+)
+TEST_PROMPT = (
+    "Perform this basic compatibility check only. First call update_plan with one "
+    "completed step named Compatibility check. Then call agentsdock_compatibility_ping "
+    "exactly once with an empty object. Reply with exactly the token returned by that "
+    "tool, without formatting. Do not use any other tools."
+)
 EFFORT_OPTIONS = [{"value": value, "label": label} for value, label in (
     ("none", "None"), ("minimal", "Minimal"), ("low", "Low"), ("medium", "Medium"),
     ("high", "High"), ("xhigh", "Extra high"), ("max", "Max"), ("ultra", "Ultra"))]
+
+
+def model_capability(value: dict | None = None) -> dict:
+    """Bound public capability metadata without inferring endpoint support."""
+    value = value or {}
+    supported = value.get("reasoning_supported")
+    supported = supported if isinstance(supported, bool) else None
+    efforts = value.get("reasoning_efforts")
+    allowed = {option["value"] for option in EFFORT_OPTIONS}
+    efforts = list(dict.fromkeys(effort for effort in efforts if isinstance(effort, str) and effort in allowed)) if isinstance(efforts, list) else []
+    if supported is False:
+        efforts = []
+    return {"kind": "chat" if value.get("kind") == "chat" else "unknown",
+        "compatibility": value.get("compatibility") if value.get("compatibility") in {"verified", "unsupported"} else "unverified",
+        "reasoning_efforts": efforts, "reasoning_supported": True if efforts else supported}
+
+
+def runtime_effort(selected: dict, catalog: dict, requested: object) -> str:
+    """Never inherit normal-account defaults or invent endpoint capabilities."""
+    capability = model_capability(catalog.get("model_capabilities", {}).get(selected.get("model")))
+    return requested if isinstance(requested, str) and requested in capability["reasoning_efforts"] else ""
+
+
+def turn_overrides(model: str, effort: str = "") -> dict:
+    # Null turn.effort means inherit. Replacing the native collaboration settings
+    # explicitly clears both a configured effort and an earlier turn's effort.
+    # Native default mode preserves the thread's base/developer instructions.
+    return {"model": model, "summary": "none", "collaborationMode": {"mode": "default", "settings": {
+        "model": model, "reasoning_effort": effort or None, "developer_instructions": None}},
+        **({"effort": effort} if effort else {})}
+
+
+def discovered_model_capability(entry: dict, model: str) -> dict | None:
+    """Exclude affirmative non-chat evidence; unfamiliar IDs remain usable."""
+    non_chat = {"embedding", "embeddings", "rerank", "reranking", "moderation", "image-generation",
+        "text-to-image", "image", "text-to-speech", "speech-to-text", "transcription", "tts", "video-generation"}
+    chat = {"chat", "chat-completion", "chat-completions", "text-generation", "responses", "conversation", "llm"}
+    declared = {str(entry.get(key) or "").lower().replace("_", "-") for key in ("type", "task", "kind")}
+    if declared & non_chat and not declared & chat:
+        return None
+    name = model.lower().rsplit("/", 1)[-1]
+    if not declared & chat and re.match(r"^(?:text-embedding(?:-|$)|(?:omni-|text-)?moderation(?:-|$)|dall-e(?:-|$)|gpt-image(?:-|$)|whisper(?:-|$)|tts(?:-|$)|(?:text-)?rerank(?:-|$)|sora(?:-|$))", name):
+        return None
+    capabilities = entry.get("capabilities") if isinstance(entry.get("capabilities"), dict) else {}
+    architecture = entry.get("architecture") if isinstance(entry.get("architecture"), dict) else {}
+    outputs = entry.get("output_modalities", architecture.get("output_modalities"))
+    if not declared & chat and isinstance(outputs, list) and outputs and all(
+        isinstance(output, str) and output in {"image", "audio", "video", "embedding", "embeddings"}
+        for output in outputs
+    ):
+        return None
+    reasoning = entry.get("reasoning") if isinstance(entry.get("reasoning"), dict) else {}
+    supported = entry.get("reasoning_supported", entry.get("supports_reasoning", capabilities.get("reasoning", reasoning.get("supported"))))
+    efforts = entry.get("supported_reasoning_efforts", entry.get("reasoning_efforts",
+        capabilities.get("reasoning_efforts", reasoning.get("efforts", []))))
+    return model_capability({"kind": "chat" if declared & chat else "unknown",
+        "reasoning_supported": supported, "reasoning_efforts": efforts})
 
 
 def validate_model(value: object) -> str:
@@ -97,6 +165,7 @@ class ProviderStore:
         self.root = root
         self.lock = threading.RLock()
         self._catalogs: dict[str, dict] = {}
+        self._model_capabilities: dict[str, dict[str, dict]] = {}
         self._public_selections: dict[str, dict] = {}
         self._revision_catalog_keys: dict[str, str] = {}
 
@@ -190,10 +259,11 @@ class ProviderStore:
                 raise HTTPException(503, "Saved provider settings or credentials are unavailable.") from None
 
     def status(self, *, available=True) -> dict:
-        selected = self.selection()
+        selected = self.selection(include_revision=True)
         return {"available": available, "configured": selected is not None,
             "base_url": selected["base_url"] if selected else None,
             "model": selected.get("model") if selected else None,
+            "credential_id": selected.get("credential_id") if selected else None,
             "has_api_key": selected is not None, "wire_api": "responses"}
 
     def for_session(self, session: dict, *, include_key=False) -> dict | None:
@@ -229,11 +299,13 @@ class ProviderStore:
         result = {"configured": selected is not None, "available": available and selected is not None,
             "model": selected.get("model") if selected else None,
             "base_url": selected["base_url"] if selected else None,
-            **(self.cached_catalog(selected) if selected else {"models": [], "efforts": EFFORT_OPTIONS,
-                "model_efforts": {}, "default_model": "", "default_effort": "high"})}
+            "credential_id": selected.get("credential_id") if selected else None,
+            **(self.cached_catalog(selected) if selected else {"models": [], "efforts": [],
+                "model_efforts": {}, "model_capabilities": {}, "default_model": "", "default_effort": ""})}
         if summary:
             result.pop("models", None)
             result.pop("model_efforts", None)
+            result.pop("model_capabilities", None)
         return result
 
     def cached_catalog(self, selected: dict | None = None) -> dict:
@@ -245,14 +317,34 @@ class ProviderStore:
                 selected = self.selection(include_key=True, revision=selected.get("credential_id"))
             key = (catalog_key(selected) if "api_key" in selected else self._revision_catalog_keys.get(identifier)) if selected else None
             cached = self._catalogs.get(key, {})
-            return {"models": cached.get("models", []), "efforts": EFFORT_OPTIONS,
-                "model_efforts": cached.get("model_efforts", {}),
+            capabilities = {model["value"]: model_capability(cached.get("model_capabilities", {}).get(model["value"]))
+                for model in cached.get("models", [])}
+            for model, evidence in self._model_capabilities.get(key, {}).items():
+                capabilities[model] = model_capability({**capabilities.get(model, {}), **evidence})
+            if selected and selected.get("model"):
+                capabilities.setdefault(selected["model"], model_capability())
+            return {"models": cached.get("models", []), "efforts": [],
+                "model_efforts": {model: [option for option in EFFORT_OPTIONS if option["value"] in capability["reasoning_efforts"]]
+                    for model, capability in capabilities.items()},
+                "model_capabilities": capabilities,
                 "default_model": cached.get("default_model") or (selected or {}).get("model") or "",
-                "default_effort": "high"}
+                "default_effort": ""}
 
     def cache_catalog(self, selected: dict, catalog: dict):
         with self.lock:
-            self._catalogs[catalog_key(selected)] = catalog
+            models = catalog.get("models", [])
+            self._catalogs[catalog_key(selected)] = {"models": models,
+                "model_capabilities": {model["value"]: model_capability(catalog.get("model_capabilities", {}).get(model["value"])) for model in models},
+                "default_model": catalog.get("default_model", "")}
+
+    def cache_model_capability(self, selected: dict, capability: dict):
+        """Retain only probe evidence for this exact endpoint/key/model tuple."""
+        model = validate_model(selected.get("model"))
+        with self.lock:
+            records = self._model_capabilities.setdefault(catalog_key(selected), {})
+            previous = records.get(model, {})
+            cleaned = model_capability({**previous, **capability})
+            records[model] = {name: cleaned[name] for name in cleaned if name in previous or name in capability}
 
     def revision(self):
         with self.lock:
@@ -338,6 +430,7 @@ class ProviderStore:
 
 def native_config(selected: dict) -> dict:
     return {"model_provider": PROVIDER_ID, **({"model": selected["model"]} if selected.get("model") else {}),
+        "model_reasoning_summary": "none",
         "model_providers": {PROVIDER_ID: {"name": "AgentsDock custom endpoint",
             "base_url": selected["base_url"], "env_key": ENV_KEY, "requires_openai_auth": False,
             "wire_api": "responses", "request_max_retries": 0, "stream_max_retries": 0,
@@ -410,6 +503,7 @@ def discover_models(selected: dict) -> dict:
         if not isinstance(entries, list):
             raise ValueError("invalid model list")
         models = []
+        capabilities = {}
         seen = set()
         for entry in entries[:2000]:
             if not isinstance(entry, dict):
@@ -418,15 +512,22 @@ def discover_models(selected: dict) -> dict:
                 value = validate_model(entry.get("id"))
             except HTTPException:
                 continue
+            capability = discovered_model_capability(entry, value)
+            if capability is None:
+                continue
             if value not in seen:
                 seen.add(value)
                 models.append({"value": value, "label": value})
+                capabilities[value] = capability
             if len(models) == 512:
                 break
         return {"ok": True, "status": "ready",
-            "message": "The endpoint accepted the key and returned its model list. Choose a model in the chat.",
-            "models": models, "efforts": EFFORT_OPTIONS, "model_efforts": {},
-            "default_model": models[0]["value"] if models else "", "default_effort": "high"}
+            "message": "The endpoint returned its model list. Model compatibility remains unverified until tested.",
+            "models": models, "efforts": [],
+            "model_efforts": {model: [option for option in EFFORT_OPTIONS if option["value"] in capability["reasoning_efforts"]]
+                for model, capability in capabilities.items()},
+            "model_capabilities": capabilities,
+            "default_model": models[0]["value"] if models else "", "default_effort": ""}
     except HTTPError as exc:
         if exc.code in (401, 403):
             return test_result("authentication_failed")
@@ -441,11 +542,13 @@ def discover_models(selected: dict) -> dict:
 
 
 def test_result(status: str) -> dict:
-    messages = {"ready": "The native Codex runtime completed a response using this endpoint and model.",
+    messages = {"ready": "Basic compatibility checked: native isolated tools and a follow-up response completed. Workspace tools, integrations and reasoning settings were not checked.",
         "unsupported": "The endpoint did not accept the Responses protocol required by Codex.",
+        "unsupported_parameter": "The endpoint rejected a parameter required by this native Codex request. Check this model's Responses compatibility and supported settings.",
         "authentication_failed": "The endpoint rejected the provider API key.",
         "model_unavailable": "The endpoint did not accept this model ID.",
         "connection_failed": "The connection test could not reach the endpoint or timed out.",
+        "inconclusive": "The model did not complete the isolated tool check and follow-up. Compatibility remains unverified.",
         "failed": "The native Codex connection test did not complete. Check the endpoint, model and provider access."}
     return {"ok": status == "ready", "status": status, "message": messages[status]}
 
@@ -459,6 +562,11 @@ def classify_failure(value) -> str:
         return "authentication_failed"
     if any(marker in text for marker in ("model_not_found", "model not found", "unknown model", "model does not exist")):
         return "model_unavailable"
+    if any(marker in text for marker in ("unsupported_parameter", "unsupported parameter", "unsupported_value", "unknown parameter", "unrecognized request argument", "unrecognized parameter")) or (
+        any(marker in text for marker in ("reasoning.effort", "reasoning effort", "reasoning_effort", "tool_choice", "tools[", "tools.", "tool type", "tool format", "custom tool", "freeform"))
+        and any(marker in text for marker in ("not supported", "unsupported", "invalid parameter", "invalid value", "unknown field"))
+    ):
+        return "unsupported_parameter"
     if any(marker in text for marker in ("405", "unsupported protocol", "/responses is not supported", "cannot post /v1/responses")):
         return "unsupported"
     if any(marker in text for marker in ("connection refused", "dns error", "failed to lookup address", "connection timed out", "request timed out", "connection failed:", "error sending request")):
@@ -470,8 +578,33 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
                           manager_factory=CodexAppServerManager, verify_protocol=_verify_protocol) -> dict:
     native = None
     opening = None
+    checks = {"native_tool_call": False, "tool_roundtrip": False, "continuation": False}
+    token = "COMPATIBILITY_" + uuid.uuid4().hex
+    ping_count = 0
+    unexpected_request = False
+    thread = None
+
+    def result(status):
+        compatibility = ("verified" if status == "ready" else "unsupported"
+            if status in {"unsupported", "unsupported_parameter", "model_unavailable"} else "unverified")
+        return {**test_result(status), "model": selected["model"], "compatibility": compatibility,
+            "scope": "isolated_native_tools_and_continuation", "checks": dict(checks)}
+
+    async def handle_request(request_id, method, params):
+        nonlocal ping_count, unexpected_request
+        if method == "item/tool/call":
+            if (params.get("threadId") == thread and params.get("tool") == TEST_TOOL
+                    and params.get("arguments") == {} and ping_count == 0):
+                ping_count += 1
+                return {"success": True, "contentItems": [{"type": "inputText", "text": token}]}
+            unexpected_request = True
+            return {"success": False, "contentItems": [{"type": "inputText", "text": "Only the compatibility ping is available."}]}
+        unexpected_request = True
+        return await decline_server_request(request_id, method, params)
+
     with tempfile.TemporaryDirectory(prefix="agentsdock-provider-test-") as temporary:
         config = {**isolated_config(), **native_config(selected), "cli_auth_credentials_store": "ephemeral",
+            "tools.update_plan.enabled": True, "developer_instructions": TEST_INSTRUCTIONS,
             "log_dir": str(Path(temporary) / "logs"), "sqlite_home": str(Path(temporary) / "db"),
             "history.persistence": "none", "check_for_update_on_startup": False,
             "analytics.enabled": False, "otel.exporter": "none", "otel.trace_exporter": "none"}
@@ -487,6 +620,7 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
                 await verify_protocol(executable, temporary, {name: value for name, value in env.items() if name != ENV_KEY})
                 native = manager_factory(executable, cwd=temporary, env_factory=lambda: env,
                     app_server_args=args, request_timeout=15, lifecycle_timeout=15,
+                    server_request_handler=handle_request,
                     sensitive_values=(selected["api_key"],))
                 # Env-carried credentials deserve the same diagnostic suppression
                 # as native account/login/start, including startup diagnostics.
@@ -498,40 +632,52 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
                 settings = effective.get("config", {})
                 provider = settings.get("model_providers", {}).get(PROVIDER_ID, {})
                 if settings.get("cli_auth_credentials_store") != "ephemeral" or settings.get("model_provider") != PROVIDER_ID or provider.get("requires_openai_auth") is not False or provider.get("env_key") != ENV_KEY or provider.get("base_url") != selected["base_url"]:
-                    return test_result("failed")
+                    return result("failed")
                 servers = settings.get("mcp_servers", {})
                 if not isinstance(servers, dict):
-                    return test_result("failed")
+                    return result("failed")
                 config["mcp_servers"] = {name: {"enabled": False} for name in servers}
                 thread = await native.start_thread({"ephemeral": True, "cwd": temporary, "model": selected["model"],
                     "modelProvider": PROVIDER_ID, "approvalPolicy": "never", "sandbox": "read-only",
-                    "baseInstructions": TEST_PROMPT, "developerInstructions": TEST_PROMPT,
-                    "config": config, "dynamicTools": [], "environments": []})
+                    "baseInstructions": TEST_INSTRUCTIONS, "developerInstructions": TEST_INSTRUCTIONS,
+                    "config": config, "dynamicTools": [{"name": TEST_TOOL,
+                        "description": "Harmless in-memory compatibility check. Returns a random token; performs no external action.",
+                        "inputSchema": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}}],
+                    "environments": []})
                 metadata = await native.read_thread(thread, include_turns=False)
                 if metadata.get("ephemeral") is not True or metadata.get("path") is not None:
-                    return test_result("failed")
-                turn = await native.start_turn(thread, [{"type": "text", "text": TEST_PROMPT}], overrides={"environments": []})
-                answered = False
-                try:
-                    while True:
-                        packet = await turn.next_notification()
-                        data = packet.get("params", {})
-                        if packet.get("method") == "error":
-                            # This scoped probe is one explicit attempt. Native
-                            # retry notices are not terminal for normal chats,
-                            # but must not silently retry a connection test.
-                            return test_result(classify_failure(data.get("error") or data.get("message")))
-                        if packet.get("method") == "item/completed" and data.get("item", {}).get("type") == "agentMessage":
-                            answered = bool(data["item"].get("text"))
-                        if packet.get("method") == "turn/completed":
-                            completed = data.get("turn", {})
-                            return test_result("ready" if answered and completed.get("status") == "completed" and not completed.get("error") else classify_failure(completed.get("error")))
-                finally:
-                    await turn.close()
+                    return result("failed")
+                for index, prompt in enumerate((TEST_PROMPT,
+                    "Repeat exactly the token returned by the compatibility ping in the preceding turn. Do not call any tools.")):
+                    turn = await native.start_turn(thread, [{"type": "text", "text": prompt}],
+                        overrides={**turn_overrides(selected["model"]), "environments": []})
+                    answer = ""
+                    try:
+                        while True:
+                            packet = await turn.next_notification()
+                            data = packet.get("params", {})
+                            if packet.get("method") == "error":
+                                # One explicit attempt; never silently retry a probe.
+                                return result(classify_failure(data.get("error") or data.get("message")))
+                            if packet.get("method") == "turn/plan/updated":
+                                checks["native_tool_call"] = True
+                            if packet.get("method") == "item/completed" and data.get("item", {}).get("type") == "agentMessage":
+                                answer = str(data["item"].get("text") or "").strip()
+                            if packet.get("method") == "turn/completed":
+                                completed = data.get("turn", {})
+                                if completed.get("status") != "completed" or completed.get("error"):
+                                    return result(classify_failure(completed.get("error")))
+                                if unexpected_request or ping_count != 1 or answer != token or not checks["native_tool_call"]:
+                                    return result("inconclusive")
+                                checks["tool_roundtrip" if index == 0 else "continuation"] = True
+                                break
+                    finally:
+                        await turn.close()
+                return result("ready")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return test_result(classify_failure(exc))
+            return result(classify_failure(exc))
         finally:
             async def cleanup():
                 if opening is not None:
@@ -557,14 +703,37 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
 def create_router(*, authorize, store: ProviderStore, mutate, probe, available, discover=discover_models, session_lookup=None) -> APIRouter:
     router = APIRouter()
 
-    async def body(request):
+    async def body(request, *, saved=False):
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
             if len(raw) > MAX_BODY_BYTES:
                 raise HTTPException(413, "Provider request is too large.")
         try:
-            return validate_selection(json.loads(raw))
+            parsed = json.loads(raw)
+            if saved and isinstance(parsed, dict) and "base_url" not in parsed and "api_key" not in parsed:
+                if set(parsed) - {"model", "session_id", "credential_id"}:
+                    raise HTTPException(400, "Provide a model and the saved endpoint identity.")
+                selected_model = validate_model(parsed.get("model"))
+                session_id, revision = parsed.get("session_id"), parsed.get("credential_id")
+                if session_id is not None and (not isinstance(session_id, str) or not 1 <= len(session_id) <= 256):
+                    raise HTTPException(400, "Provide a valid chat identity.")
+                if revision is not None and (not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{32}", revision)):
+                    raise HTTPException(400, "Provide a valid saved endpoint identity.")
+                if session_id is not None:
+                    session = session_lookup(session_id) if session_lookup else None
+                    if not session:
+                        raise HTTPException(404, "Chat not found.")
+                    selected = await asyncio.to_thread(store.for_session, session, include_key=True)
+                else:
+                    selected = await asyncio.to_thread(store.selection, include_key=True, include_revision=True)
+                if selected is None:
+                    raise HTTPException(409, "Save a custom endpoint before checking a model.")
+                if revision is not None and selected.get("credential_id") != revision:
+                    selected.clear()
+                    raise HTTPException(409, "The saved endpoint changed. Refresh before checking this model.")
+                return {**selected, "model": selected_model}
+            return validate_selection(parsed)
         except (ValueError, UnicodeError, RecursionError):
             raise HTTPException(400, "Provide a valid provider request.") from None
         finally:
@@ -579,6 +748,7 @@ def create_router(*, authorize, store: ProviderStore, mutate, probe, available, 
         result = await asyncio.to_thread(discover, selected)
         if result.get("ok") is True:
             store.cache_catalog(selected, result)
+            return {**result, **store.cached_catalog(selected)}
         return result
 
     @router.get("/api/admin/codex/provider")
@@ -589,9 +759,11 @@ def create_router(*, authorize, store: ProviderStore, mutate, probe, available, 
     @router.post("/api/admin/codex/provider/test")
     async def test(request: Request):
         access(request)
-        selected = await body(request)
+        selected = await body(request, saved=True)
         try:
             result = await probe(selected) if selected.get("model") else await catalog(selected)
+            if selected.get("model") and result.get("compatibility") in {"verified", "unsupported", "unverified"}:
+                store.cache_model_capability(selected, {"compatibility": result["compatibility"]})
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except HTTPException:
             raise

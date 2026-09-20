@@ -6022,6 +6022,61 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         await hub.unsubscribe("chat-native", failed)  # type: ignore[arg-type]
 
+    async def test_custom_unknown_model_clears_stale_effort_and_empty_completion_does_not_roll_over(self) -> None:
+        store = agent_server.codex_provider.ProviderStore(
+            Path(self.authority_temporary.name) / "provider",
+        )
+        store.save({
+            "base_url": "https://provider.example.invalid/v1",
+            "api_key": "runner-synthetic-only-key",
+        })
+        self.session.update({
+            "codex_provider": "custom",
+            "codex_provider_revision": store.revision(),
+            "model": "gateway/unknown-model",
+            "effort": "high",
+        })
+        store.record_thread("thread-native", store.selection(include_revision=True))
+        turn = FakeTurn([completed_notification()])
+        manager = FakeManager(turn)
+        rollover = AsyncMock()
+        stack, events, finished, exec_fallback = self.runner_patches(manager)
+        with stack, patch.object(
+            agent_server, "CODEX_PROVIDER_STORE", store,
+        ), patch.object(
+            agent_server, "rollover_codex_provider_session", rollover,
+        ):
+            await agent_server.run_codex_app_server(
+                "chat-native", "run-original", "Reply to this request",
+                dict(self.session),
+                Path(self.authority_temporary.name) / "manifest.json",
+                allow_exec_fallback=True,
+                allow_resume_rollover=True,
+                provider_runtime_env={"AGENTSDOCK_PROVIDER_AUTHORITY_ACTIONS": "publish"},
+            )
+
+        self.assertEqual(len(manager.turn_calls), 1)
+        overrides = manager.turn_calls[0][2]
+        self.assertEqual(overrides["model"], "gateway/unknown-model")
+        self.assertEqual(overrides["summary"], "none")
+        self.assertNotIn("effort", overrides)
+        self.assertEqual(overrides["collaborationMode"], {
+            "mode": "default", "settings": {
+                "model": "gateway/unknown-model",
+                "reasoning_effort": None,
+                "developer_instructions": None,
+            },
+        })
+        rollover.assert_not_awaited()
+        exec_fallback.assert_not_awaited()
+        self.runtime_failure.assert_not_called()
+        errors = [call.args[2]["message"] for call in events.await_args_list if call.args[1] == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("basic compatibility", errors[0])
+        finished.assert_awaited_once()
+        self.assertEqual(finished.await_args.args[1]["exit_code"], 1)
+        self.assertEqual(turn.close_calls, 1)
+
     async def test_silent_resumed_thread_rolls_over_once_with_app_server(self) -> None:
         first_turn = FakeTurn([completed_notification()])
         second_turn = FakeTurn(

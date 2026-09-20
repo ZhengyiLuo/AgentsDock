@@ -114,6 +114,11 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
     async def create(self, **kwargs):
         return (await self.ns["create_session"](self.ns["CreateSessionRequest"](**kwargs)))["session"]
 
+    def advertise_efforts(self, model, *efforts):
+        self.ns["CODEX_PROVIDER_STORE"].cache_catalog(self.selection, {
+            "models": [{"value": model, "label": model}],
+            "model_capabilities": {model: {"reasoning_efforts": list(efforts)}}})
+
     async def test_creates_persists_and_exposes_both_providers_without_replacing_normal_model(self):
         normal = await self.create(backend="codex", model="ordinary-model")
         custom = await self.create(backend="codex", codex_provider="custom")
@@ -157,6 +162,8 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normal_params["model"], "normal-model")
         self.assertEqual(custom_params["modelProvider"], codex_provider.PROVIDER_ID)
         self.assertEqual(custom_params["model"], self.selection["model"])
+        self.assertEqual(custom_params["config"]["model_reasoning_summary"], "none")
+        self.assertNotIn("model_reasoning_summary", normal_params["config"])
         store = self.ns["CODEX_PROVIDER_STORE"]
         store.record_thread("custom-thread", self.selection)
         custom["codex_thread_id"] = "custom-thread"
@@ -181,8 +188,20 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_custom_effort_is_independent_of_the_normal_account_default_model(self):
         self.ns["normalize_runtime_effort_for_model"] = Mock(side_effect=AssertionError("normal account model limits must not apply"))
+        self.advertise_efforts("gateway/custom", "ultra")
         custom = await self.create(codex_provider="custom", model="gateway/custom", effort="ultra")
         self.assertEqual((custom["model"], custom["effort"]), ("gateway/custom", "ultra"))
+
+    async def test_custom_unknown_model_clears_stale_high_while_normal_keeps_its_default(self):
+        normal = self.ns["STORE"].sessions[(await self.create())["id"]]
+        custom = self.ns["STORE"].sessions[(await self.create(codex_provider="custom", model="unknown/model", effort="high"))["id"]]
+        self.assertIsNone(custom["effort"])
+        custom["effort"] = "high"  # A saved chat from the previous universal High catalog.
+        self.assertEqual(self.ns["codex_runtime_settings"](custom), ("unknown/model", "", ""))
+        changed = await self.ns["update_session"](custom["id"], self.ns["UpdateSessionRequest"](model="another/unknown"))
+        self.assertIsNone(changed["session"]["effort"])
+        self.assertIsNone(json.loads((self.root / "sessions.json").read_text())[custom["id"]]["effort"])
+        self.assertEqual(self.ns["codex_runtime_settings"](normal), ("normal-model", "high", "fast"))
 
     def test_registration_isolates_custom_auth_and_leaves_caller_environment_unchanged(self):
         args = codex_provider.registration_args(self.selection)
@@ -207,12 +226,13 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         self.ns["STORE"].persist_restored_state.assert_awaited_once_with(durable=True)
 
     async def test_changed_endpoint_preserves_existing_chat_revision_and_model_controls(self):
+        self.advertise_efforts("new/custom-model", "ultra")
         custom = await self.create(codex_provider="custom")
         self.ns["CODEX_PROVIDER_STORE"].save({**self.selection, "base_url": "https://other.example.invalid/v1"})
         current = self.ns["STORE"].sessions[custom["id"]]
         current["backend_locked"] = True
         self.assertIsNone(current["codex_thread_id"])
-        self.assertEqual(self.ns["codex_runtime_settings"](current), (self.selection["model"], "high", ""))
+        self.assertEqual(self.ns["codex_runtime_settings"](current), (self.selection["model"], "", ""))
         self.assertEqual(self.ns["CODEX_PROVIDER_STORE"].for_session(current)["base_url"], self.selection["base_url"])
         changed = (await self.ns["update_session"](custom["id"], self.ns["UpdateSessionRequest"](model="new/custom-model", effort="ultra")))["session"]
         self.assertEqual((changed["model"], changed["effort"]), ("new/custom-model", "ultra"))
@@ -222,6 +242,7 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("codex_provider_revision", custom)
 
     async def test_internal_fork_creation_retains_parent_provider_after_reset(self):
+        self.advertise_efforts("parent-model", "ultra")
         parent = await self.create(codex_provider="custom", model="parent-model", effort="ultra")
         source = self.ns["STORE"].sessions[parent["id"]]
         original_revision = source["codex_provider_revision"]

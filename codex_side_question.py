@@ -114,12 +114,14 @@ class NativeCodexSideChat:
         self.model = model
         self.env = isolated_environment(env)
         self.provider_config = {}
+        self.provider_turn_overrides = {}
         self.sensitive_values = ()
         if provider_selection:
             # Lazy import avoids the provider probe/isolated-config cycle.
-            from codex_provider import native_config, native_environment
+            from codex_provider import native_config, native_environment, turn_overrides
             self.env = native_environment(self.env, provider_selection)
             self.provider_config = native_config(provider_selection)
+            self.provider_turn_overrides = turn_overrides(provider_selection["model"], provider_selection.get("effort") or "")
             self.sensitive_values = (provider_selection["api_key"],)
         self.thread_id: str | None = None
         self._client: CodexAppServerClient | None = None
@@ -205,7 +207,7 @@ class NativeCodexSideChat:
                     raise SideQuestionError(409, "Side chat was closed; open a new side chat")
                 turn = await self._client.start_turn(
                     self.thread_id, [{"type": "text", "text": question}],
-                    overrides={"environments": []},
+                    overrides={**self.provider_turn_overrides, "environments": []},
                 )
                 answers: dict[str, str] = {}
                 while True:

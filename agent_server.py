@@ -7001,6 +7001,9 @@ def preview_session_runtime_update(
             raise HTTPException(409, "Custom endpoints require native Codex app-server transport.")
         selected = CODEX_PROVIDER_STORE.for_session(preview)
         preview["model"] = selected.get("model")
+        preview["effort"] = codex_provider.runtime_effort(
+            selected, CODEX_PROVIDER_STORE.cached_catalog(selected), normalized_effort,
+        ) or None
         preview["codex_provider_binding"] = codex_provider.binding(selected)
         preview["codex_provider_revision"] = selected["credential_id"]
     if backend_changed:
@@ -57051,6 +57054,8 @@ def codex_thread_instruction_hash(session_id: str, sess: dict[str, Any]) -> str:
         f"agentsdock-policy-v{CODEX_THREAD_POLICY_VERSION}\0"
         f"{codex_thread_instructions(session_id, sess)}"
     )
+    if sess.get("codex_provider") == "custom":
+        payload += "\0custom-model-capabilities-v1"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -57061,7 +57066,8 @@ def codex_runtime_settings(sess: dict[str, Any]) -> tuple[str, str, str]:
         model = selected.get("model")
         if not model:
             raise HTTPException(409, "Choose a model for this custom endpoint in the chat settings.")
-        return model, normalize_runtime_effort(BACKEND_CODEX, sess.get("effort") or CODEX_DEFAULT_EFFORT), ""
+        catalog = CODEX_PROVIDER_STORE.cached_catalog(selected)
+        return model, codex_provider.runtime_effort(selected, catalog, sess.get("effort")), ""
     configured_model, configured_effort, configured_service_tier = codex_user_config_defaults()
     model = str(sess.get("model") or configured_model or CODEX_DEFAULT_MODEL).strip()
     effort = clamp_codex_runtime_effort(
@@ -57191,6 +57197,10 @@ def codex_thread_params(
     # context.  The static endpoint learns the exact live run only from
     # Codex-owned turn metadata supplied below at turn/start.
     flat_config = params.setdefault("config", {})
+    if selected:
+        # Custom endpoints must not inherit reasoning-summary parameters from
+        # the normal account. Effort is replaced explicitly on every turn.
+        flat_config["model_reasoning_summary"] = "none"
     reserved_prefix = f"mcp_servers.{CODEX_PROVIDER_MCP_NAME}"
     for key in tuple(flat_config):
         if key == reserved_prefix or key.startswith(reserved_prefix + "."):
@@ -66763,6 +66773,8 @@ async def run_codex_app_server(
                     overrides["model"] = model
                 if effort:
                     overrides["effort"] = effort
+                if selected_provider:
+                    overrides.update(codex_provider.turn_overrides(model, effort))
                 if service_tier:
                     overrides["serviceTier"] = codex_app_server_service_tier(service_tier)
 
@@ -67274,6 +67286,10 @@ async def run_codex_app_server(
         stopped = stop_requested
         terminal_status = "interrupted" if stopped else "failed"
         if not stopped:
+            if selected_provider:
+                failure_kind = codex_provider.classify_failure(terminal_error)
+                if failure_kind != "failed":
+                    terminal_error = codex_provider.test_result(failure_kind)["message"]
             await append_event(session_id, "error", {
                 "run_id": current_run_id,
                 "backend": BACKEND_CODEX,
@@ -67385,8 +67401,18 @@ async def run_codex_app_server(
         or finished_tools
         or seen_artifacts
     )
+    if selected_provider and not produced_activity and not stopped and (
+        first_activity_stalled or terminal_status == "completed"
+    ):
+        terminal_status = "failed"
+        terminal_error = (
+            "The custom model did not return a usable Codex response. Check this "
+            "model's basic compatibility in Custom endpoint settings. Its gateway "
+            "must support Responses streaming and native tool calls."
+        )
     recover_resume = (
         not delivery_unknown
+        and not (selected_provider and (first_activity_stalled or not produced_activity))
         and not goal_steer_recovery_fenced
         and not child_continuation_attempts
         and goal_continuation_result is None
@@ -67453,6 +67479,10 @@ async def run_codex_app_server(
     try:
         if terminal_status == "failed":
             terminal_error = terminal_error or "Codex app-server turn failed."
+            if selected_provider:
+                failure_kind = codex_provider.classify_failure(terminal_error)
+                if failure_kind != "failed":
+                    terminal_error = codex_provider.test_result(failure_kind)["message"]
             if codex_provider.session_choice(sess.get("codex_provider")) == "default":
                 record_runtime_failure(BACKEND_CODEX, terminal_error)
             if not error_emitted:
@@ -76490,7 +76520,7 @@ async def health() -> dict[str, Any]:
         "capabilities": {
             "side_questions": side_questions.capability(),
             "codex_auth_v1": codex_auth.capability(available=bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC),
-            "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses", "per_chat": True, "per_chat_models": True, "model_discovery": True},
+            "codex_provider_v1": {"available": bool(AGENT_TOKEN) and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC, "wire_api": "responses", "per_chat": True, "per_chat_models": True, "model_discovery": True, "model_compatibility": True},
             "team_mail_hints_v1": SECURE_PEER_RUNTIME.team_mail_hint_capability(),
             "team_mail_hints_v2": SECURE_PEER_RUNTIME.team_notification_hint_capability(),
             "websocket_auth_v1": {
@@ -77930,10 +77960,15 @@ async def create_native_side_chat(session_id: str):
                 from codex_side_question import NativeCodexSideChat
                 if self.codex is None:
                     model = current.get("model")
+                    provider_selection = CODEX_PROVIDER_STORE.for_session(current, include_key=True)
+                    if provider_selection:
+                        provider_selection["effort"] = codex_provider.runtime_effort(
+                            provider_selection, CODEX_PROVIDER_STORE.cached_catalog(provider_selection), current.get("effort"),
+                        )
                     self.codex = NativeCodexSideChat(parent_id, executable=CODEX_BIN,
                         model=model if isinstance(model, str) and model.strip() else None,
                         env=side_questions.isolated_environment(runner_env()),
-                        provider_selection=CODEX_PROVIDER_STORE.for_session(current, include_key=True))
+                        provider_selection=provider_selection)
                 result = {"answer": await self.codex.ask(question),
                           "context_note": "Native Codex context from when Side chat started, including tool results. Clear Side chat to use the latest main context."}
             self.current()
