@@ -1,6 +1,6 @@
 # Public development log
 
-## 2026-09-19 — Preserve side chats across servers — beta candidate
+## 2026-09-19 — Preserve side chats across servers — 1.0.4-beta.5
 
 - Keep side-chat state and its native conversation owned by the saved server
   identity and chat, across connection generations. Preserve drafts, replies,
@@ -13,6 +13,12 @@
   follow-up continuity, server separation and cancellation after returning.
   Inspect dark and narrow/light views. The picker and store hydration are
   outside this focused fixture; provider responses are explicitly controlled.
+- Also exercise a real Codex side chat against an existing authenticated
+  server, using one disposable main chat with a random verification fact.
+  Switch servers while its side question runs, restore its answer and draft,
+  and complete a contextual follow-up in the same native side conversation.
+  Verify both answers, then remove the disposable chat. Existing conversations
+  and login settings remain untouched.
 - Remove Electron's internal fork-error prefix. Exercise the production chat
   menu through HTTP and native Codex: reproduce a valid symlink-workspace fork
   rejection, then verify repeated forks and a child continuation with the
@@ -21,6 +27,21 @@
   production compilation with output verification. The side-chat navigation
   fix needs no server contract change; the fork workspace correction is in
   AgentsServer 1.0.4-beta.5. Include authored notes for both releases.
+- Accept desktop **1.0.4-beta.5 / 1177** from
+  `56f268292b889f173f7d1e0a10bdc43796545575`. All 88 packaged compiled files
+  match the reviewed source. Inspect the packaged renderer/preload in isolated
+  offscreen Electron. Local universal signing, notarization, Gatekeeper,
+  mounted DMG/ZIP payload parity, checksums and updater metadata pass; the
+  signed executable passes a clean CI launch. The macOS release suite passes
+  4,547 tests (10 skipped).
+- Publish matching sets of 14 reviewed assets and authored notes to both Beta
+  feeds after all four native platform checks pass. Verify public asset
+  digests, updater metadata, source tag and canonical/legacy parity.
+- Publish the signed standalone server 1.0.4-beta.5 and submit its managed
+  update for idle installation. The running service remains on beta.4 while
+  active work continues; its pending update has no error.
+- Releases: [desktop beta.5](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.5)
+  and [server beta.5](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.5).
 
 ## 2026-09-19 — Inter-chat chronology — 1.0.4-beta.4
 
