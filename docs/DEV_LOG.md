@@ -1,6 +1,6 @@
 # Public development log
 
-## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7 candidate
+## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
 
 - Separate optional saved-model compatibility checks from endpoint saving.
   Display unverified, unsupported and basic-check-passed states without
@@ -27,7 +27,26 @@
   compilation and output verification. Also complete a basic check against a
   configured external provider while preserving its saved credentials and
   ordinary account configuration. This does not certify every model or tool.
-- Signed packaging and publication remain pending.
+- Accept desktop **1.0.4-beta.7 / 1180** from
+  `26d6e4586e077997b7a5de203fa3b0d41e876699`. All 88 packaged compiled files
+  match the reviewed source and the fingerprints recorded before download.
+  Inspect the exact packaged renderer/preload in isolated offscreen Electron.
+  Universal Developer ID signatures, notarization, Gatekeeper, mounted
+  DMG/ZIP parity and updater checks pass locally; the signed executable passes
+  a clean CI launch. Recheck the native endpoint workflow against the final
+  paired server code, using isolated native Codex and a controlled provider.
+- Pass all four platform build and package checks, followed by all four
+  publication replay checks. macOS and both Linux release suites pass 4,550
+  tests (10 skipped); Windows passes 4,514 (16 skipped). Publish the Windows
+  installer under the documented unsigned distribution policy.
+- Publish matching sets of 14 assets and authored notes to both Beta feeds.
+  Match every public asset digest and size against independently hashed held
+  files, verify the exact source tag, and anonymously check all public asset
+  URLs. Download both checksum manifests and all updater metadata anonymously
+  and verify byte parity. Release/tag metadata uses authenticated public API
+  reads after the shared anonymous API rate limit is reached.
+- Releases: [desktop beta.7](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.7),
+  [legacy Beta feed](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.4-beta.7).
 
 ## 2026-09-19 — Center the Team Network mail reader — 1.0.4-beta.6
 
