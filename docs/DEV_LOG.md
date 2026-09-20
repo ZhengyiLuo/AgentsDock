@@ -1,6 +1,6 @@
 # Development and release log
 
-## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8 candidate
+## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
 
 - Add live Codex summary snapshots with section ordering, revision fencing,
   reconnect recovery and stable chronological anchors. Keep partial updates
@@ -30,7 +30,22 @@
   service, preload, store and timeline. Confirm live arrival before completion,
   reconnect recovery, authoritative replacement, section and tool ordering,
   interruption retention and historical reopening through the native cache.
-- Full release checks, signed artifact acceptance and publication are pending.
+- Accept source `51f4a4c6b4c4d718de8a03a80f354c6a69939b05` from
+  [release run 35489981739](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35489981739):
+  all eight shards pass, with 4,440 tests passed and two platform/opt-in skips.
+  Verify the Ed25519 manifest signature and all 85 packaged source files and
+  modes against the accepted commit. The final fixture and synchronization
+  repairs leave every packaged source byte unchanged from native acceptance.
+- Publish [beta.8](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.8)
+  using the exact three held assets. Reverify anonymous public downloads,
+  the public asset listing, the exact Git tag and rendered release notes.
+  Anonymous API verification is rate-limited; authenticated release metadata
+  supplements the independent public checks. Archive SHA-256:
+  `fa68bcccd2630d8447a5a3b9a8fc5dccdfe2d5512975fb46cd8ca387db030f83`.
+- Replace only this release pass's exact pending beta.7 reservations with
+  identity- and instance-bound beta.8 updates on both target servers, retaining
+  `when_idle`. Both requests are accepted; verified health still reports
+  beta.6 running while active work drains. No forced restart is performed.
 
 ## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
 
