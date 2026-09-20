@@ -22,7 +22,7 @@
   update behavior. The app and server retain their native packaging formats.
   Failed or canceled owned attempts stay paused until an explicit scoped retry;
   enrolled releases keep legacy controls under Advanced server recovery.
-- Pass 231 focused server checks, including real HTTP authentication and
+- Pass 233 focused server checks, including real HTTP authentication and
   identity guards, signed metadata, queued-work recovery, installer protection
   and candidate health rejection. Verify actual offline npm packing, CLI native
   transport, exact payload bytes and executable permissions, paired artifact
@@ -43,6 +43,11 @@
   configuration and history/state files remain byte-identical. This validates
   Linux service activation and rollback, not real provider sessions or the full
   registry-to-app update journey.
+- Install the committed local npm tarball through actual offline `npx` in a
+  second disposable Linux user account. Verify its independent real systemd
+  service, identity and token; a second fresh-install attempt is refused and
+  both services remain unchanged. Package retrieval from the public registry
+  and same-user multiple-server installation are not claimed by this test.
 - Compile the legacy Swift guardrail executable successfully. Its unchanged
   React mobile source-text assertion still fails before later checks; this is
   not recorded as a passing full Swift guardrail run.

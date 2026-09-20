@@ -1,7 +1,8 @@
 # Coordinated app and server updates
 
-Implementation status: source candidate. Isolated Linux installer activation
-and rollback have been exercised; complete coordinated migration acceptance,
+Implementation status: source candidate. Isolated Linux installer activation,
+rollback and fresh installation through an offline npm tarball have been exercised;
+complete coordinated migration acceptance,
 npm publication and the first coordinated native release have not occurred. Existing
 installations continue using the existing release channel until that release is
 accepted and published.
