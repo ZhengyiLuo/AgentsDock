@@ -60,6 +60,27 @@ describe('Codex custom provider native transport', () => {
       expect(calls).toBe(1)
     }
   )
+  it('checks the exact saved endpoint generation without transmitting a provider key', async () => {
+    const selected = { model: 'gateway/gemini', credential_id: 'a'.repeat(32), session_id: 'chat_custom' }
+    const checks = { native_tool_call: true, tool_roundtrip: true, continuation: true }
+    await withServer(async (req, res) => {
+      const chunks: Buffer[] = []; for await (const part of req) chunks.push(Buffer.from(part))
+      expect(req.method).toBe('POST')
+      expect(req.url).toBe('/api/admin/codex/provider/test')
+      expect(req.headers['x-agentsdock-token']).toBe('synthetic-admin')
+      expect(req.headers['origin']).toBeUndefined()
+      expect(req.headers['sec-fetch-mode']).toBeUndefined()
+      expect(JSON.parse(Buffer.concat(chunks).toString())).toEqual(selected)
+      res.end(JSON.stringify({ ok: true, status: 'ready', model: selected.model, compatibility: 'verified',
+        scope: 'isolated_native_tools_and_continuation', checks, message: fakeKey, api_key: fakeKey }))
+    }, async url => {
+      const client = new AgentServerClient(url, 'synthetic-admin')
+      try {
+        expect(await client.testCodexProviderModel(selected)).toEqual({ ok: true, status: 'ready', message: '',
+          model: selected.model, compatibility: 'verified', scope: 'isolated_native_tools_and_continuation', checks })
+      } finally { client.dispose() }
+    })
+  })
   it('never forwards credentials across an HTTP redirect', async () => {
     let forwarded = 0
     await withServer((_req, res) => { forwarded++; res.end(JSON.stringify(config)) }, async destination => {

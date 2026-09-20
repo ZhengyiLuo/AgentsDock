@@ -136,6 +136,15 @@ export function runtimeCatalogOptions(
   if (selected && !options.some(option => option.value === selected)) {
     options.push({ value: selected, label: selected })
   }
+  if (backend === 'codex' && codexProvider === 'custom' && type === 'models') {
+    return options.map(option => {
+      const model = option.value || backendCatalog?.default_model
+      if (!model) return option
+      const compatibility = backendCatalog?.model_capabilities?.[model]?.compatibility ?? 'unverified'
+      return { ...option, label: `${option.label} · ${t(`codexProvider.compatibility.${compatibility}`)}`,
+        ...(compatibility === 'unsupported' ? { locked: true, locked_reason: t('codexProvider.modelUnsupported') } : {}) }
+    })
+  }
   return options
 }
 
@@ -173,6 +182,9 @@ export function runtimeSelectionError(
   if (backend === 'codex' && codexProvider === 'custom') {
     if (!codexCustomProviderSupported(health)) return t('codexProvider.update')
     if (!codexCustomProviderAvailable(health, catalog, customCatalog)) return t('codexProvider.unavailable')
+    const custom = runtimeBackendCatalogFor(catalog, backend, codexProvider, customCatalog)
+    const selected = model?.trim() || custom?.default_model?.trim()
+    if (selected && custom?.model_capabilities?.[selected]?.compatibility === 'unsupported') return t('codexProvider.modelUnsupported')
     return null
   }
   if (backend === 'cursor' && !cursorBackendAvailable(health, catalog)) {
@@ -194,11 +206,13 @@ function modelEfforts(
 ): RuntimeOption[] | null {
   const backendCatalog = runtimeBackendCatalogFor(catalog, backend, codexProvider, customCatalog)
   const selectedModel = model?.trim() || backendCatalog?.default_model?.trim()
-  if (!backendCatalog || !selectedModel) return null
+  const custom = backend === 'codex' && codexProvider === 'custom'
+  if (!backendCatalog || !selectedModel) return custom ? [] : null
   const indexed = backendCatalog.model_efforts?.[selectedModel]
-  if (indexed?.length) return indexed
+  if (indexed !== undefined) return indexed
+  if (custom) return []
   const embedded = backendCatalog.models.find(option => option.value === selectedModel)?.efforts
-  return embedded?.length ? embedded : null
+  return embedded ?? null
 }
 
 export function runtimeEffortOptions(
@@ -233,7 +247,8 @@ export function runtimeEffortAfterModelChange(
   if (backend === 'cursor') return null
   const selected = current?.trim() || ''
   const scoped = modelEfforts(catalog, backend, model, codexProvider, customCatalog)
-  if (!scoped?.length || !selected) return selected || null
+  if (scoped === null || !selected) return selected || null
+  if (!scoped.length) return null
   const supported = scoped.map(option => option.value).filter(Boolean)
   if (supported.includes(selected)) return selected
 

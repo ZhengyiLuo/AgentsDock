@@ -751,16 +751,16 @@ describe('SessionDialog runtime selection', () => {
       health: { ok: true, capabilities: { codex_provider_v1: { per_chat: true, per_chat_models: true } } },
       runtimeCatalog: { backends: { ...runtimeCatalog.backends, codex: { ...runtimeCatalog.backends.codex,
         custom_provider: { configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
-          models: [{ value: 'provider/fast', label: 'Provider Fast' }], efforts: [{ value: 'high', label: 'High' }] }
+          models: [{ value: 'provider/fast', label: 'Provider Fast' }], efforts: [], model_efforts: { 'provider/fast': [{ value: 'high', label: 'High' }] } }
       } } }, refreshSessions: vi.fn().mockResolvedValue(undefined), selectSession: vi.fn().mockResolvedValue(undefined),
       modals: { settings: false, newChat: true, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
     })
     const user = userEvent.setup()
     render(<SessionDialog mode="newChat" />)
     expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'true')
-    await user.click(screen.getByRole('button', { name: 'Codex · Custom endpoint' }))
+    await user.click(screen.getByRole('button', { name: 'Codex runtime · Custom endpoint' }))
     expect(screen.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByLabelText('Reasoning')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'GPT-5.6-Sol' })).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('Model'), 'provider/fast')
     await user.selectOptions(screen.getByLabelText('Reasoning'), 'high')
@@ -768,7 +768,7 @@ describe('SessionDialog runtime selection', () => {
     await user.clear(screen.getByLabelText('Model ID'))
     await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
     await user.click(screen.getByRole('button', { name: 'Create chat' }))
-    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'provider/unlisted', effort: 'high' })))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: 'provider/unlisted', effort: null })))
   })
 
   it('opens Settings for an unconfigured custom option without creating a normal Codex chat', async () => {
@@ -779,7 +779,7 @@ describe('SessionDialog runtime selection', () => {
     })
     const user = userEvent.setup()
     render(<SessionDialog mode="newChat" />)
-    await user.click(screen.getByRole('button', { name: /Codex · Custom endpoint · Configure in Settings/ }))
+    await user.click(screen.getByRole('button', { name: /Codex runtime · Custom endpoint · Configure in Settings/ }))
     expect(useAppStore.getState().modals.appSettings).toBe(true)
     expect(useAppStore.getState().modals.newChat).toBe(false)
     expect(create).not.toHaveBeenCalled()
@@ -1147,7 +1147,7 @@ describe('JobDialog', () => {
     const user = userEvent.setup()
     render(<JobDialog />)
     if (contextMode === 'standalone') await user.click(screen.getByRole('button', { name: /Independent runs/ }))
-    expect(within(screen.getByRole('group', { name: 'Backend' })).getByRole('button', { name: 'Codex · Custom endpoint' })).toBeVisible()
+    expect(within(screen.getByRole('group', { name: 'Backend' })).getByRole('button', { name: 'Codex runtime · Custom endpoint' })).toBeVisible()
     expect(screen.queryByText(/Normal account model locked/)).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('Title'), 'Custom check')
     await user.type(screen.getByLabelText('Prompt'), 'Check the custom workspace')

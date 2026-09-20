@@ -1303,9 +1303,9 @@ describe('Composer', () => {
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
     expect(screen.getByRole('menuitemcheckbox', { name: 'Codex' })).toBeInTheDocument()
-    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex · Custom endpoint' }))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex runtime · Custom endpoint' }))
     await waitFor(() => expect(update).toHaveBeenCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'custom', model: null, effort: null })))
-    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex · Custom endpoint')
+    expect(screen.getByTitle('Change backend')).toHaveTextContent('Codex runtime · Custom endpoint')
     await user.click(screen.getByTitle('Change backend'))
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Codex' }))
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', expect.objectContaining({ backend: 'codex', codex_provider: 'default' })))
@@ -1317,7 +1317,7 @@ describe('Composer', () => {
     const user = userEvent.setup()
     render(<Composer />)
     await user.click(screen.getByTitle('Change backend'))
-    await user.click(screen.getByRole('menuitem', { name: 'Codex · Custom endpoint Configure in Settings' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Codex runtime · Custom endpoint Configure in Settings' }))
     expect(useAppStore.getState().modals.appSettings).toBe(true)
     expect(update).not.toHaveBeenCalled()
   })
@@ -1327,7 +1327,7 @@ describe('Composer', () => {
     render(<Composer />)
     const chip = screen.getByTitle('Backend is fixed after the provider session starts')
     expect(chip).toBeDisabled()
-    expect(chip).toHaveTextContent('Codex · Custom endpoint')
+    expect(chip).toHaveTextContent('Codex runtime · Custom endpoint')
   })
 
   it('changes custom endpoint models and effort in the usual picker and permits an unlisted model', async () => {
@@ -1337,12 +1337,12 @@ describe('Composer', () => {
     useAppStore.setState({ sessions: [session], runtimeCatalog: { backends: { codex: { models: [], efforts: [], custom_provider: {
       configured: true, available: true, model: null, base_url: 'https://inference.example/v1',
       models: [{ value: 'provider/first', label: 'First' }, { value: 'provider/next', label: 'Next' }],
-      efforts: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }]
+      efforts: [], model_efforts: { 'provider/next': [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] }
     } } } } })
     const user = userEvent.setup()
     const { container } = render(<Composer />)
     await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
-    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Next' }))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Next · Unverified' }))
     await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/next', effort: 'high' }))
     await user.click(container.querySelector<HTMLButtonElement>('.runtime-chip')!)
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Low' }))
@@ -1352,7 +1352,7 @@ describe('Composer', () => {
     await user.clear(screen.getByLabelText('Model ID'))
     await user.type(screen.getByLabelText('Model ID'), 'provider/unlisted')
     await user.click(screen.getByRole('button', { name: 'Use model' }))
-    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/unlisted', effort: 'low' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith('chat-1', { model: 'provider/unlisted', effort: null }))
   })
 
   it('sends a custom Codex chat independently of normal OpenAI sign-in', async () => {

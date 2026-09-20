@@ -1,5 +1,34 @@
 # Public development log
 
+## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7 candidate
+
+- Separate optional saved-model compatibility checks from endpoint saving.
+  Display unverified, unsupported and basic-check-passed states without
+  treating model discovery as proof of native Codex compatibility.
+- Respect explicit per-model effort capabilities, including empty effort
+  lists, and retain manual entry for unfamiliar model IDs. Fence saved-model
+  checks to the selected server and credential revision.
+- Pair this client candidate with AgentsServer 1.0.4-beta.7. Its 72 focused
+  provider and side-chat checks pass, including stale effort cleanup and
+  retained credential ownership. Native loopback capture confirms the
+  production override helper clears inherited effort while preserving
+  thread instructions and unrelated thread settings.
+- Exercise Settings, New chat and Composer in native offscreen Electron
+  through production preload, service, native HTTP, server middleware and
+  provider routes. Save without a model or test, and while a connection or
+  compatibility check is pending; verify late results cannot relabel saved
+  settings. Complete repeated checks through isolated native Codex against a
+  controlled streaming endpoint. Filter an embedding model, clamp advertised
+  efforts, and clear effort for unfamiliar/manual models. Inspect light/dark
+  narrow layouts, with no overflow or typing/idle requests. Ordinary account
+  status and full profile bootstrap are fixtures; chat-turn execution is
+  covered separately by server regression and native request capture.
+- Pass focused app, service and transport regressions, TypeScript, production
+  compilation and output verification. Also complete a basic check against a
+  configured external provider while preserving its saved credentials and
+  ordinary account configuration. This does not certify every model or tool.
+- Signed packaging and publication remain pending.
+
 ## 2026-09-19 — Center the Team Network mail reader — 1.0.4-beta.6
 
 - Center mail threads in a wider reading column instead of pushing sent

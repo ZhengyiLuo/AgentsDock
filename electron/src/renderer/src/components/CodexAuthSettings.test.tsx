@@ -4,6 +4,7 @@ import type { AgentsDockAPI } from '@shared/ipc'
 import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResult } from '@shared/types'
 import { setLocale } from '@shared/i18n'
 import { CodexAuthSettings } from './CodexAuthSettings'
+import { useAppStore } from '../store/app-store'
 
 const snapshot = (auth_mode: CodexAuthStatus['auth_mode'] = 'none'): CodexAuthStatus => ({
   available: true, auth_mode, email: auth_mode === 'chatgpt' ? 'person@example.com' : null,
@@ -137,6 +138,35 @@ describe('Codex account settings', () => {
 })
 
 describe('Codex custom endpoint settings', () => {
+  it('checks a saved model only on click and discards results after changing server', async () => {
+    const credential = 'a'.repeat(32)
+    let finish: (value: CodexProviderTestResult) => void = () => {}
+    const testProviderModel = vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const api = bridge(undefined, undefined, {
+      provider: vi.fn().mockResolvedValue({ ...providerSnapshot(true), credential_id: credential }), testProviderModel
+    })
+    useAppStore.setState({ health: { ok: true, capabilities: { codex_provider_v1: { model_compatibility: true } } } })
+    const { rerender } = render(<CodexAuthSettings {...props} />)
+    await openCustomForm()
+    const model = screen.getByLabelText('Model to check (optional)')
+    fireEvent.change(model, { target: { value: 'vendor/exact-model' } })
+    expect(testProviderModel).not.toHaveBeenCalled()
+    expect(api.setProvider).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Check model compatibility' }))
+    expect(testProviderModel).toHaveBeenCalledExactlyOnceWith({ profileId: 'studio', profileGeneration: 1 }, {
+      model: 'vendor/exact-model', credential_id: credential
+    })
+    expect(screen.getByLabelText('API key for this endpoint')).toHaveValue('')
+    fireEvent.change(model, { target: { value: 'vendor/different-model' } })
+    expect(screen.getByRole('button', { name: 'Checking model…' })).toBeDisabled()
+    expect(testProviderModel).toHaveBeenCalledOnce()
+    rerender(<CodexAuthSettings {...props} profileId="other" profileGeneration={2} />)
+    await act(async () => finish({ ok: true, status: 'ready', message: 'private echo', compatibility: 'verified' }))
+    expect(screen.queryByText('Basic check passed')).not.toBeInTheDocument()
+    expect(screen.queryByText('private echo')).not.toBeInTheDocument()
+    expect(api.setProvider).not.toHaveBeenCalled()
+  })
+
   it.each(['untested', 'pending', 'failed'] as const)('saves endpoint and key when the optional test is %s', async state => {
     const api = bridge(undefined, undefined, { testProvider: vi.fn().mockImplementation(() => state === 'pending'
       ? new Promise(() => {}) : Promise.resolve({ ok: false, status: 'connection_failed', message: '' })) })
@@ -181,7 +211,7 @@ describe('Codex custom endpoint settings', () => {
     expect(fields.endpoint).toHaveValue('https://api.openai.com/v1')
     expect(fields.key).toHaveAttribute('type', 'password')
     expect(screen.getByText(/Testing is optional/)).toBeInTheDocument()
-    expect(screen.getByText('Choose Codex · Custom endpoint for a new chat. Existing chats keep the endpoint and credentials they started with.')).toBeVisible()
+    expect(screen.getByText('Choose Codex runtime · Custom endpoint for a new chat. Existing chats keep the endpoint and credentials they started with.')).toBeVisible()
     fillProvider(fields)
     expect(api.testProvider).not.toHaveBeenCalled()
     expect(api.setProvider).not.toHaveBeenCalled()

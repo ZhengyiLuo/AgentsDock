@@ -272,6 +272,7 @@ export interface CodexProviderConfiguration {
   model: string | null
   has_api_key: boolean
   wire_api: 'responses'
+  credential_id?: string
 }
 
 /** Transient input sent only to the selected server's native admin route. */
@@ -283,14 +284,32 @@ export interface CodexProviderInput {
 
 export interface CodexProviderTestResult {
   ok: boolean
-  status: 'ready' | 'unsupported' | 'authentication_failed' | 'connection_failed' | 'model_unavailable' | 'failed'
+  status: 'ready' | 'unsupported' | 'unsupported_parameter' | 'inconclusive' | 'authentication_failed' | 'connection_failed' | 'model_unavailable' | 'failed'
   message: string
+  model?: string
+  compatibility?: 'unverified' | 'verified' | 'unsupported'
+  scope?: 'isolated_native_tools_and_continuation'
+  checks?: { native_tool_call: boolean; tool_roundtrip: boolean; continuation: boolean }
+}
+
+export interface CodexProviderModelTestInput {
+  model: string
+  session_id?: string
+  credential_id?: string
+}
+
+export interface RuntimeModelCapability {
+  kind: 'chat' | 'unknown'
+  compatibility: 'unverified' | 'verified' | 'unsupported'
+  reasoning_efforts: string[]
+  reasoning_supported: boolean | null
 }
 
 export interface CodexProviderModels {
   models: RuntimeModelOption[]
   efforts: RuntimeOption[]
   model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, RuntimeModelCapability>
   default_model: string | null
   default_effort: string | null
 }
@@ -481,6 +500,7 @@ export interface RuntimeBackendCatalog {
     models?: RuntimeModelOption[]
     efforts?: RuntimeOption[]
     model_efforts?: Record<string, RuntimeOption[]>
+    model_capabilities?: Record<string, RuntimeModelCapability>
     default_model?: string | null
     default_effort?: string | null
   }
@@ -489,6 +509,7 @@ export interface RuntimeBackendCatalog {
   models: RuntimeModelOption[]
   efforts: RuntimeOption[]
   model_efforts?: Record<string, RuntimeOption[]>
+  model_capabilities?: Record<string, RuntimeModelCapability>
   model_source?: string | null
   effort_source?: string | null
   default_model?: string | null
@@ -1636,7 +1657,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
-  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean }
+  codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
   side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
   workspace_files?: WorkspaceFilesCapability

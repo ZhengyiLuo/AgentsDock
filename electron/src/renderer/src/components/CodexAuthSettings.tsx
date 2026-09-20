@@ -3,6 +3,7 @@ import { KeyRound, LoaderCircle, RefreshCw } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { CodexAuthStatus, CodexProviderConfiguration, CodexProviderTestResult, CodexServerSettingsScope } from '@shared/types'
 import { useLocale } from '../lib/i18n'
+import { CodexModelCompatibilityCheck } from './CodexModelCompatibilityCheck'
 import './CodexAuthSettings.css'
 
 type AuthFailure = 'admin' | 'update' | 'connection' | 'readFailed'
@@ -324,6 +325,9 @@ export function CodexAuthSettings({ connected, profileId, profileGeneration, ser
           {t(`codexAuth.testResult.${testResult.ok && testResult.status === 'ready' ? 'ready' : testResult.status === 'ready' ? 'failed' : testResult.status}`)}
         </small>}
       </form>}
+      {showForm && providerEditable && currentProvider?.configured && !hasKey && baseURL === currentProvider.base_url && profileId && <CodexModelCompatibilityCheck
+        key={`${profileId}:${profileGeneration}:${currentProvider.credential_id ?? currentProvider.base_url}`}
+        scope={{ profileId, profileGeneration }} credentialId={currentProvider.credential_id} />}
       {error && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${error}`)}</small>}
       {providerError && <small className="codex-auth-settings-error" role="alert">{t(`codexAuth.${providerError}`)}</small>}
       {providerNotice && providerScopeMatches && <small role="status">{t(`codexAuth.${providerNotice}`)}</small>}

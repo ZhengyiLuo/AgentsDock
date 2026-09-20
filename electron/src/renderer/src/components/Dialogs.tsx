@@ -2935,7 +2935,7 @@ export function SessionDialog({ mode }: { mode: 'newChat' | 'resume' }) {
         const value = event.target.value
         setManualModel(value === '__manual__')
         if (value !== '__manual__') selectModel(value)
-      }}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}{codex_provider === 'custom' && <option value="__manual__">{t('codexProvider.manualModel')}</option>}</select></label>
+      }}>{modelOptions.map(option => <option value={option.value} key={option.value || 'default'} disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined}>{option.label}{option.locked && codex_provider !== 'custom' ? t("ui.Dialogs.upgrade_required_d38f0e0") : ''}</option>)}{codex_provider === 'custom' && <option value="__manual__">{t('codexProvider.manualModel')}</option>}</select></label>
       {hasReasoning && <label><span>Reasoning</span><select value={effort} onChange={event => setEffort(event.target.value)}>{effortOptions.map(option => <option value={option.value} key={option.value || 'default'}>{option.label}</option>)}</select></label>}
       {codex_provider === 'custom' && <div className="span-two">
         {manualModel && <label><span>{t('codexAuth.model')}</span><input aria-label={t('codexAuth.model')} value={model} maxLength={256} autoComplete="off" spellCheck={false} onChange={event => selectModel(event.target.value)} /><small>{t('codexProvider.manualModelHelp')}</small></label>}

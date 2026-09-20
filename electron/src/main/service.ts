@@ -53,6 +53,7 @@ import type {
   CodexProviderConfiguration,
   CodexProviderModels,
   CodexProviderInput,
+  CodexProviderModelTestInput,
   CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexServerSettingsScope,
@@ -2187,6 +2188,22 @@ export class AppService {
     this.assertCurrentScope(scope)
     if (sessionId) {
       const page = await scope.client.sessionPage(sessionId, { limit: 1 })
+      this.assertCurrentScope(scope)
+      this.upsertSession(scope, page.session)
+    } else await this.refreshCodexProviderRuntime(scope)
+    this.assertCurrentScope(scope)
+    return result
+  }
+
+  async testCodexProviderModel(expected: CodexServerSettingsScope, input: CodexProviderModelTestInput): Promise<CodexProviderTestResult> {
+    const scope = this.requireProfileScope(expected?.profileId, expected?.profileGeneration)
+    await this.ensureValidatedScope(scope)
+    this.assertCurrentScope(scope)
+    if (this.health?.capabilities?.codex_provider_v1?.model_compatibility !== true) throw new Error('CODEX_PROVIDER_UPDATE')
+    const result = await scope.client.testCodexProviderModel(input)
+    this.assertCurrentScope(scope)
+    if (input.session_id) {
+      const page = await scope.client.sessionPage(input.session_id, { limit: 1 })
       this.assertCurrentScope(scope)
       this.upsertSession(scope, page.session)
     } else await this.refreshCodexProviderRuntime(scope)
@@ -7426,7 +7443,8 @@ function preserveCustomProviderModels(previous: Session, incoming: Session): Ses
   return { ...incoming, codex_provider_catalog: {
     ...summary,
     ...(saved.models !== undefined ? { models: saved.models } : {}),
-    ...(saved.model_efforts !== undefined ? { model_efforts: saved.model_efforts } : {})
+    ...(saved.model_efforts !== undefined ? { model_efforts: saved.model_efforts } : {}),
+    ...(saved.model_capabilities !== undefined ? { model_capabilities: saved.model_capabilities } : {})
   } }
 }
 

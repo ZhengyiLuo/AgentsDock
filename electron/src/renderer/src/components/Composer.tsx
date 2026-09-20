@@ -3215,7 +3215,7 @@ function RuntimeMenu({
           align="start"
         >
           <DropdownMenu.Label className="menu-label">{t("ui.Composer.RuntimeMenu.model_5e2c614")}</DropdownMenu.Label>
-          {models.map(option => <DropdownMenu.CheckboxItem data-runtime-section="model" key={option.value || 'default'} className="menu-item" disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined} checked={(session.model ?? '') === option.value} onCheckedChange={() => selectModel(option.value)}>{option.label}{option.locked ? <span className="menu-item-locked-hint">{" "}{t("ui.Composer.upgrade_required_838a00a")}</span> : null}</DropdownMenu.CheckboxItem>)}
+          {models.map(option => <DropdownMenu.CheckboxItem data-runtime-section="model" key={option.value || 'default'} className="menu-item" disabled={option.locked} title={option.locked ? option.locked_reason ?? undefined : undefined} checked={(session.model ?? '') === option.value} onCheckedChange={() => selectModel(option.value)}>{option.label}{option.locked && !isCustomCodex ? <span className="menu-item-locked-hint">{" "}{t("ui.Composer.upgrade_required_838a00a")}</span> : null}</DropdownMenu.CheckboxItem>)}
           {isCustomCodex && <>
             <DropdownMenu.Item className="menu-item" onSelect={() => { setManualModel(session.model ?? ''); setManualModelOpen(true) }}>{t('codexProvider.manualModel')}</DropdownMenu.Item>
             <CodexModelDiscovery menu sessionId={session.id} />

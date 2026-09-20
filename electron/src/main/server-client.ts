@@ -1,6 +1,6 @@
 import { createReadStream, openAsBlob } from 'node:fs'
 import { parseCodexAuthStatus } from '../shared/codex-auth'
-import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderSelection } from '../shared/codex-provider'
+import { parseCodexProviderConfiguration, parseCodexProviderModels, parseCodexProviderTestResult, validateCodexProviderInput, validateCodexProviderModelTestInput, validateCodexProviderSelection } from '../shared/codex-provider'
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
@@ -50,6 +50,7 @@ import type {
   CodexProviderConfiguration,
   CodexProviderModels,
   CodexProviderInput,
+  CodexProviderModelTestInput,
   CodexProviderTestResult,
   CodexSubagentsConfiguration,
   CodexOperationAccepted,
@@ -771,10 +772,16 @@ export class AgentServerClient {
   codexProviderModels(sessionId?: string): Promise<CodexProviderModels> {
     if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256)) throw new Error('CODEX_PROVIDER_INVALID')
     const query = sessionId ? `?${new URLSearchParams({ session_id: sessionId })}` : ''
-    return this.codexProviderRequest(`/api/admin/codex/provider/models${query}`, {}, parseCodexProviderModels, 30_000, 512_000)
+    return this.codexProviderRequest(`/api/admin/codex/provider/models${query}`, {}, parseCodexProviderModels, 30_000, 2 * 1024 * 1024)
   }
   testCodexProvider(input: CodexProviderInput): Promise<CodexProviderTestResult> {
     const checked = validateCodexProviderInput(input)
+    return this.codexProviderRequest('/api/admin/codex/provider/test', {
+      method: 'POST', body: JSON.stringify(checked)
+    }, parseCodexProviderTestResult, 55_000, 2 * 1024 * 1024)
+  }
+  testCodexProviderModel(input: CodexProviderModelTestInput): Promise<CodexProviderTestResult> {
+    const checked = validateCodexProviderModelTestInput(input)
     return this.codexProviderRequest('/api/admin/codex/provider/test', {
       method: 'POST', body: JSON.stringify(checked)
     }, parseCodexProviderTestResult, 55_000, 512_000)
