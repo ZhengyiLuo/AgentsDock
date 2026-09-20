@@ -56,6 +56,7 @@ const timelineHistoryNavigation = fs.readFileSync(path.resolve('src/lib/timeline
 const timelineRowReuse = fs.readFileSync(path.resolve('src/lib/timeline-row-reuse.ts'), 'utf8')
 const mobilePackage = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'))
 const composerInputSize = fs.readFileSync(path.resolve('src/lib/composer-input-size.ts'), 'utf8')
+const chatLayout = fs.readFileSync(path.resolve('src/lib/chat-layout.ts'), 'utf8')
 const composerToolbarLayout = fs.readFileSync(path.resolve('src/lib/composer-toolbar-layout.ts'), 'utf8')
 const timelineProjection = fs.readFileSync(path.resolve('src/lib/timeline.ts'), 'utf8')
 const timelineRows = fs.readFileSync(path.resolve('src/components/TimelineRows.tsx'), 'utf8')
@@ -939,6 +940,19 @@ test('compact chat status remains readable and touch-safe', () => {
   assert.match(chatHeader, /statusLabel: \{ fontSize: 11, fontWeight: '700', flexShrink: 0/)
   assert.match(chatHeader, /spinner: \{ width: 20, height: 20/)
   assert.doesNotMatch(chatHeader, /scale: 0\.65/)
+})
+
+test('inline inspector toggle follows the same layout capability as inspector mounting', () => {
+  assert.match(chatLayout, /INLINE_INSPECTOR_MIN_WIDTH = 1080/)
+  assert.match(appShell, /const chatLayout = chatWorkspaceLayout\(width, height\)/)
+  assert.match(appShell, /const compact = chatLayout\.compact/)
+  assert.match(appShell, /const showInspector = chatLayout\.inlineInspectorAvailable && inspectorVisible/)
+  assert.match(appShell, /inlineInspectorAvailable=\{chatLayout\.inlineInspectorAvailable\}/)
+  assert.match(chatScreen, /inlineInspectorAvailable: boolean/)
+  assert.match(chatScreen, /<ChatHeader[\s\S]*?inlineInspectorAvailable=\{inlineInspectorAvailable\}/)
+  assert.match(chatHeader, /\{inlineInspectorAvailable \? <IconButton icon=\{PanelRight\}/)
+  assert.doesNotMatch(chatHeader, /\{!compact \? <IconButton icon=\{PanelRight\}/)
+  assert.doesNotMatch(appShell, /width < 720 \|\| Math\.min\(width, height\) < 600/)
 })
 
 test('native terminal relies on SwiftTerm tap handling without a competing recognizer', () => {
