@@ -83,6 +83,22 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
             server_instance_id="isolated-mail-pipeline", mail_hints_enabled=True)
         self.addCleanup(self.runtime.shutdown)
         self.client = self.runtime.client
+        def time_operation(owner, name):
+            operation = getattr(owner, name)
+            def measured(*args, **kwargs):
+                started = time.monotonic()
+                try:
+                    return operation(*args, **kwargs)
+                finally:
+                    elapsed = time.monotonic() - started
+                    if elapsed >= 1:
+                        print("Slow Mail setup operation:", name, elapsed,
+                              threading.current_thread().name, flush=True)
+            self.enterContext(mock.patch.object(owner, name, new=measured))
+        for name in ("_connect", "_prepare_mail_hint_request", "_pinned_context"):
+            time_operation(self.client, name)
+        for name in ("team_realms", "_require_active_proxy_connection"):
+            time_operation(self.runtime, name)
         self.connection_id = str(uuid.uuid4())
         row = {**self.tls.row, "connection_id": self.connection_id, "status": "approved",
             "pairing_id": self.tls.peer.pairing_id, "pairing_request_id": str(uuid.uuid4()),
