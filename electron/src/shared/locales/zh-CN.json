@@ -97,7 +97,7 @@
   "codexProvider.checkModel": "要检查的模型（可选）",
   "codexProvider.check": "检查模型兼容性",
   "codexProvider.checking": "正在检查模型…",
-  "codexProvider.checkHelp": "使用已保存的端点检查隔离环境中的原生工具调用和同一线程中的后续请求。此检查为可选项，不验证工作区工具、集成或推理支持。",
+  "codexProvider.checkHelp": "使用已保存的端点检查隔离环境中的原生工具调用和同一线程中的后续请求。此检查为可选项，不验证工作区工具、集成或思考支持。",
   "codexProvider.checkResult.ready": "隔离环境中的原生工具调用和同一线程中的后续请求已通过。",
   "codexProvider.checkResult.unsupported": "此模型或端点不支持本次检查要求的 Responses 或工具行为。",
   "codexProvider.checkResult.unsupported_parameter": "端点拒绝了本次检查要求的请求参数。",
