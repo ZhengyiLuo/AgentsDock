@@ -1,6 +1,6 @@
 # Public development log
 
-## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8 candidate
+## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
 
 - Display thinking summaries directly and retain expansion through completion.
   Opening historical traces loads one bounded activity page automatically;
@@ -12,7 +12,39 @@
 - Show custom-model summary support separately from basic tool compatibility.
 - Pass 822 transport, service, state, locale and custom-provider checks, plus
   173 timeline and projection checks and TypeScript validation.
-- Native integration acceptance, signed packaging and publication are pending.
+- Native acceptance follows controlled Responses through the real Codex
+  app-server, production server, authenticated WebSocket, desktop service,
+  preload, state and timeline. Compare rendered text and completed sections
+  exactly with native public-summary notifications. Verify live visibility,
+  summary/tool/summary order, reconnect, authoritative replacement and retention
+  after completion without persisting transient rows.
+- Stop an actual native turn that omits item completion; retain its received
+  text as a partial summary. Reopen SQLite in a fresh desktop process and
+  expand its historical trace to verify the partial marker and bounded load.
+  Inspect light/dark layouts at narrow width. Retain finite Chromium
+  ResizeObserver notifications in the evidence; geometry and warning counts
+  settle, with no application errors. This is public-summary validation,
+  not native GUI pixel parity or a claim about unavailable internal reasoning.
+- Accept desktop **1.0.4-beta.8 / 1181** from
+  `3bb296e1ea076f76f235905d3d2deb965b28e08b`. All 88 packaged compiled files
+  match the source fingerprints frozen before artifact download. Replay the
+  accepted native capture through the exact packaged full-app renderer,
+  preload and state; live/final text and chronological tool placement match.
+  This packaged replay uses offline fixture transport.
+- Universal Developer ID signatures, notarization, Gatekeeper, mounted
+  DMG/ZIP parity and updater checks pass locally; the signed executable passes
+  its clean CI launch. Preserve the previous accepted app separately.
+- Pass all four platform builds and package checks, then all four publication
+  replay checks. macOS and both Linux suites pass 4,564 tests (10 skipped);
+  Windows passes 4,528 (16 skipped). Publish the Windows installer under the
+  documented unsigned beta policy.
+- Publish after the matching signed AgentsServer **1.0.4-beta.8** is publicly
+  accepted. Verify 14 exact assets and authored notes on both desktop feeds,
+  every public asset digest and size against independently hashed held files,
+  the exact source tag, anonymous asset availability, and downloaded checksum
+  manifests/updater metadata. Release/tag metadata uses authenticated API reads.
+- Releases: [desktop beta.8](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.8),
+  [legacy Beta feed](https://github.com/ZhengyiLuo/AgentsDock-Releases/releases/tag/v1.0.4-beta.8).
 
 ## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
 

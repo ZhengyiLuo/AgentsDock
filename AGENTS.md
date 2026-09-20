@@ -1,6 +1,11 @@
 # Development rules
 
 - Preserve user work and keep changes scoped to the requested task.
+- Match each provider's native user-facing behavior: Codex chats must match
+  Codex, and Claude chats must match Claude. Verify the exposed thinking text,
+  live updates, chronological placement, and retention after completion or
+  interruption against the corresponding native client. Do not infer Claude
+  parity from Codex tests, or equate visibility improvements with content parity.
 - Read the relevant package documentation before changing its code. Use the
   package's type checks and targeted tests, then validate the affected build.
 - Follow `docs/APP_DEV_OPERATIONS.md` for every app feature and bug fix.
