@@ -1,5 +1,20 @@
 # Public development log
 
+## 2026-09-19 — Center the Team Network mail reader — 1.0.4-beta.6
+
+- Center mail threads in a wider reading column instead of pushing sent
+  messages against the far-right edge. Align incoming and sent messages,
+  increase message spacing, and soften the sent-message background.
+- Reproduce the previous layout at 2,000 pixels and 70% zoom in native
+  offscreen Electron using the production mail and Markdown components.
+  Inspect the corrected reader at 2,000, 1,200 and 600 pixels in light and
+  dark themes, including long text, code blocks and attachments. Verify no
+  page overflow, native navigation and scrolling, code copy and attachment
+  preview. The fixture uses synthetic read-only mail and an isolated
+  clipboard; delivery and production server data are outside this check.
+- Pass all 114 existing mail/style tests, TypeScript, production compilation
+  and the compiled-output verifier. This layout change needs no server update.
+
 ## 2026-09-19 — Preserve side chats across servers — 1.0.4-beta.5
 
 - Keep side-chat state and its native conversation owned by the saved server

@@ -96,9 +96,11 @@
 .network-v2-route-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .network-v2-route-search { width: calc(100% - 12px); margin: 2px 6px 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .network-v2-route-item small { display: block; font-size: 10px; opacity: .65; }
-.network-v2-mail-thread { display: flex; flex-direction: column; gap: 14px; }
-.network-v2-thread-message { width: min(92%, 760px); padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
-.network-v2-thread-message.outgoing { align-self: flex-end; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.network-v2-mail-thread { width: min(100%, 1040px); min-width: 0; margin-inline: auto; display: flex; flex-direction: column; gap: 18px; }
+.network-v2-thread-message { width: 100%; min-width: 0; padding: clamp(16px, 2vw, 28px); border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
+.network-v2-thread-message.outgoing { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.network-v2-thread-message > .network-v2-plain-body,
+.network-v2-thread-message > .network-v2-attachments { width: 100%; }
 .network-v2-thread-actions { display: flex; justify-content: flex-end; }
 .network-v2-thread-message > header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
 .network-v2-thread-message > header > strong { min-width: 0; flex: 1 1 140px; }
