@@ -14,8 +14,11 @@ from contextlib import closing
 import json
 from pathlib import Path
 import socket
+import sys
 import tempfile
+import threading
 import time
+import traceback
 import unittest
 from unittest import mock
 from urllib.parse import urlencode
@@ -196,7 +199,25 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
             self.tls.assert_settled()
             offline = self.commit()
             reopened, outgoing, disconnect = await self.connect_socket(retained)
-            restored = await asyncio.wait_for(outgoing.get(), 5)
+            try:
+                restored = await asyncio.wait_for(outgoing.get(), 5)
+            except TimeoutError:
+                feed = self.runtime._mail_hints.member
+                watcher = self.tls.gateway._mail_watcher
+                print("Mail reconnect timeout:", {
+                    "feed": None if feed is None else (feed.ready.is_set(), feed.closed, feed.close_code),
+                    "watcher": (watcher._closed, watcher._thread.is_alive(), len(watcher._entries)),
+                    "pending": self.runtime._mail_hints.pending,
+                    "leases": len(self.runtime._mail_hints.leases),
+                }, flush=True)
+                stacks = sys._current_frames()
+                for thread in threading.enumerate():
+                    if thread.name.startswith("agentsdock-") and thread.ident in stacks:
+                        print("Mail diagnostic thread:", thread.name, flush=True)
+                        traceback.print_stack(stacks[thread.ident])
+                for task in asyncio.all_tasks():
+                    task.print_stack()
+                raise
             self.assert_frame(restored, "snapshot", offline)
             self.assertFalse(restored["cursor"]["reset"])
             self.assertNotEqual(restored["stream_id"], snapshot["stream_id"])
