@@ -246,17 +246,6 @@ a { color: inherit; }
 .showcase-copy h3 { font-family: var(--display); font-size: clamp(24px, 2.9vw, 31px); font-weight: 600; letter-spacing: -.015em; line-height: 1.14; margin: 0 0 16px; color: var(--text); }
 .showcase-copy p { color: var(--muted); font-size: var(--body-1); line-height: var(--line-loose); margin: 0; max-width: 540px; font-weight: 400; }
 .showcase-copy code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; color: var(--blue-2); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; }
-/* Device-list card (Tailscale-style, in our frame) */
-.device-media { line-height: normal; padding: 30px 30px 34px; display: block; }
-.device-card-owner { margin: 0 0 22px; font-family: var(--display); font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, .5); }
-.device-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
-.device-row { display: flex; align-items: flex-start; gap: 13px; }
-.device-dot { flex-shrink: 0; margin-top: 6px; width: 9px; height: 9px; border-radius: 50%; background: #54d18c; box-shadow: 0 0 0 3px rgba(84,209,140,.16); }
-.device-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.device-name { display: inline-flex; align-items: center; gap: 8px; font-family: var(--display); font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, .48); }
-.device-name svg { color: rgba(255, 255, 255, .3); flex-shrink: 0; }
-.device-ip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: rgba(255, 255, 255, .3); letter-spacing: .01em; }
-.device-tag { font-family: var(--body-font); font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--blue-2); background: var(--accent-soft); border: 1px solid rgba(91,157,255,.28); padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
 /* Terminal card (coded, in our frame) */
 .terminal-media { line-height: normal; padding: 0; background: #0b0e13; }
 .terminal-card { margin: 0; padding: 24px 26px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.85; color: #d6deea; white-space: pre-wrap; word-break: break-word; }
