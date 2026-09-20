@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.python-version
+.venv/
+venv/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime state
+.agentsdock/
+.zenithbot-agent/
+state/
+files/
+*.log
+
+# Build/export noise
+dist/
+build/
+.DS_Store
+.test-state*/
