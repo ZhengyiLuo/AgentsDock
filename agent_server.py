@@ -79002,6 +79002,17 @@ async def interactive_chat_native_snapshot(session_id: str) -> dict[str, Any]:
     goal = await get_codex_goal(session_id)
     codex_available = backend == BACKEND_CODEX and CODEX_TRANSPORT != CODEX_TRANSPORT_EXEC
     claude_available = backend == BACKEND_CLAUDE and CLAUDE_TRANSPORT != CLAUDE_TRANSPORT_PRINT
+    runtime_available = True
+    if backend == BACKEND_CURSOR:
+        # Contract support is independent of CLI readiness. Read only the
+        # cached readiness bit; never expose raw diagnostics or probe on a
+        # guest refresh. Actual turn admission still rechecks the runtime.
+        with RUNTIME_DIAGNOSTICS_LOCK:
+            diagnostic = RUNTIME_DIAGNOSTICS.get(BACKEND_CURSOR) or {}
+            runtime_available = (
+                diagnostic.get("status") == "ready"
+                and diagnostic.get("available") is True
+            )
     status = {"type": "active" if active else "idle", "activeFlags": []}
     codex_runtime = {
         "available": codex_available, "transport": CODEX_TRANSPORT,
@@ -79047,6 +79058,11 @@ async def interactive_chat_native_snapshot(session_id: str) -> dict[str, Any]:
             "codex_controls": {"available": codex_available},
             "claude_controls": {"available": claude_available,
                                 "interactive_client_capability": CLAUDE_SDK_INTERACTIVE_CLIENT_CAPABILITY},
+            "cursor_backend": {
+                "available": True, "required": False, "version": 2,
+                "permission_modes": list(CURSOR_PERMISSION_MODES),
+                "default_permission_mode": CURSOR_DEFAULT_PERMISSION_MODE,
+            },
             "provider_jobs_access_control_v1": {
                 "available": bool(AGENT_TOKEN), "version": 1,
                 "modes": list(PROVIDER_JOBS_ACCESS_MODES),
@@ -79055,7 +79071,7 @@ async def interactive_chat_native_snapshot(session_id: str) -> dict[str, Any]:
             "workspace_files": {"available": False},
         }},
         "runtime_catalog": {"backends": {backend: {
-            "available": True, "models": [{"value": model, "label": model or "Server default"}],
+            "available": runtime_available, "models": [{"value": model, "label": model or "Server default"}],
             "efforts": [{"value": effort, "label": effort or "Server default"}],
         }}},
     })
