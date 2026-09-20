@@ -25,6 +25,27 @@
   inheritance, stale process markers and save-during-start races. Test
   summary/plaintext streaming, native completion, WebSocket negotiation,
   semantic paging and interruption through isolated production harnesses.
+- Keep session-list metadata compact without increasing its payload budget.
+  Omit never-configured limits while preserving explicit null tombstones
+  after clearing an override. The 182-row regression stays below 150,000 bytes;
+  186 related session, configuration, fork and paging checks pass.
+- Accept source `b0044cb59d581b7d65120c203a5731f2057a3ac2` from
+  [release run 35493194839](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35493194839):
+  all eight shards pass, with 4,457 tests passed and two skipped. Verify the
+  Ed25519 manifest signature, safe archive membership, and all 85 packaged
+  source files and modes against that exact commit.
+- Publish [beta.9](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.9)
+  using the exact three held assets. Independently verify unauthenticated
+  public downloads, API metadata, asset listing, Git tag and rendered release
+  notes; all hashes, the signature and the manifest match the accepted source.
+  Archive SHA-256:
+  `fb7a4703274eed77d5205f42088fc7631f7df1c09ad1132ec7e0b5177d651263`.
+- Accept identity- and instance-bound managed idle updates on both target
+  servers. Replace only the exact owned pending beta.8 reservation where one
+  remains. At receipt verification both beta.9 updates are pending behind
+  active work; running versions remain beta.8 and beta.6 respectively.
+  No forced restart is performed, and accepted reservations do not imply
+  completed installation.
 
 ## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
 
