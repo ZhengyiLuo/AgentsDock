@@ -33,20 +33,25 @@ afterEach(cleanup)
 afterEach(() => setReasoningDisplay('compact'))
 
 describe('native Codex activity presentation', () => {
-  it('shows one current line after commentary and keeps earlier full text in chronological history', () => {
-    const { container } = render(row(item([early, commentary, latest])))
+  it('shows one current line after commentary and reveals earlier live text only through the setting', () => {
+    const { container } = render(<><ReasoningDisplaySettings />{row(item([early, commentary, latest]))}</>)
     expect(container.querySelectorAll('.is-active')).toHaveLength(1)
     expect(container.querySelector('.is-active')).toHaveTextContent('Planning the next check')
     expect(container.querySelectorAll('.trace-reasoning-body')).toHaveLength(0)
     expect(screen.queryByText('Thinking summary')).not.toBeInTheDocument()
     expect(screen.queryByText('Inspecting the workspace')).not.toBeInTheDocument()
     expect(container.querySelector('.trace-activity')?.lastElementChild).toHaveTextContent('Planning the next check')
-    fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
-    expect(screen.getByText('The complete earlier explanation.')).toBeInTheDocument()
-    expect(container.querySelector('.trace-activity')?.firstElementChild).toHaveAttribute('data-event-seq', '1')
+    expect(screen.queryByRole('button', { name: 'Earlier activity' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Load available activity' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Planning the next check' }))
     expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
     expect(container.querySelector('.trace-commentary')).toHaveTextContent(commentary.text!)
+    fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
+    expect(screen.getByText('The complete earlier explanation.')).toBeInTheDocument()
+    expect(container.querySelector('.trace-activity')?.firstElementChild).toHaveAttribute('data-event-seq', '1')
+    expect(screen.queryByRole('button', { name: 'Earlier activity' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load available activity' })).toBeInTheDocument()
+    expect(window.agentsDock.timeline.trace).not.toHaveBeenCalled()
   })
 
   it('replaces the summary status with the actual latest command and stops pulsing on completion', () => {
@@ -94,6 +99,7 @@ describe('native Codex activity presentation', () => {
     expect(container.querySelector('.codex-native-activity')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Thinking summary' })).toBeInTheDocument()
     expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load available activity' })).toBeInTheDocument()
   })
 
   it('persists optional full reasoning, keeps both native channels, and restores the compact default on request', () => {
@@ -102,8 +108,8 @@ describe('native Codex activity presentation', () => {
     const view = render(<><ReasoningDisplaySettings />{row(item([early, commentary, { ...latest, phase: 'summary' }, raw]))}</>)
     expect(screen.queryByText(/END_OF_RECEIVED_REASONING/)).not.toBeInTheDocument()
     expect(view.container.querySelector('.is-active')).toHaveTextContent('Planning the next check')
-    fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
-    expect(screen.queryByText(/END_OF_RECEIVED_REASONING/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Earlier activity' })).not.toBeInTheDocument()
+    expect(view.container.querySelector('.trace-detail-actions')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
     expect(readReasoningDisplay()).toBe('expanded')
     expect(window.localStorage.getItem('agentsdock.reasoningDisplay')).toBe('expanded')
@@ -121,6 +127,8 @@ describe('native Codex activity presentation', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Show reasoning traces' }))
     expect(screen.queryByText(/END_OF_RECEIVED_REASONING/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Planning the next check' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Load available activity' })).not.toBeInTheDocument()
+    expect(window.agentsDock.timeline.trace).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -135,9 +143,10 @@ describe('native Codex activity presentation', () => {
     if (display === 'expanded') {
       expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
     } else {
-      fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
-      expect(screen.getByText('The full current explanation.')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Earlier activity' })).not.toBeInTheDocument()
+      expect(screen.queryByText('The full current explanation.')).not.toBeInTheDocument()
       expect(screen.queryByText(raw.text!)).not.toBeInTheDocument()
+      expect(view.container.querySelector('.trace-detail-actions')).not.toBeInTheDocument()
     }
     const completed = item(events, {
       active: false,
@@ -153,6 +162,7 @@ describe('native Codex activity presentation', () => {
     expect(screen.queryByText(raw.text!)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Planning the next check' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Earlier activity' })).toHaveAttribute('aria-expanded', 'false')
+    expect(view.container.querySelector('.trace-detail-actions')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Earlier activity' }))
     expect(screen.getByText(raw.text!, { selector: '.trace-reasoning-body p' })).toBeInTheDocument()
     expect(screen.getByText('The full current explanation.')).toBeInTheDocument()

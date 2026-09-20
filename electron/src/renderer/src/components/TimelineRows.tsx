@@ -643,10 +643,9 @@ function TraceDisclosure({
                   : null)
             : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} showPlaintext />)}
           {open && runActivity && nativeCodex && activityLive && latestReasoning && !expandedReasoning && <CodexReasoningEvent entry={{ kind: 'reasoning', key: reasoningItemKey(latestReasoning), seq: progressEventSequence(latestReasoning), events: [latestReasoning] }} sessionId={sessionId} activeKey={activeReasoningKey} />}
-          {open && runActivity && nativeCodex && activeToolKey && latestActivity?.kind === 'tool' && <ToolEvent entry={latestActivity} nativeCodex active runLive />}
         </ol>
-        {open && runActivity && nativeCodex && !expandedReasoning && historicalReasoningCount > 0 && <button type="button" className="codex-activity-history-toggle" aria-expanded={reasoningHistoryOpen} onClick={() => setReasoningHistoryOpen(value => !value)}><ChevronRight size={12} aria-hidden="true" />{t('timeline.activity.earlierActivity')}</button>}
-        {open && runId && <div className="trace-detail-actions">
+        {open && runActivity && nativeCodex && !activityLive && historicalReasoningCount > 0 && <button type="button" className="codex-activity-history-toggle" aria-expanded={reasoningHistoryOpen} onClick={() => setReasoningHistoryOpen(value => !value)}><ChevronRight size={12} aria-hidden="true" />{t('timeline.activity.earlierActivity')}</button>}
+        {open && runId && (!nativeCodex || !activityLive || expandedReasoning) && <div className="trace-detail-actions">
           {loadLabel && <button type="button" disabled={loadingMore} onClick={() => void showMore()}>{loadingMore && <LoaderCircle className="spin" size={12} />}{loadLabel}</button>}
           {loadedEvents && <button type="button" disabled={loadingMore} onClick={showLess}>{t('timeline.ui.useCompactTrace')}</button>}
           {loadError && <span role="alert">{loadError}</span>}
@@ -738,24 +737,29 @@ function RunActivitySupportGroup({ parts, sessionId, profileScope, nativeCodex =
   useLocale()
   const [open, setOpen] = useState(false)
   const detailsId = useId()
-  const shownParts = nativeCodex ? parts.filter(part => part.kind !== 'activity' || part.entry.key !== activeToolKey) : parts
-  const toolsOnly = nativeCodex && shownParts.every(part => part.kind === 'activity' && part.entry.kind === 'tool')
-  if (!shownParts.length) return null
-  if (toolsOnly && shownParts.length === 1 && shownParts[0].kind === 'activity' && shownParts[0].entry.kind === 'tool') {
-    return <ToolEvent entry={shownParts[0].entry} nativeCodex runLive={runLive} />
+  const activePart = nativeCodex && runLive ? parts.find(part => part.kind === 'activity'
+    && part.entry.kind === 'tool' && part.entry.key === activeToolKey && !part.entry.finished) : undefined
+  const activeTool = activePart?.kind === 'activity' && activePart.entry.kind === 'tool' ? activePart.entry : null
+  const toolsOnly = nativeCodex && parts.every(part => part.kind === 'activity' && part.entry.kind === 'tool')
+  if (!parts.length) return null
+  if (toolsOnly && parts.length === 1 && parts[0].kind === 'activity' && parts[0].entry.kind === 'tool') {
+    return <ToolEvent entry={parts[0].entry} nativeCodex active={Boolean(activeTool)} runLive={runLive} />
   }
-  const completedTools = toolsOnly && shownParts.every(part => part.kind === 'activity' && part.entry.kind === 'tool' && part.entry.finished)
-  const summary = completedTools ? t('timeline.activity.ranCommands') : runActivitySupportSummary(shownParts)
+  const completedTools = toolsOnly && parts.every(part => part.kind === 'activity' && part.entry.kind === 'tool' && part.entry.finished)
+  // One chronological group owns the current status and its command history;
+  // the running tool must not create a second row beside the finished calls.
+  const summary = activeTool ? `${t('timeline.ui.running')} ${toolHeadline(activeTool.started ?? activeTool.finished!)}`
+    : completedTools ? t('timeline.activity.ranCommands') : runActivitySupportSummary(parts)
   return <li className={`run-activity-support${open ? ' open' : ''}`}>
     <button
       type="button"
-      className="run-activity-support-toggle"
+      className={`run-activity-support-toggle${nativeCodex ? ' codex-activity-line' : ''}${activeTool ? ' is-active' : ''}`}
       aria-expanded={open}
       aria-controls={detailsId}
       onClick={() => setOpen(value => !value)}
-    >{toolsOnly ? <TerminalSquare size={13} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}<span>{summary}</span>{toolsOnly && <ChevronRight size={12} aria-hidden="true" />}</button>
+    >{toolsOnly || activeTool ? <TerminalSquare size={13} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}<span>{summary}</span>{(toolsOnly || activeTool) && <ChevronRight size={12} aria-hidden="true" />}</button>
     {open && <ol id={detailsId} className="run-activity-support-details" aria-label={summary}>
-      {shownParts.map(part => nativeCodex && part.kind === 'activity' && part.entry.kind === 'tool'
+      {parts.map(part => nativeCodex && part.kind === 'activity' && part.entry.kind === 'tool'
         ? <ToolEvent key={part.entry.key} entry={part.entry} nativeCodex runLive={runLive} />
         : <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} />)}
     </ol>}

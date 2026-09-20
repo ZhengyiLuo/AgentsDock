@@ -9,9 +9,11 @@ import { useAppStore } from '../store/app-store'
 import { TimelineRowView as TimelineRowViewImpl } from './TimelineRows'
 import { setLocale } from '@shared/i18n'
 import { formatTime } from '../lib/format'
+import { setReasoningDisplay } from '../lib/reasoning-display'
 
 afterEach(cleanup)
 afterEach(() => setLocale('en'))
+afterEach(() => setReasoningDisplay('compact'))
 const originalSelectSession = useAppStore.getState().selectSession
 const originalAcknowledgeEmergency = useAppStore.getState().acknowledgeEmergency
 const TEST_PIN_PROFILE_SCOPE: WorkspaceProfileScope = {
@@ -2332,6 +2334,8 @@ describe('timeline pin state', () => {
     expect(screen.queryByText('Old progress.')).not.toBeInTheDocument()
     expect(screen.getByText('An old unclassified summary remains supporting detail.')).toBeInTheDocument()
     expect(loadTrace).not.toHaveBeenCalled()
+    expect(within(latest as HTMLElement).queryByRole('button', { name: 'Load available activity' })).not.toBeInTheDocument()
+    act(() => setReasoningDisplay('expanded'))
     fireEvent.click(within(latest as HTMLElement).getByRole('button', { name: 'Load available activity' }))
     await within(latest as HTMLElement).findByRole('button', { name: 'Use compact trace' })
     expect(loadTrace).toHaveBeenCalledWith('chat-1', 'goal-run', 312, 3)
@@ -2375,6 +2379,8 @@ describe('timeline pin state', () => {
     expect(within(earlier).queryByText(/Working for/)).not.toBeInTheDocument()
     expect(container).not.toHaveTextContent('You stopped')
     expect(loadTrace).not.toHaveBeenCalled()
+    expect(within(latest).queryByRole('button', { name: 'Load available activity' })).not.toBeInTheDocument()
+    act(() => setReasoningDisplay('expanded'))
     fireEvent.click(within(latest).getByRole('button', { name: 'Load available activity' }))
     await within(latest).findByRole('button', { name: 'Use compact trace' })
     expect(loadTrace).toHaveBeenLastCalledWith('chat-1', 'goal-owner', 4, 3)

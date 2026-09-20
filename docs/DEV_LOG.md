@@ -1,5 +1,29 @@
 # Public development log
 
+## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 candidate
+
+- Keep the active Codex tool inside its compact command group. Update the
+  group's single row to the latest running call and retain previous calls
+  behind its disclosure. Preserve commentary boundaries and visible reasoning
+  chronology. Only the current activity pulses.
+- Hide extra trace-history controls in compact live Codex turns. Keep manual
+  pagination in expanded live traces and explicitly opened completed history.
+- Retain live-only reasoning display and identical collapsed completed/stopped
+  history. This supersedes the undelivered beta.10 candidate, whose running
+  call could still appear beside a separate completed-command group.
+- Pass 4,598 source tests (10 skipped), 164 focused timeline checks, TypeScript
+  validation and production compilation. Verify real native Codex commands
+  separated by reasoning within one commentary block, including a delayed
+  second call: one compact pulsing row retains both calls. Confirm a later
+  commentary creates its own chronological block. Exercise the actual Settings
+  entry and switch, completion, stop, unchanged completed history, reduced
+  motion, both themes and no automatic trace requests in isolated native
+  Electron through the production server and authenticated transport.
+  Provider Responses are controlled fixtures; this is transport and display
+  acceptance against the supplied visual reference, not external-model output
+  or native GUI pixel parity.
+- Availability: source candidate; signed package acceptance pending.
+
 ## 2026-09-19 — Live-only reasoning display — 1.0.4-beta.10 candidate
 
 - Apply the reasoning display preference only during an active Codex turn.
