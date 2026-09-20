@@ -3693,6 +3693,28 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
             "backend": agent_server.BACKEND_CODEX,
         }])
         stack, events, _finished, _exec_fallback = self.runner_patches(manager)
+        completed_trace_ready = asyncio.Event()
+        partial_trace_ready = asyncio.Event()
+        published_item_ids: set[str] = set()
+        expected_item_ids = {"reason-a", "reason-b", "commentary-before"}
+        update_stream = agent_server.update_reasoning_summary_stream
+
+        async def observe_append(_session_id, event_type, payload):
+            if event_type == "reasoning_summary" and payload.get("run_id") == "run-original":
+                published_item_ids.add(payload.get("item_id"))
+                if expected_item_ids <= published_item_ids:
+                    completed_trace_ready.set()
+            return {}
+
+        async def observe_stream(session_id, run_id, item_id, *args, **kwargs):
+            await update_stream(session_id, run_id, item_id, *args, **kwargs)
+            if (session_id, run_id, item_id) == ("chat-native", "run-original", "unfinished-reasoning"):
+                streamed = agent_server.reasoning_summary_stream_item(session_id, run_id, item_id)
+                if streamed.get("text") == "This unfinished summary remains visible as partial.":
+                    partial_trace_ready.set()
+
+        events.side_effect = observe_append
+        stack.enter_context(patch.object(agent_server, "update_reasoning_summary_stream", observe_stream))
         with stack:
             released = agent_server.release_turn_slot
             released.return_value = True
@@ -3706,44 +3728,42 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     allow_exec_fallback=True,
                 )
             )
-            for _ in range(100):
-                completed_trace = [
-                    call
-                    for call in events.await_args_list
-                    if call.args[1] == "reasoning_summary"
-                ]
-                if len(completed_trace) == 3:
-                    break
-                await asyncio.sleep(0)
-            else:
-                self.fail("pre-steer trace items were not published")
+            try:
+                # Steer only after both durable trace publication and the real
+                # live-summary update. Scheduler tick counts are not a deadline.
+                await asyncio.wait_for(asyncio.gather(
+                    completed_trace_ready.wait(), partial_trace_ready.wait()), timeout=10)
 
-            run_now = await asyncio.wait_for(
-                agent_server.run_queued_turn_now(
-                    "chat-native",
-                    "queued-steer",
-                ),
-                timeout=2,
-            )
-            # Re-delivery of one authoritative item must not duplicate it,
-            # while a distinct item with identical text remains visible.
-            turn.feed(reasoning_item("reason-a", "Same completed reasoning."))
-            turn.feed(reasoning_item("reason-after", "Same completed reasoning."))
-            turn.feed(agent_message(
-                "commentary-after",
-                "Completed commentary after steering.",
-                "commentary",
-            ))
-            turn.feed(agent_message(
-                "final-after",
-                "One final answer.",
-                "final_answer",
-            ))
-            turn.feed(completed_notification())
-            # This checks trace ownership, not a two-second cleanup SLA.
-            # Keep completion bounded without cancelling a valid finalizer
-            # when the full CI suite delays the event loop.
-            await asyncio.wait_for(runner, timeout=10)
+                run_now = await asyncio.wait_for(
+                    agent_server.run_queued_turn_now(
+                        "chat-native",
+                        "queued-steer",
+                    ),
+                    timeout=2,
+                )
+                # Re-delivery of one authoritative item must not duplicate it,
+                # while a distinct item with identical text remains visible.
+                turn.feed(reasoning_item("reason-a", "Same completed reasoning."))
+                turn.feed(reasoning_item("reason-after", "Same completed reasoning."))
+                turn.feed(agent_message(
+                    "commentary-after",
+                    "Completed commentary after steering.",
+                    "commentary",
+                ))
+                turn.feed(agent_message(
+                    "final-after",
+                    "One final answer.",
+                    "final_answer",
+                ))
+                turn.feed(completed_notification())
+                # This checks trace ownership, not a two-second cleanup SLA.
+                # Keep completion bounded without cancelling a valid finalizer
+                # when the full CI suite delays the event loop.
+                await asyncio.wait_for(runner, timeout=10)
+            finally:
+                if not runner.done():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
 
         trace_payloads = [
             call.args[2]
