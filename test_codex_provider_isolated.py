@@ -449,7 +449,64 @@ class ManagerGenerationTests(unittest.IsolatedAsyncioTestCase):
                 manager.close.assert_not_awaited()
 
 
+class NativeCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_owned_catalog_keeps_tool_metadata_and_never_uses_normal_credentials(self):
+        original = {"slug": "builtin/model", "default_reasoning_level": "low",
+            "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}],
+            "default_reasoning_summary": "detailed", "supports_experimental_context": True,
+            "multi_agent_reasoning_effort": "high", "use_responses_lite": True,
+            "model_messages": {"base_instructions": "native policy", "instructions_template": "native template"},
+            "tool_mode": "native-tools", "context_window": 272000}
+        with tempfile.TemporaryDirectory(prefix="provider-native-catalog-") as temporary:
+            target = Path(temporary) / "models.json"
+            async def read(command, *, prompt, cwd, env, timeout):
+                self.assertEqual(command[-2:], ["debug", "models"])
+                self.assertEqual((env["HOME"], env["CODEX_HOME"], env["TMPDIR"]), (cwd, cwd, cwd))
+                self.assertNotIn(KEY, str(command) + str(env))
+                self.assertNotIn("OPENAI_API_KEY", env)
+                self.assertNotIn(provider.ENV_KEY, env)
+                self.assertNotIn("AGENTSDOCK_AGENT_TOKEN", env)
+                self.assertTrue(Path(cwd).is_dir())
+                self.assertEqual(timeout, 15)
+                return json.dumps({"models": [original]})
+            with patch.object(provider, "run_isolated_command", side_effect=read):
+                result = await provider.prepare_native_catalog("unused-native", {
+                    "PATH": "/synthetic/bin", "HOME": "/normal-home", "CODEX_HOME": "/normal-codex",
+                    "OPENAI_API_KEY": KEY, provider.ENV_KEY: KEY, "AGENTSDOCK_AGENT_TOKEN": KEY,
+                }, target)
+            self.assertEqual(result, str(target))
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(Path(temporary).iterdir()), [target])
+            model = json.loads(target.read_text())["models"][0]
+            for key in ("model_messages", "tool_mode", "context_window", "supported_reasoning_levels"):
+                self.assertEqual(model[key], original[key])
+            self.assertIsNone(model["default_reasoning_level"])
+            self.assertIsNone(model["multi_agent_reasoning_effort"])
+            self.assertEqual(model["default_reasoning_summary"], "none")
+            self.assertFalse(model["supports_reasoning_summary_parameter"])
+            self.assertFalse(model["supports_experimental_context"])
+            self.assertFalse(model["use_responses_lite"])
+            self.assertEqual(original["default_reasoning_level"], "low")
+
+    async def test_invalid_native_catalog_is_safe_and_preserves_previous_file(self):
+        with tempfile.TemporaryDirectory(prefix="provider-native-catalog-") as temporary:
+            target = Path(temporary) / "models.json"
+            target.write_text("previous-catalog")
+            for raw in (KEY, '{"models": []}', '{"models": [{"slug": "same"}, {"slug": "same"}]}'):
+                with self.subTest(raw_is_json=raw != KEY), patch.object(provider, "run_isolated_command", AsyncMock(return_value=raw)):
+                    with self.assertRaises(HTTPException) as caught:
+                        await provider.prepare_native_catalog("unused-native", {}, target)
+                    self.assertEqual(caught.exception.status_code, 503)
+                    self.assertNotIn(KEY, str(caught.exception.detail))
+                    self.assertEqual(target.read_text(), "previous-catalog")
+                    self.assertEqual(list(Path(temporary).iterdir()), [target])
+
+
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.prepare_catalog = AsyncMock(side_effect=lambda executable, env, path: str(path))
+        self.enterContext(patch.object(provider, "prepare_native_catalog", self.prepare_catalog))
+
     async def test_shared_native_registration_preserves_effective_shell_exclusions(self):
         self.assertFalse(any(value.startswith("shell_environment_policy.exclude=") for value in provider.registration_args(SELECTION)))
         factory = FakeProcessFactory()
@@ -540,6 +597,8 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((captured["environment"]["HOME"], captured["environment"]["CODEX_HOME"]),
             ("/synthetic-home", captured["cwd"]))
         params = native.start_thread.call_args.args[0]
+        self.prepare_catalog.assert_awaited_once()
+        self.assertEqual(params["config"]["model_catalog_json"], str(Path(captured["cwd"]) / "models.json"))
         self.assertEqual(params["environments"], [])
         self.assertEqual(params["dynamicTools"][0]["name"], provider.TEST_TOOL)
         self.assertTrue(params["config"]["tools.update_plan.enabled"])

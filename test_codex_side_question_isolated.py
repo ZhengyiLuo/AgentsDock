@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 import codex_side_question as adapter
+import codex_provider
 from side_questions import SideQuestionError
 
 
@@ -82,6 +83,13 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.factory = Mock(return_value=self.client)
         self.verify = AsyncMock()
+        self.prepare_catalog = AsyncMock(side_effect=lambda executable, env, path: str(path))
+        self.enterContext(patch.object(codex_provider, "prepare_native_catalog", self.prepare_catalog))
+        async def start():
+            callback = self.factory.call_args.kwargs.get("before_start")
+            if callback:
+                await callback()
+        self.client.start.side_effect = start
         self.enterContext(patch.object(adapter, "CodexAppServerClient", self.factory))
         self.enterContext(patch.object(adapter, "_verify_protocol", self.verify))
 
@@ -93,6 +101,8 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_forks_native_parent_history_without_workspace_authority(self):
         self.assertEqual(await self.answer(), "Answer")
         args, options = self.factory.call_args
+        self.prepare_catalog.assert_not_awaited()
+        self.assertNotIn("before_start", options)
         self.assertEqual(args, ("synthetic-codex",))
         self.assertEqual(options["env_factory"](), {"HOME": "/synthetic/auth", "PATH": "/bin"})
         self.assertTrue(options["cwd"].split("/")[-1].startswith("agentsdock-side-chat-"))
@@ -162,6 +172,9 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("AGENTSDOCK_TOKEN", options["env_factory"]())
         self.assertNotIn(selected["api_key"], str(options["app_server_args"]))
         params = self.client.fork_thread.await_args.args[1]
+        self.prepare_catalog.assert_awaited_once()
+        self.assertEqual(params["config"]["model_catalog_json"], str(Path(options["cwd"]) / "models.json"))
+        self.assertIn('model_catalog_json=' + json.dumps(params["config"]["model_catalog_json"]), options["app_server_args"])
         self.assertEqual(params["modelProvider"], PROVIDER_ID)
         self.assertFalse(params["config"]["model_providers"][PROVIDER_ID]["requires_openai_auth"])
         self.assertEqual(params["config"]["model_reasoning_summary"], "none")

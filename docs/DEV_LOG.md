@@ -37,6 +37,12 @@
   rollover, while ordinary Codex retains its existing recovery behavior.
   Native capture confirms the turn override removes inherited detailed
   summaries as well as effort; normal sibling settings stay unchanged.
+- Extend native acceptance to canonical built-in model IDs: their metadata can
+  restore reasoning defaults after a turn clears them. Prepare an isolated
+  private catalog on each custom process launch, preserving native tools and
+  instructions while removing those defaults and selecting standard Responses.
+  Eight controlled requests verify canonical and unfamiliar models send an
+  empty reasoning object, retain instructions, and honor explicit effort.
 
 ## 2026-09-19 — Scheduled history catch-up — 1.0.4-beta.6
 

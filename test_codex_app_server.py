@@ -2682,6 +2682,74 @@ class CodexAppServerClientTests(unittest.IsolatedAsyncioTestCase):
             "thread/compact/start",
         )
 
+    async def test_manager_prepares_each_process_before_spawn_but_not_ready_reuse(self) -> None:
+        factory = FakeProcessFactory()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        spawn_counts = []
+
+        async def prepare() -> None:
+            spawn_counts.append(len(factory.calls))
+            entered.set()
+            await release.wait()
+
+        manager = CodexAppServerManager("codex", cwd="/tmp",
+            env_factory=lambda: {}, process_factory=factory, before_start=prepare)
+        self.addAsyncCleanup(manager.close)
+        opening = asyncio.create_task(manager.start())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            self.assertEqual(factory.calls, [])
+        finally:
+            release.set()
+            await opening
+        await manager.start()
+        self.assertEqual(spawn_counts, [0])
+        self.assertEqual(len(factory.calls), 1)
+        await manager.retire_generation(manager.generation)
+        await manager.start()
+        self.assertEqual(spawn_counts, [0, 1])
+        self.assertEqual(len(factory.calls), 2)
+
+    async def test_failed_preparation_prevents_spawn_and_allows_retry(self) -> None:
+        factory = FakeProcessFactory()
+        prepare = AsyncMock(side_effect=[RuntimeError("catalog unavailable"), None])
+        client = self.make_client(factory, before_start=prepare)
+        self.addAsyncCleanup(client.close)
+        with self.assertRaises(CodexAppServerDisconnected) as failure:
+            await client.start()
+        self.assertFalse(failure.exception.request_sent)
+        self.assertTrue(failure.exception.safe_to_retry)
+        self.assertEqual(factory.calls, [])
+        self.assertFalse(client.ready)
+        await client.start()
+        self.assertEqual(prepare.await_count, 2)
+        self.assertEqual(len(factory.calls), 1)
+
+    async def test_cancelled_preparation_prevents_spawn_and_releases_start_lock(self) -> None:
+        factory = FakeProcessFactory()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def prepare() -> None:
+            entered.set()
+            await release.wait()
+
+        client = self.make_client(factory, before_start=prepare)
+        self.addAsyncCleanup(client.close)
+        opening = asyncio.create_task(client.start())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+        finally:
+            opening.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await opening
+        self.assertEqual(factory.calls, [])
+        self.assertFalse(client.ready)
+        release.set()
+        await asyncio.wait_for(client.start(), timeout=1)
+        self.assertEqual(len(factory.calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

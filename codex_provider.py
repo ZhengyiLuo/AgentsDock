@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from codex_auth import validate_api_key
 from codex_app_server import CodexAppServerManager, decline_server_request
 from codex_side_question import isolated_config, _verify_protocol
-from side_questions import isolated_environment
+from side_questions import isolated_environment, run_isolated_command
 
 
 PROVIDER_ID = "agentsdock_custom"
@@ -475,6 +475,67 @@ def config_args(config: dict) -> tuple[str, ...]:
     return tuple(result)
 
 
+def native_catalog_without_reasoning_defaults(payload: object) -> dict:
+    """Retain native tools/instructions without assuming gateway reasoning support."""
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list) or not 1 <= len(models) <= 512:
+        raise ValueError("Native model catalog is unavailable")
+    corrected, seen = [], set()
+    for model in models:
+        if not isinstance(model, dict):
+            raise ValueError("Native model catalog is invalid")
+        slug = validate_model(model.get("slug"))
+        if slug in seen:
+            raise ValueError("Native model catalog has duplicate identities")
+        seen.add(slug)
+        corrected.append({**model,
+            "default_reasoning_level": None,
+            "default_reasoning_summary": "none",
+            "supports_reasoning_summary_parameter": False,
+            "supports_experimental_context": False,
+            "multi_agent_reasoning_effort": None,
+            # The internal Lite serializer adds reasoning.context regardless
+            # of supports_experimental_context. Custom endpoints use Responses.
+            "use_responses_lite": False,
+        })
+    return {"models": corrected}
+
+
+async def prepare_native_catalog(executable: str, environment: dict, target_path: Path) -> str:
+    """Build an owned custom-runtime catalog from this executable's offline metadata."""
+    target = Path(target_path).absolute()
+    storage = ProviderStore(target.parent)
+    try:
+        storage._directory(create=True)
+        with tempfile.TemporaryDirectory(prefix=".catalog-source-", dir=target.parent) as temporary:
+            env = {key: value for key, value in environment.items()
+                if key in {"PATH", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR", "PATHEXT"}}
+            env.update({"HOME": temporary, "CODEX_HOME": temporary, "TMPDIR": temporary,
+                "TMP": temporary, "TEMP": temporary, "RUST_LOG": "off", "OTEL_SDK_DISABLED": "true"})
+            config = {**isolated_config(), "cli_auth_credentials_store": "ephemeral",
+                "history.persistence": "none", "check_for_update_on_startup": False,
+                "analytics.enabled": False, "otel.exporter": "none", "otel.trace_exporter": "none",
+                "model_provider": "agentsdock_catalog",
+                "model_providers": {"agentsdock_catalog": {"name": "Offline native catalog",
+                    "base_url": "http://127.0.0.1:9/v1", "requires_openai_auth": False,
+                    "wire_api": "responses", "request_max_retries": 0, "stream_max_retries": 0}}}
+            # This existing owned-process helper caps each output stream at
+            # 1 MiB and joins cancellation/timeout cleanup before returning.
+            raw = await run_isolated_command(
+                [executable, *config_args(config), "debug", "models"],
+                prompt="", cwd=temporary, env=env, timeout=15,
+            )
+            catalog = native_catalog_without_reasoning_defaults(json.loads(raw))
+            # Reuse the private atomic writer; the catalog contains metadata,
+            # never endpoint credentials or the user's native configuration.
+            storage._atomic(target.name, catalog)
+            return str(target)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        raise HTTPException(503, "The native Codex model catalog could not be prepared. Update or repair Codex and retry.") from None
+
+
 def native_environment(environment: dict, selected: dict) -> dict:
     clean = {name: value for name, value in environment.items() if name.upper() not in {
         "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_AUTH_TOKEN", "OPENAI_BASE_URL", "OPENAI_API_BASE",
@@ -608,7 +669,6 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
             "log_dir": str(Path(temporary) / "logs"), "sqlite_home": str(Path(temporary) / "db"),
             "history.persistence": "none", "check_for_update_on_startup": False,
             "analytics.enabled": False, "otel.exporter": "none", "otel.trace_exporter": "none"}
-        args = config_args(config)
         env = native_environment(isolated_environment(environment), selected)
         # A fresh SQLite database paired with the user's Codex home triggers
         # a full history reindex before native initialization can complete.
@@ -618,6 +678,10 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
         try:
             async with asyncio.timeout(TEST_TIMEOUT_SECONDS):
                 await verify_protocol(executable, temporary, {name: value for name, value in env.items() if name != ENV_KEY})
+                config["model_catalog_json"] = await prepare_native_catalog(
+                    executable, env, Path(temporary) / "models.json",
+                )
+                args = config_args(config)
                 native = manager_factory(executable, cwd=temporary, env_factory=lambda: env,
                     app_server_args=args, request_timeout=15, lifecycle_timeout=15,
                     server_request_handler=handle_request,

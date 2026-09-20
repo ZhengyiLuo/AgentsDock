@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 import side_questions as side
+import codex_provider
 
 
 def event(kind, run="main", **kwargs):
@@ -724,7 +725,7 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.namespace = dict(asyncio=asyncio, side_questions=side, STATE_DIR=root,
             SERVER_SHUTTING_DOWN=False, STORE=SimpleNamespace(sessions={"chat": self.session}),
             CODEX_GOALS_RECONFIGURING=False,
-            codex_provider=SimpleNamespace(session_choice=lambda value: value or "default"),
+            codex_provider=codex_provider,
             CODEX_PROVIDER_STORE=SimpleNamespace(revision=lambda: None, for_session=lambda *args, **kwargs: None,
                 require_thread=lambda *args: None),
             DEFAULT_BACKEND="claude", BACKEND_CLAUDE="claude", BACKEND_CODEX="codex",
@@ -753,10 +754,13 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_side_chat_inherits_custom_selection_but_default_ignores_custom_revision(self):
         self.session["backend"] = "codex"
+        self.session["effort"] = "high"
         selected = {"base_url": "https://synthetic.invalid/v1", "model": "synthetic-model", "api_key": "synthetic-key", "credential_id": "retained"}
+        catalog = {"model_capabilities": {"synthetic-model": {"reasoning_efforts": ["high"]}}}
         revision = Mock(return_value="first")
         self.namespace["CODEX_PROVIDER_STORE"] = SimpleNamespace(revision=revision,
-            for_session=lambda session, **kwargs: selected if session.get("codex_provider") == "custom" else None,
+            for_session=lambda session, **kwargs: dict(selected) if session.get("codex_provider") == "custom" else None,
+            cached_catalog=lambda selection: catalog,
             require_thread=Mock())
         with patch.dict(sys.modules, {"codex_side_question": SimpleNamespace(NativeCodexSideChat=self.codex_factory)}):
             normal = await self.namespace["create_native_side_chat"]("chat")
@@ -767,12 +771,17 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             self.session["codex_provider"] = "custom"
             custom = await self.namespace["create_native_side_chat"]("chat")
             await custom.ask("Custom?", history=[])
-            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], selected)
+            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], {**selected, "effort": "high"})
             revision.return_value = "third"
             await custom.ask("Still retained after another endpoint is saved?", history=[])
             revision.return_value = None
             await custom.ask("Still retained after settings reset?", history=[])
             revision.assert_not_called()
+            catalog.clear()
+            unknown = await self.namespace["create_native_side_chat"]("chat")
+            await unknown.ask("Unknown reasoning support?", history=[])
+            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], {**selected, "effort": ""})
+            self.assertNotIn("effort", selected)
             selected["credential_id"] = "changed-chat-binding"
             with self.assertRaises(side.SideQuestionError) as caught:
                 await custom.ask("Stale?", history=[])

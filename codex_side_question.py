@@ -148,12 +148,29 @@ class NativeCodexSideChat:
         # retaining the user's history root can trigger a complete reindex.
         config.update({"log_dir": str(Path(temporary) / "log"), "history.persistence": "none"})
         from codex_provider import config_args
+        client_options = {}
+        if self.provider_config:
+            from codex_provider import prepare_native_catalog
+            catalog_path = Path(temporary) / "models.json"
+            config["model_catalog_json"] = str(catalog_path)
+
+            async def prepare_catalog():
+                if self._closed:
+                    raise SideQuestionError(409, "Side chat was closed; open a new side chat")
+                try:
+                    await prepare_native_catalog(self.executable, self.env, catalog_path)
+                except Exception:
+                    raise SideQuestionError(503, "Codex could not prepare custom model compatibility settings") from None
+                if self._closed:
+                    raise SideQuestionError(409, "Side chat was closed; open a new side chat")
+            client_options["before_start"] = prepare_catalog
         args = config_args(config)
         self._client = CodexAppServerClient(
             self.executable, cwd=temporary, env_factory=lambda: self.env,
             app_server_args=args, request_timeout=20, lifecycle_timeout=30,
             process_stream_limit=MAX_OUTPUT_BYTES, notification_queue_limit=512,
             sensitive_values=self.sensitive_values,
+            **client_options,
         )
         await self._client.start()
         if self._closed:

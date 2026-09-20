@@ -560,6 +560,7 @@ class CodexAppServerClient:
         json_parse_thread_threshold: int = 1024 * 1024,
         fork_cleanup_grace: float = 30.0,
         process_factory: ProcessFactory | None = None,
+        before_start: Callable[[], Awaitable[Any]] | None = None,
         server_request_handler: ServerRequestHandler | None = None,
         initialize_params: dict[str, Any] | None = None,
         on_process_started: ProcessLifecycleHook | None = None,
@@ -570,6 +571,7 @@ class CodexAppServerClient:
         self.codex_bin = codex_bin
         self.cwd = cwd
         self.env_factory = env_factory
+        self._before_start = before_start
         self._sensitive_values = tuple(value for value in sensitive_values if isinstance(value, str) and value)
         self._protected_env_keys = tuple(protected_env_keys)
         # Lifecycle hooks receive ``(pid, process_group_id)``. The group id is
@@ -709,6 +711,8 @@ class CodexAppServerClient:
                 await self._discard_process()
             self._closing = False
             try:
+                if self._before_start is not None:
+                    await self._before_start()
                 proc = await self._process_factory(
                     self.codex_bin,
                     "app-server",
@@ -2663,6 +2667,7 @@ class CodexAppServerManager:
         notification_queue_limit: int = 8192,
         json_parse_thread_threshold: int = 1024 * 1024,
         process_factory: ProcessFactory | None = None,
+        before_start: Callable[[], Awaitable[Any]] | None = None,
         server_request_handler: ServerRequestHandler | None = None,
         initialize_params: dict[str, Any] | None = None,
         on_process_started: ProcessLifecycleHook | None = None,
@@ -2681,6 +2686,7 @@ class CodexAppServerManager:
             notification_queue_limit=notification_queue_limit,
             json_parse_thread_threshold=json_parse_thread_threshold,
             process_factory=process_factory,
+            before_start=before_start,
             server_request_handler=server_request_handler,
             initialize_params=initialize_params,
             on_process_started=on_process_started,

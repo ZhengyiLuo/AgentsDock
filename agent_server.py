@@ -53531,8 +53531,12 @@ async def codex_app_server_manager(sess: dict[str, Any] | None = None) -> CodexA
                         + (codex_provider.registration_args(selected) + codex_provider.config_args({
                             "model_provider": codex_provider.PROVIDER_ID,
                             "cli_auth_credentials_store": "ephemeral",
+                            "model_catalog_json": str(CODEX_PROVIDER_STORE.root / "native-models.json"),
                         }) if selected else ())
                     ),
+                    before_start=(lambda: codex_provider.prepare_native_catalog(
+                        CODEX_BIN, codex_app_server_env(), CODEX_PROVIDER_STORE.root / "native-models.json",
+                    )) if selected else None,
                     request_timeout=CODEX_APP_SERVER_TIMEOUT_SECONDS,
                     lifecycle_timeout=CODEX_APP_SERVER_LIFECYCLE_TIMEOUT_SECONDS,
                     process_stream_limit=CODEX_APP_SERVER_JSONL_LIMIT_BYTES,
@@ -57201,6 +57205,7 @@ def codex_thread_params(
         # Custom endpoints must not inherit reasoning-summary parameters from
         # the normal account. Effort is replaced explicitly on every turn.
         flat_config["model_reasoning_summary"] = "none"
+        flat_config["model_catalog_json"] = str(CODEX_PROVIDER_STORE.root / "native-models.json")
     reserved_prefix = f"mcp_servers.{CODEX_PROVIDER_MCP_NAME}"
     for key in tuple(flat_config):
         if key == reserved_prefix or key.startswith(reserved_prefix + "."):
