@@ -1,6 +1,6 @@
 # Development and release log
 
-## 2026-09-19 — Native fork workspace verification — beta candidate
+## 2026-09-19 — AgentsServer 1.0.4-beta.5 accepted
 
 - Compare resolved workspace paths when verifying a native Codex fork and
   identifying a late-created child for cleanup. Preserve ancestry, exact
@@ -16,7 +16,18 @@
 - Pass 129 focused native transport and fork tests, including rejection and
   cleanup of a genuinely different workspace. Record safe failure categories
   before returning a live-fork error; do not expose raw provider exceptions.
-- Include version-specific release notes for 1.0.4-beta.5.
+- Accept [1.0.4-beta.5](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.5)
+  from `e470f98727526966aeadf4de08e35a5038a5d06c` after all eight test workers
+  and signed packaging pass in
+  [release preparation](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35477550385).
+  Verify the Ed25519 signature, manifest, exact archive membership and all 85
+  packaged source files. Public unauthenticated downloads match held assets;
+  authored release notes and the exact source target are verified.
+  Archive SHA-256:
+  `1c504c820808b53723f8b2997e366cf7e3d262f40eb266d87b58643bd0ba0baa`.
+- Submit an identity-bound managed update from beta.4 to beta.5 for idle
+  installation. It remains pending while active work continues; publication
+  does not imply the running service has already changed.
 
 ## 2026-09-18 — AgentsServer 1.0.4-beta.4 accepted
 
