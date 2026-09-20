@@ -6,6 +6,7 @@ import { SharedChatApp } from './SharedChatApp'
 
 interface EntryBridge {
   start(): Promise<void>
+  retry(): Promise<void>
   redeem(token: string): Promise<void>
   catalog(): Promise<void>
 }
@@ -47,7 +48,7 @@ export function SharedChatEntry({ bridge }: { bridge: EntryBridge }) {
     void enter()
     return () => { mounted.current = false }
   }, [bridge])
-  if (ready) return <SharedChatApp />
+  if (ready) return <SharedChatApp onRetry={() => bridge.retry()} />
   return <main className="shared-chat-welcome">
     <h1>AgentsDock</h1><h2>{t('chatShare.web.title')}</h2>
     <p>{t('chatShare.web.tokenHint')}</p>

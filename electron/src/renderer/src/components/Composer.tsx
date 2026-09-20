@@ -104,7 +104,7 @@ import {
   type TeamMentionTrigger,
   type TeamReferenceTarget
 } from '../lib/team-references'
-import { interactiveClientCapabilities, useAppStore } from '../store/app-store'
+import { interactiveClientCapabilities, useAppStore, type PendingTurnSubmission } from '../store/app-store'
 import { useTransientClose } from '../lib/transient-close'
 import { openTeamMessageLink } from '../lib/team-message-links'
 import { applyTeamMessageComposerEdit, composerDisplayToSource, composerSourceToDisplay, projectTeamMessageComposer, type ComposerMessageLink, type ComposerNativeEditSelection } from '../lib/team-message-composer'
@@ -475,7 +475,7 @@ function confirmInboundDeliveryInterruption(
     : null
 }
 
-export const Composer = memo(function Composer({ dropActive = false, sessionId }: { dropActive?: boolean; sessionId?: string | null }) {
+export const Composer = memo(function Composer({ dropActive = false, sessionId, writeDisabled = false }: { dropActive?: boolean; sessionId?: string | null; writeDisabled?: boolean }) {
   useLocale()
   const activeProfileId = useAppStore(state => state.activeProfileId)
   const profileGeneration = useAppStore(state => state.profileGeneration)
@@ -492,7 +492,8 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   const uploadPaths = useAppStore(state => selectedId ? state.uploadPathsBySession[selectedId] ?? EMPTY_UPLOAD_PATHS : EMPTY_UPLOAD_PATHS)
   const running = useAppStore(state => selectedId ? state.activeSessionIds.has(selectedId) : false)
   const admitting = useAppStore(state => selectedId ? Boolean(state.turnAdmissionTokens[selectedId]) : false)
-  const pendingSubmissionMode = useAppStore(state => selectedId ? state.pendingTurnSubmissions[selectedId]?.mode : undefined)
+  const pendingSubmission = useAppStore(state => selectedId ? state.pendingTurnSubmissions[selectedId] : undefined)
+  const pendingSubmissionMode = pendingSubmission?.mode
   const stopping = useAppStore(state => selectedId ? state.stoppingSessionIds.has(selectedId) : false)
   const catalog = useAppStore(state => state.runtimeCatalog)
   const healthRevision = useAppStore(state => composerHealthContractRevision(state.health))
@@ -730,7 +731,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   const composerTeamReferencesSupported = (teamReferences.length === 0 || teamMentionsSupported) && !unsupportedAllServersReference
   const referencesSupported = chatReferencesSupported && composerTeamReferencesSupported
   const selectedRuntimeError = sessionRuntimeAdmissionError(session, health, catalog)
-  const canSend = !selectedRuntimeError && !admitting && uploadPaths.length === 0 && referencesSupported && (Boolean(draft.trim()) || uploads.length > 0)
+  const canSend = !writeDisabled && !selectedRuntimeError && !admitting && uploadPaths.length === 0 && referencesSupported && (Boolean(draft.trim()) || uploads.length > 0)
   const codexControls = health?.capabilities?.codex_controls
   const claudeControls = health?.capabilities?.claude_controls
   const claudeMcpAvailable = claudeMcpCapabilitySupported(claudeControls)
@@ -956,6 +957,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     }
     const state = useAppStore.getState()
     const immediate = state.drafts[selectedId] ?? ''
+    const hasImmediateDraftState = Object.prototype.hasOwnProperty.call(state.drafts, selectedId)
     const hasImmediateReferenceState = Object.prototype.hasOwnProperty.call(state.chatReferencesBySession, selectedId)
     const hasImmediateTeamReferenceState = Object.prototype.hasOwnProperty.call(state.teamReferencesBySession, selectedId)
     const parsedImmediateReferences = parseStoredChatReferences(state.chatReferencesBySession[selectedId], immediate, selectedId)
@@ -983,15 +985,21 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       state.setChatReferencesForSession(selectedId, immediateState.chatReferences)
       state.setTeamReferencesForSession(selectedId, immediateState.teamReferences)
     }
-    if (!immediate || !hasImmediateReferenceState || !hasImmediateTeamReferenceState) void getWorkspacePreference(
+    if (!hasImmediateDraftState || !hasImmediateReferenceState || !hasImmediateTeamReferenceState) void getWorkspacePreference(
       draftPreferenceScope(draftContextRef.current),
       `draft:${selectedId}`,
       ''
     ).then(async storedText => {
       const current = useAppStore.getState()
       if (!mountedRef.current || current.activeProfileId !== activeProfileId || current.profileGeneration !== profileGeneration || activeIdentity(current) !== serverIdentity || draftContextRef.current.sessionId !== selectedId) return
-      const text = draftRef.current || storedText
-      if (!draftRef.current && storedText) {
+      // An explicit draft entry, including an empty string, is authoritative.
+      // Sending publishes an empty entry synchronously; a preference read that
+      // started before the send must never resurrect the consumed message.
+      const liveHasDraftState = Object.prototype.hasOwnProperty.call(current.drafts, selectedId)
+      const text = draftDirtyRef.current
+        ? draftRef.current
+        : draftRef.current || (liveHasDraftState ? current.drafts[selectedId] ?? '' : storedText)
+      if (!liveHasDraftState && !draftDirtyRef.current && !draftRef.current && storedText) {
         draftRef.current = storedText
         draftDirtyRef.current = false
         setDraft(storedText)
@@ -1086,6 +1094,9 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     const timer = window.setTimeout(() => {
       const current = useAppStore.getState()
       if (!mountedRef.current || current.activeProfileId !== activeProfileId || current.profileGeneration !== profileGeneration || activeIdentity(current) !== serverIdentity || draftContextRef.current.sessionId !== selectedId || current.switchingProfileId) return
+      // A send can consume the composer before React runs this effect's
+      // cleanup. Do not let that expired snapshot republish the sent message.
+      if (draftRef.current !== draft || referencesRef.current !== references || teamReferencesRef.current !== teamReferences) return
       const validated = validComposerReferences(
         draft,
         references,
@@ -1168,6 +1179,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   }, [activeProfileId, profileGeneration, routeHintsSupported, selectedId, serverIdentity, storedTeamReferences, teamReferences.length])
 
   const send = async (steer = false, promptOverride?: string, consumeComposer = true) => {
+    if (writeDisabled) return
     if (!profileIsActive(activeProfileId, profileGeneration)) return
     let steerConsent: InboundDeliveryConsent | undefined
     if (steer && selectedId) {
@@ -1265,7 +1277,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     }
     if (consumeComposer && session.backend === 'claude' && isStandaloneMcpCommand(outgoing)) {
       draftRef.current = ''
-      draftDirtyRef.current = false
+      draftDirtyRef.current = true
       referencesRef.current = []
       referencesDirtyRef.current = false
       teamReferencesRef.current = []
@@ -1307,7 +1319,9 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     if (consumeComposer) {
       providerCommandBindingRef.current = null
       draftRef.current = ''
-      draftDirtyRef.current = false
+      // Keep the explicit empty draft authoritative until its debounced
+      // persistence finishes. This also fences stale store notifications.
+      draftDirtyRef.current = true
       referencesRef.current = []
       referencesDirtyRef.current = false
       teamReferencesRef.current = []
@@ -1467,6 +1481,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
   }
 
   const steerFirstQueued = async () => {
+    if (writeDisabled) return
     if (!selectedId || !steeringScope) return
     if (!profileIsActive(activeProfileId, profileGeneration)) return
     const steerConsent = confirmInboundDeliveryInterruption(selectedId, 'send_now')
@@ -1494,6 +1509,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     }
   }
   const chooseFiles = async () => {
+    if (writeDisabled) return
     const sessionId = selectedId
     if (!sessionId) return
     try {
@@ -1509,6 +1525,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
     }
   }
   const handleFiles = async (files: FileList | File[]) => {
+    if (writeDisabled) return
     try {
       const refs = await nativeFileRefsFromFiles(files)
       if (refs.length) await addFiles(refs)
@@ -1778,9 +1795,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
       {!window.agentsDock.sharedChat && <div className="composer-context-row">
         <WorkingDirectoryPopover session={session} />
       </div>}
-      <CodexGoalBar />
-      <div className={`composer ${dropActive ? 'drop-active' : ''}`}>
+      <fieldset className="composer-goal-controls" disabled={writeDisabled}><CodexGoalBar /></fieldset>
+      <div className={`composer ${dropActive ? 'drop-active' : ''}${writeDisabled ? ' write-disabled' : ''}`}>
       <div className="composer-scroll-region">
+        <fieldset className="composer-queue-controls" disabled={writeDisabled}>
         <QueueShelf
         profileId={activeProfileId}
         profileGeneration={profileGeneration}
@@ -1788,6 +1806,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         sessionId={session.id}
         turns={visibleQueuedTurns}
         queueOrderTurns={queuedTurns}
+        pendingSubmission={pendingSubmission?.mode === 'queue' ? pendingSubmission : undefined}
         running={running}
         activeCodexGoal={activeCodexGoal}
         steeringPending={steeringPending}
@@ -1797,6 +1816,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
         routeHintsSupported={routeHintsSupported}
         teamMentionsSupported={teamMentionsSupported}
       />
+        </fieldset>
       {(uploads.length > 0 || uploadPaths.length > 0) && <AttachmentShelf sessionId={session.id} profileId={activeProfileId} profileGeneration={profileGeneration} files={uploads} pending={uploadPaths} />}
       <RuntimeHealthNotice backend={session.backend} sessionId={session.id} />
       {selectedRuntimeError && !(session.backend === 'cursor' && !cursorPermissionsAvailable) && <span className="chat-reference-warning">{selectedRuntimeError}</span>}
@@ -2125,10 +2145,10 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
           ? useAppStore.getState().revokeAgentRoute(selectedId, routeId, revision)
           : Promise.resolve(false)}
       />}
-      <div className="composer-bar">
+      <fieldset className="composer-bar composer-write-controls" disabled={writeDisabled}>
         <div className="composer-secondary-controls">
           <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild><button className="composer-icon composer-add-button" title={t("ui.Composer.Composer.add_9fd728c")}><Plus size={18} /></button></DropdownMenu.Trigger>
+            <DropdownMenu.Trigger asChild><button className="composer-icon composer-add-button" title={t("ui.Composer.Composer.add_9fd728c")} disabled={writeDisabled}><Plus size={18} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="menu-content" side="top" align="start">
               <DropdownMenu.Item className="menu-item" onSelect={() => void chooseFiles()}><Paperclip size={14} />{" "}{t("ui.Composer.Composer.attach_files_e697cc1")}</DropdownMenu.Item>
               <DropdownMenu.Separator className="menu-separator" />
@@ -2168,7 +2188,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
             type="button"
             className="stop-button"
             aria-label={stopping ? t("ui.Composer.Composer.stopping_bbe8574") : t("ui.Composer.Composer.stop_cae7d57")}
-            disabled={stopping}
+            disabled={writeDisabled || stopping}
             onClick={() => {
               if (!confirmInboundDeliveryInterruption(session.id, 'stop')) return
               void useAppStore.getState().stopTurnForSession(session.id)
@@ -2177,7 +2197,7 @@ export const Composer = memo(function Composer({ dropActive = false, sessionId }
           ><span className="activity-ring" /><Square size={12} fill="currentColor" /><span className="stop-button-label">{stopping ? t("ui.Composer.Composer.stopping_bbe8574") : t("ui.Composer.Composer.stop_cae7d57")}</span></button>}
           <ShortcutTooltip shortcut={running ? ['sendMessage', 'steerMessage'] : 'sendMessage'} label={running ? activeCodexGoal ? t('composer.queueMessageDuringGoal') : t("ui.Composer.Composer.queue_message_steer_now_eea53cb") : t("ui.Composer.Composer.send_message_93a26b1")}><button className="send-button" aria-label={sessionId === undefined ? (running ? t("ui.Composer.Composer.queue_message_891d4ef") : t("ui.Composer.Composer.send_message_93a26b1")) : t(running ? 'ui.composer.queueFor' : 'ui.composer.sendTo', { title: session.title })} disabled={!canSend} onClick={() => void send()}><Send size={17} /></button></ShortcutTooltip>
         </div>
-      </div>
+      </fieldset>
       <div className="drop-overlay" role="status" aria-label={dropActive ? t("ui.Composer.Composer.drop_to_attach_34a7a63") : undefined} aria-live="polite" aria-atomic="true" aria-hidden={!dropActive}>
         <Paperclip size={15} aria-hidden="true" /> <span>{t("ui.Composer.Composer.drop_to_attach_34a7a63")}</span>
       </div>
@@ -3309,6 +3329,7 @@ const QueueShelf = memo(function QueueShelf({
   sessionId,
   turns,
   queueOrderTurns,
+  pendingSubmission,
   running,
   activeCodexGoal,
   steeringPending,
@@ -3324,6 +3345,7 @@ const QueueShelf = memo(function QueueShelf({
   sessionId: string
   turns: QueuedTurn[]
   queueOrderTurns: QueuedTurn[]
+  pendingSubmission?: PendingTurnSubmission
   running: boolean
   activeCodexGoal: boolean
   steeringPending: boolean
@@ -3493,7 +3515,7 @@ const QueueShelf = memo(function QueueShelf({
     const current = queueOrderTurns.find(turn => turn.queued_id === editing.queued_id)
     if (!current || current.promoted === true) setEditing(null)
   }, [editing, queueOrderTurns])
-  if (!turns.length) return null
+  if (!turns.length && !pendingSubmission) return null
   const moveTo = async (activeId: string, targetId: string, placement: 'before' | 'after') => {
     if (movingRef.current || !profileIsActive(profileId, profileGeneration)) return
     movingRef.current = true
@@ -3801,9 +3823,10 @@ const QueueShelf = memo(function QueueShelf({
     } catch (error) { if (!isSteeringCancellation(error) && profileIsActive(profileId, profileGeneration)) reportActionError(error) }
     finally { setSavingEdit(false) }
   }
-  return <div className="queue-shelf"><div className="queue-header"><div className="queue-label"><ListOrdered size={13} /><span>{t("ui.Composer.QueueShelf.queued_turns_580e983")}</span><b>{turns.length}</b>{promotedCount > 0
+  const displayedCount = turns.length + (pendingSubmission ? 1 : 0)
+  return <div className="queue-shelf"><div className="queue-header"><div className="queue-label"><ListOrdered size={13} /><span>{t("ui.Composer.QueueShelf.queued_turns_580e983")}</span><b>{displayedCount}</b>{promotedCount > 0
     ? <small>{promotedCount === 1 ? t("ui.Composer.QueueShelf.1_starting_dc0a211") : t("ui.Composer.QueueShelf.starting_37f2a6b", { "count": String(promotedCount) })}</small>
-    : pausedCount > 0 && <small>{pausedCount === turns.length ? t("ui.Composer.QueueShelf.paused_e159b06") : t("ui.Composer.QueueShelf.paused_c123acb", { "count": String(pausedCount) })}</small>}</div></div><DndContext sensors={sensors} onDragOver={onDragOver} onDragEnd={onDragEnd}>
+    : pausedCount > 0 && <small>{pausedCount === displayedCount ? t("ui.Composer.QueueShelf.paused_e159b06") : t("ui.Composer.QueueShelf.paused_c123acb", { "count": String(pausedCount) })}</small>}</div></div><DndContext sensors={sensors} onDragOver={onDragOver} onDragEnd={onDragEnd}>
     <div className="queue-list">{queuedTurnsInPositionOrder(turns).map(turn => <QueuedRow key={turn.queued_id} profileId={profileId} profileGeneration={profileGeneration} steeringScope={steeringScope} turn={turn} sourceSessionTitle={turn.source_session_id && !turn.source_title?.trim() ? sessions.find(session => session.id === turn.source_session_id)?.title : undefined} sessionId={sessionId} running={running} activeCodexGoal={activeCodexGoal} drop={drop} steeringPending={steeringPending} promotionPending={promotedCount > 0} runtimeError={queuedTurnRuntimeAdmissionError(turn, sourceSession, health, catalog)} crossChatFence={queuedTurnCrossChatFence(queueOrderTurns, turn.queued_id, mixedReorder, asyncControls)} blockingDelivery={turn.queued_id === firstFencedTurn?.queued_id ? hiddenBlockingDelivery : null} canSkipExactDelivery={exactQueuedDeliverySkipAvailable(health)} canSkipExactPeerDelivery={exactQueuedPeerDeliverySkipAvailable(health)} asyncControls={asyncControls} reorderable={isReorderableQueuedTurn(turn, mixedReorder)} moving={moving} onMove={direction => {
       const latestQueue = queuedTurnsInPositionOrder(useAppStore.getState().snapshots[sessionId]?.queuedTurns ?? queueOrderTurns)
       const index = latestQueue.findIndex(candidate => candidate.queued_id === turn.queued_id)
@@ -3827,7 +3850,7 @@ const QueueShelf = memo(function QueueShelf({
       setEditMention(null)
       setEditTeamMention(null)
       setEditTeamMentionCandidates([])
-    }} />)}</div>
+    }} />)}{pendingSubmission && <PendingQueuedRow submission={pendingSubmission} />}</div>
   </DndContext>
   {editing && <div className="inline-editor">
     {editingAgentMessage ? <>
@@ -4055,6 +4078,19 @@ const QueueShelf = memo(function QueueShelf({
   </div>}
   </div>
 })
+
+function PendingQueuedRow({ submission }: { submission: PendingTurnSubmission }) {
+  useLocale()
+  const prompt = submission.prompt.trim()
+  const label = prompt || t('composer.queue.pendingAttachments', { count: submission.files.length })
+  return <div className="queued-row local-pending" role="status" aria-label={t('composer.queue.addingMessage', { message: label })}>
+    <span className="queue-starting-icon" title={t('composer.queue.adding')}><LoaderCircle className="spin" size={14} /></span>
+    <span className="queue-copy">
+      <span className="queue-prompt" title={label}>{label}</span>
+      <small>{t('composer.queue.adding')}</small>
+    </span>
+  </div>
+}
 
 function QueuedRow({ profileId, profileGeneration, steeringScope, turn, sourceSessionTitle, sessionId, running, activeCodexGoal, drop, steeringPending, promotionPending, runtimeError, crossChatFence, blockingDelivery, canSkipExactDelivery, canSkipExactPeerDelivery, asyncControls, reorderable, moving, onMove, onEdit }: { profileId: string | null; profileGeneration: number; steeringScope: SteeringScope; turn: QueuedTurn; sourceSessionTitle?: string; sessionId: string; running: boolean; activeCodexGoal: boolean; drop: { id: string; placement: 'before' | 'after' } | null; steeringPending: boolean; promotionPending: boolean; runtimeError: string | null; crossChatFence: QueuedTurnCrossChatFence; blockingDelivery: QueuedTurn | null; canSkipExactDelivery: boolean; canSkipExactPeerDelivery: boolean; asyncControls: boolean; reorderable: boolean; moving: boolean; onMove: (direction: 'up' | 'down') => void; onEdit: (body?: string) => void }) {
   useLocale()

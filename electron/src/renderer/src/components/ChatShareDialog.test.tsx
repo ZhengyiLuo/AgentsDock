@@ -14,13 +14,19 @@ vi.mock('../store/app-store', () => ({ useAppStore: Object.assign(
   (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state), { getState: () => fixture.state }) }))
 vi.mock('../lib/workspace-preferences', () => ({ captureWorkspaceScope: () => fixture.scope }))
 vi.mock('../lib/analytics', () => analytics)
-vi.mock('../lib/i18n', () => ({ useLocale: () => 'en', t: (key: string, values?: { count?: number }) => key === 'chatShare.revokedCount' ? `Revoked (${values?.count})` : ({
+vi.mock('../lib/i18n', () => ({ useLocale: () => 'en', t: (key: string, values?: { count?: number; time?: string }) => key === 'chatShare.revokedCount' ? `Revoked (${values?.count})`
+  : key === 'chatShare.createdAt' ? `Created ${values?.time}` : ({
   'chatShare.viewOnly': 'View only', 'chatShare.interactiveAction': 'Interactive',
   'chatShare.title': 'Share chat', 'chatShare.existing': 'Existing shares',
   'chatShare.address': 'Share address',
   'chatShare.addressHint': 'Use this server’s LAN address to share on the same network.',
   'chatShare.invalidAddress': 'Enter an HTTP or HTTPS address with an optional port, without a path, sign-in details, query or fragment.',
-  'chatShare.link': 'Share URL', 'chatShare.accessToken': 'Access token',
+  'chatShare.link': 'Share URL', 'chatShare.relativePath': 'Relative share path',
+  'chatShare.accessToken': 'Access token', 'chatShare.copyLink': 'Copy link',
+  'chatShare.copyPath': 'Copy relative path', 'chatShare.copyAccessToken': 'Copy access token',
+  'chatShare.copiedSuccessfully': 'Copied successfully.',
+  'chatShare.viewOnlyShare': 'View-only share', 'chatShare.interactiveShare': 'Interactive share',
+  'chatShare.created': 'Created share link',
   'chatShare.copyInvitation': 'Copy invitation', 'chatShare.copyTokenLink': 'Copy link with token',
   'chatShare.close': 'Close chat sharing', 'chatShare.revoke': 'Revoke',
   'chatShare.active': 'Active', 'chatShare.revoked': 'Revoked',
@@ -53,7 +59,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('two-action chat sharing', () => {
-  it.each(['snapshot', 'interactive'] as const)('creates %s directly, copies the separate token and opens only the safe URL', async mode => {
+  it.each(['snapshot', 'interactive'] as const)('creates %s directly, opens the safe URL, and copies the URL and token separately', async mode => {
     const path = mode === 'snapshot' ? `/shared-chat/share_${'a'.repeat(32)}` : `/interactive-chat/interactive_${'b'.repeat(32)}`
     const url = `http://192.0.2.1:7850${path}`
     const token = 'c'.repeat(43)
@@ -70,25 +76,37 @@ describe('two-action chat sharing', () => {
     expect(analytics.trackEvent).toHaveBeenCalledWith(
       mode === 'snapshot' ? 'chat_share_snapshot_created' : 'chat_share_interactive_created'
     )
-    expect(fixture.copy).toHaveBeenCalledWith(`${url}\nToken: ${token}`)
-    expect(screen.getByRole('textbox', { name: 'Share URL' })).toHaveValue(url)
-    expect(screen.getByRole('textbox', { name: 'Access token' })).toHaveValue(token)
+    expect(fixture.copy).not.toHaveBeenCalled()
+    const shareURL = screen.getByRole('textbox', { name: 'Share URL' })
+    const accessToken = screen.getByRole('textbox', { name: 'Access token' })
+    expect(shareURL).toHaveValue(url)
+    expect(shareURL).toHaveAttribute('title', url)
+    expect(accessToken).toHaveValue(token)
+    expect(accessToken).toHaveAttribute('title', token)
+    expect(screen.getByText(mode === 'snapshot' ? 'View-only share' : 'Interactive share')).toBeInTheDocument()
+    const copyLink = screen.getByRole('button', { name: 'Copy link' })
+    const copyToken = screen.getByRole('button', { name: 'Copy access token' })
+    expect(copyLink).toHaveTextContent('')
+    expect(copyToken).toHaveTextContent('')
+    fireEvent.click(copyLink)
+    await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(url))
+    expect(screen.getByRole('status')).toHaveTextContent('Copied successfully.')
+    fireEvent.click(copyToken)
+    await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(token))
+    expect(fixture.copy).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: 'Copy link with token' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy invitation' })).toBeNull()
     expect(fixture.create).toHaveBeenCalledExactlyOnceWith(fixture.scope, fixture.session.id, {
       mode, title: fixture.session.title, base_url: 'http://192.0.2.1:7850',
       ...(mode === 'snapshot' ? { confirmed_public: true } : { confirmed_interactive: true })
     })
     expect(fixture.preview).not.toHaveBeenCalled()
     expect(fixture.list).not.toHaveBeenCalled()
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('chatShare.copiedOpened'))
     if (mode === 'interactive') expect(screen.getByText('Share the same token with multiple people.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Copy invitation' }))
-    await waitFor(() => expect(fixture.copy).toHaveBeenCalledTimes(2))
-    expect(fixture.copy).toHaveBeenLastCalledWith(`${url}\nToken: ${token}`)
     expect(fixture.open).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['snapshot', 'interactive'] as const)('offers an explicit token-bearing link only for snapshots (%s)', async mode => {
+  it.each(['snapshot', 'interactive'] as const)('does not expose a token-bearing convenience link for %s shares', async mode => {
     const path = mode === 'snapshot' ? `/shared-chat/share_${'a'.repeat(32)}` : `/interactive-chat/interactive_${'b'.repeat(32)}`
     const url = `https://share.example.test${path}`
     const token = 'd'.repeat(43)
@@ -97,12 +115,10 @@ describe('two-action chat sharing', () => {
       expires_at: null, revoked_at: null, path, url, access_token: token, token_url: tokenURL })
     openDialog()
     fireEvent.click(screen.getByRole('button', { name: mode === 'snapshot' ? 'View only' : 'Interactive' }))
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('chatShare.copiedOpened'))
-    expect(fixture.copy).toHaveBeenCalledExactlyOnceWith(`${url}\nToken: ${token}`)
-    if (mode === 'snapshot') {
-      fireEvent.click(screen.getByRole('button', { name: 'Copy link with token' }))
-      await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(tokenURL))
-    } else expect(screen.queryByRole('button', { name: 'Copy link with token' })).toBeNull()
+    await waitFor(() => expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url))
+    expect(fixture.copy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Copy link with token' })).toBeNull()
+    expect(document.body).not.toHaveTextContent(tokenURL)
     expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url)
   })
 
@@ -115,7 +131,7 @@ describe('two-action chat sharing', () => {
     fixture.list.mockImplementation(async (_scope, _id, mode) => mode === 'interactive' ? [record] : [])
     openDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Interactive' }))
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('chatShare.copiedOpened'))
+    await waitFor(() => expect(fixture.open).toHaveBeenCalledTimes(1))
     const details = screen.getByText('Existing shares').closest('details')!
     details.open = true
     fireEvent(details, new Event('toggle'))
@@ -130,7 +146,8 @@ describe('two-action chat sharing', () => {
     revoked.open = true
     fireEvent(revoked, new Event('toggle'))
     expect(within(revoked).getByRole('button', { name: 'Revoke' })).toBeDisabled()
-    expect(within(revoked).getByText(record.title)).toBeInTheDocument()
+    expect(within(revoked).getByText('Interactive')).toHaveClass('chat-share-mode-chip', 'interactive')
+    expect(revoked).not.toHaveTextContent(record.title)
   })
 
   it('keeps previously used shares active and folds all revoked history after another revoke', async () => {
@@ -143,18 +160,24 @@ describe('two-action chat sharing', () => {
     const details = screen.getByText('Existing shares').closest('details')!
     details.open = true
     fireEvent(details, new Event('toggle'))
-    await waitFor(() => expect(screen.getByText(record.title)).toBeInTheDocument())
-    const row = screen.getByText(record.title).closest('.chat-share-record')!
-    expect(within(row as HTMLElement).getByText('Interactive · Active')).toBeInTheDocument()
+    await waitFor(() => expect(fixture.list).toHaveBeenCalledTimes(2))
+    const activeRows = [...details.querySelectorAll<HTMLElement>(':scope > .chat-share-record')]
+    expect(activeRows).toHaveLength(2)
+    const row = activeRows[0]!
+    expect(within(row as HTMLElement).getByText('Interactive')).toBeInTheDocument()
+    expect(row).toHaveTextContent(/Active · Created /)
+    expect(within(row as HTMLElement).getByText(/Created /).closest('time')).toHaveAttribute('dateTime', '1970-01-01T00:00:01.000Z')
     const revoked = screen.getByText('Revoked (1)').closest('details')!
     revoked.open = true
     fireEvent(revoked, new Event('toggle'))
     fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'Revoke' }))
     await waitFor(() => expect(screen.getByText('Revoked (2)')).toBeInTheDocument())
     expect(revoked.open).toBe(false)
-    expect(within(revoked).getByText(record.title)).toBeInTheDocument()
-    expect(within(revoked).getByText(old.title)).toBeInTheDocument()
-    expect(screen.getByText(remaining.title).closest('.chat-share-revoked')).toBeNull()
+    expect(within(revoked).getAllByText('Interactive')).toHaveLength(2)
+    expect(details.querySelectorAll(':scope > .chat-share-record')).toHaveLength(1)
+    expect(screen.queryByText(record.title)).toBeNull()
+    expect(screen.queryByText(remaining.title)).toBeNull()
+    expect(screen.queryByText(old.title)).toBeNull()
   })
 
   it.each(['snapshot', 'interactive'] as const)('keeps rejected %s creation visible without retry, copy or browser opening', async mode => {
@@ -173,7 +196,7 @@ describe('two-action chat sharing', () => {
     )
   })
 
-  it('records a created share even when a follow-up clipboard action fails', async () => {
+  it('keeps a created share visible when an explicit clipboard action fails', async () => {
     const path = `/shared-chat/share_${'a'.repeat(32)}`
     const url = `http://192.0.2.1:7850${path}`
     fixture.create.mockResolvedValue({ id: 'synthetic-share', title: fixture.session.title, created_at: 1,
@@ -182,10 +205,12 @@ describe('two-action chat sharing', () => {
     openDialog()
 
     fireEvent.click(screen.getByRole('button', { name: 'View only' }))
-
+    await waitFor(() => expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Clipboard unavailable'))
     expect(analytics.trackEvent).toHaveBeenCalledWith('chat_share_snapshot_created')
     expect(fixture.create).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox', { name: 'Share URL' })).toHaveValue(url)
   })
 
   it.each(['snapshot', 'interactive'] as const)('creates %s with a custom LAN origin and keeps its returned URLs bound after editing the address', async mode => {
@@ -199,7 +224,7 @@ describe('two-action chat sharing', () => {
     expect(address).toHaveValue('http://192.0.2.1:7850')
     fireEvent.change(address, { target: { value: 'http://192.168.50.20:7850/' } })
     fireEvent.click(screen.getByRole('button', { name: mode === 'snapshot' ? 'View only' : 'Interactive' }))
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('chatShare.copiedOpened'))
+    await waitFor(() => expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url))
     expect(fixture.create).toHaveBeenCalledExactlyOnceWith(fixture.scope, fixture.session.id, {
       mode, title: fixture.session.title, base_url: 'http://192.168.50.20:7850',
       ...(mode === 'snapshot' ? { confirmed_public: true } : { confirmed_interactive: true })
@@ -207,11 +232,39 @@ describe('two-action chat sharing', () => {
     fireEvent.change(address, { target: { value: 'https://different.example.test' } })
     expect(screen.getByRole('textbox', { name: 'Share URL' })).toHaveValue(url)
     expect(screen.getByRole('textbox', { name: 'Access token' })).toHaveValue(token)
-    fireEvent.click(screen.getByRole('button', { name: 'Copy invitation' }))
-    await waitFor(() => expect(fixture.copy).toHaveBeenCalledTimes(2))
-    expect(fixture.copy).toHaveBeenLastCalledWith(`${url}\nToken: ${token}`)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }))
+    await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(url))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy access token' }))
+    await waitFor(() => expect(fixture.copy).toHaveBeenLastCalledWith(token))
+    expect(fixture.copy).toHaveBeenCalledTimes(2)
     expect(fixture.open).toHaveBeenCalledExactlyOnceWith(url)
     expect(fixture.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows explicit mode, status and creation time and orders mixed-mode shares newest first', async () => {
+    const oldest = { id: `interactive_${'a'.repeat(32)}`, title: 'Same title', created_at: 10,
+      expires_at: null, revoked_at: null }
+    const newest = { id: `share_${'b'.repeat(32)}`, title: 'Same title', created_at: 30,
+      expires_at: null, revoked_at: null }
+    const middle = { id: `interactive_${'c'.repeat(32)}`, title: 'Same title', created_at: 20,
+      expires_at: null, revoked_at: null }
+    fixture.list.mockImplementation(async (_scope, _id, mode) => mode === 'snapshot' ? [newest] : [oldest, middle])
+    openDialog()
+    const details = screen.getByText('Existing shares').closest('details')!
+    details.open = true
+    fireEvent(details, new Event('toggle'))
+
+    await waitFor(() => expect(fixture.list).toHaveBeenCalledTimes(2))
+    const rows = [...document.querySelectorAll<HTMLElement>('.chat-share-record')]
+    expect(rows).toHaveLength(3)
+    expect(rows.map(row => row.querySelector('time')?.getAttribute('dateTime'))).toEqual([
+      '1970-01-01T00:00:30.000Z', '1970-01-01T00:00:20.000Z', '1970-01-01T00:00:10.000Z'
+    ])
+    expect(rows[0]).toHaveTextContent(/Active · Created /)
+    expect(rows[1]).toHaveTextContent(/Active · Created /)
+    expect(within(rows[0]).getByText('View only')).toHaveClass('chat-share-mode-chip', 'snapshot')
+    expect(within(rows[1]).getByText('Interactive')).toHaveClass('chat-share-mode-chip', 'interactive')
+    expect(screen.queryByText('Same title')).toBeNull()
   })
 
   it('prefills only the selected profile origin and does no background work while the address is edited', async () => {
