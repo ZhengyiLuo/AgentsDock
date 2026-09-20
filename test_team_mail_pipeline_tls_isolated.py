@@ -102,6 +102,7 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         frames, closed = [], []
         incoming, outgoing = asyncio.Queue(), asyncio.Queue()
         await incoming.put(json.dumps({"version": 1, "team_id": self.team, "previous_cursor": previous}))
+        runtime, gateway = self.runtime, self.tls.gateway
 
         class Socket:
             query_params = {}
@@ -115,7 +116,19 @@ class MailPipelineTLSAcceptanceTests(unittest.IsolatedAsyncioTestCase):
                 frame = json.loads(raw)
                 frames.append(frame)
                 await outgoing.put(frame)
-            async def close(self, code): closed.append(code)
+            async def close(self, code):
+                closed.append(code)
+                feed = runtime._mail_hints.member
+                watcher = gateway._mail_watcher
+                print("Mail pipeline socket closed:", json.dumps({
+                    "code": code, "frames": len(frames), "reconnect": previous is not None,
+                    "feed": None if feed is None else {"ready": feed.ready.is_set(),
+                        "closed": feed.closed, "close_code": feed.close_code,
+                        "thread_alive": feed.thread.is_alive()},
+                    "watcher": None if watcher is None else {"closed": watcher._closed,
+                        "thread_alive": watcher._thread.is_alive(), "entries": len(watcher._entries)},
+                    "pending": runtime._mail_hints.pending, "leases": len(runtime._mail_hints.leases),
+                }), flush=True)
 
         task = asyncio.create_task(serve_team_mail_hints(Socket(), self.runtime,
             server_identity="peer_tls_fixture", authorized=lambda: True, protocols=[MAIL_WEBSOCKET_PROTOCOL]))
