@@ -1701,6 +1701,7 @@ describe('AgentServerClient live stream', () => {
         text: 'Checking the first option.', ts: '2026-09-20T05:00:00Z', after_seq: 5 }]
     }
     expect(socket.url.searchParams.get('reasoning_stream')).toBe('true')
+    expect(socket.url.searchParams.get('reasoning_text')).toBe('true')
     socket.emit('message', JSON.stringify(snapshot))
     socket.emit('message', JSON.stringify({ ...snapshot, revision: 2 }))
     socket.emit('message', JSON.stringify(snapshot))
@@ -1756,6 +1757,7 @@ describe('AgentServerClient live stream', () => {
     const stop = client.stream('chat', 5, event, vi.fn())
     const socket = FakeWebSocket.instances[0]
     expect(socket.url.searchParams.has('reasoning_stream')).toBe(false)
+    expect(socket.url.searchParams.has('reasoning_text')).toBe(false)
     socket.emit('message', JSON.stringify({ type: 'reasoning_summary_stream', seq: 500 }))
     socket.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
     expect(event).toHaveBeenCalledOnce()

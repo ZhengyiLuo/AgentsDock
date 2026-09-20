@@ -2,8 +2,10 @@ import type { Event, ReasoningSummaryStreamItem } from '@shared/types'
 import { isPublicCommentary, type ProgressItem, type RenderTimelineItem, type TimelineItem } from './timeline'
 
 /** Presentation identity shared by the live snapshot and its durable completion. */
-export function reasoningItemKey(event: Pick<Event, 'run_id' | 'item_id' | 'id'>): string {
-  return event.run_id && event.item_id ? `reasoning:${JSON.stringify([event.run_id, event.item_id])}` : event.id
+export function reasoningItemKey(event: Pick<Event, 'run_id' | 'item_id' | 'id' | 'phase'>): string {
+  return event.run_id && event.item_id ? `reasoning:${JSON.stringify([
+    event.run_id, event.item_id, ...(event.phase === 'reasoning' ? ['reasoning'] : [])
+  ])}` : event.id
 }
 
 /**
@@ -27,10 +29,11 @@ export function overlayReasoningStream(
     // A snapshot can race its durable completion or terminal delivery. Durable
     // history always wins, including after reconnecting with a stale snapshot.
     if (owner?.kind === 'turn' && (owner.finishedAt || owner.stoppedAt
-      || owner.trace.some(event => event.type === 'reasoning_summary' && event.item_id === item.item_id && event.run_id === item.run_id))) continue
+      || owner.trace.some(event => (event.type === 'reasoning_summary' || event.type === 'reasoning_text') && event.item_id === item.item_id && event.run_id === item.run_id
+        && (event.phase === 'reasoning') === (item.phase === 'reasoning')))) continue
     const event: Event = {
-      ...item, id: `stream:${JSON.stringify([item.run_id, item.item_id])}`,
-      session_id: sessionId, type: 'reasoning_summary', seq,
+      ...item, id: `stream:${JSON.stringify([item.run_id, item.item_id, ...(item.phase === 'reasoning' ? ['reasoning'] : [])])}`,
+      session_id: sessionId, type: item.phase === 'reasoning' ? 'reasoning_text' : 'reasoning_summary', seq,
       reasoning_after_seq: item.after_seq
     }
     if (!owner || owner.kind !== 'turn') {
@@ -39,7 +42,8 @@ export function overlayReasoningStream(
       if (index < 0) continue
       const row = result[index]
       if (row.kind !== 'job' || row.events.some(event => event.run_id === item.run_id
-        && (event.item_id === item.item_id || ['turn_finished', 'turn_stopped', 'turn_failed'].includes(event.type)))) continue
+        && ((event.item_id === item.item_id && (event.phase === 'reasoning') === (item.phase === 'reasoning'))
+          || ['turn_finished', 'turn_stopped', 'turn_failed'].includes(event.type)))) continue
       if (result === rows) result = [...rows]
       result[index] = { ...row, events: [...row.events, event] }
       continue

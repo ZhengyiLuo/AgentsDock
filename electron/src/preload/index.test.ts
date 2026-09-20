@@ -185,6 +185,12 @@ describe('preload session IPC bridge', () => {
     )
   })
 
+  it('preserves the expected server identity when saving a chat limit', async () => {
+    const scope = { profileId: 'one', profileGeneration: 4, serverIdentity: 'server-one' }
+    await electronHarness.exposed?.sessions.update('chat-1', { subagent_limit: null }, scope)
+    expect(electronHarness.invoke).toHaveBeenCalledWith('sessions:update', 'chat-1', { subagent_limit: null }, scope)
+  })
+
   it('exposes generation-fenced port forwarding without renderer network authority', async () => {
     electronHarness.invoke.mockResolvedValue(undefined)
 

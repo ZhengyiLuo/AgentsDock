@@ -13,6 +13,7 @@ import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, ProgressItem, R
 import { progressEventSequence, progressToolStartSequences, extractUnifiedDiff, isHandoffDigestEvent, isPublicCommentary, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
 import { reasoningItemKey } from '../lib/timeline-reasoning-stream'
+import { useReasoningDisplay } from '../lib/reasoning-display'
 import { formatDuration, formatTime, titleCase } from '../lib/format'
 import { requirePinnedItemsScope } from '../lib/pinned-items'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
@@ -180,7 +181,7 @@ function timelineActionError(error: unknown): string {
 }
 
 function mergeTraceEvents(first: Event[], second: Event[]): Event[] {
-  return [...new Map([...first, ...second].map(event => [event.type === 'reasoning_summary' && !isPublicCommentary(event) ? reasoningItemKey(event) : event.id, event])).values()]
+  return [...new Map([...first, ...second].map(event => [(event.type === 'reasoning_summary' || event.type === 'reasoning_text') && !isPublicCommentary(event) ? reasoningItemKey(event) : event.id, event])).values()]
     .sort((left, right) => left.seq - right.seq)
 }
 
@@ -270,7 +271,7 @@ function buildTraceActivity(events: Event[]): TraceActivityEntry[] {
   const entries: TraceActivityEntry[] = []
   const toolsByIdentity = new Map<string, number>()
   for (const event of [...events].sort((left, right) => progressEventSequence(left) - progressEventSequence(right) || left.seq - right.seq)) {
-    if (event.type === 'reasoning_summary' || isPublicCommentary(event)) {
+    if (event.type === 'reasoning_summary' || event.type === 'reasoning_text' || isPublicCommentary(event)) {
       if (!traceReasoningText(event)) continue
       if (isPublicCommentary(event)) {
         entries.push({ kind: 'commentary', key: event.id, seq: progressEventSequence(event), event })
@@ -389,10 +390,19 @@ function TraceDisclosure({
 }) {
   useLocale()
   const runActivityMode = Boolean(runActivity)
+  const sessionBackend = useAppStore(state => state.snapshots[sessionId]?.session.backend
+    ?? state.sessions.find(session => session.id === sessionId)?.backend)
+  const nativeCodex = (sessionBackend ?? events.find(event => event.backend)?.backend) === 'codex'
+  const expandedReasoning = useReasoningDisplay() === 'expanded'
   const activityLive = Boolean(runActivity) && runActivity?.active !== false && !runActivity?.stoppedAt
   // Historical runs stay compact. Once opened, a live run keeps the reader's
   // choice through completion, cancellation, and subsequent history updates.
-  const [open, setOpen] = useState(() => activityLive)
+  const [open, setOpen] = useState(() => activityLive || (nativeCodex && expandedReasoning))
+  const [reasoningHistoryOpen, setReasoningHistoryOpen] = useState(false)
+  useEffect(() => {
+    if (nativeCodex && expandedReasoning) setOpen(true)
+    setReasoningHistoryOpen(false)
+  }, [expandedReasoning, nativeCodex])
   const previousActivity = useRef({
     key: runActivity?.key,
     live: activityLive
@@ -411,6 +421,7 @@ function TraceDisclosure({
     [events]
   )
   const diffScope = JSON.stringify([sessionId, runId, resetKey, runActivity?.key])
+  useEffect(() => setReasoningHistoryOpen(false), [diffScope])
   const [expandedDiffScope, setExpandedDiffScope] = useState<string | null>(() => open ? diffScope : null)
   const toggleDetails = () => {
     setExpandedDiffScope(diffScope)
@@ -448,14 +459,14 @@ function TraceDisclosure({
     }
     if (!runActivityMode) return
     if (previous.key !== runActivity?.key) {
-      setOpen(activityLive)
+      setOpen(activityLive || (nativeCodex && expandedReasoning))
       if (activityLive) setExpandedDiffScope(diffScope)
     }
     else if (activityLive && !previous.live) {
       setExpandedDiffScope(diffScope)
       setOpen(true)
     }
-  }, [activityLive, diffScope, runActivityMode, runActivity?.key])
+  }, [activityLive, diffScope, expandedReasoning, nativeCodex, runActivityMode, runActivity?.key])
   const displayEvents = useMemo(() => {
     const promotedIds = new Set(promotedCommentaryIds)
     const merged = loadedEvents ? mergeTraceEvents(runActivity?.sourceEvents ?? events, loadedEvents) : events
@@ -473,6 +484,18 @@ function TraceDisclosure({
     ))
   }, [events, includeCommentary, loadedEvents, promotedCommentaryIds, runActivity?.afterSeq, runActivity?.throughSeq, runActivity?.finalEvents, runActivity?.orderingFinalEvents, runActivity?.sourceEvents, runActivity?.toolStartSequences])
   const activity = useMemo(() => buildTraceActivity(displayEvents), [displayEvents])
+  // A single current activity owns the pulse. A finished tool is not still
+  // running, and older summaries must not compete with a newer command.
+  const latestActivity = [...activity].reverse().find(entry => entry.kind === 'tool'
+    || (entry.kind === 'reasoning' && entry.events.some(event => event.phase !== 'reasoning')))
+  const latestReasoning = latestActivity?.kind === 'reasoning'
+    ? [...latestActivity.events].reverse().find(event => event.phase !== 'reasoning')! : null
+  const activeReasoningKey = activityLive && latestActivity?.kind === 'reasoning'
+    ? reasoningItemKey(latestReasoning!) : null
+  const activeToolKey = activityLive && latestActivity?.kind === 'tool' && !latestActivity.finished
+    ? latestActivity.key : null
+  const historicalReasoningCount = activity.reduce((count, entry) => count + (entry.kind === 'reasoning'
+    ? entry.events.filter(event => event !== latestReasoning && event.phase !== 'reasoning').length : 0), 0)
   const activityParts = useMemo<TracePart[]>(() => [
     ...activity.map(entry => ({ kind: 'activity' as const, seq: entry.seq, entry })),
     ...(runActivity?.lifecycle ?? []).map(system => ({ kind: 'lifecycle' as const, seq: system.seq, system }))
@@ -489,8 +512,8 @@ function TraceDisclosure({
   const hasVisibleTerminalCommentary = keepTerminalCommentaryVisible
     && activity.some(entry => entry.kind === 'commentary')
   const summary = useMemo(
-    () => summarizeTrace(displayEvents, sessionId, activity.filter(entry => entry.kind === 'tool').length),
-    [activity, displayEvents, sessionId]
+    () => summarizeTrace(nativeCodex && !expandedReasoning ? displayEvents.filter(event => event.phase !== 'reasoning') : displayEvents, sessionId, activity.filter(entry => entry.kind === 'tool').length),
+    [activity, displayEvents, expandedReasoning, nativeCodex, sessionId]
   )
   const structuredDiffSummary = useMemo(
     () => summary.canonicalDiff ? null : summarizeStructuredToolDiff(displayEvents),
@@ -576,10 +599,10 @@ function TraceDisclosure({
     ? hasMore ? t('timeline.ui.loadMoreActivity') : t('timeline.ui.checkForNewerActivity')
     : t('timeline.ui.loadAvailableActivity')
   const activityHeader = runActivity
-    ? <RunActivityHeader item={runActivity} events={events} open={open} detailsId={detailsId} onToggle={toggleDetails} />
+    ? <RunActivityHeader item={runActivity} events={events} open={open} detailsId={detailsId} onToggle={toggleDetails} nativeCodex={nativeCodex} />
     : null
   return (
-    <div className={`trace${runActivity ? ' run-activity' : ''} ${open ? 'open' : ''}`}>
+    <div className={`trace${runActivity ? ' run-activity' : ''}${nativeCodex ? ' codex-native-activity' : ''} ${open ? 'open' : ''}`}>
       {activityHeader ?? <button
         type="button"
         className="trace-summary"
@@ -601,11 +624,16 @@ function TraceDisclosure({
                 ? <TraceCommentaryEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
                 : open
                   ? segment.kind === 'reasoning'
-                    ? <TraceReasoningEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
-                    : <RunActivitySupportGroup key={segment.key} parts={segment.parts} sessionId={sessionId} profileScope={profileScope} />
+                    ? nativeCodex
+                      ? (expandedReasoning || reasoningHistoryOpen) && <CodexReasoningEvent key={segment.key} entry={{ ...segment.entry, events: segment.entry.events.filter(event => expandedReasoning || (event !== latestReasoning && event.phase !== 'reasoning')) }} sessionId={sessionId} expanded activeKey={expandedReasoning ? activeReasoningKey : null} labeled />
+                      : <TraceReasoningEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
+                    : <RunActivitySupportGroup key={segment.key} parts={segment.parts} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} activeToolKey={activeToolKey} runLive={activityLive} />
                   : null)
-            : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} />)}
+            : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} nativeCodex={nativeCodex} showPlaintext={expandedReasoning} />)}
+          {open && runActivity && nativeCodex && latestReasoning && !expandedReasoning && <CodexReasoningEvent entry={{ kind: 'reasoning', key: reasoningItemKey(latestReasoning), seq: progressEventSequence(latestReasoning), events: [latestReasoning] }} sessionId={sessionId} activeKey={activeReasoningKey} />}
+          {open && runActivity && nativeCodex && activeToolKey && latestActivity?.kind === 'tool' && <ToolEvent entry={latestActivity} nativeCodex active runLive />}
         </ol>
+        {open && runActivity && nativeCodex && !expandedReasoning && historicalReasoningCount > 0 && <button type="button" className="codex-activity-history-toggle" aria-expanded={reasoningHistoryOpen} onClick={() => setReasoningHistoryOpen(value => !value)}><ChevronRight size={12} aria-hidden="true" />{t('timeline.activity.earlierActivity')}</button>}
         {open && runId && <div className="trace-detail-actions">
           {loadLabel && <button type="button" disabled={loadingMore} onClick={() => void showMore()}>{loadingMore && <LoaderCircle className="spin" size={12} />}{loadLabel}</button>}
           {loadedEvents && <button type="button" disabled={loadingMore} onClick={showLess}>{t('timeline.ui.useCompactTrace')}</button>}
@@ -617,7 +645,7 @@ function TraceDisclosure({
   )
 }
 
-function RunActivityHeader({ item, events, open, detailsId, onToggle }: { item: ProgressItem; events: Event[]; open: boolean; detailsId: string; onToggle: () => void }) {
+function RunActivityHeader({ item, events, open, detailsId, onToggle, nativeCodex = false }: { item: ProgressItem; events: Event[]; open: boolean; detailsId: string; onToggle: () => void; nativeCodex?: boolean }) {
   useLocale()
   const live = item.active !== false && !item.stoppedAt
   const stopped = Boolean(item.stoppedAt)
@@ -637,7 +665,7 @@ function RunActivityHeader({ item, events, open, detailsId, onToggle }: { item: 
       : t('timeline.activity.workedFor', { duration })
   if (live) {
     return <div className="run-activity-summary">
-      {live && <span className="activity-ring" aria-hidden="true" />}
+      {!nativeCodex && <span className="activity-ring" aria-hidden="true" />}
       <strong>{title}</strong>
     </div>
   }
@@ -663,13 +691,15 @@ function tracePartKey(part: TracePart): string {
   return part.kind === 'activity' ? part.entry.key : part.system.key
 }
 
-function TracePartView({ part, sessionId, profileScope }: { part: TracePart; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
+function TracePartView({ part, sessionId, profileScope, nativeCodex = false, showPlaintext = false }: { part: TracePart; sessionId: string; profileScope: WorkspaceProfileScope | null; nativeCodex?: boolean; showPlaintext?: boolean }) {
   if (part.kind === 'lifecycle') {
     return <li className="run-activity-lifecycle"><LiveLifecycleMarker item={part.system} sessionId={sessionId} profileScope={profileScope} /></li>
   }
   if (part.entry.kind === 'commentary') return <TraceCommentaryEvent entry={part.entry} sessionId={sessionId} />
-  if (part.entry.kind === 'reasoning') return <TraceReasoningEvent entry={part.entry} sessionId={sessionId} />
-  return <ToolEvent entry={part.entry} />
+  if (part.entry.kind === 'reasoning') return nativeCodex
+    ? <CodexReasoningEvent entry={{ ...part.entry, events: part.entry.events.filter(event => showPlaintext || event.phase !== 'reasoning') }} sessionId={sessionId} expanded labeled={showPlaintext} />
+    : <TraceReasoningEvent entry={part.entry} sessionId={sessionId} />
+  return <ToolEvent entry={part.entry} nativeCodex={nativeCodex} />
 }
 
 function runActivitySupportSummary(parts: TracePart[]): string {
@@ -692,11 +722,18 @@ function runActivitySupportSummary(parts: TracePart[]): string {
   ].filter(Boolean).join(' · ') || t('timeline.activity.supportingActivity')
 }
 
-function RunActivitySupportGroup({ parts, sessionId, profileScope }: { parts: TracePart[]; sessionId: string; profileScope: WorkspaceProfileScope | null }) {
+function RunActivitySupportGroup({ parts, sessionId, profileScope, nativeCodex = false, activeToolKey = null, runLive = false }: { parts: TracePart[]; sessionId: string; profileScope: WorkspaceProfileScope | null; nativeCodex?: boolean; activeToolKey?: string | null; runLive?: boolean }) {
   useLocale()
   const [open, setOpen] = useState(false)
   const detailsId = useId()
-  const summary = runActivitySupportSummary(parts)
+  const shownParts = nativeCodex ? parts.filter(part => part.kind !== 'activity' || part.entry.key !== activeToolKey) : parts
+  const toolsOnly = nativeCodex && shownParts.every(part => part.kind === 'activity' && part.entry.kind === 'tool')
+  if (!shownParts.length) return null
+  if (toolsOnly && shownParts.length === 1 && shownParts[0].kind === 'activity' && shownParts[0].entry.kind === 'tool') {
+    return <ToolEvent entry={shownParts[0].entry} nativeCodex runLive={runLive} />
+  }
+  const completedTools = toolsOnly && shownParts.every(part => part.kind === 'activity' && part.entry.kind === 'tool' && part.entry.finished)
+  const summary = completedTools ? t('timeline.activity.ranCommands') : runActivitySupportSummary(shownParts)
   return <li className={`run-activity-support${open ? ' open' : ''}`}>
     <button
       type="button"
@@ -704,9 +741,11 @@ function RunActivitySupportGroup({ parts, sessionId, profileScope }: { parts: Tr
       aria-expanded={open}
       aria-controls={detailsId}
       onClick={() => setOpen(value => !value)}
-    ><ChevronRight size={12} aria-hidden="true" /><span>{summary}</span></button>
+    >{toolsOnly ? <TerminalSquare size={13} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}<span>{summary}</span>{toolsOnly && <ChevronRight size={12} aria-hidden="true" />}</button>
     {open && <ol id={detailsId} className="run-activity-support-details" aria-label={summary}>
-      {parts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} />)}
+      {shownParts.map(part => nativeCodex && part.kind === 'activity' && part.entry.kind === 'tool'
+        ? <ToolEvent key={part.entry.key} entry={part.entry} nativeCodex runLive={runLive} />
+        : <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} />)}
     </ol>}
   </li>
 }
@@ -731,7 +770,7 @@ function summarizeTrace(events: Event[], sessionId: string, toolCount: number): 
   for (const event of events) {
     if (event.type === 'tool_started' || event.type === 'tool_finished') {
       lastTool = event
-    } else if ((event.type === 'reasoning_summary' || isPublicCommentary(event)) && traceReasoningText(event)) {
+    } else if ((event.type === 'reasoning_summary' || event.type === 'reasoning_text' || isPublicCommentary(event)) && traceReasoningText(event)) {
       summaryCount++
       lastThought = event
     }
@@ -761,6 +800,28 @@ function traceSummaryPreview(value?: string | null): string {
 function boundedTracePreview(value: string, limit: number): string {
   if (value.length <= limit) return value
   return `${value.slice(0, Math.max(0, limit - 1)).trimEnd()}…`
+}
+
+function CodexReasoningEvent({ entry, sessionId, activeKey = null, expanded = false, labeled = false }: { entry: TraceReasoningEntry; sessionId: string; activeKey?: string | null; expanded?: boolean; labeled?: boolean }) {
+  return <>{entry.events.map(event => <CodexReasoningUpdate key={reasoningItemKey(event)} event={event} sessionId={sessionId} active={reasoningItemKey(event) === activeKey} expanded={expanded} labeled={labeled} />)}</>
+}
+
+function CodexReasoningUpdate({ event, sessionId, active, expanded, labeled }: { event: Event; sessionId: string; active: boolean; expanded: boolean; labeled: boolean }) {
+  const [open, setOpen] = useState(expanded)
+  useEffect(() => setOpen(expanded), [expanded])
+  const detailsId = useId()
+  const text = traceReasoningText(event)
+  const headline = boundedTracePreview(traceSummaryPreview(text).split('\n').find(line => line.trim()) || '', TRACE_REASONING_PREVIEW_CHARS)
+  return <li className={`trace-activity-item reasoning codex-reasoning${active ? ' has-active-reasoning' : ''}`} data-event-seq={progressEventSequence(event)}>
+    <div className="trace-reasoning">
+      {(labeled || event.phase === 'reasoning') && <small className="muted codex-reasoning-kind">{t(event.phase === 'reasoning' ? 'timeline.activity.providerReasoning' : 'timeline.activity.reasoningSummary')}</small>}
+      <button type="button" className={`codex-activity-line${active ? ' is-active' : ''}${open ? ' is-expanded' : ''}`} aria-label={boundedTracePreview(headline, TRACE_REASONING_ACCESSIBLE_CHARS)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(value => !value)} title={headline}>
+        <span className={open ? 'sr-only' : undefined}>{headline}</span><ChevronRight size={12} aria-hidden="true" />
+      </button>
+      {event.partial === true && <small className="muted codex-partial-summary">{t(event.phase === 'reasoning' ? 'timeline.activity.partialProviderReasoning' : 'timeline.ui.partialThinkingSummary')}</small>}
+      {open && <div id={detailsId} className="trace-reasoning-body codex-reasoning-detail"><MarkdownContent text={text} sessionId={sessionId} fold={false} /></div>}
+    </div>
+  </li>
 }
 
 function TraceReasoningEvent({ entry, sessionId }: { entry: TraceReasoningEntry; sessionId: string }) {
@@ -815,7 +876,7 @@ function traceToolStatus(entry: TraceToolEntry): { label: string; tone: string }
   return { label: t('timeline.ui.success'), tone: 'success' }
 }
 
-function ToolEvent({ entry }: { entry: TraceToolEntry }) {
+function ToolEvent({ entry, nativeCodex = false, active = false, runLive = false }: { entry: TraceToolEntry; nativeCodex?: boolean; active?: boolean; runLive?: boolean }) {
   useLocale()
   const [open, setOpen] = useState(false)
   const detailsId = useId()
@@ -826,7 +887,13 @@ function ToolEvent({ entry }: { entry: TraceToolEntry }) {
   const rawOutput = entry.finished?.output || entry.finished?.message || ''
   const output = open && rawOutput ? compactToolOutputPreview(rawOutput) : ''
   const hasDetails = traceToolHasInput(entry) || Boolean(rawOutput)
-  const headline = <>
+  const nativeLabel = !entry.finished && runLive ? t('timeline.ui.running')
+    : !entry.finished ? t('timeline.ui.stopped')
+    : status.tone === 'success' ? t('timeline.activity.ran') : status.label
+  const headline = nativeCodex ? <>
+    <TerminalSquare size={13} aria-hidden="true" /><span>{nativeLabel} {toolHeadline(event)}</span>
+    {hasDetails && <ChevronRight size={12} aria-hidden="true" />}
+  </> : <>
     <strong>{name}</strong>
     <small className={`tool-event-status ${status.tone}`}>{status.label}</small>
     {hasDetails && <ChevronRight size={12} aria-hidden="true" />}
@@ -835,8 +902,8 @@ function ToolEvent({ entry }: { entry: TraceToolEntry }) {
     <span className="trace-activity-marker" aria-hidden="true"><Wrench size={12} /></span>
     <div className="tool-event">
       {hasDetails
-        ? <button type="button" className="tool-event-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(value => !value)}>{headline}</button>
-        : <div className="tool-event-toggle">{headline}</div>}
+        ? <button type="button" className={`tool-event-toggle${nativeCodex ? ' codex-activity-line' : ''}${active ? ' is-active' : ''}`} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(value => !value)}>{headline}</button>
+        : <div className={`tool-event-toggle${nativeCodex ? ' codex-activity-line' : ''}${active ? ' is-active' : ''}`}>{headline}</div>}
       {open && hasDetails && <div id={detailsId} className="tool-event-body">
         {input && <section><small>{t('timeline.ui.input')}</small><pre>{input}</pre></section>}
         {output && <section><small>{t('timeline.ui.result')}</small><pre>{output}</pre></section>}
@@ -2046,7 +2113,7 @@ function JobView({ item, sessionId, profileScope, pinnedItemIds }: { item: JobIt
       : { ...latestStatusSource, run_id: traceRunId }
     return mergeTraceEvents([traceSource], item.events.filter(event => (
       event.run_id === traceRunId
-      && ['reasoning_summary', 'tool_started', 'tool_finished', 'code_diff'].includes(event.type)
+      && ['reasoning_summary', 'reasoning_text', 'tool_started', 'tool_finished', 'code_diff'].includes(event.type)
     )))
   }, [item.events, latestStatusSource, traceRunId])
   const latestRunTraceAnchor = useMemo(() => {
@@ -2293,6 +2360,8 @@ async function toggleSystemPin(event: Event, sessionId: string, profileScope: Wo
 
 function toolHeadline(event?: Event): string {
   if (!event) return ''
-  const command = event.tool?.input && typeof event.tool.input === 'object' && !Array.isArray(event.tool.input) && 'command' in event.tool.input ? String(event.tool.input.command) : ''
+  const input = event.tool?.input
+  const command = input && typeof input === 'object' && !Array.isArray(input)
+    ? String(input.command ?? input.cmd ?? '') : ''
   return command || event.tool?.name || ''
 }

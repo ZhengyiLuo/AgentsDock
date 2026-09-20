@@ -1,5 +1,32 @@
 # Public development log
 
+## 2026-09-19 — Codex activity and per-chat limits — 1.0.4-beta.9
+
+- Present Codex commentary and command rows inline, with one muted pulsing
+  current activity. Stop animation on completion or interruption and honor
+  reduced motion. Preserve earlier summaries under a compact disclosure.
+- Add a persistent **Show reasoning traces** switch in Settings → General.
+  Keep compact presentation by default; optionally expand summaries and
+  separately labeled plaintext supplied by Codex. Do not decode encrypted
+  content or imply that unavailable reasoning can be recovered.
+- Carry the distinct plaintext event through live transport, timeline
+  projection, completion, interruption and history. Keep transient updates
+  outside durable cache/cursors and distinguish summaries sharing an item ID.
+  Verify the previous desktop renderer ignores the new plaintext event even
+  when its trace is expanded, while continuing to display ordinary summaries.
+- Add optional Codex and Claude sub-agent limits in the chat Inspector.
+  Fence saves to the original server identity and generation, reject old
+  servers before mutation, and retain drafts after failure. Saving during
+  active work is allowed; explain each provider's application boundary.
+- Verify the actual Settings entry and toggle, native Chromium animation,
+  reduced motion, complete text expansion, persistence, and light/narrow
+  layouts in isolated offscreen Electron. Exercise limit saves and clearing
+  through production preload, IPC, HTTP authorization and server persistence;
+  preserve a sibling chat and active-work status and reject unauthenticated
+  writes. Provider execution is verified separately in the paired server.
+- Pass 4,585 source tests (10 skipped), eight build/license guard checks and
+  TypeScript validation, including scoped and unscoped preload compatibility.
+
 ## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
 
 - Display thinking summaries directly and retain expansion through completion.

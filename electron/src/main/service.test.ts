@@ -1013,6 +1013,44 @@ describe('per-chat Codex endpoint compatibility', () => {
   })
 })
 
+describe('per-chat sub-agent limit ownership', () => {
+  function harness(capable = true) {
+    const client = { createSession: vi.fn(), updateSession: vi.fn().mockResolvedValue({ id: 'chat' }) }
+    const service = Object.create(AppService.prototype) as AppService
+    Object.assign(service, { scope: { profileId: 'one', generation: 4, namespace: 'one', client },
+      activeProfileId: 'one', profileGeneration: 4, validatedGeneration: 4,
+      settings: { getProfile: () => ({ serverIdentity: 'server-one' }) },
+      profileResetIsPending: vi.fn().mockReturnValue(false), upsertSession: vi.fn(),
+      health: { capabilities: capable ? { subagent_limit_v1: { version: 1 } } : {} } })
+    return { service, client }
+  }
+  const scope = { profileId: 'one', profileGeneration: 4, serverIdentity: 'server-one' }
+  it('refuses a stale target before issuing any request', async () => {
+    const { service, client } = harness()
+    await expect(service.updateSession('chat', { subagent_limit: 3 }, { ...scope, profileGeneration: 3 })).rejects.toThrow()
+    await expect(service.updateSession('chat', { subagent_limit: 3 }, { ...scope, serverIdentity: 'replaced' })).rejects.toThrow()
+    expect(client.updateSession).not.toHaveBeenCalled()
+    await service.updateSession('chat', { subagent_limit: 3 }, scope)
+    expect(client.updateSession).toHaveBeenCalledExactlyOnceWith('chat', { subagent_limit: 3 })
+  })
+  it('refuses old servers even when clearing, before silent field loss', async () => {
+    const { service, client } = harness(false)
+    await expect(service.updateSession('chat', { subagent_limit: null }, scope)).rejects.toThrow('Update AgentsServer')
+    await expect(service.createSession({ title: 'Chat', folder: '', cwd: '', backend: 'codex', subagent_limit: 3 })).rejects.toThrow('Update AgentsServer')
+    expect(client.updateSession).not.toHaveBeenCalled()
+    expect(client.createSession).not.toHaveBeenCalled()
+  })
+  it('validates positive whole numbers and preserves the explicit null reset', async () => {
+    const { service, client } = harness()
+    for (const value of [0, -1, 1.5, true, '2', Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(service.updateSession('chat', { subagent_limit: value as number }, scope)).rejects.toThrow('positive whole number')
+    }
+    expect(client.updateSession).not.toHaveBeenCalled()
+    await service.updateSession('chat', { subagent_limit: null }, scope)
+    expect(client.updateSession).toHaveBeenCalledExactlyOnceWith('chat', { subagent_limit: null })
+  })
+})
+
 describe('provider command compatibility', () => {
   it.each([404, 405, 501])('treats an older server HTTP %s as unsupported', async status => {
     const client = {

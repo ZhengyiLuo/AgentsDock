@@ -239,6 +239,7 @@ const SERVER_RESTART_HEALTH_TIMEOUT_MS = 3_000
 const MAX_TIMELINE_SUBSCRIPTIONS = 2
 const TRACE_DETAIL_EVENT_TYPES = new Set([
   'reasoning_summary',
+  'reasoning_text',
   'tool_started',
   'tool_finished',
   'code_diff'
@@ -2306,6 +2307,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(input.codex_provider)
+    this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
     this.upsertSession(scope, session)
@@ -2317,6 +2319,7 @@ export class AppService {
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(input.codex_provider)
+    this.requirePerChatSubagentLimit(input.subagent_limit)
     const session = await scope.client.createSession(input)
     this.assertCurrentScope(scope)
     this.upsertSession(scope, session)
@@ -2384,11 +2387,12 @@ export class AppService {
     return results
   }
 
-  async updateSession(sessionId: string, patch: UpdateSessionInput): Promise<Session> {
-    const scope = this.captureScope()
+  async updateSession(sessionId: string, patch: UpdateSessionInput, expectedScope?: WorkspaceProfileScope): Promise<Session> {
+    const scope = expectedScope ? this.requireWorkspaceScope(expectedScope) : this.captureScope()
     await this.ensureValidatedScope(scope)
     this.assertCurrentScope(scope)
     this.requirePerChatCodexProvider(patch.codex_provider)
+    this.requirePerChatSubagentLimit(patch.subagent_limit)
     const session = await scope.client.updateSession(sessionId, patch)
     this.assertCurrentScope(scope)
     if (session.archived) {
@@ -2397,6 +2401,16 @@ export class AppService {
     }
     this.upsertSession(scope, session)
     return session
+  }
+
+  private requirePerChatSubagentLimit(limit: unknown): void {
+    if (limit === undefined) return
+    if (limit !== null && (!Number.isSafeInteger(limit) || (limit as number) < 1)) {
+      throw new Error('Sub-agent limit must be a positive whole number or empty.')
+    }
+    if (this.health?.capabilities?.subagent_limit_v1?.version !== 1) {
+      throw new Error('Update AgentsServer to set a per-chat sub-agent limit.')
+    }
   }
 
   private requirePerChatCodexProvider(selection: unknown): void {

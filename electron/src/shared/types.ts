@@ -392,6 +392,15 @@ export interface CodexBackgroundTerminalsCleanInput {
   confirmed: boolean
 }
 
+export interface SessionSubagentLimitControl {
+  supported: boolean
+  scope: 'chat'
+  mode: 'native_concurrent'
+  applies_to: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start'
+  reason?: string | null
+  message?: string
+}
+
 export interface Session {
   id: string
   title: string
@@ -405,6 +414,8 @@ export interface Session {
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
+  subagent_limit_control?: SessionSubagentLimitControl
   /** Durable server-side fence set when the first ordinary chat turn is admitted. */
   backend_locked?: boolean | null
   session_id?: string | null
@@ -981,7 +992,7 @@ export interface Event extends SharedChatAttribution {
   phase?: string | null
   /** Durable summary placement at its first streamed section, without changing its ledger sequence. */
   reasoning_after_seq?: number
-  /** A user-visible summary retained when the native item ended without authoritative completion. */
+  /** Provider-supplied reasoning retained when its native item ended without authoritative completion. */
   partial?: boolean
   /** Provider message identity when supplied by native output or history. */
   provider_message_id?: string | null
@@ -1664,6 +1675,7 @@ export interface SessionForkCompletedPrefixCapability {
 }
 
 export interface HealthCapabilities {
+  subagent_limit_v1?: { version: number; backends?: Backend[] }
   codex_provider_v1?: { available?: boolean; version?: number; per_chat?: boolean; per_chat_models?: boolean; model_discovery?: boolean; model_compatibility?: boolean }
   side_questions?: SideQuestionsCapability
   tmux?: ServerCapability
@@ -2145,7 +2157,7 @@ export interface SessionSnapshot {
   generation?: number
   /** Renderer-only epoch for a genuinely disjoint authoritative timeline replacement. */
   timelineListGeneration?: number
-  /** Renderer-only live summaries; never part of the durable event/cache cursor. */
+  /** Renderer-only provider reasoning channels; never part of the durable event/cache cursor. */
   reasoningStream?: ReasoningSummaryStreamSnapshot
 }
 
@@ -2153,7 +2165,7 @@ export interface ReasoningSummaryStreamItem extends Omit<Partial<Event>, 'seq' |
   run_id: string
   item_id: string
   backend: 'codex'
-  phase: 'summary'
+  phase: 'summary' | 'reasoning'
   text: string
   ts: string
   after_seq: number
@@ -2261,6 +2273,7 @@ export interface CreateSessionInput {
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
   codex_approval_policy?: CodexApprovalPolicy | null
   codex_sandbox_mode?: CodexSandboxMode | null
   codex_permission_profile?: string | null
@@ -2300,6 +2313,7 @@ export interface UpdateSessionInput {
   model?: string | null
   effort?: string | null
   system_prompt?: string | null
+  subagent_limit?: number | null
   codex_approval_policy?: CodexApprovalPolicy | null
   codex_sandbox_mode?: CodexSandboxMode | null
   codex_permission_profile?: string | null

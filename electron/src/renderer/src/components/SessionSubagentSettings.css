@@ -1,0 +1,8 @@
+.session-subagent-settings form { display: grid; gap: 8px; }
+.session-subagent-settings label { font-size: 12px; font-weight: 600; }
+.session-subagent-input-row { display: flex; gap: 8px; }
+.session-subagent-input-row input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; color: inherit; background: transparent; }
+.session-subagent-input-row button { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; color: inherit; background: transparent; }
+.session-subagent-input-row :disabled { opacity: .5; }
+.session-subagent-settings p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.session-subagent-settings [role="alert"] { color: var(--danger, #dd6464); }

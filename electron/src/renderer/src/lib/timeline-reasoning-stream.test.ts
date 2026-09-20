@@ -18,6 +18,18 @@ const project = (events: Event[]) => {
 }
 
 describe('transient reasoning presentation', () => {
+  it('keeps summary and exposed reasoning independent when native item identity is shared', () => {
+    const summary = event(2, 'reasoning_summary', { item_id: stream.item_id, phase: 'summary', text: 'Saved summary' })
+    const raw: ReasoningSummaryStreamItem = { ...stream, phase: 'reasoning', text: 'Provider plaintext' }
+    const initial = project([start, summary])
+    const live = overlayReasoningStream(initial.rows, initial.semantic, [stream, raw], 'chat')
+    const progress = live.find(row => row.kind === 'progress')!
+    if (progress.kind !== 'progress') throw Error('missing progress')
+    expect(progress.events.map(event => event.text)).toEqual(['Saved summary', 'Provider plaintext'])
+    expect(new Set(progress.events.map(reasoningItemKey)).size).toBe(2)
+    const completed = project([start, summary, event(3, 'reasoning_text', { item_id: stream.item_id, phase: 'reasoning', text: raw.text })])
+    expect(overlayReasoningStream(completed.rows, completed.semantic, [stream, raw], 'chat')).toBe(completed.rows)
+  })
   it('shows the first summary without a durable trace row and leaves the durable projection untouched', () => {
     const { semantic, rows } = project([start])
     const before = JSON.stringify({ semantic, rows })

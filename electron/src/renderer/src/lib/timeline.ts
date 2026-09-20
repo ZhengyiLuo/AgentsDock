@@ -155,7 +155,7 @@ export interface JobItem {
 }
 
 const traceTypes = new Set([
-  'reasoning_summary', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
+  'reasoning_summary', 'reasoning_text', 'tool_started', 'tool_finished', 'raw_event', 'process_started',
   'provider_session', 'cwd_fallback', 'history_imported', 'backend_changed', 'artifact_error',
   'session_created', 'idle_warning', 'code_diff'
 ])
@@ -1173,6 +1173,7 @@ export class TimelineProjector {
       eventFile(event)
       || event.type === 'code_diff'
       || event.type === 'reasoning_summary'
+      || event.type === 'reasoning_text'
       || event.type === 'tool_started'
       || event.type === 'tool_finished'
     )) {
@@ -1993,7 +1994,7 @@ function renderCrossChatMessage(item: SystemItem): SystemItem[] {
 export function activityEventSequence(event: Event, finals: Event[] = []): number {
   // A completed summary retains the place where its first live text appeared.
   // The durable sequence remains untouched for caching, read state and replay.
-  if (event.type === 'reasoning_summary' && Number.isSafeInteger(event.reasoning_after_seq)
+  if ((event.type === 'reasoning_summary' || event.type === 'reasoning_text') && Number.isSafeInteger(event.reasoning_after_seq)
     && event.reasoning_after_seq! >= 0 && event.reasoning_after_seq! < event.seq) return event.reasoning_after_seq! + 0.5
   if (!isPublicCommentary(event) || !event.run_id || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(event.ts)) return event.seq
   const timestamp = Date.parse(event.ts)
@@ -2017,7 +2018,7 @@ function runPresentationSegments(events: Event[], finals: Event[], orderingFinal
   for (const event of orderedEvents) {
     // Post-answer diff/bookkeeping alone is not another working turn.
     if (event.type !== 'tool_started' && event.type !== 'tool_finished'
-      && !(event.type === 'reasoning_summary' && messageText(event).trim())
+      && !((event.type === 'reasoning_summary' || event.type === 'reasoning_text') && messageText(event).trim())
       && !isPublicCommentary(event)) continue
     const seq = activityEventSequence(event, orderingFinalEvents)
     while (finalCursor < finals.length && finals[finalCursor].seq < seq) finalCursor++
@@ -2044,7 +2045,7 @@ function runPresentationSegments(events: Event[], finals: Event[], orderingFinal
 }
 
 export function traceHasVisibleContent(events: Event[]): boolean {
-  return events.some(event => event.type === 'reasoning_summary' && Boolean(messageText(event).trim())) ||
+  return events.some(event => (event.type === 'reasoning_summary' || event.type === 'reasoning_text') && Boolean(messageText(event).trim())) ||
     events.some(isPublicCommentary) ||
     events.some(event => event.type === 'tool_started' || event.type === 'tool_finished') ||
     events.some(event => event.type === 'code_diff' && Boolean(event.run_id)) ||

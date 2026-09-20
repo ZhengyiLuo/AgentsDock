@@ -2327,7 +2327,7 @@ describe('timeline pin state', () => {
     expect(container.querySelectorAll('.message-row.assistant')).toHaveLength(1)
     expect(within(latest as HTMLElement).getByText(/Working for/)).toBeInTheDocument()
     expect(within(latest as HTMLElement).getByText('The continuation is still working.')).toBeInTheDocument()
-    expect(within(latest as HTMLElement).getByRole('button', { name: '307 tool calls' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(latest as HTMLElement).getByRole('button', { name: 'Ran commands' })).toHaveAttribute('aria-expanded', 'false')
     expect(container.querySelectorAll('.tool-event')).toHaveLength(0)
     expect(screen.queryByText('Old progress.')).not.toBeInTheDocument()
     expect(screen.getByText('An old unclassified summary remains supporting detail.')).toBeInTheDocument()
@@ -2854,13 +2854,17 @@ describe('timeline pin state', () => {
 
     expect(container.querySelector('.trace-summary-preview')?.textContent?.length).toBeLessThanOrEqual(320)
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    const reasoningToggle = container.querySelector<HTMLButtonElement>('.trace-reasoning-toggle')
+    const reasoningToggle = container.querySelector<HTMLButtonElement>(backend === 'codex' ? '.codex-activity-line' : '.trace-reasoning-toggle')
     expect(reasoningToggle).not.toBeNull()
     expect(reasoningToggle?.getAttribute('aria-label')?.length).toBeLessThanOrEqual(250)
-    expect(container.querySelector('.trace-reasoning-preview')?.textContent?.length).toBeLessThanOrEqual(600)
-    expect(reasoningToggle).toHaveAccessibleName('Thinking summary')
-    expect(reasoningToggle).toHaveTextContent('Thinking summary')
-    expect(reasoningToggle).not.toHaveTextContent('Renderer check')
+    if (backend === 'codex') {
+      expect(reasoningToggle).toHaveAccessibleName('Renderer check')
+      expect(reasoningToggle).not.toHaveTextContent('Thinking summary')
+    } else {
+      expect(container.querySelector('.trace-reasoning-preview')?.textContent?.length).toBeLessThanOrEqual(600)
+      expect(reasoningToggle).toHaveAccessibleName('Thinking summary')
+      expect(reasoningToggle).not.toHaveTextContent('Renderer check')
+    }
     const body = container.querySelector('.trace-reasoning-body')!
     expect(body).toHaveTextContent(summaryText)
     expect(body.querySelector('strong')).toHaveTextContent('Renderer check')
@@ -2869,7 +2873,7 @@ describe('timeline pin state', () => {
     fireEvent.click(reasoningToggle!)
     expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
     expect(reasoningToggle).toHaveTextContent('Renderer check')
-    expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('…')
+    if (backend === 'claude') expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('…')
   })
 
   it('labels a saved partial summary while preserving its received text', () => {
@@ -2881,7 +2885,7 @@ describe('timeline pin state', () => {
     }
     const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Partial thinking summary')
+    expect(container.querySelector('.trace-reasoning')).toHaveTextContent('Partial thinking summary')
     expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Received before the run stopped.')
   })
 

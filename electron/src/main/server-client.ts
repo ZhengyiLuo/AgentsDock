@@ -894,6 +894,7 @@ export class AgentServerClient {
       model: input.model || null,
       effort: input.effort || null,
       system_prompt: input.system_prompt || null,
+      ...(input.subagent_limit !== undefined ? { subagent_limit: input.subagent_limit } : {}),
       codex_approval_policy: input.codex_approval_policy ?? null,
       codex_sandbox_mode: input.codex_sandbox_mode ?? null,
       codex_permission_profile: input.codex_permission_profile ?? null,
@@ -2076,7 +2077,10 @@ export class AgentServerClient {
       const url = new URL(endpoint)
       url.searchParams.set('after', String(lastSeq))
       url.searchParams.set('visible', 'true')
-      if (onReasoningStream) url.searchParams.set('reasoning_stream', 'true')
+      if (onReasoningStream) {
+        url.searchParams.set('reasoning_stream', 'true')
+        url.searchParams.set('reasoning_text', 'true')
+      }
       const protocols = authenticatedWebSocketProtocols(
         configuration,
         url,

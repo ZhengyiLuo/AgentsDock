@@ -893,7 +893,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Deliver preceding durable completions before removing their live
         // snapshots, even when normal timeline events are batched for typing.
         if (previous?.items.some(item => !stream?.items.some(next => (
-          next.run_id === item.run_id && next.item_id === item.item_id
+          next.run_id === item.run_id && next.item_id === item.item_id && next.phase === item.phase
         )))) flushLiveEvents(true)
         set(state => {
           const snapshot = state.snapshots[payload.sessionId]
@@ -4512,7 +4512,7 @@ function eventMayRenderInTimeline(event: Event): boolean {
   if (event.type === 'turn_started' || isNativeGoalSteerEvent(event)) return Boolean(event.prompt?.trim() || event.file_ids?.length)
   if (event.type === 'assistant_text') return Boolean(event.text?.trim())
   if (event.type === 'turn_finished') return Boolean(event.result_text?.trim())
-  if (event.type === 'reasoning_summary') return Boolean((event.text || String(event.message || '')).trim())
+  if (event.type === 'reasoning_summary' || event.type === 'reasoning_text') return Boolean((event.text || String(event.message || '')).trim())
   if (event.type === 'tool_started' || event.type === 'tool_finished') return true
   if (event.type === 'artifact_created' || event.type === 'file_uploaded' || event.type === 'code_diff') return true
   if (event.type.startsWith('handoff_digest_') || event.type.startsWith('job_')) return true
@@ -4530,6 +4530,7 @@ function normalizeSessionPatch(patch: Partial<Session>) { return {
   model: patch.model,
   effort: patch.effort,
   system_prompt: patch.system_prompt,
+  subagent_limit: patch.subagent_limit,
   codex_approval_policy: patch.codex_approval_policy,
   codex_sandbox_mode: patch.codex_sandbox_mode,
   codex_permission_profile: patch.codex_permission_profile,

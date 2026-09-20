@@ -26,6 +26,7 @@ import { BackendMark } from './BackendMark'
 import { ChatShareDialog } from './ChatShareDialog'
 import { CodexAuthSettings } from './CodexAuthSettings'
 import { CodexModelDiscovery } from './CodexModelDiscovery'
+import { ReasoningDisplaySettings } from './ReasoningDisplaySettings'
 import { CodexServerSettings } from './CodexServerSettings'
 import { CodexSubagentSettings } from './CodexSubagentSettings'
 import { RuntimeHealthPanel } from './RuntimeHealth'
@@ -587,6 +588,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                   <option value="dark">{t('settings.darkTheme')}</option>
                 </select>
               </label>
+              <ReasoningDisplaySettings />
               <div className="app-settings-row">
                 <strong className="app-settings-row-title">AgentsDock</strong>
                 <span className="app-settings-value">{update?.currentVersion ? t('settings.version', { version: update.currentVersion }) : t('settings.versionUnavailable')}</span>

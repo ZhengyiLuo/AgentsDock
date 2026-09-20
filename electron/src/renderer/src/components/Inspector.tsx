@@ -16,6 +16,7 @@ import { requestOpenAgentFile, requestOpenWorkspacePath, workspacePathForAgentFi
 import { useAppStore } from '../store/app-store'
 import { LazyVideoThumbnail, MediaPreviewDialog } from './MediaGrid'
 import { NativeFileDragSurface } from './NativeFileDragSurface'
+import { SessionSubagentSettings } from './SessionSubagentSettings'
 
 const EMPTY_FILES: AgentFile[] = []
 
@@ -124,6 +125,10 @@ export function Inspector({ embedded = false, afterMedia }: { embedded?: boolean
           <SessionPromptField value={session.system_prompt || ''} onSave={value => useAppStore.getState().updateSession(session.id, { system_prompt: value || null })} />
         </section>
 
+        {pinProfileScope && (session.backend === 'codex' || session.backend === 'claude') && <SessionSubagentSettings
+          key={`subagent-limit:${activeProfileId}:${profileGeneration}:${serverIdentity}:${session.id}:${session.backend}`}
+          session={session} profileScope={pinProfileScope}
+        />}
         {pinProfileScope && <PinnedSection key={`pinned:${session.id}`} profileScope={pinProfileScope} sessionId={session.id} pins={pins} setPins={setPins} files={files} />}
         <SubagentsSection key={`subagents:${session.id}`} sessionId={session.id} />
         <section className="inspector-section collapsible-section">
