@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="如何让 AgentsDock 保持最新——应用和 AgentsServer 一起更新，并在稳定版与测试版渠道之间选择。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="更新到最新版本 · AgentsDock" />
+    <meta property="og:description" content="如何让 AgentsDock 保持最新——应用和 AgentsServer 一起更新，并在稳定版与测试版渠道之间选择。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/update.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="更新到最新版本 · AgentsDock" />
+    <meta name="twitter:description" content="如何让 AgentsDock 保持最新——应用和 AgentsServer 一起更新，并在稳定版与测试版渠道之间选择。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>更新到最新版本 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/update.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/update.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/update.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../update.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../update.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link current" href="./update.html">更新</a>
+          <span class="docs-nav-subs">
+            <a href="#update">在应用内更新</a>
+            <a href="#both">两端一起更新</a>
+            <a href="#channels">稳定版与测试版</a>
+          </span>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">文档</p>
+        <h1>更新到最新版本</h1>
+        <p class="legal-lead">AgentsDock 在应用设置里就地更新。你可以通过两个渠道选择接收新版本的方式：<strong>稳定版（Stable）</strong>和<strong>测试版（Beta）</strong>。</p>
+
+        <h2 id="update">如何在应用内更新到最新版本</h2>
+        <p>打开<strong>设置</strong>并滚动到更新区域。AgentsDock 会检查新版本并显示可用的更新——点击<strong>立即检查（Check now）</strong>，再点<strong>重启以更新（Restart to update）</strong>，即可安装并以最新版本重新启动。</p>
+        <figure class="docs-shot">
+          <video autoplay muted loop playsinline preload="metadata" poster="../assets/update-channels-poster.jpg">
+            <source src="../assets/update-channels.mp4" type="video/mp4" />
+          </video>
+          <figcaption>在设置里更新应用和你的 AgentsServer——各自都有稳定版 / 测试版开关。</figcaption>
+        </figure>
+
+        <h2 id="both">应用和服务器一起更新</h2>
+        <p>AgentsDock 由两部分组成——<strong>应用</strong>（Mac、iPhone 或 iPad 上的客户端）和 <strong>AgentsServer</strong>（运行在你的远程机器上）。两者在同一面板里各自显示版本号，各有自己的<strong>检查</strong>和更新控件。</p>
+        <p>更新时，<strong>请把两端同时升到最新版本</strong>。应用和服务器保持版本一致可以避免不匹配——功能和修复往往两边一起发布。远程机器用<strong>将服务器更新到 Beta（Update server to Beta）</strong>/<strong>安装或更新 AgentsServer（Install or update AgentsServer）</strong>，应用则用<strong>重启以更新（Restart to update）</strong>。</p>
+
+        <h2 id="channels">稳定版与测试版</h2>
+        <p>应用和服务器都有<strong>稳定版（Stable）</strong>/<strong>测试版（Beta）</strong>开关：</p>
+        <ul>
+          <li><strong>稳定版</strong>——打磨完善、充分测试的发布版本。日常使用的正确选择。</li>
+          <li><strong>测试版</strong>——最新的签名构建，功能和修复会先于稳定版到达。适合想尝鲜、不介意偶尔有小毛病的人。</li>
+        </ul>
+        <p>两端选择同一渠道，让应用和服务器步调一致。想知道每个版本具体改了什么、哪些是稳定版哪些是测试版？所有发布版本及其说明都在 GitHub 上。</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/releases" target="_blank" rel="noopener">浏览发布版本与更新说明 <span aria-hidden="true">&rarr;</span></a></p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="如何在 AgentsDock 中与 agent 开始第一段对话——确认服务器已连接，点击新建会话，选择 Claude Code 或 Codex。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="开始第一个会话 · AgentsDock" />
+    <meta property="og:description" content="如何在 AgentsDock 中与 agent 开始第一段对话——确认服务器已连接，点击新建会话，选择 Claude Code 或 Codex。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/first-chat.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="开始第一个会话 · AgentsDock" />
+    <meta name="twitter:description" content="如何在 AgentsDock 中与 agent 开始第一段对话——确认服务器已连接，点击新建会话，选择 Claude Code 或 Codex。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>开始第一个会话 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/first-chat.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/first-chat.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/first-chat.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../first-chat.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../first-chat.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link current" href="./first-chat.html">开始第一个会话</a>
+          <span class="docs-nav-subs">
+            <a href="#connect">确认已连接</a>
+            <a href="#new-chat">开始会话</a>
+          </span>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">文档</p>
+        <h1>开始第一个会话</h1>
+        <p class="legal-lead">服务器搭建并连接好之后，和 agent 开始一段对话只需一次点击。</p>
+
+        <h2 id="connect">首先，确认已连接</h2>
+        <p>打开 AgentsDock，在服务器切换器里查看你的服务器。<strong>绿点</strong>表示服务器在线且已连接；<strong>红点</strong>表示应用无法访问它。</p>
+        <figure class="docs-shot">
+          <img src="../assets/first-chat-servers.png" alt="AgentsDock server switcher — one server offline with a red dot, and the selected Mac Mini server online with a green dot" loading="lazy" />
+          <figcaption>绿 = 已连接、在线。红 = 无法访问。</figcaption>
+        </figure>
+        <p>连接服务器需要两样东西：它的<strong>地址</strong>——服务器的 IP 或主机名加端口 <code>7850</code>——以及它的<strong>访问令牌</strong>。在应用里填好后，点击<strong>测试连接（Test connection）</strong>。</p>
+        <figure class="docs-shot">
+          <img src="../assets/first-chat-addserver.png" alt="AgentsDock Add server form with a Server URL field, an Access token field, and a Test connection button" loading="lazy" />
+          <figcaption>用 URL 和访问令牌添加服务器，然后<strong>测试连接</strong>。</figcaption>
+        </figure>
+        <p>还没搭建服务器？<a href="./setup.html">搭建指南</a>会一步步带你把服务器跑起来、找到它的地址和访问令牌，再连接你的设备。</p>
+
+        <h2 id="new-chat">开始会话</h2>
+        <p>点击侧边栏顶部的 <strong>+</strong> 按钮——即<strong>新建会话（New chat）</strong>——或按 <code>⌘N</code>。</p>
+        <figure class="docs-shot">
+          <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-agents-poster.jpg">
+            <source src="../assets/feature-agents.mp4" type="video/mp4" />
+          </video>
+          <figcaption>点击 <strong>+</strong> 新建会话并选择一个 agent。</figcaption>
+        </figure>
+        <p>在弹出的对话框中选择：</p>
+        <ul>
+          <li>一个<strong>后端</strong>——Claude Code 或 Codex，用你自己的账号在远程机器上运行；</li>
+          <li>一个<strong>工作目录</strong>——远程机器上 agent 将在其中工作的文件夹。</li>
+        </ul>
+        <p>然后输入第一条消息，按 <code>Enter</code> 发送。就这么简单——agent 在你服务器上的那个目录里运行，而这个会话拥有自己的持久终端，你随时可以从任何设备接入。</p>
+
+        <h2 id="next">接下来</h2>
+        <p>到<a href="./features.html">主要功能</a>看看 AgentsDock 还能做什么，或用<a href="./shortcuts.html">键盘快捷键</a>提速。</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

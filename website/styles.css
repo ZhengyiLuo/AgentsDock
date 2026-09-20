@@ -681,6 +681,13 @@ a { color: inherit; }
 .docs-nav-subs a.active { color: var(--blue); border-left-color: var(--blue); }
 /* Mobile docs directory toggle — hidden on desktop, revealed ≤900px (see media query). */
 .docs-menu-toggle { display: none; }
+/* Docs-only language switch (EN / 中文) at the top of the sidebar. */
+.docs-lang { display: flex; gap: 6px; margin: 0 0 18px; padding: 0 10px; }
+.docs-lang-link { font-family: var(--display); font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--muted); text-decoration: none; padding: 4px 9px; border-radius: 6px; border: 1px solid transparent; transition: color .15s ease, background-color .15s ease, border-color .15s ease; }
+.docs-lang-link.is-current { color: var(--blue); background: var(--accent-soft); }
+.docs-lang-link:not(.is-current):hover { color: var(--text); border-color: var(--line); }
+.docs-menu-row { display: none; }
+
 /* Reuse the .legal prose styles but drop its narrow-column container box —
    the content fills the full width of the docs grid column. */
 .docs .legal { max-width: none; min-width: 0; margin: 0; padding: 0; }
@@ -704,6 +711,7 @@ a { color: inherit; }
 .docs-shot { margin: 26px 0; }
 .docs-shot.narrow { max-width: 250px; margin-left: auto; margin-right: auto; }
 .docs-shot.narrow figcaption { text-align: center; }
+.docs-shot.medium { max-width: 487px; }
 .docs-shot img, .docs-shot video { display: block; width: 100%; height: auto; border-radius: 12px; box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(0,0,0,.4); }
 .docs-shot figcaption { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--muted); }
 /* Keyboard-shortcuts tables — each key is its own keycap */
@@ -734,8 +742,10 @@ a { color: inherit; }
     border: 1px solid var(--line); border-radius: 12px;
     color: var(--text); font: inherit; text-align: left; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    position: sticky; top: 64px; z-index: 6;
   }
+  .docs-menu-row { display: flex; gap: 10px; align-items: stretch; position: sticky; top: 64px; z-index: 6; margin: 0 0 26px; }
+  .docs-menu-toggle { flex: 1; margin: 0; }
+  .docs-menu-lang { display: inline-flex; align-items: center; padding: 0 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(20,24,23,.86); backdrop-filter: blur(12px); color: var(--blue); font-family: var(--display); font-size: 14px; font-weight: 700; text-decoration: none; }
   .docs-menu-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .docs-menu-kicker { font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
   .docs-menu-current { font-family: var(--display); font-size: 16px; font-weight: 600; color: var(--text); }

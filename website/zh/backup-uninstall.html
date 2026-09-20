@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsServer 把什么存在哪里、如何备份和恢复、卸载时删除和保留什么，以及名称释放备份与 --purge-state 的区别。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="备份、恢复与卸载 · AgentsDock" />
+    <meta property="og:description" content="AgentsServer 把什么存在哪里、如何备份和恢复、卸载时删除和保留什么，以及名称释放备份与 --purge-state 的区别。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/backup-uninstall.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="备份、恢复与卸载 · AgentsDock" />
+    <meta name="twitter:description" content="AgentsServer 把什么存在哪里、如何备份和恢复、卸载时删除和保留什么，以及名称释放备份与 --purge-state 的区别。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>备份、恢复与卸载 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/backup-uninstall.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/backup-uninstall.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/backup-uninstall.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+            <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../backup-uninstall.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../backup-uninstall.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link current" href="./backup-uninstall.html">备份与卸载</a>
+          <span class="docs-nav-subs">
+            <a href="#what">什么存在哪里</a>
+            <a href="#backup">备份</a>
+            <a href="#restore">恢复</a>
+            <a href="#uninstall">卸载</a>
+            <a href="#release">名称释放备份</a>
+            <a href="#purge">清除状态</a>
+            <a href="#terminals">终端会话</a>
+          </span>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">服务器参考</p>
+        <h1>备份、恢复与卸载</h1>
+        <p class="legal-lead">AgentsServer 把所有东西都以普通目录的形式存放在你的机器上。本页说明各项内容的位置、如何备份和恢复，以及卸载时到底删除什么、保留什么。</p>
+        <p class="legal-meta">适用于 AgentsServer 1.0.x。命名实例路径和名称释放备份需要<a href="./multiple-servers.html#availability">多服务器</a>中描述的 <code>main</code> 分支构建。</p>
+
+        <h2 id="what">什么存在哪里</h2>
+        <ul>
+          <li><strong>状态</strong>——会话及其事件历史、定时任务、上传和生成的文件、安全对等凭据、终端元数据：<code>~/.agentsdock</code>（默认服务器）· <code>~/.agentsdock-instances/NAME</code>（命名实例）</li>
+          <li><strong>配置</strong>——访问令牌和服务设置：<code>~/.config/agents-server</code> · <code>~/.config/agents-server-instances/NAME</code></li>
+          <li><strong>运行时</strong>——已安装的发布版本及其 Python 环境（完全可重装，不含个人数据）：<code>~/.local/share/agents-server</code> · <code>~/.local/share/agents-server-instances/NAME</code></li>
+          <li><strong>日志</strong>——<code>~/Library/Logs/AgentsServer/</code>（macOS）或用户日志（Linux）</li>
+        </ul>
+        <p>你的 Claude Code 和 Codex 会话本身存放在这些工具自己的目录里（<code>~/.claude</code>、<code>~/.codex</code>），项目文件则在你自己存放的位置——AgentsServer 只引用它们，并不拥有它们。</p>
+
+        <h2 id="backup">备份</h2>
+        <p>只有<strong>状态</strong>和<strong>配置</strong>目录重要；运行时可以重装。先停止服务器，避免复制过程中文件发生变化：</p>
+<pre># macOS
+launchctl bootout gui/$(id -u)/com.agentsdock.server
+# Linux
+systemctl --user stop agents-server.service
+
+cp -a ~/.agentsdock ~/agentsdock-backup-$(date +%F)
+cp -a ~/.config/agents-server ~/agentsdock-config-backup-$(date +%F)
+
+# then start it again
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agentsdock.server.plist   # macOS
+systemctl --user start agents-server.service                                           # Linux</pre>
+        <p>对于命名实例，请使用它自己的服务名和<a href="./multiple-servers.html#paths">每个实例的位置</a>中列出的 <code>…-instances/NAME</code> 路径。配置备份包含你的访问令牌——请存放在私密的地方。</p>
+
+        <h2 id="restore">恢复</h2>
+        <p><strong>原位状态会被自动接管。</strong>如果状态目录还在（正常卸载后就是如此），只需再次运行 <code>./install.sh</code> 就能重新连上同样的会话、任务和文件。除非配置目录也保留了，否则重装会生成<em>新的</em>访问令牌——若是这样，请在应用里更新令牌。</p>
+        <p><strong>从你自己做的备份恢复：</strong>停止服务器，把备份的目录放回原来的路径，再启动它（或运行 <code>./install.sh</code>）。想保留旧令牌的话，把配置目录也一并恢复。</p>
+        <p>重装<strong>不会</strong>自动恢复<em>名称释放</em>备份——那部分在下文单独说明。</p>
+
+        <h2 id="uninstall">卸载</h2>
+<pre>./uninstall.sh                          # lists instances, confirms exact names
+./uninstall.sh --instance work          # one named instance
+./uninstall.sh --all                    # everything
+./uninstall.sh --all --exclude default  # all named instances, keep default
+./uninstall.sh --yes                    # skip the prompt (default server)</pre>
+        <p>卸载会<strong>移除</strong>用户服务、版本化的运行时，以及包括访问令牌在内的生成配置。它会<strong>保留</strong>状态目录下的会话历史、任务、文件、安全对等凭据和终端，之后再运行 <code>./install.sh</code> 会接管同样的历史。它从不使用包管理器或 <code>sudo</code>，并拒绝对根目录、主目录、宽泛的系统目录或相互重叠的路径进行操作。</p>
+
+        <h2 id="release">名称释放备份</h2>
+        <p>当一个<em>命名</em>实例的名称被释放时（移除它，或用同一名称创建新实例），它的状态目录不会被删除——而是<strong>移到一个私有备份</strong>：</p>
+<pre>~/.config/agents-server-manager/history-backups/&lt;name&gt;-&lt;random&gt;/state</pre>
+        <p>默认实例的名称永远不会被释放。原始的 Claude/Codex 会话和你的项目文件不受影响；只有 AgentsDock 自有的内容会移入备份。</p>
+        <p>释放名称会把它保存的 AgentsDock 数据保留在命令打印的私有备份位置。重装该实例<strong>不会</strong>自动恢复那个备份，重装后的实例从空的会话列表开始。目前<strong>还没有内置的恢复命令</strong>——请保持备份原样（不要移动或合并它，尤其是在该名称已被重新使用的情况下），并到 <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a> 或通过<a href="./report-issue.html">反馈问题</a>寻求恢复指引。</p>
+
+        <h2 id="purge">清除状态</h2>
+<pre>./uninstall.sh --purge-state</pre>
+        <p>这是<strong>唯一的破坏性选项</strong>。它会永久删除状态目录——会话历史、任务、文件、令牌、安全对等凭据。它总是要求你输入完整的状态路径确认，<code>--yes</code> 永远无法跳过这个提示。</p>
+
+        <h2 id="terminals">终端会话</h2>
+        <p>卸载后，持久会话终端仍会继续运行。它们是普通的 tmux 会话，按服务器隔离：</p>
+<pre>tmux ls                          # default server: sessions named zd_*
+tmux -L agents-server-NAME ls    # named instance: sessions named zdi_NAME_*</pre>
+        <p>只关闭你确认属于所移除服务器的 AgentsDock 会话终端。机器上的其他 tmux 会话以及其他实例的会话是独立的，不受影响。</p>
+
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

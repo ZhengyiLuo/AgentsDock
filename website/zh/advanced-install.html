@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsServer 的全部安装选项、端口与绑定行为、Tailscale 远程访问、访问令牌、手动安装、服务模板，以及完整的环境变量参考。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="高级安装与配置 · AgentsDock" />
+    <meta property="og:description" content="AgentsServer 的全部安装选项、端口与绑定行为、Tailscale 远程访问、访问令牌、手动安装、服务模板，以及完整的环境变量参考。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/advanced-install.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="高级安装与配置 · AgentsDock" />
+    <meta name="twitter:description" content="AgentsServer 的全部安装选项、端口与绑定行为、Tailscale 远程访问、访问令牌、手动安装、服务模板，以及完整的环境变量参考。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>高级安装与配置 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/advanced-install.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/advanced-install.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/advanced-install.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+            <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../advanced-install.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../advanced-install.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link current" href="./advanced-install.html">高级安装</a>
+          <span class="docs-nav-subs">
+            <a href="#requirements">要求</a>
+            <a href="#installer">安装选项</a>
+            <a href="#ports">端口与绑定地址</a>
+            <a href="#remote">远程访问（Tailscale）</a>
+            <a href="#tokens">访问令牌</a>
+            <a href="#manual">手动安装与运行</a>
+            <a href="#service">服务模板</a>
+            <a href="#env">环境变量</a>
+            <a href="#paths">文件位置</a>
+          </span>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">服务器参考</p>
+        <h1>高级安装与配置</h1>
+        <p class="legal-lead">安装和配置 AgentsServer 的完整参考。日常命令（更新、令牌、重启、日志）见<a href="./server.html">管理服务器</a>；首次搭建的分步教程见<a href="./setup.html">搭建指南</a>。</p>
+        <p class="legal-meta">适用于 AgentsServer 1.0.x 发布版本。权威来源：<a href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">AgentsServer 仓库</a>和 <code>./install.sh --help</code>。</p>
+
+        <h2 id="requirements">要求</h2>
+        <ul>
+          <li><strong>主机：</strong>Linux，或 Apple 芯片的 macOS。不支持 Intel macOS；安装脚本会在做任何更改前停止。</li>
+          <li><strong><code>uv</code></strong> 预装在 <code>PATH</code> 中（macOS 上 <code>brew install uv</code>；Linux 上用发行版的包管理器）。它负责准备隔离的 Python 3.10+ 运行时。安装脚本从不下载引导脚本。</li>
+          <li><strong>Claude Code 和/或 Codex</strong> 已在主机上安装并登录，且与运行服务器的是同一个用户账号。</li>
+          <li><strong>tmux</strong>（可选）——启用应用内终端、实时窗格查看和应用内托管更新。装有 Homebrew 的 macOS 上，安装脚本会询问是否代为安装；否则打印安装命令并继续。</li>
+          <li><strong>Tailscale</strong>（可选）——让其他设备无需暴露端口即可访问服务器。</li>
+          <li>可用的用户服务会话：<code>launchctl</code>（macOS）或 <code>systemctl --user</code>（Linux）。全程不使用 <code>sudo</code>。</li>
+        </ul>
+
+        <h2 id="installer">安装选项</h2>
+<pre>./install.sh [--port PORT] [--bind ADDRESS] [--release-version VERSION]
+             [--non-interactive] [--allow-port-fallback | --no-port-fallback]
+             [--show-token] [--instance NAME]</pre>
+        <ul>
+          <li><code>--port PORT</code>——固定使用指定端口。不指定时默认为 <code>7850</code>。</li>
+          <li><code>--bind ADDRESS</code>——监听地址。默认 <code>0.0.0.0</code>（所有网卡，其他设备可连接）。</li>
+          <li><code>--release-version VERSION</code>——安装指定的已发布版本而非最新版。</li>
+          <li><code>--non-interactive</code>——从不提示（跳过 tmux 安装询问和剪贴板复制）。用于脚本和通过 SSH 驱动的运行。</li>
+          <li><code>--allow-port-fallback</code> / <code>--no-port-fallback</code>——控制是否自动选择邻近端口（见下文）。</li>
+          <li><code>--show-token</code>——打印访问令牌并退出，不重新安装也不重启。</li>
+          <li><code>--instance NAME</code>——对命名实例而非默认服务器执行操作。参见<a href="./multiple-servers.html">多服务器</a>。</li>
+        </ul>
+        <p>每次运行都是幂等的：保留上一个健康版本以便回滚，保留访问令牌和配置，绝不触碰会话状态。运行失败时当前生效版本保持不变，并打印恢复指引。安装锁可防止被取消的 SSH 尝试与重试互相竞争。</p>
+
+        <h2 id="ports">端口与绑定地址</h2>
+        <p>如果默认端口已被某个不是待替换 AgentsServer 的进程占用，安装脚本会报告该监听进程（可用时借助 <code>lsof</code>），并在向上最多五个空闲端口中选一个。所选端口会在运行结束时打印。</p>
+        <ul>
+          <li>单独使用 <code>--port</code> 会固定该端口，被占用时直接失败。</li>
+          <li><code>--port … --allow-port-fallback</code> 允许显式指定的端口回退到邻近的空闲端口。</li>
+          <li><code>--no-port-fallback</code> 同样禁用默认端口的回退。</li>
+        </ul>
+        <p>绑定到 <code>0.0.0.0</code>（默认）以接受其他设备的连接；只有应用与服务器在同一台机器上时才绑定 <code>127.0.0.1</code>。绑定到回环地址的服务器无法通过 Tailscale 访问。</p>
+
+        <h2 id="remote">远程访问（Tailscale）</h2>
+        <p>远程访问推荐走 Tailscale，这样手机、平板和笔记本都能访问服务器，而无需把端口发布到互联网。它是可选的；主机上没有 Tailscale 时，安装脚本只会打印一条提醒。</p>
+        <p>在服务器上：</p>
+<pre>tailscale status
+tailscale ip -4</pre>
+        <p>在每台设备上加入同一个 tailnet，然后使用服务器 URL：</p>
+<pre>http://&lt;tailscale-ip&gt;:7850</pre>
+        <p>如果设备上的浏览器能打开 <code>/api/health</code> 但应用连不上，请检查：设备已连接 Tailscale、URL 带有端口、应用里填的是同一个访问令牌，以及服务器绑定的是 <code>0.0.0.0</code>（而不只是 <code>127.0.0.1</code>）。</p>
+        <div class="guide-note"><p><strong>切勿把 7850 端口暴露到公网。</strong>使用 Tailscale 或其他私有网络，并保持访问令牌启用。</p></div>
+
+        <h2 id="tokens">访问令牌</h2>
+        <p>安装脚本会生成一个私有的 bearer 令牌并打印一次。每个 HTTP 调用、上传、文件/视频获取和 WebSocket 流都需要它。随时可以这样取回：</p>
+<pre>./install.sh --show-token</pre>
+        <p>客户端以 <code>Authorization: Bearer &lt;token&gt;</code>（或 <code>X-AgentsDock-Token</code> 请求头）发送它。手动运行服务器时，请自行设置 <code>AGENTSDOCK_AGENT_TOKEN</code>；只有在可信的本地开发环境中才可以不设置。</p>
+
+        <h2 id="manual">手动安装与运行</h2>
+        <p>如果你不想用安装脚本或服务，可以直接从代码检出目录运行服务器：</p>
+<pre>git clone https://github.com/ZhengyiLuo/AgentsServer.git
+cd AgentsServer
+uv venv
+uv sync --frozen
+
+# confirm the CLIs work in this same shell/user
+command -v claude &amp;&amp; claude --version
+command -v codex  &amp;&amp; codex --version
+
+export AGENTSDOCK_AGENT_TOKEN='replace-with-a-long-random-token'
+uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</pre>
+        <p>在服务器机器上检查：</p>
+<pre>curl -H 'Authorization: Bearer replace-with-a-long-random-token' http://127.0.0.1:7850/api/health</pre>
+        <p>用 <code>AGENTSDOCK_STATE_DIR</code> 把状态存放在 <code>~/.agentsdock</code> 以外的位置；只安装了其中一个命令行工具时，设置 <code>AGENTSDOCK_BACKEND</code>。</p>
+
+        <h2 id="service">服务模板</h2>
+        <p>安装脚本会为你创建并管理用户服务：macOS 上是 LaunchAgent <code>com.agentsdock.server</code>，Linux 上是 <code>agents-server.service</code>。只有自定义部署才需要下面的模板。</p>
+<pre>mkdir -p ~/.config/systemd/user
+cp systemd/agents-server.service.example ~/.config/systemd/user/agents-server.service
+systemctl --user daemon-reload
+systemctl --user enable --now agents-server.service
+systemctl --user status agents-server.service --no-pager -l</pre>
+        <p>两个平台的启动、停止、重启和日志命令见<a href="./server.html#service">管理服务器</a>。</p>
+
+        <h2 id="env">环境变量</h2>
+        <p>大多数设置都是服务器读取的环境变量。新配置请使用 <code>AGENTSDOCK_*</code> 名称；历史上的 <code>ZENITHBOT_*</code> / <code>ZENITHDOCK_AGENT_TOKEN</code> 仅作为兼容别名接受。括号内为默认值。</p>
+        <p><strong>网络与访问</strong></p>
+        <ul>
+          <li><code>AGENTSDOCK_AGENT_BIND</code>——绑定地址（<code>0.0.0.0</code>）</li>
+          <li><code>AGENTSDOCK_AGENT_PORT</code>——端口（<code>7850</code>）</li>
+          <li><code>AGENTSDOCK_AGENT_TOKEN</code>——共享的 bearer 令牌（未设置）</li>
+        </ul>
+        <p><strong>路径</strong></p>
+        <ul>
+          <li><code>AGENTSDOCK_STATE_DIR</code>——会话、任务和文件状态（<code>~/.agentsdock</code>）</li>
+          <li><code>AGENTSDOCK_AGENT_CWD</code>——新会话的默认工作目录（你的主目录）</li>
+          <li><code>AGENTS_SERVER_INSTALL_DIR</code>——版本化运行时根目录（<code>~/.local/share/agents-server</code>）</li>
+          <li><code>CLAUDE_PROJECTS_ROOT</code>——Claude 历史搜索根目录（<code>~/.claude/projects</code>）</li>
+          <li><code>CODEX_SESSIONS_ROOT</code>——Codex 历史搜索根目录（<code>~/.codex/sessions</code>）</li>
+        </ul>
+        <p><strong>后端</strong></p>
+        <ul>
+          <li><code>AGENTSDOCK_BACKEND</code>——默认后端，<code>claude</code> 或 <code>codex</code>（<code>claude</code>）</li>
+          <li><code>CLAUDE_BIN</code> / <code>CODEX_BIN</code>——可执行文件名或路径（<code>claude</code> / <code>codex</code>）</li>
+          <li><code>AGENTSDOCK_CLAUDE_TRANSPORT</code>——交互式 Claude 传输方式：<code>auto</code>、<code>agent-sdk</code> 或 <code>print</code>（<code>auto</code>）</li>
+          <li><code>AGENTSDOCK_CLAUDE_SDK_IDLE_TTL_SECONDS</code>——每个会话的 SDK 客户端空闲保留时间（<code>300</code>）</li>
+          <li><code>AGENTSDOCK_CLAUDE_SDK_MAX_LOADED_CHATS</code>——最多保留的会话 SDK 客户端数（<code>4</code>）</li>
+          <li><code>AGENTSDOCK_RUNTIME_CATALOG_TIMEOUT_SECONDS</code>——每条命令的 CLI 版本/帮助/模型探测超时（<code>6</code>）</li>
+          <li><code>AGENTSDOCK_CLAUDE_AUTH_PROBE_TIMEOUT_SECONDS</code>——<code>claude auth status</code> 的超时（<code>15</code>）</li>
+          <li><code>AGENTSDOCK_RUNTIME_DIAGNOSTIC_TTL_SECONDS</code>——CLI 版本/登录探测结果的缓存时长（<code>60</code>）</li>
+        </ul>
+        <p><strong>任务与保护</strong></p>
+        <ul>
+          <li><code>AGENTSDOCK_JOB_MAX_ACTIVE_RUNS</code>——定时任务并发上限；<code>0</code> 表示不限（<code>0</code>）</li>
+          <li><code>AGENTSDOCK_MAX_ACTIVE_AGENT_RUNS</code>——会话、定时和目标运行的全服务器上限；<code>0</code> = 不限（<code>0</code>）</li>
+          <li><code>AGENTSDOCK_JOB_MIN_AVAILABLE_MEM_MB</code>——任务启动的内存保护阈值（<code>4096</code>）</li>
+          <li><code>AGENTSDOCK_MIN_START_AVAILABLE_MEM_MB</code>——交互式启动的内存保护阈值（<code>2048</code>）</li>
+          <li><code>AGENTSDOCK_CODE_DIFF_SNAPSHOT_TIMEOUT_SECONDS</code>——每次隔离 Git worktree 快照的最长时间（<code>120</code>）</li>
+        </ul>
+        <p><strong>上下文摘要</strong></p>
+        <ul>
+          <li><code>AGENTSDOCK_HANDOFF_DIGEST_BACKEND</code>——<code>claude</code> 或 <code>codex</code>（<code>claude</code>）</li>
+          <li><code>AGENTSDOCK_HANDOFF_DIGEST_MODEL</code>——模型（<code>sonnet</code>）</li>
+          <li><code>AGENTSDOCK_HANDOFF_DIGEST_EFFORT</code>——可选的推理/努力程度设置（未设置）</li>
+          <li><code>AGENTSDOCK_HANDOFF_DIGEST_TIMEOUT_SECONDS</code>——摘要生成超时（<code>180</code>）</li>
+          <li><code>AGENTSDOCK_HANDOFF_DIGEST_CHARS</code>——最终摘要的字符上限（<code>56000</code>）</li>
+        </ul>
+
+        <h2 id="paths">文件位置</h2>
+        <ul>
+          <li><code>~/.agentsdock</code>——状态：会话、任务、文件、上传、令牌、安全对等凭据</li>
+          <li><code>~/.config/agents-server</code>——生成的配置和访问令牌</li>
+          <li><code>~/.local/share/agents-server</code>——版本化的发布；<code>current</code> 指向当前生效的版本</li>
+          <li><code>~/Library/Logs/AgentsServer/</code>（macOS）· <code>journalctl --user -u agents-server.service</code>（Linux）——日志</li>
+        </ul>
+        <p>命名实例使用各自的同级路径——见<a href="./multiple-servers.html#paths">每个实例的位置</a>。</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="运行 AgentsServer 的全部命令：安装与更新、查看访问令牌、检查健康状态、启动/停止/重启服务、查看日志、卸载。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="管理服务器 · AgentsDock" />
+    <meta property="og:description" content="运行 AgentsServer 的全部命令：安装与更新、查看访问令牌、检查健康状态、启动/停止/重启服务、查看日志、卸载。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/server.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="管理服务器 · AgentsDock" />
+    <meta name="twitter:description" content="运行 AgentsServer 的全部命令：安装与更新、查看访问令牌、检查健康状态、启动/停止/重启服务、查看日志、卸载。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>管理服务器 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/server.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/server.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/server.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+        <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../server.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../server.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link current" href="./server.html">管理服务器</a>
+          <span class="docs-nav-subs">
+            <a href="#install">安装与更新</a>
+            <a href="#token">访问令牌</a>
+            <a href="#health">确认正在运行</a>
+            <a href="#service">启动、停止、重启、日志</a>
+            <a href="#manual">手动运行</a>
+            <a href="#uninstall">卸载</a>
+            <a href="#env">设置与文件位置</a>
+          </span>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">文档</p>
+        <h1>管理服务器</h1>
+        <p class="legal-lead">AgentsServer 是运行在你自己机器上的开源后端。下面的所有操作都在那台机器的终端里完成——是<strong>服务器</strong>，而不是运行应用的设备。</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">GitHub 上的 AgentsServer <span aria-hidden="true">&rarr;</span></a></p>
+
+        <p class="legal-meta">想查全部安装选项、环境变量、一台机器上的多个服务器或备份？请看<a href="./advanced-install.html">服务器参考</a>。</p>
+
+        <div class="guide-note">
+          <p>全程不需要 <code>sudo</code>。安装脚本以你的用户身份运行，保留上一个健康版本以便回滚，并在每次更新中保留你的会话历史、任务、文件和访问令牌。</p>
+        </div>
+
+        <h2 id="install">安装与更新</h2>
+        <p>首次安装——以运行 Claude Code 或 Codex 的那个用户身份，克隆仓库并运行安装脚本：</p>
+<pre>git clone https://github.com/ZhengyiLuo/AgentsServer.git
+cd AgentsServer
+./install.sh</pre>
+        <p>更新时，拉取代码并重新运行同一个安装脚本。它会换上新的运行时、重启服务，并保留你的令牌和状态：</p>
+<pre>git pull --ff-only
+./install.sh</pre>
+        <p>你也可以在应用里更新——<strong>设置 &rarr; 安装或更新 AgentsServer</strong>，或使用<a href="./update.html">更新</a>页面介绍的稳定版 / 测试版开关。</p>
+        <p>安装选项</p>
+        <ul>
+          <li><code>--port PORT</code>——固定使用指定端口（默认 <code>7850</code>）。不指定时，若默认端口被占用，安装脚本会在后续 5 个空闲端口中选一个。</li>
+          <li><code>--bind ADDRESS</code>——绑定地址（默认 <code>0.0.0.0</code>，其他设备可以访问）。</li>
+          <li><code>--allow-port-fallback</code> / <code>--no-port-fallback</code>——允许或禁止回退到邻近端口。</li>
+          <li><code>--release-version VERSION</code>——安装指定的发布版本。</li>
+          <li><code>--non-interactive</code>——不出现任何提示；用于脚本化或通过 SSH 驱动的运行。</li>
+          <li><code>--show-token</code>——打印访问令牌并退出（见下文）。</li>
+        </ul>
+        <p>要求：macOS（Apple 芯片）或 Linux，预装 <code>uv</code>（macOS 上 <code>brew install uv</code>），以及已安装并登录的 Claude Code 和/或 Codex。<code>tmux</code> 可选——它支撑应用内终端和托管更新。</p>
+
+        <h2 id="token">查看你的访问令牌</h2>
+        <p>安装脚本结束时会打印一次令牌。之后随时想再看，在服务器上运行下面的命令——它只读取现有配置，不做任何更改：</p>
+<pre>./install.sh --show-token</pre>
+        <p>添加服务器时把它粘贴到应用的<strong>访问令牌</strong>字段（参见<a href="./setup.html#part-device">搭建指南</a>）。</p>
+
+        <h2 id="health">确认正在运行</h2>
+        <p>在服务器机器上：</p>
+<pre>curl http://127.0.0.1:7850/api/health</pre>
+        <p>如果服务器要求令牌（运行 <code>install.sh</code> 后默认如此），以 bearer 请求头传入：</p>
+<pre>curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:7850/api/health</pre>
+        <p>响应会包含 Claude Code、Codex 和 <code>tmux</code> 是否可用。在应用里，<strong>设置</strong>页显示同样的运行时检查，以及一个<strong>重启服务器（Restart server）</strong>按钮。</p>
+
+        <h2 id="service">启动、停止、重启与日志</h2>
+        <p>安装脚本会把 AgentsServer 注册为登录时自动启动的用户级服务。用你平台的服务管理器来管理它。</p>
+        <p><strong>macOS</strong>——LaunchAgent 为 <code>com.agentsdock.server</code>：</p>
+<pre># status
+launchctl print gui/$(id -u)/com.agentsdock.server
+
+# restart
+launchctl kickstart -k gui/$(id -u)/com.agentsdock.server
+
+# stop until next login / start again
+launchctl bootout gui/$(id -u)/com.agentsdock.server
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agentsdock.server.plist
+
+# logs
+tail -f ~/Library/Logs/AgentsServer/server.log
+tail -f ~/Library/Logs/AgentsServer/server-error.log</pre>
+        <p><strong>Linux</strong>——服务单元为 <code>agents-server.service</code>：</p>
+<pre># status
+systemctl --user status agents-server.service --no-pager -l
+
+# restart / stop / start
+systemctl --user restart agents-server.service
+systemctl --user stop agents-server.service
+systemctl --user start agents-server.service
+
+# logs
+journalctl --user -u agents-server.service -f</pre>
+
+        <h2 id="manual">手动运行</h2>
+        <p>开发时或不用服务只想跑一次，可以直接从仓库启动服务器：</p>
+<pre>uv venv &amp;&amp; uv sync --frozen
+uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</pre>
+        <p>在该 shell 中设置 <code>AGENTSDOCK_AGENT_TOKEN</code> 以要求令牌，设置 <code>AGENTSDOCK_STATE_DIR</code> 可把状态存放在 <code>~/.agentsdock</code> 以外的位置。</p>
+
+        <h2 id="uninstall">卸载</h2>
+<pre>./uninstall.sh</pre>
+        <p>这会停止并移除服务、版本化的运行时，以及包括访问令牌在内的生成配置。做任何更改前都会先询问（<code>--yes</code> 跳过提示）。<code>~/.agentsdock</code> 下的会话、任务、文件和终端会<strong>保留</strong>，之后再运行 <code>./install.sh</code> 会直接接管它们。</p>
+        <p>若要连同这些状态一起删除，加上 <code>--purge-state</code>——它总是要求你输入完整路径确认，且不可撤销。持久会话终端会作为 tmux 会话继续留在这台服务器的 tmux 服务上；<code>tmux ls</code> 可以列出它们。只关闭你确认属于本服务器会话终端的会话——机器上的其他 tmux 会话，以及任何命名服务器实例（它们使用各自的 tmux socket），都不受卸载默认服务器的影响。</p>
+
+        <h2 id="env">设置与文件位置</h2>
+        <p>服务器上各项内容的位置：</p>
+        <ul>
+          <li><code>~/.agentsdock</code>——会话历史、任务、文件、令牌（状态目录）。</li>
+          <li><code>~/.local/share/agents-server</code>——版本化的服务器发布；<code>current</code> 指向当前生效的版本。</li>
+          <li><code>~/Library/Logs/AgentsServer/</code>（macOS）或 <code>journalctl --user</code>（Linux）——日志。</li>
+        </ul>
+        <p>大多数设置都是环境变量。你最可能用到的有：</p>
+        <ul>
+          <li><code>AGENTSDOCK_AGENT_PORT</code> / <code>AGENTSDOCK_AGENT_BIND</code>——端口（<code>7850</code>）和绑定地址（<code>0.0.0.0</code>）。</li>
+          <li><code>AGENTSDOCK_AGENT_TOKEN</code>——共享的访问令牌。</li>
+          <li><code>AGENTSDOCK_STATE_DIR</code>——状态目录（<code>~/.agentsdock</code>）。</li>
+          <li><code>AGENTSDOCK_AGENT_CWD</code>——新会话的默认工作目录（你的主目录）。</li>
+          <li><code>AGENTSDOCK_BACKEND</code>——默认后端，<code>claude</code> 或 <code>codex</code>。</li>
+          <li><code>CLAUDE_BIN</code> / <code>CODEX_BIN</code>——命令行工具不在 <code>PATH</code> 中时的可执行文件路径。</li>
+        </ul>
+        <p>完整列表（包括任务并发和内存保护）见 <a href="https://github.com/ZhengyiLuo/AgentsServer#useful-configuration" target="_blank" rel="noopener">README 的配置表</a>。</p>
+
+        <div class="guide-note">
+          <p><strong>保持私有。</strong>不要把 <code>7850</code> 端口暴露到公网。通过 Tailscale 或其他私有网络访问服务器，并保持访问令牌启用。</p>
+        </div>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

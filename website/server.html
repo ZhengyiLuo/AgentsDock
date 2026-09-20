@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Every command for running your AgentsServer: install and update, show your access token, check health, start, stop and restart the service, view logs, and uninstall." />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="Manage Your Server · AgentsDock" />
+    <meta property="og:description" content="Install, update, check, restart, and uninstall your self-hosted AgentsServer from the command line." />
+    <meta property="og:url" content="https://agentsdock.net/server.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Manage Your Server · AgentsDock" />
+    <meta name="twitter:description" content="Install, update, check, restart, and uninstall your self-hosted AgentsServer from the command line." />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Manage Your Server · AgentsDock</title>
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="./analytics.js" defer></script>
+    <script src="./site-nav.js?v=92294063" defer></script>
+    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/server.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/server.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/server.html" />
+    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+        <main class="docs">
+      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/server.html" data-lang-label="中文">
+        <nav>
+          <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link is-current" aria-current="true">EN</a>
+            <a class="docs-lang-link" href="./zh/server.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+          </div>
+          <p class="docs-nav-label">Getting started</p>
+          <a class="docs-nav-link" href="./setup.html">Setup guide</a>
+          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
+          <p class="docs-nav-label">Guides</p>
+          <a class="docs-nav-link" href="./features.html">Key features</a>
+          <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
+          <a class="docs-nav-link" href="./update.html">Updates</a>
+          <a class="docs-nav-link" href="./language.html">Language</a>
+          <a class="docs-nav-link current" href="./server.html">Manage your server</a>
+          <span class="docs-nav-subs">
+            <a href="#install">Install &amp; update</a>
+            <a href="#token">Access token</a>
+            <a href="#health">Check it's running</a>
+            <a href="#service">Start, stop, restart, logs</a>
+            <a href="#manual">Run it manually</a>
+            <a href="#uninstall">Uninstall</a>
+            <a href="#env">Settings &amp; file locations</a>
+          </span>
+          <p class="docs-nav-label">Help</p>
+          <a class="docs-nav-link" href="./report-issue.html">Report an issue</a>
+          <p class="docs-nav-label">Server reference</p>
+          <a class="docs-nav-link" href="./advanced-install.html">Advanced install</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">Multiple servers</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">Back up &amp; uninstall</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">Docs</p>
+        <h1>Manage your server</h1>
+        <p class="legal-lead">AgentsServer is the open-source backend that runs on your own machine. Everything below is done from a terminal on that machine — the <strong>server</strong>, not the device running the app.</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">AgentsServer on GitHub <span aria-hidden="true">&rarr;</span></a></p>
+
+        <p class="legal-meta">Looking for every installer option, environment variable, multiple servers on one machine, or backups? See the <a href="./advanced-install.html">Server reference</a>.</p>
+
+        <div class="guide-note">
+          <p>No <code>sudo</code> is ever needed. The installer runs as your user, keeps the previous healthy release for rollback, and preserves your chat history, jobs, files, and access token across every update.</p>
+        </div>
+
+        <h2 id="install">Install &amp; update</h2>
+        <p>First install — clone the repo and run the installer as the user who runs Claude Code or Codex:</p>
+<pre>git clone https://github.com/ZhengyiLuo/AgentsServer.git
+cd AgentsServer
+./install.sh</pre>
+        <p>To update, pull and rerun the same installer. It swaps in the new runtime, restarts the service, and keeps your token and state:</p>
+<pre>git pull --ff-only
+./install.sh</pre>
+        <p>You can also update from the app — <strong>Settings &rarr; Install or update AgentsServer</strong>, or the Stable / Beta switch described in <a href="./update.html">Updates</a>.</p>
+        <p><strong>Installer options</strong></p>
+        <ul>
+          <li><code>--port PORT</code> — pin an exact port (default <code>7850</code>). Without it, the installer picks one of the next 5 free ports if the default is taken.</li>
+          <li><code>--bind ADDRESS</code> — bind address (default <code>0.0.0.0</code>, reachable from your other devices).</li>
+          <li><code>--allow-port-fallback</code> / <code>--no-port-fallback</code> — allow or forbid the nearby-port fallback.</li>
+          <li><code>--release-version VERSION</code> — install a specific release.</li>
+          <li><code>--non-interactive</code> — no prompts; for scripted or SSH-driven runs.</li>
+          <li><code>--show-token</code> — print the access token and exit (see below).</li>
+        </ul>
+        <p>Requirements: macOS (Apple silicon) or Linux, a preinstalled <code>uv</code> (<code>brew install uv</code> on macOS), and Claude Code and/or Codex installed and signed in. <code>tmux</code> is optional — it powers the in-app terminal and managed updates.</p>
+
+        <h2 id="token">Show your access token</h2>
+        <p>The installer prints the token once when it finishes. To see it again at any time, run this on the server — it only reads the existing configuration and changes nothing:</p>
+<pre>./install.sh --show-token</pre>
+        <p>Paste it into the app's <strong>Access token</strong> field when adding the server (see the <a href="./setup.html#part-device">Setup guide</a>).</p>
+
+        <h2 id="health">Check it's running</h2>
+        <p>From the server machine:</p>
+<pre>curl http://127.0.0.1:7850/api/health</pre>
+        <p>If the server requires a token (the default after <code>install.sh</code>), pass it as a bearer header:</p>
+<pre>curl -H 'Authorization: Bearer YOUR_TOKEN' http://127.0.0.1:7850/api/health</pre>
+        <p>The response includes whether Claude Code, Codex, and <code>tmux</code> are available. Inside the app, <strong>Settings</strong> shows the same runtime checks and a <strong>Restart server</strong> button.</p>
+
+        <h2 id="service">Start, stop, restart, and logs</h2>
+        <p>The installer registers AgentsServer as a user-level service that starts at login. Manage it with your platform's service manager.</p>
+        <p><strong>macOS</strong> — the LaunchAgent is <code>com.agentsdock.server</code>:</p>
+<pre># status
+launchctl print gui/$(id -u)/com.agentsdock.server
+
+# restart
+launchctl kickstart -k gui/$(id -u)/com.agentsdock.server
+
+# stop until next login / start again
+launchctl bootout gui/$(id -u)/com.agentsdock.server
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agentsdock.server.plist
+
+# logs
+tail -f ~/Library/Logs/AgentsServer/server.log
+tail -f ~/Library/Logs/AgentsServer/server-error.log</pre>
+        <p><strong>Linux</strong> — the unit is <code>agents-server.service</code>:</p>
+<pre># status
+systemctl --user status agents-server.service --no-pager -l
+
+# restart / stop / start
+systemctl --user restart agents-server.service
+systemctl --user stop agents-server.service
+systemctl --user start agents-server.service
+
+# logs
+journalctl --user -u agents-server.service -f</pre>
+
+        <h2 id="manual">Run it manually</h2>
+        <p>For development or a one-off run without the service, start the server directly from the repo:</p>
+<pre>uv venv &amp;&amp; uv sync --frozen
+uv run python agent_server.py serve --bind 0.0.0.0 --port 7850</pre>
+        <p>Set <code>AGENTSDOCK_AGENT_TOKEN</code> in that shell to require a token, and <code>AGENTSDOCK_STATE_DIR</code> to keep state somewhere other than <code>~/.agentsdock</code>.</p>
+
+        <h2 id="uninstall">Uninstall</h2>
+<pre>./uninstall.sh</pre>
+        <p>This stops and removes the service, the versioned runtime, and the generated configuration including the access token. It asks before changing anything (<code>--yes</code> skips the prompt). Your chats, jobs, files, and terminals under <code>~/.agentsdock</code> are <strong>kept</strong>, so a later <code>./install.sh</code> picks them straight back up.</p>
+        <p>To delete that state as well, add <code>--purge-state</code> — it always requires typing the exact path to confirm and cannot be undone. Persistent chat terminals are left running as tmux sessions on this server's tmux server; <code>tmux ls</code> lists them. Only close sessions you recognise as this server's chat terminals — other tmux sessions on the machine, and any named server instances (which use their own tmux sockets), are unaffected by uninstalling the default server.</p>
+
+        <h2 id="env">Settings &amp; file locations</h2>
+        <p>Where things live on the server:</p>
+        <ul>
+          <li><code>~/.agentsdock</code> — chat history, jobs, files, tokens (the state directory).</li>
+          <li><code>~/.local/share/agents-server</code> — versioned server releases; <code>current</code> points at the active one.</li>
+          <li><code>~/Library/Logs/AgentsServer/</code> (macOS) or <code>journalctl --user</code> (Linux) — logs.</li>
+        </ul>
+        <p>Most settings are environment variables. The ones you're most likely to touch:</p>
+        <ul>
+          <li><code>AGENTSDOCK_AGENT_PORT</code> / <code>AGENTSDOCK_AGENT_BIND</code> — port (<code>7850</code>) and bind address (<code>0.0.0.0</code>).</li>
+          <li><code>AGENTSDOCK_AGENT_TOKEN</code> — the shared access token.</li>
+          <li><code>AGENTSDOCK_STATE_DIR</code> — state directory (<code>~/.agentsdock</code>).</li>
+          <li><code>AGENTSDOCK_AGENT_CWD</code> — default working directory for new chats (your home).</li>
+          <li><code>AGENTSDOCK_BACKEND</code> — default backend, <code>claude</code> or <code>codex</code>.</li>
+          <li><code>CLAUDE_BIN</code> / <code>CODEX_BIN</code> — path to each CLI if it isn't on <code>PATH</code>.</li>
+        </ul>
+        <p>The full list, including job concurrency and memory guardrails, is in the <a href="https://github.com/ZhengyiLuo/AgentsServer#useful-configuration" target="_blank" rel="noopener">README's configuration table</a>.</p>
+
+        <div class="guide-note">
+          <p><strong>Keep it private.</strong> Don't expose port <code>7850</code> to the public internet. Reach the server over Tailscale or another private network, and leave the access token enabled.</p>
+        </div>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>An IDE designed for agentic AI research.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./report-issue.html">Report an issue</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

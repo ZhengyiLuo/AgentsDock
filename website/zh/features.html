@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AgentsDock 主要功能——每台设备上的完整终端、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="主要功能 · AgentsDock" />
+    <meta property="og:description" content="AgentsDock 主要功能——每台设备上的完整终端、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/features.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="主要功能 · AgentsDock" />
+    <meta name="twitter:description" content="AgentsDock 主要功能——每台设备上的完整终端、agent 之间通话、定时任务、文件查看与编辑，全部来自你自己托管的服务器。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>主要功能 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/features.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/features.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/features.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../features.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../features.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link current" href="./features.html">主要功能</a>
+          <span class="docs-nav-subs">
+            <a href="#feat-terminal">1 · 终端访问</a>
+            <a href="#feat-agent2agent">2 · Agent 之间通话</a>
+            <a href="#feat-schedule">3 · 定时任务</a>
+            <a href="#feat-files">4 · 查看与编辑代码</a>
+            <a href="#feat-resume">5 · 恢复其他会话</a>
+            <a href="#feat-slash">6 · 斜杠命令</a>
+            <a href="#feat-fork">7 · Fork 会话</a>
+          </span>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">文档</p>
+        <h1>主要功能</h1>
+        <p class="legal-lead">连接之后 AgentsDock 能为你做什么——桌面端和移动端完全一致。</p>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-terminal"><span class="feature-doc-num">01</span><h2>从任何设备完整访问终端</h2></div>
+          <p class="feature-doc-desc">从任何设备接入会话的持久 <code>tmux</code> 会话——桌面端和移动端是同一个 shell。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-terminal-poster.jpg">
+              <source src="../assets/feature-terminal.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-agent2agent"><span class="feature-doc-num">02</span><h2>Agent 之间通话</h2></div>
+          <p class="feature-doc-desc">用 <code>@</code> 把另一个 agent 拉进会话并交给它一个任务——它在自己那边完成后回复你。</p>
+
+          <h3>开始一段 agent 之间的通话</h3>
+          <p>输入 <code>@</code>，选择你要联系的会话，然后发送。提及标签会标明你在对谁说话——它跨会话有效，甚至跨服务器也可以。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-a2a-poster.jpg">
+              <source src="../assets/feature-a2a.mp4" type="video/mp4" />
+            </video>
+          </figure>
+
+          <h3>工作原理</h3>
+          <p>你的消息会作为一次可追踪的消息交换送达。对方 agent 在它自己的机器上处理，然后直接回复到你的会话里，整个交接过程清晰可见——发给了谁、是否等待回复、何时过期。</p>
+          <p>第一条消息同时会建立一条<strong>持久连接</strong>：在 <code>@</code> 选择器里，该会话会从<em>发送后将授予 Send + Ask</em>变为<em>已授予 · Send + Ask</em>，之后你可以持续给这个 agent 发消息，无需再次授权。</p>
+
+          <h3>撤销访问</h3>
+          <figure class="docs-shot">
+            <img src="../assets/feature-a2a-revoke.png" alt="The @ picker listing chats — connected chats show 'Granted · Send + Ask' with a red Revoke button, while unconnected chats show 'Will grant Send + Ask when sent'" loading="lazy" />
+            <figcaption>已连接的会话显示<strong>已授予（Granted）</strong>，旁边有<strong>撤销（Revoke）</strong>按钮。</figcaption>
+          </figure>
+          <p>打开 <code>@</code> 选择器，点击已连接会话旁的<strong>撤销（Revoke）</strong>。这会关闭连接，直到你再次 <code>@</code> 它。每个会话能保持的连接数有限，请撤销不再需要的连接。</p>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-schedule"><span class="feature-doc-num">03</span><h2>定时任务</h2></div>
+          <p class="feature-doc-desc">排队间隔任务和周期任务，让耗时工作按时、无人值守地运行。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-schedule-poster.jpg">
+              <source src="../assets/feature-schedule.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-files"><span class="feature-doc-num">04</span><h2>查看与编辑你的代码</h2></div>
+          <p class="feature-doc-desc">直接在应用里浏览、预览和编辑远程机器上的文件。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-files-poster.jpg">
+              <source src="../assets/feature-files.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <p>你能打开的文件是会话<strong>工作目录</strong>下的文件——也就是远程机器上这个会话的 agent 工作的文件夹。创建会话时设置它，或随时在右侧的<strong>会话（Session）</strong>面板中修改。</p>
+          <figure class="docs-shot narrow">
+            <img src="../assets/feat-files-workingdir.png" alt="AgentsDock Session panel on the right, showing the chat's Working directory field" loading="lazy" />
+            <figcaption>在右侧的会话面板中查看和修改会话的<strong>工作目录</strong>。</figcaption>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-resume"><span class="feature-doc-num">05</span><h2>恢复其他会话</h2></div>
+          <p class="feature-doc-desc">把你在 AgentsDock 之外开始的 Claude Code 或 Codex 会话带进应用，完整保留历史和上下文。有两种方式。</p>
+          <div class="guide-note">
+            <p>我们建议你直接导入。</p>
+          </div>
+          <h3>直接导入</h3>
+          <p>从 <code>/</code> 菜单打开<strong>导入会话（Import chat）</strong>，就能看到<strong>那台机器上所有的 Claude Code 和 Codex 会话</strong>——每条都带预览和时间戳。勾选想要的会话并点<strong>导入（Import）</strong>，它们就会带着完整历史进入 AgentsDock——包括完全在应用之外进行的对话。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-import-poster.jpg">
+              <source src="../assets/feature-import.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <h3>使用 Resume ID 导入</h3>
+          <p>每个 Claude Code 或 Codex 会话都有一个<strong>会话 ID</strong>——也就是它的 Resume ID。选择<strong>按会话 ID 恢复（Resume by session ID）</strong>，粘贴 ID，AgentsDock 就会在应用里恢复那段对话，完整保留历史和上下文，让你能从任何设备接着聊。它适用于你在 AgentsDock <em>之外</em>开始的会话，而不只是应用内新建的。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-resume-poster.jpg">
+              <source src="../assets/feature-resume.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-slash"><span class="feature-doc-num">06</span><h2>斜杠命令</h2></div>
+          <p class="feature-doc-desc">在输入框输入 <code>/</code>，调出会话里能做的一切——命令和技能，尽在一个快捷菜单。</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="../assets/feature-slash-poster.jpg">
+              <source src="../assets/feature-slash.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <p>按下 <code>/</code>，输入框正上方会弹出命令面板：附加文件、引用另一个会话、发送反馈、切换模型、管理 MCP 服务器、新建会话等。用方向键移动，<code>Enter</code> 执行，<code>Esc</code> 关闭。</p>
+          <p>目前支持一组精选的斜杠命令，<strong>更多技能正在路上</strong>——菜单会不断增长，值得时常看看 <code>/</code> 里有什么。</p>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-fork"><span class="feature-doc-num">07</span><h2>Fork 任意会话</h2></div>
+          <p class="feature-doc-desc">一键把任意会话分出一个分支去尝试新方向——原会话保持不变。</p>
+          <p>想探索另一种思路又不想丢掉当前的进展？fork 这个会话，AgentsDock 会把完整历史复制到一个新分支，你可以随意发展——而原会话原封不动。非常适合尝试不同的提示词、跑消融实验，或把有风险的改动和已经可用的版本并排测试。</p>
+          <figure class="docs-shot medium">
+            <img src="../assets/feature-fork-menu.png" alt="The chat context menu in the sidebar, with Fork Chat highlighted" loading="lazy" />
+            <figcaption>在侧边栏右键点击一个会话，选择 <strong>Fork Chat</strong>。</figcaption>
+          </figure>
+        </section>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

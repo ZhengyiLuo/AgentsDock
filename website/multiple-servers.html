@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Run several independent AgentsServer instances for one user on the same machine: create, list, connect, update, and remove named instances safely." />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="Multiple servers on one machine · AgentsDock" />
+    <meta property="og:description" content="Run several independent AgentsServer instances for one user on the same machine: create, list, connect, update, and remove named instances safely." />
+    <meta property="og:url" content="https://agentsdock.net/multiple-servers.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Multiple servers on one machine · AgentsDock" />
+    <meta name="twitter:description" content="Run several independent AgentsServer instances for one user on the same machine: create, list, connect, update, and remove named instances safely." />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Multiple servers on one machine · AgentsDock</title>
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="./analytics.js" defer></script>
+    <script src="./site-nav.js?v=92294063" defer></script>
+    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/multiple-servers.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/multiple-servers.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/multiple-servers.html" />
+    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+            <main class="docs">
+      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/multiple-servers.html" data-lang-label="中文">
+        <nav>
+          <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link is-current" aria-current="true">EN</a>
+            <a class="docs-lang-link" href="./zh/multiple-servers.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+          </div>
+          <p class="docs-nav-label">Getting started</p>
+          <a class="docs-nav-link" href="./setup.html">Setup guide</a>
+          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
+          <p class="docs-nav-label">Guides</p>
+          <a class="docs-nav-link" href="./features.html">Key features</a>
+          <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
+          <a class="docs-nav-link" href="./update.html">Updates</a>
+          <a class="docs-nav-link" href="./language.html">Language</a>
+          <a class="docs-nav-link" href="./server.html">Manage your server</a>
+          <p class="docs-nav-label">Help</p>
+          <a class="docs-nav-link" href="./report-issue.html">Report an issue</a>
+          <p class="docs-nav-label">Server reference</p>
+          <a class="docs-nav-link" href="./advanced-install.html">Advanced install</a>
+          <a class="docs-nav-link current" href="./multiple-servers.html">Multiple servers</a>
+          <span class="docs-nav-subs">
+            <a href="#availability">Availability</a>
+            <a href="#concept">How instances work</a>
+            <a href="#create">Create an instance</a>
+            <a href="#list">List &amp; connect</a>
+            <a href="#update">Update an instance</a>
+            <a href="#paths">Where each instance lives</a>
+            <a href="#terminals">Terminals per instance</a>
+            <a href="#remove">Remove an instance</a>
+            <a href="#limits">Rules &amp; limits</a>
+          </span>
+          <a class="docs-nav-link" href="./backup-uninstall.html">Back up &amp; uninstall</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">Server reference</p>
+        <h1>Multiple servers on one machine</h1>
+        <p class="legal-lead">One machine, one user account, several fully independent AgentsServers — each with its own port, service, token, chat history, and terminals. Useful for separating work and personal, running a beta next to stable, or giving each project its own server.</p>
+
+        <h2 id="availability">Availability</h2>
+        <div class="guide-note"><p><strong>Not yet in a published release.</strong> Named instances are on the AgentsServer <code>main</code> branch (merged 20 Sep 2026). They are not in <code>v1.0.3</code> or <code>v1.0.4-beta.9</code>. Until a release ships them, you need a server installed from a <code>main</code> checkout. Check the <a href="https://github.com/ZhengyiLuo/AgentsServer/releases" target="_blank" rel="noopener">release notes</a> for the first version that includes them.</p></div>
+
+        <h2 id="concept">How instances work</h2>
+        <p>Your first server is the <strong>default</strong> instance — it keeps the paths, service name, and port you already have. Each additional server is a <strong>named</strong> instance (<code>work</code>, <code>beta</code>, …) with its own service, port, configuration, state directory, logs, and tmux server, installed as siblings of the default. Nothing is shared, and removing the default can never remove a named instance.</p>
+        <p>Instances are independent services for convenience — they are <strong>not</strong> a security boundary between each other, since they all run as your user account.</p>
+
+        <h2 id="create">Create an instance</h2>
+        <p>From an AgentsServer checkout on <code>main</code>:</p>
+<pre># automatic name and the next free port (7851 upwards)
+./instances.sh new
+
+# or choose the name and port
+./instances.sh new --name work --port 7851
+
+# optional bind address (default 0.0.0.0)
+./instances.sh new --name lab --port 7852 --bind 0.0.0.0</pre>
+        <p>A new instance starts with an empty chat list and its own freshly generated access token. Names are lowercase: a letter followed by up to 31 letters, digits, or hyphens.</p>
+
+        <h2 id="list">List &amp; connect</h2>
+<pre>./instances.sh list        # name, status, port (also the default action)
+./instances.sh info work   # details for one instance</pre>
+        <p>Connect the app to an instance exactly like any server — its URL is your host address plus <em>that instance's port</em>, and its token comes from:</p>
+<pre>./install.sh --instance work --show-token</pre>
+        <p>Add several instances to the app and switch between them from the server switcher.</p>
+
+        <h2 id="update">Update an instance</h2>
+        <p>Each instance updates independently; add <code>--instance</code> to the normal update command:</p>
+<pre>git pull --ff-only
+./install.sh --instance work</pre>
+        <p><code>./install.sh</code> with no <code>--instance</code> updates only the default server. All other installer options (<code>--port</code>, <code>--bind</code>, <code>--release-version</code>, …) work per instance — see <a href="./advanced-install.html#installer">Installer options</a>.</p>
+
+        <h2 id="paths">Where each instance lives</h2>
+        <p>Replace <code>NAME</code> with the instance name.</p>
+        <ul>
+          <li><strong>Service:</strong> <code>agents-server-NAME</code> (Linux, <code>systemctl --user</code>) · <code>com.agentsdock.server.NAME</code> (macOS LaunchAgent)</li>
+          <li><strong>State</strong> (chats, jobs, files, tokens): <code>~/.agentsdock-instances/NAME</code></li>
+          <li><strong>Configuration:</strong> <code>~/.config/agents-server-instances/NAME</code></li>
+          <li><strong>Runtime releases:</strong> <code>~/.local/share/agents-server-instances/NAME</code></li>
+          <li><strong>Logs:</strong> <code>~/Library/Logs/AgentsServer-instances/NAME/</code> (macOS) · <code>journalctl --user -u agents-server-NAME</code> (Linux)</li>
+          <li><strong>Registry</strong> of all instances: <code>~/.config/agents-server-manager/instances.json</code> (names, status, ports only — no secrets)</li>
+        </ul>
+        <p>The default instance keeps the standard paths listed in <a href="./advanced-install.html#paths">File locations</a>.</p>
+
+        <h2 id="terminals">Terminals per instance</h2>
+        <p>Each named instance runs its chat terminals on its <strong>own tmux server</strong>, so they never mix with the default server's sessions or with anything else you run in tmux:</p>
+<pre>tmux ls                             # default server's chat terminals (zd_*)
+tmux -L agents-server-work ls       # the 'work' instance's terminals (zdi_work_*)</pre>
+
+        <h2 id="remove">Remove an instance</h2>
+<pre>./uninstall.sh --instance work            # one instance
+./uninstall.sh --all                      # every instance, including default
+./uninstall.sh --all --exclude default    # every named instance, keep default</pre>
+        <p>Running <code>./uninstall.sh</code> with no arguments lists your instances and asks you to confirm their exact names. Removal stops the service and deletes the runtime and configuration (including that instance's token); its chat history is <strong>preserved by default</strong>. When a name is released, its state directory is <strong>moved to a private backup</strong>, not erased — see <a href="./backup-uninstall.html#release">Name-release backups</a>. <code>--purge-state</code> is the only destructive option and always requires typing the exact path.</p>
+
+        <h2 id="limits">Rules &amp; limits</h2>
+        <ul>
+          <li>The <strong>default instance cannot be released</strong>; only named instances can.</li>
+          <li>Removing the default server never touches named instances (they are sibling roots, not children).</li>
+          <li>Ports must be free and unreserved; the manager never stops an existing listener to take its port.</li>
+          <li>Imported provider history is excluded across instances, so the same Claude/Codex session is not adopted twice.</li>
+          <li>Instances share your user account and are not a sandbox from one another.</li>
+        </ul>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>An IDE designed for agentic AI research.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./report-issue.html">Report an issue</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

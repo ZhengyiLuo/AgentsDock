@@ -34,11 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=3d0dc0fd" defer></script>
+    <script src="./docs-nav.js?v=1eafff8c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=fe04f02b" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/first-chat.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/first-chat.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/first-chat.html" />
+    <link rel="stylesheet" href="./styles.css?v=8f252944" />
   </head>
   <body>
     <header class="site-header">
@@ -54,8 +57,12 @@
     </header>
 
     <main class="docs">
-      <aside class="docs-nav" aria-label="Documentation">
+      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/first-chat.html" data-lang-label="中文">
         <nav>
+          <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link is-current" aria-current="true">EN</a>
+            <a class="docs-lang-link" href="./zh/first-chat.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+          </div>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
           <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
@@ -68,8 +75,14 @@
           <a class="docs-nav-link" href="./features.html">Key features</a>
           <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
           <a class="docs-nav-link" href="./update.html">Updates</a>
+          <a class="docs-nav-link" href="./language.html">Language</a>
+          <a class="docs-nav-link" href="./server.html">Manage your server</a>
           <p class="docs-nav-label">Help</p>
           <a class="docs-nav-link" href="./report-issue.html">Report an issue</a>
+          <p class="docs-nav-label">Server reference</p>
+          <a class="docs-nav-link" href="./advanced-install.html">Advanced install</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">Multiple servers</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">Back up &amp; uninstall</a>
         </nav>
       </aside>
 

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="在同一台机器上为一个用户运行多个独立的 AgentsServer 实例：安全地创建、列出、连接、更新和移除命名实例。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="一台机器上的多个服务器 · AgentsDock" />
+    <meta property="og:description" content="在同一台机器上为一个用户运行多个独立的 AgentsServer 实例：安全地创建、列出、连接、更新和移除命名实例。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/multiple-servers.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="一台机器上的多个服务器 · AgentsDock" />
+    <meta name="twitter:description" content="在同一台机器上为一个用户运行多个独立的 AgentsServer 实例：安全地创建、列出、连接、更新和移除命名实例。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>一台机器上的多个服务器 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/multiple-servers.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/multiple-servers.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/multiple-servers.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+            <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../multiple-servers.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../multiple-servers.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link current" href="./multiple-servers.html">多服务器</a>
+          <span class="docs-nav-subs">
+            <a href="#availability">可用性</a>
+            <a href="#concept">实例如何工作</a>
+            <a href="#create">创建实例</a>
+            <a href="#list">列出并连接</a>
+            <a href="#update">更新实例</a>
+            <a href="#paths">每个实例的位置</a>
+            <a href="#terminals">每个实例的终端</a>
+            <a href="#remove">移除实例</a>
+            <a href="#limits">规则与限制</a>
+          </span>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">服务器参考</p>
+        <h1>一台机器上的多个服务器</h1>
+        <p class="legal-lead">一台机器、一个用户账号、多个完全独立的 AgentsServer——各自拥有自己的端口、服务、令牌、会话历史和终端。适合分开工作与个人用途、在稳定版旁边跑一个测试版，或给每个项目一个专属服务器。</p>
+
+        <h2 id="availability">可用性</h2>
+        <div class="guide-note"><p><strong>尚未包含在已发布版本中。</strong>命名实例目前在 AgentsServer 的 <code>main</code> 分支上（2026 年 9 月 20 日合并），不在 <code>v1.0.3</code> 或 <code>v1.0.4-beta.9</code> 中。在正式发布之前，你需要从 <code>main</code> 分支的检出安装服务器。请查看<a href="https://github.com/ZhengyiLuo/AgentsServer/releases" target="_blank" rel="noopener">发布说明</a>了解首个包含该功能的版本。</p></div>
+
+        <h2 id="concept">实例如何工作</h2>
+        <p>你的第一个服务器是<strong>默认</strong>实例——它保留你现有的路径、服务名和端口。每个额外的服务器都是一个<strong>命名</strong>实例（<code>work</code>、<code>beta</code>……），拥有自己的服务、端口、配置、状态目录、日志和 tmux 服务，以默认实例的同级身份安装。它们之间不共享任何东西，移除默认实例也绝不会移除命名实例。</p>
+        <p>实例是为方便而设的独立服务——它们之间<strong>不是</strong>安全边界，因为都以你的用户账号运行。</p>
+
+        <h2 id="create">创建实例</h2>
+        <p>在 <code>main</code> 分支的 AgentsServer 检出目录中：</p>
+<pre># automatic name and the next free port (7851 upwards)
+./instances.sh new
+
+# or choose the name and port
+./instances.sh new --name work --port 7851
+
+# optional bind address (default 0.0.0.0)
+./instances.sh new --name lab --port 7852 --bind 0.0.0.0</pre>
+        <p>新实例从空的会话列表开始，并拥有自己新生成的访问令牌。名称须为小写：一个字母开头，后接最多 31 个字母、数字或连字符。</p>
+
+        <h2 id="list">列出并连接</h2>
+<pre>./instances.sh list        # name, status, port (also the default action)
+./instances.sh info work   # details for one instance</pre>
+        <p>把应用连接到实例的方式和连接任何服务器完全一样——URL 是主机地址加<em>该实例的端口</em>，令牌用这条命令获取：</p>
+<pre>./install.sh --instance work --show-token</pre>
+        <p>在应用里添加多个实例，在服务器切换器中随时切换。</p>
+
+        <h2 id="update">更新实例</h2>
+        <p>每个实例独立更新；在常规更新命令后加上 <code>--instance</code>：</p>
+<pre>git pull --ff-only
+./install.sh --instance work</pre>
+        <p>不带 <code>--instance</code> 的 <code>./install.sh</code> 只更新默认服务器。其他所有安装选项（<code>--port</code>、<code>--bind</code>、<code>--release-version</code>……）都可按实例使用——见<a href="./advanced-install.html#installer">安装选项</a>。</p>
+
+        <h2 id="paths">每个实例的位置</h2>
+        <p>把 <code>NAME</code> 替换为实例名。</p>
+        <ul>
+          <li><strong>服务：</strong><code>agents-server-NAME</code>（Linux，<code>systemctl --user</code>）· <code>com.agentsdock.server.NAME</code>（macOS LaunchAgent）</li>
+          <li><strong>状态</strong>（会话、任务、文件、令牌）：<code>~/.agentsdock-instances/NAME</code></li>
+          <li><strong>配置：</strong><code>~/.config/agents-server-instances/NAME</code></li>
+          <li><strong>运行时发布：</strong><code>~/.local/share/agents-server-instances/NAME</code></li>
+          <li><strong>日志：</strong><code>~/Library/Logs/AgentsServer-instances/NAME/</code>（macOS）· <code>journalctl --user -u agents-server-NAME</code>（Linux）</li>
+          <li><strong>所有实例的注册表：</strong><code>~/.config/agents-server-manager/instances.json</code>（只含名称、状态、端口——不含任何机密）</li>
+        </ul>
+        <p>默认实例保留<a href="./advanced-install.html#paths">文件位置</a>中列出的标准路径。</p>
+
+        <h2 id="terminals">每个实例的终端</h2>
+        <p>每个命名实例的会话终端都运行在<strong>它自己的 tmux 服务</strong>上，因此绝不会与默认服务器的会话或你在 tmux 里跑的其他东西混在一起：</p>
+<pre>tmux ls                             # default server's chat terminals (zd_*)
+tmux -L agents-server-work ls       # the 'work' instance's terminals (zdi_work_*)</pre>
+
+        <h2 id="remove">移除实例</h2>
+<pre>./uninstall.sh --instance work            # one instance
+./uninstall.sh --all                      # every instance, including default
+./uninstall.sh --all --exclude default    # every named instance, keep default</pre>
+        <p>不带参数运行 <code>./uninstall.sh</code> 会列出你的实例并要求确认它们的完整名称。移除会停止服务并删除运行时和配置（包括该实例的令牌）；其会话历史<strong>默认保留</strong>。当一个名称被释放时，它的状态目录会被<strong>移到私有备份</strong>，而不是抹除——见<a href="./backup-uninstall.html#release">名称释放备份</a>。<code>--purge-state</code> 是唯一的破坏性选项，且总是要求输入完整路径。</p>
+
+        <h2 id="limits">规则与限制</h2>
+        <ul>
+          <li><strong>默认实例不能被释放</strong>；只有命名实例可以。</li>
+          <li>移除默认服务器绝不会影响命名实例（它们是同级根目录，不是子目录）。</li>
+          <li>端口必须空闲且未被预留；管理器绝不会为了占用端口而停止已有的监听进程。</li>
+          <li>导入的提供方历史在实例之间互斥，同一个 Claude/Codex 会话不会被采纳两次。</li>
+          <li>实例共享你的用户账号，彼此之间不是沙箱。</li>
+        </ul>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

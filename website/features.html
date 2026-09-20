@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="description" content="AgentsDock key features — a full terminal on every device, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
     <!-- Social preview (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="AgentsDock" />
     <meta property="og:title" content="Key Features · AgentsDock" />
-    <meta property="og:description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta property="og:description" content="AgentsDock key features — a full terminal on every device, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
     <meta property="og:url" content="https://agentsdock.net/features.html" />
     <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta property="og:image:width" content="1200" />
@@ -16,7 +16,7 @@
     <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Key Features · AgentsDock" />
-    <meta name="twitter:description" content="AgentsDock key features — a full terminal on every device, scheduled jobs, dispatch between chats, and file view & edit, all from a self-hosted server you own." />
+    <meta name="twitter:description" content="AgentsDock key features — a full terminal on every device, agent-to-agent messaging, scheduled jobs, and file view & edit, all from a self-hosted server you own." />
     <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
     <meta name="theme-color" content="#0d1013" />
     <meta name="robots" content="index,follow" />
@@ -34,11 +34,14 @@
     </script>
     <script src="./analytics.js" defer></script>
     <script src="./site-nav.js?v=92294063" defer></script>
-    <script src="./docs-nav.js?v=3d0dc0fd" defer></script>
+    <script src="./docs-nav.js?v=1eafff8c" defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=fe04f02b" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/features.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/features.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/features.html" />
+    <link rel="stylesheet" href="./styles.css?v=8f252944" />
   </head>
   <body>
     <header class="site-header">
@@ -54,8 +57,12 @@
     </header>
 
     <main class="docs">
-      <aside class="docs-nav" aria-label="Documentation">
+      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/features.html" data-lang-label="中文">
         <nav>
+          <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link is-current" aria-current="true">EN</a>
+            <a class="docs-lang-link" href="./zh/features.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+          </div>
           <p class="docs-nav-label">Getting started</p>
           <a class="docs-nav-link" href="./setup.html">Setup guide</a>
           <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
@@ -64,18 +71,23 @@
           <a class="docs-nav-link current" href="./features.html">Key features</a>
           <span class="docs-nav-subs">
             <a href="#feat-terminal">1 · Terminal access</a>
-            <a href="#feat-schedule">2 · Scheduled jobs</a>
-            <a href="#feat-digest">3 · Digest</a>
+            <a href="#feat-agent2agent">2 · Agent-to-agent</a>
+            <a href="#feat-schedule">3 · Scheduled jobs</a>
             <a href="#feat-files">4 · View &amp; edit code</a>
-            <a href="#feat-resume">5 · Resume chat</a>
+            <a href="#feat-resume">5 · Resume other chats</a>
             <a href="#feat-slash">6 · Slash commands</a>
-            <a href="#feat-agent2agent">7 · Agent-to-agent</a>
-            <a href="#feat-fork">8 · Fork chat</a>
+            <a href="#feat-fork">7 · Fork chat</a>
           </span>
           <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
           <a class="docs-nav-link" href="./update.html">Updates</a>
+          <a class="docs-nav-link" href="./language.html">Language</a>
+          <a class="docs-nav-link" href="./server.html">Manage your server</a>
           <p class="docs-nav-label">Help</p>
           <a class="docs-nav-link" href="./report-issue.html">Report an issue</a>
+          <p class="docs-nav-label">Server reference</p>
+          <a class="docs-nav-link" href="./advanced-install.html">Advanced install</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">Multiple servers</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">Back up &amp; uninstall</a>
         </nav>
       </aside>
 
@@ -95,21 +107,35 @@
         </section>
 
         <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-schedule"><span class="feature-doc-num">02</span><h2>Scheduled jobs</h2></div>
+          <div class="feature-doc-head" id="feat-agent2agent"><span class="feature-doc-num">02</span><h2>Agent-to-agent messaging</h2></div>
+          <p class="feature-doc-desc">Bring another agent into the chat with <code>@</code> and hand it a task — it works on its side and replies back.</p>
+
+          <h3>Start an agent-to-agent chat</h3>
+          <p>Type <code>@</code>, pick the chat you want to reach, and send. A mention chip marks who you're addressing — it works across chats, and even across servers.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-a2a-poster.jpg">
+              <source src="./assets/feature-a2a.mp4" type="video/mp4" />
+            </video>
+          </figure>
+
+          <h3>How it works</h3>
+          <p>Your message is delivered as a tracked exchange. The other agent works on it on its own machine and replies straight back into your chat, with the hand-off kept visible — who was addressed, whether a reply is expected, and when it expires.</p>
+          <p>That first message also opens a <strong>lasting connection</strong>: in the <code>@</code> picker the chat goes from <em>Will grant Send + Ask when sent</em> to <em>Granted · Send + Ask</em>, so you can keep messaging that agent without granting access again.</p>
+
+          <h3>Revoke access</h3>
+          <figure class="docs-shot">
+            <img src="./assets/feature-a2a-revoke.png" alt="The @ picker listing chats — connected chats show 'Granted · Send + Ask' with a red Revoke button, while unconnected chats show 'Will grant Send + Ask when sent'" loading="lazy" />
+            <figcaption>Connected chats show <strong>Granted</strong> with a <strong>Revoke</strong> button.</figcaption>
+          </figure>
+          <p>Open the <code>@</code> picker and click <strong>Revoke</strong> next to a connected chat. That closes the connection until you <code>@</code> it again. Each chat holds a limited number of connections, so revoke the ones you no longer need.</p>
+        </section>
+
+        <section class="feature-doc">
+          <div class="feature-doc-head" id="feat-schedule"><span class="feature-doc-num">03</span><h2>Scheduled jobs</h2></div>
           <p class="feature-doc-desc">Queue interval and recurring jobs so long-running work runs on time, unattended.</p>
           <figure class="docs-shot">
             <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-schedule-poster.jpg">
               <source src="./assets/feature-schedule.mp4" type="video/mp4" />
-            </video>
-          </figure>
-        </section>
-
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-digest"><span class="feature-doc-num">03</span><h2>Digest</h2></div>
-          <p class="feature-doc-desc">Send messages between chats to carry context from one to the next.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-digest-poster.jpg">
-              <source src="./assets/feature-digest.mp4" type="video/mp4" />
             </video>
           </figure>
         </section>
@@ -130,18 +156,23 @@
         </section>
 
         <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-resume"><span class="feature-doc-num">05</span><h2>Resume chats from outside AgentsDock</h2></div>
-          <p class="feature-doc-desc">Bring a Claude Code or Codex chat you started outside AgentsDock into the app — by its session ID.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-resume-poster.jpg">
-              <source src="./assets/feature-resume.mp4" type="video/mp4" />
-            </video>
-          </figure>
-          <p>Started a Claude Code or Codex session in your own terminal, before or outside AgentsDock? Every session has a <strong>session ID</strong> — paste it in and AgentsDock resumes that conversation in the app, full history and context intact, so you can carry it on from any device. It works for chats you began <em>outside</em> AgentsDock, not just ones started in the app.</p>
-          <p>Don't have the session ID handy? Open <strong>Import chat</strong> from the <code>/</code> menu to see <strong>every Claude Code and Codex session on that machine</strong> — each one listed with a preview and timestamp. Tick the chats you want and hit <strong>Import</strong>, and they land in AgentsDock with their full history — including conversations you ran entirely outside the app.</p>
+          <div class="feature-doc-head" id="feat-resume"><span class="feature-doc-num">05</span><h2>Resume other chats</h2></div>
+          <p class="feature-doc-desc">Bring a Claude Code or Codex chat you started outside AgentsDock into the app, with its full history and context. There are two ways to do it.</p>
+          <div class="guide-note">
+            <p>We recommend you import directly.</p>
+          </div>
+          <h3>Import directly</h3>
+          <p>Open <strong>Import chat</strong> from the <code>/</code> menu to see <strong>every Claude Code and Codex session on that machine</strong> — each one listed with a preview and timestamp. Tick the chats you want and hit <strong>Import</strong>, and they land in AgentsDock with their full history — including conversations you ran entirely outside the app.</p>
           <figure class="docs-shot">
             <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-import-poster.jpg">
               <source src="./assets/feature-import.mp4" type="video/mp4" />
+            </video>
+          </figure>
+          <h3>Import using Resume ID</h3>
+          <p>Every Claude Code or Codex session has a <strong>session ID</strong> — its resume ID. Choose <strong>Resume by session ID</strong>, paste the ID in, and AgentsDock resumes that conversation in the app, full history and context intact, so you can carry it on from any device. It works for chats you began <em>outside</em> AgentsDock, not just ones started in the app.</p>
+          <figure class="docs-shot">
+            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-resume-poster.jpg">
+              <source src="./assets/feature-resume.mp4" type="video/mp4" />
             </video>
           </figure>
         </section>
@@ -154,26 +185,18 @@
               <source src="./assets/feature-slash.mp4" type="video/mp4" />
             </video>
           </figure>
-          <p>Press <code>/</code> and a palette opens right above the message box: attach files, reference another chat, create a digest, send feedback, switch the model, manage MCP servers, start a new chat, and more. Use the arrow keys to move, <code>Enter</code> to run, <code>Esc</code> to close.</p>
+          <p>Press <code>/</code> and a palette opens right above the message box: attach files, reference another chat, send feedback, switch the model, manage MCP servers, start a new chat, and more. Use the arrow keys to move, <code>Enter</code> to run, <code>Esc</code> to close.</p>
           <p>We support a focused set of slash commands today, with <strong>more skills on the way</strong> — the menu keeps growing, so it's worth checking what <code>/</code> offers.</p>
         </section>
 
         <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-agent2agent"><span class="feature-doc-num">07</span><h2>Agent-to-agent messaging</h2></div>
-          <p class="feature-doc-desc">Bring another agent into the chat with <code>@</code> and hand it a task — it works on its side and replies back.</p>
-          <figure class="docs-shot">
-            <video autoplay muted loop playsinline preload="metadata" poster="./assets/feature-a2a-poster.jpg">
-              <source src="./assets/feature-a2a.mp4" type="video/mp4" />
-            </video>
-          </figure>
-          <p>Type <code>@</code> in the message box and pick another agent to address it. A <strong>mention chip</strong> appears and your message is delivered to that agent as a tracked <strong>exchange</strong> — it works across chats, and even across different servers.</p>
-          <p>The other agent receives your message, works on it on its own machine, and replies straight back into your chat. AgentsDock keeps the hand-off visible — who was addressed, whether a reply is expected, and when the exchange expires — so multi-agent back-and-forth stays organized.</p>
-        </section>
-
-        <section class="feature-doc">
-          <div class="feature-doc-head" id="feat-fork"><span class="feature-doc-num">08</span><h2>Fork any chat</h2></div>
+          <div class="feature-doc-head" id="feat-fork"><span class="feature-doc-num">07</span><h2>Fork any chat</h2></div>
           <p class="feature-doc-desc">Branch any chat with one click to try a new direction — the original stays intact.</p>
           <p>Want to explore a different approach without losing your current thread? Fork the chat, and AgentsDock copies its full history into a new branch you can take anywhere — while the original stays exactly as it was. It's ideal for trying an alternative prompt, running an ablation, or testing a risky change side by side with the version that already works.</p>
+          <figure class="docs-shot medium">
+            <img src="./assets/feature-fork-menu.png" alt="The chat context menu in the sidebar, with Fork Chat highlighted" loading="lazy" />
+            <figcaption>Right-click a chat in the sidebar and choose <strong>Fork Chat</strong>.</figcaption>
+          </figure>
         </section>
       </article>
     </main>

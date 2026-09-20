@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="What AgentsServer stores where, how to back it up and restore it, what uninstalling removes and keeps, and how name-release backups and --purge-state differ." />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="Back up, restore & uninstall · AgentsDock" />
+    <meta property="og:description" content="What AgentsServer stores where, how to back it up and restore it, what uninstalling removes and keeps, and how name-release backups and --purge-state differ." />
+    <meta property="og:url" content="https://agentsdock.net/backup-uninstall.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Back up, restore & uninstall · AgentsDock" />
+    <meta name="twitter:description" content="What AgentsServer stores where, how to back it up and restore it, what uninstalling removes and keeps, and how name-release backups and --purge-state differ." />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>Back up, restore & uninstall · AgentsDock</title>
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="./assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="./analytics.js" defer></script>
+    <script src="./site-nav.js?v=92294063" defer></script>
+    <script src="./docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/backup-uninstall.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/backup-uninstall.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/backup-uninstall.html" />
+    <link rel="stylesheet" href="./styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="AgentsDock home">
+        <img src="./assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./index.html">Home</a>
+        <a href="./setup.html">Docs</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+            <main class="docs">
+      <aside class="docs-nav" aria-label="Documentation" data-lang-href="./zh/backup-uninstall.html" data-lang-label="中文">
+        <nav>
+          <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link is-current" aria-current="true">EN</a>
+            <a class="docs-lang-link" href="./zh/backup-uninstall.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+          </div>
+          <p class="docs-nav-label">Getting started</p>
+          <a class="docs-nav-link" href="./setup.html">Setup guide</a>
+          <a class="docs-nav-link" href="./iphone.html">Install on iPhone &amp; iPad</a>
+          <a class="docs-nav-link" href="./first-chat.html">Start your first chat</a>
+          <p class="docs-nav-label">Guides</p>
+          <a class="docs-nav-link" href="./features.html">Key features</a>
+          <a class="docs-nav-link" href="./shortcuts.html">Keyboard shortcuts</a>
+          <a class="docs-nav-link" href="./update.html">Updates</a>
+          <a class="docs-nav-link" href="./language.html">Language</a>
+          <a class="docs-nav-link" href="./server.html">Manage your server</a>
+          <p class="docs-nav-label">Help</p>
+          <a class="docs-nav-link" href="./report-issue.html">Report an issue</a>
+          <p class="docs-nav-label">Server reference</p>
+          <a class="docs-nav-link" href="./advanced-install.html">Advanced install</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">Multiple servers</a>
+          <a class="docs-nav-link current" href="./backup-uninstall.html">Back up &amp; uninstall</a>
+          <span class="docs-nav-subs">
+            <a href="#what">What is stored where</a>
+            <a href="#backup">Back up</a>
+            <a href="#restore">Restore</a>
+            <a href="#uninstall">Uninstall</a>
+            <a href="#release">Name-release backups</a>
+            <a href="#purge">Purge state</a>
+            <a href="#terminals">Terminal sessions</a>
+          </span>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">Server reference</p>
+        <h1>Back up, restore &amp; uninstall</h1>
+        <p class="legal-lead">AgentsServer keeps everything on your machine, in plain directories. This page covers what lives where, how to back it up and bring it back, and exactly what uninstalling removes — and keeps.</p>
+        <p class="legal-meta">Applies to AgentsServer 1.0.x. Named-instance paths and name-release backups require the <code>main</code> build described in <a href="./multiple-servers.html#availability">Multiple servers</a>.</p>
+
+        <h2 id="what">What is stored where</h2>
+        <ul>
+          <li><strong>State</strong> — chats and their event history, scheduled jobs, uploaded and generated files, secure-peer credentials, terminal metadata: <code>~/.agentsdock</code> (default server) · <code>~/.agentsdock-instances/NAME</code> (named instance)</li>
+          <li><strong>Configuration</strong> — the access token and service settings: <code>~/.config/agents-server</code> · <code>~/.config/agents-server-instances/NAME</code></li>
+          <li><strong>Runtime</strong> — the installed release and its Python environment (fully replaceable, nothing personal): <code>~/.local/share/agents-server</code> · <code>~/.local/share/agents-server-instances/NAME</code></li>
+          <li><strong>Logs</strong> — <code>~/Library/Logs/AgentsServer/</code> (macOS) or the user journal (Linux)</li>
+        </ul>
+        <p>Your Claude Code and Codex sessions themselves live in those tools' own directories (<code>~/.claude</code>, <code>~/.codex</code>) and your project files where you keep them — AgentsServer references them but does not own them.</p>
+
+        <h2 id="backup">Back up</h2>
+        <p>Only the <strong>state</strong> and <strong>configuration</strong> directories matter; the runtime is reinstallable. Stop the server first so files aren't changing mid-copy:</p>
+<pre># macOS
+launchctl bootout gui/$(id -u)/com.agentsdock.server
+# Linux
+systemctl --user stop agents-server.service
+
+cp -a ~/.agentsdock ~/agentsdock-backup-$(date +%F)
+cp -a ~/.config/agents-server ~/agentsdock-config-backup-$(date +%F)
+
+# then start it again
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agentsdock.server.plist   # macOS
+systemctl --user start agents-server.service                                           # Linux</pre>
+        <p>For a named instance, use its own service name and the <code>…-instances/NAME</code> paths from <a href="./multiple-servers.html#paths">Where each instance lives</a>. The configuration backup contains your access token — store it somewhere private.</p>
+
+        <h2 id="restore">Restore</h2>
+        <p><strong>In-place state is picked up automatically.</strong> If the state directory is still there (as it is after a normal uninstall), simply running <code>./install.sh</code> again reconnects the same chats, jobs, and files. Reinstalling generates a <em>new</em> access token unless the configuration directory was also kept — update the token in the app if so.</p>
+        <p><strong>From a copy you made:</strong> stop the server, put the backed-up directories back at their original paths, then start it (or run <code>./install.sh</code>). Restore the configuration directory too if you want to keep the old token.</p>
+        <p>Reinstalling does <strong>not</strong> automatically restore a <em>name-release</em> backup — those are handled separately below.</p>
+
+        <h2 id="uninstall">Uninstall</h2>
+<pre>./uninstall.sh                          # lists instances, confirms exact names
+./uninstall.sh --instance work          # one named instance
+./uninstall.sh --all                    # everything
+./uninstall.sh --all --exclude default  # all named instances, keep default
+./uninstall.sh --yes                    # skip the prompt (default server)</pre>
+        <p>Uninstalling <strong>removes</strong> the user service, the versioned runtime, and the generated configuration including the access token. It <strong>keeps</strong> chat history, jobs, files, secure-peer credentials, and terminals under the state directory, so a later <code>./install.sh</code> picks the same history back up. It never uses a package manager or <code>sudo</code>, and it refuses to operate on root, home, broad system directories, or overlapping paths.</p>
+
+        <h2 id="release">Name-release backups</h2>
+        <p>When a <em>named</em> instance's name is released (removing it, or creating a fresh instance under that name), its state directory is not deleted — it is <strong>moved to a private backup</strong>:</p>
+<pre>~/.config/agents-server-manager/history-backups/&lt;name&gt;-&lt;random&gt;/state</pre>
+        <p>The default instance's name can never be released. Original Claude/Codex chats and your project files are unaffected; only AgentsDock-owned content moves into the backup.</p>
+        <p>Releasing a name preserves its saved AgentsDock data in the private backup location printed by the command. Reinstalling the instance does <strong>not</strong> automatically restore that backup, and a reinstalled instance starts with an empty chat list. There is <strong>no built-in restore command yet</strong> — keep the backup unchanged (don't move or merge it, especially if the name has since been reused) and ask for recovery guidance in <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a> or via <a href="./report-issue.html">Report an issue</a>.</p>
+
+        <h2 id="purge">Purge state</h2>
+<pre>./uninstall.sh --purge-state</pre>
+        <p>This is the <strong>only destructive option</strong>. It deletes the state directory — chat history, jobs, files, tokens, secure-peer credentials — permanently. It always asks you to type the exact state path to confirm, and <code>--yes</code> never bypasses that prompt.</p>
+
+        <h2 id="terminals">Terminal sessions</h2>
+        <p>Uninstalling leaves persistent chat terminals running. They are ordinary tmux sessions, scoped per server:</p>
+<pre>tmux ls                          # default server: sessions named zd_*
+tmux -L agents-server-NAME ls    # named instance: sessions named zdi_NAME_*</pre>
+        <p>Close only the sessions you recognise as AgentsDock chat terminals for the server you removed. Other tmux sessions on the machine, and other instances' sessions, are separate and unaffected.</p>
+
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="./assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>An IDE designed for agentic AI research.<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">Docs</a>
+        <a href="./support.html">Support</a>
+        <a href="./report-issue.html">Report an issue</a>
+        <a href="./privacy.html">Privacy</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="如何搭建 AgentsServer 并从 Mac、iPhone 或 iPad 连接 AgentsDock：安装服务器、登录 Claude Code 和 Codex、获取访问令牌、通过 Tailscale 连接。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="搭建指南 · AgentsDock" />
+    <meta property="og:description" content="如何搭建 AgentsServer 并从 Mac、iPhone 或 iPad 连接 AgentsDock：安装服务器、登录 Claude Code 和 Codex、获取访问令牌、通过 Tailscale 连接。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/setup.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="搭建指南 · AgentsDock" />
+    <meta name="twitter:description" content="如何搭建 AgentsServer 并从 Mac、iPhone 或 iPad 连接 AgentsDock：安装服务器、登录 Claude Code 和 Codex、获取访问令牌、通过 Tailscale 连接。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>搭建指南 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/setup.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/setup.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/setup.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../setup.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../setup.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link current" href="./setup.html">搭建指南</a>
+          <span class="docs-nav-subs">
+            <a href="#prereqs">开始之前</a>
+            <a href="#part-remote">第 1 部分 · 搭建远程机器</a>
+            <a href="#part-device">第 2 部分 · 连接你的设备</a>
+            <a href="#troubleshoot">连不上？</a>
+          </span>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link" href="./report-issue.html">反馈问题</a>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">文档</p>
+        <h1>搭建指南</h1>
+        <p class="legal-meta">最后更新：2026 年 8 月 2 日 · 约需 15 分钟</p>
+
+        <p class="legal-lead">AgentsDock 由两部分组成：<strong>AgentsServer</strong> 在你自己的远程机器上真正执行工作；Mac、iPhone 或 iPad 上的<strong>应用</strong>则是你查看和操作它的窗口。远程机器只需搭建一次，之后想连多少台设备都可以。</p>
+
+        <h2 id="prereqs">开始之前</h2>
+        <ul>
+          <li>一台由你掌控、保持开机的远程机器（macOS 或 Linux）来运行服务器。<code>tmux</code> 是可选的，只有应用内终端需要它。</li>
+          <li>一个 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 账号（可选）——仅在需要从局域网之外访问远程机器时才用得到。在同一 Wi‑Fi 下可以直接用机器的局域网 IP；Tailscale 让你能从其他任何地方安全连接。</li>
+          <li>你的 Claude Code 和/或 Codex 账号，用于在远程机器上登录对应的命令行工具。</li>
+          <li>一台用来运行应用的 Mac、iPhone 或 iPad。</li>
+        </ul>
+        <div class="guide-note">
+          <p>AgentsDock 是完全自托管的。你的会话、文件和 API 密钥都留在你的远程机器上——应用只是一个查看窗口。</p>
+        </div>
+
+        <h2 class="docs-part" id="part-remote"><span class="docs-part-label">第 1 部分</span>搭建远程机器</h2>
+        <p>在负责执行工作的那台机器上做一次即可。它会持续运行，你的各个设备都连接到它。</p>
+
+        <h3 class="docs-step" id="remote-server"><span class="step-n">1</span>安装 AgentsServer</h3>
+        <p>在远程机器上克隆服务器仓库并运行安装脚本：</p>
+        <pre><code>git clone https://github.com/ZhengyiLuo/AgentsServer.git
+cd AgentsServer
+./install.sh</code></pre>
+        <p>服务器默认监听 7850 端口，并在远程机器上持续运行——你的设备连接的就是它。</p>
+        <p>它由一个访问令牌保护，安装脚本结束时会打印一次——现在就复制下来，第 2 部分在每台设备上都要输入。之后想再次查看，在远程机器上运行：</p>
+        <pre><code>./install.sh --show-token</code></pre>
+        <p class="legal-meta">所有服务器命令——更新、重启、日志、卸载——都在<a href="./server.html">管理服务器</a>页面。</p>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsServer" target="_blank" rel="noopener">在 GitHub 上查看 AgentsServer 仓库 <span aria-hidden="true">&rarr;</span></a></p>
+
+        <h3 class="docs-step" id="remote-cli"><span class="step-n">2</span>在远程机器上登录 Claude Code 和 Codex</h3>
+        <p>AgentsDock 在远程机器上用你自己的账号运行 Claude Code 和 Codex 命令行工具——它从不代理、也看不到你的模型请求。因此这些工具必须安装并登录在远程机器上，而不是你的手机或笔记本上。把你打算使用的每个工具运行一次并完成登录。若某个工具未登录，AgentsDock 会将该后端显示为不可用。</p>
+
+        <h3 class="docs-step" id="remote-tailscale"><span class="step-n">3</span>在远程机器上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
+        <p>仅在需要从局域网之外访问远程机器时才需要。如果你的设备和远程机器在同一 Wi‑Fi 下，可以跳过这一步，在第 2 部分直接使用机器的局域网 IP。</p>
+        <p>在远程机器上安装 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 并登录。这会给机器分配一个私有的 <code>100.x.x.x</code> 地址，你的其他设备可以从任何地方访问它——无需向公网开放任何端口。记下这个地址（或机器的 Tailscale 主机名），第 2 部分会用到。</p>
+
+        <h2 class="docs-part" id="part-device"><span class="docs-part-label">第 2 部分</span>从你的设备连接</h2>
+        <p>在你想使用的每台 Mac、iPhone 或 iPad 上重复以下步骤。</p>
+
+        <h3 class="docs-step" id="device-app"><span class="step-n">1</span>下载 AgentsDock</h3>
+        <p><a href="../index.html#downloads">获取应用</a>（macOS、iPhone 或 iPad——当前支持的平台）并打开。</p>
+
+        <h3 class="docs-step" id="device-tailscale"><span class="step-n">2</span>在设备上安装 Tailscale <span class="docs-step-opt">可选</span></h3>
+        <p>仅当你在远程机器上安装了 Tailscale 时才需要。在这台设备上也安装它并用同一账号登录，这样两端就在同一个私有网络里，应用才能连到服务器。若在同一局域网内，跳过这一步，直接用远程机器的局域网 IP。</p>
+
+        <h3 class="docs-step" id="device-connect"><span class="step-n">3</span>连接到你的服务器</h3>
+        <p>在 AgentsDock 中添加服务器，填入远程机器的地址——它的 Tailscale <code>100.x.x.x</code> 地址加端口 <code>7850</code>——然后把第 1 部分得到的访问令牌粘贴到<strong>访问令牌（Access token）</strong>字段。它长这样：</p>
+        <pre><code>ad_tok_9f3b7c2e••••••••••••••••••••   (sample)</code></pre>
+        <p>这个令牌存放在你的服务器机器上——也就是第 1 部分搭建的远程机器，而不是你正在用来连接的设备。想再次获取，在远程机器上运行：</p>
+        <pre><code>./install.sh --show-token</code></pre>
+        <p>点击<strong>测试连接（Test connection）</strong>确认应用能连到服务器，再点<strong>添加并切换（Add &amp; switch）</strong>。连接成功后：新建一个会话，选择 Claude Code 或 Codex，并指定远程机器上的一个工作目录。</p>
+        <figure class="docs-shot">
+          <img src="../assets/setup-token.png" alt="AgentsDock connection form on macOS with the Access token field, a Test connection button, and Add and switch" loading="lazy" />
+          <figcaption>把访问令牌粘贴到<strong>访问令牌</strong>字段，保存前先点击<strong>测试连接</strong>验证。</figcaption>
+        </figure>
+        <figure class="docs-shot">
+          <img src="../assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux, Claude Code, and Codex status" loading="lazy" />
+          <figcaption>连接后，应用的<strong>设置</strong>页可以监控连接状态，并检查服务器上的 tmux、Claude Code 和 Codex 是否就绪。</figcaption>
+        </figure>
+
+        <h2 id="troubleshoot">连不上？</h2>
+        <ul>
+          <li>确认在同一台设备的浏览器里能打开服务器 URL——浏览器打不开的话，应用也连不上。</li>
+          <li>检查两端的 Tailscale 都已开启并登录，并且你用的是远程机器的 <code>100.x.x.x</code> Tailscale 地址（而不是只在远程机器自己网络里有效的局域网 IP）。</li>
+          <li>确保 URL 带了端口（<code>7850</code>），且访问令牌完全一致、没有多余空格。</li>
+        </ul>
+        <p>还是不行？前往<a href="../support.html">支持</a>页面，或在我们的 <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord</a> 提问。</p>
+
+        <p>连接好了？到<a href="./features.html">主要功能</a>看看 AgentsDock 能做什么 &rarr;</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>

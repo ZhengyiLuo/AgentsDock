@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="如何反馈 AgentsDock 的 bug 或功能建议——在会话中使用 /feedback 斜杠命令、在 GitHub 上提交 issue，或在 Discord 提问。" />
+    <!-- Social preview (Open Graph / Twitter) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentsDock" />
+    <meta property="og:title" content="反馈问题 · AgentsDock" />
+    <meta property="og:description" content="如何反馈 AgentsDock 的 bug 或功能建议——在会话中使用 /feedback 斜杠命令、在 GitHub 上提交 issue，或在 Discord 提问。" />
+    <meta property="og:url" content="https://agentsdock.net/zh/report-issue.html" />
+    <meta property="og:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentsDock — an IDE designed for agentic AI research" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="反馈问题 · AgentsDock" />
+    <meta name="twitter:description" content="如何反馈 AgentsDock 的 bug 或功能建议——在会话中使用 /feedback 斜杠命令、在 GitHub 上提交 issue，或在 Discord 提问。" />
+    <meta name="twitter:image" content="https://agentsdock.net/assets/og-card.png?v=82a3bdda" />
+    <meta name="theme-color" content="#0d1013" />
+    <meta name="robots" content="index,follow" />
+    <title>反馈问题 · AgentsDock</title>
+    <link rel="icon" href="../favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="../assets/favicon-96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-G3XRBEHKVD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-G3XRBEHKVD');
+    </script>
+    <script src="../analytics.js" defer></script>
+    <script src="../site-nav.js?v=92294063" defer></script>
+    <script src="../docs-nav.js?v=1eafff8c" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://agentsdock.net/report-issue.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://agentsdock.net/zh/report-issue.html" />
+    <link rel="alternate" hreflang="x-default" href="https://agentsdock.net/report-issue.html" />
+    <meta property="og:locale" content="zh_CN" />
+    <link rel="stylesheet" href="../styles.css?v=8f252944" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="AgentsDock 首页">
+        <img src="../assets/agentsdock-icon.png" alt="" />
+        <span>AgentsDock</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../index.html">首页</a>
+        <a href="./setup.html">文档</a>
+        <a class="nav-discord" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.446.865-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.2 14.2 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.291.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009q.181.15.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>Discord</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="docs-nav" aria-label="文档" data-docs-label="文档" data-docs-menu-label="打开文档目录" data-lang-href="../report-issue.html" data-lang-label="EN">
+        <nav>
+                    <div class="docs-lang" aria-label="Language">
+            <a class="docs-lang-link" href="../report-issue.html" hreflang="en" lang="en">EN</a>
+            <a class="docs-lang-link is-current" aria-current="true">中文</a>
+          </div>
+          <p class="docs-nav-label">入门</p>
+          <a class="docs-nav-link" href="./setup.html">搭建指南</a>
+          <a class="docs-nav-link" href="./iphone.html">在 iPhone 和 iPad 上安装</a>
+          <a class="docs-nav-link" href="./first-chat.html">开始第一个会话</a>
+          <p class="docs-nav-label">指南</p>
+          <a class="docs-nav-link" href="./features.html">主要功能</a>
+          <a class="docs-nav-link" href="./shortcuts.html">键盘快捷键</a>
+          <a class="docs-nav-link" href="./update.html">更新</a>
+          <a class="docs-nav-link" href="./language.html">语言</a>
+          <a class="docs-nav-link" href="./server.html">管理服务器</a>
+          <p class="docs-nav-label">帮助</p>
+          <a class="docs-nav-link current" href="./report-issue.html">反馈问题</a>
+          <span class="docs-nav-subs">
+            <a href="#feedback">在会话中发送反馈</a>
+            <a href="#github">在 GitHub 上提交问题</a>
+            <a href="#discord">更喜欢 Discord？</a>
+          </span>
+          <p class="docs-nav-label">服务器参考</p>
+          <a class="docs-nav-link" href="./advanced-install.html">高级安装</a>
+          <a class="docs-nav-link" href="./multiple-servers.html">多服务器</a>
+          <a class="docs-nav-link" href="./backup-uninstall.html">备份与卸载</a>
+        </nav>
+      </aside>
+
+      <article class="legal docs-body">
+        <p class="section-kicker">文档</p>
+        <h1>反馈问题</h1>
+        <p class="legal-lead">遇到 bug，或者有功能建议？问题都在 <strong>GitHub</strong> 上——而最快的入口就在会话里。</p>
+
+        <h2 id="feedback">在会话中发送反馈</h2>
+        <p>在输入框输入 <code>/feedback</code>——或从 <code>/</code> 菜单选择<strong>发送反馈（Send feedback）</strong>。它会直接带你到 GitHub 上的 AgentsDock 问题表单，不用去找仓库。</p>
+        <figure class="docs-shot">
+          <img src="../assets/report-feedback.png" alt="AgentsDock slash-command menu with 'Send feedback — Open the public AgentsDock issue form' highlighted, mapped to the /feedback command" loading="lazy" />
+          <figcaption>在任意会话中输入 <code>/feedback</code>——它会打开 GitHub 问题表单。</figcaption>
+        </figure>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new" target="_blank" rel="noopener">在 GitHub 上打开 AgentsDock 问题表单 <span aria-hidden="true">&rarr;</span></a></p>
+
+        <h2 id="github">……或直接在 GitHub 上提交问题</h2>
+        <p>目的地相同，如果你更愿意直接过去的话。在 AgentsDock 发布仓库新建一个 issue，写清标题和描述——复现步骤、你期望的结果、实际发生了什么——能附上截图或录屏更好。这对我们定位问题非常有帮助。</p>
+        <figure class="docs-shot">
+          <img src="../assets/report-issue-github.png" alt="GitHub 'Create new issue' page on the ZhengyiLuo/AgentsDock-Releases repository, showing the title field and description editor" loading="lazy" />
+          <figcaption>GitHub 上的 AgentsDock 问题表单——<code>/feedback</code> 也会跳到这里。</figcaption>
+        </figure>
+        <p><a class="quickstart-docs" href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues/new" target="_blank" rel="noopener">在 GitHub 上新建 issue <span aria-hidden="true">&rarr;</span></a></p>
+        <p class="legal-meta">建议先快速翻一下<a href="https://github.com/ZhengyiLuo/AgentsDock-Releases/issues" target="_blank" rel="noopener">已有的 issue</a>——也许已经有人报告过了。</p>
+
+        <h2 id="discord">更喜欢 Discord？</h2>
+        <p>有简短的问题，或者拿不准某个现象算不算 bug？欢迎来社区打个招呼。我们很活跃，乐意帮忙。</p>
+        <p><a class="quickstart-docs" href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">加入 AgentsDock Discord <span aria-hidden="true">&rarr;</span></a></p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="brand footer-brand"><img src="../assets/agentsdock-icon.png" alt="" /><span>AgentsDock</span></div>
+      <p>为 agentic AI 研究而设计的 IDE。<span class="footer-copyright">&copy; 2026 AgentsDock</span></p>
+      <div>
+        <a href="./setup.html">文档</a>
+        <a href="../support.html">支持</a>
+        <a href="./report-issue.html">反馈问题</a>
+        <a href="../privacy.html">隐私</a>
+        <a href="https://discord.gg/ZGDrhEWqPt" target="_blank" rel="noopener">Discord &#8599;</a>
+      </div>
+    </footer>
+
+    <script>
+      // Highlight the current section in the sidebar as you scroll.
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.docs-nav a'));
+        var map = {};
+        links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+        var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+        if (!('IntersectionObserver' in window) || !targets.length) return;
+        var current = null;
+        var obs = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              if (current) current.classList.remove('active');
+              current = map[e.target.id];
+              if (current) current.classList.add('active');
+            }
+          });
+        }, { rootMargin: '-80px 0px -70% 0px' });
+        targets.forEach(function (t) { obs.observe(t); });
+      })();
+    </script>
+  </body>
+</html>
