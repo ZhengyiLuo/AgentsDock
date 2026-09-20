@@ -26,6 +26,28 @@
   writes. Provider execution is verified separately in the paired server.
 - Pass 4,585 source tests (10 skipped), eight build/license guard checks and
   TypeScript validation, including scoped and unscoped preload compatibility.
+- Accept local universal macOS **1.0.4-beta.9 / 1182** from
+  `1641cb97dfba17b6c3b3807c79c0f63e4a36cca3`. Developer ID signatures,
+  notarization, Gatekeeper, DMG/ZIP parity and updater checks pass. The signed
+  executable passes its clean CI launch; all 88 packaged compiled files match
+  the frozen source. Replay the native capture through the exact packaged
+  renderer and preload, including Settings, persistence, reduced motion and
+  completion. This packaged replay uses offline fixture transport; native
+  provider and authenticated transport checks are recorded separately.
+- Verify the copied app on a second Mac: matching archive SHA-256, version,
+  build, deep signature and Gatekeeper acceptance. Preserve its existing app.
+- Correct a Linux arm64 test that checked an unread callback before its React
+  effect committed. Pass all 111 affected module tests and TypeScript checks.
+  Follow-up source `5ff80a385957722c99026084036750934fcc564f` changes only
+  test synchronization and type declarations; its 88 compiled files are
+  byte-identical to accepted build 1182.
+- Desktop publication remains blocked: the replacement prepare for build
+  1183 could not start because of the GitHub Actions budget. No desktop
+  beta.9 release was published. The local Mac acceptance does not certify
+  the incomplete cross-platform release.
+- The paired [AgentsServer beta.9](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.9)
+  is published and independently verified. Managed updates are queued to
+  apply when active work finishes; scheduling is not deployment acceptance.
 
 ## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8
 
