@@ -14,6 +14,17 @@
   clipboard; delivery and production server data are outside this check.
 - Pass all 114 existing mail/style tests, TypeScript, production compilation
   and the compiled-output verifier. This layout change needs no server update.
+- Accept desktop **1.0.4-beta.6 / 1178** from
+  `7e9ec89e007bc32e1f7889c4f558160385773ba9`. All 88 packaged compiled files
+  match the reviewed source. Inspect the packaged renderer/preload in isolated
+  offscreen Electron. Universal signing, notarization, Gatekeeper, mounted
+  DMG/ZIP parity and updater checks pass locally; the signed executable passes
+  a clean CI launch. All four native platform builds and package checks pass,
+  and the release test suite passes 4,547 tests (10 skipped).
+- Publish matching sets of 14 reviewed assets and authored notes to both Beta
+  feeds after all four platform replay checks pass. Verify public asset
+  digests, updater metadata, exact source tag and canonical/legacy parity.
+- Release: [desktop beta.6](https://github.com/ZhengyiLuo/AgentsDock/releases/tag/v1.0.4-beta.6).
 
 ## 2026-09-19 — Preserve side chats across servers — 1.0.4-beta.5
 
