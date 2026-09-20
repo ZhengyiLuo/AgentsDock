@@ -1,6 +1,6 @@
 # Public development log
 
-## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 candidate
+## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 
 - Keep the active Codex tool inside its compact command group. Update the
   group's single row to the latest running call and retain previous calls
@@ -22,7 +22,22 @@
   Provider Responses are controlled fixtures; this is transport and display
   acceptance against the supplied visual reference, not external-model output
   or native GUI pixel parity.
-- Availability: source candidate; signed package acceptance pending.
+- Accept signed, notarized universal macOS **1.0.4-beta.11 / 1185** from
+  `494c91fd7236a430d498cb90481fc06697b5a500`. All 88 compiled files match the
+  frozen source, and the final ZIP's ASAR matches the exact packaged full-app
+  completion and interruption replays. Verify actual Sidebar → Settings
+  interaction, compact command blocks, no extra default live controls,
+  identical terminal history, reload, reduced motion and supported minimum
+  width. The packaged replay uses captured native events and offline IPC;
+  production transport was exercised separately in the source acceptance.
+- Pass Developer ID signature, Gatekeeper, stapling, universal architecture,
+  version/build, ZIP updater hashes and feed checks. The actual signed app
+  launches cleanly for ten seconds with isolated user data and is then closed.
+  Matching ZIP SHA-256:
+  `60792d4c880914d9c05c7769289532b6d9ffe93d972fce94071d2325e923f3e9`.
+- Availability: accepted local `.app` and matching ZIP. Public desktop
+  publication remains blocked by the private Actions budget. Local app
+  acceptance does not imply cross-platform or DMG installer acceptance.
 
 ## 2026-09-19 — Live-only reasoning display — 1.0.4-beta.10 candidate
 
