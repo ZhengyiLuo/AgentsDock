@@ -352,6 +352,16 @@ class TerminalWebSocketRejectionTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(agent_server, "TERMINAL_ATTACHMENTS", registry), \
              patch.object(agent_server, "websocket_authorized", return_value=True), \
+             patch.object(
+                 agent_server,
+                 "managed_server_update_blocks_work",
+                 return_value=False,
+             ), \
+             patch.object(
+                 agent_server,
+                 "managed_server_restart_blocks_work",
+                 return_value=False,
+             ), \
              patch.dict(
                  agent_server.STORE.sessions,
                  {session_id: {"id": session_id, "archived": False, "cwd": "/workspace"}},
