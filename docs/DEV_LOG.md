@@ -1,5 +1,25 @@
 # Development and release log
 
+## 2026-09-19 — Scheduled history catch-up — 1.0.4-beta.6
+
+- Capture the initial WebSocket replay boundary under the same delivery lock
+  used by durable imports. Wait for source-proven history projection before
+  reading newly committed rows, so scheduled prompts cannot escape as user
+  messages while a subscriber is catching up.
+- Keep socket writes outside the lock. Preserve complete catch-up, exact
+  sequence delivery and the transition to live events.
+- Reproduce the race with a real durable import paused after fsync and before
+  proof publication. The regression sends an unrepaired prompt before the fix
+  and a corrected record afterward. All 11 WebSocket catch-up tests pass,
+  including slow-client liveness and concurrent append/prune cases.
+- Exercise the overlap in native offscreen Electron through the production
+  client, authenticated WebSocket, server replay handler, durable import,
+  SQLite cache and Timeline. Before the fix, duplicate scheduled prompts and
+  answers arrive unrepaired and survive reopening. Afterward, every duplicate
+  arrives corrected; the job card, latest output, Previous runs and genuine
+  user messages remain correct after reopening. Provider proof timing and the
+  initial HTTP page use controlled fixtures; no scheduled command is executed.
+
 ## 2026-09-19 — AgentsServer 1.0.4-beta.5 accepted
 
 - Compare resolved workspace paths when verifying a native Codex fork and

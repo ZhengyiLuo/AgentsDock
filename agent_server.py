@@ -90283,11 +90283,15 @@ async def session_events(
         # sequence-bound catch-up; the old single 500-row read silently skipped
         # the rest of a long offline gap.
         catchup_visible = visible is True
-        await asyncio.to_thread(prepare_provider_history_metadata_repair, session_id)
-        boundary = await asyncio.to_thread(
-            last_event_seq_from_file,
-            events_path(session_id),
-        )
+        # A durable import holds this lock until its source-proven projection
+        # is ready. Reading its fsynced rows earlier can replay raw scheduled
+        # inputs before this socket is registered for the repaired broadcast.
+        async with event_delivery_lock(session_id):
+            await asyncio.to_thread(prepare_provider_history_metadata_repair, session_id)
+            boundary = await asyncio.to_thread(
+                last_event_seq_from_file,
+                events_path(session_id),
+            )
         while True:
             cursor = await send_event_catchup(
                 session_id,
