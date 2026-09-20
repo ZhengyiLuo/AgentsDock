@@ -78,6 +78,7 @@ import type {
   ProviderCommandsSnapshot,
   ProviderReloadResult,
   ProviderRuntimeChanged,
+  ReasoningSummaryStreamSnapshot,
   QueuedCrossChatDeliveryIdentity,
   QueuedRunNowResponse,
   QueuedTurn,
@@ -116,6 +117,7 @@ import type {
 import { normalizeCursorPermissionMode } from '../shared/cursor-permissions'
 import { normalizeServerURL } from '../shared/server-url'
 import { teamNetworkValidationMessage } from '../shared/server-errors'
+import { isReasoningSummaryStream } from '../shared/reasoning-stream'
 import { deriveTeamHubBootstrapControlURL } from '../shared/team-hub-url'
 import { parseAgentTeamMessagesCapability, parseTeamBulletinAliasCapability, parseTeamAllServersAliasCapability } from '../shared/team-network'
 import { PinRevisionConflictError } from './pin-sync'
@@ -2047,7 +2049,8 @@ export class AgentServerClient {
     onEvent: (event: Event) => void,
     onState: (connected: boolean, error?: string) => void,
     onProviderRuntime?: (event: ProviderRuntimeChanged) => void,
-    onPinnedItemsChanged?: (event: TimelinePinsChanged) => void
+    onPinnedItemsChanged?: (event: TimelinePinsChanged) => void,
+    onReasoningStream?: (snapshot: ReasoningSummaryStreamSnapshot) => void
   ): () => void {
     const configuration = this.configuration
     const endpoint = new URL(configurationURL(configuration, `/api/sessions/${encodeURIComponent(sessionId)}/events`))
@@ -2073,6 +2076,7 @@ export class AgentServerClient {
       const url = new URL(endpoint)
       url.searchParams.set('after', String(lastSeq))
       url.searchParams.set('visible', 'true')
+      if (onReasoningStream) url.searchParams.set('reasoning_stream', 'true')
       const protocols = authenticatedWebSocketProtocols(
         configuration,
         url,
@@ -2081,6 +2085,8 @@ export class AgentServerClient {
       const current = new WebSocket(url, protocols)
       socket = current
       let disconnected = false
+      let reasoningInstance = ''
+      let reasoningRevision = -1
       const disconnect = (error?: string): void => {
         if (stopped || disconnected) return
         disconnected = true
@@ -2107,6 +2113,16 @@ export class AgentServerClient {
         if (stopped || disconnected) return
         try {
           const packet = JSON.parse(String(message.data)) as unknown
+          if (packet && typeof packet === 'object' && 'type' in packet && packet.type === 'reasoning_summary_stream') {
+            if (isReasoningSummaryStream(packet) && packet.session_id === sessionId
+              && (!reasoningInstance || packet.instance_id === reasoningInstance)
+              && packet.revision > reasoningRevision) {
+              reasoningInstance = packet.instance_id
+              reasoningRevision = packet.revision
+              onReasoningStream?.(packet)
+            }
+            return
+          }
           if (isProviderRuntimeChanged(packet)) {
             if (packet.session_id === sessionId) onProviderRuntime?.(packet)
             return

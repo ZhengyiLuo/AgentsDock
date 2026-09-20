@@ -1689,6 +1689,80 @@ describe('AgentServerClient live stream', () => {
     stop()
   })
 
+  it('routes only current-session reasoning snapshots in increasing instance-bound revisions', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const event = vi.fn(), summary = vi.fn()
+    const stop = client.stream('chat', 5, event, vi.fn(), undefined, undefined, summary)
+    const socket = FakeWebSocket.instances[0]
+    const snapshot = {
+      type: 'reasoning_summary_stream', session_id: 'chat', instance_id: 'boot-a', revision: 3,
+      items: [{ run_id: 'run-a', item_id: 'item-a', backend: 'codex', phase: 'summary',
+        text: 'Checking the first option.', ts: '2026-09-20T05:00:00Z', after_seq: 5 }]
+    }
+    expect(socket.url.searchParams.get('reasoning_stream')).toBe('true')
+    socket.emit('message', JSON.stringify(snapshot))
+    socket.emit('message', JSON.stringify({ ...snapshot, revision: 2 }))
+    socket.emit('message', JSON.stringify(snapshot))
+    socket.emit('message', JSON.stringify({ ...snapshot, session_id: 'other-chat', revision: 99 }))
+    socket.emit('message', JSON.stringify({ ...snapshot, instance_id: 'other-boot', revision: 99 }))
+    const cleared = { ...snapshot, revision: 4, items: [] }
+    socket.emit('message', JSON.stringify(cleared))
+    expect(summary.mock.calls.map(([value]) => value)).toEqual([snapshot, cleared])
+    expect(event).not.toHaveBeenCalled()
+    stop()
+    socket.emit('message', JSON.stringify({ ...snapshot, revision: 5 }))
+    expect(summary).toHaveBeenCalledTimes(2)
+  })
+
+  it('consumes malformed reasoning frames without poisoning the durable reconnect cursor or snapshot revision', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const event = vi.fn(), summary = vi.fn()
+    const stop = client.stream('chat', 5, event, vi.fn(), undefined, undefined, summary)
+    const first = FakeWebSocket.instances[0]
+    const snapshot = { type: 'reasoning_summary_stream', session_id: 'chat', instance_id: 'boot-a', revision: 3, items: [] }
+    for (const malformed of [
+      { ...snapshot, revision: -1 }, { ...snapshot, items: null },
+      { ...snapshot, items: [{ run_id: 'run', item_id: 'item', backend: 'codex', phase: 'summary', text: 7, after_seq: 5, ts: 'now' }] },
+      { ...snapshot, instance_id: '', revision: 99 }
+    ]) first.emit('message', JSON.stringify({ ...malformed, seq: 10000 }))
+    first.emit('message', '{malformed')
+    first.emit('message', JSON.stringify(snapshot))
+    const durable: Event = { id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now', text: 'Done.' }
+    first.emit('message', JSON.stringify(durable))
+    first.emit('close')
+    // Queued frames from the closed transport cannot change either cursor.
+    first.emit('message', JSON.stringify({ ...snapshot, revision: 100 }))
+    first.emit('message', JSON.stringify({ ...durable, seq: 9000 }))
+    vi.advanceTimersByTime(500)
+    const second = FakeWebSocket.instances[1]
+    expect(second.url.searchParams.get('after')).toBe('6')
+    expect(second.url.searchParams.get('reasoning_stream')).toBe('true')
+    const restarted = { ...snapshot, instance_id: 'boot-b', revision: 0 }
+    second.emit('message', JSON.stringify(restarted))
+    first.emit('message', JSON.stringify({ ...snapshot, revision: 101 }))
+    expect(event).toHaveBeenCalledExactlyOnceWith(durable)
+    expect(summary.mock.calls.map(([value]) => value)).toEqual([snapshot, restarted])
+    stop()
+  })
+
+  it('keeps reasoning packets out of the durable lane without opting older callers into streaming', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const client = new AgentServerClient('http://example.test:7850', 'token')
+    const event = vi.fn()
+    const stop = client.stream('chat', 5, event, vi.fn())
+    const socket = FakeWebSocket.instances[0]
+    expect(socket.url.searchParams.has('reasoning_stream')).toBe(false)
+    socket.emit('message', JSON.stringify({ type: 'reasoning_summary_stream', seq: 500 }))
+    socket.emit('message', JSON.stringify({ id: 'e6', session_id: 'chat', seq: 6, type: 'assistant_text', ts: 'now' }))
+    expect(event).toHaveBeenCalledOnce()
+    expect(event.mock.calls[0][0].seq).toBe(6)
+    stop()
+  })
+
   it('times out a stalled websocket handshake and keeps retrying', () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)

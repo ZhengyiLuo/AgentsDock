@@ -14,6 +14,7 @@ import { turnSendErrorMessage } from '@shared/server-errors'
 import { completedPrefixForkAvailable, RUNNING_FORK_UNAVAILABLE } from '@shared/session-fork'
 import { agentFileBelongsToSession, isolateSessionEvent, isolateSessionSnapshot } from '@shared/session-files'
 import { isImportedClaudeControlCompanion, isImportedCodexRuntimeContext, isImportedHistoryRecord, isImportedProviderControlMetadata, isImportedProviderInterruption, mergeProviderInterruptionEvent } from '@shared/provider-origin'
+import { isReasoningSummaryStream } from '@shared/reasoning-stream'
 import { trackEvent } from '../lib/analytics'
 import { nudgeChatFontSize, setChatFontFamily, setChatFontSize } from '../lib/chat-font'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
@@ -647,6 +648,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       window.agentsDock.events.on('server:sync', payload => {
         const current = get()
         if (!profileEventMatches(payload, current)) return
+        if (payload.state !== 'live' && current.snapshots[payload.sessionId]?.reasoningStream) {
+          set(state => ({ snapshots: { ...state.snapshots, [payload.sessionId]: {
+            ...state.snapshots[payload.sessionId], reasoningStream: undefined
+          } } }))
+        }
         if (!visibleChatSessionIds(current.chatPanes).includes(payload.sessionId)) return
         const compatible = healthIsCompatible(current.health)
         const websocketUnavailable = current.health?.websocket_runtime === false
@@ -876,6 +882,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           typeof payload.activeSession === 'boolean'
             ? { active: payload.activeSession, runId: payload.activeRunId }
             : undefined)
+      }),
+      window.agentsDock.events.on('server:reasoning-stream', payload => {
+        if (!profileEventMatches(payload, get())) return
+        const stream = payload.snapshot
+        if (stream && (!isReasoningSummaryStream(stream) || stream.session_id !== payload.sessionId)) return
+        const previous = get().snapshots[payload.sessionId]?.reasoningStream
+        if (previous && stream && previous.instance_id === stream.instance_id
+          && stream.revision <= previous.revision) return
+        // Deliver preceding durable completions before removing their live
+        // snapshots, even when normal timeline events are batched for typing.
+        if (previous?.items.some(item => !stream?.items.some(next => (
+          next.run_id === item.run_id && next.item_id === item.item_id
+        )))) flushLiveEvents(true)
+        set(state => {
+          const snapshot = state.snapshots[payload.sessionId]
+          if (!snapshot) return state
+          return { snapshots: { ...state.snapshots, [payload.sessionId]: {
+            ...snapshot, reasoningStream: stream ?? undefined
+          } } }
+        })
       }),
       window.agentsDock.events.on('native:notification', route => {
         void openProfileNotificationRoute(route, get).catch(error => get().setError(errorMessage(error)))
@@ -3426,7 +3452,8 @@ export function mergeSnapshots(previous: SessionSnapshot | undefined, next: Sess
     nextTimelineBefore,
     semanticPaging,
     generation: nextTimelineGeneration(previous, events, eventPrefixStable),
-    timelineListGeneration: previous.timelineListGeneration ?? 0
+    timelineListGeneration: previous.timelineListGeneration ?? 0,
+    reasoningStream: previous.reasoningStream
   }
 }
 
@@ -3472,6 +3499,7 @@ export function replaceSnapshot(
     ...next,
     events,
     historyDiscontinuity: false,
+    reasoningStream: previous?.reasoningStream,
     hasMoreEvents: retainedPrefix.length
       ? previous!.hasMoreEvents
       : next.hasMoreEvents,

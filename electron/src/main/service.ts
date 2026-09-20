@@ -3222,6 +3222,14 @@ export class AppService {
     }, event => {
       if (!this.isCurrentTimeline(scope, sessionId, lease)) return
       void this.refreshPinsFromNotice(scope, sessionId, event.revision)
+    }, snapshot => {
+      if (!this.isCurrentTimeline(scope, sessionId, lease)) return
+      this.emit('server:reasoning-stream', {
+        profileId: scope.profileId,
+        profileGeneration: scope.generation,
+        sessionId,
+        snapshot
+      })
     })
     const current = this.timelineSubscriptions.get(sessionId)
     if (current?.lease === lease) current.stop = stop

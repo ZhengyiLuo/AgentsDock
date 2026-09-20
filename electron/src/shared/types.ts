@@ -290,6 +290,8 @@ export interface CodexProviderTestResult {
   compatibility?: 'unverified' | 'verified' | 'unsupported'
   scope?: 'isolated_native_tools_and_continuation'
   checks?: { native_tool_call: boolean; tool_roundtrip: boolean; continuation: boolean }
+  reasoning_summary_supported?: boolean | null
+  summary_check?: 'supported' | 'unsupported' | 'inconclusive' | 'not_checked'
 }
 
 export interface CodexProviderModelTestInput {
@@ -303,6 +305,7 @@ export interface RuntimeModelCapability {
   compatibility: 'unverified' | 'verified' | 'unsupported'
   reasoning_efforts: string[]
   reasoning_supported: boolean | null
+  reasoning_summary_supported?: boolean | null
 }
 
 export interface CodexProviderModels {
@@ -976,6 +979,10 @@ export interface Event extends SharedChatAttribution {
   provider_generated?: boolean | null
   provider_input_sha256?: string | null
   phase?: string | null
+  /** Durable summary placement at its first streamed section, without changing its ledger sequence. */
+  reasoning_after_seq?: number
+  /** A user-visible summary retained when the native item ended without authoritative completion. */
+  partial?: boolean
   /** Provider message identity when supplied by native output or history. */
   provider_message_id?: string | null
   /** True only for transcript records recovered by AgentsServer history import. */
@@ -1796,6 +1803,10 @@ export interface ProviderRuntimeChanged {
   context_usage?: CodexTokenUsage | ClaudeTokenUsage | null
 }
 export interface ProfileProviderRuntimeEvent extends ProfileEventContext { event: ProviderRuntimeChanged }
+export interface ProfileReasoningStreamEvent extends ProfileEventContext {
+  sessionId: string
+  snapshot: ReasoningSummaryStreamSnapshot | null
+}
 export interface ProfileJobsEvent extends ProfileEventContext { jobs: Job[] }
 export interface ProfileRuntimeEvent extends ProfileEventContext { runtimeCatalog: RuntimeCatalog }
 export interface ProfileFilesEvent extends ProfileEventContext { sessionId: string; files: AgentFile[]; total: number }
@@ -2134,6 +2145,26 @@ export interface SessionSnapshot {
   generation?: number
   /** Renderer-only epoch for a genuinely disjoint authoritative timeline replacement. */
   timelineListGeneration?: number
+  /** Renderer-only live summaries; never part of the durable event/cache cursor. */
+  reasoningStream?: ReasoningSummaryStreamSnapshot
+}
+
+export interface ReasoningSummaryStreamItem extends Omit<Partial<Event>, 'seq' | 'id' | 'session_id' | 'type' | 'run_id' | 'item_id' | 'backend' | 'phase' | 'text' | 'ts'> {
+  run_id: string
+  item_id: string
+  backend: 'codex'
+  phase: 'summary'
+  text: string
+  ts: string
+  after_seq: number
+}
+
+export interface ReasoningSummaryStreamSnapshot {
+  type: 'reasoning_summary_stream'
+  session_id: string
+  instance_id: string
+  revision: number
+  items: ReasoningSummaryStreamItem[]
 }
 
 export interface ViewState {
@@ -2354,6 +2385,7 @@ export interface AppEventMap {
   'server:sessions': ProfileSessionsEvent
   'server:event': ProfileAgentEvent
   'server:provider-runtime': ProfileProviderRuntimeEvent
+  'server:reasoning-stream': ProfileReasoningStreamEvent
   'server:jobs': ProfileJobsEvent
   'server:runtime': ProfileRuntimeEvent
   'server:pins': ProfilePinsEvent

@@ -16,6 +16,7 @@ import type {
   JobRunNowResult,
   JobRunHistoryPage,
   LocalSessionCandidate,
+  ReasoningSummaryStreamSnapshot,
   RuntimeCatalog,
   ServerRestartRequest,
   ServerRestartStatus,
@@ -3055,7 +3056,7 @@ interface FakeClientOptions {
     callerSignal?: AbortSignal
   ) => Promise<Response>
   workspaceDownloadRequest?: (sessionId: string, path: string) => Promise<Response>
-  stream?: (sessionId: string, after: number, onEvent: (event: Event) => void, onState: (connected: boolean, error?: string) => void) => () => void
+  stream?: AgentServerClient['stream']
   emergencyStream?: (
     expectedServerIdentity: string,
     onSessions: (sessions: Session[], snapshot: boolean, removedSessionId?: string) => void,
@@ -3561,6 +3562,92 @@ describe('background connection event publication', () => {
 })
 
 describe('split-chat timeline subscriptions', () => {
+  it('forwards transient summaries only for the current lease and profile without writing them to SQLite', async () => {
+    const streams: Array<{
+      summary: NonNullable<Parameters<AgentServerClient['stream']>[6]>
+      event: (event: Event) => void
+      stop: ReturnType<typeof vi.fn>
+    }> = []
+    const client = () => fakeClient({
+      sessionPage: async sessionId => emptyTimelinePage(sessionId),
+      stream: (_sessionId, _after, event, _state, _runtime, _pins, summary) => {
+        expect(summary).toBeTypeOf('function')
+        const stream = { summary: summary!, event, stop: vi.fn() }
+        streams.push(stream)
+        return stream.stop
+      }
+    })
+    const { service, cache } = createProfileService({
+      'http://a.test:7850': [client()], 'http://b.test:7850': [client()]
+    })
+    Object.assign(service, { validatedGeneration: 1 })
+    const send = vi.fn()
+    service.addWindow({ isDestroyed: () => false, on: vi.fn(), webContents: { send } } as never)
+    const internals = service as unknown as {
+      scope: { profileId: string; generation: number; namespace: string }
+      pendingEventCache: Map<string, unknown>
+      flushEventCache(): void
+    }
+    const snapshot: ReasoningSummaryStreamSnapshot = {
+      type: 'reasoning_summary_stream', session_id: 'chat', instance_id: 'boot-a', revision: 1,
+      items: [{ run_id: 'run-a', item_id: 'item-a', backend: 'codex', phase: 'summary',
+        text: 'Current live summary.', ts: '2026-09-20T05:00:00Z', after_seq: 0 }]
+    }
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+    const putEvents = vi.spyOn(cache, 'putEvents')
+    const before = cache.snapshot(internals.scope.namespace, 'chat')
+    send.mockClear()
+    streams[0].summary(snapshot)
+    expect(send).toHaveBeenCalledExactlyOnceWith('server:reasoning-stream', {
+      profileId: 'a', profileGeneration: 1, sessionId: 'chat', snapshot
+    })
+    expect(internals.pendingEventCache.size).toBe(0)
+    internals.flushEventCache()
+    expect(putEvents).not.toHaveBeenCalled()
+    expect(cache.snapshot(internals.scope.namespace, 'chat')).toEqual(before)
+    // The durable lane still persists normally through this same subscription.
+    const durable: Event = { id: 'durable', session_id: 'chat', seq: 1, type: 'assistant_text', ts: 'now', text: 'Complete.' }
+    streams[0].event(durable)
+    internals.flushEventCache()
+    expect(putEvents).toHaveBeenCalledWith(internals.scope.namespace, 'chat', [durable])
+
+    await service.subscribeTimeline('chat', 1)
+    await settleBackgroundWork()
+    expect(streams[0].stop).toHaveBeenCalledOnce()
+    send.mockClear()
+    putEvents.mockClear()
+    streams[0].summary({ ...snapshot, revision: 90 })
+    const replacement = { ...snapshot, revision: 2, items: [] }
+    streams[1].summary(replacement)
+    expect(send).toHaveBeenCalledExactlyOnceWith('server:reasoning-stream', {
+      profileId: 'a', profileGeneration: 1, sessionId: 'chat', snapshot: replacement
+    })
+    service.unsubscribeTimeline('chat')
+    send.mockClear()
+    streams[1].summary({ ...snapshot, revision: 91 })
+    expect(send).not.toHaveBeenCalled()
+
+    await service.switchServer('b')
+    Object.assign(service, { validatedGeneration: internals.scope.generation })
+    await service.subscribeTimeline('chat', 0)
+    await settleBackgroundWork()
+    const current = streams.at(-1)!
+    expect(current).not.toBe(streams[1])
+    send.mockClear()
+    putEvents.mockClear()
+    streams[0].summary({ ...snapshot, revision: 92 })
+    streams[1].summary({ ...snapshot, revision: 93 })
+    const otherProfile = { ...snapshot, instance_id: 'boot-b', revision: 0 }
+    current.summary(otherProfile)
+    expect(send).toHaveBeenCalledExactlyOnceWith('server:reasoning-stream', {
+      profileId: 'b', profileGeneration: internals.scope.generation, sessionId: 'chat', snapshot: otherProfile
+    })
+    expect(internals.pendingEventCache.size).toBe(0)
+    internals.flushEventCache()
+    expect(putEvents).not.toHaveBeenCalled()
+  })
+
   it('keeps two session streams live and scopes events and sync state to their source chat', async () => {
     const streams = new Map<string, {
       onEvent: (event: Event) => void

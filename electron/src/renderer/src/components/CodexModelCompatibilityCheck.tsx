@@ -59,6 +59,8 @@ export function CodexModelCompatibilityCheck({ scope, credentialId }: {
     </div>
     {!supported && <small>{t('codexProvider.checkUpdate')}</small>}
     {result && <small role="status">{t(`codexProvider.compatibility.${compatibility}`)} · {t(`codexProvider.checkResult.${result.status}`)}</small>}
+    {result?.ok && result.summary_check && result.summary_check !== 'not_checked'
+      && <small>{t(`codexProvider.summaryCheck.${result.summary_check}`)}</small>}
     {error && <small role="alert" className="codex-auth-settings-error">{t(`codexProvider.${error}`)}</small>}
   </div>
 }

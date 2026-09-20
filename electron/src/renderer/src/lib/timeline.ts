@@ -1991,6 +1991,10 @@ function renderCrossChatMessage(item: SystemItem): SystemItem[] {
 
 /** Keep arrival order unless public commentary has an earlier, zoned timestamp in the same run. */
 export function activityEventSequence(event: Event, finals: Event[] = []): number {
+  // A completed summary retains the place where its first live text appeared.
+  // The durable sequence remains untouched for caching, read state and replay.
+  if (event.type === 'reasoning_summary' && Number.isSafeInteger(event.reasoning_after_seq)
+    && event.reasoning_after_seq! >= 0 && event.reasoning_after_seq! < event.seq) return event.reasoning_after_seq! + 0.5
   if (!isPublicCommentary(event) || !event.run_id || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(event.ts)) return event.seq
   const timestamp = Date.parse(event.ts)
   if (!Number.isFinite(timestamp)) return event.seq

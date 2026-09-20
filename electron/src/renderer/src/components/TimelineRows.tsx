@@ -12,6 +12,7 @@ import type { ChatReference, CodeDiffFileSummary, CrossChatExchange, Event, Pinn
 import type { CodeReviewTarget, JobItem, MediaItem, MessageItem, ProgressItem, RenderTimelineItem, SystemItem } from '../lib/timeline'
 import { progressEventSequence, progressToolStartSequences, extractUnifiedDiff, isHandoffDigestEvent, isPublicCommentary, isTimelineError, jobDisplaySelection, jobResultPresentation, messageItemText, messageText, omitTerminalClaudeFinalCommentary, parseReviewableDiff, summarizeStructuredToolDiff } from '../lib/timeline'
 import { activeEmergencyAlert } from '../lib/emergency-alert'
+import { reasoningItemKey } from '../lib/timeline-reasoning-stream'
 import { formatDuration, formatTime, titleCase } from '../lib/format'
 import { requirePinnedItemsScope } from '../lib/pinned-items'
 import { exactQueuedDeliverySkipAvailable } from '../lib/chat-references'
@@ -179,7 +180,7 @@ function timelineActionError(error: unknown): string {
 }
 
 function mergeTraceEvents(first: Event[], second: Event[]): Event[] {
-  return [...new Map([...first, ...second].map(event => [event.id, event])).values()]
+  return [...new Map([...first, ...second].map(event => [event.type === 'reasoning_summary' && !isPublicCommentary(event) ? reasoningItemKey(event) : event.id, event])).values()]
     .sort((left, right) => left.seq - right.seq)
 }
 
@@ -228,6 +229,13 @@ interface RunCommentarySegment {
   entry: TraceCommentaryEntry
 }
 
+interface RunReasoningSegment {
+  kind: 'reasoning'
+  key: string
+  seq: number
+  entry: TraceReasoningEntry
+}
+
 interface RunSupportSegment {
   kind: 'support'
   key: string
@@ -235,7 +243,7 @@ interface RunSupportSegment {
   parts: TracePart[]
 }
 
-type RunActivitySegment = RunCommentarySegment | RunSupportSegment
+type RunActivitySegment = RunCommentarySegment | RunReasoningSegment | RunSupportSegment
 
 const TRACE_REASONING_PREVIEW_CHARS = 600
 const TRACE_REASONING_ACCESSIBLE_CHARS = 220
@@ -261,18 +269,18 @@ function adjacentLegacyToolsMatch(started: Event, finished: Event): boolean {
 function buildTraceActivity(events: Event[]): TraceActivityEntry[] {
   const entries: TraceActivityEntry[] = []
   const toolsByIdentity = new Map<string, number>()
-  for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
+  for (const event of [...events].sort((left, right) => progressEventSequence(left) - progressEventSequence(right) || left.seq - right.seq)) {
     if (event.type === 'reasoning_summary' || isPublicCommentary(event)) {
       if (!traceReasoningText(event)) continue
       if (isPublicCommentary(event)) {
-        entries.push({ kind: 'commentary', key: event.id, seq: event.seq, event })
+        entries.push({ kind: 'commentary', key: event.id, seq: progressEventSequence(event), event })
         continue
       }
       const previous = entries.at(-1)
       if (previous?.kind === 'reasoning') {
         previous.events.push(event)
       } else {
-        entries.push({ kind: 'reasoning', key: event.id, seq: event.seq, events: [event] })
+        entries.push({ kind: 'reasoning', key: reasoningItemKey(event), seq: progressEventSequence(event), events: [event] })
       }
       continue
     }
@@ -326,6 +334,11 @@ function groupRunActivity(parts: TracePart[]): RunActivitySegment[] {
       })
       continue
     }
+    if (part.kind === 'activity' && part.entry.kind === 'reasoning') {
+      support = null
+      segments.push({ kind: 'reasoning', key: `reasoning:${part.entry.key}`, seq: part.seq, entry: part.entry })
+      continue
+    }
     if (!support) {
       const partKey = part.kind === 'activity' ? part.entry.key : part.system.key
       support = {
@@ -377,16 +390,12 @@ function TraceDisclosure({
   useLocale()
   const runActivityMode = Boolean(runActivity)
   const activityLive = Boolean(runActivity) && runActivity?.active !== false && !runActivity?.stoppedAt
-  const activityStopped = Boolean(runActivity?.stoppedAt)
-  const activityHasFinalResponse = runActivity?.hasFinalResponse === true
-  // Historical stops are history, not a live interruption. Only keep the
-  // activity open automatically when this mounted run actually stops live.
+  // Historical runs stay compact. Once opened, a live run keeps the reader's
+  // choice through completion, cancellation, and subsequent history updates.
   const [open, setOpen] = useState(() => activityLive)
   const previousActivity = useRef({
     key: runActivity?.key,
-    live: activityLive,
-    stopped: activityStopped,
-    hasFinalResponse: activityHasFinalResponse
+    live: activityLive
   })
   const [loadedEvents, setLoadedEvents] = useState<Event[] | null>(null)
   const detailStart = runActivity?.toolStartSequences ? 0 : runActivity?.afterSeq ?? 0
@@ -395,6 +404,7 @@ function TraceDisclosure({
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const loadGeneration = useRef(0)
+  const loadInFlight = useRef(false)
   const detailsId = useId()
   const runId = useMemo(
     () => events.find(event => event.run_id?.trim())?.run_id?.trim() || null,
@@ -405,6 +415,9 @@ function TraceDisclosure({
   const toggleDetails = () => {
     setExpandedDiffScope(diffScope)
     setOpen(value => !value)
+    // One bounded page on explicit expansion, never a live-stream poll or an
+    // automatic whole-history fetch. Further pages retain their own control.
+    if (!open && !loadedEvents) void showMore()
   }
   const traceAnchor = useMemo(
     // Anchor with the newest sampled event so a timeline index cached earlier
@@ -412,11 +425,12 @@ function TraceDisclosure({
     // Callers that synthesize a run_id onto a runless status summary must pass
     // the newest real run-scoped sequence instead; the synthetic summary does
     // not belong to the server's indexed run bounds.
-    () => anchorSeq ?? (events.length ? Math.max(...events.map(event => event.seq)) : 0),
+    () => anchorSeq ?? (events.length ? Math.floor(Math.max(...events.map(event => event.seq))) : 0),
     [anchorSeq, events]
   )
   useEffect(() => {
     loadGeneration.current++
+    loadInFlight.current = false
     setLoadedEvents(null)
     setNextAfter(detailStart)
     setHasMore(true)
@@ -430,26 +444,18 @@ function TraceDisclosure({
     const previous = previousActivity.current
     previousActivity.current = {
       key: runActivity?.key,
-      live: activityLive,
-      stopped: activityStopped,
-      hasFinalResponse: activityHasFinalResponse
+      live: activityLive
     }
     if (!runActivityMode) return
     if (previous.key !== runActivity?.key) {
       setOpen(activityLive)
       if (activityLive) setExpandedDiffScope(diffScope)
     }
-    else if (
-      !activityLive
-      && activityHasFinalResponse
-      && (previous.live || !previous.hasFinalResponse)
-    ) setOpen(false)
-    else if (activityLive || (previous.live && activityStopped)) {
+    else if (activityLive && !previous.live) {
       setExpandedDiffScope(diffScope)
       setOpen(true)
     }
-    else if (previous.live || (previous.stopped && !activityStopped)) setOpen(false)
-  }, [activityHasFinalResponse, activityLive, activityStopped, diffScope, runActivityMode, runActivity?.key])
+  }, [activityLive, diffScope, runActivityMode, runActivity?.key])
   const displayEvents = useMemo(() => {
     const promotedIds = new Set(promotedCommentaryIds)
     const merged = loadedEvents ? mergeTraceEvents(runActivity?.sourceEvents ?? events, loadedEvents) : events
@@ -491,7 +497,7 @@ function TraceDisclosure({
     [displayEvents, summary.canonicalDiff]
   )
   // Discover legacy changes only after an explicit expansion. Keep their
-  // memoized summary when details close, including the live-to-finished collapse.
+  // memoized summary when details close.
   const inspectLegacyDiff = !summary.canonicalDiff && !structuredDiffSummary && (open || expandedDiffScope === diffScope)
   const legacyDiff = useMemo(() => {
     if (!inspectLegacyDiff) return null
@@ -518,9 +524,10 @@ function TraceDisclosure({
     window.dispatchEvent(new CustomEvent<CodeReviewTarget>('agentsdock:review-diff', { detail: target }))
   }
   const showMore = async () => {
-    if (!runId || loadingMore) return
+    if (!runId || loadInFlight.current) return
     const generation = loadGeneration.current
     const cursor = nextAfter
+    loadInFlight.current = true
     setLoadingMore(true)
     setLoadError(null)
     try {
@@ -541,11 +548,15 @@ function TraceDisclosure({
       if (generation !== loadGeneration.current) return
       setLoadError(error instanceof Error ? error.message : String(error))
     } finally {
-      if (generation === loadGeneration.current) setLoadingMore(false)
+      if (generation === loadGeneration.current) {
+        loadInFlight.current = false
+        setLoadingMore(false)
+      }
     }
   }
   const showLess = () => {
     loadGeneration.current++
+    loadInFlight.current = false
     setLoadedEvents(null)
     setNextAfter(detailStart)
     setHasMore(true)
@@ -589,7 +600,9 @@ function TraceDisclosure({
             ? runActivitySegments.map(segment => segment.kind === 'commentary'
                 ? <TraceCommentaryEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
                 : open
-                  ? <RunActivitySupportGroup key={segment.key} parts={segment.parts} sessionId={sessionId} profileScope={profileScope} />
+                  ? segment.kind === 'reasoning'
+                    ? <TraceReasoningEvent key={segment.key} entry={segment.entry} sessionId={sessionId} />
+                    : <RunActivitySupportGroup key={segment.key} parts={segment.parts} sessionId={sessionId} profileScope={profileScope} />
                   : null)
             : activityParts.map(part => <TracePartView key={tracePartKey(part)} part={part} sessionId={sessionId} profileScope={profileScope} />)}
         </ol>
@@ -752,7 +765,7 @@ function boundedTracePreview(value: string, limit: number): string {
 
 function TraceReasoningEvent({ entry, sessionId }: { entry: TraceReasoningEntry; sessionId: string }) {
   useLocale()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const detailsId = useId()
   const preview = boundedTracePreview(
     entry.events.map(event => traceSummaryPreview(traceReasoningText(event))).filter(Boolean).join('\n'),
@@ -769,7 +782,10 @@ function TraceReasoningEvent({ entry, sessionId }: { entry: TraceReasoningEntry;
         <ChevronRight size={12} aria-hidden="true" />
       </button>
       {open && <div id={detailsId} className="trace-reasoning-body">
-        {entry.events.map(event => <div className="trace-reasoning-update" key={event.id}><MarkdownContent text={traceReasoningText(event)} sessionId={sessionId} fold={false} /></div>)}
+        {entry.events.map(event => <div className="trace-reasoning-update" key={reasoningItemKey(event)}>
+          {event.partial === true && <small className="muted">{t('timeline.ui.partialThinkingSummary')}</small>}
+          <MarkdownContent text={traceReasoningText(event)} sessionId={sessionId} fold={false} />
+        </div>)}
       </div>}
     </div>
   </li>

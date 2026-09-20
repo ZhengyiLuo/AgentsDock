@@ -126,6 +126,14 @@ describe('Codex custom provider native transport', () => {
       expect(() => parseCodexProviderConfiguration(value)).toThrow('CODEX_PROVIDER_RESPONSE')
     }
   })
+  it('keeps summary capability separate from basic success without exposing provider text', () => {
+    expect(parseCodexProviderTestResult({ ok: true, status: 'ready', message: fakeKey,
+      reasoning_summary_supported: false, summary_check: 'unsupported' })).toEqual({
+      ok: true, status: 'ready', message: '', reasoning_summary_supported: false, summary_check: 'unsupported'
+    })
+    expect(parseCodexProviderTestResult({ ok: true, status: 'ready',
+      reasoning_summary_supported: fakeKey, summary_check: fakeKey })).toEqual({ ok: true, status: 'ready', message: '' })
+  })
   it('preserves the per-chat provider choice across create and update without changing legacy creation', async () => {
     const calls: Array<{ method?: string; url?: string; body: Record<string, unknown> }> = []
     await withServer(async (req, res) => {

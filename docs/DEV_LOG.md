@@ -1,5 +1,19 @@
 # Public development log
 
+## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8 candidate
+
+- Display thinking summaries directly and retain expansion through completion.
+  Opening historical traces loads one bounded activity page automatically;
+  additional pages remain available without loading all history in the background.
+- Carry live summary snapshots through the native WebSocket, profile-scoped
+  service and renderer state. Keep them outside SQLite and durable read cursors,
+  replace them with authoritative completed items, and restore current snapshots
+  on reconnect. Retain interrupted summary text with a partial marker.
+- Show custom-model summary support separately from basic tool compatibility.
+- Pass 822 transport, service, state, locale and custom-provider checks, plus
+  173 timeline and projection checks and TypeScript validation.
+- Native integration acceptance, signed packaging and publication are pending.
+
 ## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
 
 - Separate optional saved-model compatibility checks from endpoint saving.

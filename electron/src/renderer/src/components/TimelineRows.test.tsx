@@ -2160,12 +2160,13 @@ describe('timeline pin state', () => {
     const surface = container.querySelector('.run-activity .trace-activity')
     expect([...surface!.children].map(child => child.textContent)).toEqual([
       'Checking the renderer.',
-      '1 thinking update · 1 status update'
+      'Thinking summaryInspecting timeline ownership.',
+      '1 status update'
     ])
     expect(container.querySelectorAll('.run-activity-support')).toHaveLength(1)
-    expect(within(container).queryByText('Inspecting timeline ownership.')).not.toBeInTheDocument()
+    expect(within(container).getByText('Inspecting timeline ownership.')).toBeInTheDocument()
     expect(within(container).queryByText('Context compacted')).not.toBeInTheDocument()
-    fireEvent.click(within(container).getByRole('button', { name: '1 thinking update · 1 status update' }))
+    fireEvent.click(within(container).getByRole('button', { name: '1 status update' }))
     expect(within(container).getByText('Inspecting timeline ownership.')).toBeInTheDocument()
     expect(within(container).getByText('Context compacted')).toBeInTheDocument()
     expect(container.querySelector('.message-row.assistant')).not.toBeInTheDocument()
@@ -2326,10 +2327,10 @@ describe('timeline pin state', () => {
     expect(container.querySelectorAll('.message-row.assistant')).toHaveLength(1)
     expect(within(latest as HTMLElement).getByText(/Working for/)).toBeInTheDocument()
     expect(within(latest as HTMLElement).getByText('The continuation is still working.')).toBeInTheDocument()
-    expect(within(latest as HTMLElement).getByRole('button', { name: '307 tool calls · 1 thinking update' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(latest as HTMLElement).getByRole('button', { name: '307 tool calls' })).toHaveAttribute('aria-expanded', 'false')
     expect(container.querySelectorAll('.tool-event')).toHaveLength(0)
     expect(screen.queryByText('Old progress.')).not.toBeInTheDocument()
-    expect(screen.queryByText('An old unclassified summary remains supporting detail.')).not.toBeInTheDocument()
+    expect(screen.getByText('An old unclassified summary remains supporting detail.')).toBeInTheDocument()
     expect(loadTrace).not.toHaveBeenCalled()
     fireEvent.click(within(latest as HTMLElement).getByRole('button', { name: 'Load available activity' }))
     await within(latest as HTMLElement).findByRole('button', { name: 'Use compact trace' })
@@ -2414,7 +2415,7 @@ describe('timeline pin state', () => {
     }
   })
 
-  it('collapses completed activity and renders the final as a separate message', () => {
+  it('keeps completed activity open and renders the final as a separate message', () => {
     const commentary: Event = {
       id: 'commentary-1', session_id: 'chat-1', seq: 1, type: 'reasoning_summary',
       ts: '2026-07-10T14:29:00Z', phase: 'commentary', text: 'I am validating the release.'
@@ -2449,9 +2450,11 @@ describe('timeline pin state', () => {
     expect(rendered.container.querySelector('.run-activity')).toBe(activity)
     expect(within(rendered.container).queryByText(/Working for/)).not.toBeInTheDocument()
     const completedToggle = within(rendered.container).getByRole('button', { name: 'Worked for 1m 0s' })
-    expect(completedToggle).toHaveAttribute('aria-expanded', 'false')
-    expect(within(rendered.container).queryByText('I am validating the release.')).not.toBeInTheDocument()
+    expect(completedToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(within(rendered.container).getByText('I am validating the release.')).toBeInTheDocument()
     expect(within(rendered.container).getByText('The release passed validation.')).toBeInTheDocument()
+    fireEvent.click(completedToggle)
+    expect(completedToggle).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(completedToggle)
     expect(completedToggle).toHaveAttribute('aria-expanded', 'true')
     expect(within(rendered.container).getByText('I am validating the release.')).toBeInTheDocument()
@@ -2526,7 +2529,7 @@ describe('timeline pin state', () => {
     expect(within(container).getAllByText('Earlier answer.')).toHaveLength(1)
   })
 
-  it('collapses a live run when stop and a real final arrive together', () => {
+  it('keeps a live run open when stop and a real final arrive together', () => {
     const commentary: Event = {
       id: 'same-frame-commentary', session_id: 'chat-1', seq: 1, type: 'reasoning_summary',
       ts: '2026-07-10T14:29:00Z', phase: 'commentary', text: 'Finishing the requested check.'
@@ -2548,8 +2551,10 @@ describe('timeline pin state', () => {
     rendered.rerender(row(completed))
 
     const toggle = within(rendered.container).getByRole('button', { name: 'You stopped after 30s' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(within(rendered.container).getByText(commentary.text!)).toBeInTheDocument()
+    fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(within(rendered.container).queryByText(commentary.text!)).not.toBeInTheDocument()
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(within(rendered.container).getByText(commentary.text!)).toBeInTheDocument()
@@ -2557,7 +2562,7 @@ describe('timeline pin state', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('collapses stopped activity when its final response arrives later', () => {
+  it('keeps stopped activity open when its final response arrives later', () => {
     const commentary: Event = {
       id: 'late-final-commentary', session_id: 'chat-1', seq: 1, type: 'reasoning_summary',
       ts: '2026-07-10T14:29:00Z', phase: 'commentary', text: 'Waiting for the final response record.'
@@ -2582,8 +2587,8 @@ describe('timeline pin state', () => {
 
     rendered.rerender(row({ ...stopped, hasFinalResponse: true }))
 
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(within(rendered.container).queryByText(commentary.text!)).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(within(rendered.container).getByText(commentary.text!)).toBeInTheDocument()
   })
 
   it('keeps historical stopped commentary visible while trace details stay opt-in', () => {
@@ -2617,9 +2622,9 @@ describe('timeline pin state', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(within(rendered.container).getAllByText('I was checking the release.')).toHaveLength(1)
     expect(within(rendered.container).getByText('I was checking the release.')).toBe(visibleCommentary)
-    expect(within(rendered.container).queryByText('Private trace detail stays collapsed.')).not.toBeInTheDocument()
+    expect(within(rendered.container).getByText('Private trace detail stays collapsed.')).toBeInTheDocument()
     expect(within(rendered.container).queryByText('Bash')).not.toBeInTheDocument()
-    const support = within(rendered.container).getByRole('button', { name: '1 tool call · 1 thinking update' })
+    const support = within(rendered.container).getByRole('button', { name: '1 tool call' })
     expect(support).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(support)
     expect(support).toHaveAttribute('aria-expanded', 'true')
@@ -2661,9 +2666,9 @@ describe('timeline pin state', () => {
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     // A successor's metadata can prove this was steering after the stopped
-    // finish arrived. Retire the old activity instead of leaving it expanded.
+    // finish arrived. Preserve the reader's explicit expansion.
     rendered.rerender(row({ ...stopped, stoppedAt: undefined, finishedAt: stopped.stoppedAt }))
-    expect(within(rendered.container).getByRole('button', { name: 'Worked for 30s' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(rendered.container).getByRole('button', { name: 'Worked for 30s' })).toHaveAttribute('aria-expanded', 'true')
     expect(within(rendered.container).getByText(commentary.text!)).toBeInTheDocument()
   })
 
@@ -2687,11 +2692,7 @@ describe('timeline pin state', () => {
     expect(container.querySelectorAll('.trace-commentary .markdown')).toHaveLength(1)
     expect(container.querySelector('.message-row.assistant')).not.toBeInTheDocument()
     expect(container.querySelector('.run-activity')).toHaveTextContent('I am validating the release.')
-    const support = within(container).getByRole('button', { name: '1 thinking update' })
-    expect(support).toHaveAttribute('aria-expanded', 'false')
-    expect(container.querySelector('.run-activity')).not.toHaveTextContent('Inspecting release metadata')
-    expect(container.querySelector('.run-activity')).not.toHaveTextContent('Long internal detail')
-    fireEvent.click(support)
+    expect(container.querySelectorAll('.trace-reasoning-body')).toHaveLength(1)
     expect(container.querySelector('.run-activity')).toHaveTextContent('Inspecting release metadata')
     expect(container.querySelector('.run-activity')).toHaveTextContent('Long internal detail')
     expect(container.querySelectorAll('.trace-commentary .markdown')).toHaveLength(1)
@@ -2741,10 +2742,9 @@ describe('timeline pin state', () => {
     expect(entries[3]).toHaveTextContent('read_fileRunning')
     expect(container.querySelectorAll('.trace-reasoning')).toHaveLength(2)
     expect(container.querySelectorAll('.tool-event')).toHaveLength(2)
-    expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
+    expect(container.querySelector('.trace-reasoning-body')).toBeInTheDocument()
     expect(container.querySelector('.tool-event-body')).not.toBeInTheDocument()
 
-    fireEvent.click(within(entries[0]).getByRole('button', { name: /2 thinking updates/ }))
     expect(entries[0].querySelector('.trace-reasoning-body')).toHaveTextContent('Checking the lockfile')
     fireEvent.click(within(entries[1]).getByRole('button', { name: /read_file.*Success/i }))
     expect(entries[1].querySelector('.tool-event-body')).toHaveTextContent('package.json')
@@ -2780,7 +2780,6 @@ describe('timeline pin state', () => {
 
     fireEvent.click(within(rendered.container).getByRole('button', { name: /Reasoning trace/ }))
     const reasoning = rendered.container.querySelector('.trace-reasoning')
-    fireEvent.click(within(reasoning as HTMLElement).getByRole('button'))
 
     rendered.rerender(
       <TimelineRowView item={trace([first, second])} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
@@ -2829,7 +2828,6 @@ describe('timeline pin state', () => {
       'Reasoning trace. 1 tool. Show details.'
     )
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
 
     await waitFor(() => expect(loadTrace).toHaveBeenCalledTimes(1))
     expect(container.querySelectorAll('.tool-event')).toHaveLength(1)
@@ -2860,10 +2858,6 @@ describe('timeline pin state', () => {
     expect(reasoningToggle).not.toBeNull()
     expect(reasoningToggle?.getAttribute('aria-label')?.length).toBeLessThanOrEqual(250)
     expect(container.querySelector('.trace-reasoning-preview')?.textContent?.length).toBeLessThanOrEqual(600)
-    expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('…')
-    expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
-
-    fireEvent.click(reasoningToggle!)
     expect(reasoningToggle).toHaveAccessibleName('Thinking summary')
     expect(reasoningToggle).toHaveTextContent('Thinking summary')
     expect(reasoningToggle).not.toHaveTextContent('Renderer check')
@@ -2875,6 +2869,20 @@ describe('timeline pin state', () => {
     fireEvent.click(reasoningToggle!)
     expect(container.querySelector('.trace-reasoning-body')).not.toBeInTheDocument()
     expect(reasoningToggle).toHaveTextContent('Renderer check')
+    expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('…')
+  })
+
+  it('labels a saved partial summary while preserving its received text', () => {
+    const item: TraceItem = {
+      kind: 'trace', id: 'partial-trace', key: 'partial-trace', seq: 1, active: true,
+      promotedCommentaryIds: [], events: [{ id: 'partial-summary', session_id: 'chat-1', seq: 1,
+        type: 'reasoning_summary', ts: '2026-07-10T14:29:00Z', run_id: 'run-1', backend: 'codex',
+        text: 'Received before the run stopped.', partial: true }]
+    }
+    const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
+    fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
+    expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Partial thinking summary')
+    expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Received before the run stopped.')
   })
 
   it('loads every completed trace page on demand and can fold back to the sampled trace', async () => {
@@ -2907,22 +2915,21 @@ describe('timeline pin state', () => {
     )
 
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
 
-    await waitFor(() => expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Early detailed thought.'))
+    await waitFor(() => expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Early detailed thought.'))
     expect(loadTrace).toHaveBeenNthCalledWith(1, 'chat-1', 'run-1', 30, 0)
 
     fireEvent.click(within(container).getByRole('button', { name: 'Load more activity' }))
 
-    await waitFor(() => expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Middle detailed thought.'))
+    await waitFor(() => expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Middle detailed thought.'))
     expect(loadTrace).toHaveBeenNthCalledWith(2, 'chat-1', 'run-1', 30, 20)
     await waitFor(() => expect(within(container).getByRole('button', { name: 'Use compact trace' })).toBeEnabled())
 
     fireEvent.click(within(container).getByRole('button', { name: 'Use compact trace' }))
 
-    expect(container.querySelector('.trace-reasoning-preview')).not.toHaveTextContent('Early detailed thought.')
-    expect(container.querySelector('.trace-reasoning-preview')).not.toHaveTextContent('Middle detailed thought.')
-    expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Latest sampled thought.')
+    expect(container.querySelector('.trace-reasoning-body')).not.toHaveTextContent('Early detailed thought.')
+    expect(container.querySelector('.trace-reasoning-body')).not.toHaveTextContent('Middle detailed thought.')
+    expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Latest sampled thought.')
   })
 
   it('does not duplicate promoted steer commentary when a retired trace is expanded', async () => {
@@ -2952,9 +2959,8 @@ describe('timeline pin state', () => {
     )
 
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
 
-    await waitFor(() => expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Private trace detail remains available.'))
+    await waitFor(() => expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Private trace detail remains available.'))
     expect(container).not.toHaveTextContent('This commentary is already a normal assistant message.')
   })
 
@@ -2984,9 +2990,8 @@ describe('timeline pin state', () => {
     )
 
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
 
-    await waitFor(() => expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Private trace detail.'))
+    await waitFor(() => expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Private trace detail.'))
     expect(container).not.toHaveTextContent('This update already appears in the assistant surface.')
   })
 
@@ -3012,14 +3017,12 @@ describe('timeline pin state', () => {
 
     expect(toggle).toHaveAccessibleName('Reasoning trace. 1 thinking summary. Hide details.')
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    const thoughtToggle = within(container).getByRole('button', { name: /Thinking summary.*Live detailed thought/ })
-    expect(thoughtToggle).toHaveTextContent('The second line remains readable.')
-    fireEvent.click(thoughtToggle)
+    const thoughtToggle = within(container).getByRole('button', { name: 'Thinking summary' })
+    expect(thoughtToggle).toHaveAttribute('aria-expanded', 'true')
     expect(within(container).getByText('Live detailed thought.')).toBeVisible()
     expect(within(container).getByText('The second line remains readable.')).toBeVisible()
     const details = within(container).getByRole('region', { name: 'Reasoning and tool details' })
-    expect(details).toHaveAttribute('aria-busy', 'false')
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
+    await waitFor(() => expect(details).toHaveAttribute('aria-busy', 'false'))
     await waitFor(() => expect(loadTrace).toHaveBeenCalledWith('chat-1', 'run-1', 30, 0))
     expect(within(container).getByRole('button', { name: 'Check for newer activity' })).toBeEnabled()
   })
@@ -3217,7 +3220,7 @@ describe('timeline pin state', () => {
     }
   })
 
-  it('retains known filenames and counts when live activity automatically collapses on completion', () => {
+  it('retains known filenames and counts when live activity completes without collapsing', () => {
     const readDiff = vi.fn(() => '@@ -1 +1,2 @@\n-old\n+new\n+extra')
     const change = { path: 'src/app.ts', kind: 'update' }
     Object.defineProperty(change, 'diff', { get: readDiff })
@@ -3233,8 +3236,8 @@ describe('timeline pin state', () => {
     const reads = readDiff.mock.calls.length
     expect(reads).toBeGreaterThan(0)
     rerender(row({ ...live, active: false, hasFinalResponse: true, finishedAt: '2026-07-10T14:30:00Z' }))
-    expect(within(container).getByRole('button', { name: 'Worked for 1m 0s' })).toHaveAttribute('aria-expanded', 'false')
-    expect(container.querySelector('.trace-details')).not.toBeInTheDocument()
+    expect(within(container).getByRole('button', { name: 'Worked for 1m 0s' })).toHaveAttribute('aria-expanded', 'true')
+    expect(container.querySelector('.trace-details')).toBeInTheDocument()
     const card = within(container).getByRole('button', { name: /Edited 1 file.*Review/ })
     expect(card).toHaveTextContent('app.ts')
     expect(card).toHaveTextContent('+2')
@@ -3478,10 +3481,8 @@ describe('timeline pin state', () => {
     expect(within(container).getByText('Cancelled')).toBeVisible()
     fireEvent.click(within(container).getByRole('button', { name: /1 tool/ }))
     expect(within(container).getAllByText('Checking the current status.')).toHaveLength(1)
-    const showMore = within(container).getByRole('button', { name: 'Load available activity' })
-    expect(showMore).toBeEnabled()
-    fireEvent.click(showMore)
     await waitFor(() => expect(loadTrace).toHaveBeenCalledWith('chat-1', 'job-run', 4, 0))
+    await waitFor(() => expect(within(container).getByRole('button', { name: 'Check for newer activity' })).toBeEnabled())
   })
 
   it('shows a runner-finished stopped job as cancelled despite stale completed metadata', () => {
@@ -3801,7 +3802,7 @@ describe('timeline pin state', () => {
 
     expect(within(container).getByRole('button', { name: /1 tool/ })).toBeVisible()
     fireEvent.click(within(container).getByRole('button', { name: /1 tool/ }))
-    expect(container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Checking collector health')
+    expect(container.querySelector('.trace-reasoning-body')).toHaveTextContent('Checking collector health')
   })
 
   it('keeps loaded scheduled trace history when the same occurrence advances', async () => {
@@ -3840,14 +3841,14 @@ describe('timeline pin state', () => {
 
     fireEvent.click(within(rendered.container).getByRole('button', { name: /Reasoning trace/ }))
     fireEvent.click(within(rendered.container).getByRole('button', { name: 'Load available activity' }))
-    await waitFor(() => expect(rendered.container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Loaded earlier thought'))
+    await waitFor(() => expect(rendered.container.querySelector('.trace-reasoning-body')).toHaveTextContent('Loaded earlier thought'))
 
     rendered.rerender(
       <TimelineRowView item={job([thought, latest, later], 4)} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />
     )
 
-    expect(rendered.container.querySelector('.trace-reasoning-preview')).toHaveTextContent('Loaded earlier thought')
-    expect(rendered.container.querySelector('.trace-reasoning-preview')).toHaveTextContent('New streamed thought')
+    expect(rendered.container.querySelector('.trace-reasoning-body')).toHaveTextContent('Loaded earlier thought')
+    expect(rendered.container.querySelector('.trace-reasoning-body')).toHaveTextContent('New streamed thought')
     expect(within(rendered.container).getByRole('button', { name: 'Check for newer activity' })).toBeEnabled()
     expect(loadTrace).toHaveBeenCalledTimes(1)
   })
@@ -3876,7 +3877,6 @@ describe('timeline pin state', () => {
     expect(within(container).getByText('Last completed output')).toBeVisible()
     expect(within(container).queryByRole('button', { name: /Previous runs/ })).not.toBeInTheDocument()
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
     await waitFor(() => expect(loadTrace).toHaveBeenCalledWith(
       'chat-1',
       'run-current',
@@ -3982,7 +3982,6 @@ describe('timeline pin state', () => {
     const { container } = render(<TimelineRowView item={item} sessionId="chat-1" onFindFile={() => {}} pinnedItemIds={new Set()} />)
 
     fireEvent.click(within(container).getByRole('button', { name: /Reasoning trace/ }))
-    fireEvent.click(within(container).getByRole('button', { name: 'Load available activity' }))
 
     await waitFor(() => expect(loadTrace).toHaveBeenCalledWith(
       'chat-1',
@@ -4074,7 +4073,7 @@ describe('timeline pin state', () => {
     fireEvent.click(await within(previousRun!).findByRole('button', { name: /Reasoning trace/ }))
     fireEvent.click(await within(previousRun!).findByRole('button', { name: 'Load available activity' }))
 
-    await waitFor(() => expect(previousRun!.querySelector('.trace-reasoning-preview')).toHaveTextContent('Reasoned through the previous run'))
+    await waitFor(() => expect(previousRun!.querySelector('.trace-reasoning-body')).toHaveTextContent('Reasoned through the previous run'))
     expect(loadTrace).toHaveBeenCalledWith('chat-1', 'run-previous', 20, 0)
   })
 

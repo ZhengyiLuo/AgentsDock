@@ -67,6 +67,10 @@ export function parseCodexProviderTestResult(value: unknown): CodexProviderTestR
   // Never expose provider text: even a successful HTTP response may echo keys.
   const checks = item.checks as Record<string, unknown> | undefined
   return { ok: item.ok, status: item.status as CodexProviderTestResult['status'], message: '',
+    ...(item.reasoning_summary_supported === null || typeof item.reasoning_summary_supported === 'boolean'
+      ? { reasoning_summary_supported: item.reasoning_summary_supported } : {}),
+    ...(['supported', 'unsupported', 'inconclusive', 'not_checked'].includes(String(item.summary_check))
+      ? { summary_check: item.summary_check as CodexProviderTestResult['summary_check'] } : {}),
     ...(typeof item.model === 'string' ? { model: modelID(item.model) } : {}),
     ...(['unverified', 'verified', 'unsupported'].includes(String(item.compatibility))
       ? { compatibility: item.compatibility as CodexProviderTestResult['compatibility'] } : {}),
@@ -99,7 +103,9 @@ export function parseCodexProviderModels(value: unknown): CodexProviderModels {
         || !Array.isArray(cap.reasoning_efforts) || !cap.reasoning_efforts.every(value => typeof value === 'string')
         || !(cap.reasoning_supported === null || typeof cap.reasoning_supported === 'boolean')) throw new Error('CODEX_PROVIDER_RESPONSE')
       capabilities[model] = { kind: cap.kind as RuntimeModelCapability['kind'], compatibility: cap.compatibility as RuntimeModelCapability['compatibility'],
-        reasoning_efforts: cap.reasoning_efforts as string[], reasoning_supported: cap.reasoning_supported as boolean | null }
+        reasoning_efforts: cap.reasoning_efforts as string[], reasoning_supported: cap.reasoning_supported as boolean | null,
+        ...(cap.reasoning_summary_supported === null || typeof cap.reasoning_summary_supported === 'boolean'
+          ? { reasoning_summary_supported: cap.reasoning_summary_supported } : {}) }
     }
   }
   return {

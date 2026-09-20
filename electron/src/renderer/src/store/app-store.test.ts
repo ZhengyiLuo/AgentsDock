@@ -4710,6 +4710,57 @@ describe('bootstrap', () => {
   })
 })
 
+describe('live reasoning summary store integration', () => {
+  it('fences transient summaries by profile and revision, reconciles completion, and clears on reconnect', async () => {
+    const profile = profileFor('profile-reasoning')
+    const handlers = new Map<string, (payload: any) => void>()
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        bootstrap: vi.fn().mockResolvedValue(profileBootstrap(profile, [profile], 3)),
+        native: { log: vi.fn().mockResolvedValue(undefined), setBadge: vi.fn().mockResolvedValue(undefined), notify: vi.fn() },
+        events: { on: vi.fn((channel: string, handler: (payload: any) => void) => { handlers.set(channel, handler); return () => {} }) }
+      } as unknown as AgentsDockAPI
+    })
+    useAppStore.setState({ initialized: false, profiles: [], activeProfileId: null, profileGeneration: 0,
+      sessions: [], selectedSessionId: null, chatPanes: { primary: null, secondary: null },
+      focusedChatPane: 'primary', snapshots: {} })
+    await useAppStore.getState().initialize()
+    const initial = snapshot('chat-1', [event('turn_started', { run_id: 'run' })])
+    useAppStore.setState({ snapshots: { 'chat-1': initial }, selectedSessionId: 'chat-1',
+      chatPanes: { primary: 'chat-1', secondary: null }, sessions: [initial.session] })
+    const context = { profileId: profile.id, profileGeneration: 3, sessionId: 'chat-1' }
+    const stream = { type: 'reasoning_summary_stream', session_id: 'chat-1', instance_id: 'server-one', revision: 2,
+      items: [{ run_id: 'run', item_id: 'thought', backend: 'codex', phase: 'summary', text: 'First section',
+        ts: '2026-09-20T04:00:00Z', after_seq: 1 }] }
+    const deliver = handlers.get('server:reasoning-stream')!
+    deliver({ ...context, snapshot: stream })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toEqual(stream)
+    expect(useAppStore.getState().snapshots['chat-1'].events).toBe(initial.events)
+    for (const payload of [
+      { ...context, profileGeneration: 2, snapshot: { ...stream, revision: 9, items: [] } },
+      { ...context, profileId: 'other-server', snapshot: { ...stream, revision: 9, items: [] } },
+      { ...context, snapshot: { ...stream, revision: 1, items: [] } },
+      { ...context, snapshot: { ...stream, session_id: 'wrong-chat', revision: 9, items: [] } }
+    ]) deliver(payload)
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toEqual(stream)
+    handlers.get('server:event')!({ ...context, event: event('reasoning_summary', {
+      id: 'completed-thought', seq: 2, run_id: 'run', item_id: 'thought', text: 'Authoritative final section'
+    }) })
+    deliver({ ...context, snapshot: { ...stream, revision: 3, items: [] } })
+    expect(useAppStore.getState().snapshots['chat-1'].events.at(-1)?.text).toBe('Authoritative final section')
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream?.items).toEqual([])
+    deliver({ ...context, snapshot: { ...stream, revision: 4 } })
+    handlers.get('server:sync')!({ ...context, state: 'reconnecting' })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toBeUndefined()
+    deliver({ ...context, snapshot: { ...stream, instance_id: 'server-two', revision: 0 } })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream?.instance_id).toBe('server-two')
+    useAppStore.setState({ selectedSessionId: null, chatPanes: { primary: null, secondary: null } })
+    handlers.get('server:sync')!({ ...context, state: 'idle' })
+    expect(useAppStore.getState().snapshots['chat-1'].reasoningStream).toBeUndefined()
+  })
+})
+
 describe('emergency alert store integration', () => {
   afterEach(() => vi.restoreAllMocks())
 
