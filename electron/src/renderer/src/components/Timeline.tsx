@@ -326,6 +326,7 @@ function TimelineSession({ profileId, profileGeneration, serverIdentity, session
     const canonical = omitQueuedPendingTimelineItems(presented, snapshot.queuedTurns, sessionId)
     const showPending = !historicalWindow
       && pendingSubmission
+      && pendingSubmission.mode !== 'queue'
       && !pendingTurnSubmissionAccepted(pendingSubmission, sourceEvents)
     const displayed = showPending
       ? [...canonical, pendingTurnMessageItem(sessionId, pendingSubmission)]

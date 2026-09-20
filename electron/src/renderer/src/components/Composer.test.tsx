@@ -199,6 +199,47 @@ describe('Composer', () => {
     expect(screen.getByPlaceholderText('Message')).toBeInTheDocument()
   })
 
+  it('shows an active-turn submission immediately in the queue shelf', () => {
+    useAppStore.setState({
+      activeSessionIds: new Set(['chat-1']),
+      pendingTurnSubmissions: {
+        'chat-1': {
+          token: 'queue-admission', prompt: 'Follow up after the current task', files: [], uploadPaths: [],
+          chatReferences: [], teamReferences: [], createdAt: Date.now(), afterSeq: 4,
+          mode: 'queue', phase: 'submitting', consumeComposer: true
+        }
+      }
+    })
+
+    const view = render(<Composer />)
+
+    expect(view.container.querySelector('.queue-shelf')).toHaveTextContent('Queued turns1')
+    expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Follow up after the current task')
+    expect(view.container.querySelector('.queued-row.local-pending')).toHaveTextContent('Adding to queue…')
+    expect(view.container.querySelector('.queued-row.local-pending button')).toBeNull()
+  })
+
+  it('keeps an offline shared-chat draft editable while gating message and attachment writes', () => {
+    const send = vi.fn()
+    Object.defineProperty(window, 'agentsDock', { configurable: true, value: {
+      ...window.agentsDock,
+      sharedChat: true,
+      turns: { send } as unknown as AgentsDockAPI['turns']
+    } })
+    const view = render(<Composer writeDisabled />)
+    const editor = screen.getByRole('textbox', { name: 'Message' })
+    fireEvent.change(editor, { target: { value: 'Draft while offline' } })
+    expect(editor).toBeEnabled()
+    expect(editor).toHaveValue('Draft while offline')
+    expect(view.container.querySelector('.send-button')).toBeDisabled()
+    expect(view.container.querySelector('.composer-add-button')).toBeDisabled()
+    expect(view.container.querySelector('.composer-goal-controls')).toBeDisabled()
+    expect(view.container.querySelector('.composer-queue-controls')).toBeDisabled()
+    expect(view.container.querySelector('.composer-write-controls')).toBeDisabled()
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('does no Team Network work on ordinary chat mount, typing, or idle', async () => {
     vi.useFakeTimers()
     const status = vi.fn()
@@ -634,6 +675,39 @@ describe('Composer', () => {
     expect(useAppStore.getState().drafts['chat-1']).toBe('Fast typing')
     expect(appStoreChange).toHaveBeenCalled()
     unsubscribe()
+  })
+
+  it('does not restore a consumed message from a late persisted-draft read', async () => {
+    const persistedDraft = deferred<string>()
+    const send = vi.fn().mockResolvedValue({
+      session: { id: 'chat-1', title: 'Chat', backend: 'codex' }, queued: false
+    })
+    Object.defineProperty(window, 'agentsDock', {
+      configurable: true,
+      value: {
+        preferences: {
+          get: vi.fn((key: string, fallback: unknown) => key === 'draft:chat-1'
+            ? persistedDraft.promise
+            : Promise.resolve(fallback)),
+          set: vi.fn().mockResolvedValue(undefined)
+        },
+        turns: { send }
+      } as unknown as AgentsDockAPI
+    })
+    const user = userEvent.setup()
+    render(<Composer />)
+    const editor = screen.getByPlaceholderText('Message')
+
+    await user.type(editor, 'Already sent')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(send).toHaveBeenCalledOnce())
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
+
+    await act(async () => persistedDraft.resolve('Already sent'))
+
+    expect(editor).toHaveValue('')
+    expect(useAppStore.getState().drafts['chat-1']).toBe('')
   })
 
   it('leaves text paste native and preserves whitespace plus UTF-16 selection offsets', () => {

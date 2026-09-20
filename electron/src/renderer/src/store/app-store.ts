@@ -1797,8 +1797,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (response.event && eventAffectsQueuedTurns(response.event)) {
         invalidateQueuedTurnsRequests(sessionId)
       }
+      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
       set(state => {
         const snapshot = state.snapshots[sessionId]
+        const authoritativeQueuedReceipt = Boolean(
+          response.queued_id
+          && snapshot?.queuedTurns.some(turn => turn.queued_id === response.queued_id)
+        )
         const nextEvents = response.event && snapshot ? upsertEvent(snapshot.events, response.event) : null
         const nextSnapshot = response.event && snapshot && nextEvents
           ? {
@@ -1816,16 +1821,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           sessions: state.sessions.map(candidate => candidate.id === reconciledSession.id ? reconciledSession : candidate),
           activeSessionIds: response.event ? updateActiveSessions(state.activeSessionIds, response.event) : state.activeSessionIds,
-          pendingTurnSubmissions: response.event
+          pendingTurnSubmissions: response.event || authoritativeQueuedReceipt
             ? removePendingTurnSubmission(state.pendingTurnSubmissions, sessionId, admissionToken)
-            : updatePendingTurnSubmissionPhase(state.pendingTurnSubmissions, sessionId, admissionToken, 'submitted'),
+            : updatePendingTurnSubmissionPhase(
+                state.pendingTurnSubmissions,
+                sessionId,
+                admissionToken,
+                'submitted',
+                responseQueued && !steer ? 'queue' : undefined
+              ),
           snapshots: nextSnapshot
             ? cacheSnapshot(state.snapshots, sessionId, nextSnapshot, visibleChatSessionIds(currentChatPaneLayout(state).panes))
             : state.snapshots
         }
       })
       if (!response.event) void get().reloadSession(sessionId, true).catch(() => undefined)
-      const responseQueued = Boolean(response.queued || response.queued_id || response.event?.type === 'turn_queued')
       if (steer && responseQueued) {
         try {
           const queuedId = response.queued_id
@@ -3900,11 +3910,14 @@ function updatePendingTurnSubmissionPhase(
   pending: Record<string, PendingTurnSubmission>,
   sessionId: string,
   token: string,
-  phase: PendingTurnSubmission['phase']
+  phase: PendingTurnSubmission['phase'],
+  mode?: PendingTurnSubmission['mode']
 ): Record<string, PendingTurnSubmission> {
   const current = pending[sessionId]
-  if (!current || current.token !== token || current.phase === phase) return pending
-  return { ...pending, [sessionId]: { ...current, phase } }
+  if (!current || current.token !== token) return pending
+  const nextMode = mode ?? current.mode
+  if (current.phase === phase && current.mode === nextMode) return pending
+  return { ...pending, [sessionId]: { ...current, phase, mode: nextMode } }
 }
 function rollbackPendingTurnSubmissionState(
   state: AppState,

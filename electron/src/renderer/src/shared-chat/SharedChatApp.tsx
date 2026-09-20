@@ -2,7 +2,7 @@ import { useState, type DragEvent } from 'react'
 import { Settings, X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { t } from '@shared/i18n'
-import type { SharedChatState } from './bridge'
+import type { SharedChatConnectionStatus, SharedChatState } from './bridge'
 import { useLocale } from '../lib/i18n'
 import { nativeFileRefsFromFiles } from '../lib/native-files'
 import { useAppStore } from '../store/app-store'
@@ -19,16 +19,20 @@ import { SessionPromptField } from '../components/Inspector'
 
 let historyIdentity: string | null = null
 /** Transport status only. Never infer live sync from a running provider or a GET snapshot. */
-export function receiveSharedChatConnection(connected: boolean, error?: string) {
+export function receiveSharedChatConnection(connection: SharedChatConnectionStatus, error?: string) {
   useAppStore.setState(previous => {
     const id = previous.selectedSessionId
-    const status = connected ? 'live' as const : error ? 'error' as const : 'offline' as const
+    const connected = connection === 'live'
+    const status = connection === 'terminal' ? 'error' as const : connection
+    const nextError = connection === 'terminal'
+      ? error ?? previous.error
+      : previous.error === previous.syncError ? null : previous.error
     return {
       connected,
       connectionGeneration: previous.connectionGeneration + (connected && !previous.connected ? 1 : 0),
       syncStatus: status, syncSessionId: id, syncError: error ?? null,
       syncBySession: id ? { [id]: { status, error: error ?? null } } : {},
-      ...(error ? { error } : {})
+      error: nextError
     }
   })
 }
@@ -69,12 +73,14 @@ export function receiveSharedChatState(value: SharedChatState, prefix: string) {
   })
 }
 
-export function SharedChatApp() {
+export function SharedChatApp({ onRetry }: { onRetry: () => void | Promise<void> }) {
   useLocale()
   const session = useAppStore(state => state.sessions[0] ?? null)
   const health = useAppStore(state => state.health)
   const error = useAppStore(state => state.error)
   const connected = useAppStore(state => state.connected)
+  const syncStatus = useAppStore(state => state.syncStatus)
+  const syncError = useAppStore(state => state.syncError)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fileDropActive, setFileDropActive] = useState(false)
   const fileDrag = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes('Files')
@@ -101,6 +107,12 @@ export function SharedChatApp() {
     }
   }
   if (!session) return null
+  const connectionMessage = syncStatus === 'offline'
+    ? t('chatShare.web.offline')
+    : syncStatus === 'error'
+      ? syncError ?? t('chatShare.web.disconnected')
+      : t('chatShare.web.reconnecting')
+  const retryable = syncStatus === 'offline' || syncStatus === 'reconnecting' || syncStatus === 'cached' || syncStatus === 'syncing'
   return <ClaudeRuntimeProvider session={session} capability={health?.capabilities?.claude_controls}>
     <CodexRuntimeProvider session={session} capability={health?.capabilities?.codex_controls}>
       <main className="shared-chat-shell" onDragEnter={fileDragOver} onDragOver={fileDragOver}
@@ -116,12 +128,17 @@ export function SharedChatApp() {
             <button className="icon-button" aria-label={t('chatShare.web.settings')} onClick={() => setSettingsOpen(true)}><Settings size={16} /></button>
           </fieldset>
         </header>
-        {!connected && <div className="shared-chat-notice" role="status">{t('chatShare.web.disconnected')}</div>}
-        {error && <div className="shared-chat-notice" role="alert"><span>{error}</span><button className="icon-button" aria-label={t('chatShare.web.dismiss')} onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
+        {!connected && <div className="shared-chat-notice" role={syncStatus === 'error' ? 'alert' : 'status'}>
+          <span>{connectionMessage}</span>
+          {retryable && <button type="button" className="quiet-button" onClick={() => {
+            void Promise.resolve(onRetry()).catch(cause => useAppStore.getState().setError(cause instanceof Error ? cause.message : String(cause)))
+          }}>{t('chatShare.web.retry')}</button>}
+        </div>}
+        {error && error !== syncError && <div className="shared-chat-notice" role="alert"><span>{error}</span><button className="icon-button" aria-label={t('chatShare.web.dismiss')} onClick={() => useAppStore.getState().setError(null)}><X size={14} /></button></div>}
         <div className="chat-workspace">
           <div className="chat-workspace-history"><Timeline /></div>
           <div className="chat-workspace-shelves"><fieldset disabled={!connected} className="shared-chat-controls"><CodexInteractionShelf /><ClaudeInteractionShelf /></fieldset></div>
-          <fieldset disabled={!connected} className="shared-chat-controls"><Composer dropActive={connected && fileDropActive} /></fieldset>
+          <Composer dropActive={connected && fileDropActive} writeDisabled={!connected} />
         </div>
       </main>
       {connected && <JobDialog />}

@@ -859,7 +859,7 @@ body.column-resizing { cursor: col-resize; user-select: none; }
 .message-surface > header, .system-row header { display: flex; align-items: center; gap: 7px; min-height: 20px; margin-bottom: 3px; color: var(--muted); font-size: var(--text-size-meta); font-weight: var(--text-weight-label); user-select: none; }
 .message-surface > header time, .system-row header time { color: var(--faint); font-weight: var(--text-weight-body); }
 .message-pending-status { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--text-weight-body); }
-.message-pending-status .activity-ring { width: 8px; height: 8px; }
+.message-pending-status .activity-ring { width: 8px; height: 8px; border-color: var(--muted); border-top-color: transparent; }
 .message-surface > header button, .system-row header button { width: 20px; height: 20px; }
 .pin-button.active { color: #e7bd55 !important; background: #3a321d !important; }
 .message-row.user .message-surface > header { justify-content: flex-end; }
@@ -1526,6 +1526,8 @@ button.tool-event-toggle:hover { background: #242424; }
 .runtime-health-row.compact code, .runtime-health-row.compact .runtime-action { display: none; }
 .runtime-recheck-button { align-self: center; white-space: nowrap; }
 .composer-bar { min-width: 0; height: 34px; display: flex; align-items: center; gap: 5px; overflow: hidden; }
+.composer-write-controls { margin: 0; padding: 0; border: 0; }
+.composer-queue-controls, .composer-goal-controls { display: contents; }
 .composer-secondary-controls { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 5px; overflow: hidden; }
 .composer-actions { min-width: 0; flex: none; display: flex; align-items: center; gap: 5px; margin-left: auto; }
 .backend-chip, .runtime-chip, .codex-permission-chip { min-width: 0; height: var(--control-height-sm); display: inline-flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); color: #bbb; background: #292929; border: 1px solid transparent; border-radius: var(--radius-control); font-size: var(--text-size-meta); font-weight: var(--text-weight-body); white-space: nowrap; }
