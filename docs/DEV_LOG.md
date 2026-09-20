@@ -1,5 +1,37 @@
 # Development and release log
 
+## 2026-09-19 — Live thinking summaries — 1.0.4-beta.8 candidate
+
+- Add live Codex summary snapshots with section ordering, revision fencing,
+  reconnect recovery and stable chronological anchors. Keep partial updates
+  outside the durable event ledger; save the authoritative completed item once.
+- Keep interrupted summaries as partial items. Join completion persistence and
+  stream cleanup on cancellation; isolate transient broadcasts to opted-in
+  subscribers without waking shared-chat projections.
+- Enable custom-model summaries only with explicit capability evidence, using
+  a separate optional summary check after basic tool compatibility succeeds.
+  Retain support observations per model and private saved credential revision
+  across restart. A later successful check supersedes older catalog metadata;
+  fresh explicit rejection disables support. Unknown observations preserve
+  prior proof. Optional metadata read/write failures never block chat or a
+  successful basic check, and unsaved credentials create no durable proof.
+- Verify summary request gating against controlled native Codex 0.155.0 and
+  0.153.4: canonical and unfamiliar model IDs request summaries only when
+  explicitly enabled, without inheriting effort or internal context fields.
+  Native tool/continuation probes emit a visible summary in the positive case;
+  summary rejection preserves basic compatibility success. No paid endpoint
+  request or production authentication/configuration change is used here.
+- Pass 120 isolated provider, per-chat routing and side-question checks,
+  including optional check failures, revision-scoped restart persistence,
+  newer capability evidence, safe metadata failures and retained credentials.
+- Pass 170 production runner, native-control and WebSocket checks, plus six
+  isolated streaming checks. Exercise actual native Codex with a controlled
+  Responses endpoint through the production runner, WebSocket and Electron
+  service, preload, store and timeline. Confirm live arrival before completion,
+  reconnect recovery, authoritative replacement, section and tool ordering,
+  interruption retention and historical reopening through the native cache.
+- Full release checks, signed artifact acceptance and publication are pending.
+
 ## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
 
 - Add explicit saved-model checks using the endpoint's retained credential

@@ -756,7 +756,8 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.session["backend"] = "codex"
         self.session["effort"] = "high"
         selected = {"base_url": "https://synthetic.invalid/v1", "model": "synthetic-model", "api_key": "synthetic-key", "credential_id": "retained"}
-        catalog = {"model_capabilities": {"synthetic-model": {"reasoning_efforts": ["high"]}}}
+        catalog = {"model_capabilities": {"synthetic-model": {
+            "reasoning_efforts": ["high"], "reasoning_summary_supported": True}}}
         revision = Mock(return_value="first")
         self.namespace["CODEX_PROVIDER_STORE"] = SimpleNamespace(revision=revision,
             for_session=lambda session, **kwargs: dict(selected) if session.get("codex_provider") == "custom" else None,
@@ -771,7 +772,8 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             self.session["codex_provider"] = "custom"
             custom = await self.namespace["create_native_side_chat"]("chat")
             await custom.ask("Custom?", history=[])
-            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], {**selected, "effort": "high"})
+            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], {
+                **selected, "effort": "high", "reasoning_summary": "auto"})
             revision.return_value = "third"
             await custom.ask("Still retained after another endpoint is saved?", history=[])
             revision.return_value = None
@@ -780,7 +782,8 @@ class ServerCallbackTests(unittest.IsolatedAsyncioTestCase):
             catalog.clear()
             unknown = await self.namespace["create_native_side_chat"]("chat")
             await unknown.ask("Unknown reasoning support?", history=[])
-            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], {**selected, "effort": ""})
+            self.assertEqual(self.codex_factory.call_args.kwargs["provider_selection"], {
+                **selected, "effort": "", "reasoning_summary": "none"})
             self.assertNotIn("effort", selected)
             selected["credential_id"] = "changed-chat-binding"
             with self.assertRaises(side.SideQuestionError) as caught:

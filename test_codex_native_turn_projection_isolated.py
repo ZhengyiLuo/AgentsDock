@@ -114,6 +114,10 @@ class NativeTurnProjectionTests(unittest.IsolatedAsyncioTestCase):
             "codex_app_server_tool_output": lambda value: ("safe output", 0, False),
             "project_codex_notification": Mock(),
             "append_event": AsyncMock(),
+            "update_reasoning_summary_stream": AsyncMock(),
+            "reasoning_summary_stream_item": lambda *args: {},
+            "clear_reasoning_summary_stream": AsyncMock(),
+            "finish_reasoning_summary_stream": AsyncMock(),
             "claim_codex_control_terminal_publication": AsyncMock(return_value=claimed),
             "stop_codex_goal_resume": AsyncMock(),
             "finish_codex_control_terminal_publication": AsyncMock(),
@@ -121,6 +125,10 @@ class NativeTurnProjectionTests(unittest.IsolatedAsyncioTestCase):
             "release_codex_interactive_control_lease": Mock(),
             "logger": SimpleNamespace(warning=Mock()),
         }
+        async def persist_summary(session_id, payload, completed):
+            await namespace["append_event"](session_id, "reasoning_summary", payload)
+            completed.add(payload["item_id"])
+        namespace["persist_reasoning_summary"] = persist_summary
         exec(_CODE, namespace)
         manager = SimpleNamespace(
             request=AsyncMock(), wait_for_notification_handler=AsyncMock(),

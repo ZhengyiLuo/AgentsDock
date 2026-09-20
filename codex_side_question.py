@@ -121,7 +121,8 @@ class NativeCodexSideChat:
             from codex_provider import native_config, native_environment, turn_overrides
             self.env = native_environment(self.env, provider_selection)
             self.provider_config = native_config(provider_selection)
-            self.provider_turn_overrides = turn_overrides(provider_selection["model"], provider_selection.get("effort") or "")
+            self.provider_turn_overrides = turn_overrides(provider_selection["model"], provider_selection.get("effort") or "",
+                summary=provider_selection.get("reasoning_summary") or "none")
             self.sensitive_values = (provider_selection["api_key"],)
         self.thread_id: str | None = None
         self._client: CodexAppServerClient | None = None

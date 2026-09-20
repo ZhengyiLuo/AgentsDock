@@ -28,6 +28,7 @@ from side_questions import isolated_environment, run_isolated_command
 PROVIDER_ID = "agentsdock_custom"
 ENV_KEY = "AGENTSDOCK_CODEX_PROVIDER_API_KEY"
 MAX_BODY_BYTES = 16 * 1024
+MAX_SUMMARY_CAPABILITIES_BYTES = 192 * 1024
 TEST_TIMEOUT_SECONDS = 45
 TEST_TOOL = "agentsdock_compatibility_ping"
 TEST_INSTRUCTIONS = (
@@ -40,6 +41,10 @@ TEST_PROMPT = (
     "completed step named Compatibility check. Then call agentsdock_compatibility_ping "
     "exactly once with an empty object. Reply with exactly the token returned by that "
     "tool, without formatting. Do not use any other tools."
+)
+SUMMARY_TEST_PROMPT = (
+    "Without using any tools, compare 17 times 23 with 19 times 21. "
+    "Work out which product is larger, then answer in one short sentence."
 )
 EFFORT_OPTIONS = [{"value": value, "label": label} for value, label in (
     ("none", "None"), ("minimal", "Minimal"), ("low", "Low"), ("medium", "Medium"),
@@ -56,9 +61,11 @@ def model_capability(value: dict | None = None) -> dict:
     efforts = list(dict.fromkeys(effort for effort in efforts if isinstance(effort, str) and effort in allowed)) if isinstance(efforts, list) else []
     if supported is False:
         efforts = []
+    summary_supported = value.get("reasoning_summary_supported")
     return {"kind": "chat" if value.get("kind") == "chat" else "unknown",
         "compatibility": value.get("compatibility") if value.get("compatibility") in {"verified", "unsupported"} else "unverified",
-        "reasoning_efforts": efforts, "reasoning_supported": True if efforts else supported}
+        "reasoning_efforts": efforts, "reasoning_supported": True if efforts else supported,
+        "reasoning_summary_supported": summary_supported if isinstance(summary_supported, bool) else None}
 
 
 def runtime_effort(selected: dict, catalog: dict, requested: object) -> str:
@@ -67,11 +74,17 @@ def runtime_effort(selected: dict, catalog: dict, requested: object) -> str:
     return requested if isinstance(requested, str) and requested in capability["reasoning_efforts"] else ""
 
 
-def turn_overrides(model: str, effort: str = "") -> dict:
+def runtime_summary(selected: dict, catalog: dict) -> str:
+    """Request summaries only with separate, explicit endpoint/model evidence."""
+    capability = model_capability(catalog.get("model_capabilities", {}).get(selected.get("model")))
+    return "auto" if capability["reasoning_summary_supported"] is True else "none"
+
+
+def turn_overrides(model: str, effort: str = "", *, summary: str = "none") -> dict:
     # Null turn.effort means inherit. Replacing the native collaboration settings
     # explicitly clears both a configured effort and an earlier turn's effort.
     # Native default mode preserves the thread's base/developer instructions.
-    return {"model": model, "summary": "none", "collaborationMode": {"mode": "default", "settings": {
+    return {"model": model, "summary": "auto" if summary == "auto" else "none", "collaborationMode": {"mode": "default", "settings": {
         "model": model, "reasoning_effort": effort or None, "developer_instructions": None}},
         **({"effort": effort} if effort else {})}
 
@@ -99,8 +112,11 @@ def discovered_model_capability(entry: dict, model: str) -> dict | None:
     supported = entry.get("reasoning_supported", entry.get("supports_reasoning", capabilities.get("reasoning", reasoning.get("supported"))))
     efforts = entry.get("supported_reasoning_efforts", entry.get("reasoning_efforts",
         capabilities.get("reasoning_efforts", reasoning.get("efforts", []))))
+    summary_supported = entry.get("reasoning_summary_supported", entry.get("supports_reasoning_summary_parameter",
+        capabilities.get("reasoning_summary", reasoning.get("summary_supported"))))
     return model_capability({"kind": "chat" if declared & chat else "unknown",
-        "reasoning_supported": supported, "reasoning_efforts": efforts})
+        "reasoning_supported": supported, "reasoning_efforts": efforts,
+        "reasoning_summary_supported": summary_supported})
 
 
 def validate_model(value: object) -> str:
@@ -166,6 +182,7 @@ class ProviderStore:
         self.lock = threading.RLock()
         self._catalogs: dict[str, dict] = {}
         self._model_capabilities: dict[str, dict[str, dict]] = {}
+        self._summary_capabilities: dict[str, dict[str, bool]] = {}
         self._public_selections: dict[str, dict] = {}
         self._revision_catalog_keys: dict[str, str] = {}
 
@@ -179,7 +196,7 @@ class ProviderStore:
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
                 raise HTTPException(503, "Provider credential storage must be private to the server user.")
 
-    def _read(self, name: str) -> dict | None:
+    def _read(self, name: str, *, max_bytes=MAX_BODY_BYTES) -> dict | None:
         self._directory()
         try:
             fd = os.open(self.root / name, os.O_RDONLY | os.O_NOFOLLOW)
@@ -189,7 +206,7 @@ class ProviderStore:
             raise HTTPException(503, "Provider credential storage is unavailable.") from None
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > MAX_BODY_BYTES:
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > max_bytes:
                 raise ValueError("unsafe credential file")
             with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as stream:
                 value = json.load(stream)
@@ -321,6 +338,8 @@ class ProviderStore:
                 for model in cached.get("models", [])}
             for model, evidence in self._model_capabilities.get(key, {}).items():
                 capabilities[model] = model_capability({**capabilities.get(model, {}), **evidence})
+            for model, supported in self._saved_summary_capabilities(selected).items():
+                capabilities[model] = model_capability({**capabilities.get(model, {}), "reasoning_summary_supported": supported})
             if selected and selected.get("model"):
                 capabilities.setdefault(selected["model"], model_capability())
             return {"models": cached.get("models", []), "efforts": [],
@@ -336,6 +355,12 @@ class ProviderStore:
             self._catalogs[catalog_key(selected)] = {"models": models,
                 "model_capabilities": {model["value"]: model_capability(catalog.get("model_capabilities", {}).get(model["value"])) for model in models},
                 "default_model": catalog.get("default_model", "")}
+            # Apply fresh explicit denials when discovery completes, rather
+            # than letting old metadata veto a later successful model check.
+            denials = {model["value"]: False for model in models
+                if catalog.get("model_capabilities", {}).get(model["value"], {}).get("reasoning_summary_supported") is False}
+            if denials:
+                self._cache_summary_capabilities(selected, denials)
 
     def cache_model_capability(self, selected: dict, capability: dict):
         """Retain only probe evidence for this exact endpoint/key/model tuple."""
@@ -344,7 +369,62 @@ class ProviderStore:
             records = self._model_capabilities.setdefault(catalog_key(selected), {})
             previous = records.get(model, {})
             cleaned = model_capability({**previous, **capability})
-            records[model] = {name: cleaned[name] for name in cleaned if name in previous or name in capability}
+            records[model] = {name: cleaned[name] for name in cleaned
+                if name != "reasoning_summary_supported" and (name in previous or name in capability)}
+            supported = capability.get("reasoning_summary_supported")
+            if isinstance(supported, bool):
+                self._cache_summary_capabilities(selected, {model: supported})
+
+    def _cache_summary_capabilities(self, selected: dict, observations: dict[str, bool]) -> None:
+        identifier = selected.get("credential_id")
+        if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
+            return
+        # Entered, unsaved credentials never create durable evidence.
+        # Validate the claimed immutable revision before using its name.
+        saved = self.selection(include_key=True, revision=identifier)
+        if not saved or catalog_key(saved) != catalog_key(selected):
+            raise HTTPException(409, "The saved endpoint changed. Refresh before checking this model.")
+        summaries = dict(self._saved_summary_capabilities(saved))
+        for model, supported in observations.items():
+            summaries.pop(model, None)
+            summaries[model] = supported
+        while len(summaries) > 512:
+            summaries.pop(next(iter(summaries)))
+        try:
+            self._atomic("summary-capabilities-" + identifier + ".json", {
+                "version": 1, "credential_id": identifier, "binding": binding(saved),
+                "catalog_key": catalog_key(saved), "models": summaries})
+        except (OSError, HTTPException):
+            # A successful optional check remains useful for this
+            # process even when display metadata cannot be persisted.
+            pass
+        self._summary_capabilities[identifier] = summaries
+
+    def _saved_summary_capabilities(self, selected: dict | None) -> dict[str, bool]:
+        """Private summary evidence belongs to one saved credential revision."""
+        identifier = (selected or {}).get("credential_id")
+        if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
+            return {}
+        if identifier in self._summary_capabilities:
+            return self._summary_capabilities[identifier]
+        try:
+            record = self._read("summary-capabilities-" + identifier + ".json", max_bytes=MAX_SUMMARY_CAPABILITIES_BYTES)
+            if record is None:
+                models = {}
+            else:
+                models = record.get("models")
+                if (record.get("version") != 1 or record.get("credential_id") != identifier
+                        or record.get("binding") != binding(selected)
+                        or record.get("catalog_key") != self._revision_catalog_keys.get(identifier)
+                        or not isinstance(models, dict) or len(models) > 512
+                        or any(validate_model(model) != model or not isinstance(supported, bool) for model, supported in models.items())):
+                    raise ValueError("Invalid summary capability evidence")
+            self._summary_capabilities[identifier] = models
+            return models
+        except Exception:
+            # Optional display capability evidence must never prevent a chat or
+            # catalog from opening. Credential files retain strict validation.
+            return {}
 
     def revision(self):
         with self.lock:
@@ -430,7 +510,7 @@ class ProviderStore:
 
 def native_config(selected: dict) -> dict:
     return {"model_provider": PROVIDER_ID, **({"model": selected["model"]} if selected.get("model") else {}),
-        "model_reasoning_summary": "none",
+        "model_reasoning_summary": "auto" if selected.get("reasoning_summary") == "auto" else "none",
         "model_providers": {PROVIDER_ID: {"name": "AgentsDock custom endpoint",
             "base_url": selected["base_url"], "env_key": ENV_KEY, "requires_openai_auth": False,
             "wire_api": "responses", "request_max_retries": 0, "stream_max_retries": 0,
@@ -491,7 +571,9 @@ def native_catalog_without_reasoning_defaults(payload: object) -> dict:
         corrected.append({**model,
             "default_reasoning_level": None,
             "default_reasoning_summary": "none",
-            "supports_reasoning_summary_parameter": False,
+            # Permit explicit per-turn requests. Endpoint/model evidence gates
+            # them in runtime_summary; native or inherited defaults stay off.
+            "supports_reasoning_summary_parameter": True,
             "supports_experimental_context": False,
             "multi_agent_reasoning_effort": None,
             # The internal Lite serializer adds reasoning.context regardless
@@ -603,7 +685,7 @@ def discover_models(selected: dict) -> dict:
 
 
 def test_result(status: str) -> dict:
-    messages = {"ready": "Basic compatibility checked: native isolated tools and a follow-up response completed. Workspace tools, integrations and reasoning settings were not checked.",
+    messages = {"ready": "Basic compatibility checked: native isolated tools and a follow-up response completed. Workspace tools, integrations and reasoning effort settings were not checked.",
         "unsupported": "The endpoint did not accept the Responses protocol required by Codex.",
         "unsupported_parameter": "The endpoint rejected a parameter required by this native Codex request. Check this model's Responses compatibility and supported settings.",
         "authentication_failed": "The endpoint rejected the provider API key.",
@@ -624,7 +706,7 @@ def classify_failure(value) -> str:
     if any(marker in text for marker in ("model_not_found", "model not found", "unknown model", "model does not exist")):
         return "model_unavailable"
     if any(marker in text for marker in ("unsupported_parameter", "unsupported parameter", "unsupported_value", "unknown parameter", "unrecognized request argument", "unrecognized parameter")) or (
-        any(marker in text for marker in ("reasoning.effort", "reasoning effort", "reasoning_effort", "tool_choice", "tools[", "tools.", "tool type", "tool format", "custom tool", "freeform"))
+        any(marker in text for marker in ("reasoning.effort", "reasoning effort", "reasoning_effort", "reasoning.summary", "reasoning summary", "reasoning_summary", "tool_choice", "tools[", "tools.", "tool type", "tool format", "custom tool", "freeform"))
         and any(marker in text for marker in ("not supported", "unsupported", "invalid parameter", "invalid value", "unknown field"))
     ):
         return "unsupported_parameter"
@@ -644,12 +726,23 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
     ping_count = 0
     unexpected_request = False
     thread = None
+    basic_ready = False
+    summary_supported = None
+    summary_check = "not_checked"
+
+    def observe_summary_failure(error):
+        nonlocal summary_supported, summary_check
+        failure = str(error).lower()
+        if (classify_failure(error) == "unsupported_parameter"
+                and any(marker in failure for marker in ("reasoning.summary", "reasoning_summary", "reasoning summary"))):
+            summary_supported, summary_check = False, "unsupported"
 
     def result(status):
         compatibility = ("verified" if status == "ready" else "unsupported"
             if status in {"unsupported", "unsupported_parameter", "model_unavailable"} else "unverified")
         return {**test_result(status), "model": selected["model"], "compatibility": compatibility,
-            "scope": "isolated_native_tools_and_continuation", "checks": dict(checks)}
+            "scope": "isolated_native_tools_and_continuation", "checks": dict(checks),
+            "reasoning_summary_supported": summary_supported, "summary_check": summary_check}
 
     async def handle_request(request_id, method, params):
         nonlocal ping_count, unexpected_request
@@ -737,11 +830,48 @@ async def test_connection(selected: dict, *, executable: str, environment: dict,
                                 break
                     finally:
                         await turn.close()
+                basic_ready = True
+                # Optional evidence from this explicit operator check only.
+                # Missing summaries or an unrelated failure never invalidate
+                # the completed basic tool/continuation check.
+                summary_check = "inconclusive"
+                try:
+                    async with asyncio.timeout(10):
+                        turn = await native.start_turn(thread, [{"type": "text", "text": SUMMARY_TEST_PROMPT}],
+                            overrides={**turn_overrides(selected["model"], summary="auto"), "environments": []})
+                        observed_summary = False
+                        try:
+                            while True:
+                                packet = await turn.next_notification()
+                                data = packet.get("params", {})
+                                method = packet.get("method")
+                                if method == "item/reasoning/summaryTextDelta" and isinstance(data.get("delta"), str) and data["delta"].strip():
+                                    observed_summary = True
+                                if method == "item/completed" and data.get("item", {}).get("type") == "reasoning":
+                                    summaries = data["item"].get("summary")
+                                    if isinstance(summaries, list) and any(isinstance(text, str) and text.strip() for text in summaries):
+                                        observed_summary = True
+                                error = (data.get("error") or data.get("message")) if method == "error" else None
+                                if method == "turn/completed":
+                                    completed = data.get("turn", {})
+                                    error = completed.get("error")
+                                    if completed.get("status") == "completed" and not error and observed_summary and not unexpected_request:
+                                        summary_supported, summary_check = True, "supported"
+                                if error:
+                                    observe_summary_failure(error)
+                                if error or method == "turn/completed":
+                                    break
+                        finally:
+                            await turn.close()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    observe_summary_failure(exc)
                 return result("ready")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return result(classify_failure(exc))
+            return result("ready" if basic_ready else classify_failure(exc))
         finally:
             async def cleanup():
                 if opening is not None:
@@ -827,7 +957,10 @@ def create_router(*, authorize, store: ProviderStore, mutate, probe, available, 
         try:
             result = await probe(selected) if selected.get("model") else await catalog(selected)
             if selected.get("model") and result.get("compatibility") in {"verified", "unsupported", "unverified"}:
-                store.cache_model_capability(selected, {"compatibility": result["compatibility"]})
+                evidence = {"compatibility": result["compatibility"]}
+                if isinstance(result.get("reasoning_summary_supported"), bool):
+                    evidence["reasoning_summary_supported"] = result["reasoning_summary_supported"]
+                store.cache_model_capability(selected, evidence)
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except HTTPException:
             raise
@@ -845,7 +978,7 @@ def create_router(*, authorize, store: ProviderStore, mutate, probe, available, 
                 raise HTTPException(404, "Chat not found.")
             selected = await asyncio.to_thread(store.for_session, session, include_key=True)
         else:
-            selected = await asyncio.to_thread(store.selection, include_key=True)
+            selected = await asyncio.to_thread(store.selection, include_key=True, include_revision=True)
         if selected is None:
             raise HTTPException(409, "Save a custom endpoint before refreshing its models.")
         try:

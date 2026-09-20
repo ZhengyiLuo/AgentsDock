@@ -165,6 +165,8 @@ class PerChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(custom_params["config"]["model_reasoning_summary"], "none")
         self.assertNotIn("model_reasoning_summary", normal_params["config"])
         store = self.ns["CODEX_PROVIDER_STORE"]
+        store.cache_model_capability(store.for_session(custom, include_key=True), {"reasoning_summary_supported": True})
+        self.assertEqual(self.ns["codex_thread_params"](custom, str(self.root))["config"]["model_reasoning_summary"], "auto")
         store.record_thread("custom-thread", self.selection)
         custom["codex_thread_id"] = "custom-thread"
         self.ns["codex_runtime_settings"](custom)

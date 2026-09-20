@@ -73,7 +73,7 @@ class StoreTests(unittest.TestCase):
         self.store.cache_catalog(SELECTION, listed)
         catalog = self.store.cached_catalog(SELECTION)
         self.assertEqual(catalog["model_capabilities"]["test/model"], {"kind": "chat", "compatibility": "verified",
-            "reasoning_efforts": ["low", "high"], "reasoning_supported": True})
+            "reasoning_efforts": ["low", "high"], "reasoning_supported": True, "reasoning_summary_supported": None})
         self.assertEqual(catalog["model_capabilities"]["other/model"]["compatibility"], "unverified")
         self.assertEqual(catalog["model_efforts"]["other/model"], [])
         self.assertEqual((catalog["efforts"], catalog["default_effort"]), ([], ""))
@@ -85,6 +85,105 @@ class StoreTests(unittest.TestCase):
         other_endpoint = {**SELECTION, "base_url": "https://other.example.invalid/v1"}
         self.store.cache_catalog(other_endpoint, listed)
         self.assertEqual(self.store.cached_catalog(other_endpoint)["model_capabilities"]["test/model"]["compatibility"], "unverified")
+
+    def test_summary_evidence_survives_discovery_without_crossing_models_or_credentials(self):
+        self.store.save(SELECTION)
+        selected = self.store.registration(include_key=True)
+        self.store.cache_model_capability(selected, {"reasoning_summary_supported": True})
+        self.store.cache_catalog(SELECTION, {"models": [{"value": "test/model"}, {"value": "other/model"}]})
+        catalog = self.store.cached_catalog(selected)
+        self.assertEqual(provider.runtime_summary(SELECTION, catalog), "auto")
+        self.assertEqual(provider.runtime_summary({**SELECTION, "model": "other/model"}, catalog), "none")
+        # An inconclusive basic-check result supplies no summary evidence.
+        self.store.cache_model_capability(selected, {"compatibility": "verified"})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "auto")
+        self.store.save({**SELECTION, "api_key": "replacement-synthetic"})
+        self.assertEqual(provider.runtime_summary(SELECTION, self.store.cached_catalog()), "none")
+
+    def test_summary_evidence_reloads_privately_without_persisting_basic_compatibility(self):
+        self.store.save(SELECTION)
+        selected = self.store.registration(include_key=True)
+        self.store.cache_model_capability(selected, {"compatibility": "verified", "reasoning_summary_supported": True})
+        record = self.store.root / ("summary-capabilities-" + selected["credential_id"] + ".json")
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(KEY, record.read_text())
+        reloaded = provider.ProviderStore(self.store.root)
+        catalog = reloaded.cached_catalog()
+        self.assertEqual(provider.runtime_summary(selected, catalog), "auto")
+        self.assertEqual(catalog["model_capabilities"][selected["model"]]["compatibility"], "unverified")
+        self.assertEqual(provider.runtime_summary({**selected, "model": "unverified/other"}, catalog), "none")
+
+    def test_summary_evidence_is_revision_scoped_and_fresh_rejection_survives_reset(self):
+        self.store.save(SELECTION)
+        original = self.store.registration(include_key=True)
+        self.store.cache_model_capability(original, {"reasoning_summary_supported": True})
+        # Even a new revision of identical credentials starts without old proof.
+        self.store.save(SELECTION)
+        replacement = self.store.registration(include_key=True)
+        self.assertNotEqual(original["credential_id"], replacement["credential_id"])
+        self.assertEqual(provider.runtime_summary(replacement, self.store.cached_catalog()), "none")
+        self.assertEqual(provider.runtime_summary(original, self.store.cached_catalog(original)), "auto")
+        self.store.cache_model_capability(original, {"reasoning_summary_supported": False})
+        self.store.cache_model_capability(original, {"compatibility": "verified", "reasoning_summary_supported": None})
+        self.store.reset()
+        reloaded = provider.ProviderStore(self.store.root)
+        self.assertFalse(reloaded.status()["configured"])
+        retained = reloaded.selection(include_key=True, revision=original["credential_id"])
+        capability = reloaded.cached_catalog(retained)["model_capabilities"][retained["model"]]
+        self.assertIs(capability["reasoning_summary_supported"], False)
+        self.assertEqual(provider.runtime_summary(retained, reloaded.cached_catalog(retained)), "none")
+
+    def test_unsaved_probe_cannot_persist_or_override_saved_summary_evidence(self):
+        self.store.save(SELECTION)
+        selected = self.store.registration(include_key=True)
+        self.store.cache_model_capability(selected, {"reasoning_summary_supported": True})
+        before = {p.name: p.read_bytes() for p in self.store.root.iterdir()}
+        self.store.cache_model_capability(SELECTION, {"reasoning_summary_supported": False})
+        self.assertEqual(before, {p.name: p.read_bytes() for p in self.store.root.iterdir()})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "auto")
+        with self.assertRaises(HTTPException):
+            self.store.cache_model_capability({**selected, "api_key": "different-synthetic"}, {"reasoning_summary_supported": False})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "auto")
+
+    def test_optional_summary_evidence_fails_closed_without_blocking_catalog_and_denials_win(self):
+        self.store.save(SELECTION)
+        selected = self.store.registration(include_key=True)
+        self.store.cache_model_capability(selected, {"reasoning_summary_supported": True})
+        self.store.cache_catalog(selected, {"models": [{"value": selected["model"]}],
+            "model_capabilities": {selected["model"]: {"reasoning_summary_supported": False}}})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "none")
+        # A later successful explicit check supersedes older negative metadata.
+        self.store.cache_model_capability(selected, {"reasoning_summary_supported": True})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "auto")
+        self.store.cache_catalog(selected, {"models": [{"value": selected["model"]}],
+            "model_capabilities": {selected["model"]: {"reasoning_summary_supported": False}}})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "none")
+        self.assertEqual(provider.runtime_summary(selected, provider.ProviderStore(self.store.root).cached_catalog()), "none")
+        self.store.cache_model_capability(selected, {"reasoning_summary_supported": False})
+        self.store.cache_catalog(selected, {"models": [{"value": selected["model"]}],
+            "model_capabilities": {selected["model"]: {"reasoning_summary_supported": True}}})
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "none")
+        record = self.store.root / ("summary-capabilities-" + selected["credential_id"] + ".json")
+        record.write_text("invalid optional metadata " + KEY)
+        reloaded = provider.ProviderStore(self.store.root)
+        self.assertTrue(reloaded.catalog(available=True)["configured"])
+        self.assertEqual(provider.runtime_summary(selected, reloaded.cached_catalog()), "none")
+        # Unreadable/unsafe optional metadata is equally non-blocking.
+        record.chmod(0o644)
+        self.assertTrue(provider.ProviderStore(self.store.root).catalog(available=True)["configured"])
+
+    def test_summary_observation_capacity_retains_newest_without_rejecting_check(self):
+        self.store.save(SELECTION)
+        selected = self.store.registration(include_key=True)
+        identifier = selected["credential_id"]
+        previous = {f"model/{index}": True for index in range(512)}
+        self.store._summary_capabilities[identifier] = previous
+        self.store.cache_model_capability(selected, {"reasoning_summary_supported": True})
+        reloaded = provider.ProviderStore(self.store.root)
+        catalog = reloaded.cached_catalog()
+        self.assertEqual(provider.runtime_summary(selected, catalog), "auto")
+        self.assertEqual(len(catalog["model_capabilities"]), 512)
+        self.assertNotIn("model/0", catalog["model_capabilities"])
 
     def test_legacy_binding_migrates_without_key_reentry_and_survives_reset(self):
         self.store.save(SELECTION)
@@ -213,6 +312,21 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         response = self.client.delete("/api/admin/codex/provider", headers=NATIVE)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["configured"])
+
+    def test_optional_summary_write_failure_preserves_success_and_in_memory_evidence(self):
+        self.store.save(SELECTION)
+        selected = self.store.registration(include_key=True)
+        self.probe.return_value = {**provider.test_result("ready"), "compatibility": "verified",
+            "reasoning_summary_supported": True, "summary_check": "supported"}
+        with patch.object(self.store, "_atomic", side_effect=OSError(errno.ENOSPC, KEY)):
+            response = self.client.post("/api/admin/codex/provider/test", headers=NATIVE,
+                json={"model": selected["model"], "credential_id": selected["credential_id"]})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["summary_check"], "supported")
+        self.assertNotIn(KEY, response.text)
+        self.assertEqual(provider.runtime_summary(selected, self.store.cached_catalog(selected)), "auto")
+        self.assertEqual(provider.runtime_summary(selected, provider.ProviderStore(self.store.root).cached_catalog()), "none")
 
     def test_custom_preserves_normal_login_and_busy_work_does_not_block_reset(self):
         self.store.save(SELECTION)
@@ -358,6 +472,26 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_summary_capability_is_independent_and_requires_explicit_boolean_evidence(self):
+        for model in ("gpt-6-astra", "unknown/provider-model"):
+            for metadata, expected in (({}, None), ({"reasoning_efforts": ["high"]}, None),
+                    ({"supports_reasoning_summary_parameter": True}, True),
+                    ({"reasoning_summary_supported": False, "reasoning_efforts": ["high"]}, False),
+                    ({"capabilities": {"reasoning_summary": True}}, True),
+                    ({"reasoning": {"summary_supported": True}}, True),
+                    ({"reasoning_summary_supported": "true"}, None)):
+                with self.subTest(model=model, metadata=metadata):
+                    capability = provider.discovered_model_capability(metadata, model)
+                    self.assertIs(capability["reasoning_summary_supported"], expected)
+                    selected = {**SELECTION, "model": model}
+                    summary = provider.runtime_summary(selected, {"model_capabilities": {model: capability}})
+                    self.assertEqual(summary, "auto" if expected is True else "none")
+                    overrides = provider.turn_overrides(model, summary=summary)
+                    self.assertEqual(overrides["summary"], summary)
+                    self.assertNotIn("effort", overrides)
+                    self.assertIsNone(overrides["collaborationMode"]["settings"]["reasoning_effort"])
+                    self.assertEqual(provider.native_config({**selected, "reasoning_summary": summary})["model_reasoning_summary"], summary)
+
     def test_owned_models_endpoint_success_auth_failure_and_redirect_no_follow(self):
         requests = []
         class Handler(BaseHTTPRequestHandler):
@@ -383,7 +517,7 @@ class DiscoveryTests(unittest.TestCase):
             selected = {"base_url": f"http://127.0.0.1:{server.server_port}/v1", "api_key": KEY}
             ready = provider.discover_models(selected)
             self.assertEqual([model["value"] for model in ready["models"]], ["model/one", "model/two", "model/three", "chat-with-embedding-tools"])
-            self.assertEqual(ready["model_capabilities"]["model/one"], {"kind": "unknown", "compatibility": "unverified", "reasoning_efforts": [], "reasoning_supported": None})
+            self.assertEqual(ready["model_capabilities"]["model/one"], {"kind": "unknown", "compatibility": "unverified", "reasoning_efforts": [], "reasoning_supported": None, "reasoning_summary_supported": None})
             self.assertEqual(ready["model_efforts"], {"model/one": [], "model/two": [{"value": "low", "label": "Low"}, {"value": "high", "label": "High"}], "model/three": [], "chat-with-embedding-tools": []})
             self.assertFalse(ready["model_capabilities"]["model/three"]["reasoning_supported"])
             self.assertEqual((ready["efforts"], ready["default_effort"]), ([], ""))
@@ -483,7 +617,7 @@ class NativeCatalogTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(model["default_reasoning_level"])
             self.assertIsNone(model["multi_agent_reasoning_effort"])
             self.assertEqual(model["default_reasoning_summary"], "none")
-            self.assertFalse(model["supports_reasoning_summary_parameter"])
+            self.assertTrue(model["supports_reasoning_summary_parameter"])
             self.assertFalse(model["supports_experimental_context"])
             self.assertFalse(model["use_responses_lite"])
             self.assertEqual(original["default_reasoning_level"], "low")
@@ -561,7 +695,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         token = ""
         async def start_turn(thread, inputs, *, overrides):
             nonlocal token
-            self.assertEqual((thread, overrides), ("ephemeral", {**provider.turn_overrides(SELECTION["model"]), "environments": []}))
+            self.assertEqual((thread, overrides), ("ephemeral", {**provider.turn_overrides(SELECTION["model"], summary="auto" if len(turns) == 2 else "none"), "environments": []}))
             if not turns:
                 reply = await captured["server_request_handler"](1, "item/tool/call", {
                     "threadId": thread, "tool": provider.TEST_TOOL, "arguments": {}})
@@ -587,7 +721,9 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["compatibility"], "verified")
         self.assertTrue(all(result["checks"].values()))
-        self.assertEqual(len(turns), 2)
+        self.assertEqual(len(turns), 3)
+        self.assertIsNone(result["reasoning_summary_supported"])
+        self.assertEqual(result["summary_check"], "inconclusive")
         for turn in turns:
             turn.close.assert_awaited_once()
         verify.assert_awaited_once()
@@ -621,6 +757,57 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result["ok"], result["compatibility"], result["status"]), (False, "unverified", "inconclusive"))
         native.start_turn.assert_awaited_once()
         native.close.assert_awaited_once()
+
+    async def test_optional_summary_check_requires_visible_evidence_and_preserves_basic_success(self):
+        cases = [
+            ([{"method": "item/reasoning/summaryTextDelta", "params": {"delta": "Compare the products."}}], True),
+            ([{"method": "item/completed", "params": {"item": {"type": "reasoning", "summary": ["Compare the products."]}}}], True),
+            ([{"method": "item/reasoning/textDelta", "params": {"delta": "Raw text is not summary support."}}], None),
+            ([], None),
+            ([{"method": "error", "params": {"error": {"message": "Unsupported parameter " + KEY, "param": "reasoning.summary"}}}], False),
+            ([{"method": "error", "params": {"error": "Unsupported parameter reasoning.effort " + KEY}}], None),
+            ([{"method": "error", "params": {"error": "401 unauthorized " + KEY}}], None),
+            ([TimeoutError()], None),
+        ]
+        for model in ("gpt-6-astra", "unknown/provider-model"):
+            for notifications, expected in cases:
+                with self.subTest(model=model, summary_supported=expected, notifications=len(notifications)):
+                    selected = {**SELECTION, "model": model}
+                    native = SimpleNamespace(client=SimpleNamespace(), start=AsyncMock(), close=AsyncMock(),
+                        request=AsyncMock(return_value={"config": {**provider.native_config(selected), "cli_auth_credentials_store": "ephemeral"}}),
+                        start_thread=AsyncMock(return_value="ephemeral"), read_thread=AsyncMock(return_value={"ephemeral": True, "path": None}))
+                    captured, turns = {}, []
+                    token = ""
+                    async def start_turn(thread, inputs, *, overrides):
+                        nonlocal token
+                        if not turns:
+                            reply = await captured["server_request_handler"](1, "item/tool/call", {
+                                "threadId": thread, "tool": provider.TEST_TOOL, "arguments": {}})
+                            token = reply["contentItems"][0]["text"]
+                        optional = len(turns) == 2
+                        self.assertEqual(overrides["summary"], "auto" if optional else "none")
+                        packets = notifications if optional else [
+                            {"method": "turn/plan/updated", "params": {}},
+                            {"method": "item/completed", "params": {"item": {"type": "agentMessage", "text": token}}}]
+                        turn = SimpleNamespace(next_notification=AsyncMock(side_effect=[*packets,
+                            {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}]), close=AsyncMock())
+                        turns.append(turn)
+                        return turn
+                    native.start_turn = AsyncMock(side_effect=start_turn)
+                    def factory(*args, **kwargs):
+                        captured.update(kwargs)
+                        return native
+                    result = await provider.test_connection(selected, executable="unused", environment={},
+                        manager_factory=factory, verify_protocol=AsyncMock())
+                    self.assertEqual((result["ok"], result["compatibility"]), (True, "verified"))
+                    self.assertTrue(all(result["checks"].values()))
+                    self.assertIs(result["reasoning_summary_supported"], expected)
+                    self.assertEqual(result["summary_check"], "supported" if expected is True else "unsupported" if expected is False else "inconclusive")
+                    self.assertNotIn(KEY, str(result))
+                    self.assertEqual(native.start_turn.await_count, 3)
+                    for turn in turns:
+                        turn.close.assert_awaited_once()
+                    native.close.assert_awaited_once()
 
     async def test_protocol_or_native_errors_are_safe_and_never_retry(self):
         verify = AsyncMock(side_effect=RuntimeError(KEY))

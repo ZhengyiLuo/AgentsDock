@@ -29,6 +29,54 @@ class FakeWebSocket:
 
 
 class EventWebSocketCatchupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_summary_is_opt_in_and_does_not_wake_share_projection(self) -> None:
+        hub = agent_server.SubscriberHub()
+        legacy, opted = FakeWebSocket(), FakeWebSocket()
+        await hub.register_accepted("chat", legacy)
+        await hub.register_accepted("chat", opted, reasoning_stream=True)
+        with patch.object(agent_server.INTERACTIVE_CHAT_LIVE, "notify") as notify:
+            await hub.broadcast("chat", {"type": "reasoning_summary_stream", "items": []})
+            notify.assert_not_called()
+            self.assertFalse(legacy.events)
+            self.assertEqual(len(opted.events), 1)
+            await hub.broadcast("chat", {"type": "reasoning_summary", "seq": 1})
+            notify.assert_called_once()
+            self.assertEqual(len(legacy.events), 1)
+            self.assertEqual(len(opted.events), 2)
+        await hub.unsubscribe("chat", opted)
+        self.assertFalse(hub._reasoning_subscribers)
+
+    async def test_reconnect_receives_live_summary_without_advancing_durable_cursor(self) -> None:
+        session_id = "summary-reconnect"
+        socket = FakeWebSocket()
+        with (
+            tempfile.TemporaryDirectory() as root,
+            patch.object(agent_server, "AGENT_TOKEN", ""),
+            patch.dict(agent_server.STORE.sessions, {session_id: {"id": session_id}}, clear=True),
+            patch.object(agent_server, "events_path", return_value=Path(root) / "events.jsonl"),
+            patch.object(agent_server, "prepare_provider_history_metadata_repair"),
+            patch.object(agent_server, "fork_internal_run_ids", return_value=set()),
+            patch.dict(agent_server.EVENT_SEQ_CACHE, {session_id: 1}, clear=True),
+            patch.dict(agent_server.REASONING_SUMMARY_STREAMS, {}, clear=True),
+        ):
+            event = {"seq": 1, "id": "start", "session_id": session_id, "type": "turn_started",
+                "ts": "2026-09-20T00:00:00Z", "run_id": "run", "prompt": "Question"}
+            (Path(root) / "events.jsonl").write_text(json.dumps(event) + "\n")
+            await agent_server.update_reasoning_summary_stream(session_id, "run", "thought", {"delta": "Visible while thinking"})
+            await agent_server.session_events(session_id, socket, after=0, reasoning_stream=True)
+            self.assertEqual([packet["type"] for packet in socket.events], ["turn_started", "reasoning_summary_stream"])
+            live = socket.events[-1]
+            self.assertNotIn("seq", live)
+            self.assertEqual(live["items"][0]["after_seq"], 1)
+            self.assertEqual(live["items"][0]["text"], "Visible while thinking")
+            self.assertEqual(agent_server.EVENT_SEQ_CACHE[session_id], 1)
+            await agent_server.clear_reasoning_summary_stream(session_id, "run")
+            reopened = FakeWebSocket()
+            await agent_server.session_events(session_id, reopened, after=1, reasoning_stream=True)
+            self.assertEqual(len(reopened.events), 1)
+            self.assertEqual(reopened.events[0]["items"], [])
+            self.assertGreater(reopened.events[0]["revision"], live["revision"])
+
     async def test_catchup_waits_for_committed_import_projection_before_reading(self) -> None:
         """A fsynced import is not ready for replay until its proof is published."""
         session_id = "import-proof-race-chat"

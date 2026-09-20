@@ -5139,6 +5139,10 @@ async def publish_turn_code_diff(
 EVENT_SEQ_CACHE: dict[str, int] = {}
 EVENT_SEQ_LOCK = asyncio.Lock()
 EVENT_SEQ_REPAIR_LOCKS: dict[str, asyncio.Lock] = {}
+REASONING_SUMMARY_STREAMS: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+REASONING_SUMMARY_STREAM_REVISION = 0
+REASONING_SUMMARY_STREAM_PENDING: dict[str, asyncio.Task[Any]] = {}
+REASONING_SUMMARY_STREAM_LAST_SENT: dict[str, float] = {}
 EVENT_DELIVERY_LOCKS: dict[str, asyncio.Lock] = {}
 ARTIFACT_PUBLICATION_LOCK_STRIPES = tuple(asyncio.Lock() for _ in range(64))
 TIMELINE_PIN_LOCK_STRIPES = tuple(asyncio.Lock() for _ in range(64))
@@ -13081,6 +13085,7 @@ class SubscriberHub:
         # does not join live broadcasts until the event-delivery boundary is
         # closed. This makes admission bounded without disturbing ordering.
         self._reservations: dict[str, set[WebSocket]] = {}
+        self._reasoning_subscribers: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
     def _connection_count_locked(self) -> int:
@@ -13122,6 +13127,7 @@ class SubscriberHub:
 
     async def unsubscribe(self, sid: str, ws: WebSocket) -> None:
         async with self._lock:
+            self._reasoning_subscribers.discard(ws)
             subs = self._subscribers.get(sid)
             if subs:
                 subs.discard(ws)
@@ -13133,7 +13139,9 @@ class SubscriberHub:
                 if not reservations:
                     self._reservations.pop(sid, None)
 
-    async def register_accepted(self, sid: str, ws: WebSocket) -> bool:
+    async def register_accepted(
+        self, sid: str, ws: WebSocket, *, reasoning_stream: bool = False,
+    ) -> bool:
         """Activate a reserved socket after it has completed catch-up."""
 
         async with self._lock:
@@ -13156,16 +13164,20 @@ class SubscriberHub:
                 if not reserved:
                     self._reservations.pop(sid, None)
             self._subscribers.setdefault(sid, set()).add(ws)
+            if reasoning_stream:
+                self._reasoning_subscribers.add(ws)
             return True
 
     async def broadcast(self, sid: str, event: dict[str, Any]) -> None:
         # Open shared-chat pages get only a non-blocking, chat-scoped wakeup.
         # Their private text projection runs separately, never in this path.
+        transient = event.get("type") == "reasoning_summary_stream"
         live_shares = globals().get("INTERACTIVE_CHAT_LIVE")
-        if live_shares is not None:
+        if not transient and live_shares is not None:
             live_shares.notify(sid, event)
         async with self._lock:
-            subs = list(self._subscribers.get(sid, set()))
+            subs = [ws for ws in self._subscribers.get(sid, set())
+                    if not transient or ws in self._reasoning_subscribers]
 
         async def send(ws: WebSocket) -> WebSocket | None:
             try:
@@ -13204,6 +13216,7 @@ class SubscriberHub:
                 current = self._subscribers.get(sid, set())
                 for ws in releasable:
                     current.discard(ws)
+                    self._reasoning_subscribers.discard(ws)
                 if not current:
                     self._subscribers.pop(sid, None)
 
@@ -54818,6 +54831,7 @@ async def consume_codex_native_turn(
     assistant_deltas: dict[str, list[str]] = {}
     reasoning_summary_deltas: dict[str, list[str]] = {}
     plan_deltas: dict[str, list[str]] = {}
+    completed_reasoning_items: set[str] = set()
     terminal_status = "completed"
     terminal_error: str | None = None
     schedule_queue = True
@@ -55033,6 +55047,7 @@ async def consume_codex_native_turn(
                 if notification_turn_id in seen_goal_turn_ids:
                     continue
                 seen_goal_turn_ids.add(notification_turn_id)
+                await finish_reasoning_summary_stream(session_id, operation_id, completed_reasoning_items)
                 turn_id = notification_turn_id
                 goal_turn_running = True
                 terminal_status = "completed"
@@ -55113,10 +55128,15 @@ async def consume_codex_native_turn(
                     str(params.get("delta") or "")
                 )
                 continue
-            if method == "item/reasoning/summaryTextDelta" and item_id:
+            if method in {"item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded"} and item_id:
+                if item_id in completed_reasoning_items:
+                    continue
                 reasoning_summary_deltas.setdefault(item_id, []).append(
                     str(params.get("delta") or "")
                 )
+                await update_reasoning_summary_stream(session_id, operation_id, item_id, params, {
+                    "provider_turn_id": turn_id, "purpose": f"codex_{operation}",
+                })
                 continue
             if method == "item/plan/delta" and item_id:
                 plan_deltas.setdefault(item_id, []).append(
@@ -55172,25 +55192,33 @@ async def consume_codex_native_turn(
                             },
                         )
                 elif item_type in {"reasoning", "plan"}:
+                    streamed = {}
                     if item_type == "reasoning":
+                        if item_id in completed_reasoning_items:
+                            continue
+                        streamed = reasoning_summary_stream_item(session_id, operation_id, item_id)
                         buffered = reasoning_summary_deltas.pop(item_id, [])
-                        text = codex_app_server_reasoning_summary(item) or "".join(buffered)
+                        text = codex_app_server_reasoning_summary(item) or streamed.get("text") or "".join(buffered)
                     else:
                         buffered = plan_deltas.pop(item_id, [])
                         text = codex_reasoning_text(item) or "".join(buffered)
                     if text:
-                        await append_event(
-                            session_id,
-                            "reasoning_summary",
-                            {
-                                "run_id": operation_id,
-                                "provider_turn_id": turn_id,
-                                "item_id": item_id,
-                                "phase": "plan" if item_type == "plan" else "summary",
-                                "text": text,
-                                "purpose": f"codex_{operation}",
-                            },
-                        )
+                        summary_payload = {
+                            "run_id": operation_id,
+                            "provider_turn_id": turn_id,
+                            "item_id": item_id,
+                            "phase": "plan" if item_type == "plan" else "summary",
+                            "text": text,
+                            **({"reasoning_after_seq": streamed["after_seq"]} if streamed else {}),
+                            "purpose": f"codex_{operation}",
+                        }
+                        if item_type == "reasoning":
+                            await persist_reasoning_summary(session_id, summary_payload, completed_reasoning_items)
+                        else:
+                            await append_event(session_id, "reasoning_summary", summary_payload)
+                    if item_type == "reasoning":
+                        completed_reasoning_items.add(item_id)
+                        await clear_reasoning_summary_stream(session_id, operation_id, item_id)
                 elif item_type == "contextCompaction" and operation == "compaction":
                     native_turn_id = str(params.get("turnId") or turn_id or "") or None
                     native_item_id = str(
@@ -55284,6 +55312,12 @@ async def consume_codex_native_turn(
         terminal_status = "failed"
         terminal_error = concise_error_message(exc)
     finally:
+        summary_cleanup = asyncio.create_task(finish_reasoning_summary_stream(
+            session_id, operation_id, completed_reasoning_items))
+        try:
+            await asyncio.shield(summary_cleanup)
+        except asyncio.CancelledError:
+            await join_task_despite_caller_cancellation(summary_cleanup)
         if goal_steer_queue is not None:
             async def settle_goal_steering() -> None:
                 async with ACTIVE_LOCK:
@@ -57204,7 +57238,8 @@ def codex_thread_params(
     if selected:
         # Custom endpoints must not inherit reasoning-summary parameters from
         # the normal account. Effort is replaced explicitly on every turn.
-        flat_config["model_reasoning_summary"] = "none"
+        flat_config["model_reasoning_summary"] = codex_provider.runtime_summary(
+            selected, CODEX_PROVIDER_STORE.cached_catalog(selected))
         flat_config["model_catalog_json"] = str(CODEX_PROVIDER_STORE.root / "native-models.json")
     reserved_prefix = f"mcp_servers.{CODEX_PROVIDER_MCP_NAME}"
     for key in tuple(flat_config):
@@ -58608,6 +58643,163 @@ def codex_reasoning_text(payload: dict[str, Any]) -> str:
                 parts.append(item.strip())
         return "\n".join(parts).strip()
     return ""
+
+
+def reasoning_summary_stream_snapshot(session_id: str) -> dict[str, Any]:
+    """An additive, non-durable lane; never advances the event-log cursor."""
+    global REASONING_SUMMARY_STREAM_REVISION
+    REASONING_SUMMARY_STREAM_REVISION += 1
+    remaining = 1_000_000
+    items = []
+    for state in REASONING_SUMMARY_STREAMS.get(session_id, {}).values():
+        item = dict(state["item"])
+        if not item["text"].strip():
+            continue
+        if len(item["text"]) > remaining:
+            item["text"] = item["text"][:remaining]
+            item["text_truncated"] = True
+        remaining -= len(item["text"])
+        items.append(item)
+        if not remaining or len(items) == 256:
+            break
+    return {
+        "type": "reasoning_summary_stream", "session_id": session_id,
+        "instance_id": SERVER_INSTANCE_ID,
+        "revision": REASONING_SUMMARY_STREAM_REVISION,
+        "items": items,
+    }
+
+
+async def broadcast_reasoning_summary_stream(session_id: str, packet: dict[str, Any]) -> None:
+    try:
+        await HUB.broadcast(session_id, packet)
+    except Exception:
+        logger.debug("reasoning summary live delivery failed session=%s", session_id)
+
+
+async def flush_reasoning_summary_stream(session_id: str, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+        async with event_delivery_lock(session_id):
+            if REASONING_SUMMARY_STREAM_PENDING.get(session_id) is not asyncio.current_task():
+                return
+            REASONING_SUMMARY_STREAM_PENDING.pop(session_id, None)
+            REASONING_SUMMARY_STREAM_LAST_SENT[session_id] = time.monotonic()
+            packet = reasoning_summary_stream_snapshot(session_id)
+        await broadcast_reasoning_summary_stream(session_id, packet)
+    finally:
+        if REASONING_SUMMARY_STREAM_PENDING.get(session_id) is asyncio.current_task():
+            REASONING_SUMMARY_STREAM_PENDING.pop(session_id, None)
+
+
+async def update_reasoning_summary_stream(
+    session_id: str, run_id: str, item_id: str, params: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Publish only native summary sections, retaining their first arrival order."""
+    index = params.get("summaryIndex", 0)
+    delta = params.get("delta", "")
+    if not run_id or not item_id or not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < 1024:
+        return
+    if not isinstance(delta, str):
+        return
+    async with event_delivery_lock(session_id):
+        if session_id in DELETING_SESSIONS or session_id in DELETED_SESSION_TOMBSTONES:
+            return
+        streams = REASONING_SUMMARY_STREAMS.setdefault(session_id, {})
+        state = streams.get((run_id, item_id))
+        first = state is None or not state["item"]["text"].strip()
+        if state is None:
+            after_seq = EVENT_SEQ_CACHE.get(session_id)
+            if after_seq is None:
+                after_seq = await asyncio.to_thread(last_event_seq_from_file, events_path(session_id))
+            state = {"parts": {}, "item": {
+                **dict(metadata or {}), "run_id": run_id, "item_id": item_id,
+                "backend": BACKEND_CODEX, "phase": "summary", "text": "",
+                "ts": now_iso(), "after_seq": after_seq,
+            }}
+            streams[(run_id, item_id)] = state
+        parts = state["parts"]
+        parts[index] = parts.get(index, "") + delta
+        state["item"]["text"] = "\n".join(parts[index] for index in sorted(parts))
+        now = time.monotonic()
+        delay = max(0.0, 0.05 - (now - REASONING_SUMMARY_STREAM_LAST_SENT.get(session_id, 0.0)))
+        if not first and delay:
+            if session_id not in REASONING_SUMMARY_STREAM_PENDING:
+                REASONING_SUMMARY_STREAM_PENDING[session_id] = asyncio.create_task(
+                    flush_reasoning_summary_stream(session_id, delay))
+            return
+        REASONING_SUMMARY_STREAM_LAST_SENT[session_id] = now
+        packet = reasoning_summary_stream_snapshot(session_id)
+    # Snapshot revisions fence a reconnect snapshot racing a newer update.
+    # Socket writes remain outside the durable event delivery lock.
+    await broadcast_reasoning_summary_stream(session_id, packet)
+
+
+def reasoning_summary_stream_item(session_id: str, run_id: str, item_id: str) -> dict[str, Any]:
+    state = REASONING_SUMMARY_STREAMS.get(session_id, {}).get((run_id, item_id))
+    return dict(state["item"]) if state else {}
+
+
+async def clear_reasoning_summary_stream(session_id: str, run_id: str, item_id: str | None = None) -> None:
+    async with event_delivery_lock(session_id):
+        streams = REASONING_SUMMARY_STREAMS.get(session_id)
+        if not streams:
+            return
+        removed = [key for key in streams if key[0] == run_id and (item_id is None or key[1] == item_id)]
+        if not removed:
+            return
+        for key in removed:
+            del streams[key]
+        if not streams:
+            REASONING_SUMMARY_STREAMS.pop(session_id, None)
+            REASONING_SUMMARY_STREAM_LAST_SENT.pop(session_id, None)
+        pending = REASONING_SUMMARY_STREAM_PENDING.pop(session_id, None)
+        if pending:
+            pending.cancel()
+        packet = reasoning_summary_stream_snapshot(session_id)
+    if pending:
+        await asyncio.gather(pending, return_exceptions=True)
+    await broadcast_reasoning_summary_stream(session_id, packet)
+
+
+async def persist_reasoning_summary(
+    session_id: str, payload: dict[str, Any], completed_item_ids: set[str],
+) -> None:
+    # Join the append and identity update together: cancellation after the
+    # ledger write must not make the finalizer append the item a second time.
+    async def commit() -> None:
+        await append_event(session_id, "reasoning_summary", payload)
+        completed_item_ids.add(payload["item_id"])
+        await clear_reasoning_summary_stream(session_id, payload["run_id"], payload["item_id"])
+    task = asyncio.create_task(commit())
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await join_task_despite_caller_cancellation(task)
+        raise
+
+
+async def finish_reasoning_summary_stream(
+    session_id: str, run_id: str, completed_item_ids: set[str],
+) -> None:
+    """Keep summaries already shown when interruption omits item/completed."""
+    items = [dict(state["item"]) for (owner, _), state in
+             REASONING_SUMMARY_STREAMS.get(session_id, {}).items() if owner == run_id]
+    try:
+        for item in items:
+            item_id = item["item_id"]
+            if item_id in completed_item_ids or not item["text"].strip():
+                continue
+            payload = {key: value for key, value in item.items() if key not in {"ts", "after_seq"}}
+            payload.update(partial=True, reasoning_after_seq=item["after_seq"])
+            await persist_reasoning_summary(session_id, payload, completed_item_ids)
+    except Exception:
+        # Storage failure must not strand the provider subscription or turn
+        # ownership while finalizers are releasing this chat.
+        logger.exception("could not preserve partial reasoning summary session=%s run=%s", session_id, run_id)
+    finally:
+        await clear_reasoning_summary_stream(session_id, run_id)
 
 
 def codex_app_server_reasoning_summary(payload: dict[str, Any]) -> str:
@@ -65331,6 +65523,7 @@ async def run_codex_app_server(
     seen_reasoning: set[str] = set()
     emitted_final_item_ids: set[str] = set()
     emitted_reasoning_item_ids: set[str] = set()
+    reasoning_stream_run_ids = {current_run_id}
     assistant_deltas: dict[str, list[str]] = {}
     reasoning_summary_deltas: dict[str, list[str]] = {}
     plan_deltas: dict[str, list[str]] = {}
@@ -65400,6 +65593,7 @@ async def run_codex_app_server(
         *,
         phase: str = "",
         item_id: str = "",
+        reasoning_after_seq: int | None = None,
     ) -> None:
         text = str(value or "").strip()
         if not text:
@@ -65419,9 +65613,14 @@ async def run_codex_app_server(
             payload["phase"] = phase
         if item_id:
             payload["item_id"] = item_id
-        await append_event(session_id, "reasoning_summary", payload)
-        if item_id:
-            emitted_reasoning_item_ids.add(item_id)
+        if reasoning_after_seq is not None:
+            payload["reasoning_after_seq"] = reasoning_after_seq
+        if phase == "summary" and item_id:
+            await persist_reasoning_summary(session_id, payload, emitted_reasoning_item_ids)
+        else:
+            await append_event(session_id, "reasoning_summary", payload)
+            if item_id:
+                emitted_reasoning_item_ids.add(item_id)
 
     async def flush_pending_unknown(*, final: bool) -> None:
         nonlocal pending_unknown_message, pending_unknown_item_id
@@ -66050,6 +66249,7 @@ async def run_codex_app_server(
                     )
                 stopped_during_handoff = bool(active.get("stop_requested"))
                 current_run_id = candidate_run_id
+                reasoning_stream_run_ids.add(candidate_run_id)
                 current_provider_prompt = request_prompt
                 current_diff_baseline = candidate_diff_baseline
                 clear_logical_buffers()
@@ -66131,6 +66331,8 @@ async def run_codex_app_server(
                 ),
             ]
             await append_durable_event_batch(session_id, event_specs)
+            await finish_reasoning_summary_stream(
+                session_id, previous_run_id, emitted_reasoning_item_ids)
             await revoke_cross_chat_capability(previous_run_id)
         except BaseException as exc:
             await retire_accepted_transition()
@@ -66302,6 +66504,7 @@ async def run_codex_app_server(
             # user-visible trace item omits its aggregate payload.
             "item/agentMessage/delta",
             "item/reasoning/summaryTextDelta",
+            "item/reasoning/summaryPartAdded",
             "item/plan/delta",
             "item/commandExecution/outputDelta",
             "item/fileChange/outputDelta",
@@ -66318,10 +66521,13 @@ async def run_codex_app_server(
                 str(params.get("delta") or "")
             )
             return False
-        if method == "item/reasoning/summaryTextDelta" and item_id:
+        if method in {"item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded"} and item_id:
+            if item_id in emitted_reasoning_item_ids:
+                return False
             reasoning_summary_deltas.setdefault(item_id, []).append(
                 str(params.get("delta") or "")
             )
+            await update_reasoning_summary_stream(session_id, current_run_id, item_id, params, current_metadata())
             return False
         if method == "item/plan/delta" and item_id:
             plan_deltas.setdefault(item_id, []).append(
@@ -66373,15 +66579,20 @@ async def run_codex_app_server(
                     pending_unknown_item_id = item_id
             elif item_type == "reasoning":
                 await flush_pending_unknown(final=False)
+                streamed = reasoning_summary_stream_item(session_id, current_run_id, item_id)
                 buffered = reasoning_summary_deltas.pop(
                     str(item.get("id") or ""),
                     [],
                 )
                 reasoning = (
                     codex_app_server_reasoning_summary(item)
+                    or streamed.get("text")
                     or "".join(buffered)
                 )
-                await emit_reasoning(reasoning, item_id=item_id)
+                await emit_reasoning(reasoning, phase="summary", item_id=item_id,
+                    reasoning_after_seq=streamed.get("after_seq"))
+                emitted_reasoning_item_ids.add(item_id)
+                await clear_reasoning_summary_stream(session_id, current_run_id, item_id)
             elif item_type == "plan":
                 await flush_pending_unknown(final=False)
                 buffered = plan_deltas.pop(
@@ -66779,7 +66990,9 @@ async def run_codex_app_server(
                 if effort:
                     overrides["effort"] = effort
                 if selected_provider:
-                    overrides.update(codex_provider.turn_overrides(model, effort))
+                    overrides.update(codex_provider.turn_overrides(model, effort,
+                        summary=codex_provider.runtime_summary(selected_provider,
+                            CODEX_PROVIDER_STORE.cached_catalog(selected_provider))))
                 if service_tier:
                     overrides["serviceTier"] = codex_app_server_service_tier(service_tier)
 
@@ -67309,6 +67522,9 @@ async def run_codex_app_server(
             nonlocal provisional_thread_invalidated, child_acceptance_parent_id
 
             try:
+                for summary_run_id in reasoning_stream_run_ids:
+                    await finish_reasoning_summary_stream(
+                        session_id, summary_run_id, emitted_reasoning_item_ids)
                 if pending_goal_steer_handoff is not None:
                     future = pending_goal_steer_handoff["request"].get("future")
                     if future is not None and not future.done():
@@ -67402,6 +67618,7 @@ async def run_codex_app_server(
     produced_activity = bool(
         text_parts
         or seen_reasoning
+        or emitted_reasoning_item_ids
         or started_tools
         or finished_tools
         or seen_artifacts
@@ -77970,6 +78187,8 @@ async def create_native_side_chat(session_id: str):
                         provider_selection["effort"] = codex_provider.runtime_effort(
                             provider_selection, CODEX_PROVIDER_STORE.cached_catalog(provider_selection), current.get("effort"),
                         )
+                        provider_selection["reasoning_summary"] = codex_provider.runtime_summary(
+                            provider_selection, CODEX_PROVIDER_STORE.cached_catalog(provider_selection))
                     self.codex = NativeCodexSideChat(parent_id, executable=CODEX_BIN,
                         model=model if isinstance(model, str) and model.strip() else None,
                         env=side_questions.isolated_environment(runner_env()),
@@ -90298,6 +90517,7 @@ async def session_events(
     ws: WebSocket,
     after: int = 0,
     visible: bool | None = None,
+    reasoning_stream: bool = False,
 ) -> None:
     selected_subprotocol = websocket_endpoint_subprotocol(
         ws,
@@ -90354,13 +90574,17 @@ async def session_events(
             # performed only in a lock-held instant where no gap remains, so a
             # later append observes the subscriber before it broadcasts.
             activated = False
+            reasoning_snapshot = None
             async with event_delivery_lock(session_id):
                 gap_boundary = await asyncio.to_thread(
                     last_event_seq_from_file,
                     events_path(session_id),
                 )
                 if cursor >= gap_boundary:
-                    activated = await HUB.register_accepted(session_id, ws)
+                    activated = await HUB.register_accepted(session_id, ws, **(
+                        {"reasoning_stream": True} if reasoning_stream else {}))
+                    if activated and reasoning_stream:
+                        reasoning_snapshot = reasoning_summary_stream_snapshot(session_id)
             if cursor >= gap_boundary:
                 if not activated:
                     # This should be unreachable after a successful
@@ -90369,6 +90593,8 @@ async def session_events(
                     # remains outside the event-delivery lock.
                     await close_event_websocket_over_capacity(ws)
                     return
+                if reasoning_snapshot is not None:
+                    await asyncio.wait_for(ws.send_json(reasoning_snapshot), timeout=WEBSOCKET_SEND_TIMEOUT_SECONDS)
                 break
             boundary = gap_boundary
         while True:

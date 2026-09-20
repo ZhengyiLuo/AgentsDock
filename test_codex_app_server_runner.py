@@ -3231,7 +3231,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [payload.get("phase") for payload in reasoning],
-            [None, "plan", "commentary"],
+            ["summary", "plan", "commentary"],
         )
         self.assertNotIn("SECRET RAW REASONING", str(event_pairs))
         self.assertFalse(
@@ -3672,7 +3672,7 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "threadId": "thread-native",
                     "turnId": "turn-native",
                     "itemId": "unfinished-reasoning",
-                    "delta": "This unfinished reasoning must stay transient.",
+                    "delta": "This unfinished summary remains visible as partial.",
                 },
             },
             {
@@ -3756,22 +3756,22 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "reason-a",
                 "reason-b",
                 "commentary-before",
+                "unfinished-reasoning",
                 "reason-after",
                 "commentary-after",
             ],
         )
         self.assertEqual(
-            [payload["run_id"] for payload in trace_payloads[:3]],
-            ["run-original", "run-original", "run-original"],
+            [payload["run_id"] for payload in trace_payloads[:4]],
+            ["run-original"] * 4,
         )
         self.assertEqual(
-            [payload["run_id"] for payload in trace_payloads[3:]],
+            [payload["run_id"] for payload in trace_payloads[4:]],
             [run_now["run_id"], run_now["run_id"]],
         )
-        self.assertFalse(any(
-            "unfinished" in str(payload.get("text") or "").lower()
-            for payload in trace_payloads
-        ))
+        self.assertTrue(trace_payloads[3]["partial"])
+        self.assertEqual(trace_payloads[3]["text"], "This unfinished summary remains visible as partial.")
+        self.assertFalse(any(payload.get("partial") for payload in trace_payloads[:3] + trace_payloads[4:]))
         final_payloads = [
             call.args[2]
             for call in events.await_args_list
@@ -3786,6 +3786,96 @@ class CodexAppServerRunnerTests(unittest.IsolatedAsyncioTestCase):
         _finished.assert_awaited_once()
         self.assertEqual(_finished.await_args.args[1]["run_id"], run_now["run_id"])
         self.assertFalse(_finished.await_args.args[1]["stopped"])
+
+    async def test_summary_is_live_before_completion_and_replaced_once_authoritatively(self) -> None:
+        turn = FakeTurn()
+        stack, events, _finished, _fallback = self.runner_patches(FakeManager(turn))
+        broadcast = AsyncMock()
+
+        def delta(text, index=0, item_id="thinking"):
+            return {"method": "item/reasoning/summaryTextDelta", "params": {
+                "threadId": "thread-native", "turnId": "turn-native",
+                "itemId": item_id, "summaryIndex": index, "delta": text}}
+
+        async def wait_for_text(text):
+            async def ready():
+                while not any(text in str(call.args[1]) for call in broadcast.await_args_list):
+                    await asyncio.sleep(0)
+            await asyncio.wait_for(ready(), timeout=2)
+
+        with stack, patch.object(agent_server.HUB, "broadcast", broadcast), patch.dict(
+            agent_server.EVENT_SEQ_CACHE, {"chat-native": 10}, clear=True,
+        ):
+            runner = asyncio.create_task(agent_server.run_codex_app_server(
+                "chat-native", "run-original", "Explain", dict(self.session),
+                Path(self.cwd) / ".runner-test-manifest.json", allow_exec_fallback=True))
+            try:
+                turn.feed(delta("First section"))
+                await wait_for_text("First section")
+                self.assertFalse(any(call.args[1] == "reasoning_summary" for call in events.await_args_list))
+                turn.feed({"method": "item/completed", "params": {
+                    "threadId": "thread-native", "turnId": "turn-native", "item": {
+                        "id": "tool-between", "type": "commandExecution", "command": "echo fixture",
+                        "status": "completed", "exitCode": 0, "aggregatedOutput": "fixture"}}})
+                turn.feed(delta("Second section", 1))
+                await wait_for_text("First section\\nSecond section")
+                completed = reasoning_item("thinking", "Authoritative revised summary")
+                turn.feed(completed)
+                turn.feed(completed)
+                turn.feed(delta("Late replay must not reopen the summary"))
+                turn.feed(agent_message("answer", "Done", "final_answer"))
+                turn.feed(completed_notification())
+                await asyncio.wait_for(runner, timeout=10)
+            finally:
+                if not runner.done():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
+        summaries = [call.args[2] for call in events.await_args_list if call.args[1] == "reasoning_summary"]
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["text"], "Authoritative revised summary")
+        self.assertEqual(summaries[0]["reasoning_after_seq"], 10)
+        self.assertEqual(summaries[0]["item_id"], "thinking")
+        self.assertFalse(agent_server.REASONING_SUMMARY_STREAMS.get("chat-native"))
+        self.assertFalse(agent_server.REASONING_SUMMARY_STREAM_PENDING.get("chat-native"))
+        self.assertNotIn("Late replay", str(broadcast.await_args_list))
+
+    async def test_received_summary_survives_transport_error_and_task_cancellation(self) -> None:
+        for cancelled in (False, True):
+            with self.subTest(cancelled=cancelled):
+                turn = FakeTurn()
+                stack, events, _finished, _fallback = self.runner_patches(FakeManager(turn))
+                agent_server.BUSY_SESSIONS.add("chat-native")
+                agent_server.CURRENT_TURNS["chat-native"] = {"run_id": "run-original", "backend": "codex"}
+                with stack, patch.object(agent_server.HUB, "broadcast", AsyncMock()), patch.dict(
+                    agent_server.EVENT_SEQ_CACHE, {"chat-native": 10}, clear=True,
+                ):
+                    runner = asyncio.create_task(agent_server.run_codex_app_server(
+                        "chat-native", "run-original", "Explain", dict(self.session),
+                        Path(self.cwd) / ".runner-test-manifest.json", allow_exec_fallback=False,
+                        allow_resume_rollover=False))
+                    try:
+                        turn.feed({"method": "item/reasoning/summaryTextDelta", "params": {
+                            "threadId": "thread-native", "turnId": "turn-native",
+                            "itemId": "partial-thought", "summaryIndex": 0, "delta": "Already shown summary"}})
+                        async def received():
+                            while not agent_server.reasoning_summary_stream_item("chat-native", "run-original", "partial-thought"):
+                                await asyncio.sleep(0)
+                        await asyncio.wait_for(received(), 2)
+                        if cancelled:
+                            runner.cancel()
+                        else:
+                            turn.feed(RuntimeError("Synthetic transport failure"))
+                        await asyncio.wait_for(asyncio.gather(runner, return_exceptions=True), 10)
+                    finally:
+                        if not runner.done():
+                            runner.cancel()
+                            await asyncio.gather(runner, return_exceptions=True)
+                summaries = [call.args[2] for call in events.await_args_list if call.args[1] == "reasoning_summary"]
+                self.assertEqual(len(summaries), 1)
+                self.assertEqual((summaries[0]["text"], summaries[0]["partial"], summaries[0]["reasoning_after_seq"]),
+                                 ("Already shown summary", True, 10))
+                self.assertFalse(agent_server.REASONING_SUMMARY_STREAMS.get("chat-native"))
+                self.assertFalse(agent_server.REASONING_SUMMARY_STREAM_PENDING.get("chat-native"))
 
     async def test_app_server_never_persists_raw_reasoning_text(self) -> None:
         turn = FakeTurn([
