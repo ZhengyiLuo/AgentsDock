@@ -394,9 +394,10 @@ export interface CodexBackgroundTerminalsCleanInput {
 
 export interface SessionSubagentLimitControl {
   supported: boolean
-  scope: 'chat'
-  mode: 'native_concurrent'
-  applies_to: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start'
+  /** Default fields may be omitted from compact session-list responses. */
+  scope?: 'chat'
+  mode?: 'native_concurrent'
+  applies_to?: 'new_or_reloaded_threads' | 'next_idle_provider_start' | 'next_provider_process_start'
   reason?: string | null
   message?: string
 }

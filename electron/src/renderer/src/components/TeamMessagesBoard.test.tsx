@@ -810,17 +810,22 @@ describe('server inbox attention state', () => {
       render(board({ onUnreadSnapshot: counts }))
       const row = await menu()
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark as unread' }))
-      await waitFor(() => expect(row).toHaveClass('unread'))
+      // The badge callback runs in a passive effect, after the row's DOM commit.
+      await waitFor(() => {
+        expect(row).toHaveClass('unread')
+        expect(counts).toHaveBeenLastCalledWith(1, false)
+      })
       expect(api.setTeamMessageMailboxState.mock.calls[0][1]).toEqual({
         teamId: 'team-1', messageId: 'message-1', addressKind: 'server', addressId: 'server-local',
         unread: true, expectedVersion: 1, idempotencyKey: expect.any(String)
       })
-      expect(counts).toHaveBeenLastCalledWith(1, false)
       await menu()
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark as read' }))
-      await waitFor(() => expect(row).not.toHaveClass('unread'))
+      await waitFor(() => {
+        expect(row).not.toHaveClass('unread')
+        expect(counts).toHaveBeenLastCalledWith(0, false)
+      })
       expect(api.setTeamMessageMailboxState.mock.calls[1][1]).toMatchObject({ unread: false, expectedVersion: 2 })
-      expect(counts).toHaveBeenLastCalledWith(0, false)
       expect(api.recordTeamMessageReceipt).not.toHaveBeenCalled()
       expect(globalRead).not.toHaveBeenCalled()
       expect(api.teamMessages).toHaveBeenCalledTimes(1)
