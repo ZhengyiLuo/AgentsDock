@@ -127,6 +127,12 @@ cd AgentsServer
         <p><strong>Only needed to reach the remote from outside its local network.</strong> If your devices are on the same Wi&#8209;Fi as the remote, you can skip this and use the machine's local IP address in Part 2.</p>
         <p>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> on the remote machine and sign in. This gives the machine a private <code>100.x.x.x</code> address that your other devices can reach from anywhere — without opening any ports to the public internet. Note that address (or the machine's Tailscale hostname); you'll enter it in Part 2.</p>
 
+        <p><strong>More than one machine?</strong> Repeat Part 1 on each of them. AgentsDock can hold several servers at once — they all show up in the server menu at the top of the sidebar, and you switch between them with one click.</p>
+        <figure class="docs-shot medium">
+          <img src="./assets/setup-servers.png" alt="The server menu at the top of the AgentsDock sidebar listing three servers, with Add Server and Server Settings below" loading="lazy" />
+          <figcaption>The server menu lists every server you've added. A green dot means it's reachable.</figcaption>
+        </figure>
+
         <h2 class="docs-part" id="part-device"><span class="docs-part-label">Part 2</span>Connect from your device</h2>
         <p>Repeat this on any Mac, iPhone, or iPad you want to use.</p>
 
@@ -149,6 +155,13 @@ cd AgentsServer
         <figure class="docs-shot">
           <img src="./assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux, Claude Code, and Codex status" loading="lazy" />
           <figcaption>Once connected, the app's Settings let you monitor the connection and check that tmux, Claude Code, and Codex are ready on the server.</figcaption>
+        </figure>
+        <p>Connected to more than one machine? Add each one the same way — open the server menu at the top of the sidebar and choose <strong>Add Server</strong>. From then on you can switch between servers from that menu at any time.</p>
+        <figure class="docs-shot">
+          <video autoplay muted loop playsinline preload="metadata" poster="./assets/setup-switch-poster.jpg">
+            <source src="./assets/setup-switch.mp4" type="video/mp4" />
+          </video>
+          <figcaption>Switch servers from the menu at the top of the sidebar — each server keeps its own chats.</figcaption>
         </figure>
 
         <h2 id="troubleshoot">Not connecting?</h2>

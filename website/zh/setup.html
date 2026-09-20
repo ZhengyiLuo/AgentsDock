@@ -128,6 +128,12 @@ cd AgentsServer
         <p>仅在需要从局域网之外访问远程机器时才需要。如果你的设备和远程机器在同一 Wi‑Fi 下，可以跳过这一步，在第 2 部分直接使用机器的局域网 IP。</p>
         <p>在远程机器上安装 <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> 并登录。这会给机器分配一个私有的 <code>100.x.x.x</code> 地址，你的其他设备可以从任何地方访问它——无需向公网开放任何端口。记下这个地址（或机器的 Tailscale 主机名），第 2 部分会用到。</p>
 
+        <p><strong>有不止一台机器？</strong>在每台机器上重复第 1 部分。AgentsDock 可以同时保存多个服务器——它们都会出现在侧边栏顶部的服务器菜单里，一键即可切换。</p>
+        <figure class="docs-shot medium">
+          <img src="../assets/setup-servers.png" alt="The server menu at the top of the AgentsDock sidebar listing three servers, with Add Server and Server Settings below" loading="lazy" />
+          <figcaption>服务器菜单列出你添加的所有服务器。绿点表示可以连上。</figcaption>
+        </figure>
+
         <h2 class="docs-part" id="part-device"><span class="docs-part-label">第 2 部分</span>从你的设备连接</h2>
         <p>在你想使用的每台 Mac、iPhone 或 iPad 上重复以下步骤。</p>
 
@@ -150,6 +156,13 @@ cd AgentsServer
         <figure class="docs-shot">
           <img src="../assets/setup-connection.png" alt="AgentsDock Settings on macOS showing a connected Mac Mini server and a Runtimes & prerequisites panel with tmux, Claude Code, and Codex status" loading="lazy" />
           <figcaption>连接后，应用的<strong>设置</strong>页可以监控连接状态，并检查服务器上的 tmux、Claude Code 和 Codex 是否就绪。</figcaption>
+        </figure>
+        <p>要连接不止一台机器？用同样的方法逐个添加——打开侧边栏顶部的服务器菜单，选择 <strong>Add Server</strong>。之后你随时可以在该菜单里切换服务器。</p>
+        <figure class="docs-shot">
+          <video autoplay muted loop playsinline preload="metadata" poster="../assets/setup-switch-poster.jpg">
+            <source src="../assets/setup-switch.mp4" type="video/mp4" />
+          </video>
+          <figcaption>在侧边栏顶部的菜单里切换服务器——每个服务器都保留自己的会话。</figcaption>
         </figure>
 
         <h2 id="troubleshoot">连不上？</h2>
