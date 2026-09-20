@@ -1,0 +1,46 @@
+name: Verify server source
+
+on:
+  pull_request:
+  push:
+    branches: [main, release/1.0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-server-source-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server tests (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    defaults:
+      run:
+        working-directory: server
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      AGENTS_SERVER_CONFIG_DIR: ${{ runner.temp }}/agentsdock-config
+      AGENTSDOCK_STATE_DIR: ${{ runner.temp }}/agentsdock-state
+      AGENTSDOCK_TEAM_HUB_MODE: disabled
+      CODEX_SESSIONS_ROOT: ${{ runner.temp }}/codex-sessions
+      CLAUDE_PROJECTS_ROOT: ${{ runner.temp }}/claude-projects
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - name: Verify dependency lock and test
+        run: |
+          uv lock --check
+          ulimit -s 65536
+          PYTHONFAULTHANDLER=1 uv run --python 3.13 python -X faulthandler scripts/run_test_shard.py --index ${{ matrix.shard }} --count 8

@@ -196,12 +196,15 @@ Open `http://localhost:4175`. No website dependency installation is needed.
 | [`website/`](website/) | Product website and user guides |
 | [`team-hub/`](team-hub/) | Team Hub service code and tests |
 | [`docs/`](docs/) | Architecture, development notes, and release-channel documentation |
-| [`server/`](server/) | Frozen compatibility fixtures for cross-stack tests, **not the deployable server** |
+| [`server/`](server/) | Maintained AgentsServer runtime, installer, and server-only tests |
 | `Sources/`, `Apps/`, `ZenithDock.xcodeproj` | Legacy Swift clients, not the current Electron or React Native apps |
 
-The maintained backend is in the separate
-[AgentsServer repository](https://github.com/ZhengyiLuo/AgentsServer). Do not
-deploy the `server/` directory from this repository.
+The maintained backend lives in `server/`. Its Python dependencies and installer
+are self-contained; server users do not need to build either client. The
+[AgentsServer repository](https://github.com/ZhengyiLuo/AgentsServer) remains the
+legacy download and compatibility destination during migration. See
+[the source migration notes](docs/SERVER_SOURCE_MIGRATION.md) before exporting
+changes or preparing a coordinated release.
 
 ## Contributing
 

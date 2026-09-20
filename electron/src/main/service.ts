@@ -11,6 +11,7 @@ import type { WorkspaceGitAction, WorkspaceGitView } from '../shared/workspace-g
 import { parseMailHintPageAcknowledgment, TEAM_MAIL_HINTS_ENABLED, type MailHintPageAcknowledgment, type MailHintScope } from '../shared/team-mail-hints'
 import { TeamMailHintController } from './team-mail-hint-controller'
 import { ActivityHealthProjection, type ActivityHealthRequest } from './activity-health'
+import type { CoordinatedConnection, CoordinatedProfile } from './coordinated-updates'
 import { SideQuestionRequests } from './side-question-requests'
 import { sideQuestionLimit, sideQuestionsAvailable, validateSideQuestionInput, type SideQuestionAnswer, type SideQuestionCancellation, type SideQuestionInput, type SideQuestionScope } from '../shared/side-questions'
 import { parseBulletinHintRefresh } from '../shared/team-bulletin-hints'
@@ -333,6 +334,9 @@ interface SemanticTimelineCapability {
 }
 
 export interface AppServiceOptions {
+  /** Reconcile authorized updates on existing health observations, without another polling loop. */
+  onServerReachable?: (profileId: string, health: Health) => void
+  onServerUnavailable?: (profileId: string) => void
   /** Test seam only. Production remains disabled until full-path acceptance. */
   mailHintsEnabled?: boolean
   settings?: SettingsStore
@@ -418,6 +422,8 @@ export class AppService {
   private jobsPollTimer: NodeJS.Timeout | null = null
   private searchBackfillTimer: NodeJS.Timeout | null = null
   private health: Health | null = null
+  private readonly onServerReachable?: AppServiceOptions['onServerReachable']
+  private readonly onServerUnavailable?: AppServiceOptions['onServerUnavailable']
   private sessions: Session[] = []
   private jobs: Job[] = []
   private runtimeCatalog: RuntimeCatalog | null = null
@@ -474,6 +480,8 @@ export class AppService {
     this.portTunnels.setChangeListener?.(ports => this.emitForwardedPorts(ports))
     appLog('startup', 'local cache ready')
     this.clientFactory = options.clientFactory ?? ((serverUrl, accessToken) => new AgentServerClient(serverUrl, accessToken))
+    this.onServerReachable = options.onServerReachable
+    this.onServerUnavailable = options.onServerUnavailable
     this.serverRestartReconnectTimeoutMs = options.serverRestartReconnectTimeoutMs ?? SERVER_RESTART_RECONNECT_TIMEOUT_MS
     this.serverRestartPollDelayMs = options.serverRestartPollDelayMs ?? SERVER_RESTART_POLL_DELAY_MS
     this.serverRestartHealthTimeoutMs = options.serverRestartHealthTimeoutMs ?? SERVER_RESTART_HEALTH_TIMEOUT_MS
@@ -2041,6 +2049,30 @@ export class AppService {
     const status = await scope.client.serverUpdateStatus(target)
     this.assertServerUpdateTarget(scope, target, status)
     return status
+  }
+
+  coordinatedUpdateProfiles(): CoordinatedProfile[] {
+    return this.settings.listProfiles().map(profile => ({ id: profile.id, name: profile.name,
+      serverIdentity: profile.serverIdentity ?? null, active: profile.id === this.activeProfileId }))
+  }
+
+  async coordinatedUpdateConnection(profile: CoordinatedProfile): Promise<CoordinatedConnection> {
+    this.requireProfileNotRemoving(profile.id)
+    const metadata = this.settings.getProfileMetadata(profile.id)
+    if (!metadata || metadata.serverIdentity !== profile.serverIdentity
+      || this.pendingProfileAuthorityNamespaces.has(profile.id)) throw staleProfileError()
+    const revision = this.settings.connectionRevision(profile.id)
+    const assertCurrent = (): void => {
+      const current = this.settings.getProfileMetadata(profile.id)
+      if (!current || current.serverUrl !== metadata.serverUrl || current.serverIdentity !== profile.serverIdentity
+        || this.settings.connectionRevision(profile.id) !== revision
+        || this.profileRemovals.has(profile.id) || this.pendingProfileAuthorityNamespaces.has(profile.id)) throw staleProfileError()
+    }
+    const token = await this.settings.accessTokenForConnectionAsync(profile.id)
+    assertCurrent()
+    const url = new URL(metadata.serverUrl)
+    return { client: this.clientFactory(metadata.serverUrl, token), assertCurrent,
+      loopback: url.protocol === 'http:' && isLoopbackHostname(url.hostname) }
   }
 
   async checkServerUpdate(track?: ServerUpdateTrack): Promise<ServerUpdateStatus> {
@@ -5211,6 +5243,7 @@ export class AppService {
     }
     this.health = health
     this.validatedGeneration = scope.generation
+    this.onServerReachable?.(scope.profileId, health)
     if (identity) {
       const verifiedScope = scope
       try {
@@ -6269,6 +6302,7 @@ export class AppService {
         ...(serverVersion ? { serverVersion } : {})
       })
       if (expectedIdentity && actualIdentity === expectedIdentity) {
+        this.onServerReachable?.(profileId, health)
         this.ensureInactiveEmergencyStream(
           profileId,
           revision,
@@ -6412,6 +6446,7 @@ export class AppService {
 
   private setProfileRuntime(profileId: string, patch: ServerProfileRuntimeState): void {
     this.profileRuntime.set(profileId, { ...this.profileRuntime.get(profileId), ...patch })
+    if (patch.connectionState === 'offline') this.onServerUnavailable?.(profileId)
   }
 
   private refreshProfileUnread(scope: ConnectionScope): void {

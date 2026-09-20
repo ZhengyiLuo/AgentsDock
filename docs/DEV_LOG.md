@@ -1,5 +1,57 @@
 # Public development log
 
+## 2026-09-20 — Coordinated npm updates — source candidate
+
+- Import the maintained server under `server/` with its complete history.
+  Retire the frozen snapshot and its legacy Swift server-text assertions.
+  Verify that the initial subtree export reproduces the original standalone
+  commit; require subsequent compatibility exports to preserve ancestry and
+  exact contents. Keep legacy signed downloads available during migration.
+- Prepare `@agentsdock/server` from the exact runtime allowlist, with no npm
+  installation hooks. Stage a separate signed descriptor tying the app's
+  public version to an immutable npm archive, integrity hashes and API contract.
+  Keep source package metadata private and publication disabled in preparation.
+- Add authenticated, identity-bound reconciliation through the existing managed
+  updater. Persist signed bytes across queued work and restart, queue while busy,
+  and validate candidate identity, version and API before activation commits.
+  Fresh npm installation refuses existing state and services, including a
+  repeated check under the installer lock.
+- Add desktop coordination with durable per-server receipts, independent offline
+  recovery, explicit enrollment, exact downloaded app version pinning and a
+  compatibility gate before restart. Ordinary unenrolled builds keep the existing
+  update behavior. The app and server retain their native packaging formats.
+  Failed or canceled owned attempts stay paused until an explicit scoped retry;
+  enrolled releases keep legacy controls under Advanced server recovery.
+- Pass 231 focused server checks, including real HTTP authentication and
+  identity guards, signed metadata, queued-work recovery, installer protection
+  and candidate health rejection. Verify actual offline npm packing, CLI native
+  transport, exact payload bytes and executable permissions, paired artifact
+  staging and Git export rejection on divergent history.
+- Pass 722 affected desktop tests, TypeScript validation and production
+  compilation. Exercise the production renderer, preload, IPC, profile service,
+  updater, coordinator and native HTTP against an isolated production FastAPI
+  server in native offscreen Electron. Click Update, reopen a second process,
+  preserve the queued receipt, display an independent offline profile, pause on
+  failure/cancellation and retry explicitly. Verify dark/light minimum-width
+  layouts and no automatic legacy release lookup. Feed/download, signing key,
+  provider work, server activation and app quit are controlled test boundaries;
+  simulated completion is not recorded as a real managed update.
+- Separately exercise the real installer in a disposable Ubuntu systemd VM:
+  legacy beta.9 to guest-stamped beta.12, then a deliberately incompatible
+  beta.13 candidate rolls back to beta.12. Authenticated health verifies exact
+  version and API, stable identity and preserved token. Six synthetic provider,
+  configuration and history/state files remain byte-identical. This validates
+  Linux service activation and rollback, not real provider sessions or the full
+  registry-to-app update journey.
+- Compile the legacy Swift guardrail executable successfully. Its unchanged
+  React mobile source-text assertion still fails before later checks; this is
+  not recorded as a passing full Swift guardrail run.
+- Availability: source candidate only. macOS launchd migration and rollback,
+  active real-provider work and retained live chat data, registry publication,
+  the complete coordinated upgrade and packaged native acceptance remain
+  required before a coordinated release. No production service or published
+  release is changed by this source work.
+
 ## 2026-09-20 — Compact running command blocks — 1.0.4-beta.11 local acceptance
 
 - Keep the active Codex tool inside its compact command group. Update the

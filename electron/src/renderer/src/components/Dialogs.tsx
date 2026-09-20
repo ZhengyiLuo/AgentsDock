@@ -467,7 +467,9 @@ export function Dialogs() {
 
 type AppSettingsSection = 'general' | 'shortcuts' | 'server' | 'updates'
 
-export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSettings?: ReactNode; serverUpdates?: ReactNode } = {}) {
+export function AppSettingsDialog({ serverSettings, serverUpdates, onServerUpdatesVisible }: {
+  serverSettings?: ReactNode; serverUpdates?: ReactNode; onServerUpdatesVisible?: (visible: boolean) => void
+} = {}) {
   useLocale()
   const language = useLanguagePreference()
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
@@ -480,6 +482,7 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
   const [appearance, setAppearance] = useState<AppearanceMode>('system')
   const [update, setUpdate] = useState<AppUpdateStatus | null>(null)
   const [updateTrackBusy, setUpdateTrackBusy] = useState(false)
+  const [serverRecoveryOpen, setServerRecoveryOpen] = useState(false)
   const activeSectionRef = useRef<HTMLButtonElement | null>(null)
 
   const closeSettings = () => {
@@ -502,13 +505,22 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
     if (legacyServerSettingsOpen) setSection('server')
   }, [legacyServerSettingsOpen])
   useEffect(() => {
+    if (!open) setServerRecoveryOpen(false)
+    onServerUpdatesVisible?.(open && update !== null
+      && (update.serverUpdates === undefined || (section === 'updates' && serverRecoveryOpen)))
+  }, [open, update?.serverUpdates !== undefined, update !== null, section, serverRecoveryOpen, onServerUpdatesVisible])
+  useEffect(() => {
     if (!open) return
     let active = true
     setAppearance(readAppearance())
     const unsubscribe = window.agentsDock.events.on('app:update', status => {
       if (active) setUpdate(status)
     })
-    void Promise.resolve(window.agentsDock.updates.check()).then(status => {
+    void Promise.resolve(window.agentsDock.updates.status()).then(status => {
+      if (!active) return undefined
+      if (status) setUpdate(status)
+      return window.agentsDock.updates.check()
+    }).then(status => {
       if (active && status) setUpdate(status)
     }).catch(error => {
       if (active) useAppStore.getState().setError(message(error))
@@ -622,8 +634,21 @@ export function AppSettingsDialog({ serverSettings, serverUpdates }: { serverSet
                 </div>
               </div>
               {update?.state === 'downloading' && <div className="app-settings-update-progress" role="progressbar" aria-label={t("ui.Dialogs.AppSettingsDialog.update_download_1c20b42")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(update.progress ?? 0)}><span style={{ width: `${update.progress ?? 0}%` }} /></div>}
+              {update?.serverUpdates?.map(server => <div className="app-settings-row" key={server.profileId}>
+                <div className="app-settings-row-copy"><strong>{server.name} <small>→ {server.targetVersion}</small></strong><span role="status">{server.message}</span></div>
+                <span className="app-settings-value">{t(`coordinatedUpdate.${server.phase}`)}</span>
+                {server.paused && <button type="button" className="quiet-button" onClick={() => {
+                  void window.agentsDock.updates.retryServers(server.profileId).then(setUpdate).catch(error => useAppStore.getState().setError(message(error)))
+                }}>{t('coordinatedUpdate.retry')}</button>}
+              </div>)}
+              {update?.serverUpdateMessage && <p role="status">{update.serverUpdateMessage}</p>}
             </div>
-            {serverUpdates}
+            {update?.serverUpdates !== undefined
+              ? <details className="app-settings-list" open={serverRecoveryOpen} onToggle={event => setServerRecoveryOpen(event.currentTarget.open)}>
+                <summary>{t('coordinatedUpdate.recovery')}</summary>
+                {serverRecoveryOpen && serverUpdates}
+              </details>
+              : serverUpdates}
           </section>}
         </div>
       </Dialog.Content>
@@ -1145,6 +1170,7 @@ export function SettingsDialog() {
   useLocale()
   const open = useAppStore(state => state.modals.settings)
   const appSettingsOpen = Boolean(useAppStore(state => state.modals.appSettings))
+  const [legacyServerUpdatesVisible, setLegacyServerUpdatesVisible] = useState(false)
   const connected = useAppStore(state => state.connected)
   const health = useAppStore(state => state.health)
   const activeProfileId = useAppStore(state => state.activeProfileId)
@@ -1202,7 +1228,7 @@ export function SettingsDialog() {
   const restartAfterUpdateRetryTimerRef = useRef<number | null>(null)
   const restartDecisionRef = useRef(false)
   const serverUpdateOperationsRef = useRef<Set<Promise<void>>>(new Set())
-  const updateSurfaceOpen = open || appSettingsOpen
+  const updateSurfaceOpen = (open || appSettingsOpen) && legacyServerUpdatesVisible
   const serverUpdateScopeId = activeProfileId || ''
   const updateBindingIdentity = activeProfile?.serverIdentity || health?.server_identity || ''
   const submittedUpdateKey = serverUpdateIntentKey(serverUpdateScopeId, updateBindingIdentity, activeProfileServerUrl || '')
@@ -2763,7 +2789,7 @@ export function SettingsDialog() {
     <footer><button type="button" className="primary-button" onClick={closeSettings}>{t("ui.Dialogs.SettingsDialog.done_11a6767")}</button></footer>
   </div>
   return <>
-  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} />
+  <AppSettingsDialog serverSettings={serverSettingsContent} serverUpdates={serverUpdatesContent} onServerUpdatesVisible={setLegacyServerUpdatesVisible} />
   <Shell
     open={updateNowConfirmationOpen}
     onOpenChange={value => { if (!value && !restartingServer) closeUpdateNowConfirmation() }}

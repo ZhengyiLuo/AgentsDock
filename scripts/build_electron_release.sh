@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$ROOT/electron"
 BUNDLED_RUNTIME="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 RELEASE_TRACK="${AGENTSDOCK_RELEASE_TRACK:-stable}"
+COORDINATED_STAGE=""
+COORDINATED_CONFIG_ARGS=()
+cleanup_coordinated_stage() {
+  if [[ -n "$COORDINATED_STAGE" && -d "$COORDINATED_STAGE" ]]; then
+    rm -rf "$COORDINATED_STAGE"
+  fi
+}
+trap cleanup_coordinated_stage EXIT
 
 case "$RELEASE_TRACK" in
   stable) METADATA_NAME="latest-mac.yml" ;;
@@ -28,6 +36,12 @@ if [[ -z "${APPLE_API_KEY:-}" || ! -f "${APPLE_API_KEY:-}" || -z "${APPLE_API_KE
 fi
 
 cd "$PROJECT"
+if [[ -n "${AGENTSDOCK_COORDINATED_MANIFEST:-}" || -n "${AGENTSDOCK_COORDINATED_SIGNATURE:-}" ]]; then
+  mkdir -p "$ROOT/dist"
+  COORDINATED_STAGE="$(mktemp -d "$ROOT/dist/.coordinated-release.XXXXXX")"
+  node "$ROOT/scripts/prepare_electron_coordinated_config.mjs" "$PROJECT" "$COORDINATED_STAGE"
+  COORDINATED_CONFIG_ARGS=(--config "$COORDINATED_STAGE/electron-builder.json")
+fi
 "$ROOT/scripts/build_electron_icon.sh"
 
 if [[ ! -d node_modules ]]; then
@@ -39,7 +53,7 @@ node_modules/.bin/vitest run
 node_modules/.bin/electron-vite build
 node "$ROOT/scripts/verify_electron_compile_output.mjs" "$PROJECT"
 rm -rf dist-release
-node_modules/.bin/electron-builder --mac zip dmg --universal --publish never --config.mac.notarize=true --config.directories.output=dist-release
+node_modules/.bin/electron-builder --mac zip dmg --universal --publish never "${COORDINATED_CONFIG_ARGS[@]}" --config.mac.notarize=true --config.directories.output=dist-release
 
 # Electron Builder notarizes the app before creating the disk image. Sign and
 # notarize the outer DMG separately so Gatekeeper can validate the installer

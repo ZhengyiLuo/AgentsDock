@@ -62,7 +62,9 @@ describe('AppSettingsDialog', () => {
   afterEach(cleanup)
 
   it('keeps app preferences, server controls, and updates in one settings dialog', async () => {
-    const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.' }
+    const updateStatus = { state: 'not-available' as const, channel: 'direct' as const, track: 'stable' as const, currentVersion: '0.2.0', message: 'AgentsDock is up to date.',
+      serverUpdates: [{ profileId: 'server-a', serverIdentity: 'identity-a', name: 'Research server', targetVersion: '1.2.0', phase: 'pending' as const, message: 'Queued until idle.' },
+        { profileId: 'server-b', serverIdentity: 'identity-b', name: 'Laptop server', targetVersion: '1.2.0', phase: 'offline' as const, message: 'The paired update will resume on reconnect.' }] }
     const check = vi.fn()
       .mockResolvedValueOnce(updateStatus)
       .mockResolvedValue({ ...updateStatus, state: 'downloaded', message: 'Ready to install' })
@@ -86,7 +88,8 @@ describe('AppSettingsDialog', () => {
       modals: { settings: false, appSettings: true, newChat: false, resume: false, folder: false, digest: false, job: false, search: false, review: false, importChats: false }
     })
 
-    render(<AppSettingsDialog serverSettings={<div>Existing server controls</div>} serverUpdates={<div>Existing server updates</div>} />)
+    const recoveryVisible = vi.fn()
+    render(<AppSettingsDialog serverSettings={<div>Existing server controls</div>} serverUpdates={<div>Existing server updates</div>} onServerUpdatesVisible={recoveryVisible} />)
     const dialog = screen.getByRole('dialog', { name: 'Settings' })
     expect(within(dialog).getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')
     expect(await within(dialog).findByText('Version 0.2.0')).toBeInTheDocument()
@@ -113,16 +116,24 @@ describe('AppSettingsDialog', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Updates' }))
     expect(within(dialog).getByText('This is the latest one.')).toBeInTheDocument()
+    expect(within(dialog).getByText('Research server')).toBeInTheDocument()
+    expect(within(dialog).getByText('Waiting for idle')).toBeInTheDocument()
+    expect(within(dialog).getByText('Laptop server')).toBeInTheDocument()
+    expect(within(dialog).getByText('Reconnect to resume')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Existing server updates')).not.toBeInTheDocument()
+    expect(recoveryVisible).toHaveBeenLastCalledWith(false)
     expect(check).toHaveBeenCalledOnce()
     const appUpdateChannel = within(dialog).getByRole('group', { name: 'App update channel' })
     fireEvent.click(within(appUpdateChannel).getByRole('button', { name: 'Beta' }))
     await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }))
     expect(check).toHaveBeenCalledTimes(2)
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restart to update' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update AgentsDock' }))
     expect(install).toHaveBeenCalledOnce()
     expect(within(dialog).queryByRole('button', { name: 'Check for updates' })).not.toBeInTheDocument()
-    expect(within(dialog).getByText('Existing server updates')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByText('Advanced server recovery'))
+    await waitFor(() => expect(within(dialog).getByText('Existing server updates')).toBeInTheDocument())
+    expect(recoveryVisible).toHaveBeenLastCalledWith(true)
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Server' }))
     expect(within(dialog).getByRole('button', { name: 'Server' })).toHaveAttribute('aria-current', 'page')
@@ -168,7 +179,7 @@ describe('AppSettingsDialog', () => {
 
     await waitFor(() => expect(setTrack).toHaveBeenCalledWith('beta'))
     expect(within(dialog).queryByRole('button', { name: /Download 0\.2\.13-beta\.13/ })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Restart to update' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Update AgentsDock' })).not.toBeInTheDocument()
     const checkButton = within(dialog).getByRole('button', { name: 'Check for updates' })
     expect(checkButton).toBeEnabled()
     fireEvent.click(checkButton)

@@ -8,6 +8,14 @@ OUTPUT="$ROOT/dist/linux"
 ARCH="${AGENTSDOCK_LINUX_ARCH:-x64}"
 ICON_SOURCE="$ROOT/Sources/ZenithDockIOS/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
 ICON_OUTPUT="$PROJECT/build/AgentsDock.png"
+COORDINATED_STAGE=""
+COORDINATED_CONFIG_ARGS=()
+cleanup_coordinated_stage() {
+  if [[ -n "$COORDINATED_STAGE" && -d "$COORDINATED_STAGE" ]]; then
+    rm -rf "$COORDINATED_STAGE"
+  fi
+}
+trap cleanup_coordinated_stage EXIT
 
 case "$ARCH" in
   x64)
@@ -30,6 +38,11 @@ mkdir -p "$(dirname "$ICON_OUTPUT")" "$OUTPUT"
 cp "$ICON_SOURCE" "$ICON_OUTPUT"
 
 cd "$PROJECT"
+if [[ -n "${AGENTSDOCK_COORDINATED_MANIFEST:-}" || -n "${AGENTSDOCK_COORDINATED_SIGNATURE:-}" ]]; then
+  COORDINATED_STAGE="$(mktemp -d "$ROOT/dist/.coordinated-linux.XXXXXX")"
+  node "$ROOT/scripts/prepare_electron_coordinated_config.mjs" "$PROJECT" "$COORDINATED_STAGE"
+  COORDINATED_CONFIG_ARGS=(--config "$COORDINATED_STAGE/electron-builder.json")
+fi
 if [[ ! -d node_modules ]]; then
   pnpm install --frozen-lockfile
 fi
@@ -45,6 +58,7 @@ node_modules/.bin/electron-builder \
   --linux AppImage tar.gz \
   "$ARCH_FLAG" \
   --publish never \
+  "${COORDINATED_CONFIG_ARGS[@]}" \
   --config.directories.output="$OUTPUT"
 
 APPIMAGE="$(find "$OUTPUT" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
