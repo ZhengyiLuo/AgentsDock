@@ -1,6 +1,6 @@
 # Development and release log
 
-## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7 candidate
+## 2026-09-19 — Custom endpoint model compatibility — 1.0.4-beta.7
 
 - Add explicit saved-model checks using the endpoint's retained credential
   revision. Exercise isolated native tool calls, a dynamic tool-result token
@@ -30,8 +30,18 @@
   the fixed compatibility error, and never reflects the synthetic credential.
   These checks establish basic isolated compatibility, not every production
   workspace tool, integration, or reasoning setting.
-- Final candidate acceptance, signed packaging, publication and managed
-  deployment remain pending. No released build is claimed by this entry.
+- Accept source `c5dd8740d74b7f87c6874ad53d821287edeedd6c` from
+  [release run 35486963546](https://github.com/ZhengyiLuo/AgentsServer/actions/runs/35486963546):
+  all eight shards pass, with 4,421 tests passed and two platform/opt-in skips.
+  Verify the Ed25519 manifest signature and all 85 packaged source files and
+  modes against the accepted commit. Publish the exact three held assets and
+  reverify unauthenticated public downloads, tag and release-note parity.
+  Archive SHA-256:
+  `f71ffaab88287477c1a27f2fb56e775a518aa8b626f3c3cec2231a99d0da5da9`.
+- [Public beta.7](https://github.com/ZhengyiLuo/AgentsServer/releases/tag/v1.0.4-beta.7)
+  is available on the Beta track. Managed idle update requests are accepted
+  by the two target servers; receipt verification still reports beta.6 running
+  while active work drains. No forced restart is performed.
 - Exercise the production chat runner in isolated state: custom unknown-model
   turns clear effort and summaries and surface an empty response once without
   rollover, while ordinary Codex retains its existing recovery behavior.
@@ -43,6 +53,10 @@
   instructions while removing those defaults and selecting standard Responses.
   Eight controlled requests verify canonical and unfamiliar models send an
   empty reasoning object, retain instructions, and honor explicit effort.
+- Verify the same catalog, initialization and eight-request behavior on the
+  second deployment's Codex 0.153.4, alongside the primary 0.155.0 acceptance.
+  Normal authentication and configuration hashes remain unchanged, and all
+  isolated native processes and temporary state are closed after acceptance.
 
 ## 2026-09-19 — Scheduled history catch-up — 1.0.4-beta.6
 
